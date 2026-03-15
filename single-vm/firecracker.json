@@ -1,0 +1,47 @@
+{
+  "boot-source": {
+    "kernel_image_path": "vmlinux",
+    "boot_args": "ro console=ttyS0 noapic reboot=k panic=1 pci=off",
+    "initrd_path": null
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "rootfs.ext4",
+      "is_root_device": true,
+      "is_read_only": false,
+      "partuuid": null,
+      "cache_type": "Unsafe",
+      "io_engine": "Sync",
+      "rate_limiter": null,
+      "socket": null
+    }
+  ],
+  "network-interfaces": [
+    {
+      "iface_id": "eth0",
+      "guest_mac": "02:FC:00:00:00:01",
+      "host_dev_name": "fc-tap0",
+      "guest_ip": "169.254.0.21",
+      "netmask": "255.255.255.252"
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": 2,
+    "mem_size_mib": 2048,
+    "ht_enabled": false,
+    "cpu_template": null
+  },
+  "cpu-config": null,
+  "balloon": null,
+  "vsock": null,
+  "logger": {
+    "log_path": "./firecracker.log",
+    "level": "Info",
+    "show_level": true,
+    "show_log_origin": true
+  },
+  "metrics": {
+    "metrics_path": "./firecracker.metrics"
+  }
+}

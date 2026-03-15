@@ -1,0 +1,21 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  identity:
+    hostname: firecracker-vm
+    password: "$6$rounds=4096$xyz$hashedpassword"
+    username: ubuntu
+  ssh:
+    install-server: true
+    allow-pw: true
+  storage:
+    layout:
+      name: lvm
+  packages:
+    - openssh-server
+    - curl
+    - wget
+    - git
