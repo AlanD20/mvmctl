@@ -60,9 +60,15 @@ else
 fi
 
 echo "Setting up NAT..."
+DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+if [ -z "$DEFAULT_IFACE" ]; then
+  echo "ERROR: Could not detect default network interface."
+  exit 1
+fi
+echo "Using host interface: $DEFAULT_IFACE"
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
-iptables -t nat -C POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null ||
-  iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+iptables -t nat -C POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE 2>/dev/null ||
+  iptables -t nat -A POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE
 
 echo ""
 echo "=== Bridge Setup Complete ==="

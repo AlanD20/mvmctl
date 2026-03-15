@@ -29,12 +29,10 @@ if ip link show "$TAP_DEV" &>/dev/null; then
 fi
 
 echo "Flushing iptables NAT rules..."
-iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || true
-iptables -D FORWARD -i "$TAP_DEV" -o eth0 -j ACCEPT 2>/dev/null || true
-iptables -D FORWARD -i eth0 -o "$TAP_DEV" -j ACCEPT 2>/dev/null || true
-
-echo "Resetting IP forwarding..."
-sysctl -w net.ipv4.ip_forward=0 >/dev/null 2>&1 || true
+DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+iptables -t nat -D POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE 2>/dev/null || true
+iptables -D FORWARD -i "$TAP_DEV" -o "$DEFAULT_IFACE" -j ACCEPT 2>/dev/null || true
+iptables -D FORWARD -i "$DEFAULT_IFACE" -o "$TAP_DEV" -j ACCEPT 2>/dev/null || true
 
 echo ""
 echo "=== Cleanup Complete ==="

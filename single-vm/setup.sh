@@ -8,15 +8,26 @@ source config.env
 
 echo "=== Firecracker Ubuntu Setup ==="
 
-echo "[1/5] Checking KVM availability..."
+echo "[1/5] Checking dependencies..."
+for cmd in qemu-img genisoimage curl bc screen; do
+  if ! command -v $cmd &>/dev/null; then
+    echo "ERROR: $cmd is not installed."
+    exit 1
+  fi
+done
+
 if [ ! -c /dev/kvm ]; then
-  echo "ERROR: KVM is not available. Please ensure KVM is enabled."
+  echo "ERROR: KVM is not available. Please ensure KVM is enabled and you have permissions."
   exit 1
 fi
-echo "KVM is available"
+echo "Dependencies and KVM check passed"
 
 echo "[2/5] Downloading Firecracker binary..."
 if [ ! -f "firecracker" ]; then
+  # Try to get latest version if not set
+  if [ -z "$FIRECRACKER_VERSION" ]; then
+    FIRECRACKER_VERSION=$(curl -s https://api.github.com/repos/firecracker-microvm/firecracker/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+')
+  fi
   curl -sL "https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tar.gz" | tar xz -C .
   mv firecracker-${FIRECRACKER_VERSION}-x86_64/firecracker .
   mv firecracker-${FIRECRACKER_VERSION}-x86_64/jailer .
@@ -30,19 +41,50 @@ if [ ! -f "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" ]; then
   curl -sL "https://cloud-images.ubuntu.com/${UBUNTU_VERSION}/current/${UBUNTU_VERSION}-server-cloudimg-amd64.img" -o "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img"
 fi
 
-echo "[4/5] Converting and resizing rootfs..."
+echo "[4/5] Preparing rootfs and Cloud-Init..."
 if [ ! -f "rootfs.ext4" ]; then
   qemu-img convert -f qcow2 -O raw "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" "rootfs.ext4"
   truncate -s "$DISK_SIZE" rootfs.ext4
-  e2fsck -f rootfs.ext4 || true
   resize2fs rootfs.ext4
+fi
+
+# Create cloud-init seed
+echo "Generating cloud-init seed..."
+mkdir -p cloud-init
+cat >cloud-init/meta-data <<EOF
+instance-id: i-$(
+  head /dev/urandom | tr -dc A-Za-z0-9 | head -c 12
+  echo ''
+)
+local-hostname: ubuntu-fc
+EOF
+genisoimage -output cloudinit.iso -volid cidata -joliet -rock cloud-init/user-data cloud-init/meta-data
+
+# Update firecracker.json with config.env values using Python for robustness
+if [ -f "firecracker.json" ]; then
+  echo "Updating firecracker.json..."
+  python3 - <<EOF
+import json
+with open("firecracker.json", "r") as f:
+    config = json.load(f)
+
+# Update values from env variables
+config["network-interfaces"][0]["host_dev_name"] = "$TAP_DEV"
+config["network-interfaces"][0]["guest_mac"] = "$MAC"
+config["network-interfaces"][0]["guest_ip"] = "$GUEST_IP"
+config["network-interfaces"][0]["netmask"] = "$MASK"
+config["machine-config"]["vcpu_count"] = $VM_VCPU
+config["machine-config"]["mem_size_mib"] = $VM_MEM_MIB
+
+with open("firecracker.json", "w") as f:
+    json.dump(config, f, indent=2)
+EOF
 fi
 
 echo "[5/5] Downloading vmlinux kernel..."
 if [ ! -f "vmlinux" ]; then
-  KERNEL_VERSION="6.1.128"
-  curl -sL "https://s3.amazonaws.com/spec.ccfc.min/img/unsupported/vmlinux" -o "vmlinux" 2>/dev/null ||
-    curl -sL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz" -o "linux-${KERNEL_VERSION}.tar.xz"
+  # Using a more reliable source for Firecracker-compatible kernels
+  curl -sL "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin" -o "vmlinux"
 fi
 
 echo ""

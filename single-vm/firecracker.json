@@ -15,6 +15,12 @@
       "io_engine": "Sync",
       "rate_limiter": null,
       "socket": null
+    },
+    {
+      "drive_id": "cloudinit",
+      "path_on_host": "cloudinit.iso",
+      "is_root_device": false,
+      "is_read_only": true
     }
   ],
   "network-interfaces": [

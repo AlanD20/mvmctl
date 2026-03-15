@@ -27,9 +27,15 @@ setup_network() {
   sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
   echo "Setting up NAT..."
-  iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-  iptables -A FORWARD -i "$TAP_DEV" -o eth0 -j ACCEPT
-  iptables -A FORWARD -i eth0 -o "$TAP_DEV" -j ACCEPT
+  DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+  if [ -z "$DEFAULT_IFACE" ]; then
+    echo "ERROR: Could not detect default network interface."
+    exit 1
+  fi
+  echo "Using host interface: $DEFAULT_IFACE"
+  iptables -t nat -A POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE
+  iptables -A FORWARD -i "$TAP_DEV" -o "$DEFAULT_IFACE" -j ACCEPT
+  iptables -A FORWARD -i "$DEFAULT_IFACE" -o "$TAP_DEV" -j ACCEPT
 
   echo "Network setup complete"
   echo "  Tap device: $TAP_DEV"

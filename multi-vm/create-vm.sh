@@ -145,10 +145,15 @@ ip link set "$TAP_DEV" master "$BRIDGE_NAME" 2>/dev/null || true
 ip link set "$TAP_DEV" up
 
 echo ""
-echo "Starting VM..."
+echo "Starting VM in screen session 'fc-$VM_NAME'..."
 cd "$VM_DIR"
-../../firecracker --no-api --config-file config.json &
-VM_PID=$!
+screen -dmS "fc-$VM_NAME" ../../firecracker --no-api --config-file config.json
+VM_PID=$(pgrep -f "firecracker --no-api --config-file config.json.*$VM_NAME")
+if [ -z "$VM_PID" ]; then
+  # Fallback if pgrep is tricky
+  sleep 1
+  VM_PID=$(cat firecracker.pid 2>/dev/null || pgrep -f "firecracker.*$VM_NAME")
+fi
 echo $VM_PID >firecracker.pid
 cd ../..
 
@@ -160,6 +165,4 @@ echo "  IP: $VM_IP"
 echo "  Directory: $VM_DIR"
 echo ""
 echo "Connect to serial console:"
-echo "  screen -r $VM_PID"
-echo "  or"
-echo "  sudo microcom /dev/ttyS0"
+echo "  sudo screen -r fc-$VM_NAME"

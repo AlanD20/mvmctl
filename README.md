@@ -2,19 +2,71 @@
 
 A lightweight virtualization setup using Firecracker with Ubuntu.
 
-## Table of Contents
+## Prerequisites
 
-- [Directory Structure](#directory-structure)
-- [Prerequisites](#prerequisites)
-- [Setup Options](#setup-options)
-- [Shared Configuration](#shared-configuration)
-- [Custom Images](#custom-images)
-- [Troubleshooting](#troubleshooting)
-- [Security Notes](#security-notes)
+### Dependencies (Host)
 
-## Directory Structure
+The following packages are required on the host system:
+- `qemu-utils` (for `qemu-img`)
+- `cloud-utils` or `genisoimage` (for cloud-init ISO)
+- `bridge-utils`
+- `iptables`
+- `curl`, `bc`, `screen`
 
+### Arch Linux
+
+```bash
+# Install required packages
+sudo pacman -S --needed qemu-desktop libisoburn iptables bridge-utils curl bc wget screen
+
+# Verify KVM
+ls -la /dev/kvm
+
+# Recommended: Add your user to the kvm group instead of changing permissions globally
+sudo usermod -aG kvm $USER
+# (Log out and log back in for changes to take effect)
 ```
+
+### Ubuntu/Debian
+
+```bash
+sudo apt-get update
+sudo apt-get install -y qemu-utils genisoimage iptables curl bc bridge-utils screen
+
+# Verify KVM
+ls /dev/kvm
+sudo usermod -aG kvm $USER
+```
+
+## Setup Options
+
+### Option 1: Single VM (Simple)
+
+For testing or running a single microVM with Cloud-Init support:
+
+```bash
+cd single-vm
+sudo ./setup.sh
+sudo ./start-vm.sh
+# Connect to console
+sudo screen -r fc-single
+sudo ./cleanup.sh
+```
+
+### Option 2: Multi-VM (Recommended)
+
+For running multiple microVMs concurrently using bridge networking:
+
+```bash
+cd multi-vm
+sudo ./setup-bridge.sh           # Run once
+sudo ./create-vm.sh vm1           # Create VMs
+# Connect to console
+sudo screen -r fc-vm1
+sudo ./stop-vm.sh vm1             # Remove specific VM
+sudo ./cleanup-all.sh             # Full cleanup
+```
+
 firecracker-ubuntu/
 ├── README.md                    # This file
 │
@@ -224,7 +276,8 @@ sudo modprobe kvm_intel    # or kvm_amd
 
 # Check permissions
 ls -la /dev/kvm
-sudo chmod 666 /dev/kvm    # Or add user to kvm group: sudo usermod -aG kvm $USER
+# Recommended: Add user to kvm group
+sudo usermod -aG kvm $USER
 ```
 
 ### VM Not Starting

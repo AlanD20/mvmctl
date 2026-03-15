@@ -17,20 +17,19 @@ This setup creates a single microVM with:
 ```bash
 cd single-vm
 
-# Step 1: Download assets and set up environment
+# Step 1: Setup (downloads assets, prepares disk/cloud-init)
 sudo ./setup.sh
 
-# Step 2: Start the VM
+# Step 2: Start the VM in a background screen session
 sudo ./start-vm.sh
 
 # Step 3: Connect to serial console
-# Option A: screen
-sudo screen -r
+sudo screen -r fc-single
 
-# Option B: microcom
-sudo microcom /dev/ttyS0
+# Step 4: Detach from console (keep VM running)
+# Press Ctrl+A, then D
 
-# Step 4: When done, clean up
+# Step 5: Clean up when done
 sudo ./cleanup.sh
 ```
 

@@ -11,9 +11,15 @@ if [ -f "vmlinux" ]; then
   exit 0
 fi
 
-echo "Trying official Firecracker test kernel..."
-if curl -sL "https://s3.amazonaws.com/spec.ccfc.min/img/unsupported/vmlinux" -o "vmlinux" 2>/dev/null; then
-  echo "Downloaded from AWS S3"
+echo "Trying official Firecracker vmlinux kernel..."
+if curl -sL "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin" -o "vmlinux"; then
+  echo "Downloaded successfully"
+  exit 0
+fi
+
+echo "Trying alternative AWS S3 location..."
+if curl -sL "https://s3.amazonaws.com/spec.ccfc.min/img/unsupported/vmlinux" -o "vmlinux"; then
+  echo "Downloaded from alternative AWS S3"
   exit 0
 fi
 
