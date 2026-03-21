@@ -21,3 +21,9 @@ autoinstall:
     - curl
     - wget
     - git
+    - net-tools
+    - vim
+    - tmux
+    - netcat-openbsd
+    - iputils-ping
+    - htop

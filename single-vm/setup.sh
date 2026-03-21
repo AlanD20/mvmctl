@@ -84,17 +84,22 @@ mkisofs -output "${OUTPUT_DIR}/cloudinit.iso" -volid cidata -joliet -rock "${OUT
 echo "✓ Cloud-init created"
 
 echo "[5/5] Generating VM configuration..."
+# Use absolute paths for Firecracker
+ROOTFS_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/rootfs.ext4"
+CLOUDINIT_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/cloudinit.iso"
+KERNEL_ABS_PATH="${SCRIPT_DIR}/../assets/kernels/vmlinux"
+
 cat >"${OUTPUT_DIR}/firecracker.json" <<EOF
 {
   "boot-source": {
-    "kernel_image_path": "../assets/kernels/vmlinux",
-    "boot_args": "console=ttyS0 noapic reboot=k panic=1 pci=off ip=${GUEST_IP}::${HOST_IP}:${MASK}::eth0:off root=/dev/vda rw",
+    "kernel_image_path": "${KERNEL_ABS_PATH}",
+    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off ip=${GUEST_IP}::${HOST_IP}:${MASK}::eth0:off rw rootwait",
     "initrd_path": null
   },
   "drives": [
     {
       "drive_id": "rootfs",
-      "path_on_host": "${OUTPUT_DIR}/rootfs.ext4",
+      "path_on_host": "${ROOTFS_ABS_PATH}",
       "is_root_device": true,
       "is_read_only": false,
       "partuuid": null,
@@ -102,12 +107,6 @@ cat >"${OUTPUT_DIR}/firecracker.json" <<EOF
       "io_engine": "Sync",
       "rate_limiter": null,
       "socket": null
-    },
-    {
-      "drive_id": "cloudinit",
-      "path_on_host": "${OUTPUT_DIR}/cloudinit.iso",
-      "is_root_device": false,
-      "is_read_only": true
     }
   ],
   "network-interfaces": [
@@ -127,8 +126,8 @@ cat >"${OUTPUT_DIR}/firecracker.json" <<EOF
   "balloon": null,
   "vsock": null,
   "logger": {
-    "log_path": "${OUTPUT_DIR}/firecracker.log",
-    "level": "Info",
+    "log_path": "${SCRIPT_DIR}/${OUTPUT_DIR}/firecracker.log",
+    "level": "debug",
     "show_level": true,
     "show_log_origin": true
   },

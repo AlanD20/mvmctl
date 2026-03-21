@@ -8,28 +8,22 @@ source config.env
 
 FIRECRACKER_SOCKET_PATH="${OUTPUT_DIR}/firecracker.socket"
 FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
+FIRECRACKER_BIN="../assets/bin/firecracker"
+KERNEL_PATH="../assets/kernels/vmlinux"
+CONFIG_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/firecracker.json"
+CONSOLE_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/firecracker.console.log"
 
 echo "=== Starting/Resuming Firecracker VM ==="
 
-# Check if already running
-if screen -list | grep -q "$VM_NAME"; then
-  echo "VM is already running in screen session '$VM_NAME'"
-  echo "Connect with: sudo screen -r $VM_NAME"
-  exit 0
-fi
-
-# Check if PID file exists and process is still running
+# Check if already running by PID file
 if [ -f "$FIRECRACKER_PID_FILE" ]; then
   EXISTING_PID=$(cat "$FIRECRACKER_PID_FILE")
   if kill -0 "$EXISTING_PID" 2>/dev/null; then
     echo "VM is already running (PID: $EXISTING_PID)"
-    echo "Connect with: sudo screen -r $VM_NAME"
+    echo "View logs: tail -f ${OUTPUT_DIR}/firecracker.console.log"
     exit 0
   fi
 fi
-
-FIRECRACKER_BIN="../assets/bin/firecracker"
-KERNEL_PATH="../assets/kernels/vmlinux"
 
 if [ ! -f "$FIRECRACKER_BIN" ] || [ ! -f "$KERNEL_PATH" ] || [ ! -f "${OUTPUT_DIR}/rootfs.ext4" ]; then
   echo "Missing required files. Run ./setup.sh first."
@@ -41,30 +35,36 @@ if ! ./network.sh check 2>/dev/null; then
   sudo ./network.sh
 fi
 
-echo "Starting Firecracker in screen session '$VM_NAME'..."
+echo "Starting Firecracker VM..."
+
 if [ "$ENABLE_SOCKET" = "true" ]; then
-  screen -dmS "$VM_NAME" "$FIRECRACKER_BIN" --api-sock "$FIRECRACKER_SOCKET_PATH" --config-file "${OUTPUT_DIR}/firecracker.json"
-  sleep 1
-  FIRECRACKER_PID=$(pgrep -f "firecracker.*--api-sock.*${OUTPUT_DIR}") || FIRECRACKER_PID=$(pgrep -f "firecracker.*${OUTPUT_DIR}")
-  if [ "$FIRECRACKER_PID" = "" ]; then
-    FIRECRACKER_PID=$(cat "$FIRECRACKER_PID_FILE" 2>/dev/null || pgrep -f "firecracker.*${OUTPUT_DIR}")
-  fi
+  nohup "$FIRECRACKER_BIN" --api-sock "$FIRECRACKER_SOCKET_PATH" --config-file "$CONFIG_ABS_PATH" \
+    >"$CONSOLE_ABS_PATH" 2>&1 &
 else
-  screen -dmS "$VM_NAME" "$FIRECRACKER_BIN" --no-api --config-file "${OUTPUT_DIR}/firecracker.json"
-  sleep 1
-  FIRECRACKER_PID=$(pgrep -f "firecracker --no-api --config-file ${OUTPUT_DIR}/firecracker.json")
+  nohup "$FIRECRACKER_BIN" --no-api --config-file "$CONFIG_ABS_PATH" \
+    >"$CONSOLE_ABS_PATH" 2>&1 &
 fi
+
+FIRECRACKER_PID=$!
 echo "$FIRECRACKER_PID" >"$FIRECRACKER_PID_FILE"
 
+sleep 2
+
+# Verify process is running
+if ! kill -0 "$FIRECRACKER_PID" 2>/dev/null; then
+  echo "ERROR: Firecracker failed to start. Check ${OUTPUT_DIR}/firecracker.console.log"
+  exit 1
+fi
+
 echo ""
-echo "=== VM Started/Resumed ==="
+echo "=== VM Started ==="
 echo "Firecracker PID: $FIRECRACKER_PID"
 echo ""
-echo "Connect to serial console with: sudo screen -r $VM_NAME"
-echo "To detach from screen, press: Ctrl+A, then D"
+echo "View console logs:"
+echo "  tail -f ${OUTPUT_DIR}/firecracker.console.log"
 echo ""
 echo "To connect via SSH:"
 echo "  ssh -i ${OUTPUT_DIR}/vm.id_rsa root@${GUEST_IP}"
 echo ""
-echo "Run ./stop-vm.sh to pause/stop the VM (preserves state)"
-echo "Run ./cleanup.sh to fully remove VM and clean up network"
+echo "Run ./stop-vm.sh to stop the VM"
+echo "Run ./cleanup.sh to remove VM and clean up network"
