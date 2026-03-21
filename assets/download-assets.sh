@@ -8,18 +8,17 @@ cd "$SCRIPT_DIR"
 echo "=== Firecracker CI Assets Setup ==="
 
 ARCH="x86_64"
-OUTPUT_DIR="."
 KERNEL_OUTPUT="kernels/vmlinux"
 ROOTFS_OUTPUT_BASE="images/ubuntu"
 KEYS_DIR="keys"
-SSH_KEY_NAME="id_rsa"
 
 detect_latest_ci_version() {
   echo "[1/4] Detecting latest Firecracker CI version..."
   local release_url="https://github.com/firecracker-microvm/firecracker/releases"
   local latest_version=$(basename $(curl -fsSLI -o /dev/null -w %{url_effective} ${release_url}/latest))
   CI_VERSION=${latest_version%.*}
-  echo "✓ Latest CI version: $CI_VERSION"
+  FULL_VERSION="$latest_version"
+  echo "✓ Latest CI version: $CI_VERSION (full: $FULL_VERSION)"
 }
 
 download_kernel() {
@@ -65,8 +64,8 @@ download_and_convert_rootfs() {
   local squashfs_file="/tmp/ubuntu-${ubuntu_version}.squashfs"
   local rootfs_output="${ROOTFS_OUTPUT_BASE}-${ubuntu_version}.ext4"
 
-  if [ -f "$rootfs_output" ] && [ -f "$ASSETS_DIR/${KEYS_DIR}/${SSH_KEY_NAME}" ]; then
-    echo "✓ Rootfs and SSH key already exist for Ubuntu $ubuntu_version"
+  if [ -f "$rootfs_output" ]; then
+    echo "✓ Rootfs already exists for Ubuntu $ubuntu_version"
     return
   fi
 
@@ -80,17 +79,16 @@ download_and_convert_rootfs() {
   cd "$temp_dir"
   unsquashfs "$squashfs_file" >/dev/null
 
-  echo " - Generating SSH key..."
-  mkdir -p "$ASSETS_DIR/${KEYS_DIR}"
-  ssh-keygen -f "$ASSETS_DIR/${KEYS_DIR}/${SSH_KEY_NAME}" -N "" -q
   mkdir -p squashfs-root/root/.ssh
   # Add all public keys from assets/keys to authorized_keys
-  for pub_key in "$ASSETS_DIR/${KEYS_DIR}"/*.pub; do
-    if [ -f "$pub_key" ]; then
-      cat "$pub_key" >>squashfs-root/root/.ssh/authorized_keys
-      echo "   Added $(basename "$pub_key") to authorized_keys"
-    fi
-  done
+  if [ -d "$ASSETS_DIR/${KEYS_DIR}" ]; then
+    for pub_key in "$ASSETS_DIR/${KEYS_DIR}"/*.pub; do
+      if [ -f "$pub_key" ]; then
+        cat "$pub_key" >>squashfs-root/root/.ssh/authorized_keys
+        echo "   Added $(basename "$pub_key") to authorized_keys"
+      fi
+    done
+  fi
   chmod 600 squashfs-root/root/.ssh/authorized_keys
 
   echo " - Creating ext4 filesystem..."
@@ -116,19 +114,34 @@ download_firecracker() {
 
   mkdir -p bin
 
-  local download_url="https://github.com/firecracker-microvm/firecracker/releases/download/${CI_VERSION}/firecracker-${CI_VERSION}-x86_64.tgz"
+  # Use full version for download URL (e.g., v1.11.0 not v1.11)
+  local download_url="https://github.com/firecracker-microvm/firecracker/releases/download/${FULL_VERSION}/firecracker-${FULL_VERSION}-${ARCH}.tgz"
   local temp_dir=$(mktemp -d)
 
-  echo " - Downloading Firecracker $CI_VERSION..."
-  if curl -sL "$download_url" | tar xz -C "$temp_dir"; then
-    mv "$temp_dir"/release-*/firecracker-*/firecracker-* bin/firecracker
-    mv "$temp_dir"/release-*/firecracker-*/jailer-* bin/jailer
-    chmod +x bin/firecracker bin/jailer
+  echo " - Downloading Firecracker ${FULL_VERSION}..."
+  echo "   URL: $download_url"
+  if curl -sL "$download_url" | tar xz -C "$temp_dir" 2>/dev/null; then
+    # Find the actual firecracker and jailer binaries (they have version in name)
+    local fc_bin=$(find "$temp_dir" -name "firecracker*" -type f | head -1)
+    local jailer_bin=$(find "$temp_dir" -name "jailer*" -type f | head -1)
+    if [ -n "$fc_bin" ]; then
+      cp "$fc_bin" bin/firecracker
+      chmod +x bin/firecracker
+      echo "✓ Firecracker downloaded"
+    else
+      echo "⚠️ Could not find firecracker binary in archive"
+    fi
+    if [ -n "$jailer_bin" ]; then
+      cp "$jailer_bin" bin/jailer
+      chmod +x bin/jailer
+      echo "✓ Jailer downloaded"
+    fi
     rm -rf "$temp_dir"
-    echo "✓ Firecracker downloaded"
   else
     rm -rf "$temp_dir"
-    echo "⚠️  Could not download Firecracker $CI_VERSION, continuing without it"
+    echo "⚠️ Could not download Firecracker ${FULL_VERSION}, continuing without it"
+    echo "   You may need to download manually from:"
+    echo "   https://github.com/firecracker-microvm/firecracker/releases"
   fi
 }
 
@@ -143,8 +156,8 @@ main() {
   echo "Location: $ASSETS_DIR"
   echo " - Kernel: $KERNEL_OUTPUT"
   echo " - Rootfs: ${ROOTFS_OUTPUT_BASE}-*.ext4"
-  echo " - SSH Key: ${ROOTFS_OUTPUT_BASE}-*.id_rsa"
-  echo " - Firecracker: bin/firecracker (if downloaded)"
+  echo " - Firecracker: bin/firecracker"
+  echo " - Jailer: bin/jailer"
 }
 
 main "$@"
