@@ -8,7 +8,7 @@ source config.env
 
 echo "=== Firecracker VM Setup (Direct Rootfs + SSH) ==="
 echo "Using kernel: kernels/vmlinux (from assets)"
-echo "Using rootfs: $(basename $(ls ../assets/images/ubuntu-*.ext4 | head -1)) (from assets)"
+echo "Using rootfs: $(basename "$(ls ../assets/images/ubuntu-*.ext4 | head -1)") (from assets)"
 echo ""
 
 echo "[1/4] Checking dependencies..."
@@ -31,21 +31,21 @@ if [ ! -f "../assets/kernels/vmlinux" ]; then
   exit 1
 fi
 ROOTFS_SOURCE=$(ls ../assets/images/ubuntu-*.ext4 2>/dev/null | head -1)
-if [ -z "$ROOTFS_SOURCE" ]; then
+if [ "$ROOTFS_SOURCE" = "" ]; then
   echo "ERROR: Rootfs not found at ../assets/images/ubuntu-*.ext4"
   echo "Run '../assets/download-assets.sh' first"
   exit 1
 fi
-SSH_KEY_SOURCE=$(ls ../assets/keys/ubuntu-*.id_rsa 2>/dev/null | head -1)
+SSH_KEY_SOURCE=$(ls ../assets/keys/id_rsa 2>/dev/null | head -1)
 if [ -z "$SSH_KEY_SOURCE" ]; then
-  echo "ERROR: SSH key not found at ../assets/keys/ubuntu-*.id_rsa"
+  echo "ERROR: SSH key not found at ../assets/keys/id_rsa"
   echo "Run '../assets/download-assets.sh' first"
   exit 1
 fi
 echo "✓ All assets present"
 
 echo "[3/4] Setting up VM environment..."
-mkdir -p "${OUTPUT_DIR}"
+mkdir -p "$OUTPUT_DIR"
 
 if [ ! -f "${OUTPUT_DIR}/rootfs.ext4" ]; then
   echo " - Copying rootfs..."
@@ -64,14 +64,22 @@ instance-id: i-$(
   head /dev/urandom | tr -dc A-Za-z0-9 | head -c 12
   echo ''
 )
-local-hostname: ubuntu-fc
+local-hostname: ${VM_NAME}
 EOF
 
-if [ -f "${OUTPUT_DIR}/cloud-init/user-data" ]; then
-  mkisofs -output "${OUTPUT_DIR}/cloudinit.iso" -volid cidata -joliet -rock "${OUTPUT_DIR}/cloud-init/user-data" "${OUTPUT_DIR}/cloud-init/meta-data"
-else
-  mkisofs -output "${OUTPUT_DIR}/cloudinit.iso" -volid cidata -joliet -rock "${OUTPUT_DIR}/cloud-init/meta-data"
-fi
+# Create user-data with DNS nameservers
+cat >"${OUTPUT_DIR}/cloud-init/user-data" <<EOF
+#cloud-config
+manage_resolv_conf: true
+resolv_conf:
+  nameservers:
+    - '1.1.1.1'
+    - '8.8.8.8'
+  searchdomains:
+    - local
+EOF
+
+mkisofs -output "${OUTPUT_DIR}/cloudinit.iso" -volid cidata -joliet -rock "${OUTPUT_DIR}/cloud-init/user-data" "${OUTPUT_DIR}/cloud-init/meta-data"
 
 echo "✓ Cloud-init created"
 
@@ -143,9 +151,6 @@ echo " - SSH Key: ${OUTPUT_DIR}/vm.id_rsa"
 echo " - vCPUs: ${VM_VCPU}"
 echo " - Memory: ${VM_MEM_MIB} MiB"
 echo " - Network: ${GUEST_IP}/30 via ${TAP_DEV}"
-echo ""
-echo "To connect via SSH:"
-echo "  ssh -i ${OUTPUT_DIR}/vm.id_rsa root@${GUEST_IP}"
 echo ""
 echo "Run: ./start-vm.sh"
 echo "View: cat ${OUTPUT_DIR}/firecracker.log"

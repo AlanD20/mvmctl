@@ -6,15 +6,15 @@ cd "$SCRIPT_DIR"
 
 source config.env
 
-API_SOCKET="${OUTPUT_DIR}/firecracker.socket"
+FIRECRACKER_SOCKET_PATH="${OUTPUT_DIR}/firecracker.socket"
 FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
 
-echo "=== Resuming Firecracker VM ==="
+echo "=== Starting/Resuming Firecracker VM ==="
 
 # Check if already running
-if screen -list | grep -q "fc-single"; then
-  echo "VM is already running in screen session 'fc-single'"
-  echo "Connect with: sudo screen -r fc-single"
+if screen -list | grep -q "$VM_NAME"; then
+  echo "VM is already running in screen session '$VM_NAME'"
+  echo "Connect with: sudo screen -r $VM_NAME"
   exit 0
 fi
 
@@ -23,7 +23,7 @@ if [ -f "$FIRECRACKER_PID_FILE" ]; then
   EXISTING_PID=$(cat "$FIRECRACKER_PID_FILE")
   if kill -0 "$EXISTING_PID" 2>/dev/null; then
     echo "VM is already running (PID: $EXISTING_PID)"
-    echo "Connect with: sudo screen -r fc-single"
+    echo "Connect with: sudo screen -r $VM_NAME"
     exit 0
   fi
 fi
@@ -41,28 +41,30 @@ if ! ./network.sh check 2>/dev/null; then
   sudo ./network.sh
 fi
 
-echo "Starting Firecracker in screen session 'fc-single'..."
+echo "Starting Firecracker in screen session '$VM_NAME'..."
 if [ "$ENABLE_SOCKET" = "true" ]; then
-  SOCKET_PATH="${OUTPUT_DIR}/firecracker.socket"
-  screen -dmS fc-single "$FIRECRACKER_BIN" --api-sock "$SOCKET_PATH" --config-file "${OUTPUT_DIR}/firecracker.json"
+  screen -dmS "$VM_NAME" "$FIRECRACKER_BIN" --api-sock "$FIRECRACKER_SOCKET_PATH" --config-file "${OUTPUT_DIR}/firecracker.json"
   sleep 1
   FIRECRACKER_PID=$(pgrep -f "firecracker.*--api-sock.*${OUTPUT_DIR}") || FIRECRACKER_PID=$(pgrep -f "firecracker.*${OUTPUT_DIR}")
-  if [ -z "$FIRECRACKER_PID" ]; then
+  if [ "$FIRECRACKER_PID" = "" ]; then
     FIRECRACKER_PID=$(cat "$FIRECRACKER_PID_FILE" 2>/dev/null || pgrep -f "firecracker.*${OUTPUT_DIR}")
   fi
 else
-  screen -dmS fc-single "$FIRECRACKER_BIN" --no-api --config-file "${OUTPUT_DIR}/firecracker.json"
+  screen -dmS "$VM_NAME" "$FIRECRACKER_BIN" --no-api --config-file "${OUTPUT_DIR}/firecracker.json"
   sleep 1
   FIRECRACKER_PID=$(pgrep -f "firecracker --no-api --config-file ${OUTPUT_DIR}/firecracker.json")
 fi
 echo "$FIRECRACKER_PID" >"$FIRECRACKER_PID_FILE"
 
 echo ""
-echo "=== VM Resumed ==="
+echo "=== VM Started/Resumed ==="
 echo "Firecracker PID: $FIRECRACKER_PID"
 echo ""
-echo "Connect to serial console with: sudo screen -r fc-single"
+echo "Connect to serial console with: sudo screen -r $VM_NAME"
 echo "To detach from screen, press: Ctrl+A, then D"
+echo ""
+echo "To connect via SSH:"
+echo "  ssh -i ${OUTPUT_DIR}/vm.id_rsa root@${GUEST_IP}"
 echo ""
 echo "Run ./stop-vm.sh to pause/stop the VM (preserves state)"
 echo "Run ./cleanup.sh to fully remove VM and clean up network"

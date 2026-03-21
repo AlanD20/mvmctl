@@ -6,7 +6,6 @@ cd "$SCRIPT_DIR"
 
 source config.env
 
-API_SOCKET="${OUTPUT_DIR}/firecracker.socket"
 FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
 FIRECRACKER_CONFIG="${OUTPUT_DIR}/firecracker.json"
 
@@ -50,7 +49,6 @@ if [ -f "$FIRECRACKER_PID_FILE" ]; then
   rm -f "$FIRECRACKER_PID_FILE"
 fi
 
-rm -f "$API_SOCKET"
 
 echo ""
 echo "=== VM Stopped ==="
