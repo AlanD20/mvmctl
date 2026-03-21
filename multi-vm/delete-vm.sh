@@ -14,10 +14,10 @@ VM_NAME="${1:-}"
 if [ -z "$VM_NAME" ]; then
   echo "Usage: $0 <name>"
   echo ""
-  echo "Stops a specific VM (keeps VM files for restart)"
+  echo "Deletes a VM permanently (stops if running, removes all files)"
   echo ""
   echo "Examples:"
-  echo "  $0 vm1    # Stop vm1"
+  echo "  $0 vm1    # Delete vm1 completely"
   echo ""
   echo "Available VMs:"
   ./list-vms.sh 2>/dev/null || ls -1 ${OUTPUT_DIR}/*/ 2>/dev/null | grep -v base-rootfs || echo "  (none)"
@@ -34,53 +34,45 @@ if [ ! -d "$VM_DIR" ]; then
   exit 1
 fi
 
-echo "=== Stopping VM: $VM_NAME ==="
+echo "=== Deleting VM: $VM_NAME ==="
 
 # =============================================================================
-# STOP FIRECRACKER PROCESS
+# STOP VM IF RUNNING
 # =============================================================================
-stop_firecracker() {
-  local VM_PID=""
-
-  # Try to get PID from file
-  if [ -f "$VM_DIR/firecracker.pid" ]; then
-    VM_PID=$(cat "$VM_DIR/firecracker.pid")
-  elif [ -f "$VM_DIR/${VM_NAME}.pid" ]; then
-    VM_PID=$(cat "$VM_DIR/${VM_NAME}.pid")
-  fi
-
-  # Stop by PID
+if [ -f "$VM_DIR/firecracker.pid" ]; then
+  VM_PID=$(cat "$VM_DIR/firecracker.pid" 2>/dev/null)
   if [ -n "$VM_PID" ] && kill -0 "$VM_PID" 2>/dev/null; then
-    echo " - Stopping Firecracker (PID: $VM_PID)..."
-    kill "$VM_PID" 2>/dev/null || true
-    sleep 1
-
-    # Force kill if still running
-    if kill -0 "$VM_PID" 2>/dev/null; then
-      echo " - Force killing..."
-      kill -9 "$VM_PID" 2>/dev/null || true
-    fi
+    echo " - Stopping running VM..."
+    ./stop-vm.sh "$VM_NAME" 2>/dev/null || true
   fi
+fi
 
-  # Remove PID files (but keep VM directory)
-  rm -f "$VM_DIR/firecracker.pid" "$VM_DIR/${VM_NAME}.pid" 2>/dev/null || true
-}
+# =============================================================================
+# REMOVE TAP DEVICE (if still exists)
+# =============================================================================
+TAP_DEV="${TAP_PREFIX}-${VM_NAME}-0"
 
-stop_firecracker
+if ip link show "$TAP_DEV" &>/dev/null; then
+  echo " - Removing tap device $TAP_DEV..."
+  sudo ip link del "$TAP_DEV" 2>/dev/null || true
+fi
+
+# =============================================================================
+# REMOVE VM DIRECTORY
+# =============================================================================
+echo " - Removing VM files..."
+rm -rf "$VM_DIR"
 
 # =============================================================================
 # COMPLETION MESSAGE
 # =============================================================================
 echo ""
 echo "=========================================="
-echo "✓✓✓ VM Stopped ✓✓✓"
+echo "✓✓✓ VM Deleted ✓✓✓"
 echo "=========================================="
 echo ""
-echo "VM '$VM_NAME' has been stopped."
+echo "VM '$VM_NAME' has been completely removed."
 echo ""
-echo "To restart the VM:"
-echo "  ./start-vm.sh $VM_NAME"
-echo ""
-echo "To completely remove the VM:"
-echo "  ./delete-vm.sh $VM_NAME"
+echo "Remaining VMs:"
+./list-vms.sh 2>/dev/null || echo "  (none)"
 echo ""
