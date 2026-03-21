@@ -1,3 +1,33 @@
-assets/bin/*
-assets/images/*
-assets/kernels/*
+# Firecracker VM Setup - Generated Files
+# This file ignores all generated artifacts
+
+# Centralized asset downloads
+assets/bin/
+assets/kernels/
+assets/images/
+
+# Single VM generated environment
+single-vm/env/
+
+# Multi VM generated environments and VMs
+multi-vm/env/
+multi-vm/vms/
+
+# Generated temporary files
+**/*.iso
+**/*.img
+**/*.img
+**/*.ext4
+**/*.log
+**/*.metrics
+**/*.pid
+**/*.socket
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
