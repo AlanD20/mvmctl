@@ -30,7 +30,7 @@ if curl -sL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION
   tar -xf "linux-${KERNEL_VERSION}.tar.xz"
   cd "linux-${KERNEL_VERSION}"
   make defconfig
-  make -j$(nproc) vmlinux
+  make -j"$(nproc)" vmlinux
   mv vmlinux ..
   cd ..
   rm -rf "linux-${KERNEL_VERSION}" "linux-${KERNEL_VERSION}.tar.xz"

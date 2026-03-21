@@ -26,7 +26,7 @@ screen -dmS fc-single ./firecracker --no-api --config-file firecracker.json
 # Wait a moment for process to start
 sleep 1
 FIRECRACKER_PID=$(pgrep -f "firecracker --no-api --config-file firecracker.json")
-echo $FIRECRACKER_PID >"$FIRECRACKER_PID_FILE"
+echo "$FIRECRACKER_PID" >"$FIRECRACKER_PID_FILE"
 
 echo ""
 echo "=== VM Started ==="

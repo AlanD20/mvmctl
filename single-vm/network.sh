@@ -21,14 +21,14 @@ setup_network() {
   ip addr add "${HOST_IP}/30" dev "$TAP_DEV"
 
   echo "Enabling proxy ARP..."
-  sysctl -w net.ipv4.conf.${TAP_DEV}.proxy_arp=1 >/dev/null
+  sysctl -w net.ipv4.conf."$TAP_DEV".proxy_arp=1 >/dev/null
 
   echo "Enabling IP forwarding..."
   sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
   echo "Setting up NAT..."
   DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-  if [ -z "$DEFAULT_IFACE" ]; then
+  if [ "$DEFAULT_IFACE" = "" ]; then
     echo "ERROR: Could not detect default network interface."
     exit 1
   fi

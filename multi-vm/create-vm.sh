@@ -11,7 +11,7 @@ VM_VCPU="${2:-0.5}"
 VM_MEM="${3:-0.5}"
 VM_IP="${4:-}"
 
-if [ -z "$VM_NAME" ]; then
+if [ "$VM_NAME" = "" ]; then
   echo "Usage: $0 <name> [vcpu] [memory] [ip]"
   echo ""
   echo "Arguments:"
@@ -50,7 +50,7 @@ if [ ! -f "vmlinux" ]; then
 fi
 
 # Convert memory to MiB and vCPUs to integer (Firecracker requires integer)
-VM_MEM_MIB=$(printf "%.0f" $(echo "$VM_MEM * 1024" | bc))
+VM_MEM_MIB=$(printf "%.0f" "$(echo "$VM_MEM * 1024" | bc)")
 # Ensure at least 1 vCPU for Firecracker
 if [ "$(echo "$VM_VCPU < 1" | bc)" -eq 1 ]; then
   VM_VCPU_INT=1
@@ -62,15 +62,15 @@ TAP_DEV="${TAP_PREFIX}-${VM_NAME}-0"
 MAC_SUFFIX=$(printf "%02x%02x%02x" $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)))
 GUEST_MAC="02:FC:${MAC_SUFFIX:0:2}:${MAC_SUFFIX:2:2}:${MAC_SUFFIX:4:2}"
 
-if [ -z "$VM_IP" ]; then
-  for ip in $(seq 2 254); do
+if [ "$VM_IP" = "" ]; then
+  for ip in "$(seq 2 254)"; do
     IP="10.10.0.$ip"
     if ! grep -rq "$IP" vms/*/config.json 2>/dev/null; then
       VM_IP="$IP"
       break
     fi
   done
-  if [ -z "$VM_IP" ]; then
+  if [ "$VM_IP" = "" ]; then
     echo "ERROR: No available IPs in pool"
     exit 1
   fi
@@ -149,12 +149,12 @@ echo "Starting VM in screen session 'fc-$VM_NAME'..."
 cd "$VM_DIR"
 screen -dmS "fc-$VM_NAME" ../../firecracker --no-api --config-file config.json
 VM_PID=$(pgrep -f "firecracker --no-api --config-file config.json.*$VM_NAME")
-if [ -z "$VM_PID" ]; then
+if [ "$VM_PID" = "" ]; then
   # Fallback if pgrep is tricky
   sleep 1
   VM_PID=$(cat firecracker.pid 2>/dev/null || pgrep -f "firecracker.*$VM_NAME")
 fi
-echo $VM_PID >firecracker.pid
+echo "$VM_PID" >firecracker.pid
 cd ../..
 
 echo ""

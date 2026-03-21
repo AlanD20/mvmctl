@@ -34,7 +34,7 @@ if [ -d "vms" ]; then
 fi
 
 echo "[2/4] Removing all tap devices..."
-for tap in $(ip link show type tap | grep -oP "${TAP_PREFIX}-[^\s:]+" | sort -u); do
+for tap in "$(ip link show type tap | grep -oP "${TAP_PREFIX}-[^\s:]+" | sort -u)"; do
   ip link del "$tap" 2>/dev/null || true
   echo "  Removed: $tap"
 done
@@ -48,7 +48,7 @@ fi
 
 echo "[4/4] Flushing iptables NAT rules..."
 DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-if [ -n "$DEFAULT_IFACE" ]; then
+if [ "$DEFAULT_IFACE" != "" ]; then
   iptables -t nat -D POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE 2>/dev/null || true
 fi
 echo "  NAT rules flushed"

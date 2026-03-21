@@ -8,7 +8,7 @@ source config.env
 
 VM_NAME="${1:-}"
 
-if [ -z "$VM_NAME" ]; then
+if [ "$VM_NAME" = "" ]; then
   echo "Usage: $0 <name>"
   echo ""
   echo "Examples:"
@@ -17,7 +17,7 @@ if [ -z "$VM_NAME" ]; then
   echo "Available VMs:"
   for dir in vms/*/; do
     if [ -d "$dir" ]; then
-      echo "  $(basename $dir)"
+      echo "  $(basename "$dir")"
     fi
   done
   exit 1

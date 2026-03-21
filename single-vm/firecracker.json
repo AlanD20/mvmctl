@@ -1,5 +1,5 @@
 {
-   "boot-source": {
+  "boot-source": {
     "kernel_image_path": "vmlinux",
     "boot_args": "ro console=ttyS0 noapic reboot=k panic=1 pci=off ip=169.254.0.21::169.254.0.22:255.255.255.252::eth0:off",
     "initrd_path": null

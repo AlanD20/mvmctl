@@ -10,7 +10,7 @@ echo "=== Firecracker Ubuntu Setup ==="
 
 echo "[1/5] Checking dependencies..."
 for cmd in qemu-img genisoimage curl bc screen; do
-  if ! command -v $cmd &>/dev/null; then
+  if ! command -v "$cmd" &>/dev/null; then
     echo "ERROR: $cmd is not installed."
     exit 1
   fi
@@ -25,13 +25,13 @@ echo "Dependencies and KVM check passed"
 echo "[2/5] Downloading Firecracker binary..."
 if [ ! -f "firecracker" ]; then
   # Try to get latest version if not set
-  if [ -z "$FIRECRACKER_VERSION" ]; then
+  if [ "$FIRECRACKER_VERSION" = "" ]; then
     FIRECRACKER_VERSION=$(curl -s https://api.github.com/repos/firecracker-microvm/firecracker/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+')
   fi
   curl -sL "https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tar.gz" | tar xz -C .
-  mv firecracker-${FIRECRACKER_VERSION}-x86_64/firecracker .
-  mv firecracker-${FIRECRACKER_VERSION}-x86_64/jailer .
-  rm -rf firecracker-${FIRECRACKER_VERSION}-x86_64
+  mv firecracker-"$FIRECRACKER_VERSION"-x86_64/firecracker .
+  mv firecracker-"$FIRECRACKER_VERSION"-x86_64/jailer .
+  rm -rf firecracker-"$FIRECRACKER_VERSION"-x86_64
 fi
 chmod +x firecracker jailer
 echo "Firecracker installed"
