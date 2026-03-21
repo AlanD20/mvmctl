@@ -1,7 +1,7 @@
 {
-  "boot-source": {
+   "boot-source": {
     "kernel_image_path": "vmlinux",
-    "boot_args": "ro console=ttyS0 noapic reboot=k panic=1 pci=off",
+    "boot_args": "ro console=ttyS0 noapic reboot=k panic=1 pci=off ip=169.254.0.21::169.254.0.22:255.255.255.252::eth0:off",
     "initrd_path": null
   },
   "drives": [
@@ -26,10 +26,7 @@
   "network-interfaces": [
     {
       "iface_id": "eth0",
-      "guest_mac": "02:FC:00:00:00:01",
-      "host_dev_name": "fc-tap0",
-      "guest_ip": "169.254.0.21",
-      "netmask": "255.255.255.252"
+      "guest_mac": "02:FC:00:00:00:01"
     }
   ],
   "machine-config": {

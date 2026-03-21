@@ -18,18 +18,18 @@ echo "KVM is available"
 echo "[2/5] Downloading Firecracker binary..."
 if [ ! -f "firecracker" ]; then
   curl -sL "https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tar.gz" | tar xz -C .
-  mv firecracker-${FIRECRACKER_VERSION}-x86_64/firecracker .
-  mv firecracker-${FIRECRACKER_VERSION}-x86_64/jailer .
-  rm -rf firecracker-${FIRECRACKER_VERSION}-x86_64
+  mv firecracker-"$FIRECRACKER_VERSION"-x86_64/firecracker .
+  mv firecracker-"$FIRECRACKER_VERSION"-x86_64/jailer .
+  rm -rf firecracker-"$FIRECRACKER_VERSION"-x86_64
   chmod +x firecracker jailer
   echo "Firecracker installed"
 else
   echo "Firecracker already installed"
 fi
 
-echo "[3/5] Downloading Ubuntu 24.04 cloud image..."
-if [ ! -f "ubuntu-24.04-server-cloudimg-amd64.img" ]; then
-  curl -sL "https://cloud-images.ubuntu.com/${UBUNTU_VERSION}/current/${UBUNTU_VERSION}-server-cloudimg-amd64.img" -o "ubuntu-24.04-server-cloudimg-amd64.img"
+echo "[3/5] Downloading Ubuntu ${UBUNTU_VERSION} cloud image..."
+if [ ! -f "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" ]; then
+  curl -sL "https://cloud-images.ubuntu.com/${UBUNTU_VERSION}/current/${UBUNTU_VERSION}-server-cloudimg-amd64.img" -o "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img"
 fi
 echo "Ubuntu cloud image ready"
 
@@ -61,7 +61,7 @@ fi
 
 echo "Setting up NAT..."
 DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-if [ -z "$DEFAULT_IFACE" ]; then
+if [ "$DEFAULT_IFACE" = "" ]; then
   echo "ERROR: Could not detect default network interface."
   exit 1
 fi

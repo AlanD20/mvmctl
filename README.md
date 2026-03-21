@@ -22,6 +22,11 @@ sudo pacman -S --needed qemu-desktop libisoburn iptables bridge-utils curl bc wg
 # Verify KVM
 ls -la /dev/kvm
 
+# Load KVM modules (if not already loaded)
+sudo modprobe kvm
+sudo modprobe kvm_intel # For Intel CPUs
+sudo modprobe kvm_amd # For AMD CPUs
+
 # Recommended: Add your user to the kvm group instead of changing permissions globally
 sudo usermod -aG kvm $USER
 # (Log out and log back in for changes to take effect)
@@ -45,117 +50,40 @@ sudo usermod -aG kvm $USER
 For testing or running a single microVM with Cloud-Init support:
 
 ```bash
-cd single-vm
-sudo ./setup.sh
-sudo ./start-vm.sh
-# Connect to console
-sudo screen -r fc-single
-sudo ./cleanup.sh
-```
-
-### Option 2: Multi-VM (Recommended)
-
-For running multiple microVMs concurrently using bridge networking:
-
-```bash
 cd multi-vm
-sudo ./setup-bridge.sh           # Run once
-sudo ./create-vm.sh vm1           # Create VMs
-# Connect to console
-sudo screen -r fc-vm1
-sudo ./stop-vm.sh vm1             # Remove specific VM
-sudo ./cleanup-all.sh             # Full cleanup
-```
-
-firecracker-ubuntu/
-├── README.md                    # This file
-│
-├── single-vm/                   # Single VM setup
-│   ├── README.md
-│   ├── setup.sh
-│   ├── network.sh
-│   ├── start-vm.sh
-│   ├── cleanup.sh
-│   ├── firecracker.json
-│   └── cloud-init/
-│       └── user-data
-│
-└── multi-vm/                    # Multi-VM setup (recommended)
-    ├── README.md
-    ├── config.env               # Configuration
-    ├── setup-bridge.sh
-    ├── get-kernel.sh
-    ├── create-vm.sh
-    ├── stop-vm.sh
-    ├── cleanup-all.sh
-    └── vms/                    # VM directories (created at runtime)
-```
-
-## Prerequisites
-
-### Arch Linux
-
-```bash
-# Install required packages
-sudo pacman -S --needed qemu utils iptables bridge-utils curl bc wget
-
-# Verify KVM
-ls -la /dev/kvm
-
-# Load KVM modules (if not already loaded)
-sudo modprobe kvm
-sudo modprobe kvm_intel  # For Intel CPUs
-sudo modprobe kvm_amd   # For AMD CPUs
-
-# Check KVM is working
-kvm-ok
-```
-
-### Ubuntu/Debian
-
-```bash
-sudo apt-get update
-sudo apt-get install -y qemu-utils cloud-utils genisoimage iptables curl bc bridge-utils
-
-# Verify KVM
-ls /dev/kvm
-```
-
-## Setup Options
-
-### Option 1: Single VM (Simple)
-
-For testing or running a single microVM:
-
-```bash
-cd single-vm
-sudo ./setup.sh
-sudo ./start-vm.sh
-sudo ./cleanup.sh
-```
-
-**Use when:**
-- You only need one VM
-- Simpler setup
-- Quick testing
-
-### Option 2: Multi-VM (Recommended)
-
-For running multiple microVMs concurrently:
-
-```bash
-cd multi-vm
-sudo ./setup-bridge.sh           # Run once
-sudo ./create-vm.sh vm1           # Create VMs
-sudo ./create-vm.sh vm2 1 2
-sudo ./stop-vm.sh vm1             # Remove specific VM
-sudo ./cleanup-all.sh             # Full cleanup
+sudo ./setup-bridge.sh # Run once
+sudo ./create-vm.sh vm1 # Create VMs
+sudo ./create-vm.sh vm2 1 2 # 1 vCPU, 2GB RAM
+# Create VM with static IP: sudo ./create-vm.sh vm3 2 4 10.10.0.50
+sudo ./stop-vm.sh vm1 # Remove specific VM
+sudo ./cleanup-all.sh # Full cleanup
 ```
 
 **Use when:**
 - You need multiple VMs
 - You want dynamic IP management
 - Better network isolation via bridge
+
+directory-structure/
+├── README.md              # This file
+├── single-vm/             # Single VM setup
+│   ├── README.md
+│   ├── setup.sh          # Download assets and prepare VM
+│   ├── start-vm.sh       # Start the VM
+│   ├── network.sh        # Configure networking
+│   ├── cleanup.sh        # Clean up resources
+│   ├── firecracker.json  # VM configuration
+│   ├── config.env        # Environment configuration
+│   └── cloud-init/
+│       └── user-data     # Cloud-init provisioning
+└── multi-vm/              # Multi-VM setup (recommended)
+    ├── README.md         # Multi-VM documentation
+    ├── config.env        # Bridge and VM configuration
+    ├── setup-bridge.sh   # Setup bridge networking
+    ├── get-kernel.sh     # Download compatible kernel
+    ├── create-vm.sh      # Create new VMs
+    ├── stop-vm.sh        # Stop specific VM
+    └── cleanup-all.sh    # Remove all VMs
 
 ## Shared Configuration
 

@@ -49,10 +49,13 @@ if [ ! -f "vmlinux" ]; then
   ./get-kernel.sh
 fi
 
-VM_MEM_MIB=$(echo "$VM_MEM * 1024" | bc | cut -d'.' -f1)
-VM_VCPU_INT=$(echo "$VM_VCPU * 1" | bc | cut -d'.' -f1)
-if [ "$VM_VCPU_INT" -lt 1 ]; then
+# Convert memory to MiB and vCPUs to integer (Firecracker requires integer)
+VM_MEM_MIB=$(printf "%.0f" $(echo "$VM_MEM * 1024" | bc))
+# Ensure at least 1 vCPU for Firecracker
+if [ "$(echo "$VM_VCPU < 1" | bc)" -eq 1 ]; then
   VM_VCPU_INT=1
+else
+  VM_VCPU_INT=$(printf "%.0f" "$VM_VCPU")
 fi
 
 TAP_DEV="${TAP_PREFIX}-${VM_NAME}-0"
@@ -111,10 +114,7 @@ cat >"$VM_DIR/config.json" <<EOF
   "network-interfaces": [
     {
       "iface_id": "eth0",
-      "guest_mac": "$GUEST_MAC",
-      "host_dev_name": "$TAP_DEV",
-      "guest_ip": "$VM_IP",
-      "netmask": "255.255.255.0"
+      "guest_mac": "$GUEST_MAC"
     }
   ],
   "machine-config": {

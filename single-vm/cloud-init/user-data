@@ -6,6 +6,8 @@ autoinstall:
     layout: us
   identity:
     hostname: firecracker-vm
+    # IMPORTANT: Replace below with a generated password hash
+    # Generate with: echo -n "yourpassword" | mkpasswd -m sha-512 -s
     password: "$6$rounds=4096$xyz$hashedpassword"
     username: ubuntu
   ssh:
