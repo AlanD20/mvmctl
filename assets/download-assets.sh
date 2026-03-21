@@ -25,10 +25,10 @@ download_firecracker() {
   echo "[1/3] Checking Firecracker binary..."
   if [ ! -f "bin/firecracker" ]; then
     echo "Downloading Firecracker ${FIRECRACKER_VERSION}..."
-    curl -sL "https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tar.gz" | tar xz -C /tmp
-    mv /tmp/firecracker-"${FIRECRACKER_VERSION}"-x86_64/firecracker bin/
-    mv /tmp/firecracker-"${FIRECRACKER_VERSION}"-x86_64/jailer bin/
-    rm -rf /tmp/firecracker-"${FIRECRACKER_VERSION}"-x86_64
+    curl -sL "https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tgz" | tar xz -C /tmp
+    mv /tmp/release-"${FIRECRACKER_VERSION}"-x86_64/firecracker-${FIRECRACKER_VERSION}-x86_64 bin/firecracker
+    mv /tmp/release-"${FIRECRACKER_VERSION}"-x86_64/jailer-${FIRECRACKER_VERSION}-x86_64 bin/jailer
+    rm -rf /tmp/release-"${FIRECRACKER_VERSION}"-x86_64
     chmod +x bin/firecracker bin/jailer
     echo "Firecracker downloaded to bin/"
   else
