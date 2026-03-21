@@ -64,7 +64,7 @@ fi
 echo "✓ Rootfs and SSH key copied"
 
 echo "[4/4] Creating cloud-init..."
-mkdir -p "${OUTPUT_DIR}/cloud-init"
+cp -r cloud-init "${OUTPUT_DIR}/cloud-init"
 
 # Create meta-data
 cat >"${OUTPUT_DIR}/cloud-init/meta-data" <<EOF
@@ -73,6 +73,24 @@ instance-id: i-$(
   echo ''
 )
 local-hostname: ${VM_NAME}
+EOF
+
+# Create network-config with static IP (matching boot args)
+cat >"${OUTPUT_DIR}/cloud-init/network-config" <<EOF
+version: 2
+ethernets:
+  eth0:
+    dhcp4: false
+    dhcp6: false
+    addresses:
+      - ${GUEST_IP}/30
+    routes:
+      - to: default
+        via: ${HOST_IP}
+    nameservers:
+      addresses:
+        - 1.1.1.1
+        - 8.8.8.8
 EOF
 
 # Read the public key content
@@ -89,53 +107,6 @@ if [ -f "cloud-init/user-data" ]; then
     -e "s|# Root SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
     -e "s|# Ubuntu user SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
     "cloud-init/user-data" >"${OUTPUT_DIR}/cloud-init/user-data"
-else
-  echo " - Creating default user-data..."
-  cat >"${OUTPUT_DIR}/cloud-init/user-data" <<EOF
-#cloud-config
-hostname: ${VM_NAME}
-manage_resolv_conf: true
-resolv_conf:
-  nameservers:
-    - 1.1.1.1
-    - 8.8.8.8
-  searchdomains:
-    - local
-
-ssh_authorized_keys:
-  - ${PUB_KEY_CONTENT}
-
-users:
-  - name: root
-    ssh_authorized_keys:
-      - ${PUB_KEY_CONTENT}
-  - name: ubuntu
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    groups: users, admin
-    home: /home/ubuntu
-    shell: /bin/bash
-    lock_passwd: false
-    passwd: "\$6\$o0ll24tM6X1RgeQ.\$rF4tWQM.99JWhhCC5GWeeQUCI40muZI29P1j0hhGn697xaPZtmVYoG4uRuoxD9yx7KBRHPWPPJH95T0PQVv5z"
-    ssh_authorized_keys:
-      - ${PUB_KEY_CONTENT}
-
-packages:
-  - openssh-server
-  - curl
-  - wget
-  - git
-  - net-tools
-  - vim
-  - tmux
-  - netcat-openbsd
-  - iputils-ping
-  - htop
-
-runcmd:
-  - systemctl enable ssh 2>/dev/null || true
-  - systemctl start ssh 2>/dev/null || true
-  - echo "Cloud-init completed" > /var/log/cloud-init-complete.log
-EOF
 fi
 
 echo " - Embedding cloud-init into rootfs..."
@@ -151,31 +122,10 @@ if mount "${OUTPUT_DIR}/rootfs.ext4" "$MOUNT_DIR" 2>/dev/null || sudo mount "${O
   sudo mkdir -p "$MOUNT_DIR/etc/cloud/cloud.cfg.d"
 
   # Copy cloud-init files
-  sudo cp "${OUTPUT_DIR}/cloud-init/user-data" "$MOUNT_DIR/var/lib/cloud/seed/nocloud/user-data"
-  sudo cp "${OUTPUT_DIR}/cloud-init/meta-data" "$MOUNT_DIR/var/lib/cloud/seed/nocloud/meta-data"
-
-  # Create a network-config for proper networking
-  sudo cat >"$MOUNT_DIR/var/lib/cloud/seed/nocloud/network-config" <<EOF
-version: 2
-ethernets:
-  eth0:
-    dhcp4: true
-    dhcp6: false
-EOF
+  sudo cp -t "$MOUNT_DIR/var/lib/cloud/seed/nocloud" "${OUTPUT_DIR}"/cloud-init/*
 
   # Set proper permissions
-  sudo chmod 644 "$MOUNT_DIR/var/lib/cloud/seed/nocloud/user-data"
-  sudo chmod 644 "$MOUNT_DIR/var/lib/cloud/seed/nocloud/meta-data"
-  sudo chmod 644 "$MOUNT_DIR/var/lib/cloud/seed/nocloud/network-config"
-
-  # Configure cloud-init to use nocloud
-  sudo cat >"$MOUNT_DIR/etc/cloud/cloud.cfg.d/99-nocloud.cfg" <<EOF
-# Cloud-init configuration for Firecracker
-datasource_list: [ NoCloud, None ]
-datasource:
-  NoCloud:
-    seedfrom: /var/lib/cloud/seed/nocloud/
-EOF
+  sudo chmod 644 "$MOUNT_DIR"/var/lib/cloud/seed/nocloud/*
 
   # Unmount
   umount "$MOUNT_DIR" 2>/dev/null || sudo umount "$MOUNT_DIR"

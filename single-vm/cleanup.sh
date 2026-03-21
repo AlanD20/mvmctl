@@ -10,11 +10,6 @@ FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
 
 echo "=== Cleaning up Firecracker VM ==="
 
-# First try to stop via screen session (most reliable)
-echo "Stopping screen session 'fc-single'..."
-screen -S fc-single -X quit 2>/dev/null || true
-sleep 1
-
 # Then kill any remaining firecracker processes for this config
 FIRECRACKER_CONFIG="${OUTPUT_DIR}/firecracker.json"
 if [ "$ENABLE_SOCKET" = "true" ]; then
