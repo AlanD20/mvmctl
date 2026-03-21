@@ -12,8 +12,8 @@ FIRECRACKER_CONFIG="${OUTPUT_DIR}/firecracker.json"
 echo "=== Stopping Firecracker VM ==="
 
 # First try to stop via screen session (most reliable)
-echo "Stopping screen session 'fc-single'..."
-screen -S fc-single -X quit 2>/dev/null || true
+echo "Stopping screen session '$VM_NAME'..."
+screen -S $VM_NAME -X quit 2>/dev/null || true
 sleep 1
 
 # Then kill any remaining firecracker processes for this config

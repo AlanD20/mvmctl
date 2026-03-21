@@ -92,15 +92,15 @@ download_and_convert_rootfs() {
   chmod 600 squashfs-root/root/.ssh/authorized_keys
 
   echo " - Creating ext4 filesystem..."
-  #sudo chown -R root:root squashfs-root
+  sudo chown -R root:root squashfs-root
   truncate -s 1G "ubuntu-${ubuntu_version}.ext4"
-  mkfs.ext4 -d squashfs-root -F "ubuntu-${ubuntu_version}.ext4" >/dev/null
+  sudo mkfs.ext4 -d squashfs-root -F "ubuntu-${ubuntu_version}.ext4" >/dev/null
 
   cp "ubuntu-${ubuntu_version}.ext4" "$ASSETS_DIR/${rootfs_output}"
   # Keys are already in assets/keys/ directory
 
   cd "$ASSETS_DIR"
-  rm -rf "$temp_dir" "$squashfs_file"
+  sudo rm -rf "$temp_dir" "$squashfs_file"
 
   echo "✓ Rootfs created: $rootfs_output"
   echo "✓ SSH keys in: ${KEYS_DIR}/"
@@ -122,8 +122,9 @@ download_firecracker() {
   echo "   URL: $download_url"
   if curl -sL "$download_url" | tar xz -C "$temp_dir" 2>/dev/null; then
     # Find the actual firecracker and jailer binaries (they have version in name)
-    local fc_bin=$(find "$temp_dir" -name "firecracker*" -type f | head -1)
-    local jailer_bin=$(find "$temp_dir" -name "jailer*" -type f | head -1)
+    # Exclude YAML files, debug binaries, and spec files
+    local fc_bin=$(find "$temp_dir" -name "firecracker-v*-${ARCH}" -type f ! -name "*.debug" | head -1)
+    local jailer_bin=$(find "$temp_dir" -name "jailer-v*-${ARCH}" -type f ! -name "*.debug" | head -1)
     if [ -n "$fc_bin" ]; then
       cp "$fc_bin" bin/firecracker
       chmod +x bin/firecracker

@@ -50,6 +50,10 @@ fi
 
 rm -f "$API_SOCKET"
 
+echo "Removing '$OUTPUT_DIR'"
+rm -rf "$OUTPUT_DIR"
+
+
 if ip link show "$TAP_DEV" &>/dev/null; then
   echo "Removing tap device $TAP_DEV..."
   ip link del "$TAP_DEV" 2>/dev/null || true
@@ -64,5 +68,6 @@ iptables -D FORWARD -i "$DEFAULT_IFACE" -o "$TAP_DEV" -j ACCEPT 2>/dev/null || t
 echo ""
 echo "=== Cleanup Complete ==="
 echo "  - Firecracker process stopped"
+echo "  - Removed '$OUTPUT_DIR'"
 echo "  - Tap device removed"
 echo "  - NAT rules flushed"
