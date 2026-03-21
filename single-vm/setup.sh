@@ -6,57 +6,58 @@ cd "$SCRIPT_DIR"
 
 source config.env
 
-echo "=== Firecracker Ubuntu Setup ==="
-echo "Using kernel: ${KERNEL_NAME} (from assets)"
-echo "Using image: ${IMAGE_OS}-${IMAGE_VERSION}-server-cloudimg-${IMAGE_ARCH}.img (from assets)"
+echo "=== Firecracker VM Setup (Direct Rootfs + SSH) ==="
+echo "Using kernel: kernels/vmlinux (from assets)"
+echo "Using rootfs: $(basename $(ls ../assets/images/ubuntu-*.ext4 | head -1)) (from assets)"
 echo ""
 
-# Check for shared assets
-echo "[1/5] Checking shared assets..."
-if [ ! -f "../assets/bin/firecracker" ]; then
-  echo "Shared Firecracker not found. Run ../assets/download-assets.sh first"
-  exit 1
-fi
-if [ ! -f "../assets/kernels/${KERNEL_NAME}" ]; then
-  echo "Shared kernel '${KERNEL_NAME}' not found. Run ../assets/download-assets.sh first"
-  exit 1
-fi
-if [ ! -f "../assets/images/${IMAGE_OS}-${IMAGE_VERSION}-server-cloudimg-${IMAGE_ARCH}.img" ]; then
-  echo "OS image not found. Run ../assets/download-assets.sh first"
-  exit 1
-fi
-echo "All assets present"
-
-echo "[2/5] Checking dependencies..."
-for cmd in qemu-img mkisofs curl bc screen; do
+echo "[1/4] Checking dependencies..."
+for cmd in mkisofs curl bc screen; do
   if ! command -v "$cmd" &>/dev/null; then
-    echo "ERROR: $cmd is not installed."
+    echo "ERROR: $cmd is not installed"
     exit 1
   fi
 done
-
 if [ ! -c /dev/kvm ]; then
-  echo "ERROR: KVM is not available. Please ensure KVM is enabled and you have permissions."
+  echo "ERROR: KVM not available"
   exit 1
 fi
-echo "Dependencies and KVM check passed"
+echo "✓ Dependencies and KVM OK"
 
-echo "[3/5] Preparing rootfs from assets..."
+echo "[2/4] Checking assets..."
+if [ ! -f "../assets/kernels/vmlinux" ]; then
+  echo "ERROR: Kernel not found at ../assets/kernels/vmlinux"
+  echo "Run '../assets/download-assets.sh' first"
+  exit 1
+fi
+ROOTFS_SOURCE=$(ls ../assets/images/ubuntu-*.ext4 2>/dev/null | head -1)
+if [ -z "$ROOTFS_SOURCE" ]; then
+  echo "ERROR: Rootfs not found at ../assets/images/ubuntu-*.ext4"
+  echo "Run '../assets/download-assets.sh' first"
+  exit 1
+fi
+SSH_KEY_SOURCE=$(ls ../assets/keys/ubuntu-*.id_rsa 2>/dev/null | head -1)
+if [ -z "$SSH_KEY_SOURCE" ]; then
+  echo "ERROR: SSH key not found at ../assets/keys/ubuntu-*.id_rsa"
+  echo "Run '../assets/download-assets.sh' first"
+  exit 1
+fi
+echo "✓ All assets present"
+
+echo "[3/4] Setting up VM environment..."
 mkdir -p "${OUTPUT_DIR}"
-IMAGE_PATH="../assets/images/${IMAGE_OS}-${IMAGE_VERSION}-server-cloudimg-${IMAGE_ARCH}.img"
+
 if [ ! -f "${OUTPUT_DIR}/rootfs.ext4" ]; then
-  if [ ! -f "$IMAGE_PATH" ]; then
-    echo "ERROR: Image file not found at $IMAGE_PATH"
-    exit 1
-  fi
-  echo "Converting image to rootfs..."
-  qemu-img convert -f qcow2 -O raw "$IMAGE_PATH" "${OUTPUT_DIR}/rootfs.ext4"
-  truncate -s "$DISK_SIZE" "${OUTPUT_DIR}/rootfs.ext4"
-  resize2fs "${OUTPUT_DIR}/rootfs.ext4"
+  echo " - Copying rootfs..."
+  cp "$ROOTFS_SOURCE" "${OUTPUT_DIR}/rootfs.ext4"
+  echo " - Copying SSH key..."
+  cp "$SSH_KEY_SOURCE" "${OUTPUT_DIR}/vm.id_rsa"
+  chmod 600 "${OUTPUT_DIR}/vm.id_rsa"
 fi
 
-# Create cloud-init seed
-echo "[4/5] Generating cloud-init seed..."
+echo "✓ Rootfs and SSH key copied"
+
+echo "[4/4] Creating cloud-init..."
 mkdir -p "${OUTPUT_DIR}/cloud-init"
 cat >"${OUTPUT_DIR}/cloud-init/meta-data" <<EOF
 instance-id: i-$(
@@ -72,13 +73,14 @@ else
   mkisofs -output "${OUTPUT_DIR}/cloudinit.iso" -volid cidata -joliet -rock "${OUTPUT_DIR}/cloud-init/meta-data"
 fi
 
-# Generate firecracker.json with dynamic paths
+echo "✓ Cloud-init created"
+
 echo "[5/5] Generating VM configuration..."
 cat >"${OUTPUT_DIR}/firecracker.json" <<EOF
 {
   "boot-source": {
-    "kernel_image_path": "../assets/kernels/${KERNEL_NAME}",
-    "boot_args": "ro console=ttyS0 noapic reboot=k panic=1 pci=off ip=${GUEST_IP}::${HOST_IP}:${MASK}::eth0:off",
+    "kernel_image_path": "../assets/kernels/vmlinux",
+    "boot_args": "console=ttyS0 noapic reboot=k panic=1 pci=off ip=${GUEST_IP}::${HOST_IP}:${MASK}::eth0:off root=/dev/vda rw",
     "initrd_path": null
   },
   "drives": [
@@ -103,13 +105,14 @@ cat >"${OUTPUT_DIR}/firecracker.json" <<EOF
   "network-interfaces": [
     {
       "iface_id": "eth0",
-      "guest_mac": "${MAC}"
+      "guest_mac": "${MAC}",
+      "host_dev_name": "${TAP_DEV}"
     }
   ],
   "machine-config": {
     "vcpu_count": ${VM_VCPU},
     "mem_size_mib": ${VM_MEM_MIB},
-    "ht_enabled": false,
+    "smt": false,
     "cpu_template": null
   },
   "cpu-config": null,
@@ -126,9 +129,23 @@ cat >"${OUTPUT_DIR}/firecracker.json" <<EOF
   }
 }
 EOF
-echo "Configuration generated (${OUTPUT_DIR}/firecracker.json)"
 
+echo "✓ Configuration generated: ${OUTPUT_DIR}/firecracker.json"
 echo ""
-echo "=== Setup Complete ==="
-echo "Run ./start-vm.sh to start the VM"
-echo "Run ./cleanup.sh when done to clean up resources"
+echo "=========================================="
+echo "✓✓✓ Setup Complete! ✓✓✓"
+echo "=========================================="
+echo ""
+echo "VM configuration:"
+echo " - Kernel: ../assets/kernels/vmlinux"
+echo " - Rootfs: ${DISK_SIZE} ext4 with SSH"
+echo " - SSH Key: ${OUTPUT_DIR}/vm.id_rsa"
+echo " - vCPUs: ${VM_VCPU}"
+echo " - Memory: ${VM_MEM_MIB} MiB"
+echo " - Network: ${GUEST_IP}/30 via ${TAP_DEV}"
+echo ""
+echo "To connect via SSH:"
+echo "  ssh -i ${OUTPUT_DIR}/vm.id_rsa root@${GUEST_IP}"
+echo ""
+echo "Run: ./start-vm.sh"
+echo "View: cat ${OUTPUT_DIR}/firecracker.log"
