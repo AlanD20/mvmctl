@@ -12,44 +12,67 @@ echo "Using kernel: ${KERNEL_PATH}"
 echo "Using rootfs: ${ROOTFS_PATH}"
 echo ""
 
+# =============================================================================
+# STEP 1: Check Dependencies
+# =============================================================================
 echo "[1/4] Checking dependencies..."
-for cmd in mkisofs curl bc screen; do
+
+# Required commands for setup
+declare -a REQUIRED_CMDS=("mkisofs" "screen" "mount" "umount" "sudo" "ip" "iptables")
+for cmd in "${REQUIRED_CMDS[@]}"; do
   if ! command -v "$cmd" &>/dev/null; then
-    echo "ERROR: $cmd is not installed"
+    echo "ERROR: Required command '$cmd' is not installed"
     exit 1
   fi
 done
+
+# Check KVM is available
 if [ ! -c /dev/kvm ]; then
-  echo "ERROR: KVM not available"
+  echo "ERROR: KVM not available (/dev/kvm not found)"
   exit 1
 fi
-echo "✓ Dependencies and KVM OK"
 
+echo "✓ All dependencies and KVM OK"
+
+# =============================================================================
+# STEP 2: Check Assets
+# =============================================================================
 echo "[2/4] Checking assets..."
+
+# Check kernel exists
 if [ ! -f "$KERNEL_PATH" ]; then
   echo "ERROR: Kernel not found at $KERNEL_PATH"
   echo "Run '../assets/download-assets.sh' first"
   exit 1
 fi
+
+# Check rootfs exists
 if [ ! -f "$ROOTFS_PATH" ]; then
   echo "ERROR: Rootfs not found at $ROOTFS_PATH"
   echo "Run '../assets/download-assets.sh' first"
   exit 1
 fi
 ROOTFS_SOURCE="$ROOTFS_PATH"
+
+# Check SSH key exists
 SSH_KEY_SOURCE=$(ls ../assets/keys/id_rsa 2>/dev/null | head -1)
 if [ -z "$SSH_KEY_SOURCE" ]; then
   echo "ERROR: SSH key not found at ../assets/keys/id_rsa"
   echo "Run '../assets/download-assets.sh' first"
   exit 1
 fi
-# Also check for public key
+
+# Check public key (optional but recommended)
 SSH_PUB_KEY_SOURCE=$(ls ../assets/keys/id_rsa.pub 2>/dev/null | head -1)
 if [ -z "$SSH_PUB_KEY_SOURCE" ]; then
   echo "WARNING: SSH public key not found at ../assets/keys/id_rsa.pub"
 fi
+
 echo "✓ All assets present"
 
+# =============================================================================
+# STEP 3: Setup VM Environment
+# =============================================================================
 echo "[3/4] Setting up VM environment..."
 mkdir -p "$OUTPUT_DIR"
 
@@ -63,15 +86,16 @@ fi
 
 echo "✓ Rootfs and SSH key copied"
 
+# =============================================================================
+# STEP 4: Create Cloud-Init
+# =============================================================================
 echo "[4/4] Creating cloud-init..."
 cp -r cloud-init "${OUTPUT_DIR}/cloud-init"
 
-# Create meta-data
+# Create meta-data with random instance ID
+INSTANCE_ID="i-$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 12)"
 cat >"${OUTPUT_DIR}/cloud-init/meta-data" <<EOF
-instance-id: i-$(
-  head /dev/urandom | tr -dc A-Za-z0-9 | head -c 12
-  echo ''
-)
+instance-id: ${INSTANCE_ID}
 local-hostname: ${VM_NAME}
 EOF
 

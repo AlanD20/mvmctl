@@ -6,17 +6,21 @@ cd "$SCRIPT_DIR"
 
 source config.env
 
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
 FIRECRACKER_SOCKET_PATH="${OUTPUT_DIR}/firecracker.socket"
 FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
 FIRECRACKER_BIN="../assets/bin/firecracker"
-# KERNEL_PATH and ROOTFS_PATH are set in config.env
 CONFIG_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/firecracker.json"
 CONSOLE_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/firecracker.console.log"
 
 echo "=== Starting/Resuming Firecracker VM ==="
 echo "Image Source: ${IMAGE_SOURCE:-firecracker-ci}"
 
-# Check if already running by PID file
+# =============================================================================
+# CHECK IF ALREADY RUNNING
+# =============================================================================
 if [ -f "$FIRECRACKER_PID_FILE" ]; then
   EXISTING_PID=$(cat "$FIRECRACKER_PID_FILE")
   if kill -0 "$EXISTING_PID" 2>/dev/null; then
@@ -26,7 +30,9 @@ if [ -f "$FIRECRACKER_PID_FILE" ]; then
   fi
 fi
 
-# Check required files
+# =============================================================================
+# VALIDATE REQUIRED FILES
+# =============================================================================
 if [ ! -f "$FIRECRACKER_BIN" ]; then
   echo "ERROR: Firecracker binary not found at $FIRECRACKER_BIN"
   exit 1
@@ -44,11 +50,17 @@ if [ ! -f "${OUTPUT_DIR}/rootfs.ext4" ]; then
   exit 1
 fi
 
+# =============================================================================
+# SETUP NETWORK
+# =============================================================================
 if ! ./network.sh check 2>/dev/null; then
   echo "Setting up network..."
   sudo ./network.sh
 fi
 
+# =============================================================================
+# START VM
+# =============================================================================
 echo "Starting Firecracker VM..."
 
 if [ "$ENABLE_SOCKET" = "true" ]; then
@@ -70,15 +82,18 @@ if ! kill -0 "$FIRECRACKER_PID" 2>/dev/null; then
   exit 1
 fi
 
+# =============================================================================
+# SUCCESS OUTPUT
+# =============================================================================
 echo ""
 echo "=== VM Started ==="
 echo "Firecracker PID: $FIRECRACKER_PID"
 echo ""
 echo "View console logs:"
-echo "  tail -f ${OUTPUT_DIR}/firecracker.console.log"
+echo " tail -f ${OUTPUT_DIR}/firecracker.console.log"
 echo ""
 echo "To connect via SSH:"
-echo "  ssh -i ${OUTPUT_DIR}/vm.id_rsa root@${GUEST_IP}"
+echo " ssh -i ${OUTPUT_DIR}/vm.id_rsa root@${GUEST_IP}"
 echo ""
 echo "Run ./stop-vm.sh to stop the VM"
 echo "Run ./cleanup.sh to remove VM and clean up network"
