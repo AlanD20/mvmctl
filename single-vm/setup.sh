@@ -42,22 +42,23 @@ fi
 echo "Dependencies and KVM check passed"
 
 echo "[3/5] Preparing rootfs from assets..."
+mkdir -p "${OUTPUT_DIR}"
 IMAGE_PATH="../assets/images/${IMAGE_OS}-${IMAGE_VERSION}-server-cloudimg-${IMAGE_ARCH}.img"
-if [ ! -f "rootfs.ext4" ]; then
+if [ ! -f "${OUTPUT_DIR}/rootfs.ext4" ]; then
   if [ ! -f "$IMAGE_PATH" ]; then
     echo "ERROR: Image file not found at $IMAGE_PATH"
     exit 1
   fi
   echo "Converting image to rootfs..."
-  qemu-img convert -f qcow2 -O raw "$IMAGE_PATH" "rootfs.ext4"
-  truncate -s "$DISK_SIZE" rootfs.ext4
-  resize2fs rootfs.ext4
+  qemu-img convert -f qcow2 -O raw "$IMAGE_PATH" "${OUTPUT_DIR}/rootfs.ext4"
+  truncate -s "$DISK_SIZE" "${OUTPUT_DIR}/rootfs.ext4"
+  resize2fs "${OUTPUT_DIR}/rootfs.ext4"
 fi
 
 # Create cloud-init seed
 echo "[4/5] Generating cloud-init seed..."
-mkdir -p cloud-init
-cat >cloud-init/meta-data <<EOF
+mkdir -p "${OUTPUT_DIR}/cloud-init"
+cat >"${OUTPUT_DIR}/cloud-init/meta-data" <<EOF
 instance-id: i-$(
   head /dev/urandom | tr -dc A-Za-z0-9 | head -c 12
   echo ''
@@ -65,15 +66,15 @@ instance-id: i-$(
 local-hostname: ubuntu-fc
 EOF
 
-if [ -f "cloud-init/user-data" ]; then
-  mkisofs -output cloudinit.iso -volid cidata -joliet -rock cloud-init/user-data cloud-init/meta-data
+if [ -f "${OUTPUT_DIR}/cloud-init/user-data" ]; then
+  mkisofs -output "${OUTPUT_DIR}/cloudinit.iso" -volid cidata -joliet -rock "${OUTPUT_DIR}/cloud-init/user-data" "${OUTPUT_DIR}/cloud-init/meta-data"
 else
-  mkisofs -output cloudinit.iso -volid cidata -joliet -rock cloud-init/meta-data
+  mkisofs -output "${OUTPUT_DIR}/cloudinit.iso" -volid cidata -joliet -rock "${OUTPUT_DIR}/cloud-init/meta-data"
 fi
 
 # Generate firecracker.json with dynamic paths
 echo "[5/5] Generating VM configuration..."
-cat >firecracker.json <<EOF
+cat >"${OUTPUT_DIR}/firecracker.json" <<EOF
 {
   "boot-source": {
     "kernel_image_path": "../assets/kernels/${KERNEL_NAME}",
@@ -83,7 +84,7 @@ cat >firecracker.json <<EOF
   "drives": [
     {
       "drive_id": "rootfs",
-      "path_on_host": "rootfs.ext4",
+      "path_on_host": "${OUTPUT_DIR}/rootfs.ext4",
       "is_root_device": true,
       "is_read_only": false,
       "partuuid": null,
@@ -94,7 +95,7 @@ cat >firecracker.json <<EOF
     },
     {
       "drive_id": "cloudinit",
-      "path_on_host": "cloudinit.iso",
+      "path_on_host": "${OUTPUT_DIR}/cloudinit.iso",
       "is_root_device": false,
       "is_read_only": true
     }
@@ -115,17 +116,17 @@ cat >firecracker.json <<EOF
   "balloon": null,
   "vsock": null,
   "logger": {
-    "log_path": "./firecracker.log",
+    "log_path": "${OUTPUT_DIR}/firecracker.log",
     "level": "Info",
     "show_level": true,
     "show_log_origin": true
   },
   "metrics": {
-    "metrics_path": "./firecracker.metrics"
+    "metrics_path": "${OUTPUT_DIR}/firecracker.metrics"
   }
 }
 EOF
-echo "Configuration generated (firecracker.json)"
+echo "Configuration generated (${OUTPUT_DIR}/firecracker.json)"
 
 echo ""
 echo "=== Setup Complete ==="

@@ -27,18 +27,19 @@ fi
 echo "KVM is available"
 
 echo "[3/6] Preparing base rootfs from assets..."
+mkdir -p "${OUTPUT_DIR}"
 IMAGE_PATH="../assets/images/${IMAGE_OS}-${IMAGE_VERSION}-server-cloudimg-${IMAGE_ARCH}.img"
 if [ ! -f "$IMAGE_PATH" ]; then
   echo "ERROR: OS image not found at $IMAGE_PATH. Run ../assets/download-assets.sh first."
   exit 1
 fi
 
-if [ ! -f "base-rootfs.ext4" ]; then
+if [ ! -f "${OUTPUT_DIR}/base-rootfs.ext4" ]; then
   echo "Converting image to base rootfs..."
-  qemu-img convert -f qcow2 -O raw "$IMAGE_PATH" "base-rootfs.ext4"
-  truncate -s "$DISK_SIZE" base-rootfs.ext4
-  e2fsck -f base-rootfs.ext4 || true
-  resize2fs base-rootfs.ext4
+  qemu-img convert -f qcow2 -O raw "$IMAGE_PATH" "${OUTPUT_DIR}/base-rootfs.ext4"
+  truncate -s "$DISK_SIZE" "${OUTPUT_DIR}/base-rootfs.ext4"
+  e2fsck -f "${OUTPUT_DIR}/base-rootfs.ext4" || true
+  resize2fs "${OUTPUT_DIR}/base-rootfs.ext4"
   echo "Base rootfs prepared"
 else
   echo "Base rootfs already exists"

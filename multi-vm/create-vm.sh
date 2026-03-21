@@ -85,11 +85,11 @@ echo "  Tap: $TAP_DEV"
 
 mkdir -p "$VM_DIR"
 
-if [ ! -f "base-rootfs.ext4" ]; then
+if [ ! -f "${OUTPUT_DIR}/base-rootfs.ext4" ]; then
   echo "ERROR: base-rootfs.ext4 not found. Run ./setup-bridge.sh first."
   exit 1
 fi
-cp base-rootfs.ext4 "$VM_DIR/rootfs.ext4"
+cp "${OUTPUT_DIR}/base-rootfs.ext4" "$VM_DIR/rootfs.ext4"
 
 cat >"$VM_DIR/config.json" <<EOF
 {
