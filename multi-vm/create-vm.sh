@@ -43,14 +43,10 @@ if ! ip link show "$BRIDGE_NAME" &>/dev/null; then
   exit 1
 fi
 
-# Check kernel exists in assets and link it
+# Check kernel exists in assets
 if [ ! -f "../assets/kernels/${KERNEL_NAME}" ]; then
   echo "ERROR: Kernel '${KERNEL_NAME}' not found in ../assets/kernels/. Run ../assets/download-assets.sh first."
   exit 1
-fi
-# Link kernel if not already linked
-if [ ! -f "vmlinux" ] || [ "$(readlink -f vmlinux)" != "$(readlink -f ../assets/kernels/${KERNEL_NAME})" ]; then
-  ln -sf "../assets/kernels/${KERNEL_NAME}" "vmlinux"
 fi
 
 # Convert memory to MiB and vCPUs to integer (Firecracker requires integer)
@@ -98,7 +94,7 @@ cp base-rootfs.ext4 "$VM_DIR/rootfs.ext4"
 cat >"$VM_DIR/config.json" <<EOF
 {
   "boot-source": {
-    "kernel_image_path": "../../vmlinux",
+    "kernel_image_path": "../../assets/kernels/${KERNEL_NAME}",
     "boot_args": "ro console=ttyS0 noapic reboot=k panic=1 pci=off ip=${VM_IP}::10.10.0.1:255.255.255.0::eth0:off",
     "initrd_path": null
   },

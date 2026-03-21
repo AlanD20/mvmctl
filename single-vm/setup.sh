@@ -71,26 +71,61 @@ else
   genisoimage -output cloudinit.iso -volid cidata -joliet -rock cloud-init/meta-data
 fi
 
-# Update firecracker.json with config.env values
-echo "[5/5] Updating VM configuration..."
-if [ -f "firecracker.json" ]; then
-  python3 - <<EOF
-import json
-with open("firecracker.json", "r") as f:
-  config = json.load(f)
-
-# Update values from env variables
-config["network-interfaces"][0]["host_dev_name"] = "$TAP_DEV"
-config["network-interfaces"][0]["guest_mac"] = "$MAC"
-config["network-interfaces"][0]["guest_ip"] = "$GUEST_IP"
-config["network-interfaces"][0]["netmask"] = "$MASK"
-config["machine-config"]["vcpu_count"] = $VM_VCPU
-config["machine-config"]["mem_size_mib"] = $VM_MEM_MIB
-
-with open("firecracker.json", "w") as f:
-  json.dump(config, f, indent=2)
+# Generate firecracker.json with dynamic paths
+echo "[5/5] Generating VM configuration..."
+cat >firecracker.json <<EOF
+{
+  "boot-source": {
+    "kernel_image_path": "../assets/kernels/${KERNEL_NAME}",
+    "boot_args": "ro console=ttyS0 noapic reboot=k panic=1 pci=off ip=${GUEST_IP}::${HOST_IP}:${MASK}::eth0:off",
+    "initrd_path": null
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "rootfs.ext4",
+      "is_root_device": true,
+      "is_read_only": false,
+      "partuuid": null,
+      "cache_type": "Unsafe",
+      "io_engine": "Sync",
+      "rate_limiter": null,
+      "socket": null
+    },
+    {
+      "drive_id": "cloudinit",
+      "path_on_host": "cloudinit.iso",
+      "is_root_device": false,
+      "is_read_only": true
+    }
+  ],
+  "network-interfaces": [
+    {
+      "iface_id": "eth0",
+      "guest_mac": "${MAC}"
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": ${VM_VCPU},
+    "mem_size_mib": ${VM_MEM_MIB},
+    "ht_enabled": false,
+    "cpu_template": null
+  },
+  "cpu-config": null,
+  "balloon": null,
+  "vsock": null,
+  "logger": {
+    "log_path": "./firecracker.log",
+    "level": "Info",
+    "show_level": true,
+    "show_log_origin": true
+  },
+  "metrics": {
+    "metrics_path": "./firecracker.metrics"
+  }
+}
 EOF
-fi
+echo "Configuration generated (firecracker.json)"
 
 echo ""
 echo "=== Setup Complete ==="

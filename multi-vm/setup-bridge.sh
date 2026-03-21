@@ -13,16 +13,11 @@ if [ ! -f "../assets/bin/firecracker" ]; then
   echo "Shared Firecracker not found. Run ../assets/download-assets.sh first"
   exit 1
 fi
-if [ ! -f "../assets/kernels/vmlinux" ]; then
-  echo "Shared kernel not found. Run ../assets/download-assets.sh first"
+if [ ! -f "../assets/kernels/${KERNEL_NAME}" ]; then
+  echo "Shared kernel '${KERNEL_NAME}' not found. Run ../assets/download-assets.sh first"
   exit 1
 fi
-
-# Link shared assets locally
-ln -sf "../assets/bin/firecracker" firecracker
-ln -sf "../assets/bin/jailer" jailer 2>/dev/null || true
-ln -sf "../assets/kernels/vmlinux" vmlinux
-echo "Shared assets linked"
+echo "All assets present"
 
 echo "[2/6] Checking KVM availability..."
 if [ ! -c /dev/kvm ]; then
