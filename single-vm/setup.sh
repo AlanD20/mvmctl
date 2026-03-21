@@ -8,7 +8,24 @@ source config.env
 
 echo "=== Firecracker Ubuntu Setup ==="
 
-echo "[1/5] Checking dependencies..."
+# Check for shared assets
+echo "[1/5] Checking shared assets..."
+if [ ! -f "../assets/bin/firecracker" ]; then
+  echo "Shared Firecracker not found. Run ../assets/download-assets.sh first"
+  exit 1
+fi
+if [ ! -f "../assets/kernels/vmlinux" ]; then
+  echo "Shared kernel not found. Run ../assets/download-assets.sh first"
+  exit 1
+fi
+
+# Link shared assets locally
+ln -sf "../assets/bin/firecracker" firecracker
+ln -sf "../assets/bin/jailer" jailer 2>/dev/null || true
+ln -sf "../assets/kernels/vmlinux" vmlinux
+echo "Shared assets linked"
+
+echo "[2/5] Checking dependencies..."
 for cmd in qemu-img genisoimage curl bc screen; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "ERROR: $cmd is not installed."
@@ -21,20 +38,6 @@ if [ ! -c /dev/kvm ]; then
   exit 1
 fi
 echo "Dependencies and KVM check passed"
-
-echo "[2/5] Downloading Firecracker binary..."
-if [ ! -f "firecracker" ]; then
-  # Try to get latest version if not set
-  if [ "$FIRECRACKER_VERSION" = "" ]; then
-    FIRECRACKER_VERSION=$(curl -s https://api.github.com/repos/firecracker-microvm/firecracker/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+')
-  fi
-  curl -sL "https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tar.gz" | tar xz -C .
-  mv firecracker-"$FIRECRACKER_VERSION"-x86_64/firecracker .
-  mv firecracker-"$FIRECRACKER_VERSION"-x86_64/jailer .
-  rm -rf firecracker-"$FIRECRACKER_VERSION"-x86_64
-fi
-chmod +x firecracker jailer
-echo "Firecracker installed"
 
 echo "[3/5] Downloading Ubuntu ${UBUNTU_VERSION} cloud image..."
 if [ ! -f "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" ]; then
@@ -81,11 +84,24 @@ with open("firecracker.json", "w") as f:
 EOF
 fi
 
-echo "[5/5] Downloading vmlinux kernel..."
-if [ ! -f "vmlinux" ]; then
-  # Using a more reliable source for Firecracker-compatible kernels
-  curl -sL "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin" -o "vmlinux"
+echo "[4/5] Preparing rootfs and Cloud-Init..."
+if [ ! -f "rootfs.ext4" ]; then
+  qemu-img convert -f qcow2 -O raw "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" "rootfs.ext4"
+  truncate -s "$DISK_SIZE" rootfs.ext4
+  resize2fs rootfs.ext4
 fi
+
+# Create cloud-init seed
+echo "Generating cloud-init seed..."
+mkdir -p cloud-init
+cat >cloud-init/meta-data <<EOF
+instance-id: i-$(
+  head /dev/urandom | tr -dc A-Za-z0-9 | head -c 12
+  echo ''
+)
+local-hostname: ubuntu-fc
+EOF
+genisoimage -output cloudinit.iso -volid cidata -joliet -rock cloud-init/user-data cloud-init/meta-data
 
 echo ""
 echo "=== Setup Complete ==="

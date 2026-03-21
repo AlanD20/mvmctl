@@ -8,26 +8,30 @@ source config.env
 
 echo "=== Setting up Bridge for Firecracker Multi-VM ==="
 
-echo "[1/5] Checking KVM availability..."
+echo "[1/6] Checking shared assets..."
+if [ ! -f "../assets/bin/firecracker" ]; then
+  echo "Shared Firecracker not found. Run ../assets/download-assets.sh first"
+  exit 1
+fi
+if [ ! -f "../assets/kernels/vmlinux" ]; then
+  echo "Shared kernel not found. Run ../assets/download-assets.sh first"
+  exit 1
+fi
+
+# Link shared assets locally
+ln -sf "../assets/bin/firecracker" firecracker
+ln -sf "../assets/bin/jailer" jailer 2>/dev/null || true
+ln -sf "../assets/kernels/vmlinux" vmlinux
+echo "Shared assets linked"
+
+echo "[2/6] Checking KVM availability..."
 if [ ! -c /dev/kvm ]; then
   echo "ERROR: KVM is not available. Please ensure KVM is enabled."
   exit 1
 fi
 echo "KVM is available"
 
-echo "[2/5] Downloading Firecracker binary..."
-if [ ! -f "firecracker" ]; then
-  curl -sL "https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tar.gz" | tar xz -C .
-  mv firecracker-"$FIRECRACKER_VERSION"-x86_64/firecracker .
-  mv firecracker-"$FIRECRACKER_VERSION"-x86_64/jailer .
-  rm -rf firecracker-"$FIRECRACKER_VERSION"-x86_64
-  chmod +x firecracker jailer
-  echo "Firecracker installed"
-else
-  echo "Firecracker already installed"
-fi
-
-echo "[3/5] Downloading Ubuntu ${UBUNTU_VERSION} cloud image..."
+echo "[3/6] Downloading Ubuntu ${UBUNTU_VERSION} cloud image..."
 if [ ! -f "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" ]; then
   curl -sL "https://cloud-images.ubuntu.com/${UBUNTU_VERSION}/current/${UBUNTU_VERSION}-server-cloudimg-amd64.img" -o "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img"
 fi
@@ -35,21 +39,14 @@ echo "Ubuntu cloud image ready"
 
 echo "[4/5] Preparing base rootfs..."
 if [ ! -f "base-rootfs.ext4" ]; then
-  qemu-img convert -f qcow2 -O raw "ubuntu-24.04-server-cloudimg-amd64.img" "base-rootfs.ext4"
+  qemu-img convert -f qcow2 -O raw "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" "base-rootfs.ext4"
   truncate -s "$DISK_SIZE" base-rootfs.ext4
   e2fsck -f base-rootfs.ext4 || true
   resize2fs base-rootfs.ext4
 fi
 echo "Base rootfs ready"
 
-echo "[5/6] Downloading vmlinux kernel..."
-if [ ! -f "vmlinux" ]; then
-  chmod +x get-kernel.sh
-  ./get-kernel.sh
-fi
-echo "Kernel ready"
-
-echo "[6/6] Creating bridge $BRIDGE_NAME..."
+echo "[5/5] Creating bridge $BRIDGE_NAME..."
 if ip link show "$BRIDGE_NAME" &>/dev/null; then
   echo "Bridge $BRIDGE_NAME already exists"
 else

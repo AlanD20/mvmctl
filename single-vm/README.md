@@ -1,192 +1,153 @@
 # Firecracker Single-VM Setup
 
-A simple, single virtual machine setup using Firecracker with Ubuntu.
+A simple, single virtual machine setup using Firecracker with Ubuntu and NAT networking.
 
-> **Note**: See the parent [README.md](../README.md) for shared prerequisites and troubleshooting.
+**See the parent [README.md](../README.md) for**: prerequisites, troubleshooting, Ubuntu version options, disk sizing, custom kernels, and security best practices.
 
 ## Overview
 
 This setup creates a single microVM with:
-- **Ubuntu** (default: 24.04 LTS Noble) - configurable via `config.env`
-- **2 vCPUs / 2GB RAM / 10GB Disk** - configurable via `config.env`
 - NAT networking via tap interface
 - Serial console access
+- Cloud-init provisioning
+
+**Default resources**: 2 vCPUs / 2GB RAM / 10GB Disk (configurable in `config.env` and `firecracker.json`)
 
 ## Quick Start
 
 ```bash
 cd single-vm
 
-# Step 1: Setup (downloads assets, prepares disk/cloud-init)
+# Download and prepare VM assets
 sudo ./setup.sh
 
-# Step 2: Start the VM in a background screen session
+# Start the VM
 sudo ./start-vm.sh
 
-# Step 3: Connect to serial console
+# Connect to serial console
 sudo screen -r fc-single
 
-# Step 4: Detach from console (keep VM running)
-# Press Ctrl+A, then D
-
-# Step 5: Clean up when done
+# When done
 sudo ./cleanup.sh
 ```
 
-## Changing the Ubuntu Version
-
-Edit `config.env` to change the Ubuntu version:
-
-```bash
-# config.env - Change this value
-UBUNTU_VERSION="noble"  # 24.04 LTS
-
-# Available versions:
-# - "noble"      = Ubuntu 24.04 LTS
-# - "jammy"       = Ubuntu 22.04 LTS
-# - "focal"       = Ubuntu 20.04 LTS
-# - "bionic"      = Ubuntu 18.04 LTS
-```
-
-Then remove the existing image and re-run setup:
-```bash
-rm -f ubuntu-*-server-cloudimg-amd64.img rootfs.ext4
-sudo ./setup.sh
-```
-
-## File Description
+## File Structure
 
 | File | Description |
 |------|-------------|
-| `config.env` | Configuration: Ubuntu version, disk size, network settings, VM resources |
-| `setup.sh` | Downloads Firecracker, kernel, Ubuntu cloud image; creates rootfs |
-| `network.sh` | Creates tap interface and sets up NAT |
-| `start-vm.sh` | Starts the Firecracker VM |
-| `cleanup.sh` | Removes tap interface, flushes NAT rules, stops VM |
+| `config.env` | VM and network configuration |
+| `setup.sh` | Download assets and prepare disk |
+| `start-vm.sh` | Start the Firecracker VM |
+| `network.sh` | Configure tap interface and NAT |
+| `cleanup.sh` | Stop VM and cleanup resources |
 | `firecracker.json` | Firecracker VM configuration |
-| `cloud-init/user-data` | Cloud-init configuration for VM provisioning |
+| `cloud-init/user-data` | Cloud-init provisioning config |
 
 ## Configuration
 
-### VM Specifications
+### VM Resources
 
-Edit `firecracker.json` to customize:
-
-```json
-{
-  "machine-config": {
-    "vcpu_count": 2,      // Number of virtual CPUs
-    "mem_size_mib": 2048 // Memory in MB (2GB)
-  },
-  "drives": [
-    {
-      "drive_id": "rootfs",
-      "path_on_host": "rootfs.ext4",
-      "is_root_device": true,
-      "is_read_only": false
-    }
-  ]
-}
-```
-
-### Adding Additional Drives
-
-Add more drive entries to the `drives` array:
-
-```json
-"drives": [
-  {
-    "drive_id": "rootfs",
-    "path_on_host": "rootfs.ext4",
-    "is_root_device": true,
-    "is_read_only": false
-  },
-  {
-    "drive_id": "data",
-    "path_on_host": "data.ext4",
-    "is_root_device": false,
-    "is_read_only": false
-  }
-]
-```
-
-### Cloud-Init Configuration
-
-Edit `cloud-init/user-data` to customize the VM:
-
-```yaml
-#cloud-config
-autoinstall:
-  version: 1
-  locale: en_US.UTF-8
-  identity:
-    hostname: my-vm
-    password: "$6$rounds=4096$..."  # Use: echo -n password | mkpasswd -m sha-512 -s
-    username: ubuntu
-  ssh:
-    install-server: true
-    allow-pw: true
-```
-
-Generate password hash:
+Edit `config.env`:
 ```bash
-echo -n "yourpassword" | mkpasswd -m sha-512 -s
+VM_VCPU=2          # Virtual CPUs
+VM_MEM_MIB=2048    # Memory in MB
+DISK_SIZE="10G"    # Disk size
 ```
 
-## Network Configuration
+Edit `firecracker.json` for advanced Firecracker configuration (see root README).
 
-The default setup uses a tap interface with proxy ARP. Network settings are defined in `config.env`:
+### Network
 
-```
-Host                          Guest
-┌─────────────┐             ┌─────────────┐
-│  eth0       │──NAT───►   │  eth0       │
-│  (internet) │             │  169.254.0.21 │
-└─────────────┘             └─────────────┘
-       ▲
-       │
-  ┌────┴────┐
-  │ fc-tap0 │
-  │ proxy_arp│
-  └─────────┘
-```
-
-- **Guest IP**: 169.254.0.21 (configurable in `config.env`)
-- **Host IP**: 169.254.0.22 (configurable in `config.env`)
+Defined in `config.env`:
+- **Guest IP**: 169.254.0.21
+- **Host IP**: 169.254.0.22  
 - **Network**: 169.254.0.20/30
 
-## Important Notes
+```
+Host               Guest
+┌─────────────┐ ┌─────────────┐
+│ eth0        │──NAT───►│ eth0        │
+│ (internet)  │         │ 169.254.0.21│
+└─────────────┘         └─────────────┘
+                ▲
+                │
+          ┌────┴────┐
+          │ fc-tap0 │
+          └─────────┘
+```
 
-1. **Run as root**: Most operations require sudo/root
-2. **KVM required**: Firecracker needs KVM virtualization
-3. **Serial console**: Default login is via serial console (ttyS0)
-4. **Cleanup always**: Always run `./cleanup.sh` when done to remove network resources
+The guest can access the internet via NAT on the host.
+
+### Cloud-Init
+
+Edit `cloud-init/user-data` to customize:
+- Hostname
+- User password (generate hash with: `echo -n "password" | mkpasswd -m sha-512 -s`)
+- SSH settings
+- Packages to install
+
+See Ubuntu's [autoinstall reference](https://ubuntu.com/server/docs/install/autoinstall) for full syntax.
 
 ## Usage Examples
 
 ### Create VM with custom resources
 
-Edit `firecracker.json` before running `./start-vm.sh`:
-
-```json
-{
-  "machine-config": {
-    "vcpu_count": 4,
-    "mem_size_mib": 8192
-  }
-}
+```bash
+# Edit config.env or firecracker.json
+sudo ./setup.sh
+sudo ./start-vm.sh
 ```
 
-### Access VM via SSH (after cloud-init config)
+### Connect to serial console
 
-The VM will be accessible at 169.254.0.21 after cloud-init completes:
+```bash
+sudo screen -r fc-single
+# Detach with: Ctrl+A, then D
+```
 
+### SSH access
+
+After cloud-init completes:
 ```bash
 ssh ubuntu@169.254.0.21
 ```
 
+### Adding data drives
+
+Create an image:
+```bash
+qemu-img create -f raw data.ext4 5G
+```
+
+Then edit `firecracker.json` and add to the `drives` array:
+```json
+{
+  "drive_id": "data",
+  "path_on_host": "data.ext4",
+  "is_root_device": false
+}
+```
+
+## Important Notes
+
+1. **Run with sudo**: Most operations require root
+2. **Cleanup required**: Always run `./cleanup.sh` when done
+3. **KVM required**: Check with `ls -la /dev/kvm`
+4. **Guest may take 30-60 seconds to fully boot**
+
+## Ubuntu Version
+
+The default is Ubuntu 24.04 LTS (Noble). See [parent README](../README.md) to change Ubuntu versions.
+
+## Troubleshooting
+
+Common issues:
+- **VM won't start**: Check KVM (`ls -la /dev/kvm`), verify vmlinux and rootfs.ext4 exist
+- **No network**: Run `./network.sh` to reconfigure tap device
+- **Console blank**: Wait 30-60 seconds for boot, or regenerate cloud-init
+
+See [parent README](../README.md#troubleshooting) for comprehensive troubleshooting.
+
 ## See Also
 
-- [Parent README](../README.md) for shared prerequisites, troubleshooting, and advanced configuration
-- [Custom Images](../custom-images.md) for using Arch Linux or bringing your own image
 - [Ubuntu Cloud Images](https://cloud-images.ubuntu.com/)

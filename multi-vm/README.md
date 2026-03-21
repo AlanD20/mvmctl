@@ -17,25 +17,25 @@ This setup is designed for running multiple microVMs concurrently:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                         Host                                 │
-│                                                              │
-│   ┌────────────┐         ┌─────────────────────────────┐   │
-│   │   eth0     │         │        br0 (bridge)         │   │
-│   │ (internet) │──NAT───►│  10.10.0.1/24               │   │
-│   └────────────┘         │                             │   │
-│                          │  ┌─────┐  ┌─────┐  ┌─────┐ │   │
-│                          │  │tap0 │  │tap1 │  │tap2 │ │   │
-│                          │  └─────┘  └─────┘  └─────┘ │   │
-│                          └─────────────────────────────┘   │
-│                                    │                          │
-└────────────────────────────────────┼──────────────────────────┘
-                                     │
-        ┌────────────────────────────┼────────────────────────┐
-        │                            │                        │
-   ┌────┴────┐                 ┌────┴────┐              ┌────┴────┐
-   │  VM 1   │                 │  VM 2   │              │  VM 3   │
-   │10.10.0.2│                 │10.10.0.3│              │10.10.0.4│
-   └─────────┘                 └─────────┘              └─────────┘
+│ Host                                                       │
+│                                                            │
+│ ┌────────────┐ ┌─────────────────────────────┐            │
+│ │ eth0       │ │ br0 (bridge)                │            │
+│ │ (internet) │──NAT───►│ 10.10.0.1/24        │            │
+│ └────────────┘   │ │ │                              │
+│                  │ ┌─────┐ ┌─────┐ ┌─────┐            │
+│                  │ │tap0 │ │tap1 │ │tap2 │            │
+│                  │ └─────┘ └─────┘ └─────┘            │
+│                  └─────────────────────────────┘            │
+│                                                            │
+└────────────────────────────────┼──────────────────────────┘
+                                 │
+┌────────────────────────────┼────────────────────────┐
+│                            │                        │
+┌────┴────┐ ┌────┴────┐ ┌────┴────┐
+│ VM 1    │ │ VM 2    │ │ VM 3    │
+│10.10.0.2│ │10.10.0.3│ │10.10.0.4│
+└─────────┘ └─────────┘ └─────────┘
 ```
 
 ## Quick Start
@@ -50,8 +50,8 @@ sudo ./setup-bridge.sh
 sudo ./create-vm.sh vm1
 
 # Step 3: Create more VMs
-sudo ./create-vm.sh vm2 1 2        # 1 vCPU, 2GB
-sudo ./create-vm.sh vm3 2 4 10.10.0.50  # 2 vCPU, 4GB, static IP
+sudo ./create-vm.sh vm2 1 2           # 1 vCPU, 2GB
+sudo ./create-vm.sh vm3 2 4 10.10.0.50 # 2 vCPU, 4GB, static IP
 
 # Step 4: List running VMs
 ls -la vms/
@@ -63,26 +63,7 @@ sudo ./stop-vm.sh vm1
 sudo ./cleanup-all.sh
 ```
 
-## Changing the Ubuntu Version
-
-Edit `config.env` to change the Ubuntu version:
-
-```bash
-# config.env - Line 5
-UBUNTU_VERSION="noble"  # 24.04 LTS
-
-# Available versions:
-# - "noble"      = Ubuntu 24.04 LTS
-# - "jammy"       = Ubuntu 22.04 LTS
-# - "focal"       = Ubuntu 20.04 LTS
-# - "bionic"      = Ubuntu 18.04 LTS
-```
-
-Then remove existing images and re-run setup:
-```bash
-rm -f ubuntu-*-server-cloudimg-amd64.img base-rootfs.ext4
-sudo ./setup-bridge.sh
-```
+**For prerequisites and Ubuntu versions, see [parent README](../README.md)**.
 
 ## File Description
 
@@ -156,10 +137,10 @@ ssh ubuntu@10.10.0.2
 
 ```bash
 BRIDGE_NAME="br0"           # Bridge interface name
-BRIDGE_IP="10.10.0.1/24"    # Bridge IP/mask
-GUEST_IP_START="10.10.0.2"  # First available IP
-GUEST_IP_END="10.10.0.254"  # Last available IP
-TAP_PREFIX="fc"             # Tap device prefix (e.g., fc-vm1-0)
+BRIDGE_IP="10.10.0.1/24"  # Bridge IP/mask
+GUEST_IP_START="10.10.0.2" # First available IP
+GUEST_IP_END="10.10.0.254" # Last available IP
+TAP_PREFIX="fc"           # Tap device prefix (e.g., fc-vm1-0)
 ```
 
 ### Customizing Default Resources
@@ -168,27 +149,19 @@ Edit `create-vm.sh` to change defaults:
 
 ```bash
 # Lines 10-11
-VM_VCPU="${2:-0.5}"    # Default: 0.5 vCPU
-VM_MEM="${3:-0.5}"      # Default: 0.5GB
+VM_VCPU="${2:-0.5}"  # Default: 0.5 vCPU
+VM_MEM="${3:-0.5}"  # Default: 0.5GB
 ```
 
 ### Resource Limits
 
 | Resource | Default | Minimum | Maximum |
 |----------|---------|---------|---------|
-| vCPU | 0.5 | 0.5 | 16+ |
-| Memory | 0.5GB | 128MB | 64GB+ |
-| Disk | 10GB | 1GB | 100GB+ |
+| vCPU     | 0.5     | 0.5     | 16+     |
+| Memory   | 0.5GB   | 128MB   | 64GB+   |
+| Disk     | 10GB    | 1GB     | 100GB+  |
 
-### Disk Size
-
-Edit `config.env` to change disk size:
-
-```bash
-DISK_SIZE="20G"  # Default: 10G
-```
-
-Then re-run `setup-bridge.sh` to regenerate the base image.
+**For disk size configuration, see [parent README](../README.md)**.
 
 ## Network Configuration
 
@@ -326,18 +299,9 @@ sudo ip link del br0
 sudo iptables -t nat -F
 ```
 
-## Security Notes
-
-- Bridge is exposed on host network
-- VMs can reach each other and host
-- Consider firewall rules for production
-- Use SSH keys instead of passwords
-- Default disk is 10GB - adjust based on needs
+**For security best practices and additional troubleshooting, see [parent README](../README.md)**.
 
 ## See Also
 
-- [Parent README](../README.md) for shared prerequisites, troubleshooting, and advanced configuration
-- [Custom Images](../custom-images.md) for using Arch Linux or bringing your own image
-- [Firecracker Official Docs](https://firecracker-microvm.github.io/)
-- [Ubuntu Cloud Images](https://cloud-images.ubuntu.com/)
-- [Bridge Networking](https://wiki.linuxfoundation.org/networking/bridge)
+- [Parent README](../README.md) for prerequisites, Ubuntu versions, disk sizes, troubleshooting, and security
+- [Custom Images](../custom-images.md) for using other distributions

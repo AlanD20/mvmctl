@@ -1,6 +1,9 @@
 # Firecracker MicroVM Setup
 
-A lightweight virtualization setup using Firecracker with Ubuntu.
+A lightweight virtualization setup using Firecracker with Ubuntu and other Linux distributions.
+
+See [single-vm/README.md](single-vm/README.md) for single-VM specific configuration and usage.
+See [multi-vm/README.md](multi-vm/README.md) for multi-VM specific configuration and usage.
 
 ## Prerequisites
 
@@ -16,20 +19,11 @@ The following packages are required on the host system:
 ### Arch Linux
 
 ```bash
-# Install required packages
 sudo pacman -S --needed qemu-desktop libisoburn iptables bridge-utils curl bc wget screen
-
-# Verify KVM
-ls -la /dev/kvm
-
-# Load KVM modules (if not already loaded)
 sudo modprobe kvm
-sudo modprobe kvm_intel # For Intel CPUs
-sudo modprobe kvm_amd # For AMD CPUs
-
-# Recommended: Add your user to the kvm group instead of changing permissions globally
+sudo modprobe kvm_intel  # For Intel CPUs
+sudo modprobe kvm_amd    # For AMD CPUs
 sudo usermod -aG kvm $USER
-# (Log out and log back in for changes to take effect)
 ```
 
 ### Ubuntu/Debian
@@ -37,88 +31,38 @@ sudo usermod -aG kvm $USER
 ```bash
 sudo apt-get update
 sudo apt-get install -y qemu-utils genisoimage iptables curl bc bridge-utils screen
-
-# Verify KVM
-ls /dev/kvm
 sudo usermod -aG kvm $USER
 ```
 
-## Setup Options
-
-### Option 1: Single VM (Simple)
-
-For testing or running a single microVM with Cloud-Init support:
-
-```bash
-cd multi-vm
-sudo ./setup-bridge.sh # Run once
-sudo ./create-vm.sh vm1 # Create VMs
-sudo ./create-vm.sh vm2 1 2 # 1 vCPU, 2GB RAM
-# Create VM with static IP: sudo ./create-vm.sh vm3 2 4 10.10.0.50
-sudo ./stop-vm.sh vm1 # Remove specific VM
-sudo ./cleanup-all.sh # Full cleanup
-```
-
-**Use when:**
-- You need multiple VMs
-- You want dynamic IP management
-- Better network isolation via bridge
-
-directory-structure/
-├── README.md              # This file
-├── single-vm/             # Single VM setup
-│   ├── README.md
-│   ├── setup.sh          # Download assets and prepare VM
-│   ├── start-vm.sh       # Start the VM
-│   ├── network.sh        # Configure networking
-│   ├── cleanup.sh        # Clean up resources
-│   ├── firecracker.json  # VM configuration
-│   ├── config.env        # Environment configuration
-│   └── cloud-init/
-│       └── user-data     # Cloud-init provisioning
-└── multi-vm/              # Multi-VM setup (recommended)
-    ├── README.md         # Multi-VM documentation
-    ├── config.env        # Bridge and VM configuration
-    ├── setup-bridge.sh   # Setup bridge networking
-    ├── get-kernel.sh     # Download compatible kernel
-    ├── create-vm.sh      # Create new VMs
-    ├── stop-vm.sh        # Stop specific VM
-    └── cleanup-all.sh    # Remove all VMs
-
-## Shared Configuration
+## Generic Configuration
 
 ### Changing the Ubuntu Version
 
-By default, the setup uses Ubuntu 24.04 LTS (Noble). You can change this:
+By default, the setup uses Ubuntu 24.04 LTS (Noble). Edit the appropriate config file based on your setup:
 
-#### Single VM
-
-Edit `single-vm/config.env` and change `UBUNTU_VERSION`:
+- **Single-VM**: Edit `single-vm/config.env`
+- **Multi-VM**: Edit `multi-vm/config.env`
 
 ```bash
 UBUNTU_VERSION="jammy"  # 22.04 LTS
 # or
-UBUNTU_VERSION="focal"   # 20.04 LTS
+UBUNTU_VERSION="focal"  # 20.04 LTS
+# or
+UBUNTU_VERSION="bionic" # 18.04 LTS (EOL)
 ```
 
-Then regenerate:
+Then regenerate the base image:
+
+**Single-VM:**
 ```bash
+cd single-vm
 rm -f ubuntu-*-server-cloudimg-amd64.img rootfs.ext4
 sudo ./setup.sh
 ```
 
-#### Multi VM
-
-Edit `config.env` and change `UBUNTU_VERSION`:
-
+**Multi-VM:**
 ```bash
-UBUNTU_VERSION="jammy"  # 22.04 LTS
-# or
-UBUNTU_VERSION="focal"   # 20.04 LTS
-```
-
-Then regenerate:
-```bash
+cd multi-vm
 rm -f ubuntu-*-server-cloudimg-amd64.img base-rootfs.ext4
 sudo ./setup-bridge.sh
 ```
@@ -134,49 +78,26 @@ sudo ./setup-bridge.sh
 
 ### Using Different Distributions
 
-The setup downloads Ubuntu cloud images. For other distributions:
+See [custom-images.md](custom-images.md) for detailed instructions on using other distributions:
 
-#### AlmaLinux/RHEL
-
-```bash
-# Download AlmaLinux cloud image
-curl -LO https://repo.almalinux.org/almalinux/9/BaseOS/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2
-qemu-img convert -f qcow2 -O raw AlmaLinux-9-GenericCloud-latest.x86_64.qcow2 almalinux.ext4
-```
-
-#### Debian
-
-```bash
-# Download Debian cloud image
-curl -LO https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
-qemu-img convert -f qcow2 -O raw debian-12-generic-amd64.qcow2 debian.ext4
-```
-
-#### Alpine
-
-```bash
-# Download Alpine virtual image
-curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-virt-3.19.1-x86_64.iso
-# Convert to raw disk
-```
+- AlmaLinux/RHEL
+- Debian
+- Alpine Linux
+- Arch Linux
+- Bring Your Own (BYO) images
 
 ### Custom Disk Size
 
-#### Single VM
+Edit the appropriate config file:
 
-Edit `single-vm/config.env`:
-
-```bash
-DISK_SIZE="20G"  # Default: 10G
-```
-
-#### Multi VM
-
-Edit `config.env`:
+- **Single-VM**: Edit `single-vm/config.env`
+- **Multi-VM**: Edit `multi-vm/config.env`
 
 ```bash
 DISK_SIZE="20G"  # Default: 10G
 ```
+
+Then regenerate as shown above.
 
 ### Custom Kernel
 
@@ -186,171 +107,80 @@ Both setups expect a `vmlinux` kernel image. To use a custom kernel:
 2. Ensure it's an uncompressed ELF binary (x86_64) or PE format (aarch64)
 3. Place it as `vmlinux` in the respective directory
 
-## Custom Images
-
-For using different Linux distributions (Arch Linux, AlmaLinux, Debian, Alpine) or bringing your own custom image, see [custom-images.md](./custom-images.md).
-
 ## Troubleshooting
 
 ### KVM Not Available
 
 ```bash
-# Check if KVM modules are loaded
 lsmod | grep kvm
-
-# Enable KVM
 sudo modprobe kvm
-sudo modprobe kvm_intel    # or kvm_amd
-
-# Check permissions
-ls -la /dev/kvm
-# Recommended: Add user to kvm group
+sudo modprobe kvm_intel  # or kvm_amd
 sudo usermod -aG kvm $USER
 ```
 
 ### VM Not Starting
 
 ```bash
-# Check Firecracker binary
 ./firecracker --version
-
-# Check disk image exists
 ls -la *.ext4
-
-# Check kernel exists
 ls -la vmlinux
-
-# Run with verbose output
 ./firecracker --no-api --config-file config.json
 ```
 
-### Network Not Working
+### Network Issues
 
 ```bash
-# Check network interfaces
 ip link
 ip addr
-
-# Check bridge (multi-vm)
-ip link show br0
-
-# Check tap devices
+ip link show br0  # Multi-VM
 ip link show type tap
-
-# Check NAT rules
 sudo iptables -t nat -L -n -v
-
-# Re-run network setup
-# Single VM:
-sudo ./network.sh
-# Multi-vm:
-sudo ./cleanup-all.sh && sudo ./setup-bridge.sh
 ```
 
 ### Permission Denied
 
 ```bash
-# Ensure running as root
-sudo -i
-
-# Or fix KVM permissions
 sudo chown root:kvm /dev/kvm
 sudo chmod 660 /dev/kvm
-```
-
-### Disk Full
-
-```bash
-# Check disk space
-df -h
-
-# Clean up old VM images
-rm -rf vms/*/
-
-# Remove base image and regenerate smaller one
-rm -f base-rootfs.ext4
-# Edit config.env to set smaller DISK_SIZE
-sudo ./setup-bridge.sh
 ```
 
 ### View Logs
 
 ```bash
-# Firecracker logs (single-vm)
-cat firecracker.log
-
-# Firecracker logs (multi-vm)
-cat vms/vm1/firecracker.log
-
-# Kernel boot messages (serial console)
-# Connect via: screen -r <pid> or microcom /dev/ttyS0
+cat firecracker.log              # Single-VM
+cat vms/vm1/firecracker.log      # Multi-VM
 ```
 
 ### Stuck VM Process
 
 ```bash
-# Find stuck firecracker processes
 ps aux | grep firecracker
-
-# Kill all firecracker processes
 sudo pkill -9 firecracker
 ```
 
-### Recover Bridge After Crash
+### Disk Full
 
 ```bash
-# Multi-vm: Remove and recreate bridge
-sudo ip link del br0 2>/dev/null
-sudo ./setup-bridge.sh
+df -h
+rm -f base-rootfs.ext4
+# Edit config.env for smaller DISK_SIZE
 ```
 
-### Network Connectivity Issues
+### Network Connectivity
 
 ```bash
-# Verify IP forwarding is enabled
 cat /proc/sys/net/ipv4/ip_forward
-
-# Manually enable if needed
 sudo sysctl -w net.ipv4.ip_forward=1
-
-# Check NAT rules
 sudo iptables -t nat -L -n -v
-
-# Verify routing
-ip route
-
-# Test ping from host
-ping <guest-ip>
+ssh ubuntu@<guest-ip>
 ```
 
-### Serial Console Not Working
+### Serial Console Connection
 
 ```bash
-# Check if screen is available
-which screen
-
-# Install screen
-# Arch: sudo pacman -S screen
-# Ubuntu: sudo apt install screen
-
-# Connect to serial console
 sudo screen -ls
-sudo screen -r
-
-# Alternative: use microcom
-sudo microcom -s 115200 /dev/ttyS0
-```
-
-### Slow Boot or Hanging
-
-```bash
-# Check kernel boot args in config.json
-# Remove "quiet" from boot_args for verbose output
-
-# Common boot args for debugging:
-# console=ttyS0 - Serial console
-# earlyprintk=serial - Early kernel messages
-# debug - Debug mode
+sudo screen -r <pid>
+# Alternative: sudo microcom -s 115200 /dev/ttyS0
 ```
 
 ## Security Notes
