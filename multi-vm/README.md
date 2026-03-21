@@ -1,91 +1,134 @@
 # Firecracker Multi-VM Setup
 
-A scalable multi-virtual machine setup using Firecracker with Ubuntu and bridge networking.
-
-> **Note**: See the parent [README.md](../README.md) for shared prerequisites and troubleshooting.
+A scalable multi-virtual machine setup using AWS Firecracker with Ubuntu and bridge networking.
 
 ## Overview
 
-This setup is designed for running multiple microVMs concurrently:
-- **Ubuntu** (default: 24.04 LTS Noble) - configurable
-- **Default: 0.5 vCPU / 0.5GB RAM** (configurable)
-- **Bridge + NAT** networking
-- **Dynamic IP assignment** from pool (10.10.0.0/24)
-- **Auto-scaling**: Create/destroy VMs quickly
+This setup creates multiple microVMs with:
+- **Bridge networking** for VM-to-VM communication
+- **NAT** for internet access
+- **Auto IP assignment** from configurable pool
+- **Cloud-init provisioning** (from base image)
 
-## Architecture
+**Default Resources Per VM:**
+- 0.5 vCPUs (configurable, minimum 1 as integer)
+- 0.5 GB RAM (configurable)
+- 2 GB Disk (from base image)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Host                                                       │
-│                                                            │
-│ ┌────────────┐ ┌─────────────────────────────┐            │
-│ │ eth0       │ │ br0 (bridge)                │            │
-│ │ (internet) │──NAT───►│ 10.10.0.1/24        │            │
-│ └────────────┘   │ │ │                              │
-│                  │ ┌─────┐ ┌─────┐ ┌─────┐            │
-│                  │ │tap0 │ │tap1 │ │tap2 │            │
-│                  │ └─────┘ └─────┘ └─────┘            │
-│                  └─────────────────────────────┘            │
-│                                                            │
-└────────────────────────────────┼──────────────────────────┘
-                                 │
-┌────────────────────────────┼────────────────────────┐
-│                            │                        │
-┌────┴────┐ ┌────┴────┐ ┌────┴────┐
-│ VM 1    │ │ VM 2    │ │ VM 3    │
-│10.10.0.2│ │10.10.0.3│ │10.10.0.4│
-└─────────┘ └─────────┘ └─────────┘
-```
+## Prerequisites
+
+Before using this setup, ensure you have:
+
+1. **KVM support**: `/dev/kvm` must exist
+2. **Required tools**: `qemu-img`, `e2fsck`, `resize2fs`, `ip`, `iptables`, `screen`, `truncate`
+3. **Assets downloaded**: Run `../assets/download-assets.sh` first
+4. **Root privileges**: All operations require sudo
 
 ## Quick Start
 
 ```bash
 cd multi-vm
 
-# Step 1: One-time setup - creates bridge, downloads assets
-sudo ./setup-bridge.sh
+# 1. Download assets first (from parent directory)
+cd ../assets && sudo ./download-assets.sh
+cd ../multi-vm
 
-# Step 2: Create a VM (default: 0.5 vCPU, 0.5GB)
-sudo ./create-vm.sh vm1
+# 2. Setup bridge and base rootfs
+sudo ./setup.sh
 
-# Step 3: Create more VMs
-sudo ./create-vm.sh vm2 1 2           # 1 vCPU, 2GB
-sudo ./create-vm.sh vm3 2 4 10.10.0.50 # 2 vCPU, 4GB, static IP
+# 3. Create VMs
+sudo ./create-vm.sh vm1                    # 0.5 vCPU, 0.5GB, auto IP
+sudo ./create-vm.sh vm2 1 2              # 1 vCPU, 2GB, auto IP
+sudo ./create-vm.sh vm3 2 4 10.20.0.50   # 2 vCPU, 4GB, static IP
 
-# Step 4: List running VMs
-ls -la vms/
+# 4. View VMs
+ls -la env/
 
-# Step 5: Stop a specific VM
+# 5. Stop a specific VM
 sudo ./stop-vm.sh vm1
 
-# Step 6: Full cleanup (when done with all VMs)
-sudo ./cleanup-all.sh
+# 6. Cleanup everything when done
+sudo ./cleanup.sh
 ```
 
-**For prerequisites and Ubuntu versions, see [parent README](../README.md)**.
-
-## File Description
+## File Structure
 
 | File | Description |
 |------|-------------|
-| `config.env` | Configuration: bridge name, IP range, tap prefix |
-| `setup-bridge.sh` | Downloads Firecracker, kernel, Ubuntu image; creates bridge + NAT |
-| `get-kernel.sh` | Downloads vmlinux kernel |
-| `create-vm.sh` | Creates a new VM with unique IP/MAC |
-| `stop-vm.sh` | Stops and removes a specific VM |
-| `cleanup-all.sh` | Complete cleanup: all VMs, bridge, NAT |
-| `vms/` | Directory containing all VM configurations |
+| `config.env` | VM and network configuration |
+| `setup.sh` | Prepare bridge and base rootfs |
+| `create-vm.sh` | Create a new VM |
+| `stop-vm.sh` | Stop and remove a specific VM |
+| `cleanup.sh` | Stop all VMs, remove bridge, flush NAT |
+| `env/` | Runtime directory (created by setup.sh) |
+| `env/base-rootfs.ext4` | Base rootfs copied for each VM |
+
+## Configuration
+
+### VM Resources
+
+Edit `config.env`:
+
+```bash
+# Default disk size (from IMAGE_SIZE)
+DISK_SIZE="${IMAGE_SIZE:-2G}"
+
+# Per-VM settings (passed to create-vm.sh)
+# ./create-vm.sh <name> [vcpu] [memory_mib]
+
+# Firecracker API socket mode
+# Set to "true" to enable API socket, "false" for --no-api mode
+ENABLE_SOCKET="${ENABLE_SOCKET:-false}"
+```
+
+### Network Configuration
+
+Network is defined in `config.env`:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| Bridge | br0 | Bridge interface name |
+| Bridge IP | 10.20.0.1/24 | Host bridge IP |
+| Guest Range | 10.20.0.2 - 10.20.0.254 | Auto-assigned IPs |
+| Tap Prefix | fc | Tap device prefix |
+
+```
+Network Topology:
+
+    Host
+┌─────────────────────────────────┐
+│ eth0 (internet)                │
+│         │                       │
+│         ▼                       │
+│    [NAT MASQUERADE]             │
+│         │                       │
+│         ▼                       │
+│    br0 (10.20.0.1/24)           │
+│    │     │     │                │
+│    │     │     │                │
+│ fc-vm1 fc-vm2 fc-vm3            │
+│  -0      -0     -0              │
+│   │      │      │               │
+└───┼──────┼──────┼───────────────┘
+    │      │      │
+┌───┴───┐┌─┴────┐┌┴──────┐
+│ VM 1  ││ VM 2 ││ VM 3  │
+│10.20.0││10.20.││10.20. │
+│   .2  ││  0.3 ││  0.4  │
+└───────┘└──────┘└───────┘
+```
+
+VMs can communicate with each other via the bridge and access the internet via NAT.
 
 ## Usage Examples
 
-### Create VM with default resources (0.5 vCPU, 0.5GB)
+### Create VM with Default Resources
 
 ```bash
 sudo ./create-vm.sh testvm
 ```
 
-### Create VM with custom resources
+### Create VM with Custom Resources
 
 ```bash
 # 1 vCPU, 1GB RAM, auto IP
@@ -95,213 +138,153 @@ sudo ./create-vm.sh mediumvm 1 1
 sudo ./create-vm.sh largevm 2 4
 ```
 
-### Create VM with static IP
+### Create VM with Static IP
 
 ```bash
-# 1 vCPU, 1GB, specific IP
-sudo ./create-vm.sh staticvm 1 1 10.10.0.100
+# 2 vCPUs, 4GB, specific IP
+sudo ./create-vm.sh staticvm 2 4 10.20.0.100
 ```
 
-### View all VMs
+### View Running VMs
 
 ```bash
 # List VM directories
-ls -la vms/
+ls -la env/
 
-# Show VM configs
-cat vms/vm1/config.json
+# View VM config
+cat env/vm1/config.json
 
 # Check VM process
-cat vms/vm1/firecracker.pid
+cat env/vm1/firecracker.pid
 ```
 
-### Stop individual VM
+### Stop Individual VM
 
 ```bash
 sudo ./stop-vm.sh vm1
 ```
 
-### Access VM
+### Access VM Console
 
 ```bash
-# Serial console (screen)
-sudo screen -r $(cat vms/vm1/firecracker.pid)
+# Attach to serial console
+sudo screen -r fc-vm1
 
-# Or via SSH after VM is ready
-ssh ubuntu@10.10.0.2
+# Detach: Ctrl+A, then D
 ```
 
-## Configuration
+## How It Works
 
-### Bridge Configuration (`config.env`)
+### 1. Setup Phase (`setup.sh`)
 
-```bash
-BRIDGE_NAME="br0"           # Bridge interface name
-BRIDGE_IP="10.10.0.1/24"  # Bridge IP/mask
-GUEST_IP_START="10.10.0.2" # First available IP
-GUEST_IP_END="10.10.0.254" # Last available IP
-TAP_PREFIX="fc"           # Tap device prefix (e.g., fc-vm1-0)
-```
+1. **Check dependencies**: Verifies required tools and KVM
+2. **Check assets**: Ensures kernel and base image exist
+3. **Create base rootfs**: Converts qcow2 → raw, resizes to DISK_SIZE
+4. **Create bridge**: Sets up br0 with IP
+5. **Configure NAT**: Adds iptables rules for internet access
 
-### Customizing Default Resources
+### 2. Create VM Phase (`create-vm.sh`)
 
-Edit `create-vm.sh` to change defaults:
+1. **Parse arguments**: name, vcpu, memory, optional IP
+2. **Validate**: Check KVM, bridge, base rootfs exist
+3. **Calculate resources**: Convert to Firecracker format
+4. **Assign IP**: Auto-assign from pool or use provided IP
+5. **Create directory**: `env/<name>/`
+6. **Copy rootfs**: From base-rootfs.ext4
+7. **Generate config**: config.json with boot args, network, resources
+8. **Create tap**: fc-<name>-0, attach to bridge
+9. **Start VM**: Firecracker in screen session
 
-```bash
-# Lines 10-11
-VM_VCPU="${2:-0.5}"  # Default: 0.5 vCPU
-VM_MEM="${3:-0.5}"  # Default: 0.5GB
-```
+### 3. Stop VM Phase (`stop-vm.sh`)
 
-### Resource Limits
+1. **Read PID**: From firecracker.pid or <name>.pid
+2. **Stop process**: SIGTERM, then SIGKILL if needed
+3. **Remove tap**: Delete fc-<name>-0 interface
+4. **Cleanup**: Remove VM directory
 
-| Resource | Default | Minimum | Maximum |
-|----------|---------|---------|---------|
-| vCPU     | 0.5     | 0.5     | 16+     |
-| Memory   | 0.5GB   | 128MB   | 64GB+   |
-| Disk     | 10GB    | 1GB     | 100GB+  |
+### 4. Cleanup Phase (`cleanup.sh`)
 
-**For disk size configuration, see [parent README](../README.md)**.
-
-## Network Configuration
-
-### IP Address Pool
-
-- **Network**: 10.10.0.0/24
-- **Bridge IP**: 10.10.0.1
-- **Available VMs**: 10.10.0.2 - 10.10.0.254 (253 VMs)
-
-### Adding Static Routes on Host
-
-If you need to access VMs from the host:
-
-```bash
-# Add route to VM network
-sudo ip route add 10.10.0.0/24 via 10.10.0.1
-
-# Or access directly
-ssh ubuntu@10.10.0.2
-```
-
-### Firewall Considerations
-
-The setup creates iptables NAT rules. For production:
-
-```bash
-# List NAT rules
-sudo iptables -t nat -L -n -v
-
-# Remove rules (use cleanup-all.sh instead)
-sudo iptables -t nat -F
-```
+1. **Stop all VMs**: Kill all Firecracker processes
+2. **Remove taps**: Delete all fc-* interfaces
+3. **Remove bridge**: Delete br0
+4. **Flush iptables**: Remove NAT rules
 
 ## Important Notes
 
-1. **Run as root**: All scripts require sudo/root
-2. **Setup once**: Run `setup-bridge.sh` only once per host
-3. **Bridge persists**: Bridge stays up after VM shutdown (intentional)
-4. **IP tracking**: Script auto-allocates IPs from pool
-5. **Cleanup**: Use `cleanup-all.sh` to remove everything
+1. **Run with sudo**: All scripts require root for networking
+2. **Setup once**: Run `setup.sh` before creating VMs
+3. **IP pool**: Auto-assigns from 10.20.0.2 - 10.20.0.254
+4. **Bridge persists**: Bridge stays up after VM shutdown
+5. **vCPU minimum**: Firecracker requires integer, minimum 1
+6. **Memory units**: Passed in GB, converted to MiB
 
-## Scaling Considerations
+## Troubleshooting
 
-### Maximum VMs
-
-Theoretical limit: 253 VMs (limited by IP pool). Practical limits:
-- **CPU**: Host CPU cores
-- **Memory**: Host RAM / VM memory
-- **Disk I/O**: SSD recommended for many VMs
-
-### Performance Tips
-
-1. Use base image with only needed packages
-2. Consider using tmpfs for /tmp in VMs
-3. Limit concurrent disk I/O per VM
-4. Use VirtIO drivers (already configured)
-
-### Resource Monitoring
+### VM Won't Start
 
 ```bash
-# Host resources
-free -h
-htop
+# Check KVM
+ls -la /dev/kvm
 
-# Per-VM resources (inside VM)
-free -h
-df -h
+# Check assets
+ls -la ../assets/kernels/
+ls -la ../assets/images/
+ls -la ../assets/bin/firecracker
 
-# Network stats
-ip -s link show br0
+# Check base rootfs
+ls -la env/base-rootfs.ext4
 ```
 
-## Advanced Usage
-
-### Add second drive to VM
-
-Create the drive first:
+### No Network
 
 ```bash
-qemu-img create -f raw mydata.ext4 5G
+# Recreate setup
+sudo ./setup.sh
+
+# Check bridge
+ip link show br0
+ip addr show br0
+
+# Check NAT rules
+sudo iptables -t nat -L -n -v
 ```
 
-Then manually edit `vms/vm1/config.json` to add:
-
-```json
-{
-  "drive_id": "data",
-  "path_on_host": "/path/to/mydata.ext4",
-  "is_root_device": false
-}
-```
-
-### Snapshot/Clone VMs
+### IP Already in Use
 
 ```bash
-# Copy rootfs
-cp vms/vm1/rootfs.ext4 vms/vm2/rootfs.ext4
-
-# Create new VM with existing rootfs
-# (requires manual config.json creation)
+# Check existing configs
+grep -r "10.20.0." env/*/config.json
 ```
 
-### Custom Cloud-Init
-
-Add cloud-init drive to config:
-
-```json
-{
-  "drive_id": "cloudinit",
-  "path_on_host": "cloudinit.iso",
-  "is_root_device": false
-}
-```
-
-## Cleanup Reference
-
-| Command | What it does |
-|---------|-------------|
-| `./stop-vm.sh vm1` | Removes vm1 only |
-| `./cleanup-all.sh` | Removes ALL VMs, bridge, NAT |
-
-### Manual cleanup (if scripts fail)
+### Cleanup Fails
 
 ```bash
-# Kill all firecracker
-sudo pkill firecracker
-
-# Remove all taps
-sudo ip link del fc-*-0 2>/dev/null
-
-# Remove bridge
-sudo ip link del br0
-
-# Flush NAT
+# Manual cleanup
+sudo pkill -f firecracker
+sudo rm -rf env/
+sudo ip link del fc-*-0 2>/dev/null || true
+sudo ip link del br0 2>/dev/null || true
 sudo iptables -t nat -F
 ```
 
-**For security best practices and additional troubleshooting, see [parent README](../README.md)**.
+## Dependencies
+
+Required commands (checked by `setup.sh`):
+- `qemu-img` - Image conversion
+- `e2fsck` - Filesystem check
+- `resize2fs` - Filesystem resize
+- `ip` - Network configuration
+- `iptables` - Firewall/NAT
+- `screen` - Terminal multiplexing
+- `truncate` - File resizing
+
+Required assets (from `../assets/`):
+- `kernels/${KERNEL_NAME}` - Kernel image
+- `images/${OS}-${VERSION}-server-cloudimg-${ARCH}.img` - Base image
+- `bin/firecracker` - Firecracker binary
 
 ## See Also
 
-- [Parent README](../README.md) for prerequisites, Ubuntu versions, disk sizes, troubleshooting, and security
-- [Custom Images](../custom-images.md) for using other distributions
+- [Parent README](../README.md) - Full project documentation
+- [Single-VM Setup](../single-vm/) - Single VM with NAT
+- [Firecracker Docs](https://github.com/firecracker-microvm/firecracker)

@@ -1,0 +1,61 @@
+#cloud-config
+# Cloud-init configuration for Firecracker VM
+# This file will be merged with SSH keys from assets/keys/
+
+datasource:
+  NoCloud:
+    seedfrom: /
+
+# Hostname configuration
+hostname: firecracker-vm
+fqdn: firecracker-vm.local
+
+# DNS Configuration
+manage_resolv_conf: true
+resolv_conf:
+  nameservers:
+    - 1.1.1.1
+    - 8.8.8.8
+  searchdomains:
+    - local
+
+# SSH Configuration
+ssh_authorized_keys:
+  # SSH keys will be injected here by setup.sh from assets/keys/
+
+# User configuration
+users:
+  - name: root
+    ssh_authorized_keys:
+      # Root SSH keys will be injected here by setup.sh
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
+    home: /home/ubuntu
+    shell: /bin/bash
+    lock_passwd: false
+    passwd: "$6$o0ll24tM6X1RgeQ.$rF4tWQM.99JWhhCC5GWeeQUCI40muZI29P1j0hhGn697xaPZtmVYoG4uRuoxD9yx7KBRHPWPPJH95T0PQVv5z"
+    ssh_authorized_keys:
+      # Ubuntu user SSH keys will be injected here by setup.sh
+
+# Package installation
+packages:
+  - openssh-server
+  - curl
+  - wget
+  - git
+  - net-tools
+  - vim
+  - tmux
+  - netcat-openbsd
+  - iputils-ping
+  - htop
+  - cloud-init
+
+# Run commands on first boot
+runcmd:
+  - systemctl enable ssh
+  - systemctl start ssh
+  - echo "Cloud-init completed successfully" > /var/log/cloud-init-complete.log
+
+final_message: "Firecracker VM is ready!"
