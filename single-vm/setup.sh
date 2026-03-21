@@ -25,12 +25,7 @@ if [ ! -f "../assets/images/${IMAGE_OS}-${IMAGE_VERSION}-server-cloudimg-${IMAGE
   echo "OS image not found. Run ../assets/download-assets.sh first"
   exit 1
 fi
-
-# Link shared assets locally
-ln -sf "../assets/bin/firecracker" firecracker
-ln -sf "../assets/bin/jailer" jailer 2>/dev/null || true
-ln -sf "../assets/kernels/${KERNEL_NAME}" "${KERNEL_NAME}"
-echo "Shared assets linked"
+echo "All assets present"
 
 echo "[2/5] Checking dependencies..."
 for cmd in qemu-img genisoimage curl bc screen; do

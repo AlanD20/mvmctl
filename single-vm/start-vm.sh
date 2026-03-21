@@ -9,7 +9,10 @@ FIRECRACKER_PID_FILE="/tmp/firecracker.pid"
 
 echo "=== Starting Firecracker VM ==="
 
-if [ ! -f "firecracker" ] || [ ! -f "vmlinux" ] || [ ! -f "rootfs.ext4" ]; then
+FIRECRACKER_BIN="../assets/bin/firecracker"
+KERNEL_PATH="../assets/kernels/vmlinux"
+
+if [ ! -f "$FIRECRACKER_BIN" ] || [ ! -f "$KERNEL_PATH" ] || [ ! -f "rootfs.ext4" ]; then
   echo "Missing required files. Run ./setup.sh first."
   exit 1
 fi
@@ -22,7 +25,7 @@ fi
 rm -f "$API_SOCKET"
 
 echo "Starting Firecracker in screen session 'fc-single'..."
-screen -dmS fc-single ./firecracker --no-api --config-file firecracker.json
+screen -dmS fc-single "$FIRECRACKER_BIN" --no-api --config-file firecracker.json
 # Wait a moment for process to start
 sleep 1
 FIRECRACKER_PID=$(pgrep -f "firecracker --no-api --config-file firecracker.json")
