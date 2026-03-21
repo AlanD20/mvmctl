@@ -9,11 +9,12 @@ source config.env
 FIRECRACKER_SOCKET_PATH="${OUTPUT_DIR}/firecracker.socket"
 FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
 FIRECRACKER_BIN="../assets/bin/firecracker"
-KERNEL_PATH="../assets/kernels/vmlinux"
+# KERNEL_PATH and ROOTFS_PATH are set in config.env
 CONFIG_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/firecracker.json"
 CONSOLE_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/firecracker.console.log"
 
 echo "=== Starting/Resuming Firecracker VM ==="
+echo "Image Source: ${IMAGE_SOURCE:-firecracker-ci}"
 
 # Check if already running by PID file
 if [ -f "$FIRECRACKER_PID_FILE" ]; then
@@ -25,8 +26,21 @@ if [ -f "$FIRECRACKER_PID_FILE" ]; then
   fi
 fi
 
-if [ ! -f "$FIRECRACKER_BIN" ] || [ ! -f "$KERNEL_PATH" ] || [ ! -f "${OUTPUT_DIR}/rootfs.ext4" ]; then
-  echo "Missing required files. Run ./setup.sh first."
+# Check required files
+if [ ! -f "$FIRECRACKER_BIN" ]; then
+  echo "ERROR: Firecracker binary not found at $FIRECRACKER_BIN"
+  exit 1
+fi
+
+if [ ! -f "$KERNEL_PATH" ]; then
+  echo "ERROR: Kernel not found at $KERNEL_PATH"
+  echo "Run '../assets/download-assets.sh' first"
+  exit 1
+fi
+
+if [ ! -f "${OUTPUT_DIR}/rootfs.ext4" ]; then
+  echo "ERROR: Rootfs not found at ${OUTPUT_DIR}/rootfs.ext4"
+  echo "Run './setup.sh' first"
   exit 1
 fi
 
