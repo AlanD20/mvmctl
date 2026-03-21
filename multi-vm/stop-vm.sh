@@ -15,15 +15,15 @@ if [ "$VM_NAME" = "" ]; then
   echo "  $0 vm1          # Stop and remove vm1"
   echo ""
   echo "Available VMs:"
-  for dir in vms/*/; do
+  for dir in "${OUTPUT_DIR}"/*/; do
     if [ -d "$dir" ]; then
-      echo "  $(basename "$dir")"
+      echo " $(basename "$dir")"
     fi
   done
   exit 1
 fi
 
-VM_DIR="vms/$VM_NAME"
+VM_DIR="${OUTPUT_DIR}/$VM_NAME"
 
 if [ ! -d "$VM_DIR" ]; then
   echo "ERROR: VM '$VM_NAME' does not exist"

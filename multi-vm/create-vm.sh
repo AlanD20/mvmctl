@@ -27,7 +27,7 @@ if [ "$VM_NAME" = "" ]; then
   exit 1
 fi
 
-VM_DIR="vms/$VM_NAME"
+VM_DIR="${OUTPUT_DIR}/$VM_NAME"
 if [ -d "$VM_DIR" ]; then
   echo "ERROR: VM '$VM_NAME' already exists at $VM_DIR"
   exit 1
@@ -65,9 +65,11 @@ GUEST_MAC="02:FC:${MAC_SUFFIX:0:2}:${MAC_SUFFIX:2:2}:${MAC_SUFFIX:4:2}"
 if [ "$VM_IP" = "" ]; then
   for i in $(seq 2 254); do
     IP="10.10.0.$i"
-    if ! grep -rq "$IP" vms/*/config.json 2>/dev/null; then
-      VM_IP="$IP"
-      break
+    if ! grep -rq "$IP" "${OUTPUT_DIR}"/*/config.json 2>/dev/null; then
+      echo "IP $IP is available"
+    else
+      echo "ERROR: IP $IP is already in use"
+      exit 1
     fi
   done
   if [ "$VM_IP" = "" ]; then
@@ -147,14 +149,25 @@ ip link set "$TAP_DEV" up
 echo ""
 echo "Starting VM in screen session 'fc-$VM_NAME'..."
 cd "$VM_DIR"
-screen -dmS "fc-$VM_NAME" ../../firecracker --no-api --config-file config.json
-VM_PID=$(pgrep -f "firecracker --no-api --config-file config.json.*$VM_NAME")
-if [ "$VM_PID" = "" ]; then
-  # Fallback if pgrep is tricky
+if [ "$ENABLE_SOCKET" = "true" ]; then
+  SOCKET_PATH="./$VM_NAME.socket"
+  PID_PATH="./$VM_NAME.pid"
+  screen -dmS "fc-$VM_NAME" ../../firecracker --api-sock "$SOCKET_PATH" --config-file config.json
   sleep 1
-  VM_PID=$(cat firecracker.pid 2>/dev/null || pgrep -f "firecracker.*$VM_NAME")
+  VM_PID=$(pgrep -f "firecracker.*--api-sock.*${VM_NAME}") || VM_PID=$(pgrep -f "firecracker.*${VM_NAME}")
+  if [ "$VM_PID" = "" ]; then
+    VM_PID=$(cat "$PID_PATH" 2>/dev/null || pgrep -f "firecracker.*${VM_NAME}")
+  fi
+  echo "$VM_PID" >"$PID_PATH"
+else
+  screen -dmS "fc-$VM_NAME" ../../firecracker --no-api --config-file config.json
+  sleep 1
+  VM_PID=$(pgrep -f "firecracker --no-api --config-file config.json.*$VM_NAME")
+  if [ "$VM_PID" = "" ]; then
+    VM_PID=$(cat firecracker.pid 2>/dev/null || pgrep -f "firecracker.*$VM_NAME")
+  fi
+  echo "$VM_PID" >firecracker.pid
 fi
-echo "$VM_PID" >firecracker.pid
 cd ../..
 
 echo ""

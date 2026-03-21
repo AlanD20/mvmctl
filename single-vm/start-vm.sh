@@ -6,8 +6,8 @@ cd "$SCRIPT_DIR"
 
 source config.env
 
-API_SOCKET="/tmp/firecracker.socket"
-FIRECRACKER_PID_FILE="/tmp/firecracker.pid"
+API_SOCKET="${OUTPUT_DIR}/firecracker.socket"
+FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
 
 echo "=== Starting Firecracker VM ==="
 
