@@ -64,10 +64,10 @@ fi
 echo "Starting Firecracker VM..."
 
 if [ "$ENABLE_SOCKET" = "true" ]; then
-  nohup "$FIRECRACKER_BIN" --api-sock "$FIRECRACKER_SOCKET_PATH" --config-file "$CONFIG_ABS_PATH" \
+  nohup "$FIRECRACKER_BIN" --enable-pci --api-sock "$FIRECRACKER_SOCKET_PATH" --config-file "$CONFIG_ABS_PATH" \
     >"$CONSOLE_ABS_PATH" 2>&1 &
 else
-  nohup "$FIRECRACKER_BIN" --no-api --config-file "$CONFIG_ABS_PATH" \
+  nohup "$FIRECRACKER_BIN" --enable-pci --no-api --config-file "$CONFIG_ABS_PATH" \
     >"$CONSOLE_ABS_PATH" 2>&1 &
 fi
 

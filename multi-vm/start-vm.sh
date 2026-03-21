@@ -39,6 +39,7 @@ fi
 # CHECK IF ALREADY RUNNING
 # =============================================================================
 PID_FILE="$VM_DIR/firecracker.pid"
+SOCKET_FILE="$VM_DIR/${VM_NAME}.socket"
 
 if [ -f "$PID_FILE" ]; then
   EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null)
@@ -48,6 +49,14 @@ if [ -f "$PID_FILE" ]; then
     echo "View console logs:"
     echo "  tail -f $VM_DIR/firecracker.console.log"
     exit 0
+  fi
+fi
+
+# If socket exists but process is dead, remove stale socket
+if [ -f "$SOCKET_FILE" ]; then
+  # Check if anything is listening on the socket
+  if ! ss -x | grep -q "$SOCKET_FILE"; then
+    rm -f "$SOCKET_FILE"
   fi
 fi
 
@@ -104,11 +113,11 @@ FIRECRACKER_BIN="../../../assets/bin/firecracker"
 SOCKET_FILE="${VM_NAME}.socket"
 CONSOLE_LOG="firecracker.console.log"
 
-# Start Firecracker
+# Start Firecracker with PCI enabled
 if [ "$ENABLE_SOCKET" = "true" ]; then
-  nohup "$FIRECRACKER_BIN" --api-sock "$SOCKET_FILE" --config-file firecracker.json >"$CONSOLE_LOG" 2>&1 &
+  nohup "$FIRECRACKER_BIN" --enable-pci --api-sock "$SOCKET_FILE" --config-file firecracker.json >"$CONSOLE_LOG" 2>&1 &
 else
-  nohup "$FIRECRACKER_BIN" --no-api --config-file firecracker.json >"$CONSOLE_LOG" 2>&1 &
+  nohup "$FIRECRACKER_BIN" --enable-pci --no-api --config-file firecracker.json >"$CONSOLE_LOG" 2>&1 &
 fi
 
 VM_PID=$!
