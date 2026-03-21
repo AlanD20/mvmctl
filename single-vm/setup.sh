@@ -28,7 +28,7 @@ fi
 echo "All assets present"
 
 echo "[2/5] Checking dependencies..."
-for cmd in qemu-img genisoimage curl bc screen; do
+for cmd in qemu-img mkisofs curl bc screen; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "ERROR: $cmd is not installed."
     exit 1
@@ -66,9 +66,9 @@ local-hostname: ubuntu-fc
 EOF
 
 if [ -f "cloud-init/user-data" ]; then
-  genisoimage -output cloudinit.iso -volid cidata -joliet -rock cloud-init/user-data cloud-init/meta-data
+  mkisofs -output cloudinit.iso -volid cidata -joliet -rock cloud-init/user-data cloud-init/meta-data
 else
-  genisoimage -output cloudinit.iso -volid cidata -joliet -rock cloud-init/meta-data
+  mkisofs -output cloudinit.iso -volid cidata -joliet -rock cloud-init/meta-data
 fi
 
 # Generate firecracker.json with dynamic paths

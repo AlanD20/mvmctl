@@ -61,7 +61,14 @@ if [ "$DEFAULT_IFACE" = "" ]; then
   exit 1
 fi
 echo "Using host interface: $DEFAULT_IFACE"
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
+
+# Check global IP forwarding is enabled
+if [ "$(sysctl -n net.ipv4.ip_forward)" != "1" ]; then
+  echo "ERROR: Global IP forwarding is not enabled."
+  echo "Run ../environment_setup.sh first to configure system settings."
+  exit 1
+fi
+
 iptables -t nat -C POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE 2>/dev/null ||
   iptables -t nat -A POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE
 
