@@ -2,37 +2,33 @@
 set -e
 
 # Shared asset download script for Firecracker setups
-# Downloads to ../assets/ directory to be shared across single-vm and multi-vm
+# Downloads kernel, firecracker binary, and OS image to assets/ directory
 
 # Get the script directory and assets directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASSETS_DIR="$(cd "$SCRIPT_DIR" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Check for config.env from calling directory
-if [ -f "../single-vm/config.env" ]; then
-  source "../single-vm/config.env"
-elif [ -f "../multi-vm/config.env" ]; then
-  source "../multi-vm/config.env"
-else
-  echo "WARNING: Could not find config.env in parent directories"
-fi
-
+# Source the centralized assets config
 echo "=== Firecracker Assets Setup ==="
+echo "Loading configuration from assets/config.env..."
+source config.env
+
+echo "Configuration:"
+echo "  Kernel: ${KERNEL_NAME} (version: ${KERNEL_VERSION})"
+echo "  OS Image: ${IMAGE_OS} ${IMAGE_VERSION} (${IMAGE_ARCH})"
+echo "  Firecracker: ${FIRECRACKER_VERSION}"
+echo ""
 
 # Download Firecracker binary
 download_firecracker() {
-  echo "[1/2] Checking Firecracker binary..."
+  echo "[1/3] Checking Firecracker binary..."
   if [ ! -f "bin/firecracker" ]; then
-    echo "Downloading Firecracker..."
-    if [ "${FIRECRACKER_VERSION:-}" = "" ]; then
-      FIRECRACKER_VERSION=$(curl -s https://api.github.com/repos/firecracker-microvm/firecracker/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+' || echo "v1.10.1")
-      export FIRECRACKER_VERSION
-    fi
+    echo "Downloading Firecracker ${FIRECRACKER_VERSION}..."
     curl -sL "https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-x86_64.tar.gz" | tar xz -C /tmp
-    mv /tmp/firecracker-"$FIRECRACKER_VERSION"-x86_64/firecracker bin/
-    mv /tmp/firecracker-"$FIRECRACKER_VERSION"-x86_64/jailer bin/
-    rm -rf /tmp/firecracker-"$FIRECRACKER_VERSION"-x86_64
+    mv /tmp/firecracker-"${FIRECRACKER_VERSION}"-x86_64/firecracker bin/
+    mv /tmp/firecracker-"${FIRECRACKER_VERSION}"-x86_64/jailer bin/
+    rm -rf /tmp/firecracker-"${FIRECRACKER_VERSION}"-x86_64
     chmod +x bin/firecracker bin/jailer
     echo "Firecracker downloaded to bin/"
   else
@@ -40,28 +36,48 @@ download_firecracker() {
   fi
 }
 
-# Download kernel
+# Download kernel using config from assets/config.env
 download_kernel() {
-  echo "[2/2] Checking kernel..."
-  if [ ! -f "kernels/vmlinux" ]; then
-    echo "Downloading Firecracker kernel..."
-    if curl -sL "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin" -o "kernels/vmlinux"; then
-      chmod +x kernels/vmlinux
+  echo "[2/3] Checking kernel..."
+  if [ ! -f "kernels/${KERNEL_NAME}" ]; then
+    echo "Downloading kernel ${KERNEL_NAME}..."
+    if curl -sL "${KERNEL_URL}" -o "kernels/${KERNEL_NAME}"; then
+      chmod +x "kernels/${KERNEL_NAME}"
       echo "Kernel downloaded to kernels/"
     else
-      echo "ERROR: Failed to download kernel"
+      echo "ERROR: Failed to download kernel from ${KERNEL_URL}"
       exit 1
     fi
   else
-    echo "Kernel already exists"
+    echo "Kernel ${KERNEL_NAME} already exists"
+  fi
+}
+
+# Download OS image using config from assets/config.env
+download_image() {
+  echo "[3/3] Checking OS image..."
+  local IMAGE_FILENAME="${IMAGE_OS}-${IMAGE_VERSION}-server-cloudimg-${IMAGE_ARCH}.img"
+  if [ ! -f "images/${IMAGE_FILENAME}" ]; then
+    echo "Downloading ${IMAGE_OS} ${IMAGE_VERSION} ${IMAGE_ARCH} image..."
+    if curl -sL "${IMAGE_URL}" -o "images/${IMAGE_FILENAME}"; then
+      echo "OS image downloaded to images/"
+    else
+      echo "ERROR: Failed to download image from ${IMAGE_URL}"
+      exit 1
+    fi
+  else
+    echo "OS image already exists"
   fi
 }
 
 download_firecracker
 download_kernel
+download_image
 
 echo ""
 echo "=== Assets Setup Complete ==="
 echo "Location: ${ASSETS_DIR}"
 echo " - bin/firecracker (binary)"
-echo " - kernels/vmlinux (kernel)"
+echo " - bin/jailer (jailer)"
+echo " - kernels/${KERNEL_NAME} (kernel)"
+echo " - images/${IMAGE_FILENAME} (OS image)"

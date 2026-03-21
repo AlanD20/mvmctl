@@ -43,10 +43,14 @@ if ! ip link show "$BRIDGE_NAME" &>/dev/null; then
   exit 1
 fi
 
-if [ ! -f "vmlinux" ]; then
-  echo "Kernel not found. Running get-kernel.sh..."
-  chmod +x get-kernel.sh
-  ./get-kernel.sh
+# Check kernel exists in assets and link it
+if [ ! -f "../assets/kernels/${KERNEL_NAME}" ]; then
+  echo "ERROR: Kernel '${KERNEL_NAME}' not found in ../assets/kernels/. Run ../assets/download-assets.sh first."
+  exit 1
+fi
+# Link kernel if not already linked
+if [ ! -f "vmlinux" ] || [ "$(readlink -f vmlinux)" != "$(readlink -f ../assets/kernels/${KERNEL_NAME})" ]; then
+  ln -sf "../assets/kernels/${KERNEL_NAME}" "vmlinux"
 fi
 
 # Convert memory to MiB and vCPUs to integer (Firecracker requires integer)
@@ -63,8 +67,8 @@ MAC_SUFFIX=$(printf "%02x%02x%02x" $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM
 GUEST_MAC="02:FC:${MAC_SUFFIX:0:2}:${MAC_SUFFIX:2:2}:${MAC_SUFFIX:4:2}"
 
 if [ "$VM_IP" = "" ]; then
-  for ip in "$(seq 2 254)"; do
-    IP="10.10.0.$ip"
+  for i in $(seq 2 254); do
+    IP="10.10.0.$i"
     if ! grep -rq "$IP" vms/*/config.json 2>/dev/null; then
       VM_IP="$IP"
       break

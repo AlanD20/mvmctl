@@ -31,20 +31,23 @@ if [ ! -c /dev/kvm ]; then
 fi
 echo "KVM is available"
 
-echo "[3/6] Downloading Ubuntu ${UBUNTU_VERSION} cloud image..."
-if [ ! -f "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" ]; then
-  curl -sL "https://cloud-images.ubuntu.com/${UBUNTU_VERSION}/current/${UBUNTU_VERSION}-server-cloudimg-amd64.img" -o "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img"
+echo "[3/6] Preparing base rootfs from assets..."
+IMAGE_PATH="../assets/images/${IMAGE_OS}-${IMAGE_VERSION}-server-cloudimg-${IMAGE_ARCH}.img"
+if [ ! -f "$IMAGE_PATH" ]; then
+  echo "ERROR: OS image not found at $IMAGE_PATH. Run ../assets/download-assets.sh first."
+  exit 1
 fi
-echo "Ubuntu cloud image ready"
 
-echo "[4/5] Preparing base rootfs..."
 if [ ! -f "base-rootfs.ext4" ]; then
-  qemu-img convert -f qcow2 -O raw "ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img" "base-rootfs.ext4"
+  echo "Converting image to base rootfs..."
+  qemu-img convert -f qcow2 -O raw "$IMAGE_PATH" "base-rootfs.ext4"
   truncate -s "$DISK_SIZE" base-rootfs.ext4
   e2fsck -f base-rootfs.ext4 || true
   resize2fs base-rootfs.ext4
+  echo "Base rootfs prepared"
+else
+  echo "Base rootfs already exists"
 fi
-echo "Base rootfs ready"
 
 echo "[5/5] Creating bridge $BRIDGE_NAME..."
 if ip link show "$BRIDGE_NAME" &>/dev/null; then
