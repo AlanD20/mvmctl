@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -7,8 +8,9 @@ source config.env
 
 API_SOCKET="${OUTPUT_DIR}/firecracker.socket"
 FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
+FIRECRACKER_CONFIG="${OUTPUT_DIR}/firecracker.json"
 
-echo "=== Cleaning up Firecracker VM ==="
+echo "=== Stopping Firecracker VM ==="
 
 # First try to stop via screen session (most reliable)
 echo "Stopping screen session 'fc-single'..."
@@ -16,7 +18,6 @@ screen -S fc-single -X quit 2>/dev/null || true
 sleep 1
 
 # Then kill any remaining firecracker processes for this config
-FIRECRACKER_CONFIG="${OUTPUT_DIR}/firecracker.json"
 if [ "$ENABLE_SOCKET" = "true" ]; then
   for pid in $(pgrep -f "firecracker.*--api-sock.*${OUTPUT_DIR}"); do
     if [ -n "$pid" ]; then
@@ -37,6 +38,7 @@ else
   done
 fi
 
+# Also check via PID file
 if [ -f "$FIRECRACKER_PID_FILE" ]; then
   FIRECRACKER_PID=$(cat "$FIRECRACKER_PID_FILE")
   if kill -0 "$FIRECRACKER_PID" 2>/dev/null; then
@@ -50,19 +52,9 @@ fi
 
 rm -f "$API_SOCKET"
 
-if ip link show "$TAP_DEV" &>/dev/null; then
-  echo "Removing tap device $TAP_DEV..."
-  ip link del "$TAP_DEV" 2>/dev/null || true
-fi
-
-echo "Flushing iptables NAT rules..."
-DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-iptables -t nat -D POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE 2>/dev/null || true
-iptables -D FORWARD -i "$TAP_DEV" -o "$DEFAULT_IFACE" -j ACCEPT 2>/dev/null || true
-iptables -D FORWARD -i "$DEFAULT_IFACE" -o "$TAP_DEV" -j ACCEPT 2>/dev/null || true
-
 echo ""
-echo "=== Cleanup Complete ==="
-echo "  - Firecracker process stopped"
-echo "  - Tap device removed"
-echo "  - NAT rules flushed"
+echo "=== VM Stopped ==="
+echo "Firecracker process terminated"
+echo ""
+echo "Note: Network configuration is still active."
+echo "Run ./cleanup.sh to fully clean up network and resources."

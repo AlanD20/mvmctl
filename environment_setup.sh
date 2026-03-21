@@ -61,6 +61,21 @@ if [ "$MISSING_DEPS" != "" ]; then
 fi
 echo "all present"
 
+# [4/4] Generate SSH keys
+echo -n "Checking SSH keys... "
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KEYS_DIR="$SCRIPT_DIR/assets/keys"
+mkdir -p "$KEYS_DIR"
+
+# Generate default SSH key if it doesn't exist
+if [ ! -f "$KEYS_DIR/id_rsa" ]; then
+  echo "generating..."
+  ssh-keygen -f "$KEYS_DIR/id_rsa" -N "" -q
+  echo "✓ SSH key generated at $KEYS_DIR/id_rsa"
+else
+  echo "already exists"
+fi
+
 echo ""
 echo "=== Environment Setup Complete ==="
 echo ""

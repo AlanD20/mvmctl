@@ -5,6 +5,8 @@
 assets/bin/
 assets/kernels/
 assets/images/
+assets/keys/*
+!assets/keys/.gitkeep
 
 # Single VM generated environment
 single-vm/env/

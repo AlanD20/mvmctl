@@ -27,10 +27,19 @@ fi
 rm -f "$API_SOCKET"
 
 echo "Starting Firecracker in screen session 'fc-single'..."
-screen -dmS fc-single "$FIRECRACKER_BIN" --no-api --config-file "${OUTPUT_DIR}/firecracker.json"
-# Wait a moment for process to start
-sleep 1
-FIRECRACKER_PID=$(pgrep -f "firecracker --no-api --config-file ${OUTPUT_DIR}/firecracker.json")
+if [ "$ENABLE_SOCKET" = "true" ]; then
+  SOCKET_PATH="${OUTPUT_DIR}/firecracker.socket"
+  screen -dmS fc-single "$FIRECRACKER_BIN" --api-sock "$SOCKET_PATH" --config-file "${OUTPUT_DIR}/firecracker.json"
+  sleep 1
+  FIRECRACKER_PID=$(pgrep -f "firecracker.*--api-sock.*${OUTPUT_DIR}") || FIRECRACKER_PID=$(pgrep -f "firecracker.*${OUTPUT_DIR}")
+  if [ -z "$FIRECRACKER_PID" ]; then
+    FIRECRACKER_PID=$(cat "$FIRECRACKER_PID_FILE" 2>/dev/null || pgrep -f "firecracker.*${OUTPUT_DIR}")
+  fi
+else
+  screen -dmS fc-single "$FIRECRACKER_BIN" --no-api --config-file "${OUTPUT_DIR}/firecracker.json"
+  sleep 1
+  FIRECRACKER_PID=$(pgrep -f "firecracker --no-api --config-file ${OUTPUT_DIR}/firecracker.json")
+fi
 echo "$FIRECRACKER_PID" >"$FIRECRACKER_PID_FILE"
 
 echo ""
