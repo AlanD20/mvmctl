@@ -126,10 +126,11 @@ fi
 # Create user-data from template or generate default
 if [ -f "cloud-init/user-data" ]; then
   echo " - Using custom cloud-init/user-data..."
-  # Read the template and inject SSH keys
+  # Read the template and inject SSH keys and hostname
   sed -e "s|# SSH keys will be injected here by setup.sh from assets/keys/|${PUB_KEY_CONTENT}|g" \
     -e "s|# Root SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
     -e "s|# Ubuntu user SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
+    -e "s|HOSTNAME_PLACEHOLDER|${VM_NAME}|g" \
     "cloud-init/user-data" >"${OUTPUT_DIR}/cloud-init/user-data"
 fi
 

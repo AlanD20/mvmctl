@@ -6,9 +6,9 @@ datasource:
   NoCloud:
     seedfrom: /
 
-# Hostname configuration
-hostname: firecracker-vm
-fqdn: firecracker-vm.local
+# Hostname configuration (will be replaced by setup scripts)
+hostname: HOSTNAME_PLACEHOLDER
+fqdn: HOSTNAME_PLACEHOLDER.local
 
 # DNS Configuration
 manage_resolv_conf: true
