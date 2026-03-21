@@ -9,7 +9,24 @@ source config.env
 API_SOCKET="${OUTPUT_DIR}/firecracker.socket"
 FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
 
-echo "=== Starting Firecracker VM ==="
+echo "=== Resuming Firecracker VM ==="
+
+# Check if already running
+if screen -list | grep -q "fc-single"; then
+  echo "VM is already running in screen session 'fc-single'"
+  echo "Connect with: sudo screen -r fc-single"
+  exit 0
+fi
+
+# Check if PID file exists and process is still running
+if [ -f "$FIRECRACKER_PID_FILE" ]; then
+  EXISTING_PID=$(cat "$FIRECRACKER_PID_FILE")
+  if kill -0 "$EXISTING_PID" 2>/dev/null; then
+    echo "VM is already running (PID: $EXISTING_PID)"
+    echo "Connect with: sudo screen -r fc-single"
+    exit 0
+  fi
+fi
 
 FIRECRACKER_BIN="../assets/bin/firecracker"
 KERNEL_PATH="../assets/kernels/vmlinux"
@@ -21,10 +38,8 @@ fi
 
 if ! ./network.sh check 2>/dev/null; then
   echo "Setting up network..."
-  ./network.sh
+  sudo ./network.sh
 fi
-
-rm -f "$API_SOCKET"
 
 echo "Starting Firecracker in screen session 'fc-single'..."
 if [ "$ENABLE_SOCKET" = "true" ]; then
@@ -43,10 +58,11 @@ fi
 echo "$FIRECRACKER_PID" >"$FIRECRACKER_PID_FILE"
 
 echo ""
-echo "=== VM Started ==="
+echo "=== VM Resumed ==="
 echo "Firecracker PID: $FIRECRACKER_PID"
 echo ""
 echo "Connect to serial console with: sudo screen -r fc-single"
 echo "To detach from screen, press: Ctrl+A, then D"
 echo ""
-echo "Run ./cleanup.sh when done to stop VM and clean up network"
+echo "Run ./stop-vm.sh to pause/stop the VM (preserves state)"
+echo "Run ./cleanup.sh to fully remove VM and clean up network"
