@@ -177,6 +177,10 @@ if sudo mount "${OUTPUT_DIR}/rootfs.ext4" "$MOUNT_DIR" 2>/dev/null; then
   # Set proper permissions
   sudo chmod 644 "$MOUNT_DIR"/var/lib/cloud/seed/nocloud/*
 
+  # Comment out /boot/efi partitions in fstab, some images come with
+  # this option by default such as Debian/Bookworm.
+  sudo sed -i '/boot\/efi/s/^/#/' "$MOUNT_DIR/etc/fstab"
+
   # Unmount
   sudo umount "$MOUNT_DIR"
   sudo rmdir "$MOUNT_DIR" 2>/dev/null || true
