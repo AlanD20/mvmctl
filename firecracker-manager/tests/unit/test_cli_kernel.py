@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from typer.testing import CliRunner
 
@@ -55,3 +56,68 @@ def test_clean_force(tmp_path: Path):
     result = runner.invoke(app, ["clean", "--build-dir", str(build_dir), "--force"])
     assert result.exit_code == 0
     assert not build_dir.exists()
+
+
+def test_build_success(tmp_path: Path):
+    out = tmp_path / "vmlinux"
+    build_dir = tmp_path / "build"
+    with patch("fcm.cli.kernel.build_kernel_pipeline", return_value=True):
+        result = runner.invoke(
+            app,
+            [
+                "build",
+                "--version",
+                "6.1.102",
+                "--out",
+                str(out),
+                "--build-dir",
+                str(build_dir),
+            ],
+        )
+    assert result.exit_code == 0
+
+
+def test_build_failure(tmp_path: Path):
+    out = tmp_path / "vmlinux"
+    build_dir = tmp_path / "build"
+    with patch("fcm.cli.kernel.build_kernel_pipeline", return_value=False):
+        result = runner.invoke(
+            app,
+            [
+                "build",
+                "--version",
+                "6.1.102",
+                "--out",
+                str(out),
+                "--build-dir",
+                str(build_dir),
+            ],
+        )
+    assert result.exit_code == 1
+
+
+def test_clean_specific_version(tmp_path: Path):
+    build_dir = tmp_path / "kernel-build"
+    build_dir.mkdir()
+    version_dir = build_dir / "linux-6.1.102"
+    version_dir.mkdir()
+    (version_dir / "Makefile").write_text("all:")
+
+    result = runner.invoke(
+        app,
+        ["clean", "--version", "6.1.102", "--build-dir", str(build_dir), "--force"],
+    )
+    assert result.exit_code == 0
+    assert not version_dir.exists()
+    assert build_dir.exists()
+
+
+def test_clean_specific_version_not_found(tmp_path: Path):
+    build_dir = tmp_path / "kernel-build"
+    build_dir.mkdir()
+
+    result = runner.invoke(
+        app,
+        ["clean", "--version", "6.1.999", "--build-dir", str(build_dir), "--force"],
+    )
+    assert result.exit_code == 1

@@ -39,3 +39,19 @@ class ConfigError(FCMError):
 
 class SocketNotFoundError(FirecrackerError):
     """Unix socket for VM API not found."""
+
+
+class HostError(FCMError):
+    """Host configuration or prerequisite failure."""
+
+
+class ProcessError(FCMError):
+    """Subprocess execution failure."""
+
+
+class AssetNotFoundError(FCMError):
+    """Requested asset (binary, kernel, image) not found locally or remotely."""
+
+
+class BinaryError(FCMError):
+    """Firecracker/jailer binary management failure."""

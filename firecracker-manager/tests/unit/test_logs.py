@@ -94,3 +94,63 @@ def test_show_logs_not_found() -> None:
         exit_code = show_logs("nonexistent-vm", log_type="boot")
 
     assert exit_code == 1
+
+
+def test_read_log_lines_io_error(tmp_path: Path) -> None:
+    log_file = tmp_path / "missing.log"
+    result = read_log_lines(log_file, lines=10)
+    assert result == []
+
+
+def test_show_logs_os_type(tmp_path: Path) -> None:
+    log_file = tmp_path / "firecracker.log"
+    log_file.write_text("os line 1\nos line 2\n")
+
+    with patch("fcm.core.logs.get_log_path", return_value=log_file):
+        exit_code = show_logs("test-vm", log_type="os", lines=50)
+
+    assert exit_code == 0
+
+
+def test_show_logs_follow(tmp_path: Path) -> None:
+    from fcm.core.logs import follow_log
+
+    log_file = tmp_path / "test.log"
+    log_file.write_text("line 1\nline 2\n")
+
+    gen = follow_log(log_file)
+    log_file.write_text("line 1\nline 2\nline 3\n")
+
+    with patch("time.sleep", side_effect=KeyboardInterrupt):
+        lines = []
+        try:
+            for line in gen:
+                lines.append(line)
+        except KeyboardInterrupt:
+            pass
+
+
+def test_show_logs_follow_keyboard_interrupt(tmp_path: Path) -> None:
+    log_file = tmp_path / "test.log"
+    log_file.write_text("line 1\n")
+
+    def fake_follow(f):
+        yield "line 1"
+        raise KeyboardInterrupt
+
+    with (
+        patch("fcm.core.logs.get_log_path", return_value=log_file),
+        patch("fcm.core.logs.follow_log", side_effect=fake_follow),
+    ):
+        exit_code = show_logs("test-vm", log_type="boot", follow=True)
+
+    assert exit_code == 0
+
+
+def test_follow_log_io_error(tmp_path: Path) -> None:
+    from fcm.core.logs import follow_log
+
+    log_file = tmp_path / "nonexistent.log"
+    gen = follow_log(log_file)
+    lines = list(gen)
+    assert lines == []

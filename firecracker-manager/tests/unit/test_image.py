@@ -12,6 +12,7 @@ from fcm.core.image import (
     convert_qcow2_to_raw,
     create_ext4_from_tar,
     download_file,
+    extract_partition_from_raw,
     fetch_image,
     load_images_config,
 )
@@ -273,3 +274,626 @@ def test_fetch_image_qcow2(
     mock_download.assert_called_once()
     mock_convert.assert_called_once()
     mock_extract.assert_called_once()
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_success_sfdisk(mock_run: MagicMock, tmp_path: Path):
+    import json
+
+    sfdisk_output = json.dumps(
+        {
+            "partitiontable": {
+                "partitions": [
+                    {"start": 2048, "size": 100000, "type": "83"},
+                ]
+            }
+        }
+    )
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            mock_result.stdout = sfdisk_output
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            mock_result.returncode = 0
+        elif cmd[0] == "blkid":
+            mock_result.stdout = "ext4\n"
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is not None
+    assert result.suffix == ".img"
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_success_fdisk(mock_run: MagicMock, tmp_path: Path):
+    raw_path_str = str(tmp_path / "image.raw")
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            raise FileNotFoundError("sfdisk not found")
+        elif cmd[0] == "fdisk":
+            mock_result.stdout = f"{raw_path_str}1  2048  100000  97953  83 Linux\n"
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            mock_result.returncode = 0
+        elif cmd[0] == "blkid":
+            mock_result.stdout = "ext4\n"
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is not None
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_no_partitions(mock_run: MagicMock, tmp_path: Path):
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            mock_result.stdout = '{"partitiontable": {"partitions": []}}'
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result == output_path
+    assert output_path.exists()
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_dd_failure(mock_run: MagicMock, tmp_path: Path):
+    import json
+
+    sfdisk_output = json.dumps(
+        {"partitiontable": {"partitions": [{"start": 2048, "size": 100000, "type": "83"}]}}
+    )
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            mock_result.stdout = sfdisk_output
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            raise subprocess.CalledProcessError(1, "dd", stderr="dd failed")
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is None
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_sfdisk_multi_partition(mock_run: MagicMock, tmp_path: Path):
+    import json
+
+    sfdisk_output = json.dumps(
+        {
+            "partitiontable": {
+                "partitions": [
+                    {"start": 2048, "size": 50000, "type": "ef"},
+                    {"start": 52048, "size": 200000, "type": "83"},
+                ]
+            }
+        }
+    )
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            mock_result.stdout = sfdisk_output
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            # Create the output file so rename works
+            output_path.write_bytes(b"\x00" * 64)
+            mock_result.returncode = 0
+        elif cmd[0] == "blkid":
+            mock_result.stdout = "btrfs\n"
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is not None
+    assert result.suffix == ".btrfs"
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_sfdisk_explicit_partition(mock_run: MagicMock, tmp_path: Path):
+    import json
+
+    sfdisk_output = json.dumps(
+        {
+            "partitiontable": {
+                "partitions": [
+                    {"start": 2048, "size": 50000, "type": "ef"},
+                    {"start": 52048, "size": 200000, "type": "83"},
+                ]
+            }
+        }
+    )
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            mock_result.stdout = sfdisk_output
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            output_path.write_bytes(b"\x00" * 64)
+            mock_result.returncode = 0
+        elif cmd[0] == "blkid":
+            mock_result.stdout = "xfs\n"
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path, partition=1)
+
+    assert result is not None
+    assert result.suffix == ".xfs"
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_fdisk_no_partitions(mock_run: MagicMock, tmp_path: Path):
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            raise FileNotFoundError("sfdisk not found")
+        elif cmd[0] == "fdisk":
+            mock_result.stdout = "Disk /tmp/image.raw: 1 GiB\n"
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result == output_path
+    assert output_path.exists()
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_fdisk_multi_partition(mock_run: MagicMock, tmp_path: Path):
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    raw_path_str = str(raw_path)
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            raise FileNotFoundError("sfdisk not found")
+        elif cmd[0] == "fdisk":
+            mock_result.stdout = (
+                f"{raw_path_str}1  2048  50000  47953  ef EFI\n"
+                f"{raw_path_str}2  52048  200000  147953  83 Linux\n"
+            )
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            mock_result.returncode = 0
+        elif cmd[0] == "blkid":
+            mock_result.stdout = ""
+            mock_result.returncode = 1
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is not None
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_fdisk_parse_failure(mock_run: MagicMock, tmp_path: Path):
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    raw_path_str = str(raw_path)
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            raise FileNotFoundError("sfdisk not found")
+        elif cmd[0] == "fdisk":
+            mock_result.stdout = f"{raw_path_str}1  nodigits  here\n"
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is None
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_blkid_not_found(mock_run: MagicMock, tmp_path: Path):
+    import json
+
+    sfdisk_output = json.dumps(
+        {"partitiontable": {"partitions": [{"start": 2048, "size": 100000, "type": "83"}]}}
+    )
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            mock_result.stdout = sfdisk_output
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            mock_result.returncode = 0
+        elif cmd[0] == "blkid":
+            raise FileNotFoundError("blkid not found")
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is not None
+    assert result.suffix == ".img"
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_sfdisk_json_error(mock_run: MagicMock, tmp_path: Path):
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    raw_path_str = str(raw_path)
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            mock_result.stdout = "NOT JSON AT ALL"
+            mock_result.returncode = 0
+        elif cmd[0] == "fdisk":
+            mock_result.stdout = f"{raw_path_str}1  2048  100000  97953  83 Linux\n"
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            mock_result.returncode = 0
+        elif cmd[0] == "blkid":
+            mock_result.stdout = "ext4\n"
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is not None
+
+
+@patch("fcm.core.image.subprocess.run")
+def test_extract_partition_from_raw_unknown_fs_type(mock_run: MagicMock, tmp_path: Path):
+    import json
+
+    sfdisk_output = json.dumps(
+        {"partitiontable": {"partitions": [{"start": 2048, "size": 100000, "type": "83"}]}}
+    )
+
+    def mock_run_side_effect(cmd, **kwargs):
+        mock_result = MagicMock()
+        if cmd[0] == "sfdisk":
+            mock_result.stdout = sfdisk_output
+            mock_result.returncode = 0
+        elif cmd[0] == "dd":
+            mock_result.returncode = 0
+        elif cmd[0] == "blkid":
+            mock_result.stdout = "ntfs\n"
+            mock_result.returncode = 0
+        else:
+            mock_result.returncode = 0
+        return mock_result
+
+    mock_run.side_effect = mock_run_side_effect
+
+    raw_path = tmp_path / "image.raw"
+    raw_path.write_bytes(b"\x00" * 1024)
+    output_path = tmp_path / "output.img"
+
+    result = extract_partition_from_raw(raw_path, output_path)
+
+    assert result is not None
+    assert result.suffix == ".img"
+
+
+@patch("fcm.core.image.create_ext4_from_tar")
+@patch("fcm.core.image.download_file")
+def test_fetch_image_tar_rootfs(
+    mock_download: MagicMock,
+    mock_create: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="alpine",
+        name="Alpine Linux",
+        source="https://example.com/alpine.tar.gz",
+        format="tar-rootfs",
+        convert_to="ext4",
+        size_mib=1024,
+    )
+
+    expected_output = tmp_path / "alpine.ext4"
+    mock_download.return_value = True
+    mock_create.return_value = True
+
+    result = fetch_image(spec, tmp_path)
+
+    assert result == expected_output
+    mock_download.assert_called_once()
+    mock_create.assert_called_once()
+
+
+@patch("fcm.core.image.create_ext4_from_tar")
+@patch("fcm.core.image.download_file")
+def test_fetch_image_tar_rootfs_failure(
+    mock_download: MagicMock,
+    mock_create: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="alpine",
+        name="Alpine Linux",
+        source="https://example.com/alpine.tar.gz",
+        format="tar-rootfs",
+        convert_to="ext4",
+        size_mib=1024,
+    )
+
+    mock_download.return_value = True
+    mock_create.return_value = False
+
+    result = fetch_image(spec, tmp_path)
+
+    assert result is None
+
+
+@patch("fcm.core.image.extract_partition_from_raw")
+@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("fcm.core.image.download_file")
+def test_fetch_image_force_re_download(
+    mock_download: MagicMock,
+    mock_convert: MagicMock,
+    mock_extract: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="ubuntu-24.04",
+        name="Ubuntu 24.04",
+        source="https://example.com/ubuntu.qcow2",
+        format="qcow2",
+        convert_to="ext4",
+        size_mib=4096,
+    )
+
+    final = tmp_path / "ubuntu-24.04.ext4"
+    final.write_text("existing image data")
+
+    expected_output = tmp_path / "ubuntu-24.04.ext4"
+    mock_download.return_value = True
+    mock_convert.return_value = True
+    mock_extract.return_value = expected_output
+
+    result = fetch_image(spec, tmp_path, force=True)
+
+    assert result == expected_output
+    mock_download.assert_called_once()
+
+
+@patch("fcm.core.image.download_file")
+def test_fetch_image_download_failure(
+    mock_download: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="ubuntu-24.04",
+        name="Ubuntu 24.04",
+        source="https://example.com/ubuntu.qcow2",
+        format="qcow2",
+        convert_to="ext4",
+        size_mib=4096,
+    )
+
+    mock_download.return_value = False
+
+    result = fetch_image(spec, tmp_path)
+
+    assert result is None
+
+
+@patch("fcm.core.image.extract_partition_from_raw")
+@patch("fcm.core.image.download_file")
+def test_fetch_image_raw_format(
+    mock_download: MagicMock,
+    mock_extract: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="custom-image",
+        name="Custom Image",
+        source="https://example.com/image.raw",
+        format="raw",
+        convert_to="ext4",
+        size_mib=2048,
+    )
+
+    expected_output = tmp_path / "custom-image.ext4"
+    mock_download.return_value = True
+    mock_extract.return_value = expected_output
+
+    result = fetch_image(spec, tmp_path)
+
+    assert result == expected_output
+    mock_download.assert_called_once()
+    mock_extract.assert_called_once()
+
+
+@patch("fcm.core.image.download_file")
+def test_fetch_image_unknown_format(
+    mock_download: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="unknown",
+        name="Unknown Format",
+        source="https://example.com/image.xyz",
+        format="xyz",
+        convert_to="ext4",
+        size_mib=2048,
+    )
+
+    mock_download.return_value = True
+
+    result = fetch_image(spec, tmp_path)
+
+    assert result is None
+
+
+@patch("fcm.core.image.extract_partition_from_raw")
+@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("fcm.core.image.download_file")
+def test_fetch_image_qcow2_convert_fails(
+    mock_download: MagicMock,
+    mock_convert: MagicMock,
+    mock_extract: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="ubuntu-24.04",
+        name="Ubuntu 24.04",
+        source="https://example.com/ubuntu.qcow2",
+        format="qcow2",
+        convert_to="ext4",
+        size_mib=4096,
+    )
+
+    mock_download.return_value = True
+    mock_convert.return_value = False
+
+    result = fetch_image(spec, tmp_path)
+
+    assert result is None
+    mock_extract.assert_not_called()
+
+
+@patch("fcm.core.image.extract_partition_from_raw")
+@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("fcm.core.image.download_file")
+def test_fetch_image_qcow2_extract_fails(
+    mock_download: MagicMock,
+    mock_convert: MagicMock,
+    mock_extract: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="ubuntu-24.04",
+        name="Ubuntu 24.04",
+        source="https://example.com/ubuntu.qcow2",
+        format="qcow2",
+        convert_to="ext4",
+        size_mib=4096,
+    )
+
+    mock_download.return_value = True
+    mock_convert.return_value = True
+    mock_extract.return_value = None
+
+    result = fetch_image(spec, tmp_path)
+
+    assert result is None
+
+
+@patch("fcm.core.image.extract_partition_from_raw")
+@patch("fcm.core.image.download_file")
+def test_fetch_image_raw_extract_fails(
+    mock_download: MagicMock,
+    mock_extract: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="custom-image",
+        name="Custom Image",
+        source="https://example.com/image.raw",
+        format="raw",
+        convert_to="ext4",
+        size_mib=2048,
+    )
+
+    mock_download.return_value = True
+    mock_extract.return_value = None
+
+    result = fetch_image(spec, tmp_path)
+
+    assert result is None
