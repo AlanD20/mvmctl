@@ -2,7 +2,21 @@
 
 ## Your Task
 
-! IMPORTANT: This project is already started and some of the requirements are already implemented. your task is to identify and continue the work from where it's left off. DO NOT REINVENT. ALWAYS ENSURE THE REQUIREMENT ISNT IMPLEMENTED AND THEN IMPLEMENT. IF IT'S ALREADY IMPLEMENTED, THEN REVIEW AND CHECK THE LOGIC TO ENSURE IT MEETS THE PHASE REQUIREMENTS.
+> [!IMPORTANT]
+> This project is already partially implemented. Before writing any code, you must first
+> audit what exists. For every requirement in every phase document, locate the relevant
+> code, read it, and determine whether the requirement is already met.
+>
+> **DO NOT reinvent or rewrite working code.**
+>
+> If a requirement is **not yet implemented** — implement it.
+>
+> If a requirement is **already implemented** — review the logic line by line and verify it
+> correctly satisfies the requirement as written. Fix only what does not meet the spec.
+>
+> Work through each phase document requirement by requirement, in order. For each one:
+> locate the code path, read it, compare it against the requirement, then act. Do not skim.
+> Do not assume something works because it exists.
 
 The `firecracker-manager` Python CLI project implementation to completion across all phases.
 The work is defined in a set of phase requirement documents (`python-cli-phase-*.md`).
