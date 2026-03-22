@@ -55,6 +55,12 @@ fi
 # =============================================================================
 echo "Starting Firecracker VM..."
 
+# Clean up any existing socket file (prevents permission errors)
+if [ -S "$FIRECRACKER_SOCKET_PATH" ]; then
+  echo " - Removing stale socket file..."
+  rm -f "$FIRECRACKER_SOCKET_PATH"
+fi
+
 # Build firecracker command arguments
 FIRECRACKER_ARGS=""
 
@@ -64,19 +70,18 @@ fi
 
 if [ "$ENABLE_SOCKET" = "true" ]; then
   FIRECRACKER_ARGS="$FIRECRACKER_ARGS --api-sock $FIRECRACKER_SOCKET_PATH"
+else
+  # Explicitly disable API when socket mode is off
+  FIRECRACKER_ARGS="$FIRECRACKER_ARGS --no-api"
 fi
 
 # Remove leading space if present
 FIRECRACKER_ARGS=$(echo "$FIRECRACKER_ARGS" | sed 's/^ *//')
 
 # Start firecracker with the appropriate arguments
-if [ -n "$FIRECRACKER_ARGS" ]; then
-  nohup "$FIRECRACKER_BIN" $FIRECRACKER_ARGS --config-file "$CONFIG_ABS_PATH" \
-    >"$CONSOLE_ABS_PATH" 2>&1 &
-else
-  nohup "$FIRECRACKER_BIN" --config-file "$CONFIG_ABS_PATH" \
-    >"$CONSOLE_ABS_PATH" 2>&1 &
-fi
+echo " - Firecracker args: $FIRECRACKER_ARGS"
+nohup "$FIRECRACKER_BIN" $FIRECRACKER_ARGS --config-file "$CONFIG_ABS_PATH" \
+  >"$CONSOLE_ABS_PATH" 2>&1 &
 
 FIRECRACKER_PID=$!
 echo "$FIRECRACKER_PID" >"$FIRECRACKER_PID_FILE"

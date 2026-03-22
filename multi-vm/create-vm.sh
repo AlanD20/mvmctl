@@ -151,7 +151,7 @@ if [ -f "$SSH_PUB_KEY_SOURCE" ]; then
     # Inject SSH keys into user-data
     sed -e "s|# SSH keys will be injected here by setup.sh from assets/keys/|${PUB_KEY_CONTENT}|g" \
       -e "s|# Root SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
-      -e "s|# Ubuntu user SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
+      -e "s|# User SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
       "cloud-init/user-data" >"$VM_DIR/cloud-init/user-data"
   fi
 else
@@ -200,11 +200,31 @@ echo " - Generating Firecracker configuration..."
 ROOTFS_ABS_PATH="${SCRIPT_DIR}/${VM_DIR}/rootfs.ext4"
 KERNEL_ABS_PATH="${SCRIPT_DIR}/${KERNEL_PATH}"
 
+# Detect filesystem type for proper boot args
+ROOTFS_TYPE="ext4"
+if command -v file &>/dev/null; then
+  FS_INFO=$(file -b "$ROOTFS_ABS_PATH" 2>/dev/null || echo "")
+  if echo "$FS_INFO" | grep -qi "btrfs"; then
+    ROOTFS_TYPE="btrfs"
+  elif echo "$FS_INFO" | grep -qi "xfs"; then
+    ROOTFS_TYPE="xfs"
+  elif echo "$FS_INFO" | grep -qi "ext2"; then
+    ROOTFS_TYPE="ext2"
+  elif echo "$FS_INFO" | grep -qi "ext3"; then
+    ROOTFS_TYPE="ext3"
+  fi
+fi
+
+echo "   Detected filesystem type: $ROOTFS_TYPE"
+
+# Build boot args with appropriate root filesystem type
+BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off ip=${VM_IP}::${NETWORK_PREFIX}.1:255.255.255.0::eth0:off rw rootwait rootfstype=${ROOTFS_TYPE} ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/"
+
 cat >"$VM_DIR/firecracker.json" <<EOF
 {
   "boot-source": {
     "kernel_image_path": "${KERNEL_ABS_PATH}",
-    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off ip=${VM_IP}::${NETWORK_PREFIX}.1:255.255.255.0::eth0:off rw rootwait ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
+    "boot_args": "${BOOT_ARGS}",
     "initrd_path": null
   },
   "drives": [
@@ -276,6 +296,11 @@ PID_FILE="firecracker.pid"
 SOCKET_FILE="${VM_NAME}.socket"
 CONSOLE_LOG="firecracker.console.log"
 
+# Clean up any existing socket file
+if [ -S "$SOCKET_FILE" ]; then
+  rm -f "$SOCKET_FILE"
+fi
+
 # Check if already running
 if [ -f "$PID_FILE" ]; then
   EXISTING_PID=$(cat "$PID_FILE")
@@ -286,12 +311,21 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 
-# Start Firecracker
-if [ "$ENABLE_SOCKET" = "true" ]; then
-  nohup "$FIRECRACKER_BIN" --api-sock "$SOCKET_FILE" --config-file firecracker.json >"$CONSOLE_LOG" 2>&1 &
-else
-  nohup "$FIRECRACKER_BIN" --no-api --config-file firecracker.json >"$CONSOLE_LOG" 2>&1 &
+# Build firecracker command arguments
+FIRECRACKER_ARGS=""
+
+if [ "$ENABLE_PCI" = "true" ]; then
+  FIRECRACKER_ARGS="$FIRECRACKER_ARGS --enable-pci"
 fi
+
+if [ "$ENABLE_SOCKET" = "true" ]; then
+  FIRECRACKER_ARGS="$FIRECRACKER_ARGS --api-sock $SOCKET_FILE"
+else
+  FIRECRACKER_ARGS="$FIRECRACKER_ARGS --no-api"
+fi
+
+# Start Firecracker
+nohup "$FIRECRACKER_BIN" $FIRECRACKER_ARGS --config-file firecracker.json >"$CONSOLE_LOG" 2>&1 &
 
 VM_PID=$!
 echo "$VM_PID" >"$PID_FILE"

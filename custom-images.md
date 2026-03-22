@@ -42,9 +42,136 @@ The Firecracker setup uses a two-stage image system:
 
 For Firecracker compatibility, images must:
 1. **Be in raw format** (`.ext4` or `.img`)
-2. **Have virtio drivers** (`virtio_blk`, `virtio_net`)
-3. **Support serial console** (`ttyS0`)
-4. **Use a compatible init system** (systemd, OpenRC, or runit)
+2. **Be a raw filesystem, NOT a partitioned disk** (use `losetup` + `dd` to extract partitions)
+3. **Have virtio drivers** (`virtio_blk`, `virtio_net`)
+4. **Support serial console** (`ttyS0`)
+5. **Use a compatible init system** (systemd, OpenRC, or runit)
+
+> ⚠️ **Important**: Most cloud images (Arch, Debian, AlmaLinux, Fedora) are **partitioned disks** (like `/dev/sda` with partitions). Firecracker needs a **raw filesystem** (like `/dev/sda1` as a file). You must extract the root partition - see distribution-specific instructions below.
+
+---
+
+## Converting Partitioned Images to Raw Filesystems
+
+Most cloud providers distribute images as **partitioned disks** (qcow2 format). Firecracker requires a **raw filesystem image** (just the partition contents, not the partition table).
+
+### Why This Matters
+
+| Image Type | What It Contains | Works with Firecracker? |
+|------------|------------------|------------------------|
+| **Partitioned disk** | Boot sector + partition table + partitions | ❌ No - causes "VFS: Unable to mount root fs" error |
+| **Raw filesystem** | Just the filesystem contents | ✅ Yes - boots correctly |
+
+### Quick Conversion Process
+
+Here's the standard process for any qcow2 cloud image:
+
+#### Step 1 — Convert qcow2 to raw
+
+```bash
+qemu-img convert -f qcow2 -O raw image.qcow2 image.raw
+```
+
+#### Step 2 — Check partition layout
+
+```bash
+fdisk -l image.raw
+```
+
+Look for the root partition (usually the largest one). Note:
+- Device name (e.g., `image.raw1`, `image.raw2`)
+- Size (largest is usually root)
+- Filesystem type
+
+#### Step 3 — Extract the root partition
+
+**Option A: Using `losetup` (Recommended)**
+
+```bash
+# Attach image and scan for partitions (-P flag)
+sudo losetup -fP image.raw
+
+# Find which loop device was assigned
+sudo losetup -a
+# Output: /dev/loop0: []: (/path/to/image.raw)
+
+# Extract the partition (replace X with partition number)
+sudo dd if=/dev/loop0pX of=image-root.ext4 bs=4M status=progress
+
+# Detach the loop device
+sudo losetup -d /dev/loop0
+```
+
+**Option B: Using `kpartx` (Alternative)**
+
+```bash
+# Create device mappings
+sudo kpartx -av image.raw
+# Creates: /dev/mapper/loop0p1, /dev/mapper/loop0p2, etc.
+
+# Extract the partition
+sudo dd if=/dev/mapper/loop0pX of=image-root.ext4 bs=4M status=progress
+
+# Remove mappings
+sudo kpartx -dv image.raw
+```
+
+#### Step 4 — Verify
+
+```bash
+# Check the extracted filesystem
+file image-root.ext4
+# Should show: "Linux rev 1.0 ext4 filesystem data" (or btrfs, xfs, etc.)
+```
+
+#### Step 5 — Resize (optional)
+
+```bash
+# Resize image to desired size
+truncate -s 10G image-root.ext4
+
+# For ext4: resize the filesystem
+sudo e2fsck -f image-root.ext4
+sudo resize2fs image-root.ext4
+
+# For btrfs: just resize online after boot
+# (btrfs can resize while mounted)
+```
+
+#### Step 6 — Cleanup
+
+```bash
+rm -f image.raw image.qcow2
+```
+
+### Troubleshooting: Cleaning up stale loop devices
+
+If you get "device busy" errors:
+
+```bash
+# Find active loop devices
+sudo losetup -a
+
+# Detach specific device
+sudo losetup -d /dev/loop0
+
+# Or detach all
+for dev in $(losetup -a | grep "(deleted)" | cut -d: -f1); do
+  sudo losetup -d "$dev"
+done
+```
+
+### Using Partitioned Images (Alternative)
+
+If you must use a partitioned image, modify the boot args:
+
+```bash
+# In single-vm/env/firecracker.json or multi-vm/env/vm1/firecracker.json
+# Change: "root=/dev/vda" 
+# To:     "root=/dev/vda1" (or vda2, depending on partition)
+```
+
+However, this is **not recommended** as it can cause issues with some filesystems and distributions.
 
 ---
 
@@ -104,9 +231,9 @@ Arch Linux provides cloud images that work well with Firecracker.
 
 ### Download and Prepare
 
-**Important**: Arch Linux cloud images are partitioned disks (not raw filesystems). You have two options:
+**Important**: Arch Linux cloud images are **partitioned disks** (not raw filesystems). Firecracker needs a raw filesystem image, not a partitioned disk. Follow these steps to extract the root filesystem:
 
-#### Option 1: Extract the Root Filesystem (Recommended)
+#### Step 1 — Convert qcow2 to raw
 
 ```bash
 cd assets/images
@@ -116,41 +243,107 @@ curl -LO https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudim
 
 # Convert qcow2 to raw disk image
 qemu-img convert -f qcow2 -O raw Arch-Linux-x86_64-cloudimg.qcow2 arch.raw
+```
 
-# Mount the raw image to access partitions
-mkdir -p /tmp/arch-mount
+#### Step 2 — Check the partition layout
+
+```bash
+# View partition table
+fdisk -l arch.raw
+```
+
+Note the **Start sector** of the root partition (usually the last/largest one). You'll need it for offset calculations.
+
+Example output:
+```
+Device       Start     End Sectors  Size Type
+arch.raw1     2048  526335  524288  256M EFI System
+arch.raw2   526336 8388607 7862272  3.7G Linux filesystem  <-- This is root
+```
+
+#### Step 3 — Map partitions and extract root filesystem
+
+**Option A — Using losetup (simpler, recommended):**
+
+```bash
+# Attach raw image and scan for partitions (-P flag)
+sudo losetup -fP arch.raw
+
+# Find which loop device was assigned
+sudo losetup -a
+# Output: /dev/loop0: []: (/path/to/arch.raw)
+
+# Extract the root partition (e.g., /dev/loop0p2)
+sudo dd if=/dev/loop0p2 of=arch-root.btrfs bs=4M status=progress
+
+# Detach the loop device
+sudo losetup -d /dev/loop0
+```
+
+**Option B — Using kpartx (alternative):**
+
+```bash
+# Create device mappings in /dev/mapper/
 sudo kpartx -av arch.raw
-# This creates device mappings like /dev/mapper/loop0p1
+# Output: add map loop0p1 ...
+#         add map loop0p2 ...
 
-# Check which partition is the root filesystem
-sudo fdisk -l arch.raw
-# Usually partition 1 is the root filesystem
+# View mapped devices
+ls /dev/mapper/
 
-# Create a new ext4 image from the root partition
-sudo dd if=/dev/mapper/loop0p1 of=arch.ext4 bs=4M status=progress
+# Extract the root partition
+sudo dd if=/dev/mapper/loop0p2 of=arch-root.btrfs bs=4M status=progress
 
-# Resize if needed (optional)
-truncate -s 10G arch.ext4
-sudo e2fsck -f arch.ext4
-sudo resize2fs arch.ext4
-
-# Cleanup
+# Remove device mappings
 sudo kpartx -dv arch.raw
-rm -f arch.raw
-rmdir /tmp/arch-mount 2>/dev/null || true
+```
 
+#### Step 4 — Verify and resize (optional)
+
+```bash
+# Verify it's a btrfs filesystem
+file arch-root.btrfs
+
+# Resize if needed
+truncate -s 10G arch-root.btrfs
+```
+
+**Note**: Arch Linux uses **btrfs** by default, not ext4. The setup scripts will auto-detect this.
+
+#### Step 5 — Cleanup
+
+```bash
+# Remove temporary files
+rm -f arch.raw Arch-Linux-x86_64-cloudimg.qcow2
+
+# Return to project root
 cd ../..
 ```
 
-#### Option 2: Use Partitioned Image with Modified Boot Args
+#### Troubleshooting: Cleaning up stale loop devices
 
-If you prefer to keep the partitioned image, modify the boot args in `firecracker.json`:
+If you get errors about busy devices or want to clean up manually:
 
-```json
-"boot_args": "console=ttyS0 reboot=k panic=1 pci=off ip=10.10.0.2::10.10.0.1:255.255.255.252::eth0:off rw root=/dev/vda1"
+```bash
+# Find active loop devices
+sudo losetup -a
+# Output: /dev/loop1: []: (/path/to/arch.raw) (deleted)
+# The (deleted) means the file is gone but loop is still held open
+
+# Detach it
+sudo losetup -d /dev/loop1
+# Or: sudo kpartx -d /dev/loop1
 ```
 
-Note: Change `root=/dev/vda` to `root=/dev/vda1` to specify the first partition.
+#### Option 2: Use Partitioned Image (Not Recommended)
+
+If you prefer to keep the partitioned image (not recommended), modify the boot args in `firecracker.json`:
+
+```json
+"boot_args": "console=ttyS0 reboot=k panic=1 pci=off ip=10.10.0.2::10.10.0.1:255.255.255.252::eth0:off rw root=/dev/vda2"
+```
+
+**Note**: Change `root=/dev/vda` to `root=/dev/vda2` to specify the second partition (usually root on Arch).
 
 ### Update Configuration
 
@@ -228,7 +421,9 @@ Debian provides official cloud images with cloud-init support.
 
 ### Download and Prepare
 
-**Important**: Debian cloud images are partitioned disks. You must extract the root partition:
+**Important**: Debian cloud images are **partitioned disks**. Follow these steps to extract the root filesystem:
+
+#### Step 1 — Download and convert
 
 ```bash
 cd assets/images
@@ -238,22 +433,57 @@ curl -LO https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic
 
 # Convert qcow2 to raw disk
 qemu-img convert -f qcow2 -O raw debian-12-generic-amd64.qcow2 debian.raw
+```
 
-# Extract root partition (usually partition 1)
-mkdir -p /tmp/debian-mount
+#### Step 2 — Check partition layout
+
+```bash
+fdisk -l debian.raw
+# Usually shows: debian.raw1 (partition 1) = root filesystem
+```
+
+#### Step 3 — Extract root partition
+
+**Using losetup (recommended):**
+
+```bash
+# Attach and scan partitions
+sudo losetup -fP debian.raw
+
+# Check assigned device
+LOOP_DEV=$(sudo losetup -j debian.raw | cut -d: -f1 | head -1)
+# Output: /dev/loop0
+
+# Extract partition 1 (usually root)
+sudo dd if=${LOOP_DEV}p1 of=debian-bookworm.ext4 bs=4M status=progress
+
+# Detach
+sudo losetup -d $LOOP_DEV
+```
+
+**Using kpartx (alternative):**
+
+```bash
+# Create mappings
 sudo kpartx -av debian.raw
-sudo dd if=/dev/mapper/loop0p1 of=debian.ext4 bs=4M status=progress
 
-# Resize (optional)
-truncate -s 10G debian.ext4
-sudo e2fsck -f debian.ext4
-sudo resize2fs debian.ext4
+# Extract
+sudo dd if=/dev/mapper/loop0p1 of=debian-bookworm.ext4 bs=4M status=progress
 
 # Cleanup
 sudo kpartx -dv debian.raw
-rm -f debian.raw
-rmdir /tmp/debian-mount 2>/dev/null || true
+```
 
+#### Step 4 — Resize (optional)
+
+```bash
+# Resize to desired size
+truncate -s 10G debian-bookworm.ext4
+sudo e2fsck -f debian-bookworm.ext4
+sudo resize2fs debian-bookworm.ext4
+
+# Cleanup
+rm -f debian.raw debian-12-generic-amd64.qcow2
 cd ../..
 ```
 
@@ -397,7 +627,9 @@ AlmaLinux and CentOS Stream provide cloud images compatible with Firecracker.
 
 ### Download AlmaLinux
 
-**Important**: AlmaLinux cloud images are partitioned disks. You must extract the root partition:
+**Important**: AlmaLinux cloud images are **partitioned disks**. Follow these steps to extract the root filesystem:
+
+#### Step 1 — Download and convert
 
 ```bash
 cd assets/images
@@ -407,22 +639,51 @@ curl -LO https://repo.almalinux.org/almalinux/9/BaseOS/x86_64/images/AlmaLinux-9
 
 # Convert qcow2 to raw disk
 qemu-img convert -f qcow2 -O raw AlmaLinux-9-GenericCloud-latest.x86_64.qcow2 almalinux.raw
+```
 
-# Extract root partition (usually partition 1)
-mkdir -p /tmp/almalinux-mount
+#### Step 2 — Check partition layout
+
+```bash
+fdisk -l almalinux.raw
+# Usually shows: almalinux.raw1 (partition 1) = root filesystem
+```
+
+#### Step 3 — Extract root partition
+
+**Using losetup (recommended):**
+
+```bash
+# Attach and scan partitions
+sudo losetup -fP almalinux.raw
+
+# Get loop device
+LOOP_DEV=$(sudo losetup -j almalinux.raw | cut -d: -f1 | head -1)
+
+# Extract partition 1 (usually root)
+sudo dd if=${LOOP_DEV}p1 of=almalinux-9.ext4 bs=4M status=progress
+
+# Detach
+sudo losetup -d $LOOP_DEV
+```
+
+**Using kpartx (alternative):**
+
+```bash
 sudo kpartx -av almalinux.raw
-sudo dd if=/dev/mapper/loop0p1 of=almalinux.ext4 bs=4M status=progress
+sudo dd if=/dev/mapper/loop0p1 of=almalinux-9.ext4 bs=4M status=progress
+sudo kpartx -dv almalinux.raw
+```
 
+#### Step 4 — Resize and cleanup
+
+```bash
 # Resize (optional)
-truncate -s 10G almalinux.ext4
-sudo e2fsck -f almalinux.ext4
-sudo resize2fs almalinux.ext4
+truncate -s 10G almalinux-9.ext4
+sudo e2fsck -f almalinux-9.ext4
+sudo resize2fs almalinux-9.ext4
 
 # Cleanup
-sudo kpartx -dv almalinux.raw
-rm -f almalinux.raw
-rmdir /tmp/almalinux-mount 2>/dev/null || true
-
+rm -f almalinux.raw AlmaLinux-9-GenericCloud-latest.x86_64.qcow2
 cd ../..
 ```
 
@@ -678,6 +939,117 @@ genisoimage -output cloud-init.iso -volid cidata -joliet -rock user-data meta-da
 ```
 
 **Note**: The current setup embeds cloud-init directly into the rootfs instead of using ISOs.
+
+---
+
+## Building Custom Kernels
+
+You can build your own upstream Linux kernel with custom options for Firecracker. This is useful when you need specific filesystem support (like btrfs) or custom drivers.
+
+### Quick Build
+
+```bash
+cd assets
+
+# Build upstream kernel with default settings
+./build-kernel.sh
+
+# This creates: kernels/vmlinux-upstream
+```
+
+### Configuration Options
+
+Edit `assets/config.env` before building:
+
+```bash
+# Kernel version to build
+KERNEL_VERSION="6.12"
+
+# Number of parallel build jobs
+PARALLEL_JOBS=$(nproc)
+
+# Build directory (default: /tmp/firecracker-kernel-build)
+BUILD_DIR="/tmp/firecracker-kernel-build"
+
+# Keep build directory after completion
+KEEP_BUILD=false
+```
+
+### What's Included
+
+The build script automatically:
+1. Downloads Linux kernel source from kernel.org
+2. Applies Firecracker's microvm kernel configuration
+3. Enables built-in support for:
+   - **BTRFS** filesystem
+   - **EXT4** filesystem
+   - **XFS** filesystem
+   - **VirtIO** block and network drivers
+   - **Serial console** support
+4. Builds uncompressed vmlinux (what Firecracker needs)
+
+### Using Your Custom Kernel
+
+After building, update `assets/config.env`:
+
+```bash
+# Use upstream kernel instead of minimal
+KERNEL_SOURCE="upstream"
+```
+
+Then setup your VM as usual:
+
+```bash
+cd single-vm
+sudo ./setup.sh
+sudo ./create-vm.sh
+```
+
+### Advanced: Manual Kernel Build
+
+If you want more control, build manually:
+
+```bash
+# 1. Get Linux source
+git clone --depth=1 https://github.com/torvalds/linux.git
+cd linux
+
+# Or download specific version
+curl -O https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.tar.xz
+tar xf linux-6.12.tar.xz
+cd linux-6.12
+
+# 2. Get Firecracker config
+curl -O https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-x86_64-6.1.config
+cp microvm-kernel-x86_64-6.1.config .config
+make olddefconfig
+
+# 3. Enable BTRFS (built-in, not module)
+./scripts/config --enable CONFIG_BTRFS_FS
+./scripts/config --enable CONFIG_BTRFS_FS_POSIX_ACL
+make olddefconfig
+
+# 4. Build
+make vmlinux -j$(nproc)
+
+# 5. Copy to Firecracker
+cp vmlinux ../assets/kernels/vmlinux-upstream
+```
+
+### Required Kernel Config
+
+For Firecracker compatibility, ensure these are built-in (`=y`):
+
+```
+CONFIG_KVM_GUEST=y
+CONFIG_PARAVIRT=y
+CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_VIRTIO_BLK=y
+CONFIG_VIRTIO_NET=y
+CONFIG_BTRFS_FS=y       # For btrfs images
+CONFIG_EXT4_FS=y        # For ext4 images
+```
 
 ---
 

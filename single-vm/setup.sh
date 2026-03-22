@@ -86,6 +86,31 @@ fi
 
 echo "✓ Rootfs and SSH key copied"
 
+# Check if rootfs is a partitioned disk (not a raw filesystem)
+if file "${OUTPUT_DIR}/rootfs.ext4" 2>/dev/null | grep -qE "DOS/MBR|partition|boot sector"; then
+  echo ""
+  echo "⚠️  WARNING: Rootfs appears to be a partitioned disk image, not a raw filesystem."
+  echo "    This will cause a kernel panic during boot (VFS: Unable to mount root fs)."
+  echo ""
+  echo "    SOLUTION - Choose one:"
+  echo ""
+  echo "    Option 1: Extract the root partition (recommended):"
+  echo "      rm -rf ${OUTPUT_DIR}"
+  echo "      cd ../assets/images"
+  echo "      sudo kpartx -av arch.raw"
+  echo "      sudo dd if=/dev/mapper/loop0p1 of=arch.ext4 bs=4M"
+  echo "      sudo kpartx -dv arch.raw"
+  echo "      cd ../../single-vm"
+  echo "      sudo ./setup.sh"
+  echo ""
+  echo "    Option 2: Use partitioned image with boot args:"
+  echo "      Edit ${OUTPUT_DIR}/firecracker.json after setup completes"
+  echo "      Change: \"root=/dev/vda\" to \"root=/dev/vda1\""
+  echo ""
+  echo "    See custom-images.md for detailed instructions."
+  echo ""
+fi
+
 # =============================================================================
 # STEP 4: Create Cloud-Init
 # =============================================================================
@@ -129,7 +154,7 @@ if [ -f "cloud-init/user-data" ]; then
   # Read the template and inject SSH keys and hostname
   sed -e "s|# SSH keys will be injected here by setup.sh from assets/keys/|${PUB_KEY_CONTENT}|g" \
     -e "s|# Root SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
-    -e "s|# Ubuntu user SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
+    -e "s|# User SSH keys will be injected here by setup.sh|${PUB_KEY_CONTENT}|g" \
     -e "s|HOSTNAME_PLACEHOLDER|${VM_NAME}|g" \
     "cloud-init/user-data" >"${OUTPUT_DIR}/cloud-init/user-data"
 fi
@@ -211,11 +236,34 @@ echo "[6/6] Generating VM configuration..."
 ROOTFS_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/rootfs.ext4"
 KERNEL_ABS_PATH="${SCRIPT_DIR}/${KERNEL_PATH}"
 
+# Detect filesystem type for proper boot args
+ROOTFS_TYPE="ext4"
+if command -v file &>/dev/null; then
+  FS_INFO=$(file -b "$ROOTFS_ABS_PATH" 2>/dev/null || echo "")
+  if echo "$FS_INFO" | grep -qi "btrfs"; then
+    ROOTFS_TYPE="btrfs"
+  elif echo "$FS_INFO" | grep -qi "xfs"; then
+    ROOTFS_TYPE="xfs"
+  elif echo "$FS_INFO" | grep -qi "ext2"; then
+    ROOTFS_TYPE="ext2"
+  elif echo "$FS_INFO" | grep -qi "ext3"; then
+    ROOTFS_TYPE="ext3"
+  fi
+fi
+
+echo " - Detected filesystem type: $ROOTFS_TYPE"
+
+LSM_ENABLED=true
+LSM_FLAGS="landlock,lockdown,yama,integrity,selinux,bpf"
+
+# Build boot args with appropriate root filesystem type
+BOOT_ARGS="console=ttyS0 reboot=k panic=1 ip=${GUEST_IP}::${HOST_IP}:${MASK}::eth0:off root=/dev/vda rw rootwait rootfstype=${ROOTFS_TYPE} ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/ lsm=$LSM_FLAGS"
+
 cat >"${OUTPUT_DIR}/firecracker.json" <<EOF
 {
   "boot-source": {
     "kernel_image_path": "${KERNEL_ABS_PATH}",
-    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off ip=${GUEST_IP}::${HOST_IP}:${MASK}::eth0:off rw rootwait ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
+    "boot_args": "${BOOT_ARGS}",
     "initrd_path": null
   },
   "drives": [

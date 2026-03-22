@@ -28,15 +28,15 @@ users:
   - name: root
     ssh_authorized_keys:
       # Root SSH keys will be injected here by setup.sh
-  - name: ubuntu
+  - name: human
     sudo: ALL=(ALL) NOPASSWD:ALL
     groups: users, admin
-    home: /home/ubuntu
+    home: /home/human
     shell: /bin/bash
     lock_passwd: false
     passwd: "$6$o0ll24tM6X1RgeQ.$rF4tWQM.99JWhhCC5GWeeQUCI40muZI29P1j0hhGn697xaPZtmVYoG4uRuoxD9yx7KBRHPWPPJH95T0PQVv5z"
     ssh_authorized_keys:
-      # Ubuntu user SSH keys will be injected here by setup.sh
+      # User SSH keys will be injected here by setup.sh
 
 # Package installation
 packages:
