@@ -12,18 +12,21 @@ source config.env
 VM_NAME="${1:-}"
 VM_VCPU="${2:-2}"
 VM_MEM_MIB="${3:-2048}"
+VM_IP_STATIC="${4:-}"
 
 if [ -z "$VM_NAME" ]; then
-  echo "Usage: $0 <name> [vcpu] [memory_mib]"
+  echo "Usage: $0 <name> [vcpu] [memory_mib] [ip_address]"
   echo ""
   echo "Arguments:"
-  echo "  name         - VM name (required)"
-  echo "  vcpu         - Number of vCPUs (default: 2)"
-  echo "  memory_mib   - Memory in MiB (default: 2048)"
+  echo " name - VM name (required)"
+  echo " vcpu - Number of vCPUs (default: 2)"
+  echo " memory_mib - Memory in MiB (default: 2048)"
+  echo " ip_address - Static IP (optional, auto-assigned if omitted)"
   echo ""
   echo "Examples:"
-  echo "  $0 vm1                    # 2 vCPU, 2048MiB, auto IP"
-  echo "  $0 vm2 1 1024           # 1 vCPU, 1024MiB, auto IP"
+  echo " $0 vm1 # 2 vCPU, 2048MiB, auto IP"
+  echo " $0 vm2 1 1024 # 1 vCPU, 1024MiB, auto IP"
+  echo " $0 vm3 2 2048 10.20.0.50 # 2 vCPU, 2048MiB, static IP"
   exit 1
 fi
 
@@ -61,26 +64,52 @@ fi
 # ASSIGN IP ADDRESS
 # =============================================================================
 
-# Extract network prefix (e.g., 10.20.0 from 10.20.0.1/24)
 NETWORK_PREFIX=$(echo "$BRIDGE_IP" | cut -d. -f1-3)
+GATEWAY_IP=$(echo "$BRIDGE_IP" | cut -d'/' -f1)
 
-# Auto-assign IP
-VM_IP=""
-for i in $(seq 2 254); do
-  IP="${NETWORK_PREFIX}.${i}"
-  # Check if IP is already used in existing VMs
-  IP_IN_USE=false
+if [ -n "$VM_IP_STATIC" ]; then
+  VM_IP="$VM_IP_STATIC"
+
+  if ! echo "$VM_IP" | grep -qE "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$"; then
+    echo "ERROR: Invalid IP address format: $VM_IP"
+    exit 1
+  fi
+
+  if ! echo "$VM_IP" | grep -q "^${NETWORK_PREFIX}\."; then
+    echo "ERROR: IP $VM_IP is not in the network range ${NETWORK_PREFIX}.0/24"
+    exit 1
+  fi
+
+  IP_OCTET=$(echo "$VM_IP" | cut -d. -f4)
+  if [ "$IP_OCTET" -eq 1 ] || [ "$IP_OCTET" -eq 0 ] || [ "$IP_OCTET" -eq 255 ]; then
+    echo "ERROR: IP $VM_IP is reserved (cannot use .0, .1, or .255)"
+    exit 1
+  fi
+
   while IFS= read -r config_file; do
-    if [ -f "$config_file" ] && grep -q "ip=${IP}::" "$config_file" 2>/dev/null; then
-      IP_IN_USE=true
-      break
+    if [ -f "$config_file" ] && grep -q "ip=${VM_IP}::" "$config_file" 2>/dev/null; then
+      EXISTING_VM=$(basename "$(dirname "$config_file")")
+      echo "ERROR: IP $VM_IP is already in use by VM: $EXISTING_VM"
+      exit 1
     fi
   done < <(find ${OUTPUT_DIR} -name "firecracker.json" 2>/dev/null)
-  if [ "$IP_IN_USE" = "false" ]; then
-    VM_IP="$IP"
-    break
-  fi
-done
+else
+  VM_IP=""
+  for i in $(seq 2 254); do
+    IP="${NETWORK_PREFIX}.${i}"
+    IP_IN_USE=false
+    while IFS= read -r config_file; do
+      if [ -f "$config_file" ] && grep -q "ip=${IP}::" "$config_file" 2>/dev/null; then
+        IP_IN_USE=true
+        break
+      fi
+    done < <(find ${OUTPUT_DIR} -name "firecracker.json" 2>/dev/null)
+    if [ "$IP_IN_USE" = "false" ]; then
+      VM_IP="$IP"
+      break
+    fi
+  done
+fi
 
 if [ -z "$VM_IP" ]; then
   echo "ERROR: No available IPs in pool"
@@ -227,7 +256,7 @@ if [ "$ENABLE_PCI" != "true" ]; then
   PCI_ARGS="pci=off"
 fi
 
-BOOT_ARGS="console=ttyS0 reboot=k panic=1 ${PCI_ARGS} ip=${VM_IP}::${NETWORK_PREFIX}.1:255.255.255.0::eth0:off rw rootwait rootfstype=${ROOTFS_TYPE} ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/ lsm=${BOOT_ARG_LSM_FLAGS}"
+BOOT_ARGS="console=ttyS0 reboot=k panic=1 ${PCI_ARGS} ip=${VM_IP}::${GATEWAY_IP}:255.255.255.0::eth0:off rw rootwait rootfstype=${ROOTFS_TYPE} ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/ lsm=${BOOT_ARG_LSM_FLAGS}"
 
 cat >"$VM_DIR/firecracker.json" <<EOF
 {

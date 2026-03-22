@@ -23,11 +23,13 @@ cd ../multi-vm && sudo ./setup.sh
 sudo ./create-vm.sh vm1              # 2 vCPU, 2048MiB, auto IP
 sudo ./create-vm.sh vm2 1 1024       # 1 vCPU, 1024MiB, auto IP
 sudo ./create-vm.sh vm3 2 4096       # 2 vCPU, 4096MiB, auto IP
+sudo ./create-vm.sh vm4 2 2048 10.20.0.50  # 2 vCPU, 2048MiB, static IP
 
 # 4. List VMs with status
 sudo ./list-vms.sh
 
 # 5. SSH into VM (wait 30-60s for boot)
+cd .. && ./ssh.sh vm1     # From project root
 ssh -i env/vm.id_rsa root@10.20.0.2
 
 # 6. Delete VM when done

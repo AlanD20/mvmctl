@@ -147,8 +147,15 @@ sudo chmod 660 /dev/kvm
 ### View Logs
 
 ```bash
-cat firecracker.log              # Single-VM
-cat vms/vm1/firecracker.log      # Multi-VM
+# Using the helper script
+./ssh.sh <vm_name|ip> [user]
+./logs-vm.sh <vm_name> [os|boot]
+
+# Manual
+ssh -i single-vm/env/vm.id_rsa root@10.10.0.2
+ssh -i multi-vm/env/vm.id_rsa root@10.20.0.2
+cat firecracker.log
+cat vms/vm1/firecracker.log
 ```
 
 ### Stuck VM Process
