@@ -51,7 +51,7 @@ sudo ./cleanup.sh
 | `create-vm.sh` | Create and start a new VM with auto-assigned IP |
 | `delete-vm.sh` | Graceful shutdown, remove NAT rules, delete VM |
 | `list-vms.sh` | List all VMs with status, IP, MAC |
-| `cleanup.sh` | Stop all VMs, remove bridge, flush NAT |
+| `logs-vm.sh` | View VM logs (boot or OS) |
 
 ## Configuration
 
@@ -116,10 +116,11 @@ VMs communicate via the bridge and access the internet via NAT.
 ssh -i env/vm.id_rsa root@10.20.0.2
 
 # Follow console logs
-tail -f env/vm1/firecracker.console.log
+./logs-vm.sh vm1
+./logs-vm.sh vm1 boot
 
 # View firecracker logs
-cat env/vm1/firecracker.log
+./logs-vm.sh vm1 os
 
 # List all VMs
 ./list-vms.sh

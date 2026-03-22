@@ -42,6 +42,7 @@ ssh -i env/vm.id_rsa root@10.10.0.2
 | `setup.sh` | Prepare assets, configure cloud-init, setup network |
 | `create-vm.sh` | Start the Firecracker VM |
 | `delete-vm.sh` | Graceful shutdown and cleanup |
+| `logs-vm.sh` | View VM logs (boot or OS) |
 
 ## Configuration
 
@@ -91,10 +92,11 @@ Host                    Guest
 ssh -i env/vm.id_rsa root@10.10.0.2
 
 # Follow console logs
-tail -f env/firecracker.console.log
+./logs-vm.sh
+./logs-vm.sh boot
 
 # View firecracker logs
-cat env/firecracker.log
+./logs-vm.sh os
 ```
 
 ## Troubleshooting

@@ -350,7 +350,8 @@ sleep 2
 
 # Verify process started
 if ! kill -0 "$VM_PID" 2>/dev/null; then
-  echo "ERROR: Firecracker failed to start. Check $VM_DIR/firecracker.console.log"
+  echo "ERROR: Firecracker failed to start. Check the log:"
+  echo " ./logs-vm.sh ${VM_NAME} boot"
   cd ../..
   exit 1
 fi
@@ -375,6 +376,6 @@ echo " - Tap: $TAP_DEV"
 echo " - Directory: $VM_DIR"
 echo ""
 echo "Commands:"
-echo " - Logs: tail -f $VM_DIR/firecracker.console.log"
+echo " - Logs: ./logs-vm.sh ${VM_NAME} boot"
 echo " - Delete: ./delete-vm.sh $VM_NAME"
 echo ""

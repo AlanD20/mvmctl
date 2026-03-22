@@ -28,7 +28,7 @@ if [ -f "$FIRECRACKER_PID_FILE" ]; then
   EXISTING_PID=$(cat "$FIRECRACKER_PID_FILE")
   if kill -0 "$EXISTING_PID" 2>/dev/null; then
     echo " - VM is already running (PID: $EXISTING_PID)"
-    echo " - Console log: tail -f ${OUTPUT_DIR}/firecracker.console.log"
+    echo " - Console log: ./logs-vm.sh boot"
     exit 0
   fi
 fi
@@ -86,10 +86,10 @@ FIRECRACKER_ARGS="${FIRECRACKER_ARGS# }"
 echo " - Args: $FIRECRACKER_ARGS"
 
 nohup "$FIRECRACKER_BIN" $FIRECRACKER_ARGS --config-file "$CONFIG_ABS_PATH" \
-  > "$CONSOLE_LOG" 2>&1 &
+  >"$CONSOLE_LOG" 2>&1 &
 
 FIRECRACKER_PID=$!
-echo "$FIRECRACKER_PID" > "$FIRECRACKER_PID_FILE"
+echo "$FIRECRACKER_PID" >"$FIRECRACKER_PID_FILE"
 
 # Give the process a moment to initialise, then verify it's still alive
 sleep 2
@@ -104,7 +104,7 @@ fi
 echo ""
 echo "=== VM Started (PID: $FIRECRACKER_PID) ==="
 echo ""
-echo "Console : tail -f ${OUTPUT_DIR}/firecracker.console.log"
+echo "Console : ./logs-vm.sh boot"
 echo "SSH     : ssh -i ${OUTPUT_DIR}/vm.id_rsa root@${GUEST_IP}"
 echo "Stop    : ./delete-vm.sh"
 echo ""
