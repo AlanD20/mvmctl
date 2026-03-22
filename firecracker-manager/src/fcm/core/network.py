@@ -438,6 +438,29 @@ def allocate_ip(
     raise NetworkError(f"No available IPs in subnet {subnet}")
 
 
+def get_iptables_rules_for_bridge(bridge: str) -> list[str]:
+    """Return iptables rules that reference the given bridge interface.
+
+    Runs iptables -L FORWARD and iptables -t nat -L POSTROUTING and filters
+    lines that contain the bridge name.
+
+    Returns a list of matching rule strings (may be empty).
+    """
+    rules: list[str] = []
+
+    for cmd in [
+        ["iptables", "-L", "FORWARD", "--line-numbers", "-n"],
+        ["iptables", "-t", "nat", "-L", "POSTROUTING", "--line-numbers", "-n"],
+    ]:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if bridge in line:
+                    rules.append(line.strip())
+
+    return rules
+
+
 def generate_mac() -> str:
     """Generate a random MAC address with 02:FC: prefix.
 

@@ -17,15 +17,11 @@ from fcm.core.config_gen import ConfigGenerator
 from fcm.core.firecracker import FirecrackerClient, get_vm_socket_path
 from fcm.core.logs import show_logs
 from fcm.core.network import (
-    BRIDGE_NAME,
-    allocate_ip,
     add_iptables_forward_rules,
     create_tap,
     delete_tap,
     generate_mac,
     remove_iptables_forward_rules,
-    setup_bridge,
-    setup_nat,
     teardown_nat,
 )
 from fcm.core.network_manager import (
@@ -42,33 +38,16 @@ from fcm.models.vm import VMConfig, VMInstance, VMState
 from fcm.utils.console import print_error, print_info, print_success
 from fcm.utils.fs import get_cache_dir, get_images_dir, get_kernels_dir, get_vm_dir
 
-app = typer.Typer(help="VM lifecycle management")
+app = typer.Typer(help="VM lifecycle management", no_args_is_help=True)
 
 console = Console()
 
-# ---------------------------------------------------------------------------
-# setup
-# ---------------------------------------------------------------------------
 
-
-@app.command()
-def setup(
-    bridge: str = typer.Option(BRIDGE_NAME, "--bridge", help="Bridge interface name"),
-) -> None:
-    """Create the bridge interface and configure NAT.
-
-    Run once per host boot (or after reboot). Requires root.
-    """
-    try:
-        print_info(f"Setting up bridge {bridge}...")
-        setup_bridge(bridge)
-        print_info("Configuring NAT...")
-        setup_nat(bridge)
-        print_success(f"Network setup complete. Bridge {bridge} is ready.")
-    except NetworkError as e:
-        print_error(f"Network setup failed: {e}")
-        raise typer.Exit(code=1)
-
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the vm command group."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
 
 # ---------------------------------------------------------------------------
 # create
@@ -86,11 +65,11 @@ def create(
         "--kernel",
         help="Path to vmlinux kernel (default: FCM_KERNEL or ~/.cache/firecracker-manager/kernels/vmlinux)",
     ),
-    vcpus: int = typer.Option(1, "--vcpus", help="Number of vCPUs"),
-    mem: int = typer.Option(512, "--mem", help="Memory in MiB"),
+    vcpus: int = typer.Option(1, "--vcpus", "--cpus", help="Number of vCPUs"),
+    mem: int = typer.Option(512, "--mem", "--memory", help="Memory in MiB"),
     ip: str | None = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
     network_name: str = typer.Option(
-        DEFAULT_NETWORK_NAME, "--network", help="Named network to attach to"
+        DEFAULT_NETWORK_NAME, "--network", "--net", help="Named network to attach to"
     ),
     mac: str | None = typer.Option(
         None, "--mac", help="Custom MAC address (auto-generated if omitted)"
@@ -114,6 +93,14 @@ def create(
     ),
 ) -> None:
     """Create and start a new Firecracker VM."""
+    import re
+
+    if mac is not None:
+        mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
+        if not mac_re.match(mac):
+            print_error(f"Invalid MAC address format: {mac!r}. Expected format: XX:XX:XX:XX:XX:XX")
+            raise typer.Exit(code=1)
+
     vm_dir = get_vm_dir(name)
     if vm_dir.exists():
         print_error(f"VM '{name}' already exists at {vm_dir}")
@@ -174,9 +161,9 @@ def create(
         # Validate IP is in the network's subnet
         import ipaddress
         try:
-            ip_net = ipaddress.IPv4Network(net_config.subnet, strict=False)
+            ip_net = ipaddress.IPv4Network(net_config.cidr, strict=False)
             if ipaddress.IPv4Address(ip.split("/")[0]) not in ip_net:
-                print_error(f"IP {ip} is outside network '{network_name}' subnet {net_config.subnet}")
+                print_error(f"IP {ip} is outside network '{network_name}' subnet {net_config.cidr}")
                 raise typer.Exit(code=1)
         except ValueError as e:
             print_error(f"Invalid IP address: {e}")
@@ -190,7 +177,7 @@ def create(
             raise typer.Exit(code=1)
 
     # MAC address
-    guest_mac = mac if mac else _deterministic_mac(name)
+    guest_mac = mac if mac else generate_mac()
     tap_name = f"fc-{name}-0"
     bridge = net_config.bridge
 
@@ -333,29 +320,8 @@ def remove(
     vm_dir = get_vm_dir(name)
     tap_name = f"fc-{name}-0"
 
-    # Kill process
-    if vm.pid:
-        try:
-            os.kill(vm.pid, signal.SIGTERM)
-            # Wait up to 5 seconds for graceful exit
-            for _ in range(50):
-                time.sleep(0.1)
-                try:
-                    os.kill(vm.pid, 0)
-                except ProcessLookupError:
-                    break
-            else:
-                # Still alive, force kill
-                try:
-                    os.kill(vm.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-        except ProcessLookupError:
-            pass  # Already gone
-        except PermissionError as e:
-            print_error(f"Cannot kill PID {vm.pid}: {e}")
-            if not force:
-                raise typer.Exit(code=1)
+    # Graceful shutdown sequence
+    _graceful_shutdown(vm.pid, vm.socket_path, vm.ip)
 
     # Teardown network
     remove_iptables_forward_rules(tap_name)
@@ -593,44 +559,18 @@ def cleanup(
 def pause(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
 ) -> None:
-    """Pause a running VM. Requires VM to have been started with --enable-api-socket."""
-    socket_path = get_vm_socket_path(name)
-    if not socket_path:
-        print_error(f"Socket not found for VM '{name}'")
-        print_error("VM must be running with --enable-api-socket")
-        raise typer.Exit(code=1)
-
-    client = FirecrackerClient(socket_path)
-    try:
-        if client.pause_vm():
-            VMManager().update_status(name, VMState.PAUSED)
-            raise typer.Exit(code=0)
-        else:
-            raise typer.Exit(code=1)
-    finally:
-        client.close()
+    """Pause a running VM (not supported in this version)."""
+    print_info("VM pause/resume is not supported by this version of fcm.")
+    raise typer.Exit(code=0)
 
 
 @app.command()
 def resume(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
 ) -> None:
-    """Resume a paused VM. Requires VM to have been started with --enable-api-socket."""
-    socket_path = get_vm_socket_path(name)
-    if not socket_path:
-        print_error(f"Socket not found for VM '{name}'")
-        print_error("VM must be running with --enable-api-socket")
-        raise typer.Exit(code=1)
-
-    client = FirecrackerClient(socket_path)
-    try:
-        if client.resume_vm():
-            VMManager().update_status(name, VMState.RUNNING)
-            raise typer.Exit(code=0)
-        else:
-            raise typer.Exit(code=1)
-    finally:
-        client.close()
+    """Resume a paused VM (not supported in this version)."""
+    print_info("VM pause/resume is not supported by this version of fcm.")
+    raise typer.Exit(code=0)
 
 
 @app.command()
@@ -685,22 +625,68 @@ def load(
 # ---------------------------------------------------------------------------
 
 
-def _deterministic_mac(vm_name: str) -> str:
-    """Generate a deterministic MAC address from the VM name.
+def _graceful_shutdown(pid: int | None, socket_path: Path | None, vm_ip: str | None) -> None:
+    """Gracefully shut down a VM process.
 
-    Uses a stable hash so the same VM name always gets the same MAC.
-    The locally administered bit is set (02:xx prefix).
+    Sequence:
+    1. Send Ctrl+Alt+Del via API socket (best-effort), then wait up to 5s.
+    2. If still alive: SIGTERM, wait 1s.
+    3. If still alive: SIGKILL.
+    4. Run ssh-keygen -R <ip> to remove host key from known_hosts.
     """
-    import hashlib
+    if pid is None:
+        return
 
-    h = hashlib.sha256(vm_name.encode()).digest()
-    return f"02:{h[0]:02x}:{h[1]:02x}:{h[2]:02x}:{h[3]:02x}:{h[4]:02x}"
+    def _is_alive(p: int) -> bool:
+        try:
+            os.kill(p, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+
+    # Step 1: send Ctrl+Alt+Del via API socket
+    if socket_path is not None and Path(socket_path).exists():
+        try:
+            client = FirecrackerClient(Path(socket_path))
+            client.send_ctrl_alt_del()
+            client.close()
+        except Exception:
+            pass  # best-effort
+        # Wait up to 5 seconds for graceful exit
+        for _ in range(50):
+            time.sleep(0.1)
+            if not _is_alive(pid):
+                break
+
+    # Step 2: SIGTERM
+    if _is_alive(pid):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        time.sleep(1.0)
+
+    # Step 3: SIGKILL
+    if _is_alive(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    # Step 4: remove VM IP from known_hosts
+    if vm_ip is not None:
+        subprocess.run(
+            ["ssh-keygen", "-R", vm_ip],
+            capture_output=True,
+            check=False,
+        )
 
 
 def _resolve_ssh_key(ssh_key: str | None) -> str | None:
     """Resolve an SSH key from name (key cache) or file path.
 
     Returns the public key content string, or None.
+    When ssh_key is explicitly named but not found, prints available keys and exits.
     """
     if ssh_key is None:
         # Fall back to any key in cache
@@ -721,8 +707,18 @@ def _resolve_ssh_key(ssh_key: str | None) -> str | None:
     if key_path.exists():
         return key_path.read_text().strip()
 
-    print_info(f"Warning: SSH key '{ssh_key}' not found in cache or filesystem")
-    return None
+    # Key not found — list available keys and exit
+    from fcm.core.key_manager import list_keys
+
+    available = list_keys()
+    if available:
+        names = ", ".join(k.name for k in available)
+        print_error(f"SSH key '{ssh_key}' not found in cache or filesystem.")
+        print_error(f"Available keys: {names}")
+    else:
+        print_error(f"SSH key '{ssh_key}' not found in cache or filesystem.")
+        print_error("No keys in cache. Add one with: fcm key add <name> <path>")
+    raise typer.Exit(code=1)
 
 
 def _write_cloud_init(
@@ -855,6 +851,6 @@ def _find_network_for_vm(vm_name: str) -> list[str]:
     result: list[str] = []
     for net in list_networks():
         leases = get_network_leases(net.name)
-        if any(l.vm_name == vm_name for l in leases):
+        if any(lease.vm_name == vm_name for lease in leases):
             result.append(net.name)
     return result

@@ -12,10 +12,6 @@ from pathlib import Path
 from fcm.constants import device_prefix
 from fcm.core.network import (
     allocate_ip,
-    add_iptables_forward_rules,
-    create_tap,
-    delete_tap,
-    remove_iptables_forward_rules,
     setup_bridge,
     setup_nat,
     teardown_bridge,
@@ -36,7 +32,7 @@ class NetworkConfig:
     """Persistent configuration for a named network."""
 
     name: str
-    subnet: str
+    cidr: str
     gateway: str
     bridge: str
     nat_enabled: bool = True
@@ -77,6 +73,9 @@ def _load_config(network_dir: Path) -> NetworkConfig | None:
     if not config_file.exists():
         return None
     data = json.loads(config_file.read_text())
+    # Migrate legacy 'subnet' key to 'cidr'
+    if "subnet" in data and "cidr" not in data:
+        data["cidr"] = data.pop("subnet")
     return NetworkConfig(**data)
 
 
@@ -135,9 +134,11 @@ def get_network_leases(name: str) -> list[NetworkLease]:
 
 def create_network(
     name: str,
-    subnet: str | None = None,
+    cidr: str | None = None,
     gateway: str | None = None,
     nat: bool = True,
+    # Legacy alias for backward compatibility
+    subnet: str | None = None,
 ) -> NetworkConfig:
     """Create a named network.
 
@@ -146,9 +147,10 @@ def create_network(
 
     Args:
         name: Network name.
-        subnet: IP subnet in CIDR notation (e.g., "192.168.100.0/24").
+        cidr: IP subnet in CIDR notation (e.g., "192.168.100.0/24").
         gateway: Gateway IP for the bridge. Defaults to first host in subnet.
         nat: Whether to configure NAT/masquerade. Default True.
+        subnet: Deprecated alias for cidr.
 
     Returns:
         The created NetworkConfig.
@@ -156,23 +158,27 @@ def create_network(
     Raises:
         NetworkError: If the network already exists or setup fails.
     """
+    # Handle legacy subnet parameter
+    if cidr is None and subnet is not None:
+        cidr = subnet
+
     network_dir = get_network_dir(name)
     if _load_config(network_dir) is not None:
         raise NetworkError(f"Network '{name}' already exists")
 
     # Resolve defaults
-    if subnet is None:
-        subnet = _auto_allocate_subnet()
-    _validate_subnet_no_overlap(subnet, name)
+    if cidr is None:
+        cidr = _auto_allocate_subnet()
+    _validate_subnet_no_overlap(cidr, name)
 
     if gateway is None:
-        gateway = _gateway_for_subnet(subnet)
+        gateway = _gateway_for_subnet(cidr)
 
     bridge = _bridge_name_for(name)
 
     config = NetworkConfig(
         name=name,
-        subnet=subnet,
+        cidr=cidr,
         gateway=gateway,
         bridge=bridge,
         nat_enabled=nat,
@@ -180,7 +186,7 @@ def create_network(
 
     # Create host-level resources
     try:
-        setup_bridge(bridge, gateway_cidr=f"{gateway}/{_prefix_len(subnet)}")
+        setup_bridge(bridge, gateway_cidr=f"{gateway}/{_prefix_len(cidr)}")
         if nat:
             setup_nat(bridge)
     except NetworkError:
@@ -211,7 +217,7 @@ def remove_network(name: str) -> None:
 
     leases = _load_leases(network_dir)
     if leases:
-        vm_names = ", ".join(l.vm_name for l in leases)
+        vm_names = ", ".join(lease.vm_name for lease in leases)
         raise NetworkError(
             f"Network '{name}' still has VMs attached: {vm_names}. "
             "Remove those VMs first."
@@ -241,13 +247,13 @@ def inspect_network(name: str) -> dict[str, object]:
     leases = _load_leases(network_dir)
     return {
         "name": config.name,
-        "subnet": config.subnet,
+        "cidr": config.cidr,
         "gateway": config.gateway,
         "bridge": config.bridge,
         "nat_enabled": config.nat_enabled,
         "created_at": config.created_at,
         "bridge_exists": bridge_exists(config.bridge),
-        "vms": [{"vm_name": l.vm_name, "ip": l.ip} for l in leases],
+        "vms": [{"vm_name": lease.vm_name, "ip": lease.ip} for lease in leases],
     }
 
 
@@ -265,11 +271,11 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
         raise NetworkError(f"Network '{network_name}' not found")
 
     leases = _load_leases(network_dir)
-    used_ips = [l.ip for l in leases]
+    used_ips = [lease.ip for lease in leases]
     # Also reserve the gateway
     used_ips.append(config.gateway)
 
-    ip = allocate_ip(used_ips, subnet=config.subnet)
+    ip = allocate_ip(used_ips, subnet=config.cidr)
     leases.append(NetworkLease(vm_name=vm_name, ip=ip))
     _save_leases(network_dir, leases)
     return ip
@@ -279,7 +285,7 @@ def release_network_ip(network_name: str, vm_name: str) -> None:
     """Release a VM's IP lease from a network."""
     network_dir = get_network_dir(network_name)
     leases = _load_leases(network_dir)
-    leases = [l for l in leases if l.vm_name != vm_name]
+    leases = [lease for lease in leases if lease.vm_name != vm_name]
     _save_leases(network_dir, leases)
 
 
@@ -288,7 +294,7 @@ def ensure_default_network() -> NetworkConfig:
     config = get_network(DEFAULT_NETWORK_NAME)
     if config is not None:
         return config
-    return create_network(DEFAULT_NETWORK_NAME, subnet=DEFAULT_SUBNET, nat=True)
+    return create_network(DEFAULT_NETWORK_NAME, cidr=DEFAULT_SUBNET, nat=True)
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +311,7 @@ def _auto_allocate_subnet() -> str:
     existing = list_networks()
     used_nets = set()
     for net in existing:
-        used_nets.add(ipaddress.IPv4Network(net.subnet, strict=False))
+        used_nets.add(ipaddress.IPv4Network(net.cidr, strict=False))
 
     # Start from 10.20.0.0/24 and increment the third octet
     for i in range(256):
@@ -322,8 +328,8 @@ def _validate_subnet_no_overlap(subnet: str, exclude_name: str = "") -> None:
     for existing in list_networks():
         if existing.name == exclude_name:
             continue
-        existing_net = ipaddress.IPv4Network(existing.subnet, strict=False)
+        existing_net = ipaddress.IPv4Network(existing.cidr, strict=False)
         if new_net.overlaps(existing_net):
             raise NetworkError(
-                f"Subnet {subnet} overlaps with network '{existing.name}' ({existing.subnet})"
+                f"Subnet {subnet} overlaps with network '{existing.name}' ({existing.cidr})"
             )

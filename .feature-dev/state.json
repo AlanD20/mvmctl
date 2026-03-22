@@ -1,0 +1,12 @@
+{
+  "feature": "firecracker-manager CLI Phase 4 — implement all Phase 4 requirements per python-cli-entry.md",
+  "status": "in_progress",
+  "methodology": "traditional",
+  "complexity": "complex",
+  "current_step": "checkpoint-1",
+  "current_phase": 1,
+  "completed_steps": [1, 2],
+  "files_created": ["01-requirements.md", "02-architecture.md"],
+  "started_at": "2026-03-22T00:00:00Z",
+  "last_updated": "2026-03-22T00:00:00Z"
+}

@@ -9,13 +9,21 @@ from fcm.core.host import (
     get_host_state,
     get_ip_forward_status,
     init_host,
+    prune_host,
     restore_host,
 )
 from fcm.exceptions import HostError
 from fcm.utils.console import console, print_error, print_info, print_success, print_warning
 from fcm.utils.fs import get_cache_dir
 
-app = typer.Typer(help="Host configuration")
+app = typer.Typer(help="Host configuration", no_args_is_help=True)
+
+
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the host command group."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
 
 
 @app.command(name="init")
@@ -84,6 +92,45 @@ def ls_cmd() -> None:
     )
 
     console.print(table)
+
+
+@app.command(name="prune")
+def prune(
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
+) -> None:
+    """Tear down all bridges, TAPs, and iptables rules. Does not remove cached files."""
+    from fcm.core.vm_manager import VMManager
+    from fcm.models.vm import VMState
+
+    # Refuse if any VMs are running
+    manager = VMManager()
+    running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
+    if running:
+        names = ", ".join(v.name for v in running)
+        print_error(f"Cannot prune: {len(running)} VM(s) still running: {names}")
+        print_error("Stop all VMs first with: fcm vm remove --name <name>")
+        raise typer.Exit(code=1)
+
+    if not force:
+        print_warning(
+            "This will tear down all network bridges, TAP devices, iptables rules, "
+            "and revert host sysctl changes. VM cache files, images, kernels, and "
+            "binaries will NOT be removed."
+        )
+        typer.confirm("Proceed with host prune?", abort=True)
+
+    cache_dir = get_cache_dir()
+    try:
+        summary = prune_host(cache_dir)
+    except Exception as e:
+        print_error(f"Prune failed: {e}")
+        raise typer.Exit(code=1)
+
+    if summary:
+        for item in summary:
+            print_info(f"  {item}")
+
+    print_success("Host pruned successfully.")
 
 
 @app.command()

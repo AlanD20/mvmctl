@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import typer
 
@@ -17,7 +16,7 @@ from fcm.core.kernel import build_kernel_pipeline
 from fcm.core.key_manager import add_key, create_key, list_keys
 from fcm.exceptions import BinaryError, HostError
 from fcm.exceptions import KeyError as FCMKeyError
-from fcm.utils.console import print_error, print_info, print_success, print_warning
+from fcm.utils.console import print_info, print_success, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
 app = typer.Typer(help="Guided onboarding")

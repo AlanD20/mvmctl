@@ -231,6 +231,51 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     return changes
 
 
+def prune_host(cache_dir: Path) -> list[str]:
+    """Tear down all bridges, TAPs, iptables rules and revert host sysctl changes.
+
+    Does NOT remove VM cache files, images, kernels, or binaries.
+
+    Returns a list of summary strings describing what was torn down.
+    """
+    # Import here to avoid circular imports
+    from fcm.core.network_manager import list_networks, remove_network
+
+    summary: list[str] = []
+
+    # Tear down all named networks (bridges, TAPs, iptables rules)
+    try:
+        networks = list_networks()
+    except Exception:
+        networks = []
+
+    for net in networks:
+        try:
+            remove_network(net.name)
+            summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
+        except Exception as e:
+            summary.append(f"Warning: failed to remove network '{net.name}': {e}")
+
+    # Revert sysctl changes using saved snapshot
+    try:
+        reverted = restore_host(cache_dir)
+        for change in reverted:
+            summary.append(f"Reverted {change.setting}")
+    except HostError:
+        pass  # No saved state is acceptable
+
+    # Remove the state snapshot file if it exists
+    state_file = _state_file(cache_dir)
+    if state_file.exists():
+        try:
+            state_file.unlink()
+            summary.append("Removed host state snapshot")
+        except OSError:
+            pass
+
+    return summary
+
+
 def get_host_state(cache_dir: Path) -> HostState | None:
     path = _state_file(cache_dir)
     if not path.exists():

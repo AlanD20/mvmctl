@@ -88,7 +88,7 @@ def get_key(name: str) -> KeyInfo | None:
     return KeyInfo(**entry)
 
 
-def add_key(name: str, pub_key_path: str | Path) -> KeyInfo:
+def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> KeyInfo:
     """Import an existing public key into the cache."""
     pub_key_path = Path(pub_key_path)
     if not pub_key_path.exists():
@@ -100,7 +100,14 @@ def add_key(name: str, pub_key_path: str | Path) -> KeyInfo:
 
     registry = _load_registry()
     if name in registry:
-        raise FCMKeyError(f"Key '{name}' already exists. Remove it first to replace.")
+        if overwrite:
+            # Remove old .pub file and registry entry before re-adding
+            old_pub = get_keys_dir() / f"{name}.pub"
+            if old_pub.exists():
+                old_pub.unlink()
+            del registry[name]
+        else:
+            raise FCMKeyError(f"Key '{name}' already exists. Remove it first to replace.")
 
     keys_dir = get_keys_dir()
     keys_dir.mkdir(parents=True, exist_ok=True)
@@ -146,7 +153,12 @@ def create_key(
 
     registry = _load_registry()
     if name in registry:
-        raise FCMKeyError(f"Key '{name}' already exists in cache. Remove it first.")
+        if overwrite:
+            # Silently remove existing registry entry before proceeding
+            del registry[name]
+            _save_registry(registry)
+        else:
+            raise FCMKeyError(f"Key '{name}' already exists in cache. Remove it first.")
 
     if comment is None:
         import socket

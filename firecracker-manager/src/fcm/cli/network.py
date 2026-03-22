@@ -1,13 +1,17 @@
 """Network management commands."""
 
 import json
+from typing import cast
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from fcm.core.network import get_iptables_rules_for_bridge
 from fcm.core.network_manager import (
+    DEFAULT_NETWORK_NAME,
     create_network,
+    get_network_leases,
     inspect_network,
     list_networks,
     remove_network,
@@ -15,8 +19,15 @@ from fcm.core.network_manager import (
 from fcm.exceptions import NetworkError
 from fcm.utils.console import print_error, print_info, print_success
 
-app = typer.Typer(help="Network management")
+app = typer.Typer(help="Network management", no_args_is_help=True)
 console = Console()
+
+
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the network command group."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
 
 
 @app.command(name="ls")
@@ -30,11 +41,12 @@ def ls(
         data = [
             {
                 "name": n.name,
-                "subnet": n.subnet,
+                "cidr": n.cidr,
                 "gateway": n.gateway,
                 "bridge": n.bridge,
                 "nat_enabled": n.nat_enabled,
                 "created_at": n.created_at,
+                "vm_count": len(get_network_leases(n.name)),
             }
             for n in networks
         ]
@@ -47,16 +59,19 @@ def ls(
 
     table = Table(title="Networks")
     table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("Subnet", style="green")
+    table.add_column("CIDR", style="green")
     table.add_column("Gateway")
     table.add_column("Bridge")
     table.add_column("NAT")
+    table.add_column("VM Count")
     table.add_column("Created")
 
     for n in networks:
         nat_str = "[green]yes[/green]" if n.nat_enabled else "[dim]no[/dim]"
         created = n.created_at[:19] if n.created_at else "-"
-        table.add_row(n.name, n.subnet, n.gateway, n.bridge, nat_str, created)
+        vm_count = str(len(get_network_leases(n.name)))
+        name_str = f"{n.name} (default)" if n.name == DEFAULT_NETWORK_NAME else n.name
+        table.add_row(name_str, n.cidr, n.gateway, n.bridge, nat_str, vm_count, created)
 
     console.print(table)
 
@@ -72,8 +87,8 @@ def list_cmd(
 @app.command()
 def create(
     name: str = typer.Argument(..., help="Network name"),
-    subnet: str | None = typer.Option(
-        None, "--subnet", help="IP subnet (e.g. 192.168.100.0/24)"
+    cidr: str = typer.Option(
+        ..., "--cidr", help="IP subnet in CIDR notation (e.g. 192.168.100.0/24)"
     ),
     gateway: str | None = typer.Option(
         None, "--gateway", help="Gateway IP for the bridge"
@@ -84,7 +99,7 @@ def create(
     try:
         config = create_network(
             name=name,
-            subnet=subnet,
+            cidr=cidr,
             gateway=gateway,
             nat=not no_nat,
         )
@@ -93,7 +108,7 @@ def create(
         raise typer.Exit(code=1)
 
     print_success(f"Network '{config.name}' created")
-    print_info(f"  Subnet:  {config.subnet}")
+    print_info(f"  CIDR:    {config.cidr}")
     print_info(f"  Gateway: {config.gateway}")
     print_info(f"  Bridge:  {config.bridge}")
     print_info(f"  NAT:     {'enabled' if config.nat_enabled else 'disabled'}")
@@ -143,17 +158,27 @@ def inspect(
         return
 
     print_info(f"Network: {info['name']}")
-    print_info(f"  Subnet:       {info['subnet']}")
+    print_info(f"  CIDR:         {info.get('cidr', info.get('subnet', ''))}")
     print_info(f"  Gateway:      {info['gateway']}")
     print_info(f"  Bridge:       {info['bridge']}")
     print_info(f"  NAT:          {'enabled' if info['nat_enabled'] else 'disabled'}")
     print_info(f"  Bridge alive: {'yes' if info['bridge_exists'] else 'no'}")
     print_info(f"  Created:      {info['created_at']}")
 
-    vms = info.get("vms", [])
+    vms = cast(list[dict[str, str]], info.get("vms") or [])
     if vms:
         print_info(f"  VMs ({len(vms)}):")
         for vm in vms:
             print_info(f"    {vm['vm_name']}: {vm['ip']}")
     else:
         print_info("  VMs: none")
+
+    # iptables rule dump for this bridge
+    bridge = str(info["bridge"])
+    rules = get_iptables_rules_for_bridge(bridge)
+    if rules:
+        print_info(f"  iptables rules for {bridge}:")
+        for rule in rules:
+            print_info(f"    {rule}")
+    else:
+        print_info(f"  iptables rules for {bridge}: none")

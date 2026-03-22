@@ -15,7 +15,7 @@ from fcm.exceptions import NetworkError
 from fcm.models.vm import VMInstance, VMState
 
 _FAKE_NET = NetworkConfig(
-    name="default", subnet="10.20.0.0/24", gateway="10.20.0.1",
+    name="default", cidr="10.20.0.0/24", gateway="10.20.0.1",
     bridge="fcm-br0", nat_enabled=True,
 )
 
@@ -81,15 +81,11 @@ def test_cleanup_nothing_to_do():
     assert "Nothing to clean up" in result.output
 
 
-def test_setup_calls_network():
-    with (
-        patch("fcm.cli.vm.setup_bridge") as mock_bridge,
-        patch("fcm.cli.vm.setup_nat") as mock_nat,
-    ):
-        result = runner.invoke(app, ["setup"])
-    assert result.exit_code == 0
-    mock_bridge.assert_called_once()
-    mock_nat.assert_called_once()
+def test_setup_removed():
+    # The 'setup' subcommand was removed in Phase 4.
+    result = runner.invoke(app, ["setup"])
+    # Typer returns exit code 2 for unknown commands
+    assert result.exit_code == 2
 
 
 def test_create_vm_missing_kernel():
@@ -293,15 +289,12 @@ def test_delete_force_running_vm():
         patch("fcm.cli.vm.delete_tap"),
         patch("fcm.cli.vm.teardown_nat"),
         patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
-        patch("os.kill") as mock_kill,
-        patch("fcm.cli.vm.time.sleep"),
+        patch("fcm.cli.vm._graceful_shutdown"),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
         fake_dir = MagicMock()
         fake_dir.exists.return_value = False
         mock_vm_dir.return_value = fake_dir
-        # Simulate process dying after SIGTERM
-        mock_kill.side_effect = [None, ProcessLookupError]
         result = runner.invoke(app, ["delete", "--name", "delvm", "--force"])
 
     assert result.exit_code == 0
@@ -351,6 +344,8 @@ def test_delete_permission_error_no_force():
 
 
 def test_delete_permission_error_not_force_exits():
+    # Phase 4: _graceful_shutdown now handles kill sequence internally.
+    # The remove command proceeds to cleanup even if kill fails.
     vm = _make_vm("permvm2", VMState.RUNNING)
     with (
         patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
@@ -359,7 +354,7 @@ def test_delete_permission_error_not_force_exits():
         patch("fcm.cli.vm.delete_tap"),
         patch("fcm.cli.vm.teardown_nat"),
         patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
-        patch("os.kill", side_effect=PermissionError("not root")),
+        patch("fcm.cli.vm._graceful_shutdown"),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
         fake_dir = MagicMock()
@@ -368,7 +363,7 @@ def test_delete_permission_error_not_force_exits():
         # Provide "y" to confirmation prompt
         result = runner.invoke(app, ["delete", "--name", "permvm2"], input="y\n")
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
 
 
 # ---------------------------------------------------------------------------
@@ -521,68 +516,18 @@ def test_cleanup_abort_no_force():
 # ---------------------------------------------------------------------------
 
 
-def test_pause_success():
-    mock_client = MagicMock()
-    mock_client.pause_vm.return_value = True
-    with (
-        patch("fcm.cli.vm.get_vm_socket_path", return_value=Path("/tmp/fake.sock")),
-        patch("fcm.cli.vm.FirecrackerClient", return_value=mock_client),
-        patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
-    ):
-        result = runner.invoke(app, ["pause", "--name", "myvm"])
+def test_pause_not_supported():
+    # Phase 4: pause prints "not supported" and exits 0
+    result = runner.invoke(app, ["pause", "--name", "myvm"])
     assert result.exit_code == 0
-    mock_client.pause_vm.assert_called_once()
-    mock_client.close.assert_called_once()
+    assert "not supported" in result.output.lower()
 
 
-def test_pause_no_socket():
-    with patch("fcm.cli.vm.get_vm_socket_path", return_value=None):
-        result = runner.invoke(app, ["pause", "--name", "myvm"])
-    assert result.exit_code == 1
-    assert "Socket not found" in result.output
-
-
-def test_pause_failure():
-    mock_client = MagicMock()
-    mock_client.pause_vm.return_value = False
-    with (
-        patch("fcm.cli.vm.get_vm_socket_path", return_value=Path("/tmp/fake.sock")),
-        patch("fcm.cli.vm.FirecrackerClient", return_value=mock_client),
-    ):
-        result = runner.invoke(app, ["pause", "--name", "myvm"])
-    assert result.exit_code == 1
-
-
-def test_resume_success():
-    mock_client = MagicMock()
-    mock_client.resume_vm.return_value = True
-    with (
-        patch("fcm.cli.vm.get_vm_socket_path", return_value=Path("/tmp/fake.sock")),
-        patch("fcm.cli.vm.FirecrackerClient", return_value=mock_client),
-        patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
-    ):
-        result = runner.invoke(app, ["resume", "--name", "myvm"])
+def test_resume_not_supported():
+    # Phase 4: resume prints "not supported" and exits 0
+    result = runner.invoke(app, ["resume", "--name", "myvm"])
     assert result.exit_code == 0
-    mock_client.resume_vm.assert_called_once()
-    mock_client.close.assert_called_once()
-
-
-def test_resume_no_socket():
-    with patch("fcm.cli.vm.get_vm_socket_path", return_value=None):
-        result = runner.invoke(app, ["resume", "--name", "myvm"])
-    assert result.exit_code == 1
-    assert "Socket not found" in result.output
-
-
-def test_resume_failure():
-    mock_client = MagicMock()
-    mock_client.resume_vm.return_value = False
-    with (
-        patch("fcm.cli.vm.get_vm_socket_path", return_value=Path("/tmp/fake.sock")),
-        patch("fcm.cli.vm.FirecrackerClient", return_value=mock_client),
-    ):
-        result = runner.invoke(app, ["resume", "--name", "myvm"])
-    assert result.exit_code == 1
+    assert "not supported" in result.output.lower()
 
 
 def test_snapshot_success():
@@ -718,14 +663,10 @@ def test_load_failure():
 # ---------------------------------------------------------------------------
 
 
-def test_setup_network_error():
-    with (
-        patch("fcm.cli.vm.setup_bridge", side_effect=NetworkError("bridge fail")),
-        patch("fcm.cli.vm.setup_nat"),
-    ):
-        result = runner.invoke(app, ["setup"])
-    assert result.exit_code == 1
-    assert "Network setup failed" in result.output
+def test_setup_command_removed():
+    # The 'setup' subcommand was removed in Phase 4; setup is now in 'host init'.
+    result = runner.invoke(app, ["setup"])
+    assert result.exit_code == 2
 
 
 # ---------------------------------------------------------------------------

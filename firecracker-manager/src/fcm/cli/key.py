@@ -16,8 +16,15 @@ from fcm.core.key_manager import (
 from fcm.exceptions import KeyError as FCMKeyError
 from fcm.utils.console import print_error, print_info, print_success
 
-app = typer.Typer(help="SSH key management")
+app = typer.Typer(help="SSH key management", no_args_is_help=True)
 console = Console()
+
+
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the key command group."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
 
 
 @app.command(name="ls")
@@ -38,14 +45,14 @@ def ls(
 
     table = Table(title="SSH Keys")
     table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("Algorithm", style="green")
     table.add_column("Fingerprint")
+    table.add_column("Algorithm", style="green")
     table.add_column("Comment")
-    table.add_column("Added")
+    table.add_column("Date Added")
 
     for k in keys:
         added = k.added_at[:19] if k.added_at else "-"
-        table.add_row(k.name, k.algorithm, k.fingerprint, k.comment, added)
+        table.add_row(k.name, k.fingerprint, k.algorithm, k.comment, added)
 
     console.print(table)
 
@@ -62,10 +69,11 @@ def list_cmd(
 def add(
     name: str = typer.Argument(..., help="Name for this key"),
     public_key_path: str = typer.Argument(..., help="Path to public key file"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing key"),
 ) -> None:
     """Import an existing public key into the cache."""
     try:
-        info = add_key(name, public_key_path)
+        info = add_key(name, public_key_path, overwrite=overwrite)
     except FCMKeyError as e:
         print_error(str(e))
         raise typer.Exit(code=1)

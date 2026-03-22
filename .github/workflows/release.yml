@@ -1,0 +1,43 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        working-directory: firecracker-manager
+        run: uv sync --group dev
+
+      - name: Build binary
+        working-directory: firecracker-manager
+        run: |
+          uv run pyinstaller \
+            --onefile \
+            --name fcm-${{ matrix.os }} \
+            src/fcm/main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fcm-${{ matrix.os }}
+          path: firecracker-manager/dist/fcm-${{ matrix.os }}
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firecracker-manager/dist/fcm-${{ matrix.os }}

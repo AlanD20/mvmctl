@@ -58,7 +58,7 @@ def test_add_success(mock_add):
     result = runner.invoke(app, ["add", "testkey", "/tmp/id.pub"])
     assert result.exit_code == 0
     assert "added" in result.output.lower()
-    mock_add.assert_called_once_with("testkey", "/tmp/id.pub")
+    mock_add.assert_called_once_with("testkey", "/tmp/id.pub", overwrite=False)
 
 
 @patch("fcm.cli.key.add_key", side_effect=FCMKeyError("not found"))
