@@ -9,11 +9,11 @@ source config.env
 echo "=== Firecracker Multi-VM Status ==="
 echo ""
 
-if [ ! -d "$OUTPUT_DIR" ] || [ -z "$(ls -A $OUTPUT_DIR 2>/dev/null | grep -v base-rootfs)" ]; then
+if [ ! -d "$OUTPUT_DIR" ] || [ -z "$(ls -A $OUTPUT_DIR 2>/dev/null | grep -v base-rootfs | grep -v cloud-init)" ]; then
   echo "No VMs found."
   echo ""
   echo "Create a VM with:"
-  echo "  ./create-vm.sh <name> [vcpu] [memory_mib]"
+  echo " ./create-vm.sh <name> [vcpu] [memory_mib]"
   exit 0
 fi
 
@@ -24,24 +24,17 @@ for vm_dir in "$OUTPUT_DIR"/*/; do
   if [ -d "$vm_dir" ]; then
     VM_NAME=$(basename "$vm_dir")
 
-    # Skip base-rootfs
-    if [ "$VM_NAME" = "base-rootfs.ext4" ]; then
-      continue
-    fi
+    [ "$VM_NAME" = "base-rootfs.ext4" ] && continue
+    [ "$VM_NAME" = "cloud-init" ] && continue
 
-    # Get IP from config
-    VM_IP="N/A"
-    if [ -f "$vm_dir/firecracker.json" ]; then
-      VM_IP=$(grep -oP 'ip=\K[^:]*' "$vm_dir/firecracker.json" 2>/dev/null | head -1 || echo "N/A")
-    fi
+    [ ! -f "$vm_dir/firecracker.json" ] && continue
 
-    # Get MAC from config
-    VM_MAC="N/A"
-    if [ -f "$vm_dir/firecracker.json" ]; then
-      VM_MAC=$(grep -oP '"guest_mac": "\K[^"]*' "$vm_dir/firecracker.json" 2>/dev/null | head -1 || echo "N/A")
-    fi
+    VM_IP=$(grep -oP 'ip=\K[^:]*' "$vm_dir/firecracker.json" 2>/dev/null | head -1 || true)
+    [ -z "$VM_IP" ] && continue
 
-    # Check status
+    VM_MAC=$(grep -oP '"guest_mac": "\K[^"]*' "$vm_dir/firecracker.json" 2>/dev/null | head -1 || true)
+    [ -z "$VM_MAC" ] && continue
+
     VM_STATUS="stopped"
     VM_PID="N/A"
     if [ -f "$vm_dir/firecracker.pid" ]; then
@@ -57,7 +50,7 @@ done
 
 echo ""
 echo "Commands:"
-echo "  Create:  ./create-vm.sh <name> [vcpu] [memory_mib]"
-echo "  Delete:  ./delete-vm.sh <name>"
-echo "  Console: tail -f $OUTPUT_DIR/<name>/firecracker.console.log"
+echo " Create: ./create-vm.sh <name> [vcpu] [memory_mib]"
+echo " Delete: ./delete-vm.sh <name>"
+echo " Console: tail -f $OUTPUT_DIR/<name>/firecracker.console.log"
 echo ""

@@ -179,8 +179,17 @@ if mount "$VM_DIR/rootfs.ext4" "$MOUNT_DIR" 2>/dev/null || sudo mount "$VM_DIR/r
   # Copy cloud-init files
   sudo cp -r "$VM_DIR/cloud-init/"* "$MOUNT_DIR/var/lib/cloud/seed/nocloud/"
 
+  # Copy 99-nocloud.cfg to cloud.cfg.d (disables cloud-init networking)
+  if [ -f "cloud-init/99-nocloud.cfg" ]; then
+    sudo cp "cloud-init/99-nocloud.cfg" "$MOUNT_DIR/etc/cloud/cloud.cfg.d/"
+  fi
+
   # Set permissions
   sudo chmod 644 "$MOUNT_DIR"/var/lib/cloud/seed/nocloud/*
+
+  # Comment out /boot/efi entries — present by default on some images (e.g. Debian Bookworm)
+  # Firecracker doesn't expose an EFI partition so leaving this uncommented causes boot failure
+  sudo sed -i '/boot\/efi/s/^/#/' "$MOUNT_DIR/etc/fstab"
 
   # Unmount
   umount "$MOUNT_DIR" 2>/dev/null || sudo umount "$MOUNT_DIR"
@@ -200,25 +209,25 @@ echo " - Generating Firecracker configuration..."
 ROOTFS_ABS_PATH="${SCRIPT_DIR}/${VM_DIR}/rootfs.ext4"
 KERNEL_ABS_PATH="${SCRIPT_DIR}/${KERNEL_PATH}"
 
-# Detect filesystem type for proper boot args
+# Detect filesystem type for proper boot args (like single-vm)
 ROOTFS_TYPE="ext4"
 if command -v file &>/dev/null; then
   FS_INFO=$(file -b "$ROOTFS_ABS_PATH" 2>/dev/null || echo "")
-  if echo "$FS_INFO" | grep -qi "btrfs"; then
-    ROOTFS_TYPE="btrfs"
-  elif echo "$FS_INFO" | grep -qi "xfs"; then
-    ROOTFS_TYPE="xfs"
-  elif echo "$FS_INFO" | grep -qi "ext2"; then
-    ROOTFS_TYPE="ext2"
-  elif echo "$FS_INFO" | grep -qi "ext3"; then
-    ROOTFS_TYPE="ext3"
-  fi
+  for fs in btrfs xfs ext2 ext3; do
+    echo "$FS_INFO" | grep -qi "$fs" && ROOTFS_TYPE="$fs" && break
+  done
 fi
 
-echo "   Detected filesystem type: $ROOTFS_TYPE"
+echo " - Detected filesystem: ${ROOTFS_TYPE}"
 
 # Build boot args with appropriate root filesystem type
-BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off ip=${VM_IP}::${NETWORK_PREFIX}.1:255.255.255.0::eth0:off rw rootwait rootfstype=${ROOTFS_TYPE} ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/"
+# Add pci=off only when ENABLE_PCI is false (default behavior for Firecracker)
+PCI_ARGS=""
+if [ "$ENABLE_PCI" != "true" ]; then
+  PCI_ARGS="pci=off"
+fi
+
+BOOT_ARGS="console=ttyS0 reboot=k panic=1 ${PCI_ARGS} ip=${VM_IP}::${NETWORK_PREFIX}.1:255.255.255.0::eth0:off rw rootwait rootfstype=${ROOTFS_TYPE} ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/ lsm=${BOOT_ARG_LSM_FLAGS}"
 
 cat >"$VM_DIR/firecracker.json" <<EOF
 {
@@ -258,7 +267,7 @@ cat >"$VM_DIR/firecracker.json" <<EOF
   "vsock": null,
   "logger": {
     "log_path": "${SCRIPT_DIR}/${VM_DIR}/firecracker.log",
-    "level": "Info",
+    "level": "Debug",
     "show_level": true,
     "show_log_origin": true
   },
@@ -282,6 +291,13 @@ fi
 # Attach to bridge
 sudo ip link set "$TAP_DEV" master "$BRIDGE_NAME" 2>/dev/null || true
 sudo ip link set "$TAP_DEV" up
+
+DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+if [ -n "$DEFAULT_IFACE" ]; then
+  echo " - Adding iptables FORWARD rules..."
+  sudo iptables -A FORWARD -i "$TAP_DEV" -o "$DEFAULT_IFACE" -j ACCEPT 2>/dev/null || true
+  sudo iptables -A FORWARD -i "$DEFAULT_IFACE" -o "$TAP_DEV" -j ACCEPT 2>/dev/null || true
+fi
 
 # =============================================================================
 # START VM

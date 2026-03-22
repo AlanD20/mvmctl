@@ -86,6 +86,25 @@ fi
 # Clean up PID and socket files
 rm -f "$PID_FILE" "$SOCKET_FILE" 2>/dev/null || true
 
+TAP_DEV="${TAP_PREFIX}-${VM_NAME}-0"
+VM_IP=""
+if [ -f "$VM_DIR/firecracker.json" ]; then
+  VM_IP=$(grep -oP 'ip=\K[^:]*' "$VM_DIR/firecracker.json" 2>/dev/null | head -1 || true)
+fi
+
+if [ -n "$VM_IP" ]; then
+  echo " - Removing SSH fingerprint for $VM_IP..."
+  ssh-keygen -R "$VM_IP" 2>/dev/null || true
+fi
+
+DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+if [ -n "$DEFAULT_IFACE" ]; then
+  echo " - Removing iptables rules for $TAP_DEV..."
+  sudo iptables -t nat -D POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE 2>/dev/null || true
+  sudo iptables -D FORWARD -i "$TAP_DEV" -o "$DEFAULT_IFACE" -j ACCEPT 2>/dev/null || true
+  sudo iptables -D FORWARD -i "$DEFAULT_IFACE" -o "$TAP_DEV" -j ACCEPT 2>/dev/null || true
+fi
+
 # =============================================================================
 # REMOVE TAP DEVICE (if still exists)
 # =============================================================================
