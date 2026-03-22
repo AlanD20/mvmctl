@@ -1,6 +1,7 @@
 """Tests for core/network.py."""
 
 import re
+import subprocess
 import ipaddress
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -615,13 +616,10 @@ def test_remove_iptables_forward_rules_already_absent():
     with patch(
         "fcm.core.network.subprocess.run",
         side_effect=[
-            subprocess.CalledProcessError(1, ["iptables", "-D", "FORWARD"]),
-            subprocess.CalledProcessError(1, ["iptables", "-D", "FORWARD"]),
+            subprocess.CompletedProcess(["iptables", "-D", "FORWARD"], returncode=1),
+            subprocess.CompletedProcess(["iptables", "-D", "FORWARD"], returncode=1),
         ],
     ) as mock_run:
         remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
         # Should not raise, just log
         assert mock_run.call_count == 2
-
-
-import subprocess

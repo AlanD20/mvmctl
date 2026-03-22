@@ -5,7 +5,7 @@ import logging
 import os
 
 import typer
-from fcm.cli import vm, image, kernel, config
+from fcm.cli import vm, image, kernel, config, asset, host, network, key, configure
 
 app = typer.Typer(
     name="fcm",
@@ -14,9 +14,14 @@ app = typer.Typer(
 )
 
 app.add_typer(vm.app, name="vm", help="VM lifecycle management")
+app.add_typer(network.app, name="network", help="Network management")
+app.add_typer(asset.app, name="asset", help="Asset management")
 app.add_typer(image.app, name="image", help="Image management")
 app.add_typer(kernel.app, name="kernel", help="Kernel management")
 app.add_typer(config.app, name="config", help="Configuration commands")
+app.add_typer(host.app, name="host", help="Host configuration")
+app.add_typer(key.app, name="key", help="SSH key management")
+app.add_typer(configure.app, name="configure", help="Guided setup wizard")
 
 
 @app.callback()

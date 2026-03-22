@@ -64,6 +64,8 @@ The codebase uses a strict two-layer architecture:
 | `core/image.py` | Download, verify, convert root filesystem images |
 | `core/kernel.py` | Clone and build kernels from source |
 | `core/binary_manager.py` | Download versioned Firecracker releases |
+| `core/network_manager.py` | Named network CRUD, IP lease allocation, persistent state |
+| `core/key_manager.py` | SSH key store: add, create, remove, inspect keys |
 
 ### Config Hierarchy
 
@@ -81,6 +83,7 @@ CLI flags > YAML config > `assets/defaults.yaml` built-in defaults
 ├── kernels/      # Compiled vmlinux files
 ├── images/       # Root filesystem images (.ext4)
 ├── keys/         # SSH keypairs
+├── networks/     # Named network configs and IP leases
 ├── host/         # Pre-init host state snapshot
 └── vms/<name>/   # Per-VM: rootfs, config JSON, logs, PID, socket, cloud-init/
 ```
@@ -88,7 +91,7 @@ CLI flags > YAML config > `assets/defaults.yaml` built-in defaults
 ### VM Lifecycle Data Flow
 
 1. `vm create` CLI handler → `core/network.py` (TAP setup) → `core/config_gen.py` (generate JSON) → `core/firecracker.py` (spawn process) → `core/vm_manager.py` (register state)
-2. `vm delete` → kill process → teardown TAP → deregister state
+2. `vm remove` → kill process → teardown TAP → release network lease → deregister state
 
 ### Cloud-init
 

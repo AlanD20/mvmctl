@@ -99,8 +99,8 @@ def kernel_build(
         raise typer.Exit(code=1)
 
 
-@kernel_app.command(name="rm")
-def kernel_rm(
+@kernel_app.command(name="remove")
+def kernel_remove(
     name: str = typer.Argument(..., help="Kernel file name to remove"),
     kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
@@ -116,6 +116,16 @@ def kernel_rm(
 
     path.unlink()
     print_success(f"Removed {path}")
+
+
+@kernel_app.command(name="rm", hidden=True)
+def kernel_rm(
+    name: str = typer.Argument(..., help="Kernel file name to remove"),
+    kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Alias for remove."""
+    kernel_remove(name=name, kernels_dir=kernels_dir, force=force)
 
 
 @image_app.command(name="ls")
@@ -164,9 +174,9 @@ def image_fetch(
         raise typer.Exit(code=1)
 
 
-@image_app.command(name="rm")
-def image_rm(
-    id: str = typer.Argument(..., help="Image ID to delete"),
+@image_app.command(name="remove")
+def image_remove(
+    id: str = typer.Argument(..., help="Image ID to remove"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
@@ -179,16 +189,26 @@ def image_rm(
         raise typer.Exit(code=1)
 
     if not force:
-        typer.confirm(f"Delete {len(found)} file(s) for '{id}'?", abort=True)
+        typer.confirm(f"Remove {len(found)} file(s) for '{id}'?", abort=True)
 
     for path in found:
         if path.is_dir():
             shutil.rmtree(path)
         else:
             path.unlink()
-        print_success(f"Deleted: {path}")
+        print_success(f"Removed: {path}")
 
     raise typer.Exit(code=0)
+
+
+@image_app.command(name="rm", hidden=True)
+def image_rm(
+    id: str = typer.Argument(..., help="Image ID to remove"),
+    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Alias for remove."""
+    image_remove(id=id, images_dir=images_dir, force=force)
 
 
 def _format_bin_row(bv: BinaryVersion) -> list[str]:
@@ -254,8 +274,8 @@ def bin_use(
     print_success(f"Active version set to {version}")
 
 
-@bin_app.command(name="rm")
-def bin_rm(
+@bin_app.command(name="remove")
+def bin_remove(
     version: str = typer.Argument(..., help="Version to remove"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
@@ -270,6 +290,15 @@ def bin_rm(
         raise typer.Exit(code=1)
 
     print_success(f"Removed v{version}")
+
+
+@bin_app.command(name="rm", hidden=True)
+def bin_rm(
+    version: str = typer.Argument(..., help="Version to remove"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Alias for remove."""
+    bin_remove(version=version, force=force)
 
 
 @app.command(name="clear")

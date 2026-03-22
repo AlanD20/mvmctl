@@ -10,8 +10,14 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from fcm.cli.vm import app, _write_cloud_init
+from fcm.core.network_manager import NetworkConfig
 from fcm.exceptions import NetworkError
 from fcm.models.vm import VMInstance, VMState
+
+_FAKE_NET = NetworkConfig(
+    name="default", subnet="10.20.0.0/24", gateway="10.20.0.1",
+    bridge="fcm-br0", nat_enabled=True,
+)
 
 runner = CliRunner()
 
@@ -128,8 +134,8 @@ def test_create_vm_success():
         with (
             patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
             patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
-            patch("fcm.cli.vm.allocate_ip", return_value="10.20.0.5"),
-            patch("fcm.cli.vm.generate_mac", return_value="02:FC:00:00:00:01"),
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.5"),
             patch("fcm.cli.vm.create_tap"),
             patch("fcm.cli.vm.add_iptables_forward_rules"),
             patch("fcm.cli.vm.ConfigGenerator"),
@@ -174,8 +180,8 @@ def test_create_vm_image_from_path():
         with (
             patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
             patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
-            patch("fcm.cli.vm.allocate_ip", return_value="10.20.0.6"),
-            patch("fcm.cli.vm.generate_mac", return_value="02:FC:00:00:00:02"),
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.6"),
             patch("fcm.cli.vm.create_tap"),
             patch("fcm.cli.vm.add_iptables_forward_rules"),
             patch("fcm.cli.vm.ConfigGenerator"),
@@ -201,8 +207,8 @@ def test_create_vm_popen_file_not_found():
         with (
             patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
             patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
-            patch("fcm.cli.vm.allocate_ip", return_value="10.20.0.7"),
-            patch("fcm.cli.vm.generate_mac", return_value="02:FC:00:00:00:03"),
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.7"),
             patch("fcm.cli.vm.create_tap"),
             patch("fcm.cli.vm.add_iptables_forward_rules"),
             patch("fcm.cli.vm.ConfigGenerator"),
@@ -230,8 +236,8 @@ def test_create_vm_popen_os_error():
         with (
             patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
             patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
-            patch("fcm.cli.vm.allocate_ip", return_value="10.20.0.8"),
-            patch("fcm.cli.vm.generate_mac", return_value="02:FC:00:00:00:04"),
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.8"),
             patch("fcm.cli.vm.create_tap"),
             patch("fcm.cli.vm.add_iptables_forward_rules"),
             patch("fcm.cli.vm.ConfigGenerator"),
@@ -259,9 +265,10 @@ def test_create_vm_network_error_on_tap():
         with (
             patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
             patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
-            patch("fcm.cli.vm.allocate_ip", return_value="10.20.0.9"),
-            patch("fcm.cli.vm.generate_mac", return_value="02:FC:00:00:00:05"),
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.9"),
             patch("fcm.cli.vm.create_tap", side_effect=NetworkError("tap fail")),
+            patch("fcm.cli.vm.release_network_ip"),
             patch("fcm.cli.vm.ConfigGenerator"),
             patch("fcm.cli.vm._inject_cloud_init"),
         ):
@@ -285,6 +292,7 @@ def test_delete_force_running_vm():
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
         patch("fcm.cli.vm.teardown_nat"),
+        patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
         patch("os.kill") as mock_kill,
         patch("fcm.cli.vm.time.sleep"),
     ):
@@ -297,7 +305,7 @@ def test_delete_force_running_vm():
         result = runner.invoke(app, ["delete", "--name", "delvm", "--force"])
 
     assert result.exit_code == 0
-    assert "deleted" in result.output
+    assert "removed" in result.output.lower()
 
 
 def test_delete_process_already_gone():
@@ -308,6 +316,7 @@ def test_delete_process_already_gone():
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
         patch("fcm.cli.vm.teardown_nat"),
+        patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
         patch("os.kill", side_effect=ProcessLookupError),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
@@ -317,7 +326,7 @@ def test_delete_process_already_gone():
         result = runner.invoke(app, ["delete", "--name", "gonevm", "--force"])
 
     assert result.exit_code == 0
-    assert "deleted" in result.output
+    assert "removed" in result.output.lower()
 
 
 def test_delete_permission_error_no_force():
@@ -328,6 +337,7 @@ def test_delete_permission_error_no_force():
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
         patch("fcm.cli.vm.teardown_nat"),
+        patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
         patch("os.kill", side_effect=PermissionError("not root")),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
@@ -348,6 +358,7 @@ def test_delete_permission_error_not_force_exits():
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
         patch("fcm.cli.vm.teardown_nat"),
+        patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
         patch("os.kill", side_effect=PermissionError("not root")),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
@@ -727,12 +738,9 @@ def test_write_cloud_init_with_ssh_key():
         tmp_path = Path(tmp)
         cloud_init_dir = tmp_path / "cloud-init"
         cloud_init_dir.mkdir()
-        keys_dir = tmp_path / "keys"
-        keys_dir.mkdir()
-        (keys_dir / "id_ed25519.pub").write_text("ssh-ed25519 AAAA testkey")
 
-        with patch("fcm.cli.vm.get_cache_dir", return_value=tmp_path):
-            _write_cloud_init(cloud_init_dir, "testvm", "10.20.0.2", "root")
+        _write_cloud_init(cloud_init_dir, "testvm", "10.20.0.2", "root",
+                          ssh_pub_key="ssh-ed25519 AAAA testkey")
 
         meta = (cloud_init_dir / "meta-data").read_text()
         assert "testvm" in meta
@@ -749,9 +757,210 @@ def test_write_cloud_init_without_ssh_key():
         cloud_init_dir = tmp_path / "cloud-init"
         cloud_init_dir.mkdir()
 
-        with patch("fcm.cli.vm.get_cache_dir", return_value=tmp_path):
-            _write_cloud_init(cloud_init_dir, "testvm2", "10.20.0.3", "ubuntu")
+        _write_cloud_init(cloud_init_dir, "testvm2", "10.20.0.3", "ubuntu")
 
         userdata = (cloud_init_dir / "user-data").read_text()
         assert "ssh-authorized-keys" not in userdata
         assert "#cloud-config" in userdata
+
+
+def test_write_cloud_init_custom_user_data():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+
+        custom_file = tmp_path / "custom-userdata.yaml"
+        custom_file.write_text("#cloud-config\npackages:\n  - nginx\n")
+
+        _write_cloud_init(cloud_init_dir, "testvm3", "10.20.0.4", "root",
+                          custom_user_data=custom_file)
+
+        userdata = (cloud_init_dir / "user-data").read_text()
+        assert "nginx" in userdata
+        assert "#cloud-config" in userdata
+
+
+def test_write_cloud_init_custom_user_data_with_ssh_key_injection():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+
+        custom_file = tmp_path / "custom-userdata.yaml"
+        custom_file.write_text("#cloud-config\npackages:\n  - vim\n")
+
+        _write_cloud_init(cloud_init_dir, "testvm4", "10.20.0.5", "root",
+                          ssh_pub_key="ssh-ed25519 AAAA injected",
+                          custom_user_data=custom_file)
+
+        userdata = (cloud_init_dir / "user-data").read_text()
+        assert "ssh-ed25519 AAAA injected" in userdata
+        assert "ssh-authorized-keys" in userdata
+        assert "vim" in userdata
+
+
+def test_write_cloud_init_custom_user_data_merge_existing_ssh():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+
+        custom_file = tmp_path / "custom-userdata.yaml"
+        custom_file.write_text(
+            "#cloud-config\nusers:\n  - name: admin\n"
+            "    ssh_authorized_keys:\n      - ssh-rsa EXISTING\n"
+        )
+
+        _write_cloud_init(cloud_init_dir, "testvm5", "10.20.0.6", "root",
+                          ssh_pub_key="ssh-ed25519 AAAA newkey",
+                          custom_user_data=custom_file)
+
+        userdata = (cloud_init_dir / "user-data").read_text()
+        assert "ssh-rsa EXISTING" in userdata
+        assert "ssh-ed25519 AAAA newkey" in userdata
+
+
+# ---------------------------------------------------------------------------
+# --mac flag
+# ---------------------------------------------------------------------------
+
+
+def test_create_vm_with_custom_mac():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        kernels_dir = tmp_path / "kernels"
+        kernels_dir.mkdir(parents=True)
+        (kernels_dir / "vmlinux").write_text("fake kernel")
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True)
+        (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 7777
+
+        with (
+            patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
+            patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.7"),
+            patch("fcm.cli.vm.create_tap"),
+            patch("fcm.cli.vm.add_iptables_forward_rules"),
+            patch("fcm.cli.vm.ConfigGenerator"),
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("fcm.cli.vm._inject_cloud_init"),
+        ):
+            mock_mgr_cls.return_value.list_all.return_value = []
+            result = runner.invoke(app, [
+                "create", "--name", "macvm",
+                "--image", "ubuntu-24.04",
+                "--mac", "02:AA:BB:CC:DD:EE",
+            ])
+
+        assert result.exit_code == 0
+        assert "02:AA:BB:CC:DD:EE" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --user-data flag
+# ---------------------------------------------------------------------------
+
+
+def test_create_vm_with_user_data():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        kernels_dir = tmp_path / "kernels"
+        kernels_dir.mkdir(parents=True)
+        (kernels_dir / "vmlinux").write_text("fake kernel")
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True)
+        (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
+
+        ud_file = tmp_path / "my-userdata.yaml"
+        ud_file.write_text("#cloud-config\npackages:\n  - htop\n")
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 6666
+
+        with (
+            patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
+            patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.8"),
+            patch("fcm.cli.vm.create_tap"),
+            patch("fcm.cli.vm.add_iptables_forward_rules"),
+            patch("fcm.cli.vm.ConfigGenerator"),
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("fcm.cli.vm._inject_cloud_init"),
+        ):
+            mock_mgr_cls.return_value.list_all.return_value = []
+            result = runner.invoke(app, [
+                "create", "--name", "udvm",
+                "--image", "ubuntu-24.04",
+                "--user-data", str(ud_file),
+            ])
+
+        assert result.exit_code == 0
+
+
+def test_create_vm_user_data_file_not_found():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        kernels_dir = tmp_path / "kernels"
+        kernels_dir.mkdir(parents=True)
+        (kernels_dir / "vmlinux").write_text("fake kernel")
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True)
+        (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
+
+        with (
+            patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.9"),
+        ):
+            result = runner.invoke(app, [
+                "create", "--name", "badud",
+                "--image", "ubuntu-24.04",
+                "--user-data", "/nonexistent/path.yaml",
+            ])
+
+        assert result.exit_code == 1
+        assert "not found" in result.output.lower()
+
+
+def test_create_vm_user_data_warns_no_cloud_config_header():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        kernels_dir = tmp_path / "kernels"
+        kernels_dir.mkdir(parents=True)
+        (kernels_dir / "vmlinux").write_text("fake kernel")
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True)
+        (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
+
+        ud_file = tmp_path / "bad-userdata.yaml"
+        ud_file.write_text("packages:\n  - htop\n")
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 5555
+
+        with (
+            patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}),
+            patch("fcm.cli.vm.VMManager") as mock_mgr_cls,
+            patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
+            patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.10"),
+            patch("fcm.cli.vm.create_tap"),
+            patch("fcm.cli.vm.add_iptables_forward_rules"),
+            patch("fcm.cli.vm.ConfigGenerator"),
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("fcm.cli.vm._inject_cloud_init"),
+        ):
+            mock_mgr_cls.return_value.list_all.return_value = []
+            result = runner.invoke(app, [
+                "create", "--name", "warnvm",
+                "--image", "ubuntu-24.04",
+                "--user-data", str(ud_file),
+            ])
+
+        assert result.exit_code == 0
+        assert "warning" in result.output.lower()

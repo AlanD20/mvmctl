@@ -25,7 +25,7 @@ class VMDefaultsConfig:
     network_interface: str = "eth0"
     boot_args: str = "console=ttyS0 reboot=k panic=1 pci=off"
     disk_size: str = "2G"
-    enable_socket: bool = False
+    enable_api_socket: bool = False
     enable_pci: bool = False
     lsm_flags: str = "landlock,lockdown,yama,integrity,selinux,bpf"
 

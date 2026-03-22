@@ -125,32 +125,47 @@ def convert(
         raise typer.Exit(code=1)
 
 
-@app.command()
-def delete(
-    id: str = typer.Option(..., "--id", help="Image ID to delete"),
+@app.command(name="remove")
+def remove(
+    id: str = typer.Option(..., "--id", help="Image ID to remove"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force delete without confirmation"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove a local image."""
     import shutil
 
-    # Find image files matching the ID
     patterns = [f"{id}.ext4", f"{id}.btrfs", f"{id}.img", f"{id}.raw"]
-    found = []
-    for pattern in patterns:
-        path = images_dir / pattern
-        if path.exists():
-            found.append(path)
+    found = [images_dir / p for p in patterns if (images_dir / p).exists()]
 
     if not found:
         print_error(f"No image files found for '{id}'")
         raise typer.Exit(code=1)
 
     if not force:
-        typer.confirm(f"Delete {len(found)} file(s) for '{id}'?", abort=True)
+        typer.confirm(f"Remove {len(found)} file(s) for '{id}'?", abort=True)
 
     for path in found:
         shutil.rmtree(path, ignore_errors=True) if path.is_dir() else path.unlink()
-        print_success(f"Deleted: {path}")
+        print_success(f"Removed: {path}")
 
     raise typer.Exit(code=0)
+
+
+@app.command(name="rm", hidden=True)
+def rm(
+    id: str = typer.Option(..., "--id", help="Image ID to remove"),
+    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Alias for remove."""
+    remove(id=id, images_dir=images_dir, force=force)
+
+
+@app.command(name="delete", hidden=True)
+def delete(
+    id: str = typer.Option(..., "--id", help="Image ID to remove"),
+    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Alias for remove."""
+    remove(id=id, images_dir=images_dir, force=force)

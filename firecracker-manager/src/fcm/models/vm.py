@@ -28,7 +28,7 @@ class VMConfig:
     guest_mac: str | None = None
     tap_device: str | None = None
     boot_args: str | None = None
-    enable_socket: bool = False
+    enable_api_socket: bool = False
     enable_pci: bool = False
     lsm_flags: str = "landlock,lockdown,yama,integrity,selinux,bpf"
 

@@ -41,7 +41,7 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.mem_size_mib == 2048
     assert config.vm_defaults.network_interface == "eth0"
     assert config.vm_defaults.disk_size == "2G"
-    assert config.vm_defaults.enable_socket is False
+    assert config.vm_defaults.enable_api_socket is False
     assert config.vm_defaults.enable_pci is False
 
     assert config.network.single_vm.tap_dev == "fc-tap0"

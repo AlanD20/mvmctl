@@ -54,7 +54,7 @@ def bridge_exists(bridge: str = BRIDGE_NAME) -> bool:
     return result.returncode == 0
 
 
-def setup_bridge(bridge: str = BRIDGE_NAME, cidr: str = BRIDGE_CIDR) -> None:
+def setup_bridge(bridge: str = BRIDGE_NAME, cidr: str = BRIDGE_CIDR, gateway_cidr: str | None = None) -> None:
     """Create and configure the bridge interface.
 
     - Creates bridge with `ip link add {bridge} type bridge`
@@ -64,6 +64,8 @@ def setup_bridge(bridge: str = BRIDGE_NAME, cidr: str = BRIDGE_CIDR) -> None:
     - Raises NetworkError on failure.
     - Is idempotent: if bridge already exists, does nothing.
     """
+    effective_cidr = gateway_cidr if gateway_cidr else cidr
+
     if bridge_exists(bridge):
         logger.debug("Bridge %s already exists, skipping creation", bridge)
         return
@@ -79,12 +81,12 @@ def setup_bridge(bridge: str = BRIDGE_NAME, cidr: str = BRIDGE_CIDR) -> None:
 
     try:
         subprocess.run(
-            ["ip", "addr", "add", cidr, "dev", bridge],
+            ["ip", "addr", "add", effective_cidr, "dev", bridge],
             check=True,
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to assign IP {cidr} to bridge {bridge}: {e}") from e
+        raise NetworkError(f"Failed to assign IP {effective_cidr} to bridge {bridge}: {e}") from e
 
     try:
         subprocess.run(

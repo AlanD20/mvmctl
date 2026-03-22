@@ -311,7 +311,7 @@ def test_image_rm_success(tmp_path: Path):
         ["image", "rm", "test", "--images-dir", str(tmp_path), "--force"],
     )
     assert result.exit_code == 0
-    assert "Deleted" in result.output
+    assert "Removed" in result.output
     assert not (tmp_path / "test.ext4").exists()
 
 

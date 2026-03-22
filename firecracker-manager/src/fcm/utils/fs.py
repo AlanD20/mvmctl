@@ -3,19 +3,19 @@
 import os
 from pathlib import Path
 
-_PROJECT_NAME = "firecracker-manager"
+from fcm.constants import PROJECT_NAME, env_var
 
 
 def get_cache_dir() -> Path:
     """Return the FCM cache root directory.
 
     Checks FCM_CACHE_DIR env var first, then falls back to
-    ~/.cache/firecracker-manager.
+    ~/.cache/<project-name>.
     """
-    override = os.environ.get("FCM_CACHE_DIR")
+    override = os.environ.get(env_var("CACHE_DIR"))
     if override:
         return Path(override)
-    return Path.home() / ".cache" / _PROJECT_NAME
+    return Path.home() / ".cache" / PROJECT_NAME
 
 
 def get_vms_dir() -> Path:
@@ -41,6 +41,26 @@ def get_kernels_dir() -> Path:
 def get_state_file() -> Path:
     """Return the path to the VM state JSON file."""
     return get_vms_dir() / "state.json"
+
+
+def get_networks_dir() -> Path:
+    """Return the directory for named network state."""
+    return get_cache_dir() / "networks"
+
+
+def get_network_dir(name: str) -> Path:
+    """Return the directory for a specific network."""
+    return get_networks_dir() / name
+
+
+def get_keys_dir() -> Path:
+    """Return the directory for SSH key management."""
+    return get_cache_dir() / "keys"
+
+
+def get_bin_dir() -> Path:
+    """Return the directory for cached Firecracker binaries."""
+    return get_cache_dir() / "bin"
 
 
 def get_assets_dir() -> Path:

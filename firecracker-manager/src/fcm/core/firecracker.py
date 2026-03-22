@@ -243,7 +243,7 @@ def get_vm_socket_path(vm_name: str) -> Path | None:
     from fcm.utils.fs import get_vm_dir
 
     vm_dir = get_vm_dir(vm_name)
-    for name in [f"{vm_name}.socket", "firecracker.socket", "socket"]:
+    for name in ["firecracker.api.socket", f"{vm_name}.socket", "firecracker.socket", "firecracker.sock", "socket"]:
         p = vm_dir / name
         if p.exists():
             return p

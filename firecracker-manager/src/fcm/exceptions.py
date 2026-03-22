@@ -55,3 +55,7 @@ class AssetNotFoundError(FCMError):
 
 class BinaryError(FCMError):
     """Firecracker/jailer binary management failure."""
+
+
+class KeyError(FCMError):
+    """SSH key management failure."""

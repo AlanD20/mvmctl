@@ -28,6 +28,13 @@ from fcm.core.network import (
     setup_nat,
     teardown_nat,
 )
+from fcm.core.network_manager import (
+    DEFAULT_NETWORK_NAME,
+    allocate_network_ip,
+    ensure_default_network,
+    get_network,
+    release_network_ip,
+)
 from fcm.core.ssh import connect_to_vm
 from fcm.core.vm_manager import VMManager
 from fcm.exceptions import NetworkError
@@ -82,10 +89,23 @@ def create(
     vcpus: int = typer.Option(1, "--vcpus", help="Number of vCPUs"),
     mem: int = typer.Option(512, "--mem", help="Memory in MiB"),
     ip: str | None = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
-    user: str = typer.Option("root", "--user", help="Default SSH user for cloud-init"),
-    enable_socket: bool = typer.Option(
-        False, "--enable-socket", help="Enable Firecracker API socket"
+    network_name: str = typer.Option(
+        DEFAULT_NETWORK_NAME, "--network", help="Named network to attach to"
     ),
+    mac: str | None = typer.Option(
+        None, "--mac", help="Custom MAC address (auto-generated if omitted)"
+    ),
+    ssh_key: str | None = typer.Option(
+        None, "--ssh-key", help="SSH public key name (from key cache) or file path"
+    ),
+    user_data: Path | None = typer.Option(
+        None, "--user-data", help="Path to custom cloud-init user-data file"
+    ),
+    user: str = typer.Option("root", "--user", help="Default SSH user for cloud-init"),
+    enable_api_socket: bool = typer.Option(
+        False, "--enable-api-socket", help="Enable Firecracker HTTP API socket"
+    ),
+    enable_pci: bool = typer.Option(False, "--enable-pci", help="Enable PCI device support"),
     firecracker_bin: str = typer.Option(
         "firecracker",
         "--firecracker-bin",
@@ -126,20 +146,61 @@ def create(
             print_error("Download with: fcm image fetch <id>")
             raise typer.Exit(code=1)
 
-    manager = VMManager()
-    existing_vms = manager.list_all()
-    existing_ips = [vm.ip for vm in existing_vms if vm.ip]
+    # Validate user-data file if provided
+    if user_data is not None:
+        if not user_data.exists():
+            print_error(f"User-data file not found: {user_data}")
+            raise typer.Exit(code=1)
+        content = user_data.read_text()
+        if not content.startswith("#cloud-config") and not content.startswith("Content-Type:"):
+            print_info("Warning: user-data does not start with #cloud-config or MIME header")
 
-    guest_ip = ip if ip else allocate_ip(existing_ips)
-    guest_mac = generate_mac()
+    # -------------------------------------------------------- network & IP
+    # Ensure the target network exists (auto-creates default if needed)
+    try:
+        net_config = get_network(network_name)
+        if net_config is None:
+            if network_name == DEFAULT_NETWORK_NAME:
+                net_config = ensure_default_network()
+            else:
+                print_error(f"Network '{network_name}' not found. Create it with: fcm network create {network_name}")
+                raise typer.Exit(code=1)
+    except NetworkError as e:
+        print_error(f"Network error: {e}")
+        raise typer.Exit(code=1)
+
+    # IP allocation
+    if ip:
+        # Validate IP is in the network's subnet
+        import ipaddress
+        try:
+            ip_net = ipaddress.IPv4Network(net_config.subnet, strict=False)
+            if ipaddress.IPv4Address(ip.split("/")[0]) not in ip_net:
+                print_error(f"IP {ip} is outside network '{network_name}' subnet {net_config.subnet}")
+                raise typer.Exit(code=1)
+        except ValueError as e:
+            print_error(f"Invalid IP address: {e}")
+            raise typer.Exit(code=1)
+        guest_ip = ip
+    else:
+        try:
+            guest_ip = allocate_network_ip(network_name, name)
+        except NetworkError as e:
+            print_error(f"IP allocation failed: {e}")
+            raise typer.Exit(code=1)
+
+    # MAC address
+    guest_mac = mac if mac else _deterministic_mac(name)
     tap_name = f"fc-{name}-0"
+    bridge = net_config.bridge
 
     print_info(f"Creating VM '{name}'")
-    print_info(f"  IP:     {guest_ip}")
-    print_info(f"  MAC:    {guest_mac}")
-    print_info(f"  TAP:    {tap_name}")
-    print_info(f"  vCPUs:  {vcpus}")
-    print_info(f"  Memory: {mem} MiB")
+    print_info(f"  Network: {network_name}")
+    print_info(f"  IP:      {guest_ip}")
+    print_info(f"  MAC:     {guest_mac}")
+    print_info(f"  TAP:     {tap_name}")
+    print_info(f"  vCPUs:   {vcpus}")
+    print_info(f"  Memory:  {mem} MiB")
 
     # ----------------------------------------------------------------- vm dir
     vm_dir.mkdir(parents=True, exist_ok=False)
@@ -156,11 +217,15 @@ def create(
     cloud_init_dir = vm_dir / "cloud-init"
     cloud_init_dir.mkdir(exist_ok=True)
 
-    _write_cloud_init(cloud_init_dir, name, guest_ip, user)
+    # Resolve SSH key
+    ssh_pub_key = _resolve_ssh_key(ssh_key)
+
+    _write_cloud_init(cloud_init_dir, name, guest_ip, user, ssh_pub_key=ssh_pub_key,
+                      custom_user_data=user_data)
     _inject_cloud_init(rootfs_path, cloud_init_dir)
 
     # --------------------------------------------------------- firecracker cfg
-    socket_path = vm_dir / "firecracker.sock" if enable_socket else None
+    socket_path = vm_dir / "firecracker.api.socket" if enable_api_socket else None
     vm_config = VMConfig(
         name=name,
         vcpu_count=vcpus,
@@ -170,18 +235,22 @@ def create(
         guest_ip=guest_ip,
         guest_mac=guest_mac,
         tap_device=tap_name,
-        enable_socket=enable_socket,
-        enable_pci=False,
+        enable_api_socket=enable_api_socket,
+        enable_pci=enable_pci,
     )
     config_file = vm_dir / "firecracker.json"
     ConfigGenerator(vm_config).write_to_file(config_file)
 
     # ---------------------------------------------------------------- network
     try:
-        create_tap(tap_name)
-        add_iptables_forward_rules(tap_name)
+        create_tap(tap_name, bridge=bridge)
+        add_iptables_forward_rules(tap_name, bridge=bridge)
     except NetworkError as e:
         shutil.rmtree(vm_dir, ignore_errors=True)
+        try:
+            release_network_ip(network_name, name)
+        except NetworkError:
+            pass
         print_error(f"Network setup failed: {e}")
         raise typer.Exit(code=1)
 
@@ -191,7 +260,7 @@ def create(
     pid_file = vm_dir / "firecracker.pid"
 
     fc_cmd = [firecracker_bin, "--no-api", "--config-file", str(config_file)]
-    if enable_socket and socket_path:
+    if enable_api_socket and socket_path:
         # Use API socket mode instead
         fc_cmd = [
             firecracker_bin,
@@ -224,6 +293,7 @@ def create(
     pid_file.write_text(str(proc.pid))
 
     # --------------------------------------------------------------- register
+    manager = VMManager()
     vm_instance = VMInstance(
         name=name,
         pid=proc.pid,
@@ -241,12 +311,12 @@ def create(
 
 
 # ---------------------------------------------------------------------------
-# delete
+# remove (aliases: rm, delete)
 # ---------------------------------------------------------------------------
 
 
-@app.command()
-def delete(
+@app.command(name="remove")
+def remove(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     force: bool = typer.Option(False, "--force", "-f", help="Force kill and skip confirmation"),
 ) -> None:
@@ -299,12 +369,38 @@ def delete(
     except NetworkError as e:
         print_error(f"Warning: NAT teardown warning: {e}")
 
+    # Release network IP lease
+    for net_name in _find_network_for_vm(name):
+        try:
+            release_network_ip(net_name, name)
+        except NetworkError:
+            pass
+
     manager.deregister(name)
 
     if vm_dir.exists():
         shutil.rmtree(vm_dir)
 
-    print_success(f"VM '{name}' deleted")
+    print_success(f"VM '{name}' removed")
+
+
+# Aliases
+@app.command(name="rm", hidden=True)
+def rm(
+    name: str = typer.Option(..., "--name", "-n", help="VM name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force kill and skip confirmation"),
+) -> None:
+    """Alias for remove."""
+    remove(name=name, force=force)
+
+
+@app.command(name="delete", hidden=True)
+def delete(
+    name: str = typer.Option(..., "--name", "-n", help="VM name"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force kill and skip confirmation"),
+) -> None:
+    """Alias for remove."""
+    remove(name=name, force=force)
 
 
 # ---------------------------------------------------------------------------
@@ -497,11 +593,11 @@ def cleanup(
 def pause(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
 ) -> None:
-    """Pause a running VM. Requires VM to have been started with --enable-socket."""
+    """Pause a running VM. Requires VM to have been started with --enable-api-socket."""
     socket_path = get_vm_socket_path(name)
     if not socket_path:
         print_error(f"Socket not found for VM '{name}'")
-        print_error("VM must be running with --enable-socket")
+        print_error("VM must be running with --enable-api-socket")
         raise typer.Exit(code=1)
 
     client = FirecrackerClient(socket_path)
@@ -519,11 +615,11 @@ def pause(
 def resume(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
 ) -> None:
-    """Resume a paused VM. Requires VM to have been started with --enable-socket."""
+    """Resume a paused VM. Requires VM to have been started with --enable-api-socket."""
     socket_path = get_vm_socket_path(name)
     if not socket_path:
         print_error(f"Socket not found for VM '{name}'")
-        print_error("VM must be running with --enable-socket")
+        print_error("VM must be running with --enable-api-socket")
         raise typer.Exit(code=1)
 
     client = FirecrackerClient(socket_path)
@@ -543,11 +639,11 @@ def snapshot(
     mem_out: Path = typer.Option(..., "--mem-out", help="Memory snapshot output path"),
     state_out: Path = typer.Option(..., "--state-out", help="VM state output path"),
 ) -> None:
-    """Snapshot VM memory and disk state. Requires --enable-socket."""
+    """Snapshot VM memory and disk state. Requires --enable-api-socket."""
     socket_path = get_vm_socket_path(name)
     if not socket_path:
         print_error(f"Socket not found for VM '{name}'")
-        print_error("VM must be running with --enable-socket")
+        print_error("VM must be running with --enable-api-socket")
         raise typer.Exit(code=1)
 
     client = FirecrackerClient(socket_path)
@@ -567,11 +663,11 @@ def load(
     state_in: Path = typer.Option(..., "--state-in", help="VM state input path"),
     resume_after: bool = typer.Option(True, "--resume/--no-resume", help="Resume VM after loading"),
 ) -> None:
-    """Load VM from snapshot. Requires --enable-socket."""
+    """Load VM from snapshot. Requires --enable-api-socket."""
     socket_path = get_vm_socket_path(name)
     if not socket_path:
         print_error(f"Socket not found for VM '{name}'")
-        print_error("VM must be running with --enable-socket")
+        print_error("VM must be running with --enable-api-socket")
         raise typer.Exit(code=1)
 
     client = FirecrackerClient(socket_path)
@@ -589,16 +685,55 @@ def load(
 # ---------------------------------------------------------------------------
 
 
-def _write_cloud_init(cloud_init_dir: Path, vm_name: str, guest_ip: str, user: str) -> None:
-    """Write cloud-init seed files (meta-data, network-config, user-data)."""
-    # Read SSH public key from cache
-    keys_dir = get_cache_dir() / "keys"
-    ssh_pub_key: str | None = None
-    if keys_dir.exists():
-        for pub in keys_dir.glob("*.pub"):
-            ssh_pub_key = pub.read_text().strip()
-            break
+def _deterministic_mac(vm_name: str) -> str:
+    """Generate a deterministic MAC address from the VM name.
 
+    Uses a stable hash so the same VM name always gets the same MAC.
+    The locally administered bit is set (02:xx prefix).
+    """
+    import hashlib
+
+    h = hashlib.sha256(vm_name.encode()).digest()
+    return f"02:{h[0]:02x}:{h[1]:02x}:{h[2]:02x}:{h[3]:02x}:{h[4]:02x}"
+
+
+def _resolve_ssh_key(ssh_key: str | None) -> str | None:
+    """Resolve an SSH key from name (key cache) or file path.
+
+    Returns the public key content string, or None.
+    """
+    if ssh_key is None:
+        # Fall back to any key in cache
+        keys_dir = get_cache_dir() / "keys"
+        if keys_dir.exists():
+            for pub in keys_dir.glob("*.pub"):
+                return pub.read_text().strip()
+        return None
+
+    # Check key cache first
+    keys_dir = get_cache_dir() / "keys"
+    cache_key = keys_dir / f"{ssh_key}.pub"
+    if cache_key.exists():
+        return cache_key.read_text().strip()
+
+    # Treat as file path
+    key_path = Path(ssh_key)
+    if key_path.exists():
+        return key_path.read_text().strip()
+
+    print_info(f"Warning: SSH key '{ssh_key}' not found in cache or filesystem")
+    return None
+
+
+def _write_cloud_init(
+    cloud_init_dir: Path,
+    vm_name: str,
+    guest_ip: str,
+    user: str,
+    ssh_pub_key: str | None = None,
+    custom_user_data: Path | None = None,
+) -> None:
+    """Write cloud-init seed files (meta-data, network-config, user-data)."""
     # meta-data
     meta_data = f"instance-id: {vm_name}\nlocal-hostname: {vm_name}\n"
     (cloud_init_dir / "meta-data").write_text(meta_data)
@@ -620,29 +755,50 @@ def _write_cloud_init(cloud_init_dir: Path, vm_name: str, guest_ip: str, user: s
     (cloud_init_dir / "network-config").write_text(network_config)
 
     # user-data
-    ssh_section = ""
-    if ssh_pub_key:
-        ssh_section = (
-            f"  - name: {user}\n"
-            "    groups: sudo\n"
-            "    shell: /bin/bash\n"
-            "    sudo: ALL=(ALL) NOPASSWD:ALL\n"
-            "    ssh-authorized-keys:\n"
-            f"      - {ssh_pub_key}\n"
-        )
+    if custom_user_data is not None:
+        # Use custom user-data, potentially merging SSH key
+        content = custom_user_data.read_text()
+        if ssh_pub_key and "ssh_authorized_keys" not in content:
+            # Inject SSH key block
+            content += (
+                f"\nusers:\n"
+                f"  - name: {user}\n"
+                f"    ssh-authorized-keys:\n"
+                f"      - {ssh_pub_key}\n"
+            )
+        elif ssh_pub_key and "ssh_authorized_keys" in content:
+            # Append to existing ssh_authorized_keys section
+            content = content.replace(
+                "ssh_authorized_keys:",
+                f"ssh_authorized_keys:\n      - {ssh_pub_key}",
+                1,
+            )
+        (cloud_init_dir / "user-data").write_text(content)
+    else:
+        # Generate default user-data
+        ssh_section = ""
+        if ssh_pub_key:
+            ssh_section = (
+                f"  - name: {user}\n"
+                "    groups: sudo\n"
+                "    shell: /bin/bash\n"
+                "    sudo: ALL=(ALL) NOPASSWD:ALL\n"
+                "    ssh-authorized-keys:\n"
+                f"      - {ssh_pub_key}\n"
+            )
 
-    user_data = (
-        "#cloud-config\n"
-        "users:\n"
-        "  - default\n"
-        f"{ssh_section}"
-        "package_update: false\n"
-        "package_upgrade: false\n"
-        "runcmd:\n"
-        "  - systemctl disable --now snapd.socket 2>/dev/null || true\n"
-        "final_message: 'fcm cloud-init done'\n"
-    )
-    (cloud_init_dir / "user-data").write_text(user_data)
+        ud = (
+            "#cloud-config\n"
+            "users:\n"
+            "  - default\n"
+            f"{ssh_section}"
+            "package_update: false\n"
+            "package_upgrade: false\n"
+            "runcmd:\n"
+            "  - systemctl disable --now snapd.socket 2>/dev/null || true\n"
+            "final_message: 'fcm cloud-init done'\n"
+        )
+        (cloud_init_dir / "user-data").write_text(ud)
 
 
 def _inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
@@ -690,3 +846,15 @@ def _cleanup_tap(tap_name: str) -> None:
         delete_tap(tap_name)
     except (NetworkError, Exception):
         pass
+
+
+def _find_network_for_vm(vm_name: str) -> list[str]:
+    """Find which networks have a lease for this VM."""
+    from fcm.core.network_manager import get_network_leases, list_networks
+
+    result: list[str] = []
+    for net in list_networks():
+        leases = get_network_leases(net.name)
+        if any(l.vm_name == vm_name for l in leases):
+            result.append(net.name)
+    return result
