@@ -252,39 +252,201 @@ download_firecracker() {
   fi
 }
 
+# Helper function to download and convert any cloud image
+download_and_convert_image() {
+  local distro_name="$1"
+  local download_url="$2"
+  local output_name="$3"
+  local kernel_url="$4"
+
+  echo "=== $distro_name Cloud Image Setup ==="
+
+  local download_dir="images/${output_name}/download"
+  local rootfs_output="images/${output_name}.ext4"
+  local kernel_output="kernels/${output_name}-vmlinux"
+  mkdir -p "$download_dir"
+
+  # Download rootfs
+  local image_file=$(basename "$download_url")
+  echo "[1/3] Downloading $distro_name image..."
+  download_if_not_present "${download_dir}/${image_file}" "$download_url"
+
+  # Convert/generate image
+  if [ ! -f "$rootfs_output" ]; then
+    echo "[2/3] Converting to ext4..."
+
+    # Check if it's a qcow2 or already raw
+    if [[ "$image_file" == *.qcow2 ]]; then
+      qemu-img convert -f qcow2 -O raw "${download_dir}/${image_file}" "$rootfs_output"
+    elif [[ "$image_file" == *.raw ]] || [[ "$image_file" == *.img ]]; then
+      cp "${download_dir}/${image_file}" "$rootfs_output"
+    else
+      # Assume tar archive (like Ubuntu cloud images)
+      truncate -s "${IMAGE_SIZE:-2G}" "$rootfs_output"
+      mkfs.ext4 "$rootfs_output" >/dev/null 2>&1
+
+      local tmppath=/tmp/.rootfs-$$
+      mkdir "$tmppath"
+      sudo mount "$rootfs_output" -o loop "$tmppath"
+      sudo tar -xf "${download_dir}/${image_file}" --directory "$tmppath"
+      sudo umount "$tmppath"
+      rmdir "$tmppath"
+    fi
+
+    echo "✓ Rootfs created: $rootfs_output"
+  else
+    echo "✓ Rootfs already exists: $rootfs_output"
+  fi
+
+  # Download or extract kernel
+  if [ -n "$kernel_url" ] && [ ! -f "$kernel_output" ]; then
+    echo "[3/3] Setting up kernel..."
+    if [[ "$kernel_url" == *.vmlinuz* ]] || [[ "$kernel_url" == *vmlinuz* ]]; then
+      # Compressed kernel, need to extract
+      local kernel_file=$(basename "$kernel_url")
+      download_if_not_present "${download_dir}/${kernel_file}" "$kernel_url"
+      extract_vmlinux "${download_dir}/${kernel_file}" "$kernel_output"
+    else
+      # Already extracted vmlinux
+      download_if_not_present "$kernel_output" "$kernel_url"
+    fi
+    echo "✓ Kernel ready: $kernel_output"
+  elif [ -f "$KERNEL_OUTPUT" ] && [ ! -f "$kernel_output" ]; then
+    # Fallback to generic kernel
+    cp "$KERNEL_OUTPUT" "$kernel_output"
+    echo "✓ Using generic kernel: $kernel_output"
+  else
+    echo "✓ Kernel already exists: $kernel_output"
+  fi
+
+  echo ""
+  echo "$distro_name Setup Complete:"
+  echo " - Rootfs: $rootfs_output"
+  echo " - Kernel: $kernel_output"
+}
+
+download_arch_linux() {
+  download_and_convert_image \
+    "Arch Linux" \
+    "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2" \
+    "arch"
+}
+
+download_debian() {
+  local debian_version="${1:-bookworm}"
+  download_and_convert_image \
+    "Debian $debian_version" \
+    "https://cloud.debian.org/images/cloud/${debian_version}/latest/debian-12-generic-amd64.qcow2" \
+    "debian-${debian_version}"
+}
+
+download_almalinux() {
+  download_and_convert_image \
+    "AlmaLinux 9" \
+    "https://repo.almalinux.org/almalinux/9/BaseOS/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2" \
+    "almalinux-9"
+}
+
+download_fedora() {
+  local fedora_version="${1:-39}"
+  download_and_convert_image \
+    "Fedora $fedora_version" \
+    "https://download.fedoraproject.org/pub/fedora/linux/releases/${fedora_version}/Cloud/x86_64/images/Fedora-Cloud-Base-${fedora_version}-latest.x86_64.qcow2" \
+    "fedora-${fedora_version}"
+}
+
+show_custom_image_help() {
+  echo ""
+  echo "=== Custom Image Support ==="
+  echo ""
+  echo "To download other distributions, set IMAGE_SOURCE and run again:"
+  echo ""
+  echo "  IMAGE_SOURCE=arch-linux ./download-assets.sh"
+  echo "  IMAGE_SOURCE=debian ./download-assets.sh"
+  echo "  IMAGE_SOURCE=almalinux ./download-assets.sh"
+  echo "  IMAGE_SOURCE=fedora ./download-assets.sh"
+  echo ""
+  echo "Or manually download and convert any cloud image:"
+  echo "  1. Download .qcow2, .raw, or .img file"
+  echo "  2. Convert: qemu-img convert -f qcow2 -O raw source.qcow2 destination.ext4"
+  echo "  3. Place in assets/images/"
+  echo "  4. Update config.env to point to it"
+  echo ""
+  echo "See custom-images.md for detailed instructions."
+}
+
 main() {
   echo "=== Firecracker Assets Setup ==="
   echo "Image Source: $IMAGE_SOURCE"
   echo ""
 
-  if [ "$IMAGE_SOURCE" = "ubuntu-cloud" ]; then
-    # Ubuntu Cloud Images path
+  case "$IMAGE_SOURCE" in
+  "ubuntu-cloud")
     if [ -z "$UBUNTU_VERSION" ]; then
       echo "ERROR: UBUNTU_VERSION not set in config.env"
       exit 1
     fi
     download_ubuntu_cloud
     download_firecracker
-  else
+    ;;
+  "arch-linux")
+    download_arch_linux
+    download_firecracker
+    ;;
+  "debian")
+    download_debian
+    download_firecracker
+    ;;
+  "almalinux")
+    download_almalinux
+    download_firecracker
+    ;;
+  "fedora")
+    download_fedora
+    download_firecracker
+    ;;
+  *)
     # Default: Firecracker CI path
     detect_latest_ci_version
     download_firecracker
     download_kernel_firecracker_ci
     download_and_convert_rootfs_firecracker_ci
-  fi
+    ;;
+  esac
 
   echo ""
   echo "=== Assets Setup Complete ==="
   echo "Location: $ASSETS_DIR"
-  if [ "$IMAGE_SOURCE" = "ubuntu-cloud" ]; then
+  case "$IMAGE_SOURCE" in
+  "ubuntu-cloud")
     echo " - Rootfs: images/${UBUNTU_VERSION}.ext4"
     echo " - Kernel: kernels/${UBUNTU_VERSION}-vmlinux"
-  else
+    ;;
+  "arch-linux")
+    echo " - Rootfs: images/arch.ext4"
+    echo " - Kernel: kernels/arch-vmlinux"
+    ;;
+  "debian")
+    echo " - Rootfs: images/debian-*.ext4"
+    echo " - Kernel: kernels/debian-*-vmlinux"
+    ;;
+  "almalinux")
+    echo " - Rootfs: images/almalinux-*.ext4"
+    echo " - Kernel: kernels/almalinux-*-vmlinux"
+    ;;
+  "fedora")
+    echo " - Rootfs: images/fedora-*.ext4"
+    echo " - Kernel: kernels/fedora-*-vmlinux"
+    ;;
+  *)
     echo " - Kernel: $KERNEL_OUTPUT"
     echo " - Rootfs: ${ROOTFS_OUTPUT_BASE}-*.ext4"
-  fi
+    ;;
+  esac
   echo " - Firecracker: bin/firecracker"
   echo " - Jailer: bin/jailer"
+  echo ""
+  show_custom_image_help
 }
 
 main "$@"
