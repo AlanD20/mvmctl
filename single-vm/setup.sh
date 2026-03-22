@@ -17,7 +17,7 @@ echo ""
 # -----------------------------------------------------------------------------
 echo "[1/6] Checking dependencies..."
 
-for cmd in mkisofs mount umount sudo ip iptables; do
+for cmd in mount umount sudo ip iptables; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "ERROR: Required command '$cmd' is not installed"
     exit 1

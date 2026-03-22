@@ -171,7 +171,7 @@ configure_kernel() {
   ./scripts/config --enable CONFIG_CGROUPS
   ./scripts/config --enable CONFIG_MEMCG
 
-  echo " - The pain with upstream kernel with Firecracker..."
+  echo " - The pain of using upstream kernel with Firecracker..."
   ./scripts/config --enable CONFIG_PCI
   ./scripts/config --disable CONFIG_BLK_DEV_ZONED
   ./scripts/config --disable CONFIG_VIRTIO_BLK_F_SECURE_ERASE
