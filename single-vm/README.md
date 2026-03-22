@@ -38,7 +38,7 @@ cd ../single-vm
 sudo ./setup.sh
 
 # 3. Start the VM
-sudo ./start-vm.sh
+sudo ./create-vm.sh
 
 # 4. View console logs
 sudo tail -f env/firecracker.console.log
@@ -61,7 +61,7 @@ sudo ./cleanup.sh
 | `setup.sh` | Prepare VM assets and embed cloud-init |
 | `start-vm.sh` | Start the Firecracker VM |
 | `delete-vm.sh` | Graceful shutdown and delete VM (with cleanup) |
-| `network.sh` | Configure tap interface and NAT rules |
+| `setup.sh` | Prepare VM assets, cloud-init, network, and generate config |
 | `cleanup.sh` | Force stop VM, remove files, cleanup network |
 | `cloud-init/user-data` | Cloud-init configuration template |
 | `cloud-init/99-nocloud.cfg` | Cloud-init datasource config |
@@ -209,13 +209,13 @@ sudo ./setup.sh
 6. **Embed cloud-init**: Mounts rootfs and copies files to `/var/lib/cloud/seed/nocloud/`
 7. **Generate config**: Creates `env/firecracker.json` with all VM settings
 
-### 2. Start Phase (`start-vm.sh`)
+### 2. Start Phase (`create-vm.sh`)
 
 1. **Check running**: Exits if VM already running
-2. **Validate files**: Ensures all required files exist
-3. **Setup network**: Calls `network.sh` if needed
-4. **Start Firecracker**: Launches with `--enable-pci` and `--no-api` or `--api-sock`
-5. **Save PID**: Writes PID to `env/firecracker.pid`
+2. **Validate files**: Ensures all required files exist (kernel, rootfs, config)
+3. **Start Firecracker**: Launches with `--api-sock` or `--no-api` based on ENABLE_SOCKET setting
+4. **Save PID**: Writes PID to `env/firecracker.pid`
+5. **Display info**: Shows connection instructions and log paths
 
 ### 3. Network Setup (`network.sh`)
 

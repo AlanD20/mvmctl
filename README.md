@@ -64,7 +64,7 @@ sudo ./setup.sh
 ```bash
 cd multi-vm
 rm -f ubuntu-*-server-cloudimg-amd64.img base-rootfs.ext4
-sudo ./setup-bridge.sh
+sudo ./setup.sh
 ```
 
 #### Available Ubuntu Versions

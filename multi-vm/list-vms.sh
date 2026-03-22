@@ -58,6 +58,6 @@ done
 echo ""
 echo "Commands:"
 echo "  Create:  ./create-vm.sh <name> [vcpu] [memory_mib]"
-echo "  Stop:    ./stop-vm.sh <name>"
+echo "  Delete:  ./delete-vm.sh <name>"
 echo "  Console: tail -f $OUTPUT_DIR/<name>/firecracker.console.log"
 echo ""

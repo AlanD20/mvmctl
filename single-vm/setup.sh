@@ -141,19 +141,19 @@ MOUNT_DIR="${OUTPUT_DIR}/mnt-rootfs"
 mkdir -p "$MOUNT_DIR"
 
 # Try to mount (may need sudo)
-if mount "${OUTPUT_DIR}/rootfs.ext4" "$MOUNT_DIR" 2>/dev/null || sudo mount "${OUTPUT_DIR}/rootfs.ext4" "$MOUNT_DIR"; then
+if sudo mount "${OUTPUT_DIR}/rootfs.ext4" "$MOUNT_DIR" 2>/dev/null; then
   # Create cloud-init seed directory structure
   sudo mkdir -p "$MOUNT_DIR/var/lib/cloud/seed/nocloud"
   sudo mkdir -p "$MOUNT_DIR/etc/cloud/cloud.cfg.d"
 
   # Copy cloud-init files
-  sudo cp -t "$MOUNT_DIR/var/lib/cloud/seed/nocloud" "${OUTPUT_DIR}"/cloud-init/*
+  sudo cp -r "${OUTPUT_DIR}/cloud-init/"* "$MOUNT_DIR/var/lib/cloud/seed/nocloud/"
 
   # Set proper permissions
   sudo chmod 644 "$MOUNT_DIR"/var/lib/cloud/seed/nocloud/*
 
   # Unmount
-  umount "$MOUNT_DIR" 2>/dev/null || sudo umount "$MOUNT_DIR"
+  sudo umount "$MOUNT_DIR"
   sudo rmdir "$MOUNT_DIR" 2>/dev/null || true
 
   echo "✓ Cloud-init embedded into rootfs at /var/lib/cloud/seed/nocloud/"

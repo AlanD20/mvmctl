@@ -207,7 +207,7 @@ cat env/vm1/firecracker.log
 ### 3. Delete VM Phase (`delete-vm.sh`)
 
 1. **Check if running**: Read PID from firecracker.pid
-2. **Graceful shutdown**: Send SendCtrlAltDel via API (if socket mode)
+2. **Graceful shutdown**: Send SendCtrlAltDel via API (if socket file exists)
 3. **Force kill**: SIGTERM, then SIGKILL if graceful shutdown fails
 4. **Clean up**: Remove PID and socket files
 5. **Remove tap**: Delete fc-<name>-0 interface

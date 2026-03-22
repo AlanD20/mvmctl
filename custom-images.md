@@ -50,7 +50,7 @@ sudo ./setup.sh
 
 # Multi-vm
 rm -f ubuntu-*-server-cloudimg-amd64.img base-rootfs.ext4
-sudo ./setup-bridge.sh
+sudo ./setup.sh
 ```
 
 ---
@@ -331,9 +331,9 @@ genisoimage -output cloud-init.iso -volid cidata -joliet -rock user-data meta-da
 2. Run `./start-vm.sh`
 
 ```bash
-cp my-custom-image.ext4 single-vm/rootfs.ext4
+cp my-custom-image.ext4 single-vm/env/rootfs.ext4
 cd single-vm
-sudo ./start-vm.sh
+sudo ./create-vm.sh
 ```
 
 #### Multi-VM
