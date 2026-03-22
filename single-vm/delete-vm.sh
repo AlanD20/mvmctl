@@ -3,7 +3,6 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-
 source config.env
 
 FIRECRACKER_PID_FILE="${OUTPUT_DIR}/firecracker.pid"
@@ -11,20 +10,19 @@ FIRECRACKER_SOCKET="${OUTPUT_DIR}/firecracker.socket"
 
 echo "=== Deleting Firecracker VM ==="
 
-# =============================================================================
-# STOP FIRECRACKER
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Stop Firecracker
+# -----------------------------------------------------------------------------
 
-# Check if VM is running
 if [ ! -f "$FIRECRACKER_PID_FILE" ]; then
-  echo "VM is not running"
+  echo " - No PID file found, checking for stray processes..."
 else
   FIRECRACKER_PID=$(cat "$FIRECRACKER_PID_FILE" 2>/dev/null)
 
   if [ -n "$FIRECRACKER_PID" ] && kill -0 "$FIRECRACKER_PID" 2>/dev/null; then
     echo " - VM is running (PID: $FIRECRACKER_PID), stopping..."
 
-    # Try graceful shutdown via API if socket mode
+    # Try graceful shutdown via API socket
     if [ "$ENABLE_SOCKET" = "true" ] && [ -S "$FIRECRACKER_SOCKET" ]; then
       echo " - Sending graceful shutdown (CtrlAltDel)..."
       if curl --unix-socket "$FIRECRACKER_SOCKET" -s -X PUT \
@@ -38,9 +36,7 @@ else
             break
           fi
         done
-        if kill -0 "$FIRECRACKER_PID" 2>/dev/null; then
-          echo " - Graceful shutdown timeout, forcing stop..."
-        fi
+        kill -0 "$FIRECRACKER_PID" 2>/dev/null && echo " - Graceful shutdown timeout, forcing stop..."
       fi
     fi
 
@@ -49,7 +45,6 @@ else
       echo " - Force stopping Firecracker (PID: $FIRECRACKER_PID)..."
       kill "$FIRECRACKER_PID" 2>/dev/null || true
       sleep 1
-
       if kill -0 "$FIRECRACKER_PID" 2>/dev/null; then
         echo " - Force killing with SIGKILL..."
         kill -9 "$FIRECRACKER_PID" 2>/dev/null || true
@@ -58,26 +53,25 @@ else
   fi
 fi
 
-# Clean up PID and socket files
+# Kill any remaining stray processes associated with this VM
+for pid in $(pgrep -f "firecracker.*${OUTPUT_DIR}" 2>/dev/null || true); do
+  echo " - Stopping stray Firecracker process (PID: $pid)..."
+  kill "$pid" 2>/dev/null || true
+  sleep 1
+  kill -9 "$pid" 2>/dev/null || true
+done
+
 rm -f "$FIRECRACKER_PID_FILE" "$FIRECRACKER_SOCKET" 2>/dev/null || true
 
-# =============================================================================
-# REMOVE TAP DEVICE
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Remove network configuration
+# -----------------------------------------------------------------------------
+
 if ip link show "$TAP_DEV" &>/dev/null; then
   echo " - Removing tap device $TAP_DEV..."
   ip link del "$TAP_DEV" 2>/dev/null || sudo ip link del "$TAP_DEV" 2>/dev/null || true
 fi
 
-# =============================================================================
-# REMOVE OUTPUT DIRECTORY
-# =============================================================================
-echo " - Removing VM files..."
-rm -rf "$OUTPUT_DIR"
-
-# =============================================================================
-# FLUSH IPTABLES
-# =============================================================================
 echo " - Flushing iptables NAT rules..."
 DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
 if [ -n "$DEFAULT_IFACE" ]; then
@@ -86,16 +80,22 @@ if [ -n "$DEFAULT_IFACE" ]; then
   sudo iptables -D FORWARD -i "$DEFAULT_IFACE" -o "$TAP_DEV" -j ACCEPT 2>/dev/null || true
 fi
 
-# =============================================================================
-# COMPLETION MESSAGE
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Clean up remaining files
+# -----------------------------------------------------------------------------
+
+if [ -n "$GUEST_IP" ]; then
+  echo " - Removing SSH fingerprint for $GUEST_IP..."
+  ssh-keygen -R "$GUEST_IP" 2>/dev/null || true
+fi
+
+echo " - Removing VM files in '$OUTPUT_DIR'..."
+rm -rf "$OUTPUT_DIR"
+
+# -----------------------------------------------------------------------------
+
 echo ""
-echo "=========================================="
-echo "✓✓✓ VM Deleted ✓✓✓"
-echo "=========================================="
+echo "=== VM Deleted ==="
 echo ""
-echo "VM has been completely removed."
-echo ""
-echo "To create a new VM:"
-echo "  ./setup.sh"
+echo "To create a new VM: ./setup.sh"
 echo ""
