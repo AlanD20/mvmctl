@@ -18,7 +18,7 @@ echo ""
 echo "[1/4] Checking dependencies..."
 
 # Required commands for setup
-declare -a REQUIRED_CMDS=("mkisofs" "screen" "mount" "umount" "sudo" "ip" "iptables")
+declare -a REQUIRED_CMDS=("mkisofs" "mount" "umount" "sudo" "ip" "iptables")
 for cmd in "${REQUIRED_CMDS[@]}"; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "ERROR: Required command '$cmd' is not installed"
@@ -90,7 +90,7 @@ echo "✓ Rootfs and SSH key copied"
 # STEP 4: Create Cloud-Init
 # =============================================================================
 echo "[4/4] Creating cloud-init..."
-cp -r cloud-init "${OUTPUT_DIR}/cloud-init"
+cp -r cloud-init "${OUTPUT_DIR}"
 
 # Create meta-data with random instance ID
 INSTANCE_ID="i-$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 12)"
@@ -163,7 +163,50 @@ else
   echo "✓ Cloud-init ISO created"
 fi
 
-echo "[5/5] Generating VM configuration..."
+# =============================================================================
+# STEP 5: Setup Network
+# =============================================================================
+echo "[5/6] Setting up network..."
+
+# Check global IP forwarding
+if [ "$(sysctl -n net.ipv4.ip_forward)" != "1" ]; then
+  echo "ERROR: Global IP forwarding is not enabled."
+  echo "Run ../environment_setup.sh first"
+  exit 1
+fi
+
+# Remove existing tap if present
+if ip link show "$TAP_DEV" &>/dev/null; then
+  echo " - Tap device $TAP_DEV already exists, removing..."
+  sudo ip link del "$TAP_DEV" 2>/dev/null || true
+fi
+
+echo " - Creating tap device $TAP_DEV..."
+sudo ip tuntap add dev "$TAP_DEV" mode tap
+sudo ip link set dev "$TAP_DEV" up
+
+echo " - Configuring IP addresses..."
+sudo ip addr add "${HOST_IP}/30" dev "$TAP_DEV"
+
+echo " - Enabling proxy ARP..."
+sudo sysctl -w net.ipv4.conf."$TAP_DEV".proxy_arp=1 >/dev/null
+
+echo " - Setting up NAT..."
+DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+if [ -z "$DEFAULT_IFACE" ]; then
+  echo "ERROR: Could not detect default network interface."
+  exit 1
+fi
+sudo iptables -t nat -A POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE
+sudo iptables -A FORWARD -i "$TAP_DEV" -o "$DEFAULT_IFACE" -j ACCEPT
+sudo iptables -A FORWARD -i "$DEFAULT_IFACE" -o "$TAP_DEV" -j ACCEPT
+
+echo "✓ Network configured"
+
+# =============================================================================
+# STEP 6: Generate VM Configuration
+# =============================================================================
+echo "[6/6] Generating VM configuration..."
 # Use absolute paths for Firecracker
 ROOTFS_ABS_PATH="${SCRIPT_DIR}/${OUTPUT_DIR}/rootfs.ext4"
 KERNEL_ABS_PATH="${SCRIPT_DIR}/${KERNEL_PATH}"
@@ -230,5 +273,5 @@ echo " - vCPUs: ${VM_VCPU}"
 echo " - Memory: ${VM_MEM_MIB} MiB"
 echo " - Network: ${GUEST_IP}/30 via ${TAP_DEV}"
 echo ""
-echo "Run: ./start-vm.sh"
+echo "Run: ./create-vm.sh"
 echo "View: cat ${OUTPUT_DIR}/firecracker.log"

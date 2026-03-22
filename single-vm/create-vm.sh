@@ -51,14 +51,6 @@ if [ ! -f "${OUTPUT_DIR}/rootfs.ext4" ]; then
 fi
 
 # =============================================================================
-# SETUP NETWORK
-# =============================================================================
-if ! ./network.sh check 2>/dev/null; then
-  echo "Setting up network..."
-  sudo ./network.sh
-fi
-
-# =============================================================================
 # START VM
 # =============================================================================
 echo "Starting Firecracker VM..."
@@ -95,5 +87,4 @@ echo ""
 echo "To connect via SSH:"
 echo " ssh -i ${OUTPUT_DIR}/vm.id_rsa root@${GUEST_IP}"
 echo ""
-echo "Run ./stop-vm.sh to stop the VM"
-echo "Run ./cleanup.sh to remove VM and clean up network"
+echo "Run ./delete-vm.sh to stop and remove the VM"

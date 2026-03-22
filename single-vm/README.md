@@ -9,6 +9,7 @@ This setup creates a single microVM with:
 - **Cloud-init provisioning** for automatic configuration
 - **SSH access** using pre-generated keys
 - **Serial console** access via log files
+- **Graceful shutdown** via API when socket mode is enabled
 
 **Default Resources:**
 - 2 vCPUs
@@ -20,7 +21,7 @@ This setup creates a single microVM with:
 Before using this setup, ensure you have:
 
 1. **KVM support**: `/dev/kvm` must exist
-2. **Required tools**: `mkisofs`, `screen`, `mount`, `umount`, `sudo`, `ip`, `iptables`
+2. **Required tools**: `mkisofs`, `mount`, `umount`, `curl`, `ip`, `iptables`
 3. **Assets downloaded**: Run `../assets/download-assets.sh` first
 4. **Root privileges**: Most operations require sudo
 
@@ -45,10 +46,10 @@ sudo tail -f env/firecracker.console.log
 # 5. SSH into VM (wait 30-60s for boot)
 ssh -i env/vm.id_rsa root@10.10.0.2
 
-# 6. Stop the VM
-sudo ./stop-vm.sh
+# 6. Delete the VM (graceful shutdown + cleanup)
+sudo ./delete-vm.sh
 
-# 7. Cleanup everything when done
+# 7. Cleanup everything when done (optional, delete-vm.sh already cleans up)
 sudo ./cleanup.sh
 ```
 
@@ -59,9 +60,9 @@ sudo ./cleanup.sh
 | `config.env` | VM configuration (CPU, memory, network, paths) |
 | `setup.sh` | Prepare VM assets and embed cloud-init |
 | `start-vm.sh` | Start the Firecracker VM |
-| `stop-vm.sh` | Stop the Firecracker VM (keeps network) |
+| `delete-vm.sh` | Graceful shutdown and delete VM (with cleanup) |
 | `network.sh` | Configure tap interface and NAT rules |
-| `cleanup.sh` | Stop VM, remove files, cleanup network |
+| `cleanup.sh` | Force stop VM, remove files, cleanup network |
 | `cloud-init/user-data` | Cloud-init configuration template |
 | `cloud-init/99-nocloud.cfg` | Cloud-init datasource config |
 | `env/` | Runtime directory (created by setup.sh) |
@@ -81,6 +82,11 @@ VM_MEM_MIB=2048
 
 # Disk size (from IMAGE_SIZE, default 2G)
 DISK_SIZE="${IMAGE_SIZE:-2G}"
+
+# Firecracker API socket mode
+# Set to "true" to enable API socket (allows graceful shutdown)
+# Set to "false" for --no-api mode
+ENABLE_SOCKET="${ENABLE_SOCKET:-false}"
 ```
 
 ### Network Configuration
@@ -114,7 +120,7 @@ The guest accesses the internet via NAT on the host.
 ### Cloud-Init
 
 Edit `cloud-init/user-data` to customize:
-- **Hostname**: Change `hostname` and `fqdn`
+- **Hostname**: Will be set to VM_NAME automatically
 - **Users**: Modify the `users` section
 - **Password**: Generate with `echo -n "password" | mkpasswd -m sha-512 -s`
 - **SSH Keys**: Automatically injected from `../assets/keys/`
@@ -155,20 +161,32 @@ ssh -i env/vm.id_rsa root@10.10.0.2
 ssh -i env/vm.id_rsa ubuntu@10.10.0.2
 ```
 
-### Stop Without Cleanup
+### Delete VM (Graceful Shutdown)
 
 ```bash
-# Stop VM but keep files and network
-sudo ./stop-vm.sh
-
-# Can restart later with
-sudo ./start-vm.sh
+# Graceful shutdown (if socket mode enabled) then delete
+sudo ./delete-vm.sh
 ```
 
-### Full Cleanup
+If `ENABLE_SOCKET=true`, the delete script will:
+1. Send `SendCtrlAltDel` action via API (graceful shutdown)
+2. Wait up to 5 seconds for shutdown
+3. Force kill if graceful shutdown fails
+4. Remove tap device
+5. Remove VM files
+6. Flush iptables rules
+
+If `ENABLE_SOCKET=false`:
+1. Send SIGTERM
+2. Send SIGKILL if needed
+3. Remove tap device
+4. Remove VM files
+5. Flush iptables rules
+
+### Force Cleanup
 
 ```bash
-# Stop VM, remove all files, delete tap device
+# Force stop and cleanup (if delete-vm.sh fails)
 sudo ./cleanup.sh
 
 # To start fresh, run setup.sh again
@@ -182,19 +200,21 @@ sudo ./setup.sh
 1. **Check dependencies**: Verifies required tools and KVM
 2. **Check assets**: Ensures kernel, rootfs, and SSH keys exist
 3. **Copy rootfs**: Copies rootfs to `env/rootfs.ext4`
-4. **Generate cloud-init**:
+4. **Copy SSH key**: Copies key to `env/vm.id_rsa`
+5. **Generate cloud-init**:
    - Creates metadata with random instance ID
    - Creates network-config with static IP
    - Injects SSH keys into user-data
-5. **Embed cloud-init**: Mounts rootfs and copies files to `/var/lib/cloud/seed/nocloud/`
-6. **Generate config**: Creates `env/firecracker.json` with all VM settings
+   - Sets hostname to VM_NAME
+6. **Embed cloud-init**: Mounts rootfs and copies files to `/var/lib/cloud/seed/nocloud/`
+7. **Generate config**: Creates `env/firecracker.json` with all VM settings
 
 ### 2. Start Phase (`start-vm.sh`)
 
 1. **Check running**: Exits if VM already running
 2. **Validate files**: Ensures all required files exist
 3. **Setup network**: Calls `network.sh` if needed
-4. **Start Firecracker**: Launches with `--no-api` or `--api-sock`
+4. **Start Firecracker**: Launches with `--enable-pci` and `--no-api` or `--api-sock`
 5. **Save PID**: Writes PID to `env/firecracker.pid`
 
 ### 3. Network Setup (`network.sh`)
@@ -204,16 +224,18 @@ sudo ./setup.sh
 3. **Enable forwarding**: Sets sysctl for proxy ARP
 4. **Setup NAT**: Adds iptables rules for masquerade
 
-### 4. Stop Phase (`stop-vm.sh`)
+### 4. Delete Phase (`delete-vm.sh`)
 
 1. **Read PID**: From `env/firecracker.pid`
-2. **Send SIGTERM**: Graceful shutdown
-3. **Send SIGKILL**: Force kill if needed
-4. **Cleanup**: Removes PID file
+2. **Graceful shutdown**: Send SendCtrlAltDel via API (if socket mode)
+3. **Force kill**: SIGTERM, then SIGKILL if graceful shutdown fails
+4. **Remove tap**: Deletes `fc-tap0` interface
+5. **Remove files**: Deletes `env/` directory
+6. **Flush iptables**: Removes NAT rules
 
-### 5. Cleanup Phase (`cleanup.sh`)
+### 5. Force Cleanup Phase (`cleanup.sh`)
 
-1. **Stop processes**: Kills all Firecracker processes
+1. **Stop processes**: Force kills all Firecracker processes
 2. **Remove files**: Deletes `env/` directory
 3. **Remove socket**: Deletes API socket if exists
 4. **Remove tap**: Deletes `fc-tap0` interface
@@ -221,10 +243,10 @@ sudo ./setup.sh
 
 ## Important Notes
 
-1. **Always cleanup**: Run `./cleanup.sh` when done to remove network rules
+1. **Always cleanup**: Run `./delete-vm.sh` when done to remove network rules
 2. **Sudo required**: Most scripts need root for networking and mounting
 3. **Boot time**: Guest takes 30-60 seconds to fully boot
-4. **Screen sessions**: `screen` is used for console access (not persistent)
+4. **Socket mode**: Enable in config.env for graceful shutdown support
 5. **Image source**: Controlled by `IMAGE_SOURCE` in `../assets/config.env`
    - `ubuntu-cloud`: Full Ubuntu with cloud-init
    - `firecracker-ci`: Minimal Firecracker test images
@@ -287,11 +309,11 @@ sudo iptables -F
 
 Required commands (checked by `setup.sh`):
 - `mkisofs` - Create ISO files (genisoimage package)
-- `screen` - Terminal multiplexing
 - `mount/umount` - Filesystem mounting
 - `sudo` - Privilege escalation
 - `ip` - Network configuration (iproute2)
 - `iptables` - Firewall rules
+- `curl` - API requests (for graceful shutdown)
 
 Required assets (from `../assets/`):
 - `kernels/vmlinux` or `kernels/{version}-vmlinux`
