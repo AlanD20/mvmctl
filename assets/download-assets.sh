@@ -39,6 +39,10 @@ download_if_absent() {
   [ -f "$1" ] || download "$1" "$2"
 }
 
+fix_owner() {
+  sudo chown "$USER:$USER" "$1"
+}
+
 # ---------------------------------------------------------------------------
 # Firecracker binary
 # ---------------------------------------------------------------------------
@@ -162,6 +166,7 @@ download_rootfs_firecracker_ci() {
   cp "ubuntu-${ubuntu_ver}.ext4" "$ASSETS_DIR/$rootfs_out"
   cd "$ASSETS_DIR"
   sudo rm -rf "$tmp_dir" "$squashfs_file"
+  fix_owner "$rootfs_out"
 
   echo "✓ Rootfs saved: $rootfs_out"
 }
@@ -206,6 +211,7 @@ download_ubuntu_cloud() {
   [ -d "$mnt/etc/cloud" ] && sudo mkdir -p "$mnt/var/lib/cloud/seed/nocloud"
   sudo umount "$mnt"
   rmdir "$mnt"
+  fix_owner "$rootfs_out"
 
   echo "✓ Rootfs saved: $rootfs_out"
 }
@@ -286,6 +292,7 @@ extract_partition_from_raw() {
     echo " - Could not detect filesystem type; keeping as .img"
     EXTRACTED_ROOTFS="$out_file"
   fi
+  fix_owner "$EXTRACTED_ROOTFS"
 }
 
 download_and_convert_image() {
