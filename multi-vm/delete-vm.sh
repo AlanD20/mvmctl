@@ -11,7 +11,7 @@ source config.env
 # =============================================================================
 VM_NAME="${1:-}"
 
-if [ -z "$VM_NAME" ]; then
+if [ "$VM_NAME" = "" ]; then
   echo "Usage: $0 <name>"
   echo ""
   echo "Deletes a VM permanently (stops if running, removes all files)"
@@ -20,7 +20,7 @@ if [ -z "$VM_NAME" ]; then
   echo "  $0 vm1    # Delete vm1 completely"
   echo ""
   echo "Available VMs:"
-  ./list-vms.sh 2>/dev/null || ls -1 ${OUTPUT_DIR}/*/ 2>/dev/null | grep -v base-rootfs || echo "  (none)"
+  ./list-vms.sh 2>/dev/null || ls -1 "$OUTPUT_DIR"/*/ 2>/dev/null | grep -v base-rootfs || echo "  (none)"
   exit 1
 fi
 
@@ -39,13 +39,52 @@ echo "=== Deleting VM: $VM_NAME ==="
 # =============================================================================
 # STOP VM IF RUNNING
 # =============================================================================
-if [ -f "$VM_DIR/firecracker.pid" ]; then
-  VM_PID=$(cat "$VM_DIR/firecracker.pid" 2>/dev/null)
+PID_FILE="$VM_DIR/firecracker.pid"
+SOCKET_FILE="$VM_DIR/${VM_NAME}.socket"
+
+# Check if VM is running
+if [ -f "$PID_FILE" ]; then
+  VM_PID=$(cat "$PID_FILE" 2>/dev/null)
+
   if [ -n "$VM_PID" ] && kill -0 "$VM_PID" 2>/dev/null; then
-    echo " - Stopping running VM..."
-    ./stop-vm.sh "$VM_NAME" 2>/dev/null || true
+    echo " - VM is running (PID: $VM_PID), stopping..."
+
+    # Try graceful shutdown via API if socket mode
+    if [ "$ENABLE_SOCKET" = "true" ] && [ -S "$SOCKET_FILE" ]; then
+      echo " - Sending graceful shutdown (CtrlAltDel)..."
+      if curl --unix-socket "$SOCKET_FILE" -s -X PUT \
+        "http://localhost/actions" \
+        -d '{ "action_type": "SendCtrlAltDel" }' 2>/dev/null; then
+        echo " - Waiting for VM to shutdown (5s timeout)..."
+        for i in {1..10}; do
+          sleep 0.5
+          if ! kill -0 "$VM_PID" 2>/dev/null; then
+            echo " - VM shutdown gracefully"
+            break
+          fi
+        done
+        if kill -0 "$VM_PID" 2>/dev/null; then
+          echo " - Graceful shutdown timeout, forcing stop..."
+        fi
+      fi
+    fi
+
+    # Force kill if still running
+    if kill -0 "$VM_PID" 2>/dev/null; then
+      echo " - Force stopping Firecracker (PID: $VM_PID)..."
+      kill "$VM_PID" 2>/dev/null || true
+      sleep 1
+
+      if kill -0 "$VM_PID" 2>/dev/null; then
+        echo " - Force killing with SIGKILL..."
+        kill -9 "$VM_PID" 2>/dev/null || true
+      fi
+    fi
   fi
 fi
+
+# Clean up PID and socket files
+rm -f "$PID_FILE" "$SOCKET_FILE" 2>/dev/null || true
 
 # =============================================================================
 # REMOVE TAP DEVICE (if still exists)

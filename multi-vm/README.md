@@ -9,10 +9,11 @@ This setup creates multiple microVMs with:
 - **NAT** for internet access
 - **Auto IP assignment** from configurable pool
 - **Cloud-init provisioning** (from base image)
+- **Graceful shutdown** via API when socket mode is enabled
 
 **Default Resources Per VM:**
-- 0.5 vCPUs (configurable, minimum 1 as integer)
-- 0.5 GB RAM (configurable)
+- 2 vCPUs (configurable)
+- 2048 MiB RAM (configurable)
 - 2 GB Disk (from base image)
 
 ## Prerequisites
@@ -20,7 +21,7 @@ This setup creates multiple microVMs with:
 Before using this setup, ensure you have:
 
 1. **KVM support**: `/dev/kvm` must exist
-2. **Required tools**: `qemu-img`, `e2fsck`, `resize2fs`, `ip`, `iptables`, `screen`, `truncate`
+2. **Required tools**: `mkisofs`, `mount`, `umount`, `ip`, `iptables`, `curl`
 3. **Assets downloaded**: Run `../assets/download-assets.sh` first
 4. **Root privileges**: All operations require sudo
 
@@ -36,16 +37,16 @@ cd ../multi-vm
 # 2. Setup bridge and base rootfs
 sudo ./setup.sh
 
-# 3. Create VMs
-sudo ./create-vm.sh vm1                    # 0.5 vCPU, 0.5GB, auto IP
-sudo ./create-vm.sh vm2 1 2              # 1 vCPU, 2GB, auto IP
-sudo ./create-vm.sh vm3 2 4 10.20.0.50   # 2 vCPU, 4GB, static IP
+# 3. Create VMs (creates and starts automatically)
+sudo ./create-vm.sh vm1                    # 2 vCPU, 2048MiB, auto IP
+sudo ./create-vm.sh vm2 1 1024         # 1 vCPU, 1024MiB, auto IP
+sudo ./create-vm.sh vm3 2 4096         # 2 vCPU, 4096MiB, auto IP
 
-# 4. View VMs
-ls -la env/
+# 4. List VMs with status
+sudo ./list-vms.sh
 
-# 5. Stop a specific VM
-sudo ./stop-vm.sh vm1
+# 5. Delete a VM (graceful shutdown + removal)
+sudo ./delete-vm.sh vm1
 
 # 6. Cleanup everything when done
 sudo ./cleanup.sh
@@ -57,9 +58,11 @@ sudo ./cleanup.sh
 |------|-------------|
 | `config.env` | VM and network configuration |
 | `setup.sh` | Prepare bridge and base rootfs |
-| `create-vm.sh` | Create a new VM |
-| `stop-vm.sh` | Stop and remove a specific VM |
+| `create-vm.sh` | Create and start a new VM |
+| `delete-vm.sh` | Graceful shutdown and delete VM |
+| `list-vms.sh` | List all VMs with status |
 | `cleanup.sh` | Stop all VMs, remove bridge, flush NAT |
+| `cloud-init/` | Cloud-init configuration templates |
 | `env/` | Runtime directory (created by setup.sh) |
 | `env/base-rootfs.ext4` | Base rootfs copied for each VM |
 
@@ -73,11 +76,9 @@ Edit `config.env`:
 # Default disk size (from IMAGE_SIZE)
 DISK_SIZE="${IMAGE_SIZE:-2G}"
 
-# Per-VM settings (passed to create-vm.sh)
-# ./create-vm.sh <name> [vcpu] [memory_mib]
-
 # Firecracker API socket mode
-# Set to "true" to enable API socket, "false" for --no-api mode
+# Set to "true" to enable API socket (allows graceful shutdown)
+# Set to "false" for --no-api mode
 ENABLE_SOCKET="${ENABLE_SOCKET:-false}"
 ```
 
@@ -131,46 +132,52 @@ sudo ./create-vm.sh testvm
 ### Create VM with Custom Resources
 
 ```bash
-# 1 vCPU, 1GB RAM, auto IP
-sudo ./create-vm.sh mediumvm 1 1
+# 1 vCPU, 1024MiB RAM, auto IP
+sudo ./create-vm.sh mediumvm 1 1024
 
-# 2 vCPUs, 4GB RAM, auto IP
-sudo ./create-vm.sh largevm 2 4
+# 2 vCPUs, 4096MiB RAM, auto IP
+sudo ./create-vm.sh largevm 2 4096
 ```
 
-### Create VM with Static IP
+### List VMs
 
 ```bash
-# 2 vCPUs, 4GB, specific IP
-sudo ./create-vm.sh staticvm 2 4 10.20.0.100
+# Show all VMs with status, IP, MAC
+sudo ./list-vms.sh
+
+# Output format:
+# NAME         IP ADDRESS      MAC ADDRESS       STATUS     PID
+# vm1          10.20.0.2       02:FC:xx:xx:xx:xx running    12345
 ```
 
-### View Running VMs
+### Delete VM (Graceful Shutdown)
 
 ```bash
-# List VM directories
-ls -la env/
-
-# View VM config
-cat env/vm1/config.json
-
-# Check VM process
-cat env/vm1/firecracker.pid
+# Graceful shutdown (if socket mode enabled) then delete
+sudo ./delete-vm.sh vm1
 ```
 
-### Stop Individual VM
+If `ENABLE_SOCKET=true`, the delete script will:
+1. Send `SendCtrlAltDel` action via API (graceful shutdown)
+2. Wait up to 5 seconds for shutdown
+3. Force kill if graceful shutdown fails
+4. Remove tap device
+5. Delete VM directory
+
+If `ENABLE_SOCKET=false`:
+1. Send SIGTERM
+2. Send SIGKILL if needed
+3. Remove tap device
+4. Delete VM directory
+
+### View VM Logs
 
 ```bash
-sudo ./stop-vm.sh vm1
-```
+# Console logs
+tail -f env/vm1/firecracker.console.log
 
-### Access VM Console
-
-```bash
-# Attach to serial console
-sudo screen -r fc-vm1
-
-# Detach: Ctrl+A, then D
+# Firecracker logs
+cat env/vm1/firecracker.log
 ```
 
 ## How It Works
@@ -179,32 +186,36 @@ sudo screen -r fc-vm1
 
 1. **Check dependencies**: Verifies required tools and KVM
 2. **Check assets**: Ensures kernel and base image exist
-3. **Create base rootfs**: Converts qcow2 → raw, resizes to DISK_SIZE
+3. **Prepare base rootfs**: Copy from assets
 4. **Create bridge**: Sets up br0 with IP
 5. **Configure NAT**: Adds iptables rules for internet access
 
 ### 2. Create VM Phase (`create-vm.sh`)
 
-1. **Parse arguments**: name, vcpu, memory, optional IP
+1. **Parse arguments**: name, vcpu, memory
 2. **Validate**: Check KVM, bridge, base rootfs exist
-3. **Calculate resources**: Convert to Firecracker format
-4. **Assign IP**: Auto-assign from pool or use provided IP
-5. **Create directory**: `env/<name>/`
-6. **Copy rootfs**: From base-rootfs.ext4
-7. **Generate config**: config.json with boot args, network, resources
-8. **Create tap**: fc-<name>-0, attach to bridge
-9. **Start VM**: Firecracker in screen session
+3. **Assign IP**: Auto-assign from pool
+4. **Create directory**: `env/<name>/`
+5. **Copy rootfs**: From base-rootfs.ext4
+6. **Generate config**: firecracker.json with boot args, network, resources
+7. **Create cloud-init**: meta-data, network-config, user-data with hostname
+8. **Embed cloud-init**: Mount rootfs and copy files
+9. **Create tap**: fc-<name>-0, attach to bridge
+10. **Start VM**: Firecracker with --enable-pci
+11. **InstanceStart**: Send InstanceStart action via API (if socket mode)
 
-### 3. Stop VM Phase (`stop-vm.sh`)
+### 3. Delete VM Phase (`delete-vm.sh`)
 
-1. **Read PID**: From firecracker.pid or <name>.pid
-2. **Stop process**: SIGTERM, then SIGKILL if needed
-3. **Remove tap**: Delete fc-<name>-0 interface
-4. **Cleanup**: Remove VM directory
+1. **Check if running**: Read PID from firecracker.pid
+2. **Graceful shutdown**: Send SendCtrlAltDel via API (if socket mode)
+3. **Force kill**: SIGTERM, then SIGKILL if graceful shutdown fails
+4. **Clean up**: Remove PID and socket files
+5. **Remove tap**: Delete fc-<name>-0 interface
+6. **Delete directory**: Remove env/<name>/
 
 ### 4. Cleanup Phase (`cleanup.sh`)
 
-1. **Stop all VMs**: Kill all Firecracker processes
+1. **Delete all VMs**: Run delete-vm for each VM
 2. **Remove taps**: Delete all fc-* interfaces
 3. **Remove bridge**: Delete br0
 4. **Flush iptables**: Remove NAT rules
@@ -214,9 +225,9 @@ sudo screen -r fc-vm1
 1. **Run with sudo**: All scripts require root for networking
 2. **Setup once**: Run `setup.sh` before creating VMs
 3. **IP pool**: Auto-assigns from 10.20.0.2 - 10.20.0.254
-4. **Bridge persists**: Bridge stays up after VM shutdown
-5. **vCPU minimum**: Firecracker requires integer, minimum 1
-6. **Memory units**: Passed in GB, converted to MiB
+4. **Bridge persists**: Bridge stays up after VM deletion
+5. **Socket mode**: Enable in config.env for graceful shutdown support
+6. **VM lifecycle**: Each VM is created, runs, and deleted - no pause/resume
 
 ## Troubleshooting
 
@@ -253,7 +264,7 @@ sudo iptables -t nat -L -n -v
 
 ```bash
 # Check existing configs
-grep -r "10.20.0." env/*/config.json
+grep -r "10.20.0." env/*/firecracker.json
 ```
 
 ### Cleanup Fails
@@ -270,18 +281,17 @@ sudo iptables -t nat -F
 ## Dependencies
 
 Required commands (checked by `setup.sh`):
-- `qemu-img` - Image conversion
-- `e2fsck` - Filesystem check
-- `resize2fs` - Filesystem resize
+- `mkisofs` - Create ISO files
+- `mount/umount` - Filesystem mounting
 - `ip` - Network configuration
 - `iptables` - Firewall/NAT
-- `screen` - Terminal multiplexing
-- `truncate` - File resizing
+- `curl` - API requests (for graceful shutdown)
 
 Required assets (from `../assets/`):
 - `kernels/${KERNEL_NAME}` - Kernel image
-- `images/${OS}-${VERSION}-server-cloudimg-${ARCH}.img` - Base image
+- `images/${UBUNTU_VERSION}.ext4` - Base rootfs
 - `bin/firecracker` - Firecracker binary
+- `keys/id_rsa.pub` - SSH public key for cloud-init
 
 ## See Also
 
