@@ -221,7 +221,7 @@ download_ubuntu_cloud() {
 #
 # For images with a partition table the user is shown fdisk output and asked
 # to pick the root partition. The extracted partition is renamed to match its
-# detected filesystem type (e.g. arch.btrfs, fedora-39.ext4).
+# detected filesystem type (e.g. arch.btrfs, debian-bookworm.ext4).
 #
 # Sets global EXTRACTED_ROOTFS to the final image path.
 # ---------------------------------------------------------------------------
@@ -363,21 +363,6 @@ download_debian() {
     "debian-${ver}"
 }
 
-download_almalinux() {
-  download_and_convert_image \
-    "AlmaLinux 9" \
-    "https://repo.almalinux.org/almalinux/9/BaseOS/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2" \
-    "almalinux-9"
-}
-
-download_fedora() {
-  local ver="${1:-39}"
-  download_and_convert_image \
-    "Fedora $ver" \
-    "https://download.fedoraproject.org/pub/fedora/linux/releases/${ver}/Cloud/x86_64/images/Fedora-Cloud-Base-${ver}-latest.x86_64.qcow2" \
-    "fedora-${ver}"
-}
-
 # ---------------------------------------------------------------------------
 # Help
 # ---------------------------------------------------------------------------
@@ -391,8 +376,6 @@ Set IMAGE_SOURCE in config.env (or inline) and re-run:
 
   IMAGE_SOURCE=arch-linux   ./download-assets.sh
   IMAGE_SOURCE=debian        ./download-assets.sh
-  IMAGE_SOURCE=almalinux    ./download-assets.sh
-  IMAGE_SOURCE=fedora        ./download-assets.sh
   IMAGE_SOURCE=ubuntu-cloud  ./download-assets.sh
 
 To add a distro manually:
@@ -436,12 +419,6 @@ main() {
       ;;
     debian)
       download_debian
-      ;;
-    almalinux)
-      download_almalinux
-      ;;
-    fedora)
-      download_fedora
       ;;
     *)
       # Default: official Firecracker CI images (Ubuntu squashfs + vmlinux)
