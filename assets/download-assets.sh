@@ -336,7 +336,7 @@ download_debian() {
   local debian_version="${1:-bookworm}"
   download_and_convert_image \
     "Debian $debian_version" \
-    "https://cloud.debian.org/images/cloud/${debian_version}/latest/debian-12-generic-amd64.qcow2" \
+    "https://saimei.ftp.acc.umu.se/images/cloud/${debian_version}/latest/debian-12-generic-amd64.qcow2" \
     "debian-${debian_version}"
 }
 
