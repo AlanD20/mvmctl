@@ -175,7 +175,7 @@ download_rootfs_firecracker_ci() {
 # Ubuntu Cloud image (tar archive -> ext4)
 # ---------------------------------------------------------------------------
 
-download_ubuntu_cloud() {
+download_ubuntu() {
   echo "=== Ubuntu Cloud Image ==="
   echo "    Version : $UBUNTU_VERSION"
   echo "    Size    : $IMAGE_SIZE"
@@ -352,7 +352,7 @@ download_arch_linux() {
   download_and_convert_image \
     "Arch Linux" \
     "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2" \
-    "arch"
+    "archlinux"
 }
 
 download_debian() {
@@ -374,9 +374,9 @@ show_help() {
 
 Set IMAGE_SOURCE in config.env (or inline) and re-run:
 
-  IMAGE_SOURCE=arch-linux   ./download-assets.sh
-  IMAGE_SOURCE=debian        ./download-assets.sh
-  IMAGE_SOURCE=ubuntu-cloud  ./download-assets.sh
+  IMAGE_SOURCE=ubuntu       ./download-assets.sh
+  IMAGE_SOURCE=archlinux    ./download-assets.sh
+  IMAGE_SOURCE=debian       ./download-assets.sh
 
 To add a distro manually:
   1. Download a .qcow2 / .raw / .img cloud image
@@ -411,10 +411,10 @@ main() {
   echo ""
 
   case "$IMAGE_SOURCE" in
-    ubuntu-cloud)
-      download_ubuntu_cloud
+    ubuntu)
+      download_ubuntu
       ;;
-    arch-linux)
+    archlinux)
       download_arch_linux
       ;;
     debian)
