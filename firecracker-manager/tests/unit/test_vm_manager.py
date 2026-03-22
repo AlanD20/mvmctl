@@ -60,3 +60,15 @@ def test_vm_manager_not_found():
 
         result = manager.get("non-existent")
         assert result is None
+
+
+def test_vm_manager_update_status_not_found():
+    """Test update_status raises VMNotFoundError for nonexistent VM."""
+    import pytest
+    from fcm.exceptions import VMNotFoundError
+
+    with tempfile.TemporaryDirectory() as tmp:
+        manager = VMManager(Path(tmp))
+
+        with pytest.raises(VMNotFoundError):
+            manager.update_status("nonexistent", VMState.STOPPED)

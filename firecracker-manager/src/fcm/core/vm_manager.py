@@ -2,17 +2,18 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 from datetime import datetime
+from typing import Any, cast
 
-from fcm.models.vm import VMInstance, VMState, VMConfig
+from fcm.models.vm import VMInstance, VMState
+from fcm.utils.fs import get_vms_dir
 
 
 class VMManager:
     """Manages VM state persistence."""
 
-    def __init__(self, run_dir: Path):
-        self.run_dir = Path(run_dir)
+    def __init__(self, run_dir: Path | None = None) -> None:
+        self.run_dir = Path(run_dir) if run_dir is not None else get_vms_dir()
         self.state_file = self.run_dir / "state.json"
         self._ensure_run_dir()
 
@@ -20,14 +21,14 @@ class VMManager:
         """Create run directory if it doesn't exist."""
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
-    def _load_state(self) -> dict:
+    def _load_state(self) -> dict[str, Any]:
         """Load state from JSON file."""
         if not self.state_file.exists():
             return {"vms": {}}
         with open(self.state_file, "r") as f:
-            return json.load(f)
+            return cast(dict[str, Any], json.load(f))
 
-    def _save_state(self, state: dict) -> None:
+    def _save_state(self, state: dict[str, Any]) -> None:
         """Save state to JSON file."""
         with open(self.state_file, "w") as f:
             json.dump(state, f, indent=2, default=str)
@@ -45,7 +46,17 @@ class VMManager:
         }
         self._save_state(state)
 
-    def get(self, name: str) -> Optional[VMInstance]:
+    def update_status(self, name: str, status: VMState) -> None:
+        """Update the status of a registered VM."""
+        state = self._load_state()
+        if name not in state["vms"]:
+            from fcm.exceptions import VMNotFoundError
+
+            raise VMNotFoundError(f"VM '{name}' not found in state")
+        state["vms"][name]["status"] = status.value
+        self._save_state(state)
+
+    def get(self, name: str) -> VMInstance | None:
         """Get VM by name."""
         state = self._load_state()
         vm_data = state["vms"].get(name)

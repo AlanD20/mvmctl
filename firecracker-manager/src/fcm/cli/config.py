@@ -3,19 +3,19 @@
 import json
 import typer
 from pathlib import Path
-from typing import Optional
 
 from fcm.core.config import load_config, validate_config, dump_config
 from fcm.utils.console import print_error, print_success
+from fcm.utils.fs import get_assets_dir, get_vm_dir
 
 app = typer.Typer(help="Configuration commands")
 
 
 @app.command()
 def show(
-    section: Optional[str] = typer.Option(None, "--section", help="Config section to show"),
+    section: str | None = typer.Option(None, "--section", help="Config section to show"),
     config_dir: Path = typer.Option(
-        Path(__file__).parent.parent.parent / "assets",
+        get_assets_dir(),
         "--config-dir",
         help="Configuration directory",
     ),
@@ -33,7 +33,7 @@ def show(
 @app.command()
 def validate(
     config_dir: Path = typer.Option(
-        Path(__file__).parent.parent.parent / "assets",
+        get_assets_dir(),
         "--config-dir",
         help="Configuration directory",
     ),
@@ -58,14 +58,9 @@ def validate(
 @app.command()
 def dump_vm(
     name: str = typer.Option(..., "--name", help="VM name"),
-    multi_vm_dir: Path = typer.Option(
-        Path("../multi-vm"),
-        "--multi-vm",
-        help="Multi-VM directory",
-    ),
 ) -> None:
     """Print the Firecracker JSON config for a VM."""
-    vm_dir = multi_vm_dir / "env" / name
+    vm_dir = get_vm_dir(name)
     config_file = vm_dir / "firecracker.json"
 
     if not config_file.exists():
@@ -75,7 +70,6 @@ def dump_vm(
     try:
         with open(config_file, "r") as f:
             content = f.read()
-            # Validate JSON
             data = json.loads(content)
             typer.echo(json.dumps(data, indent=2))
     except json.JSONDecodeError as e:

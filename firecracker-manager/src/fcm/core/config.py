@@ -2,8 +2,8 @@
 
 import yaml
 from pathlib import Path
-from typing import Any, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
+from typing import Any
 
 
 @dataclass
@@ -11,9 +11,9 @@ class FirecrackerConfig:
     """Firecracker binary configuration."""
 
     binary: str = "/usr/local/bin/firecracker"
-    socket_dir: str = "/tmp/fcm/sockets"
-    run_dir: str = "/tmp/fcm/run"
-    log_dir: str = "/tmp/fcm/logs"
+    socket_dir: str = ""
+    run_dir: str = ""
+    log_dir: str = ""
 
 
 @dataclass
@@ -64,9 +64,7 @@ class NetworkConfig:
 class PathsConfig:
     """Directory paths."""
 
-    assets_dir: str = "../assets"
-    single_vm_dir: str = "../single-vm"
-    multi_vm_dir: str = "../multi-vm"
+    assets_dir: str = ""
 
 
 @dataclass
@@ -85,7 +83,8 @@ def load_yaml(path: Path) -> dict[str, Any]:
         return {}
 
     with open(path, "r") as f:
-        return yaml.safe_load(f) or {}
+        result: dict[str, Any] = yaml.safe_load(f) or {}
+        return result
 
 
 def load_config(config_dir: Path) -> FCMConfig:
@@ -107,6 +106,10 @@ def load_config(config_dir: Path) -> FCMConfig:
     network_data = data.get("network", {})
     paths_data = data.get("paths", {})
 
+    # Filter paths_data to only known PathsConfig fields
+    valid_path_fields = {f.name for f in fields(PathsConfig)}
+    paths_data_filtered = {k: v for k, v in paths_data.items() if k in valid_path_fields}
+
     return FCMConfig(
         firecracker=FirecrackerConfig(**firecracker_data),
         vm_defaults=VMDefaultsConfig(**vm_defaults_data),
@@ -114,7 +117,7 @@ def load_config(config_dir: Path) -> FCMConfig:
             single_vm=SingleVMNetworkConfig(**network_data.get("single_vm", {})),
             multi_vm=MultiVMNetworkConfig(**network_data.get("multi_vm", {})),
         ),
-        paths=PathsConfig(**paths_data),
+        paths=PathsConfig(**paths_data_filtered),
     )
 
 
@@ -149,7 +152,7 @@ def validate_config(config: FCMConfig) -> list[str]:
     return errors
 
 
-def dump_config(config: FCMConfig, section: Optional[str] = None) -> dict[str, Any]:
+def dump_config(config: FCMConfig, section: str | None = None) -> dict[str, object]:
     """Dump configuration as dictionary.
 
     Args:
@@ -159,7 +162,7 @@ def dump_config(config: FCMConfig, section: Optional[str] = None) -> dict[str, A
     Returns:
         Configuration dictionary
     """
-    result = {
+    result: dict[str, object] = {
         "firecracker": config.firecracker.__dict__,
         "vm_defaults": config.vm_defaults.__dict__,
         "network": {

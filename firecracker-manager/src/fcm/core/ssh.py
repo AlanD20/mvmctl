@@ -3,17 +3,18 @@
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from fcm.utils.console import print_error, print_success
+from fcm.core.vm_manager import VMManager
+from fcm.utils.fs import get_cache_dir
 
 
-def find_ssh_keys(assets_dir: Path) -> list[Path]:
-    """Find SSH private keys in assets/keys/."""
-    keys_dir = assets_dir / "keys"
+def find_ssh_keys(keys_dir: Path | None = None) -> list[Path]:
+    """Find SSH private keys in the cache keys directory."""
+    if keys_dir is None:
+        keys_dir = get_cache_dir() / "keys"
     if not keys_dir.exists():
         return []
-
     keys = []
     for key_file in keys_dir.glob("id_*"):
         if key_file.suffix == ".pub":
@@ -22,7 +23,7 @@ def find_ssh_keys(assets_dir: Path) -> list[Path]:
     return keys
 
 
-def extract_ip_from_config(config_path: Path) -> Optional[str]:
+def extract_ip_from_config(config_path: Path) -> str | None:
     """Extract IP address from Firecracker JSON config."""
     import json
     import re
@@ -47,8 +48,8 @@ def extract_ip_from_config(config_path: Path) -> Optional[str]:
 def build_ssh_command(
     ip: str,
     user: str = "root",
-    key_path: Optional[Path] = None,
-    command: Optional[str] = None,
+    key_path: Path | None = None,
+    command: str | None = None,
 ) -> list[str]:
     """Build SSH command arguments."""
     ssh_args = [
@@ -73,8 +74,8 @@ def build_ssh_command(
 def exec_ssh(
     ip: str,
     user: str = "root",
-    key_path: Optional[Path] = None,
-    command: Optional[str] = None,
+    key_path: Path | None = None,
+    command: str | None = None,
 ) -> None:
     """Execute SSH, replacing current process."""
     ssh_args = build_ssh_command(ip, user, key_path, command)
@@ -84,8 +85,8 @@ def exec_ssh(
 def run_ssh(
     ip: str,
     user: str = "root",
-    key_path: Optional[Path] = None,
-    command: Optional[str] = None,
+    key_path: Path | None = None,
+    command: str | None = None,
 ) -> int:
     """Run SSH as subprocess, return exit code."""
     ssh_args = build_ssh_command(ip, user, key_path, command)
@@ -96,10 +97,8 @@ def run_ssh(
 def connect_to_vm(
     vm_name_or_ip: str,
     user: str = "root",
-    key_path: Optional[Path] = None,
-    command: Optional[str] = None,
-    multi_vm_dir: Path = Path("../multi-vm"),
-    assets_dir: Path = Path("../assets"),
+    key_path: Path | None = None,
+    command: str | None = None,
     exec_mode: bool = True,
 ) -> int:
     """Connect to VM via SSH.
@@ -109,8 +108,6 @@ def connect_to_vm(
         user: SSH user
         key_path: Specific SSH key to use
         command: Command to execute (optional)
-        multi_vm_dir: Path to multi-vm directory
-        assets_dir: Path to assets directory
         exec_mode: If True, replace process; if False, run subprocess
 
     Returns:
@@ -118,21 +115,26 @@ def connect_to_vm(
     """
     import re
 
-    is_ip = re.match(r"^\d+\.\d+\.\d+\.\d+$", vm_name_or_ip)
+    is_ip = bool(re.match(r"^\d+\.\d+\.\d+\.\d+$", vm_name_or_ip))
 
     if is_ip:
         ip = vm_name_or_ip
     else:
-        config_path = multi_vm_dir / "env" / vm_name_or_ip / "firecracker.json"
-        ip = extract_ip_from_config(config_path)
-        if not ip:
-            print_error(f"Could not find IP for VM '{vm_name_or_ip}'")
+        # Look up VM in state via VMManager
+        manager = VMManager()
+        vm = manager.get(vm_name_or_ip)
+        if not vm:
+            print_error(f"VM '{vm_name_or_ip}' not found")
             return 1
+        if not vm.ip:
+            print_error(f"VM '{vm_name_or_ip}' has no IP address")
+            return 1
+        ip = vm.ip
 
     if not key_path:
-        keys = find_ssh_keys(assets_dir)
+        keys = find_ssh_keys()
         if not keys:
-            print_error("No SSH keys found in assets/keys/")
+            print_error("No SSH keys found in cache keys directory")
             return 1
         key_path = keys[0]
 
@@ -141,7 +143,6 @@ def connect_to_vm(
         return 1
 
     key_path.chmod(0o600)
-
     print_success(f"Connecting to {ip} as {user}...")
 
     if exec_mode and not command:

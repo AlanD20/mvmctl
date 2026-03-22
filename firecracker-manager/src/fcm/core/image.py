@@ -3,7 +3,6 @@
 import hashlib
 import subprocess
 from pathlib import Path
-from typing import Optional
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
@@ -14,7 +13,7 @@ from fcm.utils.console import print_error, print_success, print_info
 def download_file(
     url: str,
     dest: Path,
-    expected_sha256: Optional[str] = None,
+    expected_sha256: str | None = None,
     show_progress: bool = True,
 ) -> bool:
     """Download file with optional progress display.
@@ -95,7 +94,7 @@ def convert_qcow2_to_raw(
     try:
         print_info(f"Converting {qcow2_path.name} to raw...")
 
-        result = subprocess.run(
+        subprocess.run(
             ["qemu-img", "convert", "-f", "qcow2", "-O", "raw", str(qcow2_path), str(raw_path)],
             capture_output=True,
             text=True,
@@ -116,8 +115,8 @@ def convert_qcow2_to_raw(
 def extract_partition_from_raw(
     raw_path: Path,
     output_path: Path,
-    partition: Optional[int] = None,
-) -> bool:
+    partition: int | None = None,
+) -> Path | None:
     """Extract root partition from raw disk image.
 
     Uses fdisk to find partitions and dd to extract.
@@ -130,47 +129,91 @@ def extract_partition_from_raw(
     Returns:
         True if successful, False otherwise
     """
+    import json as json_mod
     import re
 
     try:
-        # Get partition info with fdisk
-        result = subprocess.run(
-            ["fdisk", "-l", str(raw_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        start_sector: int | None = None
+        sector_count: int | None = None
 
-        # Parse partitions
-        partition_lines = []
-        for line in result.stdout.split("\n"):
-            if re.match(rf"^{re.escape(str(raw_path))}p?\\d", line):
-                partition_lines.append(line)
+        sfdisk_ok = False
+        try:
+            sfdisk_result = subprocess.run(
+                ["sfdisk", "--json", str(raw_path)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            table = json_mod.loads(sfdisk_result.stdout)
+            partitions = table.get("partitiontable", {}).get("partitions", [])
 
-        if not partition_lines:
-            # No partition table, use image as-is
-            print_info("No partition table found, using image as-is")
-            raw_path.rename(output_path)
-            return True
+            if not partitions:
+                print_info("No partition table found, using image as-is")
+                raw_path.rename(output_path)
+                return output_path
 
-        # If multiple partitions and none specified, prompt
-        if len(partition_lines) > 1 and partition is None:
-            print_info(f"Found {len(partition_lines)} partitions:")
-            for i, line in enumerate(partition_lines, 1):
-                print(f"  {i}: {line}")
-            print_info("Using last partition as root")
-            partition = len(partition_lines)
+            if len(partitions) > 1 and partition is None:
+                print_info(f"Found {len(partitions)} partitions:")
+                for i, p in enumerate(partitions, 1):
+                    print(
+                        f"  {i}: start={p.get('start')} size={p.get('size')} type={p.get('type', '?')}"
+                    )
+                print_info("Using last partition as root")
+                partition = len(partitions)
 
-        if partition is None:
-            partition = 1
+            if partition is None:
+                partition = 1
 
-        # Extract the partition
-        chosen_line = partition_lines[partition - 1]
-        parts = chosen_line.split()
+            chosen = partitions[partition - 1]
+            start_sector = int(chosen["start"])
+            sector_count = int(chosen["size"])
+            sfdisk_ok = True
 
-        # Parse start sector and size
-        start_sector = int(parts[1])
-        sector_count = int(parts[3]) if len(parts) > 3 else None
+        except (
+            FileNotFoundError,
+            subprocess.CalledProcessError,
+            json_mod.JSONDecodeError,
+            KeyError,
+        ):
+            pass
+
+        if not sfdisk_ok:
+            result = subprocess.run(
+                ["fdisk", "-l", str(raw_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            partition_lines = []
+            for line in result.stdout.split("\n"):
+                if re.match(rf"^{re.escape(str(raw_path))}p?\d", line):
+                    partition_lines.append(line)
+
+            if not partition_lines:
+                print_info("No partition table found, using image as-is")
+                raw_path.rename(output_path)
+                return output_path
+
+            if len(partition_lines) > 1 and partition is None:
+                print_info(f"Found {len(partition_lines)} partitions:")
+                for i, line in enumerate(partition_lines, 1):
+                    print(f"  {i}: {line}")
+                print_info("Using last partition as root")
+                partition = len(partition_lines)
+
+            if partition is None:
+                partition = 1
+
+            chosen_line = partition_lines[partition - 1]
+            numeric_parts = [p for p in chosen_line.split() if p.isdigit()]
+            if len(numeric_parts) < 2:
+                print_error("Failed to parse fdisk output for partition sectors")
+                return None
+            start_sector = int(numeric_parts[0])
+            sector_count = int(numeric_parts[1]) if len(numeric_parts) >= 3 else None
+
+        assert start_sector is not None
 
         print_info(f"Extracting partition {partition} (start={start_sector})...")
 
@@ -184,7 +227,7 @@ def extract_partition_from_raw(
         if sector_count:
             dd_args.append(f"count={sector_count}")
 
-        result = subprocess.run(dd_args, capture_output=True, check=True)
+        subprocess.run(dd_args, capture_output=True, check=True)
 
         # Detect filesystem type
         try:
@@ -207,14 +250,14 @@ def extract_partition_from_raw(
             pass
 
         print_success(f"Extracted to {output_path.name}")
-        return True
+        return output_path
 
     except subprocess.CalledProcessError as e:
         print_error(f"Extraction failed: {e}")
-        return False
+        return None
     except (IndexError, ValueError) as e:
         print_error(f"Failed to parse partition table: {e}")
-        return False
+        return None
 
 
 def create_ext4_from_tar(
@@ -238,14 +281,14 @@ def create_ext4_from_tar(
         print_info(f"Creating ext4 image from {tar_path.name}...")
 
         # Create empty image
-        result = subprocess.run(
+        subprocess.run(
             ["truncate", "-s", size, str(output_path)],
             capture_output=True,
             check=True,
         )
 
         # Format as ext4
-        result = subprocess.run(
+        subprocess.run(
             ["mkfs.ext4", str(output_path)],
             capture_output=True,
             check=True,
@@ -278,7 +321,7 @@ def fetch_image(
     spec: ImageSpec,
     output_dir: Path,
     force: bool = False,
-) -> Optional[Path]:
+) -> Path | None:
     """Fetch and convert an image.
 
     Args:
@@ -305,18 +348,27 @@ def fetch_image(
 
     # Convert based on format
     success = False
+    actual_path: Path | None = None
 
     if spec.format == "qcow2":
         raw_path = download_path.with_suffix(".raw")
         if convert_qcow2_to_raw(download_path, raw_path):
-            success = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
+            result = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
             raw_path.unlink(missing_ok=True)
+            if result is not None:
+                success = True
+                actual_path = result
 
     elif spec.format == "tar-rootfs":
         success = create_ext4_from_tar(download_path, final_path)
+        if success:
+            actual_path = final_path
 
     elif spec.format == "raw":
-        success = extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
+        result = extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
+        if result is not None:
+            success = True
+            actual_path = result
 
     else:
         print_error(f"Unknown format: {spec.format}")
@@ -325,7 +377,7 @@ def fetch_image(
     download_path.unlink(missing_ok=True)
 
     if success:
-        return final_path
+        return actual_path
     return None
 
 

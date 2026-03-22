@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Firecracker Manager CLI - Main entry point."""
 
+import logging
+import os
+
 import typer
 from fcm.cli import vm, image, kernel, config
 
@@ -22,7 +25,19 @@ def callback(
     debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
 ) -> None:
     """Firecracker Manager CLI."""
-    pass
+    # Determine log level: --debug > --verbose > FCM_LOG_LEVEL env var > WARNING
+    if debug:
+        level = logging.DEBUG
+    elif verbose:
+        level = logging.INFO
+    else:
+        env_level = os.environ.get("FCM_LOG_LEVEL", "WARNING").upper()
+        level = getattr(logging, env_level, logging.WARNING)
+
+    logging.basicConfig(
+        level=level,
+        format="%(levelname)s: %(name)s: %(message)s",
+    )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,6 @@ import http.client
 import json
 import socket
 from pathlib import Path
-from typing import Optional, Any
 
 from fcm.utils.console import print_error, print_success, print_info
 
@@ -16,8 +15,9 @@ class UnixSocketHTTPConnection(http.client.HTTPConnection):
         self.socket_path = socket_path
         super().__init__("localhost")
 
-    def connect(self):
+    def connect(self) -> None:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(5.0)
         self.sock.connect(str(self.socket_path))
 
 
@@ -26,7 +26,7 @@ class FirecrackerClient:
 
     def __init__(self, socket_path: Path):
         self.socket_path = Path(socket_path)
-        self.conn: Optional[UnixSocketHTTPConnection] = None
+        self.conn: UnixSocketHTTPConnection | None = None
 
     def _connect(self) -> bool:
         """Connect to Firecracker socket."""
@@ -45,12 +45,13 @@ class FirecrackerClient:
         self,
         method: str,
         path: str,
-        body: Optional[dict] = None,
-    ) -> tuple[int, Optional[dict]]:
+        body: dict[str, object] | None = None,
+    ) -> tuple[int, dict[str, object] | None]:
         """Make HTTP request to Firecracker API."""
         if not self.conn:
             if not self._connect():
                 return 0, None
+        assert self.conn is not None
 
         headers = {"Content-Type": "application/json"} if body else {}
         body_json = json.dumps(body) if body else None
@@ -70,7 +71,7 @@ class FirecrackerClient:
             print_error(f"API request failed: {e}")
             return 0, None
 
-    def close(self):
+    def close(self) -> None:
         """Close connection."""
         if self.conn:
             self.conn.close()
@@ -83,7 +84,7 @@ class FirecrackerClient:
             True if successful, False otherwise
         """
         print_info("Pausing VM...")
-        status, data = self._request("PATCH", "/vm")
+        status, data = self._request("PATCH", "/vm", {"state": "Paused"})
 
         if status == 204:
             print_success("VM paused")
@@ -128,7 +129,7 @@ class FirecrackerClient:
         """
         print_info("Creating snapshot...")
 
-        body = {
+        body: dict[str, object] = {
             "mem_file_path": str(mem_path),
             "snapshot_path": str(snapshot_path),
         }
@@ -136,7 +137,7 @@ class FirecrackerClient:
         status, data = self._request("PUT", "/snapshot/create", body)
 
         if status == 204:
-            print_success(f"Snapshot created")
+            print_success("Snapshot created")
             print_info(f"  Memory: {mem_path}")
             print_info(f"  State: {snapshot_path}")
             return True
@@ -181,7 +182,7 @@ class FirecrackerClient:
                 print_error(f"Response: {data}")
             return False
 
-    def get_instance_info(self) -> Optional[dict]:
+    def get_instance_info(self) -> dict[str, object] | None:
         """Get VM instance information.
 
         Returns:
@@ -193,7 +194,7 @@ class FirecrackerClient:
             return data
         return None
 
-    def describe_instance(self) -> Optional[dict]:
+    def describe_instance(self) -> dict[str, object] | None:
         """Describe the VM instance.
 
         Returns:
@@ -237,26 +238,13 @@ class FirecrackerClient:
             return False
 
 
-def get_vm_socket_path(vm_name: str, multi_vm_dir: Path) -> Optional[Path]:
-    """Get socket path for a VM.
+def get_vm_socket_path(vm_name: str) -> Path | None:
+    """Get socket path for a VM from cache directory."""
+    from fcm.utils.fs import get_vm_dir
 
-    Args:
-        vm_name: VM name
-        multi_vm_dir: Path to multi-vm directory
-
-    Returns:
-        Socket path or None if not found
-    """
-    vm_dir = multi_vm_dir / "env" / vm_name
-    socket_path = vm_dir / f"{vm_name}.socket"
-
-    if socket_path.exists():
-        return socket_path
-
-    # Try alternative names
-    for alt_name in ["firecracker.socket", "socket"]:
-        alt_path = vm_dir / alt_name
-        if alt_path.exists():
-            return alt_path
-
+    vm_dir = get_vm_dir(vm_name)
+    for name in [f"{vm_name}.socket", "firecracker.socket", "socket"]:
+        p = vm_dir / name
+        if p.exists():
+            return p
     return None

@@ -3,10 +3,10 @@
 import json
 import typer
 from pathlib import Path
-from typing import Optional
 
 from fcm.core.image import load_images_config, fetch_image
 from fcm.utils.console import print_table, print_error, print_success
+from fcm.utils.fs import get_images_dir, get_assets_dir
 
 app = typer.Typer(help="Image management")
 
@@ -14,11 +14,11 @@ app = typer.Typer(help="Image management")
 @app.command()
 def fetch(
     id: str = typer.Argument(..., help="Image ID from images.yaml"),
-    out: Optional[Path] = typer.Option(Path("../assets/images"), "--out", help="Output directory"),
+    out: Path = typer.Option(get_images_dir(), "--out", help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
 ) -> None:
     """Download and convert an image."""
-    config_path = Path(__file__).parent.parent.parent / "assets" / "images.yaml"
+    config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
 
     spec = next((img for img in images if img.id == id), None)
@@ -37,10 +37,10 @@ def fetch(
 @app.command()
 def fetch_all(
     force: bool = typer.Option(False, "--force", help="Re-download all images"),
-    out: Optional[Path] = typer.Option(Path("../assets/images"), "--out", help="Output directory"),
+    out: Path = typer.Option(get_images_dir(), "--out", help="Output directory"),
 ) -> None:
     """Fetch all images defined in images.yaml."""
-    config_path = Path(__file__).parent.parent.parent / "assets" / "images.yaml"
+    config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
 
     if not images:
@@ -60,12 +60,10 @@ def fetch_all(
 @app.command(name="list")
 def list_images(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    images_dir: Optional[Path] = typer.Option(
-        Path("../assets/images"), "--images-dir", help="Images directory"
-    ),
+    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
 ) -> None:
     """Show locally available images."""
-    config_path = Path(__file__).parent.parent.parent / "assets" / "images.yaml"
+    config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
 
     if json_output:
@@ -92,7 +90,7 @@ def convert(
     src: Path = typer.Option(..., "--src", help="Source image file"),
     dst: Path = typer.Option(..., "--dst", help="Destination file"),
     format: str = typer.Option("ext4", "--format", help="Target format"),
-    size: Optional[str] = typer.Option(None, "--size", help="Target size (e.g., 2G)"),
+    size: str | None = typer.Option(None, "--size", help="Target size (e.g., 2G)"),
 ) -> None:
     """Convert an existing image file."""
     from fcm.core.image import (
@@ -109,12 +107,14 @@ def convert(
     if src.suffix == ".qcow2":
         raw_path = dst.with_suffix(".raw")
         if convert_qcow2_to_raw(src, raw_path):
-            success = extract_partition_from_raw(raw_path, dst)
+            result_path = extract_partition_from_raw(raw_path, dst)
+            success = result_path is not None
             raw_path.unlink(missing_ok=True)
     elif src.suffix == ".tar" or str(src).endswith(".tar.gz") or str(src).endswith(".tar.xz"):
         success = create_ext4_from_tar(src, dst, size or "2G")
     elif src.suffix == ".raw" or src.suffix == ".img":
-        success = extract_partition_from_raw(src, dst)
+        result_path = extract_partition_from_raw(src, dst)
+        success = result_path is not None
     else:
         print_error(f"Unknown source format: {src.suffix}")
 
@@ -128,9 +128,7 @@ def convert(
 @app.command()
 def delete(
     id: str = typer.Option(..., "--id", help="Image ID to delete"),
-    images_dir: Optional[Path] = typer.Option(
-        Path("../assets/images"), "--images-dir", help="Images directory"
-    ),
+    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Force delete without confirmation"),
 ) -> None:
     """Remove a local image."""

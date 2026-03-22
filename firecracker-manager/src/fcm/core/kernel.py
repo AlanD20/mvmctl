@@ -5,17 +5,16 @@ import os
 import subprocess
 import tarfile
 from pathlib import Path
-from typing import Optional
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
-from fcm.utils.console import print_error, print_success, print_info, console
+from fcm.utils.console import print_error, print_success, print_info
 
 
 def download_kernel_source(
     url: str,
     dest: Path,
-    expected_sha256: Optional[str] = None,
+    expected_sha256: str | None = None,
 ) -> bool:
     """Download kernel source tarball.
 
@@ -78,7 +77,7 @@ def download_kernel_source(
 def extract_kernel_tarball(
     tarball: Path,
     extract_dir: Path,
-) -> Optional[Path]:
+) -> Path | None:
     """Extract kernel tarball.
 
     Args:
@@ -92,7 +91,7 @@ def extract_kernel_tarball(
         print_info(f"Extracting {tarball.name}...")
 
         with tarfile.open(tarball, "r:xz") as tar:
-            tar.extractall(path=extract_dir)
+            tar.extractall(path=extract_dir, filter="data")
 
         # Find extracted directory (should be linux-X.Y.Z)
         for item in extract_dir.iterdir():
@@ -171,8 +170,8 @@ def run_make(
         )
         return result.returncode, result.stdout, result.stderr
     else:
-        result = subprocess.run(cmd, cwd=kernel_dir)
-        return result.returncode, "", ""
+        returncode = subprocess.run(cmd, cwd=kernel_dir).returncode
+        return returncode, "", ""
 
 
 def configure_kernel(
@@ -186,7 +185,6 @@ def configure_kernel(
     Returns:
         True if successful, False otherwise
     """
-    from pathlib import Path
 
     # Download Firecracker config
     if not download_firecracker_config(kernel_dir):
@@ -360,7 +358,9 @@ def build_kernel(
         print_error("Build failed!")
         # Show last error lines
         lines = stderr.split("\n")
-        error_lines = [l for l in lines if "error:" in l.lower() or "undefined" in l.lower()]
+        error_lines = [
+            line for line in lines if "error:" in line.lower() or "undefined" in line.lower()
+        ]
         if error_lines:
             print_info("Errors found:")
             for line in error_lines[-10:]:
@@ -392,8 +392,8 @@ def build_kernel_pipeline(
     source_url: str,
     output_path: Path,
     build_dir: Path,
-    sha256: Optional[str] = None,
-    jobs: Optional[int] = None,
+    sha256: str | None = None,
+    jobs: int | None = None,
 ) -> bool:
     """Full kernel build pipeline.
 
@@ -410,6 +410,10 @@ def build_kernel_pipeline(
     """
     if jobs is None:
         jobs = os.cpu_count() or 1
+
+    if output_path.exists():
+        print_success(f"Using cached kernel: {output_path}")
+        return True
 
     tarball = build_dir / f"linux-{version}.tar.xz"
     kernel_src_dir = build_dir / f"linux-{version}"

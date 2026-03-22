@@ -2,9 +2,9 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 
 from fcm.models.vm import VMConfig
+from fcm.utils.fs import get_vm_dir
 
 
 class ConfigGenerator:
@@ -13,7 +13,7 @@ class ConfigGenerator:
     def __init__(self, vm_config: VMConfig):
         self.vm_config = vm_config
 
-    def generate(self) -> dict:
+    def generate(self) -> dict[str, object]:
         """Generate Firecracker config dictionary."""
         boot_args = self.vm_config.boot_args or self._build_default_boot_args()
 
@@ -21,7 +21,6 @@ class ConfigGenerator:
             "boot-source": {
                 "kernel_image_path": str(self.vm_config.kernel_path),
                 "boot_args": boot_args,
-                "initrd_path": None,
             },
             "drives": [
                 {
@@ -61,13 +60,27 @@ class ConfigGenerator:
         """Build default boot arguments."""
         pci_arg = "pci=off" if not self.vm_config.enable_pci else ""
         ip_arg = (
-            f"ip={self.vm_config.guest_ip}::10.10.0.1:255.255.255.252::eth0:off"
+            f"ip={self.vm_config.guest_ip}::10.20.0.1:255.255.255.0::eth0:off"
             if self.vm_config.guest_ip
             else ""
         )
-        return f"console=ttyS0 reboot=k panic=1 {pci_arg} {ip_arg} rw rootwait"
+        lsm_flags = getattr(self.vm_config, "lsm_flags", None)
+        lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
+        parts = [
+            "console=ttyS0",
+            "reboot=k",
+            "panic=1",
+            pci_arg,
+            ip_arg,
+            "rw",
+            "rootwait",
+            "rootfstype=ext4",
+            "ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
+            lsm_arg,
+        ]
+        return " ".join(p for p in parts if p).strip()
 
-    def _build_network_config(self) -> list:
+    def _build_network_config(self) -> list[dict[str, object]]:
         """Build network interface configuration."""
         if not self.vm_config.tap_device:
             return []
@@ -82,11 +95,11 @@ class ConfigGenerator:
 
     def _get_log_path(self) -> Path:
         """Get path for firecracker.log."""
-        return Path(f"/tmp/fcm/run/{self.vm_config.name}/firecracker.log")
+        return get_vm_dir(self.vm_config.name) / "firecracker.log"
 
     def _get_metrics_path(self) -> Path:
         """Get path for metrics file."""
-        return Path(f"/tmp/fcm/run/{self.vm_config.name}/firecracker.metrics")
+        return get_vm_dir(self.vm_config.name) / "firecracker.metrics"
 
     def write_to_file(self, path: Path) -> None:
         """Write config to JSON file."""

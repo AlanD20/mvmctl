@@ -1,6 +1,5 @@
 """Tests for config generation."""
 
-import json
 from pathlib import Path
 
 from fcm.core.config_gen import ConfigGenerator

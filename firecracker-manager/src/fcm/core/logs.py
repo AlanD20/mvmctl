@@ -1,28 +1,26 @@
 """Log viewing utilities."""
 
-import sys
+from collections.abc import Generator
 from pathlib import Path
-from typing import Optional, Generator
 
 from fcm.utils.console import print_error, print_info
+from fcm.utils.fs import get_vm_dir
 
 
 def get_log_path(
     vm_name: str,
     log_type: str = "boot",
-    multi_vm_dir: Path = Path("../multi-vm"),
-) -> Optional[Path]:
+) -> Path | None:
     """Get log file path for a VM.
 
     Args:
         vm_name: VM name
         log_type: 'boot' for console log, 'os' for firecracker log
-        multi_vm_dir: Path to multi-vm directory
 
     Returns:
         Path to log file or None if not found
     """
-    vm_dir = multi_vm_dir / "env" / vm_name
+    vm_dir = get_vm_dir(vm_name)
 
     if not vm_dir.exists():
         print_error(f"VM '{vm_name}' not found at {vm_dir}")
@@ -87,7 +85,6 @@ def show_logs(
     log_type: str = "boot",
     lines: int = 50,
     follow: bool = False,
-    multi_vm_dir: Path = Path("../multi-vm"),
 ) -> int:
     """Show VM logs.
 
@@ -96,12 +93,11 @@ def show_logs(
         log_type: 'boot' or 'os'
         lines: Number of lines to show
         follow: If True, follow log output
-        multi_vm_dir: Path to multi-vm directory
 
     Returns:
         Exit code (0 for success)
     """
-    log_file = get_log_path(vm_name, log_type, multi_vm_dir)
+    log_file = get_log_path(vm_name, log_type)
     if not log_file:
         return 1
 

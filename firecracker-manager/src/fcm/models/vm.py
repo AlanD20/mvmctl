@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 
 class VMState(Enum):
@@ -25,10 +24,10 @@ class VMConfig:
     mem_size_mib: int = 2048
     kernel_path: Path = field(default_factory=lambda: Path("vmlinux"))
     rootfs_path: Path = field(default_factory=lambda: Path("rootfs.ext4"))
-    guest_ip: Optional[str] = None
-    guest_mac: Optional[str] = None
-    tap_device: Optional[str] = None
-    boot_args: Optional[str] = None
+    guest_ip: str | None = None
+    guest_mac: str | None = None
+    tap_device: str | None = None
+    boot_args: str | None = None
     enable_socket: bool = False
     enable_pci: bool = False
     lsm_flags: str = "landlock,lockdown,yama,integrity,selinux,bpf"
@@ -39,10 +38,10 @@ class VMInstance:
     """VM instance metadata."""
 
     name: str
-    pid: Optional[int] = None
-    socket_path: Optional[Path] = None
-    ip: Optional[str] = None
-    mac: Optional[str] = None
+    pid: int | None = None
+    socket_path: Path | None = None
+    ip: str | None = None
+    mac: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     status: VMState = VMState.STOPPED
-    config: Optional[VMConfig] = None
+    config: VMConfig | None = None

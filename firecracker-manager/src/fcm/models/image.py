@@ -1,8 +1,6 @@
 """Image data models."""
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -15,4 +13,4 @@ class ImageSpec:
     format: str
     convert_to: str
     size_mib: int
-    sha256: Optional[str] = None
+    sha256: str | None = None
