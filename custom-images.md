@@ -104,22 +104,53 @@ Arch Linux provides cloud images that work well with Firecracker.
 
 ### Download and Prepare
 
+**Important**: Arch Linux cloud images are partitioned disks (not raw filesystems). You have two options:
+
+#### Option 1: Extract the Root Filesystem (Recommended)
+
 ```bash
 cd assets/images
 
 # Download the Arch Linux cloud image
 curl -LO https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
 
-# Convert to raw format
-qemu-img convert -f qcow2 -O raw Arch-Linux-x86_64-cloudimg.qcow2 arch.ext4
+# Convert qcow2 to raw disk image
+qemu-img convert -f qcow2 -O raw Arch-Linux-x86_64-cloudimg.qcow2 arch.raw
+
+# Mount the raw image to access partitions
+mkdir -p /tmp/arch-mount
+sudo kpartx -av arch.raw
+# This creates device mappings like /dev/mapper/loop0p1
+
+# Check which partition is the root filesystem
+sudo fdisk -l arch.raw
+# Usually partition 1 is the root filesystem
+
+# Create a new ext4 image from the root partition
+sudo dd if=/dev/mapper/loop0p1 of=arch.ext4 bs=4M status=progress
 
 # Resize if needed (optional)
 truncate -s 10G arch.ext4
-e2fsck -f arch.ext4
-resize2fs arch.ext4
+sudo e2fsck -f arch.ext4
+sudo resize2fs arch.ext4
+
+# Cleanup
+sudo kpartx -dv arch.raw
+rm -f arch.raw
+rmdir /tmp/arch-mount 2>/dev/null || true
 
 cd ../..
 ```
+
+#### Option 2: Use Partitioned Image with Modified Boot Args
+
+If you prefer to keep the partitioned image, modify the boot args in `firecracker.json`:
+
+```json
+"boot_args": "console=ttyS0 reboot=k panic=1 pci=off ip=10.10.0.2::10.10.0.1:255.255.255.252::eth0:off rw root=/dev/vda1"
+```
+
+Note: Change `root=/dev/vda` to `root=/dev/vda1` to specify the first partition.
 
 ### Update Configuration
 
@@ -197,19 +228,31 @@ Debian provides official cloud images with cloud-init support.
 
 ### Download and Prepare
 
+**Important**: Debian cloud images are partitioned disks. You must extract the root partition:
+
 ```bash
 cd assets/images
 
 # Download Debian 12 (Bookworm)
 curl -LO https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 
-# Convert to raw
-qemu-img convert -f qcow2 -O raw debian-12-generic-amd64.qcow2 debian.ext4
+# Convert qcow2 to raw disk
+qemu-img convert -f qcow2 -O raw debian-12-generic-amd64.qcow2 debian.raw
+
+# Extract root partition (usually partition 1)
+mkdir -p /tmp/debian-mount
+sudo kpartx -av debian.raw
+sudo dd if=/dev/mapper/loop0p1 of=debian.ext4 bs=4M status=progress
 
 # Resize (optional)
 truncate -s 10G debian.ext4
-e2fsck -f debian.ext4
-resize2fs debian.ext4
+sudo e2fsck -f debian.ext4
+sudo resize2fs debian.ext4
+
+# Cleanup
+sudo kpartx -dv debian.raw
+rm -f debian.raw
+rmdir /tmp/debian-mount 2>/dev/null || true
 
 cd ../..
 ```
@@ -354,19 +397,31 @@ AlmaLinux and CentOS Stream provide cloud images compatible with Firecracker.
 
 ### Download AlmaLinux
 
+**Important**: AlmaLinux cloud images are partitioned disks. You must extract the root partition:
+
 ```bash
 cd assets/images
 
 # AlmaLinux 9
 curl -LO https://repo.almalinux.org/almalinux/9/BaseOS/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2
 
-# Convert to raw
-qemu-img convert -f qcow2 -O raw AlmaLinux-9-GenericCloud-latest.x86_64.qcow2 almalinux.ext4
+# Convert qcow2 to raw disk
+qemu-img convert -f qcow2 -O raw AlmaLinux-9-GenericCloud-latest.x86_64.qcow2 almalinux.raw
 
-# Resize
+# Extract root partition (usually partition 1)
+mkdir -p /tmp/almalinux-mount
+sudo kpartx -av almalinux.raw
+sudo dd if=/dev/mapper/loop0p1 of=almalinux.ext4 bs=4M status=progress
+
+# Resize (optional)
 truncate -s 10G almalinux.ext4
-e2fsck -f almalinux.ext4
-resize2fs almalinux.ext4
+sudo e2fsck -f almalinux.ext4
+sudo resize2fs almalinux.ext4
+
+# Cleanup
+sudo kpartx -dv almalinux.raw
+rm -f almalinux.raw
+rmdir /tmp/almalinux-mount 2>/dev/null || true
 
 cd ../..
 ```

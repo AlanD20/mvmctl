@@ -55,11 +55,26 @@ fi
 # =============================================================================
 echo "Starting Firecracker VM..."
 
+# Build firecracker command arguments
+FIRECRACKER_ARGS=""
+
+if [ "$ENABLE_PCI" = "true" ]; then
+  FIRECRACKER_ARGS="--enable-pci"
+fi
+
 if [ "$ENABLE_SOCKET" = "true" ]; then
-  nohup "$FIRECRACKER_BIN" --api-sock "$FIRECRACKER_SOCKET_PATH" --config-file "$CONFIG_ABS_PATH" \
+  FIRECRACKER_ARGS="$FIRECRACKER_ARGS --api-sock $FIRECRACKER_SOCKET_PATH"
+fi
+
+# Remove leading space if present
+FIRECRACKER_ARGS=$(echo "$FIRECRACKER_ARGS" | sed 's/^ *//')
+
+# Start firecracker with the appropriate arguments
+if [ -n "$FIRECRACKER_ARGS" ]; then
+  nohup "$FIRECRACKER_BIN" $FIRECRACKER_ARGS --config-file "$CONFIG_ABS_PATH" \
     >"$CONSOLE_ABS_PATH" 2>&1 &
 else
-  nohup "$FIRECRACKER_BIN" --no-api --config-file "$CONFIG_ABS_PATH" \
+  nohup "$FIRECRACKER_BIN" --config-file "$CONFIG_ABS_PATH" \
     >"$CONSOLE_ABS_PATH" 2>&1 &
 fi
 
