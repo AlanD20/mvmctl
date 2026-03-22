@@ -1,0 +1,175 @@
+"""Configuration loading and validation."""
+
+import yaml
+from pathlib import Path
+from typing import Any, Optional
+from dataclasses import dataclass, field
+
+
+@dataclass
+class FirecrackerConfig:
+    """Firecracker binary configuration."""
+
+    binary: str = "/usr/local/bin/firecracker"
+    socket_dir: str = "/tmp/fcm/sockets"
+    run_dir: str = "/tmp/fcm/run"
+    log_dir: str = "/tmp/fcm/logs"
+
+
+@dataclass
+class VMDefaultsConfig:
+    """Default VM settings."""
+
+    vcpu_count: int = 2
+    mem_size_mib: int = 2048
+    network_interface: str = "eth0"
+    boot_args: str = "console=ttyS0 reboot=k panic=1 pci=off"
+    disk_size: str = "2G"
+    enable_socket: bool = False
+    enable_pci: bool = False
+    lsm_flags: str = "landlock,lockdown,yama,integrity,selinux,bpf"
+
+
+@dataclass
+class SingleVMNetworkConfig:
+    """Single VM network settings."""
+
+    tap_dev: str = "fc-tap0"
+    guest_ip: str = "10.10.0.2"
+    host_ip: str = "10.10.0.1"
+    mask: str = "255.255.255.252"
+    mac: str = "02:FC:00:00:00:01"
+
+
+@dataclass
+class MultiVMNetworkConfig:
+    """Multi VM network settings."""
+
+    bridge_name: str = "fc-br0"
+    bridge_ip: str = "10.20.0.1/24"
+    guest_ip_start: str = "10.20.0.2"
+    guest_ip_end: str = "10.20.0.254"
+    tap_prefix: str = "fc"
+
+
+@dataclass
+class NetworkConfig:
+    """Network configuration."""
+
+    single_vm: SingleVMNetworkConfig = field(default_factory=SingleVMNetworkConfig)
+    multi_vm: MultiVMNetworkConfig = field(default_factory=MultiVMNetworkConfig)
+
+
+@dataclass
+class PathsConfig:
+    """Directory paths."""
+
+    assets_dir: str = "../assets"
+    single_vm_dir: str = "../single-vm"
+    multi_vm_dir: str = "../multi-vm"
+
+
+@dataclass
+class FCMConfig:
+    """Main configuration."""
+
+    firecracker: FirecrackerConfig = field(default_factory=FirecrackerConfig)
+    vm_defaults: VMDefaultsConfig = field(default_factory=VMDefaultsConfig)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
+    paths: PathsConfig = field(default_factory=PathsConfig)
+
+
+def load_yaml(path: Path) -> dict[str, Any]:
+    """Load YAML file."""
+    if not path.exists():
+        return {}
+
+    with open(path, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
+def load_config(config_dir: Path) -> FCMConfig:
+    """Load configuration from YAML files.
+
+    Loads defaults.yaml, images.yaml, and kernel.yaml from config_dir.
+
+    Args:
+        config_dir: Directory containing config files
+
+    Returns:
+        Parsed configuration
+    """
+    defaults_path = config_dir / "defaults.yaml"
+    data = load_yaml(defaults_path)
+
+    firecracker_data = data.get("firecracker", {})
+    vm_defaults_data = data.get("vm_defaults", {})
+    network_data = data.get("network", {})
+    paths_data = data.get("paths", {})
+
+    return FCMConfig(
+        firecracker=FirecrackerConfig(**firecracker_data),
+        vm_defaults=VMDefaultsConfig(**vm_defaults_data),
+        network=NetworkConfig(
+            single_vm=SingleVMNetworkConfig(**network_data.get("single_vm", {})),
+            multi_vm=MultiVMNetworkConfig(**network_data.get("multi_vm", {})),
+        ),
+        paths=PathsConfig(**paths_data),
+    )
+
+
+def validate_config(config: FCMConfig) -> list[str]:
+    """Validate configuration and return list of errors."""
+    errors = []
+
+    # Validate paths exist
+    paths = [
+        ("firecracker.binary", config.firecracker.binary),
+    ]
+
+    for name, path in paths:
+        if not Path(path).exists():
+            errors.append(f"{name}: File not found: {path}")
+
+    # Validate VM resources
+    if config.vm_defaults.vcpu_count < 1:
+        errors.append("vm_defaults.vcpu_count: Must be at least 1")
+
+    if config.vm_defaults.mem_size_mib < 64:
+        errors.append("vm_defaults.mem_size_mib: Must be at least 64 MiB")
+
+    # Validate network ranges
+    try:
+        import ipaddress
+
+        ipaddress.ip_network(config.network.multi_vm.bridge_ip, strict=False)
+    except ValueError as e:
+        errors.append(f"network.multi_vm.bridge_ip: Invalid CIDR: {e}")
+
+    return errors
+
+
+def dump_config(config: FCMConfig, section: Optional[str] = None) -> dict[str, Any]:
+    """Dump configuration as dictionary.
+
+    Args:
+        config: Configuration to dump
+        section: Optional section to limit output
+
+    Returns:
+        Configuration dictionary
+    """
+    result = {
+        "firecracker": config.firecracker.__dict__,
+        "vm_defaults": config.vm_defaults.__dict__,
+        "network": {
+            "single_vm": config.network.single_vm.__dict__,
+            "multi_vm": config.network.multi_vm.__dict__,
+        },
+        "paths": config.paths.__dict__,
+    }
+
+    if section:
+        return {section: result.get(section, {})}
+
+    return result

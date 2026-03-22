@@ -1,0 +1,86 @@
+"""Configuration commands."""
+
+import json
+import typer
+from pathlib import Path
+from typing import Optional
+
+from fcm.core.config import load_config, validate_config, dump_config
+from fcm.utils.console import print_error, print_success
+
+app = typer.Typer(help="Configuration commands")
+
+
+@app.command()
+def show(
+    section: Optional[str] = typer.Option(None, "--section", help="Config section to show"),
+    config_dir: Path = typer.Option(
+        Path(__file__).parent.parent.parent / "assets",
+        "--config-dir",
+        help="Configuration directory",
+    ),
+) -> None:
+    """Print resolved configuration."""
+    try:
+        config = load_config(config_dir)
+        data = dump_config(config, section)
+        typer.echo(json.dumps(data, indent=2))
+    except Exception as e:
+        print_error(f"Failed to load config: {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def validate(
+    config_dir: Path = typer.Option(
+        Path(__file__).parent.parent.parent / "assets",
+        "--config-dir",
+        help="Configuration directory",
+    ),
+) -> None:
+    """Validate all YAML config files."""
+    try:
+        config = load_config(config_dir)
+        errors = validate_config(config)
+
+        if errors:
+            print_error("Configuration validation failed:")
+            for error in errors:
+                print_error(f"  - {error}")
+            raise typer.Exit(code=1)
+        else:
+            print_success("Configuration is valid")
+    except Exception as e:
+        print_error(f"Validation error: {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def dump_vm(
+    name: str = typer.Option(..., "--name", help="VM name"),
+    multi_vm_dir: Path = typer.Option(
+        Path("../multi-vm"),
+        "--multi-vm",
+        help="Multi-VM directory",
+    ),
+) -> None:
+    """Print the Firecracker JSON config for a VM."""
+    vm_dir = multi_vm_dir / "env" / name
+    config_file = vm_dir / "firecracker.json"
+
+    if not config_file.exists():
+        print_error(f"VM '{name}' not found or no config file")
+        raise typer.Exit(code=1)
+
+    try:
+        with open(config_file, "r") as f:
+            content = f.read()
+            # Validate JSON
+            data = json.loads(content)
+            typer.echo(json.dumps(data, indent=2))
+    except json.JSONDecodeError as e:
+        print_error(f"Invalid JSON in config file: {e}")
+        raise typer.Exit(code=1)
+    except FileNotFoundError:
+        print_error(f"Config file not found: {config_file}")
+        raise typer.Exit(code=1)
