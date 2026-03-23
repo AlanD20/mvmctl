@@ -19,16 +19,13 @@ def download_kernel_source(
     url: str,
     dest: Path,
     expected_sha256: str | None = None,
-) -> bool:
+) -> None:
     """Download kernel source tarball.
 
     Args:
         url: URL to download from
         dest: Destination path
         expected_sha256: Optional SHA-256 checksum
-
-    Returns:
-        True if successful
 
     Raises:
         KernelError: If download fails
@@ -71,8 +68,6 @@ def download_kernel_source(
                 )
             logger.info("Checksum verified")
 
-        return True
-
     except (URLError, IOError) as e:
         raise KernelError(f"Download failed: {e}") from e
 
@@ -113,21 +108,22 @@ def extract_kernel_tarball(
 
 def download_firecracker_config(
     kernel_dir: Path,
-) -> bool:
+    version: str,
+) -> None:
     """Download Firecracker microvm kernel config.
 
     Args:
         kernel_dir: Kernel source directory
-
-    Returns:
-        True if successful
+        version: Kernel version string (e.g. ``"6.1.102"``); the major.minor
+            component is used to select the matching config file.
 
     Raises:
         KernelError: If download fails
     """
+    major_minor = ".".join(version.split(".")[:2])
     config_url = (
         "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/"
-        "resources/guest_configs/microvm-kernel-ci-x86_64-6.1.config"
+        f"resources/guest_configs/microvm-kernel-ci-x86_64-{major_minor}.config"
     )
 
     try:
@@ -142,7 +138,6 @@ def download_firecracker_config(
                 f.write(config_content)
 
             logger.info("Config downloaded")
-            return True
 
     except URLError as e:
         raise KernelError(f"Failed to download config: {e}") from e
@@ -180,16 +175,39 @@ def run_make(
         return returncode, "", ""
 
 
+def _run_config_script(config_script: Path, args: list[str], kernel_dir: Path) -> None:
+    """Run scripts/config with the given args, logging a warning on failure.
+
+    Args:
+        config_script: Path to the kernel scripts/config helper
+        args: Arguments to pass (e.g. ["--enable", "CONFIG_FOO"])
+        kernel_dir: Kernel source directory (used as cwd)
+    """
+    result = subprocess.run(
+        [str(config_script)] + args,
+        cwd=kernel_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.warning(
+            "scripts/config %s failed (rc=%d): %s",
+            " ".join(args),
+            result.returncode,
+            result.stderr.strip(),
+        )
+
+
 def configure_kernel(
     kernel_dir: Path,
-) -> bool:
+    version: str,
+) -> None:
     """Configure kernel with Firecracker settings.
 
     Args:
         kernel_dir: Kernel source directory
-
-    Returns:
-        True if successful
+        version: Kernel version string (e.g. ``"6.1.102"``) used to select the
+            matching Firecracker config file.
 
     Raises:
         KernelError: If configuration fails
@@ -197,7 +215,7 @@ def configure_kernel(
 
     # Download Firecracker config
     try:
-        download_firecracker_config(kernel_dir)
+        download_firecracker_config(kernel_dir, version)
     except KernelError:
         logger.info("Using defconfig instead...")
         returncode, _, _ = run_make(kernel_dir, "defconfig")
@@ -224,11 +242,7 @@ def configure_kernel(
     ]
 
     for flag, option in options:
-        subprocess.run(
-            [str(config_script), flag, option],
-            cwd=kernel_dir,
-            capture_output=True,
-        )
+        _run_config_script(config_script, [flag, option], kernel_dir)
 
     # Enable VirtIO (built-in, not module)
     logger.info("Enabling VirtIO drivers...")
@@ -242,75 +256,31 @@ def configure_kernel(
     ]
 
     for option in virtio_options:
-        subprocess.run(
-            [str(config_script), "--enable", option],
-            cwd=kernel_dir,
-            capture_output=True,
-        )
+        _run_config_script(config_script, ["--enable", option], kernel_dir)
 
     # Enable serial console
     logger.info("Enabling serial console...")
-    subprocess.run(
-        [str(config_script), "--enable", "CONFIG_SERIAL_8250"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
-    subprocess.run(
-        [str(config_script), "--enable", "CONFIG_SERIAL_8250_CONSOLE"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
-    subprocess.run(
-        [str(config_script), "--set-val", "CONFIG_SERIAL_8250_NR_UARTS", "4"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
+    _run_config_script(config_script, ["--enable", "CONFIG_SERIAL_8250"], kernel_dir)
+    _run_config_script(config_script, ["--enable", "CONFIG_SERIAL_8250_CONSOLE"], kernel_dir)
+    _run_config_script(config_script, ["--set-val", "CONFIG_SERIAL_8250_NR_UARTS", "4"], kernel_dir)
 
     # Enable network
     logger.info("Enabling network support...")
     network_options = ["CONFIG_NET", "CONFIG_INET", "CONFIG_IPV6"]
     for option in network_options:
-        subprocess.run(
-            [str(config_script), "--enable", option],
-            cwd=kernel_dir,
-            capture_output=True,
-        )
+        _run_config_script(config_script, ["--enable", option], kernel_dir)
 
     # Enable KVM guest optimizations
     logger.info("Enabling KVM guest optimizations...")
-    subprocess.run(
-        [str(config_script), "--enable", "CONFIG_KVM_GUEST"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
-    subprocess.run(
-        [str(config_script), "--enable", "CONFIG_PARAVIRT"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
+    _run_config_script(config_script, ["--enable", "CONFIG_KVM_GUEST"], kernel_dir)
+    _run_config_script(config_script, ["--enable", "CONFIG_PARAVIRT"], kernel_dir)
 
     # Enable LandLock
     logger.info("Enabling LandLock...")
-    subprocess.run(
-        [str(config_script), "--enable", "CONFIG_SECURITY_LANDLOCK"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
-    subprocess.run(
-        [str(config_script), "--enable", "CONFIG_BPF_SYSCALL"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
-    subprocess.run(
-        [str(config_script), "--enable", "CONFIG_CGROUPS"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
-    subprocess.run(
-        [str(config_script), "--enable", "CONFIG_MEMCG"],
-        cwd=kernel_dir,
-        capture_output=True,
-    )
+    _run_config_script(config_script, ["--enable", "CONFIG_SECURITY_LANDLOCK"], kernel_dir)
+    _run_config_script(config_script, ["--enable", "CONFIG_BPF_SYSCALL"], kernel_dir)
+    _run_config_script(config_script, ["--enable", "CONFIG_CGROUPS"], kernel_dir)
+    _run_config_script(config_script, ["--enable", "CONFIG_MEMCG"], kernel_dir)
 
     # Resolve dependencies again
     logger.info("Resolving dependencies...")
@@ -342,23 +312,18 @@ def configure_kernel(
     if not all_present:
         raise KernelError("Required kernel settings are missing from configuration")
 
-    return True
-
 
 def build_kernel(
     kernel_dir: Path,
     output_path: Path,
     jobs: int = 1,
-) -> bool:
+) -> None:
     """Build the kernel.
 
     Args:
         kernel_dir: Kernel source directory
         output_path: Where to copy vmlinux
         jobs: Number of parallel jobs
-
-    Returns:
-        True if successful
 
     Raises:
         KernelError: If build fails
@@ -396,8 +361,6 @@ def build_kernel(
     size_mb = size / (1024 * 1024)
     logger.info("Kernel built: %s (%.1f MiB)", output_path.name, size_mb)
 
-    return True
-
 
 def build_kernel_pipeline(
     version: str,
@@ -406,7 +369,7 @@ def build_kernel_pipeline(
     build_dir: Path,
     sha256: str | None = None,
     jobs: int | None = None,
-) -> bool:
+) -> None:
     """Full kernel build pipeline.
 
     Args:
@@ -417,9 +380,6 @@ def build_kernel_pipeline(
         sha256: Optional SHA-256 checksum
         jobs: Number of parallel jobs (defaults to CPU count)
 
-    Returns:
-        True if successful
-
     Raises:
         KernelError: If any pipeline step fails
         ChecksumMismatchError: If checksum verification fails
@@ -429,7 +389,7 @@ def build_kernel_pipeline(
 
     if output_path.exists():
         logger.info("Using cached kernel: %s", output_path)
-        return True
+        return
 
     tarball = build_dir / f"linux-{version}.tar.xz"
     kernel_src_dir = build_dir / f"linux-{version}"
@@ -447,9 +407,7 @@ def build_kernel_pipeline(
         logger.info("Using existing source: %s", kernel_src_dir)
 
     # Configure
-    configure_kernel(kernel_src_dir)
+    configure_kernel(kernel_src_dir, version)
 
     # Build
     build_kernel(kernel_src_dir, output_path, jobs)
-
-    return True

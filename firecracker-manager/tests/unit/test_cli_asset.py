@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from fcm.cli.asset import app
 from fcm.core.binary_manager import BinaryVersion
-from fcm.exceptions import AssetNotFoundError, BinaryError
+from fcm.exceptions import AssetNotFoundError, BinaryError, KernelError
 from fcm.models.image import ImageSpec
 
 runner = CliRunner()
@@ -103,7 +103,7 @@ def test_kernel_fetch_success(mock_build: MagicMock, tmp_path: Path):
     mock_build.assert_called_once()
 
 
-@patch("fcm.cli.asset.build_kernel_pipeline", return_value=False)
+@patch("fcm.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
 def test_kernel_fetch_failure(mock_build: MagicMock, tmp_path: Path):
     out = tmp_path / "vmlinux"
     result = runner.invoke(app, ["kernel", "fetch", "--version", "6.1.102", "--out", str(out)])
@@ -141,7 +141,7 @@ def test_kernel_build_success(mock_build: MagicMock, tmp_path: Path):
     )
 
 
-@patch("fcm.cli.asset.build_kernel_pipeline", return_value=False)
+@patch("fcm.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
 def test_kernel_build_failure(mock_build: MagicMock, tmp_path: Path):
     out = tmp_path / "vmlinux"
     result = runner.invoke(app, ["kernel", "build", "--version", "6.1.102", "--out", str(out)])

@@ -17,7 +17,7 @@ from fcm.api.assets import (
     load_images_config,
     build_kernel_pipeline,
 )
-from fcm.exceptions import AssetNotFoundError, BinaryError
+from fcm.exceptions import AssetNotFoundError, BinaryError, KernelError
 from fcm.utils.console import print_error, print_success, print_table, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
@@ -87,19 +87,19 @@ def kernel_fetch(
 ) -> None:
     """Download the official minimal kernel."""
     source_url = f"https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
-    success = build_kernel_pipeline(
-        version=version,
-        source_url=source_url,
-        output_path=out,
-        build_dir=get_cache_dir() / "kernel-build",
-        jobs=None,
-    )
-    if success:
-        print_success(f"Kernel built: {out}")
-        raise typer.Exit(code=0)
-    else:
-        print_error("Kernel build failed")
-        raise typer.Exit(code=1)
+    try:
+        build_kernel_pipeline(
+            version=version,
+            source_url=source_url,
+            output_path=out,
+            build_dir=get_cache_dir() / "kernel-build",
+            jobs=None,
+        )
+    except KernelError as exc:
+        print_error(f"Kernel build failed: {exc}")
+        raise typer.Exit(code=1) from exc
+    print_success(f"Kernel built: {out}")
+    raise typer.Exit(code=0)
 
 
 @kernel_app.command(name="build")
@@ -113,19 +113,18 @@ def kernel_build(
 ) -> None:
     """Build a custom upstream kernel."""
     source_url = f"https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
-    success = build_kernel_pipeline(
-        version=version or "6.1.102",
-        source_url=source_url,
-        output_path=out,
-        build_dir=build_dir,
-        jobs=jobs,
-    )
-    if success:
-        print_success(f"Kernel built: {out}")
-        raise typer.Exit(code=0)
-    else:
-        print_error("Kernel build failed")
-        raise typer.Exit(code=1)
+    try:
+        build_kernel_pipeline(
+            version=version or "6.1.102",
+            source_url=source_url,
+            output_path=out,
+            build_dir=build_dir,
+            jobs=jobs,
+        )
+    except KernelError as exc:
+        print_error(f"Kernel build failed: {exc}")
+        raise typer.Exit(code=1) from exc
+    print_success(f"Kernel built: {out}")
 
 
 @kernel_app.command(name="remove")

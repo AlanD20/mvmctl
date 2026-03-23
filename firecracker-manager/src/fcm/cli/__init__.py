@@ -1,3 +1,3 @@
 """CLI command modules."""
 
-__all__ = ["vm", "image", "kernel", "config", "asset", "host", "network", "key", "configure"]
+__all__ = ["vm", "config", "asset", "host", "network", "key", "configure"]

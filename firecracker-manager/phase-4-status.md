@@ -61,7 +61,7 @@
 
 | Requirement | Status | Notes |
 |---|---|---|
-| `vm pause` and `vm resume` NOT implemented as subcommands | ✅ | Removed per Phase 4 §3 |
+| `vm pause` and `vm resume` NOT implemented as subcommands | ⚠️ | Registered as stub subcommands that print an informational message; not fully functional |
 | Typing `vm pause` or `vm resume` produces a message (not unrecognised command error) | ✅ | |
 
 ### No `vm setup`
@@ -102,7 +102,7 @@
 | Refuse to run if any VM is currently running (check live PID files); list running VMs | ✅ | |
 | After removing networking: update host state snapshot to reflect restored state | ✅ | |
 | Does NOT remove VM cache files, images, kernels, or binaries | ✅ | |
-| Does NOT revert IP forwarding sysctl (only `host restore` does that) | ✅ | |
+| Does NOT revert IP forwarding sysctl (only `host reset` does that) | ✅ | |
 | `host prune` replaces `asset cache clear` for networking cleanup | ✅ | |
 
 ### `host init` idempotency
@@ -162,7 +162,7 @@
 | `license = { text = "MIT" }` | ✅ | Added in previous session |
 | `requires-python = ">=3.13"` | ✅ | |
 | All runtime dependencies with minimum version pins | ✅ | |
-| `[project.scripts] fcm = "firecracker_manager.cli.main:app"` | ✅ | |
+| `[project.scripts] fcm = "fcm.main:app"` | ✅ | |
 | `[project.optional-dependencies] dev` — pytest, pytest-cov, pytest-mock, ruff, mypy, pyinstaller | ✅ | Added in previous session |
 | `[build-system] hatchling` | ✅ | |
 
@@ -212,7 +212,7 @@
 |---|---|
 | `ruff check src/` | ✅ All checks passed |
 | `mypy src/` | ✅ Success: no issues found in 42 source files |
-| `pytest` | ✅ 551 passed |
+| `pytest` | ⚠️ | Was 551 at time of writing; count changes as tests evolve (644 as of latest run) |
 | Coverage | ✅ 82.85% (≥ 80% required) |
 | `ssh-keygen -R` call removed | ✅ |
 | `help` subcommand at every level | ✅ |

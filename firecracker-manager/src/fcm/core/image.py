@@ -120,6 +120,147 @@ def convert_qcow2_to_raw(
         raise ImageError("qemu-img not found. Install qemu-utils.") from e
 
 
+_NO_PARTITION_TABLE = object()  # Sentinel: raw image is the filesystem
+
+
+def _parse_partitions_sfdisk(
+    raw_path: Path,
+    partition: int | None,
+) -> tuple[int, int | None, int] | object | None:
+    """Parse partition table using sfdisk.
+
+    Returns:
+        ``(start_sector, sector_count, partition_number)`` on success,
+        ``_NO_PARTITION_TABLE`` sentinel if image has no partition table,
+        or ``None`` if sfdisk is unavailable or fails.
+
+    Raises:
+        ImageError: On extraction failure (propagated from outer handler).
+    """
+    import json as json_mod
+
+    try:
+        sfdisk_result = subprocess.run(
+            ["sfdisk", "--json", str(raw_path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        table = json_mod.loads(sfdisk_result.stdout)
+        partitions = table.get("partitiontable", {}).get("partitions", [])
+
+        if not partitions:
+            return _NO_PARTITION_TABLE
+
+        if len(partitions) > 1 and partition is None:
+            logger.info("Found %d partitions:", len(partitions))
+            for i, p in enumerate(partitions, 1):
+                logger.debug(
+                    "  %d: start=%s size=%s type=%s",
+                    i,
+                    p.get("start"),
+                    p.get("size"),
+                    p.get("type", "?"),
+                )
+            logger.info("Using last partition as root")
+            partition = len(partitions)
+
+        if partition is None:
+            partition = 1
+
+        chosen = partitions[partition - 1]
+        start_sector = int(chosen["start"])
+        sector_count = int(chosen["size"])
+        return (start_sector, sector_count, partition)
+
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        json_mod.JSONDecodeError,
+        KeyError,
+    ):
+        return None
+
+
+def _parse_partitions_fdisk(
+    raw_path: Path,
+    partition: int | None,
+) -> tuple[int, int | None, int] | object:
+    """Parse partition table using fdisk (fallback when sfdisk unavailable).
+
+    Returns:
+        ``(start_sector, sector_count, partition_number)`` on success, or
+        ``_NO_PARTITION_TABLE`` sentinel if image has no partition table.
+
+    Raises:
+        ImageError: If fdisk output cannot be parsed.
+    """
+    import re
+
+    result = subprocess.run(
+        ["fdisk", "-l", str(raw_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    partition_lines = [
+        line
+        for line in result.stdout.split("\n")
+        if re.match(rf"^{re.escape(str(raw_path))}p?\d", line)
+    ]
+
+    if not partition_lines:
+        return _NO_PARTITION_TABLE
+
+    if len(partition_lines) > 1 and partition is None:
+        logger.info("Found %d partitions:", len(partition_lines))
+        for i, line in enumerate(partition_lines, 1):
+            logger.debug("  %d: %s", i, line)
+        logger.info("Using last partition as root")
+        partition = len(partition_lines)
+
+    if partition is None:
+        partition = 1
+
+    chosen_line = partition_lines[partition - 1]
+    numeric_parts = [p for p in chosen_line.split() if p.isdigit()]
+    if len(numeric_parts) < 2:
+        raise ImageError("Failed to parse fdisk output for partition sectors")
+    start_sector = int(numeric_parts[0])
+    sector_count = int(numeric_parts[1]) if len(numeric_parts) >= 3 else None
+    return (start_sector, sector_count, partition)
+
+
+def _detect_and_rename_fs(output_path: Path) -> Path:
+    """Detect filesystem type via blkid and rename output file accordingly.
+
+    Args:
+        output_path: Path to the extracted partition image.
+
+    Returns:
+        The (possibly renamed) output path.
+    """
+    try:
+        blkid_result = subprocess.run(
+            ["blkid", "-o", "value", "-s", "TYPE", str(output_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        fs_type = blkid_result.stdout.strip()
+        if fs_type:
+            ext_map = {"ext4": ".ext4", "btrfs": ".btrfs", "xfs": ".xfs"}
+            ext = ext_map.get(fs_type, ".img")
+            final_path = output_path.with_suffix(ext)
+            output_path.rename(final_path)
+            output_path = final_path
+            logger.info("Detected filesystem: %s", fs_type)
+    except FileNotFoundError:
+        pass
+    return output_path
+
+
 def extract_partition_from_raw(
     raw_path: Path,
     output_path: Path,
@@ -140,94 +281,17 @@ def extract_partition_from_raw(
     Raises:
         ImageError: On extraction failure
     """
-    import json as json_mod
-    import re
-
     try:
-        start_sector: int | None = None
-        sector_count: int | None = None
+        parsed = _parse_partitions_sfdisk(raw_path, partition)
+        if parsed is None:
+            parsed = _parse_partitions_fdisk(raw_path, partition)
 
-        sfdisk_ok = False
-        try:
-            sfdisk_result = subprocess.run(
-                ["sfdisk", "--json", str(raw_path)],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            table = json_mod.loads(sfdisk_result.stdout)
-            partitions = table.get("partitiontable", {}).get("partitions", [])
+        if parsed is _NO_PARTITION_TABLE:
+            logger.info("No partition table found, using image as-is")
+            raw_path.rename(output_path)
+            return output_path
 
-            if not partitions:
-                logger.info("No partition table found, using image as-is")
-                raw_path.rename(output_path)
-                return output_path
-
-            if len(partitions) > 1 and partition is None:
-                logger.info("Found %d partitions:", len(partitions))
-                for i, p in enumerate(partitions, 1):
-                    logger.debug(
-                        "  %d: start=%s size=%s type=%s",
-                        i,
-                        p.get("start"),
-                        p.get("size"),
-                        p.get("type", "?"),
-                    )
-                logger.info("Using last partition as root")
-                partition = len(partitions)
-
-            if partition is None:
-                partition = 1
-
-            chosen = partitions[partition - 1]
-            start_sector = int(chosen["start"])
-            sector_count = int(chosen["size"])
-            sfdisk_ok = True
-
-        except (
-            FileNotFoundError,
-            subprocess.CalledProcessError,
-            json_mod.JSONDecodeError,
-            KeyError,
-        ):
-            pass
-
-        if not sfdisk_ok:
-            result = subprocess.run(
-                ["fdisk", "-l", str(raw_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            partition_lines = []
-            for line in result.stdout.split("\n"):
-                if re.match(rf"^{re.escape(str(raw_path))}p?\d", line):
-                    partition_lines.append(line)
-
-            if not partition_lines:
-                logger.info("No partition table found, using image as-is")
-                raw_path.rename(output_path)
-                return output_path
-
-            if len(partition_lines) > 1 and partition is None:
-                logger.info("Found %d partitions:", len(partition_lines))
-                for i, line in enumerate(partition_lines, 1):
-                    logger.debug("  %d: %s", i, line)
-                logger.info("Using last partition as root")
-                partition = len(partition_lines)
-
-            if partition is None:
-                partition = 1
-
-            chosen_line = partition_lines[partition - 1]
-            numeric_parts = [p for p in chosen_line.split() if p.isdigit()]
-            if len(numeric_parts) < 2:
-                raise ImageError("Failed to parse fdisk output for partition sectors")
-            start_sector = int(numeric_parts[0])
-            sector_count = int(numeric_parts[1]) if len(numeric_parts) >= 3 else None
-
-        assert start_sector is not None
+        start_sector, sector_count, partition = parsed  # type: ignore[misc]
 
         logger.info("Extracting partition %d (start=%d)...", partition, start_sector)
 
@@ -243,25 +307,7 @@ def extract_partition_from_raw(
 
         subprocess.run(dd_args, capture_output=True, check=True)
 
-        # Detect filesystem type
-        try:
-            blkid_result = subprocess.run(
-                ["blkid", "-o", "value", "-s", "TYPE", str(output_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            fs_type = blkid_result.stdout.strip()
-            if fs_type:
-                # Rename with correct extension
-                ext_map = {"ext4": ".ext4", "btrfs": ".btrfs", "xfs": ".xfs"}
-                ext = ext_map.get(fs_type, ".img")
-                final_path = output_path.with_suffix(ext)
-                output_path.rename(final_path)
-                output_path = final_path
-                logger.info("Detected filesystem: %s", fs_type)
-        except FileNotFoundError:
-            pass
+        output_path = _detect_and_rename_fs(output_path)
 
         logger.info("Extracted to %s", output_path.name)
         return output_path

@@ -50,10 +50,17 @@ def read_log_lines(
     log_file: Path,
     lines: int = 50,
 ) -> list[str]:
-    """Read last N lines from log file.
+    """Read last *lines* lines from a log file.
+
+    Args:
+        log_file: Path to the log file.
+        lines: Number of trailing lines to return.
+
+    Returns:
+        List of line strings (including newlines).
 
     Raises:
-        FCMError: If the log file cannot be read
+        FCMError: If the log file cannot be read.
     """
     try:
         with open(log_file, "r") as f:

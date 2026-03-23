@@ -14,7 +14,7 @@ from fcm.api.assets import (
 )
 from fcm.api.host import check_kvm_access, get_host_state, init_host
 from fcm.api.keys import add_key, create_key, list_keys
-from fcm.exceptions import BinaryError, FCMError, FCMKeyError, HostError
+from fcm.exceptions import BinaryError, FCMError, FCMKeyError, HostError, KernelError
 from fcm.utils.console import print_info, print_success, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
@@ -161,17 +161,18 @@ def _build_default_kernel() -> None:
     out = get_kernels_dir() / "vmlinux"
     out.parent.mkdir(parents=True, exist_ok=True)
     source_url = f"https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
-    success = build_kernel_pipeline(
-        version=version,
-        source_url=source_url,
-        output_path=out,
-        build_dir=get_cache_dir() / "kernel-build",
-        jobs=None,
-    )
-    if success:
-        print_success(f"  Kernel built: {out}")
+    try:
+        build_kernel_pipeline(
+            version=version,
+            source_url=source_url,
+            output_path=out,
+            build_dir=get_cache_dir() / "kernel-build",
+            jobs=None,
+        )
+    except KernelError as exc:
+        print_warning(f"  Kernel build failed: {exc}. Run 'fcm asset kernel build' manually.")
     else:
-        print_warning("  Kernel build failed. Run 'fcm asset kernel build' manually.")
+        print_success(f"  Kernel built: {out}")
 
 
 def _step_image(non_interactive: bool) -> None:

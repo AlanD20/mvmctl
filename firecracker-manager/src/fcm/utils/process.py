@@ -53,7 +53,8 @@ def stream_cmd(
     except FileNotFoundError as e:
         raise ProcessError(f"Command not found: {args[0]}") from e
 
-    assert proc.stdout is not None
+    if proc.stdout is None:
+        raise ProcessError("stdout is None — stdout=PIPE was not set")
     try:
         for line in proc.stdout:
             yield line.rstrip("\n")

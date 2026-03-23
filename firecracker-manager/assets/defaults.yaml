@@ -13,7 +13,7 @@ vm_defaults:
   network_interface: eth0
   boot_args: "console=ttyS0 reboot=k panic=1 pci=off"
   disk_size: "2G"
-  enable_socket: false
+  enable_api_socket: false
   enable_pci: false
   lsm_flags: "landlock,lockdown,yama,integrity,selinux,bpf"
 

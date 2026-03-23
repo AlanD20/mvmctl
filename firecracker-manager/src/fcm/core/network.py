@@ -25,10 +25,13 @@ GATEWAY = DEFAULT_NETWORK_GATEWAY
 
 
 def get_default_interface() -> str:
-    """Get the default network interface by parsing `ip route show default`.
+    """Get the default network interface by parsing ``ip route show default``.
 
-    Returns the interface name (e.g., 'eth0', 'ens3').
-    Raises NetworkError if not found.
+    Returns:
+        Interface name (e.g. ``"eth0"``, ``"ens3"``).
+
+    Raises:
+        NetworkError: If the default route cannot be determined.
     """
     try:
         result = subprocess.run(

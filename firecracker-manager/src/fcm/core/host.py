@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import grp
 import json
 import logging
 import os
+import pwd
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
@@ -18,7 +20,7 @@ from fcm.constants import (
     PROJECT_NAME,
     SUDOERS_DROP_IN_PATH,
 )
-from fcm.exceptions import HostError
+from fcm.exceptions import HostError, PrivilegeError
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +59,21 @@ def _state_file(cache_dir: Path) -> Path:
 
 
 def check_kvm_access() -> bool:
+    """Check whether the current user has read/write access to ``/dev/kvm``.
+
+    Returns:
+        True if ``/dev/kvm`` exists and is readable/writable, False otherwise.
+    """
     kvm = Path("/dev/kvm")
     return kvm.exists() and os.access(kvm, os.R_OK | os.W_OK)
 
 
 def check_required_binaries() -> list[str]:
+    """Return names of required system binaries that are not found on ``$PATH``.
+
+    Returns:
+        List of missing binary names. Empty if all are present.
+    """
     missing: list[str] = []
     for name in REQUIRED_BINARIES:
         if not shutil.which(name):
@@ -72,7 +84,51 @@ def check_required_binaries() -> list[str]:
     return missing
 
 
+def check_privileges(binary: str) -> None:
+    """Check that the current process can invoke *binary* with elevated privileges.
+
+    Verifies that the binary exists on the host and that the current user is
+    either root or a member of the project group.
+
+    Args:
+        binary: Path or name of the binary to check.
+
+    Raises:
+        PrivilegeError: If the binary is not found or the user lacks group membership.
+    """
+    if not shutil.which(binary) and not Path(binary).exists():
+        raise PrivilegeError(
+            f"Binary not found: {binary}. Run 'fcm host init' to set up required dependencies."
+        )
+
+    if os.getuid() == 0:
+        return
+
+    try:
+        g = grp.getgrnam(PROJECT_GROUP)
+        username = pwd.getpwuid(os.getuid()).pw_name
+        if username not in g.gr_mem:
+            raise PrivilegeError(
+                f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
+                f"Run 'sudo fcm host init' to configure privileges, "
+                f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
+            )
+    except KeyError as e:
+        raise PrivilegeError(
+            f"Group '{PROJECT_GROUP}' does not exist. "
+            f"Run 'sudo fcm host init' to set up privilege management."
+        ) from e
+
+
 def get_ip_forward_status() -> str:
+    """Read the current value of ``net.ipv4.ip_forward`` via sysctl.
+
+    Returns:
+        The sysctl value as a string (typically ``"0"`` or ``"1"``).
+
+    Raises:
+        HostError: If the sysctl command fails or is not found.
+    """
     try:
         result = subprocess.run(
             ["sysctl", "-n", SYSCTL_KEY],
@@ -369,6 +425,20 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
 
 
 def init_host(cache_dir: Path) -> list[HostChange]:
+    """Apply one-time host configuration for Firecracker (KVM, modules, sysctl, group, sudoers).
+
+    Idempotent — running twice applies no duplicate changes. Pre-change state
+    is persisted so it can be reverted with ``restore_host``.
+
+    Args:
+        cache_dir: Root cache directory for persisting host state.
+
+    Returns:
+        List of changes that were applied.
+
+    Raises:
+        HostError: If KVM is inaccessible or required binaries are missing.
+    """
     changes: list[HostChange] = []
 
     if not check_kvm_access():
@@ -475,6 +545,20 @@ def get_host_state(cache_dir: Path) -> HostState | None:
 
 
 def restore_host(cache_dir: Path) -> list[HostChange]:
+    """Revert host changes recorded by ``init_host`` back to their original state.
+
+    Reads the saved state snapshot and reverses each change (sysctl values,
+    config files, sudoers, group) in LIFO order.
+
+    Args:
+        cache_dir: Root cache directory containing the host state snapshot.
+
+    Returns:
+        List of changes that were reverted.
+
+    Raises:
+        HostError: If no saved host state exists.
+    """
     state = get_host_state(cache_dir)
     if not state:
         raise HostError("No saved host state to restore")
