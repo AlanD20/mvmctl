@@ -1,6 +1,7 @@
 """Kernel download and build utilities."""
 
 import hashlib
+import logging
 import os
 import subprocess
 import tarfile
@@ -8,7 +9,9 @@ from pathlib import Path
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
-from fcm.utils.console import print_error, print_success, print_info
+from fcm.exceptions import KernelError, ChecksumMismatchError
+
+logger = logging.getLogger(__name__)
 
 
 def download_kernel_source(
@@ -24,12 +27,16 @@ def download_kernel_source(
         expected_sha256: Optional SHA-256 checksum
 
     Returns:
-        True if successful, False otherwise
+        True if successful
+
+    Raises:
+        KernelError: If download fails
+        ChecksumMismatchError: If checksum verification fails
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        print_info(f"Downloading kernel from {url}")
+        logger.info("Downloading kernel from %s", url)
         req = Request(url, headers={"User-Agent": "fcm/0.1.0"})
 
         sha256_hash = hashlib.sha256() if expected_sha256 else None
@@ -52,32 +59,27 @@ def download_kernel_source(
 
                     if total_size:
                         percent = (downloaded / total_size) * 100
-                        print(f"\r  Progress: {percent:.1f}%", end="", flush=True)
-
-        print()  # Newline
+                        logger.debug("Download progress: %.1f%%", percent)
 
         if expected_sha256 and sha256_hash:
             actual = sha256_hash.hexdigest()
             if actual.lower() != expected_sha256.lower():
-                print_error(f"Checksum mismatch! Expected {expected_sha256}, got {actual}")
                 dest.unlink()
-                return False
-            print_success("Checksum verified")
+                raise ChecksumMismatchError(
+                    f"Checksum mismatch! Expected {expected_sha256}, got {actual}"
+                )
+            logger.info("Checksum verified")
 
         return True
 
-    except URLError as e:
-        print_error(f"Download failed: {e}")
-        return False
-    except IOError as e:
-        print_error(f"I/O error: {e}")
-        return False
+    except (URLError, IOError) as e:
+        raise KernelError(f"Download failed: {e}") from e
 
 
 def extract_kernel_tarball(
     tarball: Path,
     extract_dir: Path,
-) -> Path | None:
+) -> Path:
     """Extract kernel tarball.
 
     Args:
@@ -85,10 +87,13 @@ def extract_kernel_tarball(
         extract_dir: Directory to extract to
 
     Returns:
-        Path to extracted kernel directory or None
+        Path to extracted kernel directory
+
+    Raises:
+        KernelError: If extraction fails or kernel directory not found
     """
     try:
-        print_info(f"Extracting {tarball.name}...")
+        logger.info("Extracting %s...", tarball.name)
 
         with tarfile.open(tarball, "r:xz") as tar:
             tar.extractall(path=extract_dir, filter="data")
@@ -96,15 +101,13 @@ def extract_kernel_tarball(
         # Find extracted directory (should be linux-X.Y.Z)
         for item in extract_dir.iterdir():
             if item.is_dir() and item.name.startswith("linux-"):
-                print_success(f"Extracted to {item.name}")
+                logger.info("Extracted to %s", item.name)
                 return item
 
-        print_error("Could not find extracted kernel directory")
-        return None
+        raise KernelError("Could not find extracted kernel directory")
 
     except tarfile.TarError as e:
-        print_error(f"Extraction failed: {e}")
-        return None
+        raise KernelError(f"Extraction failed: {e}") from e
 
 
 def download_firecracker_config(
@@ -116,7 +119,10 @@ def download_firecracker_config(
         kernel_dir: Kernel source directory
 
     Returns:
-        True if successful, False otherwise
+        True if successful
+
+    Raises:
+        KernelError: If download fails
     """
     config_url = (
         "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/"
@@ -124,7 +130,7 @@ def download_firecracker_config(
     )
 
     try:
-        print_info("Downloading Firecracker kernel config...")
+        logger.info("Downloading Firecracker kernel config...")
         req = Request(config_url, headers={"User-Agent": "fcm/0.1.0"})
 
         with urlopen(req, timeout=60) as response:
@@ -134,12 +140,11 @@ def download_firecracker_config(
             with open(config_path, "w") as f:
                 f.write(config_content)
 
-            print_success("Config downloaded")
+            logger.info("Config downloaded")
             return True
 
     except URLError as e:
-        print_error(f"Failed to download config: {e}")
-        return False
+        raise KernelError(f"Failed to download config: {e}") from e
 
 
 def run_make(
@@ -183,26 +188,29 @@ def configure_kernel(
         kernel_dir: Kernel source directory
 
     Returns:
-        True if successful, False otherwise
+        True if successful
+
+    Raises:
+        KernelError: If configuration fails
     """
 
     # Download Firecracker config
-    if not download_firecracker_config(kernel_dir):
-        print_info("Using defconfig instead...")
+    try:
+        download_firecracker_config(kernel_dir)
+    except KernelError:
+        logger.info("Using defconfig instead...")
         returncode, _, _ = run_make(kernel_dir, "defconfig")
         if returncode != 0:
-            print_error("defconfig failed")
-            return False
+            raise KernelError("defconfig failed")
 
     # Sync config to current kernel version
-    print_info("Synchronizing config...")
+    logger.info("Synchronizing config...")
     returncode, _, _ = run_make(kernel_dir, "olddefconfig")
     if returncode != 0:
-        print_error("olddefconfig failed")
-        return False
+        raise KernelError("olddefconfig failed")
 
     # Enable filesystems
-    print_info("Enabling filesystems...")
+    logger.info("Enabling filesystems...")
     config_script = kernel_dir / "scripts" / "config"
 
     options = [
@@ -222,7 +230,7 @@ def configure_kernel(
         )
 
     # Enable VirtIO (built-in, not module)
-    print_info("Enabling VirtIO drivers...")
+    logger.info("Enabling VirtIO drivers...")
     virtio_options = [
         "CONFIG_VIRTIO",
         "CONFIG_VIRTIO_MENU",
@@ -240,7 +248,7 @@ def configure_kernel(
         )
 
     # Enable serial console
-    print_info("Enabling serial console...")
+    logger.info("Enabling serial console...")
     subprocess.run(
         [str(config_script), "--enable", "CONFIG_SERIAL_8250"],
         cwd=kernel_dir,
@@ -258,7 +266,7 @@ def configure_kernel(
     )
 
     # Enable network
-    print_info("Enabling network support...")
+    logger.info("Enabling network support...")
     network_options = ["CONFIG_NET", "CONFIG_INET", "CONFIG_IPV6"]
     for option in network_options:
         subprocess.run(
@@ -268,7 +276,7 @@ def configure_kernel(
         )
 
     # Enable KVM guest optimizations
-    print_info("Enabling KVM guest optimizations...")
+    logger.info("Enabling KVM guest optimizations...")
     subprocess.run(
         [str(config_script), "--enable", "CONFIG_KVM_GUEST"],
         cwd=kernel_dir,
@@ -281,7 +289,7 @@ def configure_kernel(
     )
 
     # Enable LandLock
-    print_info("Enabling LandLock...")
+    logger.info("Enabling LandLock...")
     subprocess.run(
         [str(config_script), "--enable", "CONFIG_SECURITY_LANDLOCK"],
         cwd=kernel_dir,
@@ -304,14 +312,13 @@ def configure_kernel(
     )
 
     # Resolve dependencies again
-    print_info("Resolving dependencies...")
+    logger.info("Resolving dependencies...")
     returncode, _, _ = run_make(kernel_dir, "olddefconfig")
     if returncode != 0:
-        print_error("olddefconfig failed after enabling options")
-        return False
+        raise KernelError("olddefconfig failed after enabling options")
 
     # Verify critical settings
-    print_info("Verifying configuration...")
+    logger.info("Verifying configuration...")
     config_path = kernel_dir / ".config"
     required_settings = [
         "CONFIG_BTRFS_FS=y",
@@ -326,12 +333,15 @@ def configure_kernel(
 
     for setting in required_settings:
         if setting in config_content:
-            print_success(f"  {setting}")
+            logger.info("  %s", setting)
         else:
-            print_error(f"  MISSING: {setting}")
+            logger.error("  MISSING: %s", setting)
             all_present = False
 
-    return all_present
+    if not all_present:
+        raise KernelError("Required kernel settings are missing from configuration")
+
+    return True
 
 
 def build_kernel(
@@ -347,31 +357,32 @@ def build_kernel(
         jobs: Number of parallel jobs
 
     Returns:
-        True if successful, False otherwise
+        True if successful
+
+    Raises:
+        KernelError: If build fails
     """
-    print_info(f"Building vmlinux with {jobs} parallel jobs...")
-    print_info("This may take 10-30 minutes...")
+    logger.info("Building vmlinux with %d parallel jobs...", jobs)
+    logger.info("This may take 10-30 minutes...")
 
     returncode, stdout, stderr = run_make(kernel_dir, "vmlinux", jobs, capture_output=True)
 
     if returncode != 0:
-        print_error("Build failed!")
         # Show last error lines
         lines = stderr.split("\n")
         error_lines = [
             line for line in lines if "error:" in line.lower() or "undefined" in line.lower()
         ]
         if error_lines:
-            print_info("Errors found:")
+            logger.error("Build errors:")
             for line in error_lines[-10:]:
-                print(f"  {line}")
-        return False
+                logger.error("  %s", line)
+        raise KernelError("Kernel build failed")
 
     # Copy vmlinux to output
     vmlinux_path = kernel_dir / "vmlinux"
     if not vmlinux_path.exists():
-        print_error("Build succeeded but vmlinux not found")
-        return False
+        raise KernelError("Build succeeded but vmlinux not found")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -382,7 +393,7 @@ def build_kernel(
 
     size = output_path.stat().st_size
     size_mb = size / (1024 * 1024)
-    print_success(f"Kernel built: {output_path.name} ({size_mb:.1f} MiB)")
+    logger.info("Kernel built: %s (%.1f MiB)", output_path.name, size_mb)
 
     return True
 
@@ -406,13 +417,17 @@ def build_kernel_pipeline(
         jobs: Number of parallel jobs (defaults to CPU count)
 
     Returns:
-        True if successful, False otherwise
+        True if successful
+
+    Raises:
+        KernelError: If any pipeline step fails
+        ChecksumMismatchError: If checksum verification fails
     """
     if jobs is None:
         jobs = os.cpu_count() or 1
 
     if output_path.exists():
-        print_success(f"Using cached kernel: {output_path}")
+        logger.info("Using cached kernel: %s", output_path)
         return True
 
     tarball = build_dir / f"linux-{version}.tar.xz"
@@ -420,25 +435,20 @@ def build_kernel_pipeline(
 
     # Download
     if not tarball.exists():
-        if not download_kernel_source(source_url, tarball, sha256):
-            return False
+        download_kernel_source(source_url, tarball, sha256)
     else:
-        print_success(f"Using cached tarball: {tarball}")
+        logger.info("Using cached tarball: %s", tarball)
 
     # Extract
     if not kernel_src_dir.exists():
-        extracted = extract_kernel_tarball(tarball, build_dir)
-        if not extracted:
-            return False
+        extract_kernel_tarball(tarball, build_dir)
     else:
-        print_success(f"Using existing source: {kernel_src_dir}")
+        logger.info("Using existing source: %s", kernel_src_dir)
 
     # Configure
-    if not configure_kernel(kernel_src_dir):
-        return False
+    configure_kernel(kernel_src_dir)
 
     # Build
-    if not build_kernel(kernel_src_dir, output_path, jobs):
-        return False
+    build_kernel(kernel_src_dir, output_path, jobs)
 
     return True

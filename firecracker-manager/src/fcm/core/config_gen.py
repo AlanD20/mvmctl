@@ -59,8 +59,10 @@ class ConfigGenerator:
     def _build_default_boot_args(self) -> str:
         """Build default boot arguments."""
         pci_arg = "pci=off" if not self.vm_config.enable_pci else ""
+        gateway = self.vm_config.gateway or "10.20.0.1"
+        subnet_mask = self.vm_config.subnet_mask or "255.255.255.0"
         ip_arg = (
-            f"ip={self.vm_config.guest_ip}::10.20.0.1:255.255.255.0::eth0:off"
+            f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:off"
             if self.vm_config.guest_ip
             else ""
         )

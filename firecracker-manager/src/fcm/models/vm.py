@@ -25,6 +25,8 @@ class VMConfig:
     rootfs_path: Path = field(default_factory=lambda: Path("rootfs.ext4"))
     guest_ip: str | None = None
     guest_mac: str | None = None
+    gateway: str | None = None
+    subnet_mask: str = "255.255.255.0"
     tap_device: str | None = None
     boot_args: str | None = None
     enable_api_socket: bool = False

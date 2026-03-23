@@ -4,10 +4,13 @@ import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from fcm.core.firecracker import (
     FirecrackerClient,
     get_vm_socket_path,
 )
+from fcm.exceptions import FirecrackerError, SocketNotFoundError
 
 
 def _make_client(tmp_path: Path) -> tuple[FirecrackerClient, Path]:
@@ -26,13 +29,13 @@ def _mock_response(status: int, body: dict[str, object] | None = None) -> MagicM
 
 def test_connect_socket_not_found(tmp_path: Path):
     client = FirecrackerClient(tmp_path / "missing.socket")
-    assert client._connect() is False
+    with pytest.raises(SocketNotFoundError):
+        client._connect()
 
 
 def test_connect_socket_exists(tmp_path: Path):
     client, _ = _make_client(tmp_path)
-    result = client._connect()
-    assert result is True
+    client._connect()
     assert client.conn is not None
 
 
@@ -45,9 +48,8 @@ def test_close_clears_connection(tmp_path: Path):
 
 def test_request_no_connection(tmp_path: Path):
     client = FirecrackerClient(tmp_path / "missing.socket")
-    status, data = client._request("GET", "/")
-    assert status == 0
-    assert data is None
+    with pytest.raises(SocketNotFoundError):
+        client._request("GET", "/")
 
 
 def test_pause_vm_success(tmp_path: Path):
@@ -69,7 +71,8 @@ def test_pause_vm_failure(tmp_path: Path):
     mock_conn.getresponse.return_value = _mock_response(400, {"error": "bad"})
     client.conn = mock_conn
 
-    assert client.pause_vm() is False
+    with pytest.raises(FirecrackerError, match="Failed to pause VM"):
+        client.pause_vm()
 
 
 def test_resume_vm_success(tmp_path: Path):
@@ -87,7 +90,8 @@ def test_resume_vm_failure(tmp_path: Path):
     mock_conn.getresponse.return_value = _mock_response(500, {"error": "internal"})
     client.conn = mock_conn
 
-    assert client.resume_vm() is False
+    with pytest.raises(FirecrackerError, match="Failed to resume VM"):
+        client.resume_vm()
 
 
 def test_create_snapshot_success(tmp_path: Path):
@@ -105,7 +109,8 @@ def test_create_snapshot_failure(tmp_path: Path):
     mock_conn.getresponse.return_value = _mock_response(400, {"error": "fail"})
     client.conn = mock_conn
 
-    assert client.create_snapshot(tmp_path / "mem", tmp_path / "state") is False
+    with pytest.raises(FirecrackerError, match="Failed to create snapshot"):
+        client.create_snapshot(tmp_path / "mem", tmp_path / "state")
 
 
 def test_load_snapshot_success(tmp_path: Path):
@@ -123,7 +128,8 @@ def test_load_snapshot_failure(tmp_path: Path):
     mock_conn.getresponse.return_value = _mock_response(400, {"error": "nope"})
     client.conn = mock_conn
 
-    assert client.load_snapshot(tmp_path / "mem", tmp_path / "state") is False
+    with pytest.raises(FirecrackerError, match="Failed to load snapshot"):
+        client.load_snapshot(tmp_path / "mem", tmp_path / "state")
 
 
 def test_get_instance_info_success(tmp_path: Path):
@@ -172,7 +178,8 @@ def test_start_instance_failure(tmp_path: Path):
     mock_conn.getresponse.return_value = _mock_response(400, None)
     client.conn = mock_conn
 
-    assert client.start_instance() is False
+    with pytest.raises(FirecrackerError, match="Failed to start VM"):
+        client.start_instance()
 
 
 def test_send_ctrl_alt_del_success(tmp_path: Path):

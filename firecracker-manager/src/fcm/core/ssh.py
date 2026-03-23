@@ -1,12 +1,15 @@
 """SSH connection utilities."""
 
+import logging
 import os
 import subprocess
 from pathlib import Path
 
-from fcm.utils.console import print_error, print_success
+from fcm.exceptions import VMNotFoundError, FCMKeyError, FCMError
 from fcm.core.vm_manager import VMManager
 from fcm.utils.fs import get_cache_dir
+
+logger = logging.getLogger(__name__)
 
 
 def find_ssh_keys(keys_dir: Path | None = None) -> list[Path]:
@@ -111,7 +114,12 @@ def connect_to_vm(
         exec_mode: If True, replace process; if False, run subprocess
 
     Returns:
-        Exit code (0 for success)
+        Exit code (0 for success, or subprocess exit code)
+
+    Raises:
+        VMNotFoundError: If VM name not found in state
+        FCMKeyError: If no SSH keys found or specified key not found
+        FCMError: If VM has no IP address
     """
     import re
 
@@ -124,26 +132,22 @@ def connect_to_vm(
         manager = VMManager()
         vm = manager.get(vm_name_or_ip)
         if not vm:
-            print_error(f"VM '{vm_name_or_ip}' not found")
-            return 1
+            raise VMNotFoundError(f"VM '{vm_name_or_ip}' not found")
         if not vm.ip:
-            print_error(f"VM '{vm_name_or_ip}' has no IP address")
-            return 1
+            raise FCMError(f"VM '{vm_name_or_ip}' has no IP address")
         ip = vm.ip
 
     if not key_path:
         keys = find_ssh_keys()
         if not keys:
-            print_error("No SSH keys found in cache keys directory")
-            return 1
+            raise FCMKeyError("No SSH keys found in cache keys directory")
         key_path = keys[0]
 
     if not key_path.exists():
-        print_error(f"SSH key not found: {key_path}")
-        return 1
+        raise FCMKeyError(f"SSH key not found: {key_path}")
 
     key_path.chmod(0o600)
-    print_success(f"Connecting to {ip} as {user}...")
+    logger.info("Connecting to %s as %s...", ip, user)
 
     if exec_mode and not command:
         exec_ssh(ip, user, key_path)

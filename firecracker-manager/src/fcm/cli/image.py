@@ -11,6 +11,13 @@ from fcm.utils.fs import get_images_dir, get_assets_dir
 app = typer.Typer(help="Image management")
 
 
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the image command group."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
+
+
 @app.command()
 def fetch(
     id: str = typer.Argument(..., help="Image ID from images.yaml"),

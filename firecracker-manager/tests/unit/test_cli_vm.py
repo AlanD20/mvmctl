@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from fcm.cli.vm import app, _write_cloud_init
 from fcm.core.network_manager import NetworkConfig
-from fcm.exceptions import NetworkError
+from fcm.exceptions import FirecrackerError, NetworkError
 from fcm.models.vm import VMInstance, VMState
 
 _FAKE_NET = NetworkConfig(
@@ -287,13 +287,14 @@ def test_delete_force_running_vm():
         patch("fcm.cli.vm.get_vm_dir") as mock_vm_dir,
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
-        patch("fcm.cli.vm.teardown_nat"),
-        patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
+        patch("fcm.cli.vm.release_network_ip"),
         patch("fcm.cli.vm._graceful_shutdown"),
+        patch("subprocess.run"),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
         fake_dir = MagicMock()
         fake_dir.exists.return_value = False
+        fake_dir.__truediv__ = lambda self, other: MagicMock(exists=lambda: False)
         mock_vm_dir.return_value = fake_dir
         result = runner.invoke(app, ["delete", "--name", "delvm", "--force"])
 
@@ -308,13 +309,14 @@ def test_delete_process_already_gone():
         patch("fcm.cli.vm.get_vm_dir") as mock_vm_dir,
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
-        patch("fcm.cli.vm.teardown_nat"),
-        patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
-        patch("os.kill", side_effect=ProcessLookupError),
+        patch("fcm.cli.vm.release_network_ip"),
+        patch("fcm.cli.vm._graceful_shutdown"),
+        patch("subprocess.run"),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
         fake_dir = MagicMock()
         fake_dir.exists.return_value = False
+        fake_dir.__truediv__ = lambda self, other: MagicMock(exists=lambda: False)
         mock_vm_dir.return_value = fake_dir
         result = runner.invoke(app, ["delete", "--name", "gonevm", "--force"])
 
@@ -329,17 +331,18 @@ def test_delete_permission_error_no_force():
         patch("fcm.cli.vm.get_vm_dir") as mock_vm_dir,
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
-        patch("fcm.cli.vm.teardown_nat"),
-        patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
-        patch("os.kill", side_effect=PermissionError("not root")),
+        patch("fcm.cli.vm.release_network_ip"),
+        patch("fcm.cli.vm._graceful_shutdown"),
+        patch("subprocess.run"),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
         fake_dir = MagicMock()
         fake_dir.exists.return_value = False
+        fake_dir.__truediv__ = lambda self, other: MagicMock(exists=lambda: False)
         mock_vm_dir.return_value = fake_dir
         result = runner.invoke(app, ["delete", "--name", "permvm", "--force"])
 
-    # force=True, so PermissionError is caught but continues
+    # force=True, so proceeds to cleanup
     assert result.exit_code == 0
 
 
@@ -352,13 +355,14 @@ def test_delete_permission_error_not_force_exits():
         patch("fcm.cli.vm.get_vm_dir") as mock_vm_dir,
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
-        patch("fcm.cli.vm.teardown_nat"),
-        patch("fcm.cli.vm._find_network_for_vm", return_value=[]),
+        patch("fcm.cli.vm.release_network_ip"),
         patch("fcm.cli.vm._graceful_shutdown"),
+        patch("subprocess.run"),
     ):
         mock_mgr_cls.return_value.get.return_value = vm
         fake_dir = MagicMock()
         fake_dir.exists.return_value = False
+        fake_dir.__truediv__ = lambda self, other: MagicMock(exists=lambda: False)
         mock_vm_dir.return_value = fake_dir
         # Provide "y" to confirmation prompt
         result = runner.invoke(app, ["delete", "--name", "permvm2"], input="y\n")
@@ -455,7 +459,6 @@ def test_cleanup_with_stopped_vms_force():
         patch("fcm.cli.vm.get_vm_dir") as mock_vm_dir,
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
-        patch("fcm.cli.vm.teardown_nat"),
         patch("os.kill"),
     ):
         mock_mgr_cls.return_value.list_all.return_value = [stopped]
@@ -476,7 +479,6 @@ def test_cleanup_all_includes_running():
         patch("fcm.cli.vm.get_vm_dir") as mock_vm_dir,
         patch("fcm.cli.vm.remove_iptables_forward_rules"),
         patch("fcm.cli.vm.delete_tap"),
-        patch("fcm.cli.vm.teardown_nat"),
         patch("os.kill"),
     ):
         mock_mgr_cls.return_value.list_all.return_value = [running, stopped]
@@ -574,7 +576,7 @@ def test_snapshot_no_socket():
 
 def test_snapshot_failure():
     mock_client = MagicMock()
-    mock_client.create_snapshot.return_value = False
+    mock_client.create_snapshot.side_effect = FirecrackerError("Failed to create snapshot: 400")
     with (
         patch("fcm.cli.vm.get_vm_socket_path", return_value=Path("/tmp/fake.sock")),
         patch("fcm.cli.vm.FirecrackerClient", return_value=mock_client),
@@ -638,7 +640,7 @@ def test_load_no_socket():
 
 def test_load_failure():
     mock_client = MagicMock()
-    mock_client.load_snapshot.return_value = False
+    mock_client.load_snapshot.side_effect = FirecrackerError("Failed to load snapshot: 400")
     with (
         patch("fcm.cli.vm.get_vm_socket_path", return_value=Path("/tmp/fake.sock")),
         patch("fcm.cli.vm.FirecrackerClient", return_value=mock_client),

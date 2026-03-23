@@ -14,6 +14,9 @@ from fcm.core.config import (
     validate_config,
 )
 
+# Note: SingleVMNetworkConfig was removed — networks are now managed via
+# the named network system (core/network_manager.py).
+
 
 def test_load_yaml_missing_file(tmp_path: Path) -> None:
     result = load_yaml(tmp_path / "nonexistent.yaml")
@@ -44,7 +47,6 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.enable_api_socket is False
     assert config.vm_defaults.enable_pci is False
 
-    assert config.network.single_vm.tap_dev == "fc-tap0"
     assert config.network.multi_vm.bridge_name == "fc-br0"
     assert config.network.multi_vm.bridge_ip == "10.20.0.1/24"
 
@@ -56,7 +58,6 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
         "firecracker": {"binary": "/opt/firecracker"},
         "vm_defaults": {"vcpu_count": 8, "mem_size_mib": 4096},
         "network": {
-            "single_vm": {"tap_dev": "custom-tap"},
             "multi_vm": {"bridge_name": "custom-br0", "bridge_ip": "172.16.0.1/16"},
         },
         "paths": {"assets_dir": "/tmp/assets"},
@@ -68,7 +69,6 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
     assert config.firecracker.binary == "/opt/firecracker"
     assert config.vm_defaults.vcpu_count == 8
     assert config.vm_defaults.mem_size_mib == 4096
-    assert config.network.single_vm.tap_dev == "custom-tap"
     assert config.network.multi_vm.bridge_name == "custom-br0"
     assert config.network.multi_vm.bridge_ip == "172.16.0.1/16"
     assert config.paths.assets_dir == "/tmp/assets"
@@ -127,7 +127,6 @@ def test_dump_config_all_sections() -> None:
 
     network = result["network"]
     assert isinstance(network, dict)
-    assert "single_vm" in network
     assert "multi_vm" in network
 
 

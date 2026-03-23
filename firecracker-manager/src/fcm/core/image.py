@@ -1,13 +1,16 @@
 """Image download and conversion utilities."""
 
 import hashlib
+import logging
 import subprocess
 from pathlib import Path
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
+from fcm.exceptions import ImageError, ChecksumMismatchError, ConfigError
 from fcm.models.image import ImageSpec
-from fcm.utils.console import print_error, print_success, print_info
+
+logger = logging.getLogger(__name__)
 
 
 def download_file(
@@ -25,7 +28,11 @@ def download_file(
         show_progress: Show progress bar
 
     Returns:
-        True if successful, False otherwise
+        True if successful
+
+    Raises:
+        ImageError: On download or I/O failure
+        ChecksumMismatchError: On checksum mismatch
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
 
@@ -33,7 +40,7 @@ def download_file(
         req = Request(url, headers={"User-Agent": "fcm/0.1.0"})
 
         if show_progress:
-            print_info(f"Downloading {url}")
+            logger.info("Downloading %s", url)
 
         with urlopen(req, timeout=300) as response:
             total_size = response.headers.get("Content-Length")
@@ -54,28 +61,24 @@ def download_file(
 
                     if show_progress and total_size:
                         percent = (downloaded / int(total_size)) * 100
-                        print(f"\r  Progress: {percent:.1f}%", end="", flush=True)
-
-        if show_progress:
-            print()  # Newline after progress
+                        logger.debug("Progress: %.1f%%", percent)
 
         # Verify checksum if provided
         if expected_sha256 and sha256_hash:
             actual_sha256 = sha256_hash.hexdigest()
             if actual_sha256.lower() != expected_sha256.lower():
-                print_error(f"Checksum mismatch! Expected {expected_sha256}, got {actual_sha256}")
                 dest.unlink()
-                return False
-            print_success("Checksum verified")
+                raise ChecksumMismatchError(
+                    f"Checksum mismatch! Expected {expected_sha256}, got {actual_sha256}"
+                )
+            logger.info("Checksum verified")
 
         return True
 
     except URLError as e:
-        print_error(f"Download failed: {e}")
-        return False
+        raise ImageError(f"Download failed: {e}") from e
     except IOError as e:
-        print_error(f"I/O error: {e}")
-        return False
+        raise ImageError(f"I/O error: {e}") from e
 
 
 def convert_qcow2_to_raw(
@@ -89,10 +92,13 @@ def convert_qcow2_to_raw(
         raw_path: Destination raw file
 
     Returns:
-        True if successful, False otherwise
+        True if successful
+
+    Raises:
+        ImageError: On conversion failure or missing qemu-img
     """
     try:
-        print_info(f"Converting {qcow2_path.name} to raw...")
+        logger.info("Converting %s to raw...", qcow2_path.name)
 
         subprocess.run(
             ["qemu-img", "convert", "-f", "qcow2", "-O", "raw", str(qcow2_path), str(raw_path)],
@@ -101,22 +107,20 @@ def convert_qcow2_to_raw(
             check=True,
         )
 
-        print_success(f"Converted to {raw_path.name}")
+        logger.info("Converted to %s", raw_path.name)
         return True
 
     except subprocess.CalledProcessError as e:
-        print_error(f"qemu-img failed: {e.stderr}")
-        return False
-    except FileNotFoundError:
-        print_error("qemu-img not found. Install qemu-utils.")
-        return False
+        raise ImageError(f"qemu-img failed: {e.stderr}") from e
+    except FileNotFoundError as e:
+        raise ImageError("qemu-img not found. Install qemu-utils.") from e
 
 
 def extract_partition_from_raw(
     raw_path: Path,
     output_path: Path,
     partition: int | None = None,
-) -> Path | None:
+) -> Path:
     """Extract root partition from raw disk image.
 
     Uses fdisk to find partitions and dd to extract.
@@ -127,7 +131,10 @@ def extract_partition_from_raw(
         partition: Partition number (auto-detect if None)
 
     Returns:
-        True if successful, False otherwise
+        Path to extracted partition image
+
+    Raises:
+        ImageError: On extraction failure
     """
     import json as json_mod
     import re
@@ -148,17 +155,21 @@ def extract_partition_from_raw(
             partitions = table.get("partitiontable", {}).get("partitions", [])
 
             if not partitions:
-                print_info("No partition table found, using image as-is")
+                logger.info("No partition table found, using image as-is")
                 raw_path.rename(output_path)
                 return output_path
 
             if len(partitions) > 1 and partition is None:
-                print_info(f"Found {len(partitions)} partitions:")
+                logger.info("Found %d partitions:", len(partitions))
                 for i, p in enumerate(partitions, 1):
-                    print(
-                        f"  {i}: start={p.get('start')} size={p.get('size')} type={p.get('type', '?')}"
+                    logger.debug(
+                        "  %d: start=%s size=%s type=%s",
+                        i,
+                        p.get("start"),
+                        p.get("size"),
+                        p.get("type", "?"),
                     )
-                print_info("Using last partition as root")
+                logger.info("Using last partition as root")
                 partition = len(partitions)
 
             if partition is None:
@@ -191,15 +202,15 @@ def extract_partition_from_raw(
                     partition_lines.append(line)
 
             if not partition_lines:
-                print_info("No partition table found, using image as-is")
+                logger.info("No partition table found, using image as-is")
                 raw_path.rename(output_path)
                 return output_path
 
             if len(partition_lines) > 1 and partition is None:
-                print_info(f"Found {len(partition_lines)} partitions:")
+                logger.info("Found %d partitions:", len(partition_lines))
                 for i, line in enumerate(partition_lines, 1):
-                    print(f"  {i}: {line}")
-                print_info("Using last partition as root")
+                    logger.debug("  %d: %s", i, line)
+                logger.info("Using last partition as root")
                 partition = len(partition_lines)
 
             if partition is None:
@@ -208,14 +219,13 @@ def extract_partition_from_raw(
             chosen_line = partition_lines[partition - 1]
             numeric_parts = [p for p in chosen_line.split() if p.isdigit()]
             if len(numeric_parts) < 2:
-                print_error("Failed to parse fdisk output for partition sectors")
-                return None
+                raise ImageError("Failed to parse fdisk output for partition sectors")
             start_sector = int(numeric_parts[0])
             sector_count = int(numeric_parts[1]) if len(numeric_parts) >= 3 else None
 
         assert start_sector is not None
 
-        print_info(f"Extracting partition {partition} (start={start_sector})...")
+        logger.info("Extracting partition %d (start=%d)...", partition, start_sector)
 
         dd_args = [
             "dd",
@@ -245,19 +255,17 @@ def extract_partition_from_raw(
                 final_path = output_path.with_suffix(ext)
                 output_path.rename(final_path)
                 output_path = final_path
-                print_info(f"Detected filesystem: {fs_type}")
+                logger.info("Detected filesystem: %s", fs_type)
         except FileNotFoundError:
             pass
 
-        print_success(f"Extracted to {output_path.name}")
+        logger.info("Extracted to %s", output_path.name)
         return output_path
 
     except subprocess.CalledProcessError as e:
-        print_error(f"Extraction failed: {e}")
-        return None
+        raise ImageError(f"Extraction failed: {e}") from e
     except (IndexError, ValueError) as e:
-        print_error(f"Failed to parse partition table: {e}")
-        return None
+        raise ImageError(f"Failed to parse partition table: {e}") from e
 
 
 def create_ext4_from_tar(
@@ -273,12 +281,15 @@ def create_ext4_from_tar(
         size: Image size (e.g., "2G")
 
     Returns:
-        True if successful, False otherwise
+        True if successful
+
+    Raises:
+        ImageError: On failure to create image or missing tools
     """
     import tempfile
 
     try:
-        print_info(f"Creating ext4 image from {tar_path.name}...")
+        logger.info("Creating ext4 image from %s...", tar_path.name)
 
         # Create empty image
         subprocess.run(
@@ -306,22 +317,20 @@ def create_ext4_from_tar(
             finally:
                 subprocess.run(["umount", mnt], check=False)
 
-        print_success(f"Created {output_path.name}")
+        logger.info("Created %s", output_path.name)
         return True
 
     except subprocess.CalledProcessError as e:
-        print_error(f"Failed to create image: {e}")
-        return False
+        raise ImageError(f"Failed to create image: {e}") from e
     except FileNotFoundError as e:
-        print_error(f"Required tool not found: {e}")
-        return False
+        raise ImageError(f"Required tool not found: {e}") from e
 
 
 def fetch_image(
     spec: ImageSpec,
     output_dir: Path,
     force: bool = False,
-) -> Path | None:
+) -> Path:
     """Fetch and convert an image.
 
     Args:
@@ -330,7 +339,10 @@ def fetch_image(
         force: Re-download even if exists
 
     Returns:
-        Path to final image or None if failed
+        Path to final image
+
+    Raises:
+        ImageError: On failure to fetch or convert image
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -338,47 +350,37 @@ def fetch_image(
     final_path = output_dir / f"{spec.id}.{spec.convert_to}"
 
     if final_path.exists() and not force:
-        print_success(f"Image already exists: {final_path}")
+        logger.info("Image already exists: %s", final_path)
         return final_path
 
     # Download
     download_path = output_dir / f"{spec.id}.download"
-    if not download_file(spec.source, download_path, spec.sha256):
-        return None
+    download_file(spec.source, download_path, spec.sha256)
 
     # Convert based on format
-    success = False
     actual_path: Path | None = None
 
     if spec.format == "qcow2":
         raw_path = download_path.with_suffix(".raw")
-        if convert_qcow2_to_raw(download_path, raw_path):
-            result = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
-            raw_path.unlink(missing_ok=True)
-            if result is not None:
-                success = True
-                actual_path = result
+        convert_qcow2_to_raw(download_path, raw_path)
+        actual_path = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
+        raw_path.unlink(missing_ok=True)
 
     elif spec.format == "tar-rootfs":
-        success = create_ext4_from_tar(download_path, final_path)
-        if success:
-            actual_path = final_path
+        create_ext4_from_tar(download_path, final_path)
+        actual_path = final_path
 
     elif spec.format == "raw":
-        result = extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
-        if result is not None:
-            success = True
-            actual_path = result
+        actual_path = extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
 
     else:
-        print_error(f"Unknown format: {spec.format}")
+        download_path.unlink(missing_ok=True)
+        raise ImageError(f"Unknown format: {spec.format}")
 
     # Cleanup download
     download_path.unlink(missing_ok=True)
 
-    if success:
-        return actual_path
-    return None
+    return actual_path
 
 
 def load_images_config(config_path: Path) -> list[ImageSpec]:
@@ -389,12 +391,14 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
 
     Returns:
         List of image specifications
+
+    Raises:
+        ConfigError: If config file not found
     """
     import yaml
 
     if not config_path.exists():
-        print_error(f"Config not found: {config_path}")
-        return []
+        raise ConfigError(f"Config not found: {config_path}")
 
     with open(config_path) as f:
         data = yaml.safe_load(f)

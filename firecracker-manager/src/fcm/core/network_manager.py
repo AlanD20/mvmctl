@@ -6,7 +6,7 @@ import ipaddress
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fcm.constants import device_prefix
@@ -36,7 +36,7 @@ class NetworkConfig:
     gateway: str
     bridge: str
     nat_enabled: bool = True
-    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
 
 
 @dataclass

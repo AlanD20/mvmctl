@@ -31,17 +31,6 @@ class VMDefaultsConfig:
 
 
 @dataclass
-class SingleVMNetworkConfig:
-    """Single VM network settings."""
-
-    tap_dev: str = "fc-tap0"
-    guest_ip: str = "10.10.0.2"
-    host_ip: str = "10.10.0.1"
-    mask: str = "255.255.255.252"
-    mac: str = "02:FC:00:00:00:01"
-
-
-@dataclass
 class MultiVMNetworkConfig:
     """Multi VM network settings."""
 
@@ -56,7 +45,6 @@ class MultiVMNetworkConfig:
 class NetworkConfig:
     """Network configuration."""
 
-    single_vm: SingleVMNetworkConfig = field(default_factory=SingleVMNetworkConfig)
     multi_vm: MultiVMNetworkConfig = field(default_factory=MultiVMNetworkConfig)
 
 
@@ -114,7 +102,6 @@ def load_config(config_dir: Path) -> FCMConfig:
         firecracker=FirecrackerConfig(**firecracker_data),
         vm_defaults=VMDefaultsConfig(**vm_defaults_data),
         network=NetworkConfig(
-            single_vm=SingleVMNetworkConfig(**network_data.get("single_vm", {})),
             multi_vm=MultiVMNetworkConfig(**network_data.get("multi_vm", {})),
         ),
         paths=PathsConfig(**paths_data_filtered),
@@ -166,7 +153,6 @@ def dump_config(config: FCMConfig, section: str | None = None) -> dict[str, obje
         "firecracker": config.firecracker.__dict__,
         "vm_defaults": config.vm_defaults.__dict__,
         "network": {
-            "single_vm": config.network.single_vm.__dict__,
             "multi_vm": config.network.multi_vm.__dict__,
         },
         "paths": config.paths.__dict__,

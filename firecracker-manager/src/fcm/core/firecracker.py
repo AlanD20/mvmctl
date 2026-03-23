@@ -2,10 +2,13 @@
 
 import http.client
 import json
+import logging
 import socket
 from pathlib import Path
 
-from fcm.utils.console import print_error, print_success, print_info
+from fcm.exceptions import FirecrackerError, SocketNotFoundError
+
+logger = logging.getLogger(__name__)
 
 
 class UnixSocketHTTPConnection(http.client.HTTPConnection):
@@ -28,18 +31,20 @@ class FirecrackerClient:
         self.socket_path = Path(socket_path)
         self.conn: UnixSocketHTTPConnection | None = None
 
-    def _connect(self) -> bool:
-        """Connect to Firecracker socket."""
+    def _connect(self) -> None:
+        """Connect to Firecracker socket.
+
+        Raises:
+            SocketNotFoundError: If the socket file does not exist.
+            FirecrackerError: If connection to the socket fails.
+        """
         if not self.socket_path.exists():
-            print_error(f"Socket not found: {self.socket_path}")
-            return False
+            raise SocketNotFoundError(f"Socket not found: {self.socket_path}")
 
         try:
             self.conn = UnixSocketHTTPConnection(self.socket_path)
-            return True
         except Exception as e:
-            print_error(f"Failed to connect to socket: {e}")
-            return False
+            raise FirecrackerError(f"Failed to connect to socket: {e}") from e
 
     def _request(
         self,
@@ -47,10 +52,14 @@ class FirecrackerClient:
         path: str,
         body: dict[str, object] | None = None,
     ) -> tuple[int, dict[str, object] | None]:
-        """Make HTTP request to Firecracker API."""
+        """Make HTTP request to Firecracker API.
+
+        Raises:
+            SocketNotFoundError: If the socket file does not exist.
+            FirecrackerError: If the API request fails.
+        """
         if not self.conn:
-            if not self._connect():
-                return 0, None
+            self._connect()
         assert self.conn is not None
 
         headers = {"Content-Type": "application/json"} if body else {}
@@ -67,9 +76,10 @@ class FirecrackerClient:
 
             return status, data
 
+        except (SocketNotFoundError, FirecrackerError):
+            raise
         except Exception as e:
-            print_error(f"API request failed: {e}")
-            return 0, None
+            raise FirecrackerError(f"API request failed: {e}") from e
 
     def close(self) -> None:
         """Close connection."""
@@ -81,37 +91,43 @@ class FirecrackerClient:
         """Pause the VM.
 
         Returns:
-            True if successful, False otherwise
+            True if successful.
+
+        Raises:
+            FirecrackerError: If the pause operation fails.
         """
-        print_info("Pausing VM...")
+        logger.info("Pausing VM...")
         status, data = self._request("PATCH", "/vm", {"state": "Paused"})
 
         if status == 204:
-            print_success("VM paused")
+            logger.info("VM paused")
             return True
         else:
-            print_error(f"Failed to pause VM: {status}")
+            msg = f"Failed to pause VM: {status}"
             if data:
-                print_error(f"Response: {data}")
-            return False
+                msg += f" Response: {data}"
+            raise FirecrackerError(msg)
 
     def resume_vm(self) -> bool:
         """Resume the VM.
 
         Returns:
-            True if successful, False otherwise
+            True if successful.
+
+        Raises:
+            FirecrackerError: If the resume operation fails.
         """
-        print_info("Resuming VM...")
+        logger.info("Resuming VM...")
         status, data = self._request("PATCH", "/vm", {"state": "Resumed"})
 
         if status == 204:
-            print_success("VM resumed")
+            logger.info("VM resumed")
             return True
         else:
-            print_error(f"Failed to resume VM: {status}")
+            msg = f"Failed to resume VM: {status}"
             if data:
-                print_error(f"Response: {data}")
-            return False
+                msg += f" Response: {data}"
+            raise FirecrackerError(msg)
 
     def create_snapshot(
         self,
@@ -125,9 +141,12 @@ class FirecrackerClient:
             snapshot_path: Path to save VM state
 
         Returns:
-            True if successful, False otherwise
+            True if successful.
+
+        Raises:
+            FirecrackerError: If snapshot creation fails.
         """
-        print_info("Creating snapshot...")
+        logger.info("Creating snapshot...")
 
         body: dict[str, object] = {
             "mem_file_path": str(mem_path),
@@ -137,15 +156,15 @@ class FirecrackerClient:
         status, data = self._request("PUT", "/snapshot/create", body)
 
         if status == 204:
-            print_success("Snapshot created")
-            print_info(f"  Memory: {mem_path}")
-            print_info(f"  State: {snapshot_path}")
+            logger.info("Snapshot created")
+            logger.info("  Memory: %s", mem_path)
+            logger.info("  State: %s", snapshot_path)
             return True
         else:
-            print_error(f"Failed to create snapshot: {status}")
+            msg = f"Failed to create snapshot: {status}"
             if data:
-                print_error(f"Response: {data}")
-            return False
+                msg += f" Response: {data}"
+            raise FirecrackerError(msg)
 
     def load_snapshot(
         self,
@@ -161,9 +180,12 @@ class FirecrackerClient:
             resume: Whether to resume VM after loading
 
         Returns:
-            True if successful, False otherwise
+            True if successful.
+
+        Raises:
+            FirecrackerError: If snapshot loading fails.
         """
-        print_info("Loading snapshot...")
+        logger.info("Loading snapshot...")
 
         body = {
             "mem_file_path": str(mem_path),
@@ -174,13 +196,13 @@ class FirecrackerClient:
         status, data = self._request("PUT", "/snapshot/load", body)
 
         if status == 204:
-            print_success("Snapshot loaded")
+            logger.info("Snapshot loaded")
             return True
         else:
-            print_error(f"Failed to load snapshot: {status}")
+            msg = f"Failed to load snapshot: {status}"
             if data:
-                print_error(f"Response: {data}")
-            return False
+                msg += f" Response: {data}"
+            raise FirecrackerError(msg)
 
     def get_instance_info(self) -> dict[str, object] | None:
         """Get VM instance information.
@@ -210,17 +232,19 @@ class FirecrackerClient:
         """Start the VM instance.
 
         Returns:
-            True if successful, False otherwise
+            True if successful.
+
+        Raises:
+            FirecrackerError: If the start operation fails.
         """
-        print_info("Starting VM...")
+        logger.info("Starting VM...")
         status, data = self._request("PUT", "/actions", {"action_type": "InstanceStart"})
 
         if status == 204:
-            print_success("VM started")
+            logger.info("VM started")
             return True
         else:
-            print_error(f"Failed to start VM: {status}")
-            return False
+            raise FirecrackerError(f"Failed to start VM: {status}")
 
     def send_ctrl_alt_del(self) -> bool:
         """Send Ctrl+Alt+Del to VM.
@@ -228,13 +252,17 @@ class FirecrackerClient:
         Returns:
             True if successful, False otherwise
         """
-        status, data = self._request("PUT", "/actions", {"action_type": "SendCtrlAltDel"})
+        try:
+            status, data = self._request("PUT", "/actions", {"action_type": "SendCtrlAltDel"})
+        except (SocketNotFoundError, FirecrackerError):
+            logger.error("Failed to send Ctrl+Alt+Del")
+            return False
 
         if status == 204:
-            print_success("Ctrl+Alt+Del sent")
+            logger.info("Ctrl+Alt+Del sent")
             return True
         else:
-            print_error(f"Failed to send Ctrl+Alt+Del: {status}")
+            logger.error("Failed to send Ctrl+Alt+Del: %s", status)
             return False
 
 

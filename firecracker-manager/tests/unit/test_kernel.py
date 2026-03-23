@@ -5,6 +5,8 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 from urllib.error import URLError
 
+import pytest
+
 from fcm.core.kernel import (
     build_kernel,
     build_kernel_pipeline,
@@ -14,6 +16,7 @@ from fcm.core.kernel import (
     extract_kernel_tarball,
     run_make,
 )
+from fcm.exceptions import ChecksumMismatchError, KernelError
 
 
 def test_download_kernel_source_success(tmp_path: Path):
@@ -64,18 +67,17 @@ def test_download_kernel_source_checksum_mismatch(tmp_path: Path):
 
     dest = tmp_path / "linux.tar.xz"
     with patch("fcm.core.kernel.urlopen", return_value=mock_response):
-        result = download_kernel_source("https://example.com/k.tar.xz", dest, "deadbeef")
+        with pytest.raises(ChecksumMismatchError):
+            download_kernel_source("https://example.com/k.tar.xz", dest, "deadbeef")
 
-    assert result is False
     assert not dest.exists()
 
 
 def test_download_kernel_source_url_error(tmp_path: Path):
     dest = tmp_path / "linux.tar.xz"
     with patch("fcm.core.kernel.urlopen", side_effect=URLError("no network")):
-        result = download_kernel_source("https://example.com/k.tar.xz", dest)
-
-    assert result is False
+        with pytest.raises(KernelError):
+            download_kernel_source("https://example.com/k.tar.xz", dest)
 
 
 def test_extract_kernel_tarball_success(tmp_path: Path):
@@ -101,8 +103,8 @@ def test_extract_kernel_tarball_bad_file(tmp_path: Path):
     tarball = tmp_path / "bad.tar.xz"
     tarball.write_bytes(b"not-a-tarball")
 
-    result = extract_kernel_tarball(tarball, tmp_path / "out")
-    assert result is None
+    with pytest.raises(KernelError):
+        extract_kernel_tarball(tarball, tmp_path / "out")
 
 
 def test_extract_kernel_tarball_no_linux_dir(tmp_path: Path):
@@ -117,9 +119,8 @@ def test_extract_kernel_tarball_no_linux_dir(tmp_path: Path):
     with tarfile.open(tarball, "w:xz") as tar:
         tar.add(inner_dir.parent / "other-dir", arcname="other-dir")
 
-    result = extract_kernel_tarball(tarball, extract_dir)
-
-    assert result is None
+    with pytest.raises(KernelError):
+        extract_kernel_tarball(tarball, extract_dir)
 
 
 def test_run_make_capture(tmp_path: Path):
@@ -200,9 +201,8 @@ def test_download_firecracker_config_url_error(mock_urlopen: MagicMock, tmp_path
     kernel_dir = tmp_path / "linux-src"
     kernel_dir.mkdir()
 
-    result = download_firecracker_config(kernel_dir)
-
-    assert result is False
+    with pytest.raises(KernelError):
+        download_firecracker_config(kernel_dir)
 
 
 @patch("fcm.core.kernel.download_firecracker_config")
@@ -284,9 +284,8 @@ def test_configure_kernel_olddefconfig_fails(
     kernel_dir = tmp_path / "linux-src"
     kernel_dir.mkdir()
 
-    result = configure_kernel(kernel_dir)
-
-    assert result is False
+    with pytest.raises(KernelError):
+        configure_kernel(kernel_dir)
 
 
 @patch("fcm.core.kernel.run_make")
@@ -294,15 +293,14 @@ def test_configure_kernel_olddefconfig_fails(
 def test_configure_kernel_defconfig_also_fails(
     mock_download: MagicMock, mock_run_make: MagicMock, tmp_path: Path
 ):
-    mock_download.return_value = False
+    mock_download.side_effect = KernelError("download failed")
     mock_run_make.return_value = (1, "", "defconfig error")
 
     kernel_dir = tmp_path / "linux-src"
     kernel_dir.mkdir()
 
-    result = configure_kernel(kernel_dir)
-
-    assert result is False
+    with pytest.raises(KernelError):
+        configure_kernel(kernel_dir)
 
 
 @patch("fcm.core.kernel.run_make")
@@ -337,9 +335,8 @@ def test_configure_kernel_second_olddefconfig_fails(
 
     with patch("fcm.core.kernel.subprocess.run") as mock_subprocess:
         mock_subprocess.return_value = MagicMock(returncode=0)
-        result = configure_kernel(kernel_dir)
-
-    assert result is False
+        with pytest.raises(KernelError):
+            configure_kernel(kernel_dir)
 
 
 @patch("fcm.core.kernel.download_firecracker_config")
@@ -358,9 +355,8 @@ def test_configure_kernel_missing_required_settings(
     config_path = kernel_dir / ".config"
     config_path.write_text("CONFIG_BTRFS_FS=y\n")
 
-    result = configure_kernel(kernel_dir)
-
-    assert result is False
+    with pytest.raises(KernelError):
+        configure_kernel(kernel_dir)
 
 
 def test_build_kernel_success(tmp_path: Path):
@@ -395,9 +391,8 @@ def test_build_kernel_failure(tmp_path: Path):
     mock_result.stderr = "error: something broke\n"
 
     with patch("fcm.core.kernel.subprocess.run", return_value=mock_result):
-        result = build_kernel(kernel_dir, output_path, jobs=1)
-
-    assert result is False
+        with pytest.raises(KernelError):
+            build_kernel(kernel_dir, output_path, jobs=1)
 
 
 def test_build_kernel_failure_with_error_lines(tmp_path: Path):
@@ -412,9 +407,8 @@ def test_build_kernel_failure_with_error_lines(tmp_path: Path):
     mock_result.stderr = "CC some/file.o\nerror: undefined reference to 'foo'\nLD vmlinux\n"
 
     with patch("fcm.core.kernel.subprocess.run", return_value=mock_result):
-        result = build_kernel(kernel_dir, output_path, jobs=1)
-
-    assert result is False
+        with pytest.raises(KernelError):
+            build_kernel(kernel_dir, output_path, jobs=1)
 
 
 def test_build_kernel_vmlinux_not_found(tmp_path: Path):
@@ -429,9 +423,8 @@ def test_build_kernel_vmlinux_not_found(tmp_path: Path):
     mock_result.stderr = ""
 
     with patch("fcm.core.kernel.subprocess.run", return_value=mock_result):
-        result = build_kernel(kernel_dir, output_path, jobs=2)
-
-    assert result is False
+        with pytest.raises(KernelError):
+            build_kernel(kernel_dir, output_path, jobs=2)
 
 
 def test_build_kernel_pipeline_cached(tmp_path: Path):
@@ -453,15 +446,17 @@ def test_build_kernel_pipeline_download_fails(tmp_path: Path):
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
-    with patch("fcm.core.kernel.download_kernel_source", return_value=False):
-        result = build_kernel_pipeline(
-            version="6.1.102",
-            source_url="https://example.com/linux.tar.xz",
-            output_path=output_path,
-            build_dir=build_dir,
-        )
-
-    assert result is False
+    with patch(
+        "fcm.core.kernel.download_kernel_source",
+        side_effect=KernelError("download failed"),
+    ):
+        with pytest.raises(KernelError):
+            build_kernel_pipeline(
+                version="6.1.102",
+                source_url="https://example.com/linux.tar.xz",
+                output_path=output_path,
+                build_dir=build_dir,
+            )
 
 
 @patch("fcm.core.kernel.build_kernel")
@@ -513,16 +508,15 @@ def test_build_kernel_pipeline_extract_fails(
     tarball.write_bytes(b"fake tarball")
 
     mock_download.return_value = True
-    mock_extract.return_value = None
+    mock_extract.side_effect = KernelError("extraction failed")
 
-    result = build_kernel_pipeline(
-        version="6.1.102",
-        source_url="https://example.com/linux.tar.xz",
-        output_path=output_path,
-        build_dir=build_dir,
-    )
-
-    assert result is False
+    with pytest.raises(KernelError):
+        build_kernel_pipeline(
+            version="6.1.102",
+            source_url="https://example.com/linux.tar.xz",
+            output_path=output_path,
+            build_dir=build_dir,
+        )
 
 
 @patch("fcm.core.kernel.configure_kernel")
@@ -543,16 +537,15 @@ def test_build_kernel_pipeline_configure_fails(
 
     mock_download.return_value = True
     mock_extract.return_value = kernel_src_dir
-    mock_configure.return_value = False
+    mock_configure.side_effect = KernelError("configure failed")
 
-    result = build_kernel_pipeline(
-        version="6.1.102",
-        source_url="https://example.com/linux.tar.xz",
-        output_path=output_path,
-        build_dir=build_dir,
-    )
-
-    assert result is False
+    with pytest.raises(KernelError):
+        build_kernel_pipeline(
+            version="6.1.102",
+            source_url="https://example.com/linux.tar.xz",
+            output_path=output_path,
+            build_dir=build_dir,
+        )
 
 
 @patch("fcm.core.kernel.build_kernel")
@@ -576,16 +569,15 @@ def test_build_kernel_pipeline_build_fails(
     mock_download.return_value = True
     mock_extract.return_value = kernel_src_dir
     mock_configure.return_value = True
-    mock_build.return_value = False
+    mock_build.side_effect = KernelError("build failed")
 
-    result = build_kernel_pipeline(
-        version="6.1.102",
-        source_url="https://example.com/linux.tar.xz",
-        output_path=output_path,
-        build_dir=build_dir,
-    )
-
-    assert result is False
+    with pytest.raises(KernelError):
+        build_kernel_pipeline(
+            version="6.1.102",
+            source_url="https://example.com/linux.tar.xz",
+            output_path=output_path,
+            build_dir=build_dir,
+        )
 
 
 @patch("fcm.core.kernel.build_kernel")

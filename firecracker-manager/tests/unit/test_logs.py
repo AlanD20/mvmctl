@@ -1,7 +1,10 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from fcm.core.logs import get_log_path, read_log_lines, show_logs
+from fcm.exceptions import FCMError, VMNotFoundError
 
 
 def test_get_log_path_boot(tmp_path: Path) -> None:
@@ -33,18 +36,16 @@ def test_get_log_path_unknown_type(tmp_path: Path) -> None:
     vm_dir.mkdir()
 
     with patch("fcm.core.logs.get_vm_dir", return_value=vm_dir):
-        result = get_log_path("test-vm", log_type="unknown")
-
-    assert result is None
+        with pytest.raises(FCMError, match="Unknown log type"):
+            get_log_path("test-vm", log_type="unknown")
 
 
 def test_get_log_path_missing_vm(tmp_path: Path) -> None:
     nonexistent = tmp_path / "no-such-vm"
 
     with patch("fcm.core.logs.get_vm_dir", return_value=nonexistent):
-        result = get_log_path("no-such-vm")
-
-    assert result is None
+        with pytest.raises(VMNotFoundError, match="not found"):
+            get_log_path("no-such-vm")
 
 
 def test_get_log_path_missing_file(tmp_path: Path) -> None:
@@ -52,9 +53,8 @@ def test_get_log_path_missing_file(tmp_path: Path) -> None:
     vm_dir.mkdir()
 
     with patch("fcm.core.logs.get_vm_dir", return_value=vm_dir):
-        result = get_log_path("test-vm", log_type="boot")
-
-    assert result is None
+        with pytest.raises(FCMError, match="Log file not found"):
+            get_log_path("test-vm", log_type="boot")
 
 
 def test_read_log_lines_basic(tmp_path: Path) -> None:
@@ -90,16 +90,15 @@ def test_show_logs_success(tmp_path: Path) -> None:
 
 
 def test_show_logs_not_found() -> None:
-    with patch("fcm.core.logs.get_log_path", return_value=None):
-        exit_code = show_logs("nonexistent-vm", log_type="boot")
-
-    assert exit_code == 1
+    with patch("fcm.core.logs.get_log_path", side_effect=VMNotFoundError("VM 'nonexistent-vm' not found")):
+        with pytest.raises(VMNotFoundError, match="not found"):
+            show_logs("nonexistent-vm", log_type="boot")
 
 
 def test_read_log_lines_io_error(tmp_path: Path) -> None:
     log_file = tmp_path / "missing.log"
-    result = read_log_lines(log_file, lines=10)
-    assert result == []
+    with pytest.raises(FCMError, match="Error reading log file"):
+        read_log_lines(log_file, lines=10)
 
 
 def test_show_logs_os_type(tmp_path: Path) -> None:
@@ -152,5 +151,5 @@ def test_follow_log_io_error(tmp_path: Path) -> None:
 
     log_file = tmp_path / "nonexistent.log"
     gen = follow_log(log_file)
-    lines = list(gen)
-    assert lines == []
+    with pytest.raises(FCMError, match="Error following log"):
+        list(gen)

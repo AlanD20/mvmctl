@@ -20,15 +20,15 @@ def test_vm_subcommand_registered():
     assert result.exit_code == 0
 
 
-def test_image_subcommand_registered():
-    """Test 'image --help' is reachable."""
-    result = runner.invoke(app, ["image", "--help"])
+def test_asset_subcommand_registered():
+    """Test 'asset --help' is reachable."""
+    result = runner.invoke(app, ["asset", "--help"])
     assert result.exit_code == 0
 
 
-def test_kernel_subcommand_registered():
-    """Test 'kernel --help' is reachable."""
-    result = runner.invoke(app, ["kernel", "--help"])
+def test_network_subcommand_registered():
+    """Test 'network --help' is reachable."""
+    result = runner.invoke(app, ["network", "--help"])
     assert result.exit_code == 0
 
 

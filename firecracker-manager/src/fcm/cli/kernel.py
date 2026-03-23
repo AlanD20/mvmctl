@@ -12,6 +12,13 @@ from fcm.utils.fs import get_kernels_dir, get_cache_dir
 app = typer.Typer(help="Kernel management")
 
 
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the kernel command group."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
+
+
 @app.command()
 def build(
     version: str | None = typer.Option("6.1.102", "--version", help="Kernel version to build"),

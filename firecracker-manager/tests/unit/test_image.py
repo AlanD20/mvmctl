@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.error import URLError
 
+import pytest
 import yaml
 
 from fcm.core.image import (
@@ -16,6 +17,7 @@ from fcm.core.image import (
     fetch_image,
     load_images_config,
 )
+from fcm.exceptions import ChecksumMismatchError, ConfigError, ImageError
 from fcm.models.image import ImageSpec
 
 
@@ -63,8 +65,8 @@ def test_load_images_config_valid(tmp_path: Path):
 
 
 def test_load_images_config_missing_file(tmp_path: Path):
-    result = load_images_config(tmp_path / "nonexistent.yaml")
-    assert result == []
+    with pytest.raises(ConfigError):
+        load_images_config(tmp_path / "nonexistent.yaml")
 
 
 def test_load_images_config_empty(tmp_path: Path):
@@ -133,14 +135,14 @@ def test_download_file_checksum_mismatch(mock_urlopen: MagicMock, tmp_path: Path
     mock_urlopen.return_value = _mock_urlopen_response(data)
 
     dest = tmp_path / "output.bin"
-    result = download_file(
-        "https://example.com/file.bin",
-        dest,
-        expected_sha256="0000000000000000000000000000000000000000000000000000000000000000",
-        show_progress=False,
-    )
+    with pytest.raises(ChecksumMismatchError):
+        download_file(
+            "https://example.com/file.bin",
+            dest,
+            expected_sha256="0000000000000000000000000000000000000000000000000000000000000000",
+            show_progress=False,
+        )
 
-    assert result is False
     assert not dest.exists()  # file deleted on mismatch
 
 
@@ -149,9 +151,8 @@ def test_download_file_url_error(mock_urlopen: MagicMock, tmp_path: Path):
     mock_urlopen.side_effect = URLError("Connection refused")
 
     dest = tmp_path / "output.bin"
-    result = download_file("https://example.com/file.bin", dest, show_progress=False)
-
-    assert result is False
+    with pytest.raises(ImageError):
+        download_file("https://example.com/file.bin", dest, show_progress=False)
 
 
 # ---------------------------------------------------------------------------
@@ -180,16 +181,16 @@ def test_convert_qcow2_to_raw_success(mock_run: MagicMock, tmp_path: Path):
 def test_convert_qcow2_to_raw_failure(mock_run: MagicMock, tmp_path: Path):
     mock_run.side_effect = subprocess.CalledProcessError(1, "qemu-img", stderr="error")
 
-    result = convert_qcow2_to_raw(tmp_path / "image.qcow2", tmp_path / "image.raw")
-    assert result is False
+    with pytest.raises(ImageError):
+        convert_qcow2_to_raw(tmp_path / "image.qcow2", tmp_path / "image.raw")
 
 
 @patch("fcm.core.image.subprocess.run")
 def test_convert_qcow2_to_raw_missing_tool(mock_run: MagicMock, tmp_path: Path):
     mock_run.side_effect = FileNotFoundError("qemu-img not found")
 
-    result = convert_qcow2_to_raw(tmp_path / "image.qcow2", tmp_path / "image.raw")
-    assert result is False
+    with pytest.raises(ImageError):
+        convert_qcow2_to_raw(tmp_path / "image.qcow2", tmp_path / "image.raw")
 
 
 # ---------------------------------------------------------------------------
@@ -216,9 +217,8 @@ def test_create_ext4_from_tar_failure(mock_run: MagicMock, tmp_path: Path):
 
     tar = tmp_path / "rootfs.tar"
     output = tmp_path / "rootfs.ext4"
-    result = create_ext4_from_tar(tar, output)
-
-    assert result is False
+    with pytest.raises(ImageError):
+        create_ext4_from_tar(tar, output)
 
 
 # ---------------------------------------------------------------------------
@@ -395,9 +395,8 @@ def test_extract_partition_from_raw_dd_failure(mock_run: MagicMock, tmp_path: Pa
     raw_path.write_bytes(b"\x00" * 1024)
     output_path = tmp_path / "output.img"
 
-    result = extract_partition_from_raw(raw_path, output_path)
-
-    assert result is None
+    with pytest.raises(ImageError):
+        extract_partition_from_raw(raw_path, output_path)
 
 
 @patch("fcm.core.image.subprocess.run")
@@ -565,9 +564,8 @@ def test_extract_partition_from_raw_fdisk_parse_failure(mock_run: MagicMock, tmp
 
     output_path = tmp_path / "output.img"
 
-    result = extract_partition_from_raw(raw_path, output_path)
-
-    assert result is None
+    with pytest.raises(ImageError):
+        extract_partition_from_raw(raw_path, output_path)
 
 
 @patch("fcm.core.image.subprocess.run")
@@ -713,11 +711,10 @@ def test_fetch_image_tar_rootfs_failure(
     )
 
     mock_download.return_value = True
-    mock_create.return_value = False
+    mock_create.side_effect = ImageError("Failed to create image")
 
-    result = fetch_image(spec, tmp_path)
-
-    assert result is None
+    with pytest.raises(ImageError):
+        fetch_image(spec, tmp_path)
 
 
 @patch("fcm.core.image.extract_partition_from_raw")
@@ -766,11 +763,10 @@ def test_fetch_image_download_failure(
         size_mib=4096,
     )
 
-    mock_download.return_value = False
+    mock_download.side_effect = ImageError("Download failed")
 
-    result = fetch_image(spec, tmp_path)
-
-    assert result is None
+    with pytest.raises(ImageError):
+        fetch_image(spec, tmp_path)
 
 
 @patch("fcm.core.image.extract_partition_from_raw")
@@ -816,9 +812,8 @@ def test_fetch_image_unknown_format(
 
     mock_download.return_value = True
 
-    result = fetch_image(spec, tmp_path)
-
-    assert result is None
+    with pytest.raises(ImageError):
+        fetch_image(spec, tmp_path)
 
 
 @patch("fcm.core.image.extract_partition_from_raw")
@@ -840,11 +835,11 @@ def test_fetch_image_qcow2_convert_fails(
     )
 
     mock_download.return_value = True
-    mock_convert.return_value = False
+    mock_convert.side_effect = ImageError("qemu-img failed")
 
-    result = fetch_image(spec, tmp_path)
+    with pytest.raises(ImageError):
+        fetch_image(spec, tmp_path)
 
-    assert result is None
     mock_extract.assert_not_called()
 
 

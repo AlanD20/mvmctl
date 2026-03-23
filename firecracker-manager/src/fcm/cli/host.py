@@ -53,37 +53,20 @@ def init_cmd() -> None:
 
 
 @app.command(name="ls")
-def ls_cmd() -> None:
+def ls_cmd(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
     """Show current host configuration state vs expected."""
-    table = Table(title="Host Configuration")
-    table.add_column("Check", style="cyan", no_wrap=True)
-    table.add_column("Status", style="bold")
-    table.add_column("Detail")
+    import json
 
     kvm_ok = check_kvm_access()
-    table.add_row(
-        "/dev/kvm",
-        "[green]ok[/green]" if kvm_ok else "[red]FAIL[/red]",
-        "accessible" if kvm_ok else "not accessible",
-    )
-
     missing = check_required_binaries()
-    table.add_row(
-        "required binaries",
-        "[green]ok[/green]" if not missing else "[red]FAIL[/red]",
-        "all found" if not missing else f"missing: {', '.join(missing)}",
-    )
 
     try:
         ip_fwd = get_ip_forward_status()
     except HostError:
         ip_fwd = "unknown"
     fwd_ok = ip_fwd == "1"
-    table.add_row(
-        "ip_forward",
-        "[green]ok[/green]" if fwd_ok else "[yellow]off[/yellow]",
-        f"value={ip_fwd}",
-    )
 
     cache_dir = get_cache_dir()
     state = None
@@ -91,6 +74,43 @@ def ls_cmd() -> None:
         state = get_host_state(cache_dir)
     except HostError:
         pass
+
+    if json_output:
+        data = {
+            "kvm_accessible": kvm_ok,
+            "required_binaries": {"ok": not missing, "missing": missing},
+            "ip_forward": {"value": ip_fwd, "ok": fwd_ok},
+            "state_snapshot": {
+                "exists": state is not None,
+                "timestamp": state.init_timestamp if state else None,
+            },
+        }
+        typer.echo(json.dumps(data, indent=2))
+        return
+
+    table = Table(title="Host Configuration")
+    table.add_column("Check", style="cyan", no_wrap=True)
+    table.add_column("Status", style="bold")
+    table.add_column("Detail")
+
+    table.add_row(
+        "/dev/kvm",
+        "[green]ok[/green]" if kvm_ok else "[red]FAIL[/red]",
+        "accessible" if kvm_ok else "not accessible",
+    )
+
+    table.add_row(
+        "required binaries",
+        "[green]ok[/green]" if not missing else "[red]FAIL[/red]",
+        "all found" if not missing else f"missing: {', '.join(missing)}",
+    )
+
+    table.add_row(
+        "ip_forward",
+        "[green]ok[/green]" if fwd_ok else "[yellow]off[/yellow]",
+        f"value={ip_fwd}",
+    )
+
     table.add_row(
         "state snapshot",
         "[green]saved[/green]" if state else "[dim]none[/dim]",

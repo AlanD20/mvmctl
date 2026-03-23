@@ -22,7 +22,6 @@ from fcm.core.network import (
     delete_tap,
     generate_mac,
     remove_iptables_forward_rules,
-    teardown_nat,
 )
 from fcm.core.network_manager import (
     DEFAULT_NETWORK_NAME,
@@ -33,7 +32,7 @@ from fcm.core.network_manager import (
 )
 from fcm.core.ssh import connect_to_vm
 from fcm.core.vm_manager import VMManager
-from fcm.exceptions import NetworkError
+from fcm.exceptions import FirecrackerError, NetworkError
 from fcm.models.vm import VMConfig, VMInstance, VMState
 from fcm.utils.console import print_error, print_info, print_success
 from fcm.utils.fs import get_cache_dir, get_images_dir, get_kernels_dir, get_vm_dir
@@ -211,6 +210,10 @@ def create(
     # Resolve SSH key
     ssh_pub_key = _resolve_ssh_key(ssh_key)
 
+    import ipaddress as _ipaddress
+
+    _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
+
     _write_cloud_init(
         cloud_init_dir,
         name,
@@ -219,11 +222,16 @@ def create(
         ssh_pub_key=ssh_pub_key,
         custom_user_data=user_data,
         gateway=net_config.gateway,
+        prefix_len=_prefix_len,
     )
     _inject_cloud_init(rootfs_path, cloud_init_dir)
 
     # --------------------------------------------------------- firecracker cfg
     socket_path = vm_dir / "firecracker.api.socket" if enable_api_socket else None
+    # Compute subnet mask from CIDR for boot args
+    _net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
+    _subnet_mask = str(_net.netmask)
+
     vm_config = VMConfig(
         name=name,
         vcpu_count=vcpus,
@@ -232,6 +240,8 @@ def create(
         rootfs_path=rootfs_path,
         guest_ip=guest_ip,
         guest_mac=guest_mac,
+        gateway=net_config.gateway,
+        subnet_mask=_subnet_mask,
         tap_device=tap_name,
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
@@ -332,29 +342,45 @@ def remove(
     vm_dir = get_vm_dir(name)
     tap_name = f"fc-{name}-0"
 
+    # Step 1: Read PID from firecracker.pid file (Phase 4 §3)
     pid_file = vm_dir / "firecracker.pid"
     pid = int(pid_file.read_text().strip()) if pid_file.exists() else vm.pid
 
-    _graceful_shutdown(pid, vm.socket_path, vm.ip)
+    # Steps 2-4: Graceful shutdown sequence
+    _graceful_shutdown(pid, vm.socket_path)
 
+    # Step 5: Clean up TAP device and iptables rules, release IP
     remove_iptables_forward_rules(tap_name)
     try:
         delete_tap(tap_name)
     except NetworkError as e:
         print_error(f"Warning: failed to delete TAP {tap_name}: {e}")
 
-    # Release network IP lease
-    for net_name in _find_network_for_vm(name):
+    # Release network IP lease using stored network_name
+    net_name = vm.network_name or DEFAULT_NETWORK_NAME
+    try:
+        release_network_ip(net_name, name)
+    except NetworkError:
+        pass
+
+    # Step 6: Remove SSH known-hosts entry
+    if vm.ip:
         try:
-            release_network_ip(net_name, name)
-        except NetworkError:
+            subprocess.run(
+                ["ssh-keygen", "-R", vm.ip],
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError:
             pass
 
     manager.deregister(name)
 
+    # Step 7: Delete VM cache directory
     if vm_dir.exists():
         shutil.rmtree(vm_dir)
 
+    # Step 8: Do NOT tear down the network — networks persist independently
     print_success(f"VM '{name}' removed")
 
 
@@ -402,6 +428,8 @@ def ls_vms(
                 "mac": v.mac,
                 "status": v.status.value,
                 "pid": v.pid,
+                "api_socket": v.socket_path is not None,
+                "network": v.network_name or "-",
                 "created_at": v.created_at.isoformat(),
             }
             for v in vms
@@ -418,6 +446,7 @@ def ls_vms(
     table.add_column("IP", style="green")
     table.add_column("Status", style="bold")
     table.add_column("PID")
+    table.add_column("API", no_wrap=True)
     table.add_column("Created")
 
     status_colors = {
@@ -429,11 +458,13 @@ def ls_vms(
     for v in vms:
         status_str = status_colors.get(v.status, v.status.value)
         created = v.created_at.strftime("%Y-%m-%d %H:%M") if v.created_at else "-"
+        api_str = "[green]on[/green]" if v.socket_path else "[dim]off[/dim]"
         table.add_row(
             v.name,
             v.ip or "-",
             status_str,
             str(v.pid) if v.pid else "-",
+            api_str,
             created,
         )
 
@@ -560,11 +591,6 @@ def cleanup(
 
         print_success(f"Removed VM '{v.name}'")
 
-    try:
-        teardown_nat(force=False)
-    except NetworkError:
-        pass
-
 
 # ---------------------------------------------------------------------------
 # pause / resume / snapshot / load
@@ -604,10 +630,11 @@ def snapshot(
 
     client = FirecrackerClient(socket_path)
     try:
-        if client.create_snapshot(mem_out, state_out):
-            raise typer.Exit(code=0)
-        else:
-            raise typer.Exit(code=1)
+        client.create_snapshot(mem_out, state_out)
+        raise typer.Exit(code=0)
+    except FirecrackerError as exc:
+        print_error(str(exc))
+        raise typer.Exit(code=1)
     finally:
         client.close()
 
@@ -628,10 +655,11 @@ def load(
 
     client = FirecrackerClient(socket_path)
     try:
-        if client.load_snapshot(mem_in, state_in, resume_after):
-            raise typer.Exit(code=0)
-        else:
-            raise typer.Exit(code=1)
+        client.load_snapshot(mem_in, state_in, resume_after)
+        raise typer.Exit(code=0)
+    except FirecrackerError as exc:
+        print_error(str(exc))
+        raise typer.Exit(code=1)
     finally:
         client.close()
 
@@ -641,14 +669,13 @@ def load(
 # ---------------------------------------------------------------------------
 
 
-def _graceful_shutdown(pid: int | None, socket_path: Path | None, vm_ip: str | None) -> None:
+def _graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
     """Gracefully shut down a VM process.
 
     Sequence:
     1. Send Ctrl+Alt+Del via API socket (best-effort), then wait up to 5s.
     2. If still alive: SIGTERM, wait 1s.
     3. If still alive: SIGKILL.
-    4. Run ssh-keygen -R <ip> to remove host key from known_hosts.
     """
     if pid is None:
         return
@@ -737,6 +764,7 @@ def _write_cloud_init(
     ssh_pub_key: str | None = None,
     custom_user_data: Path | None = None,
     gateway: str = "10.20.0.1",
+    prefix_len: int = 24,
 ) -> None:
     """Write cloud-init seed files (meta-data, network-config, user-data)."""
     # meta-data
@@ -751,7 +779,7 @@ def _write_cloud_init(
         "   name: eth0\n"
         "   subnets:\n"
         "     - type: static\n"
-        f"       address: {guest_ip}/24\n"
+        f"       address: {guest_ip}/{prefix_len}\n"
         f"       gateway: {gateway}\n"
         "       dns_nameservers:\n"
         "         - 8.8.8.8\n"
@@ -846,17 +874,5 @@ def _cleanup_tap(tap_name: str) -> None:
     try:
         remove_iptables_forward_rules(tap_name)
         delete_tap(tap_name)
-    except (NetworkError, Exception):
+    except NetworkError:
         pass
-
-
-def _find_network_for_vm(vm_name: str) -> list[str]:
-    """Find which networks have a lease for this VM."""
-    from fcm.core.network_manager import get_network_leases, list_networks
-
-    result: list[str] = []
-    for net in list_networks():
-        leases = get_network_leases(net.name)
-        if any(lease.vm_name == vm_name for lease in leases):
-            result.append(net.name)
-    return result

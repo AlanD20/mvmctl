@@ -169,6 +169,12 @@ def create_key(
 
         comment = f"{name}@{socket.gethostname()}"
 
+    if overwrite:
+        if private_key_path.exists():
+            private_key_path.unlink()
+        if pub_key_path.exists():
+            pub_key_path.unlink()
+
     cmd = [
         "ssh-keygen",
         "-t",
@@ -180,24 +186,6 @@ def create_key(
         "-C",
         comment,
     ]
-    if overwrite:
-        cmd.append("-y")  # not needed, but we handle existing file
-        # Just remove existing files first
-        if private_key_path.exists():
-            private_key_path.unlink()
-        if pub_key_path.exists():
-            pub_key_path.unlink()
-        cmd = [
-            "ssh-keygen",
-            "-t",
-            "ed25519",
-            "-f",
-            str(private_key_path),
-            "-N",
-            "",
-            "-C",
-            comment,
-        ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:

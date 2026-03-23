@@ -1,16 +1,19 @@
 """Log viewing utilities."""
 
+import logging
 from collections.abc import Generator
 from pathlib import Path
 
-from fcm.utils.console import print_error, print_info
+from fcm.exceptions import FCMError, VMNotFoundError
 from fcm.utils.fs import get_vm_dir
+
+logger = logging.getLogger(__name__)
 
 
 def get_log_path(
     vm_name: str,
     log_type: str = "boot",
-) -> Path | None:
+) -> Path:
     """Get log file path for a VM.
 
     Args:
@@ -18,25 +21,26 @@ def get_log_path(
         log_type: 'boot' for console log, 'os' for firecracker log
 
     Returns:
-        Path to log file or None if not found
+        Path to log file
+
+    Raises:
+        VMNotFoundError: If VM directory does not exist
+        FCMError: If log type is unknown or log file not found
     """
     vm_dir = get_vm_dir(vm_name)
 
     if not vm_dir.exists():
-        print_error(f"VM '{vm_name}' not found at {vm_dir}")
-        return None
+        raise VMNotFoundError(f"VM '{vm_name}' not found at {vm_dir}")
 
     if log_type == "boot":
         log_file = vm_dir / "firecracker.console.log"
     elif log_type == "os":
         log_file = vm_dir / "firecracker.log"
     else:
-        print_error(f"Unknown log type '{log_type}'. Valid: boot, os")
-        return None
+        raise FCMError(f"Unknown log type '{log_type}'. Valid: boot, os")
 
     if not log_file.exists():
-        print_error(f"Log file not found: {log_file}")
-        return None
+        raise FCMError(f"Log file not found: {log_file}")
 
     return log_file
 
@@ -45,14 +49,17 @@ def read_log_lines(
     log_file: Path,
     lines: int = 50,
 ) -> list[str]:
-    """Read last N lines from log file."""
+    """Read last N lines from log file.
+
+    Raises:
+        FCMError: If the log file cannot be read
+    """
     try:
         with open(log_file, "r") as f:
             all_lines = f.readlines()
             return all_lines[-lines:] if len(all_lines) > lines else all_lines
     except IOError as e:
-        print_error(f"Error reading log file: {e}")
-        return []
+        raise FCMError(f"Error reading log file: {e}") from e
 
 
 def follow_log(
@@ -61,6 +68,9 @@ def follow_log(
     """Follow log file in real-time (like tail -f).
 
     Yields new lines as they are written.
+
+    Raises:
+        FCMError: If the log file cannot be read
     """
     try:
         with open(log_file, "r") as f:
@@ -77,7 +87,7 @@ def follow_log(
     except KeyboardInterrupt:
         raise
     except IOError as e:
-        print_error(f"Error following log: {e}")
+        raise FCMError(f"Error following log: {e}") from e
 
 
 def show_logs(
@@ -96,17 +106,19 @@ def show_logs(
 
     Returns:
         Exit code (0 for success)
+
+    Raises:
+        VMNotFoundError: If VM not found
+        FCMError: On log access errors
     """
     log_file = get_log_path(vm_name, log_type)
-    if not log_file:
-        return 1
 
     log_type_label = "Boot" if log_type == "boot" else "OS"
-    print_info(f"=== {log_type_label} Log for {vm_name} ===")
-    print_info(f"File: {log_file}")
+    logger.info("=== %s Log for %s ===", log_type_label, vm_name)
+    logger.info("File: %s", log_file)
 
     if follow:
-        print_info("Press Ctrl+C to exit")
+        logger.info("Press Ctrl+C to exit")
         print()
         try:
             for line in follow_log(log_file):

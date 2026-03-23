@@ -2,12 +2,15 @@ import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from fcm.core.ssh import (
     find_ssh_keys,
     extract_ip_from_config,
     build_ssh_command,
     connect_to_vm,
 )
+from fcm.exceptions import VMNotFoundError, FCMKeyError
 from fcm.models.vm import VMInstance, VMState
 
 
@@ -171,20 +174,19 @@ def test_connect_to_vm_by_name(
 
 @patch("fcm.core.ssh.VMManager")
 def test_connect_to_vm_name_not_found(mock_vm_manager_cls: MagicMock):
-    """Returns 1 when VM name not found."""
+    """Raises VMNotFoundError when VM name not found."""
     mock_manager = MagicMock()
     mock_manager.get.return_value = None
     mock_vm_manager_cls.return_value = mock_manager
 
-    result = connect_to_vm("nonexistent", exec_mode=False)
-
-    assert result == 1
+    with pytest.raises(VMNotFoundError, match="not found"):
+        connect_to_vm("nonexistent", exec_mode=False)
 
 
 @patch("fcm.core.ssh.find_ssh_keys", return_value=[])
 def test_connect_to_vm_no_keys(mock_find_keys: MagicMock):
-    """Returns 1 when no SSH keys found."""
-    result = connect_to_vm("10.20.0.5", exec_mode=False)
+    """Raises FCMKeyError when no SSH keys found."""
+    with pytest.raises(FCMKeyError, match="No SSH keys found"):
+        connect_to_vm("10.20.0.5", exec_mode=False)
 
-    assert result == 1
     mock_find_keys.assert_called_once()
