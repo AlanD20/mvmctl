@@ -506,7 +506,11 @@ def prune_host(cache_dir: Path) -> list[str]:
 
     Does NOT remove VM cache files, images, kernels, or binaries.
 
-    Returns a list of summary strings describing what was torn down.
+    Args:
+        cache_dir: Root cache directory containing the host state snapshot.
+
+    Returns:
+        A list of summary strings describing what was torn down.
     """
     summary = clean_host(cache_dir)
 
@@ -531,6 +535,17 @@ def prune_host(cache_dir: Path) -> list[str]:
 
 
 def get_host_state(cache_dir: Path) -> HostState | None:
+    """Retrieve the saved host configuration state.
+
+    Args:
+        cache_dir: Root cache directory containing the host state snapshot.
+
+    Returns:
+        The ``HostState`` if it exists, or ``None`` if no state is saved.
+
+    Raises:
+        HostError: If the state file is corrupt or invalid.
+    """
     path = _state_file(cache_dir)
     if not path.exists():
         return None

@@ -83,6 +83,7 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
             client.close()
         except (ProcessLookupError, PermissionError, InterruptedError):
             pass
+        # Poll for 5 seconds (50 * 0.1s) to allow graceful shutdown before SIGTERM/SIGKILL.
         for _ in range(50):
             time.sleep(0.1)
             # P-L3: single check per iteration — no fix needed

@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      working-directory: firecracker-manager
+      run: uv sync --group dev
+
+    - name: Lint with Ruff
+      working-directory: firecracker-manager
+      run: uv run ruff check .
+
+    - name: Typecheck with Mypy
+      working-directory: firecracker-manager
+      run: uv run mypy .
+
+    - name: Run Pytest
+      working-directory: firecracker-manager
+      run: uv run pytest tests/unit/
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        python-version: "3.13"
+
+    - name: Install pip-audit
+      run: uv tool install pip-audit
+
+    - name: Security Audit
+      working-directory: firecracker-manager
+      run: |
+        uv export --format requirements-txt > requirements.txt
+        pip-audit -r requirements.txt

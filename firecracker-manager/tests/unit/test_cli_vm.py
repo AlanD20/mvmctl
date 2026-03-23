@@ -244,7 +244,7 @@ def test_create_duplicate_vm_name(mocker: MockerFixture):
 # T-H3 (via main app): vm create error-path tests through the top-level CLI
 # ---------------------------------------------------------------------------
 
-from fcm.main import app as main_app
+from fcm.main import app as main_app  # noqa: E402
 
 main_runner = CliRunner()
 

@@ -41,23 +41,34 @@ def write_cloud_init(
         yaml.dump(network_config, default_flow_style=False)
     )
 
+    from typing import Any
     if custom_user_data is not None:
-        content = custom_user_data.read_text()
-        if ssh_pub_key and "ssh_authorized_keys" not in content:
-            extra = yaml.dump(
-                {"users": [{"name": user, "ssh-authorized-keys": [ssh_pub_key]}]},
-                default_flow_style=False,
-            )
-            content += "\n" + extra
-        elif ssh_pub_key and "ssh_authorized_keys" in content:
-            content = content.replace(
-                "ssh_authorized_keys:",
-                f"ssh_authorized_keys:\n      - {ssh_pub_key}",
-                1,
-            )
-        (cloud_init_dir / "user-data").write_text(content)
+        ud: dict[str, Any] = {}
+        try:
+            loaded = yaml.safe_load(custom_user_data.read_text())
+            if isinstance(loaded, dict):
+                ud = loaded
+        except yaml.YAMLError:
+            pass
+        if ssh_pub_key:
+            if "users" not in ud:
+                ud["users"] = [{"name": user, "ssh-authorized-keys": [ssh_pub_key]}]
+            else:
+                users_list = ud["users"]
+                if isinstance(users_list, list):
+                    user_found = False
+                    for u in users_list:
+                        if isinstance(u, dict) and u.get("name") == user:
+                            keys = u.setdefault("ssh-authorized-keys", [])
+                            if ssh_pub_key not in keys:
+                                keys.append(ssh_pub_key)
+                            user_found = True
+                            break
+                    if not user_found:
+                        users_list.append({"name": user, "ssh-authorized-keys": [ssh_pub_key]})
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n" + yaml.dump(ud, default_flow_style=False))
     else:
-        ud: dict[str, object] = {
+        ud = {
             "users": ["default"],
             "package_update": False,
             "package_upgrade": False,

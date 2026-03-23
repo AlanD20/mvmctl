@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fcm.core.key_manager import (
-    KeyInfo,
     add_key,
     create_key,
     get_key,
@@ -262,7 +261,6 @@ def test_inspect_key_not_found(keys_dir):
 
 def test_save_registry_sets_chmod_600(keys_dir, tmp_path):
     """After add_key, registry.json should have mode 0o600."""
-    import stat
 
     pub_file = tmp_path / "id_ed25519.pub"
     pub_file.write_text(SAMPLE_PUB_KEY)
@@ -293,8 +291,7 @@ def test_add_key_with_path_traversal_name(keys_dir, tmp_path, bad_name):
     pub_file = tmp_path / "id_ed25519.pub"
     pub_file.write_text(SAMPLE_PUB_KEY)
     try:
-        info = add_key(bad_name, pub_file)
-        cached = keys_dir / f"{bad_name}.pub"
+        add_key(bad_name, pub_file)
     except (FCMKeyError, OSError, ValueError):
         pass
 

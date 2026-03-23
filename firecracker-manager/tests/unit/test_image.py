@@ -100,7 +100,6 @@ def _mock_urlopen_response(data: bytes, content_length: str | None = None):
 @patch("fcm.utils.http.urlopen")
 def test_download_file_warns_no_checksum(mock_urlopen: MagicMock, tmp_path: Path):
     """S-H10: download_file should log a warning when expected_sha256 is None."""
-    import logging
 
     data = b"hello world binary content"
     mock_urlopen.return_value = _mock_urlopen_response(data)

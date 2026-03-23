@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -221,8 +221,10 @@ def test_inspect_network(mock_bridge_exists, mock_cache_dir: Path):
     info = inspect_network("mynet")
     assert info["name"] == "mynet"
     assert info["bridge_exists"] is True
-    assert len(info["vms"]) == 1
-    assert info["vms"][0] == {"vm_name": "vm1", "ip": "10.20.1.2"}
+    vms = info["vms"]
+    assert isinstance(vms, list)
+    assert len(vms) == 1
+    assert vms[0] == {"vm_name": "vm1", "ip": "10.20.1.2"}
 
 
 def test_inspect_network_not_found():

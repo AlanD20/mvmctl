@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 
 from fcm.constants import HTTP_USER_AGENT
 from fcm.exceptions import AssetNotFoundError, BinaryError, FCMError
-from fcm.utils.fs import get_bin_dir, get_cache_dir
+from fcm.utils.fs import get_bin_dir
 from fcm.utils.http import download_file
 
 logger = logging.getLogger(__name__)

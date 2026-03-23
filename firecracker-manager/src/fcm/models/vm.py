@@ -2,16 +2,16 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
+from enum import StrEnum, auto
 from pathlib import Path
 
 
-class VMState(Enum):
+class VMState(StrEnum):
     """VM lifecycle states."""
 
-    RUNNING = "running"
-    STOPPED = "stopped"
-    ERROR = "error"
+    RUNNING = auto()
+    STOPPED = auto()
+    ERROR = auto()
 
 
 @dataclass

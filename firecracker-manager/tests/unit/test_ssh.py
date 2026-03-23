@@ -215,3 +215,44 @@ def test_build_ssh_command_rejects_bad_username():
     """build_ssh_command should reject invalid usernames."""
     with pytest.raises(FCMError, match="Invalid SSH username"):
         build_ssh_command("10.20.0.2", user="$(whoami)")
+
+
+# ---------------------------------------------------------------------------
+# run_ssh and exec_ssh coverage (3e)
+# ---------------------------------------------------------------------------
+
+from fcm.core.ssh import run_ssh, exec_ssh  # noqa: E402
+
+
+@patch("fcm.core.ssh.subprocess.run")
+def test_run_ssh_success(mock_run):
+    """run_ssh calls subprocess.run successfully."""
+    mock_run.return_value = MagicMock(returncode=0)
+    result = run_ssh("10.0.0.1", "root", Path("key"), "uptime")
+    assert result == 0
+    mock_run.assert_called_once()
+    assert mock_run.call_args[0][0][0] == "ssh"
+
+
+@patch("fcm.core.ssh.subprocess.run")
+def test_run_ssh_failure(mock_run):
+    """run_ssh returns exit code on failure."""
+    mock_run.return_value = MagicMock(returncode=1)
+    assert run_ssh("10.0.0.1", "root", Path("key"), "bad_cmd") == 1
+
+
+@patch("fcm.core.ssh.os.execvp")
+def test_exec_ssh(mock_execvp):
+    """exec_ssh calls os.execvp with the correct arguments."""
+    exec_ssh("10.0.0.1", "root", Path("key"))
+    mock_execvp.assert_called_once()
+    assert mock_execvp.call_args[0][0] == "ssh"
+    assert "root@10.0.0.1" in mock_execvp.call_args[0][1]
+
+
+@patch("fcm.core.ssh.os.execvp")
+def test_exec_ssh_oserror(mock_execvp):
+    """exec_ssh raises OSError if os.execvp throws OSError."""
+    mock_execvp.side_effect = OSError("No such file or directory")
+    with pytest.raises(OSError, match="No such file"):
+        exec_ssh("10.0.0.1", "root", Path("key"))

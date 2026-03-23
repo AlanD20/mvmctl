@@ -1672,3 +1672,71 @@ class TestGetIpForwardErrorPaths:
         mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl", stderr="unknown key")
         with pytest.raises(HostError, match="Failed to read"):
             get_ip_forward_status()
+
+
+class TestWriteSudoersErrorPaths:
+    @patch("fcm.core.host.subprocess.run")
+    def test_visudo_failure(self, mock_run, tmp_path):
+        """_write_sudoers raises HostError if visudo validation fails."""
+        mock_run.return_value = MagicMock(returncode=1, stderr="syntax error")
+        from fcm.core.host import _write_sudoers
+        with pytest.raises(HostError, match="Generated sudoers file failed visudo validation"):
+            _write_sudoers(tmp_path / "sudoers", "testgrp")
+
+
+class TestAddUserToGroupErrorPaths:
+    @patch("fcm.core.host._user_in_group", return_value=False)
+    @patch("fcm.core.host.subprocess.run")
+    def test_usermod_failure(self, mock_run, mock_in_group):
+        """_add_user_to_group raises HostError if usermod fails."""
+        mock_run.side_effect = subprocess.CalledProcessError(1, "usermod", stderr="user not found")
+        with pytest.raises(HostError, match="Failed to add usr to group grp"):
+            _add_user_to_group("usr", "grp")
+
+    @patch("fcm.core.host._user_in_group", return_value=False)
+    @patch("fcm.core.host.subprocess.run", side_effect=FileNotFoundError("usermod"))
+    def test_usermod_not_found(self, mock_run, mock_in_group):
+        """_add_user_to_group raises HostError if usermod is missing."""
+        with pytest.raises(HostError, match="usermod command not found"):
+            _add_user_to_group("usr", "grp")
+
+
+class TestPruneHostErrorPaths:
+    @patch("fcm.core.host.clean_host", return_value=["cleaned"])
+    @patch("fcm.core.host.restore_host")
+    @patch("fcm.core.host._state_file")
+    def test_prune_host_restore_fails(self, mock_state_file, mock_restore, mock_clean, tmp_path):
+        """prune_host catches HostError from restore_host but still returns clean summary and removes state."""
+        mock_restore.side_effect = HostError("fake restore error")
+        mock_sf = MagicMock()
+        mock_sf.exists.return_value = True
+        mock_state_file.return_value = mock_sf
+        
+        from fcm.core.host import prune_host
+        summary = prune_host(tmp_path)
+        
+        assert "cleaned" in summary
+        assert "Removed host state snapshot" in summary
+        mock_sf.unlink.assert_called_once()
+
+
+class TestResetHostErrorPaths:
+    @patch("fcm.core.host.clean_host", return_value=["cleaned"])
+    @patch("fcm.core.host.restore_host", side_effect=HostError("fake restore error"))
+    @patch("fcm.core.host._remove_sudoers", side_effect=HostError("fake sudoers error"))
+    @patch("fcm.core.host._remove_group", side_effect=HostError("fake group error"))
+    @patch("fcm.core.host._state_file")
+    def test_reset_host_all_errors(self, mock_state_file, mock_rg, mock_rs, mock_rh, mock_ch, tmp_path):
+        """reset_host catches all intermediary HostErrors and still returns a summary."""
+        mock_sf = MagicMock()
+        mock_sf.exists.return_value = True
+        mock_state_file.return_value = mock_sf
+        
+        from fcm.core.host import reset_host
+        summary = reset_host(tmp_path)
+        
+        assert "cleaned" in summary
+        assert "Warning: fake sudoers error" in summary
+        assert "Warning: fake group error" in summary
+        assert "Removed host state snapshot" in summary
+        mock_sf.unlink.assert_called_once()

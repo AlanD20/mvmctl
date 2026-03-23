@@ -1,9 +1,7 @@
 """Unit tests for vm_lifecycle helper functions (no KVM/subprocess required)."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from fcm.core.vm_lifecycle import cleanup_tap, graceful_shutdown
 from fcm.exceptions import NetworkError
@@ -23,7 +21,6 @@ def test_graceful_shutdown_already_dead() -> None:
 
 def test_graceful_shutdown_via_sigterm_then_sigkill() -> None:
     """Exercises the SIGTERM -> SIGKILL path when process stays alive."""
-    import signal
 
     call_count = {"n": 0}
 

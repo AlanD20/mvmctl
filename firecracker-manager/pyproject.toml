@@ -11,16 +11,7 @@ dependencies = [
     "pyyaml>=6,<7",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "mypy>=1.19,<2",
-    "pytest>=9,<10",
-    "pytest-cov>=7,<8",
-    "pytest-mock>=3,<4",
-    "ruff>=0.15,<1",
-    "types-PyYAML>=6.0,<7",
-    "pyinstaller>=6,<7",
-]
+
 
 [project.scripts]
 fcm = "fcm.main:app"
@@ -45,6 +36,13 @@ skip-magic-trailing-comma = false
 python_version = "3.13"
 strict = true
 
+[[tool.mypy.overrides]]
+module = ["tests.*", "test_*", "tests"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+disable_error_code = ["no-untyped-def", "no-untyped-call", "arg-type", "attr-defined"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -60,5 +58,7 @@ dev = [
     "pytest-mock>=3,<4",
     "ruff>=0.15,<1",
     "types-PyYAML>=6.0,<7",
+]
+build = [
     "pyinstaller>=6,<7",
 ]

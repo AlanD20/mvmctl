@@ -1,7 +1,6 @@
-from __future__ import annotations
-import subprocess
-
 """Tests for Phase 5 features: privilege model, clean/reset, help command."""
+
+from __future__ import annotations
 
 
 from unittest.mock import MagicMock, patch

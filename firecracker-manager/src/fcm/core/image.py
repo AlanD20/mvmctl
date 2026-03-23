@@ -4,7 +4,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from fcm.exceptions import ImageError, ChecksumMismatchError, ConfigError
+from fcm.exceptions import ImageError, ConfigError
 from fcm.models.image import ImageSpec
 from fcm.utils.http import download_file  # re-exported for backward compatibility
 
@@ -240,8 +240,8 @@ def extract_partition_from_raw(
             raw_path.rename(output_path)
             return output_path
 
-        start_sector, sector_count, partition = parsed  # type: ignore[misc]
-
+        import typing
+        start_sector, sector_count, partition = typing.cast(tuple[int, typing.Optional[int], int], parsed)
         logger.info("Extracting partition %d (start=%d)...", partition, start_sector)
 
         skip_bytes = start_sector * 512
