@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from fcm.core.vm_manager import VMManager
 from fcm.models.vm import VMInstance, VMState
 
 
@@ -56,3 +57,8 @@ def stopped_vm() -> VMInstance:
         status=VMState.STOPPED,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
     )
+
+
+@pytest.fixture
+def vm_manager(tmp_path: Path) -> VMManager:
+    return VMManager(tmp_path)

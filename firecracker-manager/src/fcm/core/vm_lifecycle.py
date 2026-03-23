@@ -23,7 +23,7 @@ from fcm.core.network_manager import (
     release_network_ip,
 )
 from fcm.core.ssh import resolve_ssh_key
-from fcm.core.vm_manager import VMManager
+from fcm.core.vm_manager import VMManager, get_vm_manager
 from fcm.exceptions import NetworkError, FCMError, VMNotFoundError
 from fcm.models.vm import VMConfig, VMInstance, VMState
 from fcm.utils.fs import get_kernels_dir, get_images_dir, get_vm_dir
@@ -90,6 +90,7 @@ def create_vm(
     enable_api_socket: bool = False,
     enable_pci: bool = False,
     firecracker_bin: str = "firecracker",
+    vm_manager: VMManager | None = None,
 ) -> VMInstance:
     import re
     import ipaddress as _ipaddress
@@ -258,7 +259,7 @@ def create_vm(
 
     pid_file.write_text(str(proc.pid))
 
-    manager = VMManager()
+    manager = vm_manager or get_vm_manager()
     vm_instance = VMInstance(
         name=name,
         pid=proc.pid,
@@ -273,8 +274,8 @@ def create_vm(
     return vm_instance
 
 
-def remove_vm(name: str) -> None:
-    manager = VMManager()
+def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
+    manager = vm_manager or get_vm_manager()
     vm = manager.get(name)
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")

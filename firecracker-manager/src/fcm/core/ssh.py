@@ -25,9 +25,7 @@ def _validate_ssh_username(user: str) -> None:
         FCMError: If the username contains invalid characters.
     """
     if not _VALID_SSH_USERNAME.match(user):
-        raise FCMError(
-            f"Invalid SSH username '{user}': must match ^[a-z_][a-z0-9_-]*$"
-        )
+        raise FCMError(f"Invalid SSH username '{user}': must match ^[a-z_][a-z0-9_-]*$")
 
 
 def find_ssh_keys(keys_dir: Path | None = None) -> list[Path]:
@@ -122,6 +120,7 @@ def connect_to_vm(
     key_path: Path | None = None,
     command: str | None = None,
     exec_mode: bool = True,
+    vm_manager: VMManager | None = None,
 ) -> int:
     """Connect to VM via SSH.
 
@@ -148,7 +147,7 @@ def connect_to_vm(
         ip = vm_name_or_ip
     else:
         # Look up VM in state via VMManager
-        manager = VMManager()
+        manager = vm_manager if vm_manager is not None else VMManager()
         vm = manager.get(vm_name_or_ip)
         if not vm:
             raise VMNotFoundError(f"VM '{vm_name_or_ip}' not found")
@@ -207,4 +206,6 @@ def resolve_ssh_key(ssh_key: str | None) -> str | None:
         names = ", ".join(k.name for k in available)
         raise FCMKeyError(f"SSH key '{ssh_key}' not found.\\nAvailable keys: {names}")
     else:
-        raise FCMKeyError(f"SSH key '{ssh_key}' not found.\\nNo keys in cache. Add one with: fcm key add <name> <path>")
+        raise FCMKeyError(
+            f"SSH key '{ssh_key}' not found.\\nNo keys in cache. Add one with: fcm key add <name> <path>"
+        )

@@ -2,6 +2,7 @@
 
 import fcntl
 import json
+import logging
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any, cast
 from fcm.models.vm import VMInstance, VMState
 from fcm.utils.fs import get_vms_dir
 
+logger = logging.getLogger(__name__)
+
 
 class VMManager:
     """Manages VM state persistence."""
@@ -18,6 +21,7 @@ class VMManager:
     def __init__(self, run_dir: Path | None = None) -> None:
         self.run_dir = Path(run_dir) if run_dir is not None else get_vms_dir()
         self.state_file = self.run_dir / "state.json"
+        self._cache: dict[str, Any] | None = None
         self._ensure_run_dir()
 
     def _ensure_run_dir(self) -> None:
@@ -41,17 +45,28 @@ class VMManager:
             f.close()
 
     def _load_state(self) -> dict[str, Any]:
-        """Load state from JSON file."""
+        """Load state from JSON file, using in-memory cache when available."""
+        if self._cache is not None:
+            return self._cache
         if not self.state_file.exists():
             return {"vms": {}}
-        with open(self.state_file, "r") as f:
-            return cast(dict[str, Any], json.load(f))
+        try:
+            with open(self.state_file, "r") as f:
+                state = cast(dict[str, Any], json.load(f))
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("Corrupt state file at %s — resetting to empty", self.state_file)
+            return {"vms": {}}
+        if "vms" not in state:
+            return {"vms": {}}
+        self._cache = state
+        return state
 
     def _save_state(self, state: dict[str, Any]) -> None:
-        """Save state to JSON file."""
+        """Save state to JSON file and update cache."""
         with open(self.state_file, "w") as f:
             json.dump(state, f, indent=2, default=str)
         self.state_file.chmod(0o600)
+        self._cache = state
 
     def register(self, vm: VMInstance) -> None:
         """Register a new VM in state."""
@@ -127,3 +142,7 @@ class VMManager:
             if name in state["vms"]:
                 del state["vms"][name]
                 self._save_state(state)
+
+
+def get_vm_manager(run_dir: Path | None = None) -> VMManager:
+    return VMManager(run_dir=run_dir)

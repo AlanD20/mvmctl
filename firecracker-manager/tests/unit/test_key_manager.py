@@ -76,8 +76,9 @@ def test_get_key_found(keys_dir):
     assert result.name == "mykey"
 
 
-def test_get_key_not_found(keys_dir):
-    assert get_key("nonexistent") is None
+@pytest.mark.parametrize("key_name", ["nonexistent", "ghost-key", "missing-123"])
+def test_get_key_not_found(keys_dir, key_name: str):
+    assert get_key(key_name) is None
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +225,10 @@ def test_remove_key_success(keys_dir, tmp_path):
     assert "rmkey" not in registry
 
 
-def test_remove_key_not_found(keys_dir):
+@pytest.mark.parametrize("key_name", ["nonexistent", "ghost-key", "never-added"])
+def test_remove_key_not_found(keys_dir, key_name: str):
     with pytest.raises(FCMKeyError, match="not found"):
-        remove_key("nonexistent")
+        remove_key(key_name)
 
 
 # ---------------------------------------------------------------------------

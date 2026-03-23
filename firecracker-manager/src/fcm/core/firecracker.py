@@ -31,6 +31,17 @@ class FirecrackerClient:
         self.socket_path = Path(socket_path)
         self.conn: UnixSocketHTTPConnection | None = None
 
+    def __enter__(self) -> "FirecrackerClient":
+        """Connect to Firecracker socket and return client."""
+        self._connect()
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object
+    ) -> None:
+        """Close the socket connection."""
+        self.close()
+
     def _connect(self) -> None:
         """Connect to Firecracker socket.
 

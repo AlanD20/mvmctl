@@ -17,7 +17,7 @@ from fcm.core.image import (
     fetch_image,
     load_images_config,
 )
-from fcm.exceptions import ChecksumMismatchError, ConfigError, ImageError
+from fcm.exceptions import ChecksumMismatchError, ConfigError, ImageError, FCMError
 from fcm.models.image import ImageSpec
 
 
@@ -97,7 +97,7 @@ def _mock_urlopen_response(data: bytes, content_length: str | None = None):
     return mock_response
 
 
-@patch("fcm.core.image.urlopen")
+@patch("fcm.utils.http.urlopen")
 def test_download_file_warns_no_checksum(mock_urlopen: MagicMock, tmp_path: Path):
     """S-H10: download_file should log a warning when expected_sha256 is None."""
     import logging
@@ -106,7 +106,7 @@ def test_download_file_warns_no_checksum(mock_urlopen: MagicMock, tmp_path: Path
     mock_urlopen.return_value = _mock_urlopen_response(data)
 
     dest = tmp_path / "warn_output.bin"
-    with patch("fcm.core.image.logger") as mock_logger:
+    with patch("fcm.utils.http.logger") as mock_logger:
         download_file(
             "https://example.com/file.bin", dest, expected_sha256=None, show_progress=False
         )
@@ -114,7 +114,7 @@ def test_download_file_warns_no_checksum(mock_urlopen: MagicMock, tmp_path: Path
     assert "No checksum" in mock_logger.warning.call_args[0][0]
 
 
-@patch("fcm.core.image.urlopen")
+@patch("fcm.utils.http.urlopen")
 def test_download_file_success(mock_urlopen: MagicMock, tmp_path: Path):
     data = b"hello world binary content"
     mock_urlopen.return_value = _mock_urlopen_response(data)
@@ -127,7 +127,7 @@ def test_download_file_success(mock_urlopen: MagicMock, tmp_path: Path):
     assert dest.read_bytes() == data
 
 
-@patch("fcm.core.image.urlopen")
+@patch("fcm.utils.http.urlopen")
 def test_download_file_checksum_match(mock_urlopen: MagicMock, tmp_path: Path):
     data = b"checksum test data"
     expected_sha = hashlib.sha256(data).hexdigest()
@@ -146,7 +146,7 @@ def test_download_file_checksum_match(mock_urlopen: MagicMock, tmp_path: Path):
     assert dest.read_bytes() == data
 
 
-@patch("fcm.core.image.urlopen")
+@patch("fcm.utils.http.urlopen")
 def test_download_file_checksum_mismatch(mock_urlopen: MagicMock, tmp_path: Path):
     data = b"checksum test data"
     mock_urlopen.return_value = _mock_urlopen_response(data)
@@ -163,12 +163,12 @@ def test_download_file_checksum_mismatch(mock_urlopen: MagicMock, tmp_path: Path
     assert not dest.exists()  # file deleted on mismatch
 
 
-@patch("fcm.core.image.urlopen")
+@patch("fcm.utils.http.urlopen")
 def test_download_file_url_error(mock_urlopen: MagicMock, tmp_path: Path):
     mock_urlopen.side_effect = URLError("Connection refused")
 
     dest = tmp_path / "output.bin"
-    with pytest.raises(ImageError):
+    with pytest.raises(FCMError):
         download_file("https://example.com/file.bin", dest, show_progress=False)
 
 
@@ -329,7 +329,7 @@ def test_extract_partition_from_raw_success_sfdisk(mock_run: MagicMock, tmp_path
 
     result = extract_partition_from_raw(raw_path, output_path)
 
-    assert result is not None
+    assert isinstance(result, Path)
     assert result.suffix == ".img"
 
 
@@ -361,7 +361,9 @@ def test_extract_partition_from_raw_success_fdisk(mock_run: MagicMock, tmp_path:
 
     result = extract_partition_from_raw(raw_path, output_path)
 
-    assert result is not None
+    assert isinstance(result, Path)
+    assert result == output_path
+    assert result.suffix == ".img"
 
 
 @patch("fcm.core.image.subprocess.run")
@@ -455,7 +457,7 @@ def test_extract_partition_from_raw_sfdisk_multi_partition(mock_run: MagicMock, 
 
     result = extract_partition_from_raw(raw_path, output_path)
 
-    assert result is not None
+    assert isinstance(result, Path)
     assert result.suffix == ".btrfs"
 
 
@@ -497,7 +499,7 @@ def test_extract_partition_from_raw_sfdisk_explicit_partition(mock_run: MagicMoc
 
     result = extract_partition_from_raw(raw_path, output_path, partition=1)
 
-    assert result is not None
+    assert isinstance(result, Path)
     assert result.suffix == ".xfs"
 
 
@@ -557,7 +559,9 @@ def test_extract_partition_from_raw_fdisk_multi_partition(mock_run: MagicMock, t
 
     result = extract_partition_from_raw(raw_path, output_path)
 
-    assert result is not None
+    assert isinstance(result, Path)
+    assert result == output_path
+    assert result.suffix == ".img"
 
 
 @patch("fcm.core.image.subprocess.run")
@@ -614,7 +618,7 @@ def test_extract_partition_from_raw_blkid_not_found(mock_run: MagicMock, tmp_pat
 
     result = extract_partition_from_raw(raw_path, output_path)
 
-    assert result is not None
+    assert isinstance(result, Path)
     assert result.suffix == ".img"
 
 
@@ -647,7 +651,9 @@ def test_extract_partition_from_raw_sfdisk_json_error(mock_run: MagicMock, tmp_p
 
     result = extract_partition_from_raw(raw_path, output_path)
 
-    assert result is not None
+    assert isinstance(result, Path)
+    assert result == output_path
+    assert result.suffix == ".img"
 
 
 @patch("fcm.core.image.subprocess.run")
@@ -680,7 +686,7 @@ def test_extract_partition_from_raw_unknown_fs_type(mock_run: MagicMock, tmp_pat
 
     result = extract_partition_from_raw(raw_path, output_path)
 
-    assert result is not None
+    assert isinstance(result, Path)
     assert result.suffix == ".img"
 
 

@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from fcm.api.vms import (
@@ -21,11 +20,9 @@ from fcm.api.vms import (
 from fcm.constants import DEFAULT_NETWORK_NAME
 from fcm.exceptions import FCMError
 from fcm.models.vm import VMState
-from fcm.utils.console import print_error, print_info, print_success
+from fcm.utils.console import console, print_error, print_info, print_success
 
 app = typer.Typer(help="VM lifecycle management", no_args_is_help=True)
-
-console = Console()
 
 
 @app.command(name="help", hidden=True)

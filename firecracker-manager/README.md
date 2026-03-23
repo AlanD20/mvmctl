@@ -724,6 +724,46 @@ fcm config dump-vm --name myvm
 
 ---
 
+### `fcm configure` — Guided Setup Wizard
+
+First-time setup wizard that walks through all prerequisites in one command. Each step checks whether the component is already present and skips it if so.
+
+**Flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--non-interactive` | Use defaults and skip all prompts | false |
+| `--skip-host` | Skip the host init step (Step 1) | false |
+
+**Steps:**
+
+| Step | What It Does |
+|------|--------------|
+| [1/6] Privilege setup | Runs `sudo fcm host init` (group, sudoers, KVM) — skippable with `--skip-host` |
+| [2/6] Firecracker binary | Downloads the latest Firecracker release if none is cached |
+| [3/6] Kernel | Builds the default minimal kernel (v6.1.102) if none is cached |
+| [4/6] Image | Downloads a root filesystem image (interactive menu or first available) |
+| [5/6] SSH key | Generates an ED25519 keypair or imports an existing public key |
+| [6/6] Summary | Prints a status table showing which components are ready vs missing |
+
+**Examples:**
+
+```bash
+# Interactive wizard — prompts at each step
+fcm configure
+
+# Fully automated — downloads defaults, no prompts
+fcm configure --non-interactive
+
+# Skip host init (useful when re-running after group membership is active)
+fcm configure --skip-host
+
+# Fully automated, skip host init
+fcm configure --non-interactive --skip-host
+```
+
+---
+
 ## Configuration Reference
 
 ### Config File Location

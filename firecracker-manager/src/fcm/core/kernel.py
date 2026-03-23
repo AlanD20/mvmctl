@@ -1,16 +1,16 @@
 """Kernel download and build utilities."""
 
-import hashlib
 import logging
 import os
 import subprocess
 import tarfile
 from pathlib import Path
+
+from fcm.exceptions import KernelError, ChecksumMismatchError, FCMError
+from fcm.utils.http import download_file
+from fcm.constants import HTTP_USER_AGENT
 from urllib.request import urlopen, Request
 from urllib.error import URLError
-
-from fcm.constants import HTTP_USER_AGENT
-from fcm.exceptions import KernelError, ChecksumMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -31,44 +31,12 @@ def download_kernel_source(
         KernelError: If download fails
         ChecksumMismatchError: If checksum verification fails
     """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
+    logger.info("Downloading kernel from %s", url)
     try:
-        logger.info("Downloading kernel from %s", url)
-        req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
-
-        sha256_hash = hashlib.sha256() if expected_sha256 else None
-
-        with urlopen(req, timeout=600) as response:
-            total_size = response.headers.get("Content-Length")
-            total_size = int(total_size) if total_size else None
-            downloaded = 0
-
-            with open(dest, "wb") as f:
-                while True:
-                    chunk = response.read(8192)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-
-                    if sha256_hash:
-                        sha256_hash.update(chunk)
-
-                    if total_size:
-                        percent = (downloaded / total_size) * 100
-                        logger.debug("Download progress: %.1f%%", percent)
-
-        if expected_sha256 and sha256_hash:
-            actual = sha256_hash.hexdigest()
-            if actual.lower() != expected_sha256.lower():
-                dest.unlink()
-                raise ChecksumMismatchError(
-                    f"Checksum mismatch! Expected {expected_sha256}, got {actual}"
-                )
-            logger.info("Checksum verified")
-
-    except (URLError, IOError) as e:
+        download_file(url, dest, expected_sha256, timeout=600)
+    except ChecksumMismatchError:
+        raise
+    except FCMError as e:
         raise KernelError(f"Download failed: {e}") from e
 
 

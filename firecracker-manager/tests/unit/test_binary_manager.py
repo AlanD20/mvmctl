@@ -244,7 +244,8 @@ def test_fetch_binary_downloads_and_extracts(tmp_path: Path, mocker: MockerFixtu
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, sha_resp])
+    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("fcm.core.binary_manager.urlopen", return_value=sha_resp)
     result = fetch_binary("1.5.0", bin_dir=tmp_path)
 
     assert result.version == "1.5.0"
@@ -257,7 +258,7 @@ def test_fetch_binary_downloads_and_extracts(tmp_path: Path, mocker: MockerFixtu
 
 
 def test_fetch_binary_download_failure_cleans_up(tmp_path: Path, mocker: MockerFixture):
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=URLError("network error"))
+    mocker.patch("fcm.utils.http.urlopen", side_effect=URLError("network error"))
     with pytest.raises(BinaryError, match="Failed to download"):
         fetch_binary("1.5.0", bin_dir=tmp_path)
     # No partial tgz left behind
@@ -285,7 +286,8 @@ def test_fetch_binary_missing_binaries_in_archive(tmp_path: Path, mocker: Mocker
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, sha_resp])
+    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("fcm.core.binary_manager.urlopen", return_value=sha_resp)
     with pytest.raises(BinaryError, match="missing expected binaries"):
         fetch_binary("1.5.0", bin_dir=tmp_path)
 
@@ -304,7 +306,8 @@ def test_fetch_binary_corrupt_archive(tmp_path: Path, mocker: MockerFixture):
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, sha_resp])
+    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("fcm.core.binary_manager.urlopen", return_value=sha_resp)
     with pytest.raises(BinaryError):
         fetch_binary("1.5.0", bin_dir=tmp_path)
     # Partial files cleaned up
@@ -511,7 +514,8 @@ def test_fetch_binary_sha256_mismatch(tmp_path: Path, mocker: MockerFixture):
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, sha_resp])
+    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("fcm.core.binary_manager.urlopen", return_value=sha_resp)
     with pytest.raises(BinaryError, match="SHA-256 mismatch"):
         fetch_binary("1.5.0", bin_dir=tmp_path)
 
@@ -524,9 +528,8 @@ def test_fetch_binary_sha256_sidecar_unavailable(tmp_path: Path, mocker: MockerF
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch(
-        "fcm.core.binary_manager.urlopen", side_effect=[mock_resp, URLError("404")]
-    )
+    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=URLError("404"))
     result = fetch_binary("1.6.0", bin_dir=tmp_path)
 
     assert result.version == "1.6.0"

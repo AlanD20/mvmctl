@@ -3,7 +3,6 @@
 import json
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from fcm.core.key_manager import (
@@ -14,11 +13,10 @@ from fcm.core.key_manager import (
     remove_key,
 )
 from fcm.exceptions import FCMKeyError
-from fcm.utils.console import print_error, print_info, print_success
+from fcm.utils.console import console, print_error, print_info, print_success
 from fcm.utils.validation import validate_entity_name
 
 app = typer.Typer(help="SSH key management", no_args_is_help=True)
-console = Console()
 
 
 @app.command(name="help", hidden=True)

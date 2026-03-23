@@ -44,8 +44,8 @@ class MultiVMNetworkConfig:
 
 
 @dataclass
-class NetworkConfig:
-    """Network configuration."""
+class NetworkTopologyConfig:
+    """Network topology configuration (wraps multi-VM network settings)."""
 
     multi_vm: MultiVMNetworkConfig = field(default_factory=MultiVMNetworkConfig)
 
@@ -63,7 +63,7 @@ class FCMConfig:
 
     firecracker: FirecrackerConfig = field(default_factory=FirecrackerConfig)
     vm_defaults: VMDefaultsConfig = field(default_factory=VMDefaultsConfig)
-    network: NetworkConfig = field(default_factory=NetworkConfig)
+    network: NetworkTopologyConfig = field(default_factory=NetworkTopologyConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
 
 
@@ -103,7 +103,7 @@ def load_config(config_dir: Path) -> FCMConfig:
     return FCMConfig(
         firecracker=FirecrackerConfig(**firecracker_data),
         vm_defaults=VMDefaultsConfig(**vm_defaults_data),
-        network=NetworkConfig(
+        network=NetworkTopologyConfig(
             multi_vm=MultiVMNetworkConfig(**network_data.get("multi_vm", {})),
         ),
         paths=PathsConfig(**paths_data_filtered),

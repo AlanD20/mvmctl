@@ -14,8 +14,9 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from fcm.constants import HTTP_USER_AGENT
-from fcm.exceptions import AssetNotFoundError, BinaryError
+from fcm.exceptions import AssetNotFoundError, BinaryError, FCMError
 from fcm.utils.fs import get_bin_dir, get_cache_dir
+from fcm.utils.http import download_file
 
 logger = logging.getLogger(__name__)
 
@@ -144,23 +145,18 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
         )
 
     tgz_url = f"{GITHUB_DOWNLOAD_URL}/v{version}/firecracker-v{version}-x86_64.tgz"
-    req = Request(tgz_url, headers={"User-Agent": HTTP_USER_AGENT})
 
     tgz_path = d / f"firecracker-v{version}-x86_64.tgz"
     try:
-        logger.info("Downloading %s", tgz_url)
-        sha256_hash = hashlib.sha256()
-        with urlopen(req, timeout=300) as resp, open(tgz_path, "wb") as f:
-            while True:
-                chunk = resp.read(8192)
-                if not chunk:
-                    break
-                f.write(chunk)
-                sha256_hash.update(chunk)
-    except (URLError, OSError) as exc:
+        download_file(tgz_url, tgz_path, expected_sha256=None, timeout=300)
+    except FCMError as exc:
         tgz_path.unlink(missing_ok=True)
         raise BinaryError(f"Failed to download Firecracker v{version}: {exc}") from exc
 
+    sha256_hash = hashlib.sha256()
+    with open(tgz_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256_hash.update(chunk)
     _verify_sha256(version, tgz_path, sha256_hash.hexdigest())
 
     try:

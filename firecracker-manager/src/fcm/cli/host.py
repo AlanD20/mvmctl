@@ -131,11 +131,11 @@ def clean_cmd(
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
 ) -> None:
     """Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group."""
-    from fcm.core.vm_manager import VMManager
+    from fcm.core.vm_manager import get_vm_manager
     from fcm.models.vm import VMState
 
     # Refuse if any VMs are running
-    manager = VMManager()
+    manager = get_vm_manager()
     running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
     if running:
         names = ", ".join(v.name for v in running)
@@ -169,11 +169,11 @@ def reset_cmd(
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
 ) -> None:
     """Full rollback: remove networking, revert sysctl, remove sudoers and group."""
-    from fcm.core.vm_manager import VMManager
+    from fcm.core.vm_manager import get_vm_manager
     from fcm.models.vm import VMState
 
     # Refuse if any VMs are running
-    manager = VMManager()
+    manager = get_vm_manager()
     running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
     if running:
         names = ", ".join(v.name for v in running)
@@ -213,10 +213,10 @@ def prune(
     """[Deprecated] Use 'fcm host clean' instead."""
     print_warning("'host prune' is deprecated. Use 'host clean' instead.")
 
-    from fcm.core.vm_manager import VMManager
+    from fcm.core.vm_manager import get_vm_manager
     from fcm.models.vm import VMState
 
-    manager = VMManager()
+    manager = get_vm_manager()
     running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
     if running:
         names = ", ".join(v.name for v in running)

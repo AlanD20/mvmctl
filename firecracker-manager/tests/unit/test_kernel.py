@@ -28,7 +28,7 @@ def test_download_kernel_source_success(tmp_path: Path):
     mock_response.__exit__ = MagicMock(return_value=False)
 
     dest = tmp_path / "linux.tar.xz"
-    with patch("fcm.core.kernel.urlopen", return_value=mock_response):
+    with patch("fcm.utils.http.urlopen", return_value=mock_response):
         download_kernel_source("https://example.com/kernel.tar.xz", dest)
 
     assert dest.exists()
@@ -48,7 +48,7 @@ def test_download_kernel_source_checksum_match(tmp_path: Path):
     mock_response.__exit__ = MagicMock(return_value=False)
 
     dest = tmp_path / "linux.tar.xz"
-    with patch("fcm.core.kernel.urlopen", return_value=mock_response):
+    with patch("fcm.utils.http.urlopen", return_value=mock_response):
         download_kernel_source("https://example.com/k.tar.xz", dest, expected)
 
     assert dest.exists()
@@ -64,7 +64,7 @@ def test_download_kernel_source_checksum_mismatch(tmp_path: Path):
     mock_response.__exit__ = MagicMock(return_value=False)
 
     dest = tmp_path / "linux.tar.xz"
-    with patch("fcm.core.kernel.urlopen", return_value=mock_response):
+    with patch("fcm.utils.http.urlopen", return_value=mock_response):
         with pytest.raises(ChecksumMismatchError):
             download_kernel_source("https://example.com/k.tar.xz", dest, "deadbeef")
 
@@ -73,7 +73,7 @@ def test_download_kernel_source_checksum_mismatch(tmp_path: Path):
 
 def test_download_kernel_source_url_error(tmp_path: Path):
     dest = tmp_path / "linux.tar.xz"
-    with patch("fcm.core.kernel.urlopen", side_effect=URLError("no network")):
+    with patch("fcm.utils.http.urlopen", side_effect=URLError("no network")):
         with pytest.raises(KernelError):
             download_kernel_source("https://example.com/k.tar.xz", dest)
 

@@ -313,9 +313,9 @@ def _step_summary() -> None:
     all_ok = True
     for label, ok in checks:
         status = "[green]ready[/green]" if ok else "[yellow]missing[/yellow]"
-        from rich.console import Console
+        from fcm.utils.console import console
 
-        Console().print(f"  {label}: {status}")
+        console.print(f"  {label}: {status}")
         if not ok:
             all_ok = False
 

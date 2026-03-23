@@ -38,7 +38,11 @@ def _load_registry() -> dict[str, dict[str, Any]]:
     path = _registry_path()
     if not path.exists():
         return {}
-    data: dict[str, dict[str, Any]] = json.loads(path.read_text())
+    try:
+        data: dict[str, dict[str, Any]] = json.loads(path.read_text())
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("Corrupt key registry at %s — resetting to empty", path)
+        return {}
     return data
 
 

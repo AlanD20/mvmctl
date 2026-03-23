@@ -1,12 +1,13 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 from fcm.core.config import (
     FCMConfig,
     FirecrackerConfig,
     MultiVMNetworkConfig,
-    NetworkConfig,
+    NetworkTopologyConfig,
     VMDefaultsConfig,
     dump_config,
     load_config,
@@ -85,8 +86,9 @@ def test_validate_config_valid() -> None:
     assert other_errors == []
 
 
-def test_validate_config_invalid_vcpu() -> None:
-    config = FCMConfig(vm_defaults=VMDefaultsConfig(vcpu_count=0))
+@pytest.mark.parametrize("vcpu_count", [0, -1, -100])
+def test_validate_config_invalid_vcpu(vcpu_count: int) -> None:
+    config = FCMConfig(vm_defaults=VMDefaultsConfig(vcpu_count=vcpu_count))
     errors = validate_config(config)
 
     vcpu_errors = [e for e in errors if "vcpu_count" in e]
@@ -94,8 +96,9 @@ def test_validate_config_invalid_vcpu() -> None:
     assert "Must be at least 1" in vcpu_errors[0]
 
 
-def test_validate_config_invalid_mem() -> None:
-    config = FCMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=32))
+@pytest.mark.parametrize("mem_size_mib", [32, 63, 0])
+def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
+    config = FCMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=mem_size_mib))
     errors = validate_config(config)
 
     mem_errors = [e for e in errors if "mem_size_mib" in e]
@@ -105,7 +108,7 @@ def test_validate_config_invalid_mem() -> None:
 
 def test_validate_config_invalid_cidr() -> None:
     config = FCMConfig(
-        network=NetworkConfig(
+        network=NetworkTopologyConfig(
             multi_vm=MultiVMNetworkConfig(bridge_ip="not-a-cidr"),
         ),
     )

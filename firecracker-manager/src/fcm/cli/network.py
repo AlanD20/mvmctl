@@ -4,7 +4,6 @@ import json
 from typing import cast
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from fcm.constants import DEFAULT_NETWORK_NAME
@@ -17,11 +16,10 @@ from fcm.core.network_manager import (
     remove_network,
 )
 from fcm.exceptions import NetworkError
-from fcm.utils.console import print_error, print_info, print_success
+from fcm.utils.console import console, print_error, print_info, print_success
 from fcm.utils.validation import validate_entity_name
 
 app = typer.Typer(help="Network management", no_args_is_help=True)
-console = Console()
 
 
 @app.command(name="help", hidden=True)
