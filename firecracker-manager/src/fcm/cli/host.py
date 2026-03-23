@@ -1,5 +1,6 @@
 """Host configuration CLI commands."""
 
+from fcm.exceptions import FCMError
 import typer
 from rich.table import Table
 
@@ -54,7 +55,7 @@ def init_cmd() -> None:
     try:
         ensure_default_network()
         print_success("Default network ready.")
-    except Exception as e:
+    except FCMError as e:
         print_warning(f"Default network setup skipped: {e}")
 
 
@@ -153,7 +154,7 @@ def clean_cmd(
     cache_dir = get_cache_dir()
     try:
         summary = clean_host(cache_dir)
-    except Exception as e:
+    except FCMError as e:
         print_error(f"Clean failed: {e}")
         raise typer.Exit(code=1)
 
@@ -192,7 +193,7 @@ def reset_cmd(
     cache_dir = get_cache_dir()
     try:
         summary = reset_host(cache_dir)
-    except Exception as e:
+    except FCMError as e:
         print_error(f"Reset failed: {e}")
         raise typer.Exit(code=1)
 
@@ -235,7 +236,7 @@ def prune(
     cache_dir = get_cache_dir()
     try:
         summary = prune_host(cache_dir)
-    except Exception as e:
+    except FCMError as e:
         print_error(f"Prune failed: {e}")
         raise typer.Exit(code=1)
 

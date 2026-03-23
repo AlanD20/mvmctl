@@ -440,14 +440,14 @@ def prune_host(cache_dir: Path) -> list[str]:
     # Tear down all named networks (bridges, TAPs, iptables rules)
     try:
         networks = list_networks()
-    except Exception:
+    except subprocess.CalledProcessError:
         networks = []
 
     for net in networks:
         try:
             remove_network(net.name)
             summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
-        except Exception as e:
+        except subprocess.CalledProcessError as e:
             summary.append(f"Warning: failed to remove network '{net.name}': {e}")
 
     # Revert sysctl changes using saved snapshot
@@ -561,13 +561,13 @@ def clean_host(cache_dir: Path) -> list[str]:
     summary: list[str] = []
     try:
         networks = list_networks()
-    except Exception:
+    except subprocess.CalledProcessError:
         networks = []
     for net in networks:
         try:
             remove_network(net.name)
             summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
-        except Exception as e:
+        except subprocess.CalledProcessError as e:
             summary.append(f"Warning: failed to remove network '{net.name}': {e}")
     return summary
 

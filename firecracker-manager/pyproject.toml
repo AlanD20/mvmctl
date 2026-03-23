@@ -47,6 +47,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "--cov=src/fcm --cov-branch --cov-report=term-missing"
 
 [dependency-groups]
 dev = [

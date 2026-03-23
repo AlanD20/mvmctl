@@ -1,7 +1,6 @@
 """VM state management."""
 
 import json
-import os
 from pathlib import Path
 from datetime import datetime
 from typing import Any, cast

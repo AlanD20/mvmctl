@@ -1,6 +1,7 @@
+from __future__ import annotations
+import subprocess
 """Tests for Phase 5 features: privilege model, clean/reset, help command."""
 
-from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
@@ -263,7 +264,7 @@ class TestCleanHost:
         assert len(summary) == 1
         assert "Removed network 'default'" in summary[0]
 
-    @patch("fcm.core.network_manager.remove_network", side_effect=Exception("fail"))
+    @patch("fcm.core.network_manager.remove_network", side_effect=subprocess.CalledProcessError(1, "fail"))
     @patch("fcm.core.network_manager.list_networks")
     def test_clean_host_handles_network_failure(self, mock_list, mock_remove):
         net = MagicMock()
@@ -275,7 +276,7 @@ class TestCleanHost:
         summary = clean_host(MagicMock())
         assert "Warning" in summary[0]
 
-    @patch("fcm.core.network_manager.list_networks", side_effect=Exception("fail"))
+    @patch("fcm.core.network_manager.list_networks", side_effect=subprocess.CalledProcessError(1, "fail"))
     def test_clean_host_handles_list_failure(self, mock_list):
         from fcm.core.host import clean_host
 

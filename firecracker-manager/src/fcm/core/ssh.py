@@ -154,3 +154,38 @@ def connect_to_vm(
         return 0
     else:
         return run_ssh(ip, user, key_path, command)
+
+
+def resolve_ssh_key(ssh_key: str | None) -> str | None:
+    """Resolve an SSH key from name (key cache) or file path.
+
+    Returns the public key content string, or None.
+    When ssh_key is explicitly named but not found, raises FCMKeyError.
+    """
+    if ssh_key is None:
+        # Fall back to any key in cache
+        keys_dir = get_cache_dir() / "keys"
+        if keys_dir.exists():
+            for pub in keys_dir.glob("*.pub"):
+                return pub.read_text().strip()
+        return None
+
+    # Check key cache first
+    keys_dir = get_cache_dir() / "keys"
+    cache_key = keys_dir / f"{ssh_key}.pub"
+    if cache_key.exists():
+        return cache_key.read_text().strip()
+
+    # Treat as file path
+    key_path = Path(ssh_key)
+    if key_path.exists():
+        return key_path.read_text().strip()
+
+    from fcm.core.key_manager import list_keys
+
+    available = list_keys()
+    if available:
+        names = ", ".join(k.name for k in available)
+        raise FCMKeyError(f"SSH key '{ssh_key}' not found.\\nAvailable keys: {names}")
+    else:
+        raise FCMKeyError(f"SSH key '{ssh_key}' not found.\\nNo keys in cache. Add one with: fcm key add <name> <path>")

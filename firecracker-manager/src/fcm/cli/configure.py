@@ -1,6 +1,8 @@
 """Guided onboarding wizard — collapses first-time setup into a single flow."""
 
 from __future__ import annotations
+from fcm.exceptions import FCMError
+
 
 
 import typer
@@ -66,7 +68,7 @@ def _step_host(skip: bool, non_interactive: bool) -> None:
 
             ensure_default_network()
             print_success("  Default network ready")
-        except Exception:
+        except FCMError:
             pass
         return
 
@@ -191,7 +193,7 @@ def _step_image(non_interactive: bool) -> None:
     config_path = get_assets_dir() / "images.yaml"
     try:
         images = load_images_config(config_path)
-    except Exception:
+    except FCMError:
         print_warning("  Could not load images config.")
         print_info("  Run 'fcm asset image fetch <id>' manually.")
         return

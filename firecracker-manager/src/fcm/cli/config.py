@@ -1,5 +1,6 @@
 """Configuration commands."""
 
+from fcm.exceptions import FCMError
 import json
 import typer
 from pathlib import Path
@@ -32,7 +33,7 @@ def show(
         config = load_config(config_dir)
         data = dump_config(config, section)
         typer.echo(json.dumps(data, indent=2))
-    except Exception as e:
+    except FCMError as e:
         print_error(f"Failed to load config: {e}")
         raise typer.Exit(code=1)
 
@@ -57,7 +58,7 @@ def validate(
             raise typer.Exit(code=1)
         else:
             print_success("Configuration is valid")
-    except Exception as e:
+    except FCMError as e:
         print_error(f"Validation error: {e}")
         raise typer.Exit(code=1)
 

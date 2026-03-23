@@ -8,6 +8,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from fcm.constants import DEFAULT_NETWORK_CIDR, BRIDGE_NAME
 
 from fcm.constants import device_prefix
 from fcm.core.network import (
@@ -24,7 +25,6 @@ from fcm.utils.fs import get_networks_dir, get_network_dir
 logger = logging.getLogger(__name__)
 
 DEFAULT_NETWORK_NAME = "default"
-DEFAULT_SUBNET = "10.20.0.0/24"
 
 
 @dataclass
@@ -176,6 +176,15 @@ def create_network(
 
     bridge = _bridge_name_for(name)
 
+    if name == DEFAULT_NETWORK_NAME:
+        return NetworkConfig(
+            name=name,
+            cidr=DEFAULT_NETWORK_CIDR,
+            gateway=_gateway_for_subnet(DEFAULT_NETWORK_CIDR),
+            bridge=BRIDGE_NAME,
+            nat_enabled=True,
+        )
+
     config = NetworkConfig(
         name=name,
         cidr=cidr,
@@ -293,7 +302,7 @@ def ensure_default_network() -> NetworkConfig:
     config = get_network(DEFAULT_NETWORK_NAME)
     if config is not None:
         return config
-    return create_network(DEFAULT_NETWORK_NAME, cidr=DEFAULT_SUBNET, nat=True)
+    return create_network(DEFAULT_NETWORK_NAME, cidr=DEFAULT_NETWORK_CIDR, nat=True)
 
 
 # ---------------------------------------------------------------------------

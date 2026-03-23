@@ -43,7 +43,7 @@ class FirecrackerClient:
 
         try:
             self.conn = UnixSocketHTTPConnection(self.socket_path)
-        except Exception as e:
+        except OSError as e:
             raise FirecrackerError(f"Failed to connect to socket: {e}") from e
 
     def _request(
@@ -78,7 +78,7 @@ class FirecrackerClient:
 
         except (SocketNotFoundError, FirecrackerError):
             raise
-        except Exception as e:
+        except OSError as e:
             raise FirecrackerError(f"API request failed: {e}") from e
 
     def close(self) -> None:

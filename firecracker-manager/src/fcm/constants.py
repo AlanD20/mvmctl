@@ -19,7 +19,7 @@ def _resolve_cli_name() -> str:
         for ep in eps:
             if ep.value == "fcm.main:app" or ep.value.endswith("main:app"):
                 return ep.name
-    except Exception:
+    except (IOError, ValueError):
         pass
     return "fcm"
 
