@@ -21,7 +21,7 @@ Install the package so the API is importable:
 pip install firecracker-manager
 
 # From source
-git clone <repo-url>
+git clone https://github.com/your-org/firecracker-manager
 cd firecracker-manager
 pip install -e .
 
@@ -46,6 +46,19 @@ from fcm.api import vms, network, assets, keys, host
 | `api/assets.py` | Asset management: kernels, images, Firecracker binaries |
 | `api/keys.py` | SSH key registry: add, create, remove, list, inspect |
 | `api/host.py` | Host initialisation, state inspection, prune, clean, reset, privileges |
+
+---
+
+## Utility Modules
+
+| Module | Responsibility |
+|---|---|
+| `utils/fs.py` | Filesystem helpers: VM directory paths, cache directory resolution |
+| `utils/console.py` | Rich console output helpers: tables, panels, status messages |
+| `utils/process.py` | Subprocess wrapper with logging and error handling |
+| `utils/http.py` | HTTP download helper with progress reporting and SHA256 verification |
+| `utils/audit.py` | Audit logging for privileged operations |
+| `utils/validation.py` | Input validation helpers (VM name, IP address, CIDR) |
 
 ---
 

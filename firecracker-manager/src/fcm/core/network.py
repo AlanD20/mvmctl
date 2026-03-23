@@ -64,7 +64,8 @@ def bridge_exists(bridge: str = BRIDGE_NAME) -> bool:
     """Return True if the bridge interface exists."""
     result = subprocess.run(
         ["ip", "link", "show", bridge],
-        capture_output=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         check=False,
     )
     return result.returncode == 0
@@ -234,7 +235,8 @@ def tap_exists(tap_name: str) -> bool:
     """Return True if the TAP device exists."""
     result = subprocess.run(
         ["ip", "link", "show", tap_name],
-        capture_output=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         check=False,
     )
     return result.returncode == 0

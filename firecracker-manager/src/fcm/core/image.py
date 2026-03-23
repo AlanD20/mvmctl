@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from fcm.exceptions import ImageError, ConfigError
@@ -328,6 +329,30 @@ def create_ext4_from_tar(
         raise ImageError(f"Required tool not found: {e}") from e
 
 
+def _handle_qcow2(download_path: Path, final_path: Path) -> Path:
+    raw_path = download_path.with_suffix(".raw")
+    convert_qcow2_to_raw(download_path, raw_path)
+    actual_path = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
+    raw_path.unlink(missing_ok=True)
+    return actual_path
+
+
+def _handle_tar_rootfs(download_path: Path, final_path: Path) -> Path:
+    create_ext4_from_tar(download_path, final_path)
+    return final_path
+
+
+def _handle_raw(download_path: Path, final_path: Path) -> Path:
+    return extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
+
+
+_FORMAT_HANDLERS: dict[str, Callable[[Path, Path], Path]] = {
+    "qcow2": _handle_qcow2,
+    "tar-rootfs": _handle_tar_rootfs,
+    "raw": _handle_raw,
+}
+
+
 def fetch_image(
     spec: ImageSpec,
     output_dir: Path,
@@ -360,24 +385,11 @@ def fetch_image(
     download_file(spec.source, download_path, spec.sha256)
 
     # Convert based on format
-    actual_path: Path | None = None
-
-    if spec.format == "qcow2":
-        raw_path = download_path.with_suffix(".raw")
-        convert_qcow2_to_raw(download_path, raw_path)
-        actual_path = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
-        raw_path.unlink(missing_ok=True)
-
-    elif spec.format == "tar-rootfs":
-        create_ext4_from_tar(download_path, final_path)
-        actual_path = final_path
-
-    elif spec.format == "raw":
-        actual_path = extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
-
-    else:
+    handler = _FORMAT_HANDLERS.get(spec.format)
+    if handler is None:
         download_path.unlink(missing_ok=True)
         raise ImageError(f"Unknown format: {spec.format}")
+    actual_path = handler(download_path, final_path)
 
     # Cleanup download
     download_path.unlink(missing_ok=True)

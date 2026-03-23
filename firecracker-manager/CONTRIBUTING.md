@@ -15,7 +15,7 @@ Thanks for wanting to contribute. This guide covers everything you need to get s
 ## Development Setup
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/your-org/firecracker-manager
 cd firecracker-manager
 
 # Install all dependencies including dev tools
@@ -190,7 +190,7 @@ To rename the project, update `pyproject.toml` and re-run the PyInstaller comman
 The project ships a self-contained single-file binary built with PyInstaller. The binary bundles all runtime dependencies and requires no Python installation on the target machine.
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/your-org/firecracker-manager
 cd firecracker-manager
 
 pip install -e ".[dev]" pyinstaller
