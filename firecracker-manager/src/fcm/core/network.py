@@ -2,7 +2,7 @@
 
 import ipaddress
 import logging
-import random
+import secrets
 import subprocess
 from pathlib import Path
 
@@ -475,8 +475,10 @@ def get_iptables_rules_for_bridge(bridge: str) -> list[str]:
 def generate_mac() -> str:
     """Generate a random MAC address with 02:FC: prefix.
 
+    Uses ``secrets`` for cryptographically strong randomness.
+
     Format: 02:FC:XX:XX:XX:XX where X is random hex.
     """
-    rand_bytes = [random.randint(0, 255) for _ in range(4)]
+    rand_bytes = secrets.token_bytes(4)
     suffix = ":".join(f"{b:02x}" for b in rand_bytes)
     return f"02:FC:{suffix}"

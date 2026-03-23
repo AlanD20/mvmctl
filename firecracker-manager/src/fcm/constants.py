@@ -1,6 +1,7 @@
 """Project identity constants derived from pyproject.toml metadata."""
 
 import importlib.metadata
+from typing import Final
 
 
 def _resolve_project_name() -> str:
@@ -22,11 +23,11 @@ def _resolve_cli_name() -> str:
     return "fcm"
 
 
-PROJECT_NAME: str = _resolve_project_name()
+PROJECT_NAME: Final[str] = _resolve_project_name()
 
-PROJECT_NAME_UPPER: str = PROJECT_NAME.replace("-", "_").upper()
+PROJECT_NAME_UPPER: Final[str] = PROJECT_NAME.replace("-", "_").upper()
 
-CLI_NAME: str = _resolve_cli_name()
+CLI_NAME: Final[str] = _resolve_cli_name()
 
 
 def env_var(suffix: str) -> str:
@@ -45,23 +46,23 @@ def config_filename() -> str:
     return f"{CLI_NAME}.yaml"
 
 
-BRIDGE_NAME: str = f"{device_prefix()}-br0"
+BRIDGE_NAME: Final[str] = f"{device_prefix()}-br0"
 
-TAP_PREFIX: str = f"{CLI_NAME}-tap"
+TAP_PREFIX: Final[str] = f"{CLI_NAME}-tap"
 
-PROJECT_GROUP: str = CLI_NAME  # "fcm"
-SUDOERS_DROP_IN_PATH: str = f"/etc/sudoers.d/{CLI_NAME}"
-DEFAULT_NETWORK_NAME: str = "default"
-DEFAULT_NETWORK_CIDR: str = "10.10.0.0/24"
-DEFAULT_NETWORK_GATEWAY: str = "10.10.0.1"
-BRIDGE_PREFIX: str = f"{CLI_NAME}-br"
-FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: int = 5
-FIRECRACKER_SIGTERM_WAIT_S: int = 1
-PRIVILEGED_BINARIES: list[str] = [
+PROJECT_GROUP: Final[str] = CLI_NAME  # "fcm"
+SUDOERS_DROP_IN_PATH: Final[str] = f"/etc/sudoers.d/{CLI_NAME}"
+DEFAULT_NETWORK_NAME: Final[str] = "default"
+DEFAULT_NETWORK_CIDR: Final[str] = "10.10.0.0/24"
+DEFAULT_NETWORK_GATEWAY: Final[str] = "10.10.0.1"
+BRIDGE_PREFIX: Final[str] = f"{CLI_NAME}-br"
+FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: Final[int] = 5
+FIRECRACKER_SIGTERM_WAIT_S: Final[int] = 1
+PRIVILEGED_BINARIES: Final[list[str]] = [
     "/usr/sbin/ip",
     "/usr/sbin/iptables",
     "/usr/sbin/iptables-restore",
     "/usr/sbin/iptables-save",
     "/usr/sbin/sysctl",
 ]
-HTTP_USER_AGENT: str = f"{CLI_NAME}/0.1.0"
+HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/0.1.0"

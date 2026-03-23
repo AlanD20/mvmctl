@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,23 @@ from fcm.core.vm_manager import VMManager
 from fcm.utils.fs import get_cache_dir
 
 logger = logging.getLogger(__name__)
+
+_VALID_SSH_USERNAME = re.compile(r"^[a-z_][a-z0-9_-]*$")
+
+
+def _validate_ssh_username(user: str) -> None:
+    """Validate that an SSH username matches POSIX conventions.
+
+    Args:
+        user: The username string to validate.
+
+    Raises:
+        FCMError: If the username contains invalid characters.
+    """
+    if not _VALID_SSH_USERNAME.match(user):
+        raise FCMError(
+            f"Invalid SSH username '{user}': must match ^[a-z_][a-z0-9_-]*$"
+        )
 
 
 def find_ssh_keys(keys_dir: Path | None = None) -> list[Path]:
@@ -55,6 +73,7 @@ def build_ssh_command(
     command: str | None = None,
 ) -> list[str]:
     """Build SSH command arguments."""
+    _validate_ssh_username(user)
     ssh_args = [
         "ssh",
         "-o",

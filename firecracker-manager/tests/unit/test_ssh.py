@@ -9,8 +9,9 @@ from fcm.core.ssh import (
     extract_ip_from_config,
     build_ssh_command,
     connect_to_vm,
+    _validate_ssh_username,
 )
-from fcm.exceptions import VMNotFoundError, FCMKeyError
+from fcm.exceptions import VMNotFoundError, FCMKeyError, FCMError
 from fcm.models.vm import VMInstance, VMState
 
 
@@ -190,3 +191,27 @@ def test_connect_to_vm_no_keys(mock_find_keys: MagicMock):
         connect_to_vm("10.20.0.5", exec_mode=False)
 
     mock_find_keys.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# SSH username validation (S-M7)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_ssh_username_valid():
+    """Valid POSIX usernames should not raise."""
+    for name in ("root", "ubuntu", "_svc", "user-1", "a_b_c"):
+        _validate_ssh_username(name)
+
+
+def test_validate_ssh_username_invalid():
+    """Invalid usernames should raise FCMError."""
+    for name in ("Root", "user name", "1start", "user@host", "$(whoami)", "a;b", ""):
+        with pytest.raises(FCMError, match="Invalid SSH username"):
+            _validate_ssh_username(name)
+
+
+def test_build_ssh_command_rejects_bad_username():
+    """build_ssh_command should reject invalid usernames."""
+    with pytest.raises(FCMError, match="Invalid SSH username"):
+        build_ssh_command("10.20.0.2", user="$(whoami)")
