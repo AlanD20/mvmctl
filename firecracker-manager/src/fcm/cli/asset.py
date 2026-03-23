@@ -6,16 +6,17 @@ import shutil
 import typer
 from pathlib import Path
 
-from fcm.core.binary_manager import (
+from fcm.api.assets import (
     BinaryVersion,
     fetch_binary,
     list_local_versions,
     list_remote_versions,
     remove_version,
     set_active_version,
+    fetch_image,
+    load_images_config,
+    build_kernel_pipeline,
 )
-from fcm.core.image import fetch_image, load_images_config
-from fcm.core.kernel import build_kernel_pipeline
 from fcm.exceptions import AssetNotFoundError, BinaryError
 from fcm.utils.console import print_error, print_success, print_table, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir

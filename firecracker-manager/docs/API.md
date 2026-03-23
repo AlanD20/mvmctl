@@ -457,19 +457,19 @@ Download and convert a VM rootfs image (qcow2, tar, or raw) to an ext4 file.
 
 ---
 
-#### `load_images_config(config_path: Path | None = None) -> list[object]`
+#### `load_images_config(config_path: Path) -> list[ImageSpec]`
 
 Load the built-in image catalogue from YAML.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `config_path` | `Path \| None` | `None` | Override config file path. Defaults to the bundled `assets/images.yaml`. |
+| `config_path` | `Path` | *(required)* | Path to the images YAML config file (e.g. the bundled `assets/images.yaml`). |
 
-**Returns:** List of image spec objects.
+**Returns:** `list[ImageSpec]` — list of image specification objects.
 
 ---
 
-#### `build_kernel_pipeline(version: str, source_url: str, output_path: Path, build_dir: Path, sha256: str | None = None, jobs: int | None = None) -> Path`
+#### `build_kernel_pipeline(version: str, source_url: str, output_path: Path, build_dir: Path, sha256: str | None = None, jobs: int | None = None) -> bool`
 
 Run the full kernel build pipeline: download source, extract, configure, compile, copy `vmlinux`.
 
@@ -482,7 +482,7 @@ Run the full kernel build pipeline: download source, extract, configure, compile
 | `sha256` | `str \| None` | `None` | Expected SHA256 checksum for integrity verification |
 | `jobs` | `int \| None` | `None` | Parallel make jobs. Defaults to CPU count. |
 
-**Returns:** Path to the compiled `vmlinux`.
+**Returns:** `True` on success.
 
 **Raises:** `KernelError` on any build step failure.
 

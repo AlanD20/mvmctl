@@ -47,7 +47,7 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.enable_api_socket is False
     assert config.vm_defaults.enable_pci is False
 
-    assert config.network.multi_vm.bridge_name == "fc-br0"
+    assert config.network.multi_vm.bridge_name == "fcm-br0"
     assert config.network.multi_vm.bridge_ip == "10.20.0.1/24"
 
     assert config.paths.assets_dir == ""

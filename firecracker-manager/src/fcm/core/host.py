@@ -11,7 +11,13 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fcm.constants import CLI_NAME, PRIVILEGED_BINARIES, PROJECT_GROUP, PROJECT_NAME, SUDOERS_DROP_IN_PATH
+from fcm.constants import (
+    CLI_NAME,
+    PRIVILEGED_BINARIES,
+    PROJECT_GROUP,
+    PROJECT_NAME,
+    SUDOERS_DROP_IN_PATH,
+)
 from fcm.exceptions import HostError
 
 logger = logging.getLogger(__name__)
@@ -432,23 +438,7 @@ def prune_host(cache_dir: Path) -> list[str]:
 
     Returns a list of summary strings describing what was torn down.
     """
-    # Import here to avoid circular imports
-    from fcm.core.network_manager import list_networks, remove_network
-
-    summary: list[str] = []
-
-    # Tear down all named networks (bridges, TAPs, iptables rules)
-    try:
-        networks = list_networks()
-    except subprocess.CalledProcessError:
-        networks = []
-
-    for net in networks:
-        try:
-            remove_network(net.name)
-            summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
-        except subprocess.CalledProcessError as e:
-            summary.append(f"Warning: failed to remove network '{net.name}': {e}")
+    summary = clean_host(cache_dir)
 
     # Revert sysctl changes using saved snapshot
     try:
@@ -522,9 +512,7 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
             target = Path(change.applied_value).resolve()
             # S-C2: Validate file path against allowlist before writing
             if not any(target == allowed.resolve() for allowed in RESTORABLE_FILE_PATHS):
-                logger.warning(
-                    "Skipping disallowed file path '%s' from state file", target
-                )
+                logger.warning("Skipping disallowed file path '%s' from state file", target)
                 continue
             if target.exists():
                 try:

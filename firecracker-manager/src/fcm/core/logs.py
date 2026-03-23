@@ -2,7 +2,7 @@
 
 import logging
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 from fcm.exceptions import ConfigError, FCMError, VMNotFoundError
@@ -94,17 +94,23 @@ def show_logs(
     log_type: str = "boot",
     lines: int = 50,
     follow: bool = False,
-) -> int:
-    """Show VM logs.
+    output: Callable[[str], object] | None = None,
+) -> list[str]:
+    """Retrieve VM log lines.
+
+    In non-follow mode, returns the last *lines* lines from the log file.
+    In follow mode, streams lines through the *output* callback and returns
+    the lines that were streamed before the caller interrupted (Ctrl-C).
 
     Args:
         vm_name: VM name
         log_type: 'boot' or 'os'
-        lines: Number of lines to show
-        follow: If True, follow log output
+        lines: Number of lines to show (non-follow mode)
+        follow: If True, follow log output via *output* callback
+        output: Callable to emit each line in follow mode (default: ``print``)
 
     Returns:
-        Exit code (0 for success)
+        List of log line strings.
 
     Raises:
         VMNotFoundError: If VM not found
@@ -118,16 +124,15 @@ def show_logs(
 
     if follow:
         logger.info("Press Ctrl+C to exit")
-        print()
+        emit = output or print
+        collected: list[str] = []
         try:
             for line in follow_log(log_file):
-                print(line)
+                emit(line)
+                collected.append(line)
         except KeyboardInterrupt:
-            print()
-            return 0
+            return collected
+        return collected
     else:
         log_lines = read_log_lines(log_file, lines)
-        for line in log_lines:
-            print(line, end="")
-
-    return 0
+        return log_lines

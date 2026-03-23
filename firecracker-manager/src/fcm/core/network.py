@@ -6,16 +6,22 @@ import random
 import subprocess
 from pathlib import Path
 
+from fcm.constants import (
+    BRIDGE_NAME,
+    DEFAULT_NETWORK_CIDR,
+    DEFAULT_NETWORK_GATEWAY,
+)
 from fcm.exceptions import NetworkError
 
 
 logger = logging.getLogger(__name__)
 
-BRIDGE_NAME = "fc-br0"
-BRIDGE_IP = "10.20.0.1"
-BRIDGE_CIDR = "10.20.0.1/24"
-SUBNET = "10.20.0.0/24"
-GATEWAY = "10.20.0.1"
+# Derived defaults from constants — kept as module-level aliases so existing
+# function signatures that reference them continue to work.
+BRIDGE_IP = DEFAULT_NETWORK_GATEWAY
+BRIDGE_CIDR = f"{DEFAULT_NETWORK_GATEWAY}/24"
+SUBNET = DEFAULT_NETWORK_CIDR
+GATEWAY = DEFAULT_NETWORK_GATEWAY
 
 
 def get_default_interface() -> str:
@@ -54,7 +60,9 @@ def bridge_exists(bridge: str = BRIDGE_NAME) -> bool:
     return result.returncode == 0
 
 
-def setup_bridge(bridge: str = BRIDGE_NAME, cidr: str = BRIDGE_CIDR, gateway_cidr: str | None = None) -> None:
+def setup_bridge(
+    bridge: str = BRIDGE_NAME, cidr: str = BRIDGE_CIDR, gateway_cidr: str | None = None
+) -> None:
     """Create and configure the bridge interface.
 
     - Creates bridge with `ip link add {bridge} type bridge`

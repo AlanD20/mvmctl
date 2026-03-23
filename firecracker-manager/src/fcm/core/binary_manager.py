@@ -13,8 +13,9 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from fcm.constants import HTTP_USER_AGENT
 from fcm.exceptions import AssetNotFoundError, BinaryError
-from fcm.utils.fs import get_cache_dir
+from fcm.utils.fs import get_bin_dir, get_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +31,6 @@ class BinaryVersion:
     firecracker_path: Path
     jailer_path: Path
     is_active: bool
-
-
-def get_bin_dir() -> Path:
-    """Return the directory for cached Firecracker binaries."""
-    return get_cache_dir() / "bin"
 
 
 def _resolve_bin_dir(bin_dir: Path | None) -> Path:
@@ -95,7 +91,7 @@ def list_local_versions(bin_dir: Path | None = None) -> list[BinaryVersion]:
 def list_remote_versions(limit: int = 10) -> list[str]:
     """Fetch recent Firecracker release versions from GitHub."""
     url = f"{GITHUB_RELEASES_URL}?per_page={limit}"
-    req = Request(url, headers={"User-Agent": "fcm/0.1.0", "Accept": "application/json"})
+    req = Request(url, headers={"User-Agent": HTTP_USER_AGENT, "Accept": "application/json"})
 
     try:
         with urlopen(req, timeout=30) as response:
@@ -115,7 +111,7 @@ def _verify_sha256(version: str, tgz_path: Path, actual_hex: str) -> None:
     """Verify downloaded tarball against GitHub SHA-256 sidecar file."""
     sha_url = f"{GITHUB_DOWNLOAD_URL}/v{version}/firecracker-v{version}-x86_64.tgz.sha256.txt"
     try:
-        req = Request(sha_url, headers={"User-Agent": "fcm/0.1.0"})
+        req = Request(sha_url, headers={"User-Agent": HTTP_USER_AGENT})
         with urlopen(req, timeout=30) as resp:
             content = resp.read().decode().strip()
         expected = content.split()[0].lower()
@@ -148,7 +144,7 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
         )
 
     tgz_url = f"{GITHUB_DOWNLOAD_URL}/v{version}/firecracker-v{version}-x86_64.tgz"
-    req = Request(tgz_url, headers={"User-Agent": "fcm/0.1.0"})
+    req = Request(tgz_url, headers={"User-Agent": HTTP_USER_AGENT})
 
     tgz_path = d / f"firecracker-v{version}-x86_64.tgz"
     try:

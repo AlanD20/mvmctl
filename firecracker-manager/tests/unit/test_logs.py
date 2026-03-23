@@ -84,13 +84,17 @@ def test_show_logs_success(tmp_path: Path) -> None:
     log_file.write_text("boot line 1\nboot line 2\n")
 
     with patch("fcm.core.logs.get_log_path", return_value=log_file):
-        exit_code = show_logs("test-vm", log_type="boot", lines=50)
+        result = show_logs("test-vm", log_type="boot", lines=50)
 
-    assert exit_code == 0
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert result[0] == "boot line 1\n"
 
 
 def test_show_logs_not_found() -> None:
-    with patch("fcm.core.logs.get_log_path", side_effect=VMNotFoundError("VM 'nonexistent-vm' not found")):
+    with patch(
+        "fcm.core.logs.get_log_path", side_effect=VMNotFoundError("VM 'nonexistent-vm' not found")
+    ):
         with pytest.raises(VMNotFoundError, match="not found"):
             show_logs("nonexistent-vm", log_type="boot")
 
@@ -106,9 +110,10 @@ def test_show_logs_os_type(tmp_path: Path) -> None:
     log_file.write_text("os line 1\nos line 2\n")
 
     with patch("fcm.core.logs.get_log_path", return_value=log_file):
-        exit_code = show_logs("test-vm", log_type="os", lines=50)
+        result = show_logs("test-vm", log_type="os", lines=50)
 
-    assert exit_code == 0
+    assert isinstance(result, list)
+    assert len(result) == 2
 
 
 def test_show_logs_follow(tmp_path: Path) -> None:
@@ -141,9 +146,10 @@ def test_show_logs_follow_keyboard_interrupt(tmp_path: Path) -> None:
         patch("fcm.core.logs.get_log_path", return_value=log_file),
         patch("fcm.core.logs.follow_log", side_effect=fake_follow),
     ):
-        exit_code = show_logs("test-vm", log_type="boot", follow=True)
+        result = show_logs("test-vm", log_type="boot", follow=True)
 
-    assert exit_code == 0
+    assert isinstance(result, list)
+    assert "line 1" in result
 
 
 def test_follow_log_io_error(tmp_path: Path) -> None:

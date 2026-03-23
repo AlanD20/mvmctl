@@ -74,6 +74,9 @@ def create(
     ),
 ) -> None:
     """Create and start a new Firecracker VM."""
+    from fcm.utils.validation import validate_entity_name
+
+    validate_entity_name(name, "VM")
     try:
         vm = create_vm(
             name=name,
@@ -219,6 +222,7 @@ def ssh(
     try:
         from fcm.utils.validation import validate_entity_name
         import re
+
         if not bool(re.match(r"^\d+\.\d+\.\d+\.\d+$", name)):
             validate_entity_name(name, "VM")
         exit_code = ssh_vm(name=name, user=user, key=key, cmd=cmd)
@@ -244,9 +248,12 @@ def logs(
     """
     try:
         from fcm.utils.validation import validate_entity_name
+
         validate_entity_name(name, "VM")
-        exit_code = get_logs(name=name, log_type=log_type, lines=lines, follow=follow)
-        raise typer.Exit(code=exit_code)
+        log_lines = get_logs(name=name, log_type=log_type, lines=lines, follow=follow)
+        for line in log_lines:
+            print(line, end="" if line.endswith("\n") else "\n")
+        raise typer.Exit(code=0)
     except FCMError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
@@ -290,6 +297,7 @@ def pause(
 ) -> None:
     """Pause a running VM (not supported in this version)."""
     from fcm.utils.validation import validate_entity_name
+
     validate_entity_name(name, "VM")
     print_info("VM pause/resume is not supported by this version of fcm.")
     raise typer.Exit(code=0)
@@ -301,6 +309,7 @@ def resume(
 ) -> None:
     """Resume a paused VM (not supported in this version)."""
     from fcm.utils.validation import validate_entity_name
+
     validate_entity_name(name, "VM")
     print_info("VM pause/resume is not supported by this version of fcm.")
     raise typer.Exit(code=0)
@@ -314,6 +323,7 @@ def snapshot(
 ) -> None:
     """Snapshot VM memory and disk state. Requires --enable-api-socket."""
     from fcm.utils.validation import validate_entity_name
+
     validate_entity_name(name, "VM")
     try:
         snapshot_vm(name=name, mem_out=mem_out, state_out=state_out)
@@ -332,6 +342,7 @@ def load(
 ) -> None:
     """Load VM from snapshot. Requires --enable-api-socket."""
     from fcm.utils.validation import validate_entity_name
+
     validate_entity_name(name, "VM")
     try:
         load_snapshot(name=name, mem_in=mem_in, state_in=state_in, resume_after=resume_after)

@@ -29,6 +29,7 @@ __all__ = [
     "cleanup_vms",
 ]
 
+
 def list_vms(include_stopped: bool = True) -> list[VMInstance]:
     """Return all registered VMs."""
     manager = VMManager()
@@ -37,18 +38,23 @@ def list_vms(include_stopped: bool = True) -> list[VMInstance]:
         return [vm for vm in all_vms if vm.status == VMState.RUNNING]
     return all_vms
 
+
 def get_vm(name: str) -> VMInstance | None:
     """Look up a VM by name."""
     return VMManager().get(name)
+
 
 def deregister_vm(name: str) -> None:
     """Remove a VM entry from the state registry."""
     VMManager().deregister(name)
 
+
 def vm_cache_dir(name: str) -> Path:
     """Return the cache directory path for a given VM name."""
     from fcm.utils.fs import get_vms_dir
+
     return get_vms_dir() / name
+
 
 def ssh_vm(
     name: str,
@@ -65,14 +71,16 @@ def ssh_vm(
         exec_mode=cmd is None,
     )
 
-def get_logs(name: str, log_type: str = "os", lines: int = 50, follow: bool = False) -> int:
-    """View VM logs."""
+
+def get_logs(name: str, log_type: str = "os", lines: int = 50, follow: bool = False) -> list[str]:
+    """View VM logs. Returns log lines."""
     return show_logs(
         vm_name=name,
         log_type=log_type,
         lines=lines,
         follow=follow,
     )
+
 
 def cleanup_vms(all_vms: bool = False, dry_run: bool = False) -> list[VMInstance]:
     """Remove stopped VMs and stale directories. Returns list of affected VMs."""

@@ -93,11 +93,16 @@ def create_vm(
 ) -> VMInstance:
     import re
     import ipaddress as _ipaddress
+    from fcm.utils.validation import validate_entity_name
+
+    validate_entity_name(name, "VM")
 
     if mac is not None:
         mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
         if not mac_re.match(mac):
-            raise FCMError(f"Invalid MAC address format: {mac!r}. Expected format: XX:XX:XX:XX:XX:XX")
+            raise FCMError(
+                f"Invalid MAC address format: {mac!r}. Expected format: XX:XX:XX:XX:XX:XX"
+            )
 
     vm_dir = get_vm_dir(name)
     if vm_dir.exists():
@@ -146,7 +151,9 @@ def create_vm(
         try:
             ip_net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
             if _ipaddress.IPv4Address(ip.split("/")[0]) not in ip_net:
-                raise NetworkError(f"IP {ip} is outside network '{network_name}' subnet {net_config.cidr}")
+                raise NetworkError(
+                    f"IP {ip} is outside network '{network_name}' subnet {net_config.cidr}"
+                )
         except ValueError as e:
             raise NetworkError(f"Invalid IP address: {e}")
         guest_ip = ip
@@ -311,7 +318,9 @@ def remove_vm(name: str) -> None:
 def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
     socket_path = get_vm_socket_path(name)
     if not socket_path:
-        raise FCMError(f"Socket not found for VM '{name}'. Must be running with --enable-api-socket")
+        raise FCMError(
+            f"Socket not found for VM '{name}'. Must be running with --enable-api-socket"
+        )
 
     client = FirecrackerClient(socket_path)
     try:
@@ -323,7 +332,9 @@ def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
 def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = True) -> None:
     socket_path = get_vm_socket_path(name)
     if not socket_path:
-        raise FCMError(f"Socket not found for VM '{name}'. Must be running with --enable-api-socket")
+        raise FCMError(
+            f"Socket not found for VM '{name}'. Must be running with --enable-api-socket"
+        )
 
     client = FirecrackerClient(socket_path)
     try:

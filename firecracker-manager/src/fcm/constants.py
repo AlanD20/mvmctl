@@ -1,7 +1,5 @@
 """Project identity constants derived from pyproject.toml metadata."""
 
-from __future__ import annotations
-
 import importlib.metadata
 
 
@@ -66,3 +64,4 @@ PRIVILEGED_BINARIES: list[str] = [
     "/usr/sbin/iptables-save",
     "/usr/sbin/sysctl",
 ]
+HTTP_USER_AGENT: str = f"{CLI_NAME}/0.1.0"

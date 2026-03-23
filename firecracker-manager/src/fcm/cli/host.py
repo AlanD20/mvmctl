@@ -15,6 +15,7 @@ from fcm.core.host import (
     reset_host,
     restore_host,
 )
+from fcm.constants import PROJECT_GROUP
 from fcm.exceptions import HostError
 from fcm.utils.console import console, print_error, print_info, print_success, print_warning
 from fcm.utils.fs import get_cache_dir
@@ -45,10 +46,8 @@ def init_cmd() -> None:
         for change in changes:
             print_success(f"{change.setting}: {change.original_value!r} → {change.applied_value!r}")
         print_success(f"Host initialized ({len(changes)} change(s) applied).")
-        print_warning(
-            "ACTION REQUIRED: Log out and back in for group membership to take effect."
-        )
-        print_info("Or run immediately: newgrp fcm")
+        print_warning("ACTION REQUIRED: Log out and back in for group membership to take effect.")
+        print_info(f"Or run immediately: newgrp {PROJECT_GROUP}")
 
     from fcm.core.network_manager import ensure_default_network
 

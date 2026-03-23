@@ -1,23 +1,20 @@
 """Guided onboarding wizard — collapses first-time setup into a single flow."""
 
 from __future__ import annotations
-from fcm.exceptions import FCMError
-
-
 
 import typer
 
-from fcm.core.binary_manager import (
+from fcm.api.assets import (
     fetch_binary,
     list_local_versions,
     list_remote_versions,
+    fetch_image,
+    load_images_config,
+    build_kernel_pipeline,
 )
-from fcm.core.host import check_kvm_access, get_host_state, init_host
-from fcm.core.image import fetch_image, load_images_config
-from fcm.core.kernel import build_kernel_pipeline
-from fcm.core.key_manager import add_key, create_key, list_keys
-from fcm.exceptions import BinaryError, HostError
-from fcm.exceptions import FCMKeyError
+from fcm.api.host import check_kvm_access, get_host_state, init_host
+from fcm.api.keys import add_key, create_key, list_keys
+from fcm.exceptions import BinaryError, FCMError, FCMKeyError, HostError
 from fcm.utils.console import print_info, print_success, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
@@ -64,7 +61,7 @@ def _step_host(skip: bool, non_interactive: bool) -> None:
         except HostError as e:
             print_warning(f"  Host init failed: {e}")
         try:
-            from fcm.core.network_manager import ensure_default_network
+            from fcm.api.network import ensure_default_network
 
             ensure_default_network()
             print_success("  Default network ready")

@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
+from fcm.constants import HTTP_USER_AGENT
 from fcm.exceptions import ImageError, ChecksumMismatchError, ConfigError
 from fcm.models.image import ImageSpec
 
@@ -40,7 +41,7 @@ def download_file(
         logger.warning("No checksum provided for download: %s", url)
 
     try:
-        req = Request(url, headers={"User-Agent": "fcm/0.1.0"})
+        req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
 
         if show_progress:
             logger.info("Downloading %s", url)

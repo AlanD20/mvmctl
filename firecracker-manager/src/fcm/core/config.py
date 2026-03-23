@@ -5,6 +5,8 @@ from pathlib import Path
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+from fcm.constants import BRIDGE_NAME, CLI_NAME
+
 
 @dataclass
 class FirecrackerConfig:
@@ -34,11 +36,11 @@ class VMDefaultsConfig:
 class MultiVMNetworkConfig:
     """Multi VM network settings."""
 
-    bridge_name: str = "fc-br0"
+    bridge_name: str = BRIDGE_NAME
     bridge_ip: str = "10.20.0.1/24"
     guest_ip_start: str = "10.20.0.2"
     guest_ip_end: str = "10.20.0.254"
-    tap_prefix: str = "fc"
+    tap_prefix: str = CLI_NAME
 
 
 @dataclass

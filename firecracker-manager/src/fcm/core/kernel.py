@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
+from fcm.constants import HTTP_USER_AGENT
 from fcm.exceptions import KernelError, ChecksumMismatchError
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ def download_kernel_source(
 
     try:
         logger.info("Downloading kernel from %s", url)
-        req = Request(url, headers={"User-Agent": "fcm/0.1.0"})
+        req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
 
         sha256_hash = hashlib.sha256() if expected_sha256 else None
 
@@ -131,7 +132,7 @@ def download_firecracker_config(
 
     try:
         logger.info("Downloading Firecracker kernel config...")
-        req = Request(config_url, headers={"User-Agent": "fcm/0.1.0"})
+        req = Request(config_url, headers={"User-Agent": HTTP_USER_AGENT})
 
         with urlopen(req, timeout=60) as response:
             config_content = response.read().decode("utf-8")

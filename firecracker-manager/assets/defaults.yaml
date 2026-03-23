@@ -19,17 +19,17 @@ vm_defaults:
 
 network:
   single_vm:
-    tap_dev: "fc-tap0"
+    tap_dev: "fcm-tap0"
     guest_ip: "10.10.0.2"
     host_ip: "10.10.0.1"
     mask: "255.255.255.252"
     mac: "02:FC:00:00:00:01"
   multi_vm:
-    bridge_name: "fc-br0"
-    bridge_ip: "10.20.0.1/24"
-    guest_ip_start: "10.20.0.2"
-    guest_ip_end: "10.20.0.254"
-    tap_prefix: "fc"
+    bridge_name: "fcm-br0"
+    bridge_ip: "10.10.0.1/24"
+    guest_ip_start: "10.10.0.2"
+    guest_ip_end: "10.10.0.254"
+    tap_prefix: "fcm"
 
 paths:
   assets_dir: "../assets"

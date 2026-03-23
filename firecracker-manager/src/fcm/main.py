@@ -7,6 +7,7 @@ import os
 
 import typer
 from fcm.cli import vm, config, asset, host, network, key, configure
+from fcm.constants import CLI_NAME
 
 
 def _get_version() -> str:
@@ -18,8 +19,9 @@ def _get_version() -> str:
 
         return __version__
 
+
 app = typer.Typer(
-    name="fcm",
+    name=CLI_NAME,
     help="Firecracker Manager - Manage microVMs",
     rich_markup_mode="rich",
 )
@@ -38,13 +40,11 @@ def callback(
     ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
-    version: bool = typer.Option(
-        False, "--version", is_eager=True, help="Show version and exit"
-    ),
+    version: bool = typer.Option(False, "--version", is_eager=True, help="Show version and exit"),
 ) -> None:
     """Firecracker Manager CLI."""
     if version:
-        typer.echo(f"fcm {_get_version()}")
+        typer.echo(f"{CLI_NAME} {_get_version()}")
         raise typer.Exit()
 
     # If no subcommand was given, show help
@@ -70,7 +70,7 @@ def callback(
 @app.command(name="version")
 def version_cmd(ctx: typer.Context) -> None:
     """Show the version and exit."""
-    typer.echo(f"fcm {_get_version()}")
+    typer.echo(f"{CLI_NAME} {_get_version()}")
     raise typer.Exit()
 
 
@@ -101,7 +101,7 @@ def help_cmd(
             raise typer.Exit(code=1)
 
     # Print help for the found command
-    with click.Context(cmd, info_name=" ".join([root.info_name or "fcm"] + args)) as sub_ctx:
+    with click.Context(cmd, info_name=" ".join([root.info_name or CLI_NAME] + args)) as sub_ctx:
         typer.echo(cmd.get_help(sub_ctx))
     raise typer.Exit()
 
