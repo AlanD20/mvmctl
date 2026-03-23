@@ -11,6 +11,11 @@ from fcm.utils.fs import get_vm_dir
 
 logger = logging.getLogger(__name__)
 
+_LOG_TYPE_FILES: dict[str, str] = {
+    "boot": "firecracker.console.log",
+    "os": "firecracker.log",
+}
+
 
 def get_log_path(
     vm_name: str,
@@ -34,12 +39,11 @@ def get_log_path(
     if not vm_dir.exists():
         raise VMNotFoundError(f"VM '{vm_name}' not found at {vm_dir}")
 
-    if log_type == "boot":
-        log_file = vm_dir / "firecracker.console.log"
-    elif log_type == "os":
-        log_file = vm_dir / "firecracker.log"
-    else:
-        raise ConfigError(f"Unknown log type '{log_type}'. Valid: boot, os")
+    log_filename = _LOG_TYPE_FILES.get(log_type)
+    if log_filename is None:
+        valid = ", ".join(_LOG_TYPE_FILES)
+        raise ConfigError(f"Unknown log type '{log_type}'. Valid: {valid}")
+    log_file = vm_dir / log_filename
 
     if not log_file.exists():
         raise VMNotFoundError(f"Log file not found for VM '{vm_name}': {log_file}")

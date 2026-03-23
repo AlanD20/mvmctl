@@ -96,36 +96,33 @@ def inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
 
     Requires root. Falls back gracefully if loop mount fails.
     """
-    import os
     import tempfile
 
     seed_target = "/var/lib/cloud/seed/nocloud"
-    mount_point = Path(tempfile.mkdtemp(prefix="fcm-mount-"))
-    os.chmod(mount_point, 0o700)
 
-    try:
-        # Mount the rootfs ext4 image
-        subprocess.run(
-            ["mount", "-o", "loop", str(rootfs_path), str(mount_point)],
-            check=True,
-            capture_output=True,
-        )
+    with tempfile.TemporaryDirectory(prefix="fcm-mount-") as tmp_dir:
+        mount_point = Path(tmp_dir)
+        mount_point.chmod(0o700)
+        mounted = False
         try:
+            # Mount the rootfs ext4 image
+            subprocess.run(
+                ["mount", "-o", "loop", str(rootfs_path), str(mount_point)],
+                check=True,
+                capture_output=True,
+            )
+            mounted = True
             target = mount_point / seed_target.lstrip("/")
             target.mkdir(parents=True, exist_ok=True)
             for f in cloud_init_dir.iterdir():
                 shutil.copy2(f, target / f.name)
+        except subprocess.CalledProcessError as e:
+            print_error(f"Warning: could not inject cloud-init (requires root): {e}")
+            print_info("VM will boot without cloud-init pre-seeding")
         finally:
-            subprocess.run(
-                ["umount", str(mount_point)],
-                check=False,
-                capture_output=True,
-            )
-    except subprocess.CalledProcessError as e:
-        print_error(f"Warning: could not inject cloud-init (requires root): {e}")
-        print_info("VM will boot without cloud-init pre-seeding")
-    finally:
-        try:
-            mount_point.rmdir()
-        except OSError:
-            pass
+            if mounted:
+                subprocess.run(
+                    ["umount", str(mount_point)],
+                    check=False,
+                    capture_output=True,
+                )

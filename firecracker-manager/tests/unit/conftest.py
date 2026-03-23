@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -60,3 +61,19 @@ def stopped_vm() -> VMInstance:
 @pytest.fixture
 def vm_manager(tmp_path: Path) -> VMManager:
     return VMManager(tmp_path)
+
+
+@pytest.fixture
+def mock_subprocess_run_success(monkeypatch):
+    """Shared fixture: mock subprocess.run to return success (returncode=0)."""
+    mock = MagicMock(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr("subprocess.run", lambda *a, **kw: mock)
+    return mock
+
+
+@pytest.fixture
+def mock_subprocess_run_failure(monkeypatch):
+    """Shared fixture: mock subprocess.run to return failure (returncode=1)."""
+    mock = MagicMock(returncode=1, stdout="", stderr="error")
+    monkeypatch.setattr("subprocess.run", lambda *a, **kw: mock)
+    return mock

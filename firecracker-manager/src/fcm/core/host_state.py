@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fcm.constants import CLI_NAME, PROJECT_NAME, SUDOERS_DROP_IN_PATH
+from fcm.constants import PROJECT_NAME, SUDOERS_DROP_IN_PATH
 from fcm.exceptions import HostError
 
 logger = logging.getLogger(__name__)
