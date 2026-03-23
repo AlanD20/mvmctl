@@ -60,7 +60,7 @@ def _bridge_name_for(network_name: str) -> str:
 def _gateway_for_subnet(subnet: str) -> str:
     """Return the first usable host IP in a subnet as the gateway."""
     net = ipaddress.IPv4Network(subnet, strict=False)
-    return str(next(net.hosts()))
+    return str(next(iter(net.hosts())))
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +96,7 @@ def _load_leases(network_dir: Path) -> list[NetworkLease]:
 def _save_leases(network_dir: Path, leases: list[NetworkLease]) -> None:
     network_dir.mkdir(parents=True, exist_ok=True)
     leases_file = network_dir / "leases.json"
-    leases_file.write_text(
-        json.dumps([asdict(lease) for lease in leases], indent=2)
-    )
+    leases_file.write_text(json.dumps([asdict(lease) for lease in leases], indent=2))
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +217,7 @@ def remove_network(name: str) -> None:
     if leases:
         vm_names = ", ".join(lease.vm_name for lease in leases)
         raise NetworkError(
-            f"Network '{name}' still has VMs attached: {vm_names}. "
-            "Remove those VMs first."
+            f"Network '{name}' still has VMs attached: {vm_names}. Remove those VMs first."
         )
 
     # Teardown host resources

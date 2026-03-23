@@ -11,6 +11,13 @@ from fcm.utils.fs import get_assets_dir, get_vm_dir
 app = typer.Typer(help="Configuration commands")
 
 
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the config command group."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
+
+
 @app.command()
 def show(
     section: str | None = typer.Option(None, "--section", help="Config section to show"),

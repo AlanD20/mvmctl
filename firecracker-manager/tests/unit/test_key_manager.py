@@ -15,7 +15,7 @@ from fcm.core.key_manager import (
     list_keys,
     remove_key,
 )
-from fcm.exceptions import KeyError as FCMKeyError
+from fcm.exceptions import FCMKeyError
 
 SAMPLE_PUB_KEY = (
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtestkeycontent"

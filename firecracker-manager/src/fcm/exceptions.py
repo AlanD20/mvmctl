@@ -57,5 +57,5 @@ class BinaryError(FCMError):
     """Firecracker/jailer binary management failure."""
 
 
-class KeyError(FCMError):
+class FCMKeyError(FCMError):
     """SSH key management failure."""

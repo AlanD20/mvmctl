@@ -42,4 +42,4 @@ jobs:
 
       - name: Run tests
         working-directory: firecracker-manager
-        run: uv run pytest tests/ -v --tb=short
+        run: uv run pytest tests/ -v --tb=short --cov=src/fcm --cov-report=term-missing --cov-fail-under=80

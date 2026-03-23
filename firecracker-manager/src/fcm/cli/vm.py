@@ -6,7 +6,7 @@ import shutil
 import signal
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -49,6 +49,7 @@ def help_cmd(ctx: typer.Context) -> None:
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
     raise typer.Exit()
 
+
 # ---------------------------------------------------------------------------
 # create
 # ---------------------------------------------------------------------------
@@ -65,8 +66,8 @@ def create(
         "--kernel",
         help="Path to vmlinux kernel (default: FCM_KERNEL or ~/.cache/firecracker-manager/kernels/vmlinux)",
     ),
-    vcpus: int = typer.Option(1, "--vcpus", "--cpus", help="Number of vCPUs"),
-    mem: int = typer.Option(512, "--mem", "--memory", help="Memory in MiB"),
+    vcpus: int = typer.Option(2, "--vcpus", "--cpus", help="Number of vCPUs"),
+    mem: int = typer.Option(2048, "--mem", "--memory", help="Memory in MiB"),
     ip: str | None = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
     network_name: str = typer.Option(
         DEFAULT_NETWORK_NAME, "--network", "--net", help="Named network to attach to"
@@ -150,7 +151,9 @@ def create(
             if network_name == DEFAULT_NETWORK_NAME:
                 net_config = ensure_default_network()
             else:
-                print_error(f"Network '{network_name}' not found. Create it with: fcm network create {network_name}")
+                print_error(
+                    f"Network '{network_name}' not found. Create it with: fcm network create {network_name}"
+                )
                 raise typer.Exit(code=1)
     except NetworkError as e:
         print_error(f"Network error: {e}")
@@ -160,6 +163,7 @@ def create(
     if ip:
         # Validate IP is in the network's subnet
         import ipaddress
+
         try:
             ip_net = ipaddress.IPv4Network(net_config.cidr, strict=False)
             if ipaddress.IPv4Address(ip.split("/")[0]) not in ip_net:
@@ -207,8 +211,15 @@ def create(
     # Resolve SSH key
     ssh_pub_key = _resolve_ssh_key(ssh_key)
 
-    _write_cloud_init(cloud_init_dir, name, guest_ip, user, ssh_pub_key=ssh_pub_key,
-                      custom_user_data=user_data)
+    _write_cloud_init(
+        cloud_init_dir,
+        name,
+        guest_ip,
+        user,
+        ssh_pub_key=ssh_pub_key,
+        custom_user_data=user_data,
+        gateway=net_config.gateway,
+    )
     _inject_cloud_init(rootfs_path, cloud_init_dir)
 
     # --------------------------------------------------------- firecracker cfg
@@ -287,7 +298,8 @@ def create(
         socket_path=socket_path,
         ip=guest_ip,
         mac=guest_mac,
-        created_at=datetime.now(),
+        network_name=network_name,
+        created_at=datetime.now(tz=timezone.utc),
         status=VMState.RUNNING,
     )
     manager.register(vm_instance)
@@ -320,20 +332,16 @@ def remove(
     vm_dir = get_vm_dir(name)
     tap_name = f"fc-{name}-0"
 
-    # Graceful shutdown sequence
-    _graceful_shutdown(vm.pid, vm.socket_path, vm.ip)
+    pid_file = vm_dir / "firecracker.pid"
+    pid = int(pid_file.read_text().strip()) if pid_file.exists() else vm.pid
 
-    # Teardown network
+    _graceful_shutdown(pid, vm.socket_path, vm.ip)
+
     remove_iptables_forward_rules(tap_name)
     try:
         delete_tap(tap_name)
     except NetworkError as e:
         print_error(f"Warning: failed to delete TAP {tap_name}: {e}")
-
-    try:
-        teardown_nat(force=False)
-    except NetworkError as e:
-        print_error(f"Warning: NAT teardown warning: {e}")
 
     # Release network IP lease
     for net_name in _find_network_for_vm(name):
@@ -370,12 +378,12 @@ def delete(
 
 
 # ---------------------------------------------------------------------------
-# list
+# ls (primary) / list (alias)
 # ---------------------------------------------------------------------------
 
 
-@app.command(name="list")
-def list_vms(
+@app.command(name="ls")
+def ls_vms(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     all_vms: bool = typer.Option(False, "--all", "-a", help="Show all VMs including stopped"),
 ) -> None:
@@ -415,7 +423,6 @@ def list_vms(
     status_colors = {
         VMState.RUNNING: "[green]running[/green]",
         VMState.STOPPED: "[dim]stopped[/dim]",
-        VMState.PAUSED: "[yellow]paused[/yellow]",
         VMState.ERROR: "[red]error[/red]",
     }
 
@@ -431,6 +438,15 @@ def list_vms(
         )
 
     console.print(table)
+
+
+@app.command(name="list", hidden=True)
+def list_vms(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    all_vms: bool = typer.Option(False, "--all", "-a", help="Show all VMs including stopped"),
+) -> None:
+    """Alias for ls."""
+    ls_vms(json_output=json_output, all_vms=all_vms)
 
 
 # ---------------------------------------------------------------------------
@@ -673,14 +689,6 @@ def _graceful_shutdown(pid: int | None, socket_path: Path | None, vm_ip: str | N
         except (ProcessLookupError, PermissionError):
             pass
 
-    # Step 4: remove VM IP from known_hosts
-    if vm_ip is not None:
-        subprocess.run(
-            ["ssh-keygen", "-R", vm_ip],
-            capture_output=True,
-            check=False,
-        )
-
 
 def _resolve_ssh_key(ssh_key: str | None) -> str | None:
     """Resolve an SSH key from name (key cache) or file path.
@@ -728,6 +736,7 @@ def _write_cloud_init(
     user: str,
     ssh_pub_key: str | None = None,
     custom_user_data: Path | None = None,
+    gateway: str = "10.20.0.1",
 ) -> None:
     """Write cloud-init seed files (meta-data, network-config, user-data)."""
     # meta-data
@@ -738,15 +747,15 @@ def _write_cloud_init(
     network_config = (
         "version: 1\n"
         "config:\n"
-        "  - type: physical\n"
-        "    name: eth0\n"
-        "    subnets:\n"
-        "      - type: static\n"
-        f"        address: {guest_ip}/24\n"
-        "        gateway: 10.20.0.1\n"
-        "        dns_nameservers:\n"
-        "          - 8.8.8.8\n"
-        "          - 1.1.1.1\n"
+        " - type: physical\n"
+        "   name: eth0\n"
+        "   subnets:\n"
+        "     - type: static\n"
+        f"       address: {guest_ip}/24\n"
+        f"       gateway: {gateway}\n"
+        "       dns_nameservers:\n"
+        "         - 8.8.8.8\n"
+        "         - 1.1.1.1\n"
     )
     (cloud_init_dir / "network-config").write_text(network_config)
 
@@ -757,10 +766,7 @@ def _write_cloud_init(
         if ssh_pub_key and "ssh_authorized_keys" not in content:
             # Inject SSH key block
             content += (
-                f"\nusers:\n"
-                f"  - name: {user}\n"
-                f"    ssh-authorized-keys:\n"
-                f"      - {ssh_pub_key}\n"
+                f"\nusers:\n  - name: {user}\n    ssh-authorized-keys:\n      - {ssh_pub_key}\n"
             )
         elif ssh_pub_key and "ssh_authorized_keys" in content:
             # Append to existing ssh_authorized_keys section

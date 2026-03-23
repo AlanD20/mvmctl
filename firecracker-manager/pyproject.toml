@@ -1,13 +1,24 @@
 [project]
 name = "firecracker-manager"
 version = "0.1.0"
-description = "Python CLI for managing Firecracker microVMs"
+description = "A CLI for managing Firecracker microVMs"
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.13"
 dependencies = [
     "typer>=0.12,<0.16",
     "rich>=13,<15",
     "pyyaml>=6,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.19,<2",
+    "pytest>=9,<10",
+    "pytest-cov>=7,<8",
+    "ruff>=0.15,<1",
+    "types-PyYAML>=6.0,<7",
+    "pyinstaller>=6,<7",
 ]
 
 [project.scripts]

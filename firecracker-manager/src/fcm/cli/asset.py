@@ -29,6 +29,34 @@ app.add_typer(image_app, name="image")
 app.add_typer(bin_app, name="bin")
 
 
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the asset command group."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
+
+
+@kernel_app.command(name="help", hidden=True)
+def kernel_help(ctx: typer.Context) -> None:
+    """Show help for the kernel subcommand."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
+
+
+@image_app.command(name="help", hidden=True)
+def image_help(ctx: typer.Context) -> None:
+    """Show help for the image subcommand."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
+
+
+@bin_app.command(name="help", hidden=True)
+def bin_help(ctx: typer.Context) -> None:
+    """Show help for the bin subcommand."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
+
+
 @kernel_app.command(name="ls")
 def kernel_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),

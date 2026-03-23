@@ -1,7 +1,7 @@
 """VM data models."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -11,7 +11,6 @@ class VMState(Enum):
 
     RUNNING = "running"
     STOPPED = "stopped"
-    PAUSED = "paused"
     ERROR = "error"
 
 
@@ -42,6 +41,7 @@ class VMInstance:
     socket_path: Path | None = None
     ip: str | None = None
     mac: str | None = None
-    created_at: datetime = field(default_factory=datetime.now)
+    network_name: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     status: VMState = VMState.STOPPED
     config: VMConfig | None = None

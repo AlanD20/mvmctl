@@ -1,617 +1,170 @@
-# fcm Developer API Reference
+# firecracker-manager Python API Reference
 
-This document describes the public Python API surface of the `fcm.core.*` modules.
-All functions are callable without Typer (as a library).
+## Introduction
 
----
+Every CLI command maps 1:1 to a Python function in `fcm.api.*`. The CLI is a thin
+presentation layer on top of these modules — it handles argument parsing, output
+formatting, and exit codes, then calls the same functions documented here.
 
-## Table of Contents
-
-1. [fcm.core.key_manager](#fcmcorekey_manager)
-2. [fcm.core.network_manager](#fcmcorenetwork_manager)
-3. [fcm.core.network](#fcmcorenetwork)
-4. [fcm.core.vm_manager](#fcmcorevm_manager)
-5. [fcm.core.firecracker](#fcmcorefirecracker)
-6. [fcm.core.host](#fcmcorehost)
-7. [fcm.models.vm](#fcmmodelsvm)
-8. [fcm.exceptions](#fcmexceptions)
+You can import the API directly to build automation scripts, GUIs, or TUIs without
+going through the CLI. All system interactions (KVM, iptables, bridge devices) happen
+lazily — importing the package has no side effects.
 
 ---
 
-## fcm.core.key_manager
+## Installation
 
-Named SSH key store backed by `~/.cache/firecracker-manager/keys/`.
+Install the package so the API is importable:
 
-### `list_keys() -> list[KeyInfo]`
+```bash
+# From PyPI
+pip install firecracker-manager
 
-List all keys in the cache.
+# From source
+git clone <repo-url>
+cd firecracker-manager
+pip install -e .
 
-**Returns:** List of `KeyInfo` dataclass instances.
+# Using uv
+uv sync
+```
 
----
-
-### `get_key(name: str) -> KeyInfo | None`
-
-Get a key by name.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Key name |
-
-**Returns:** `KeyInfo` if found, `None` if not found.
-
----
-
-### `add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> KeyInfo`
-
-Import an existing public key into the cache.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Name to register the key under |
-| `pub_key_path` | `str \| Path` | Path to `.pub` file on disk |
-| `overwrite` | `bool` | When `True`, replace an existing key with the same name |
-
-**Returns:** `KeyInfo` with fingerprint, algorithm, and metadata.
-
-**Raises:** `fcm.exceptions.KeyError` if file not found, file empty, or key already exists (when `overwrite=False`).
-
----
-
-### `create_key(name: str, output_dir: str | Path | None = None, comment: str | None = None, overwrite: bool = False) -> tuple[KeyInfo, Path]`
-
-Generate a new ED25519 keypair via `ssh-keygen`.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Key name and filename |
-| `output_dir` | `str \| Path \| None` | Directory for private key file (default: `~/.ssh/`) |
-| `comment` | `str \| None` | Key comment (default: `name@hostname`) |
-| `overwrite` | `bool` | When `True`, overwrite existing key files and registry entry |
-
-**Returns:** `(KeyInfo, private_key_path)` tuple.
-
-**Raises:** `fcm.exceptions.KeyError` if `ssh-keygen` fails or key already exists (when `overwrite=False`).
-
----
-
-### `remove_key(name: str) -> None`
-
-Remove a key from the cache (does not delete key files from disk outside the cache).
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Key name |
-
-**Raises:** `fcm.exceptions.KeyError` if key not found.
-
----
-
-### `inspect_key(name: str) -> dict[str, object]`
-
-Return detailed info about a named key, including the public key content.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Key name |
-
-**Returns:** Dict with keys: `name`, `fingerprint`, `algorithm`, `comment`, `added_at`, `public_key`.
-
-**Raises:** `fcm.exceptions.KeyError` if key not found.
-
----
-
-### `KeyInfo` dataclass
+Then import:
 
 ```python
-@dataclass
-class KeyInfo:
-    name: str
-    fingerprint: str
-    algorithm: str
-    comment: str
-    added_at: str
+from fcm.api import vms, network, assets, keys, host
 ```
 
 ---
 
-## fcm.core.network_manager
+## Module Overview
 
-Named network management. Networks are persisted under `~/.cache/firecracker-manager/networks/`.
-
-### `list_networks() -> list[NetworkConfig]`
-
-List all named networks.
-
-**Returns:** List of `NetworkConfig` instances.
-
----
-
-### `get_network(name: str) -> NetworkConfig | None`
-
-Get a named network by name.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Network name |
-
-**Returns:** `NetworkConfig` if found, `None` if not found.
+| Module | Responsibility |
+|---|---|
+| `api/vms.py` | VM lifecycle: list, get, deregister, cache directory |
+| `api/network.py` | Network management: create, remove, list, inspect, IP allocation |
+| `api/assets.py` | Asset management: kernels, images, Firecracker binaries |
+| `api/keys.py` | SSH key registry: add, create, remove, list, inspect |
+| `api/host.py` | Host initialisation, state inspection, prune |
 
 ---
 
-### `create_network(name: str, cidr: str | None = None, gateway: str | None = None, nat: bool = True) -> NetworkConfig`
+## Data Models
 
-Create a named network: sets up bridge device, IP range, and optionally NAT rules.
+### `fcm.models.vm`
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Network name |
-| `cidr` | `str \| None` | IP subnet in CIDR notation, e.g. `"192.168.100.0/24"`. Auto-allocated if `None`. |
-| `gateway` | `str \| None` | Gateway IP for the bridge. Defaults to first host in subnet. |
-| `nat` | `bool` | Configure NAT/masquerade. Default `True`. |
-
-**Returns:** The created `NetworkConfig`.
-
-**Raises:** `fcm.exceptions.NetworkError` if the network already exists, CIDR overlaps with existing network, or bridge setup fails.
-
----
-
-### `remove_network(name: str) -> None`
-
-Remove a named network: tears down bridge and NAT rules, removes persisted state.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Network name |
-
-**Raises:** `fcm.exceptions.NetworkError` if network has VMs attached or doesn't exist.
-
----
-
-### `inspect_network(name: str) -> dict[str, object]`
-
-Return full details for a named network.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Network name |
-
-**Returns:** Dict with keys: `name`, `cidr`, `gateway`, `bridge`, `nat_enabled`, `created_at`, `bridge_exists`, `vms`.
-
-**Raises:** `fcm.exceptions.NetworkError` if network not found.
-
----
-
-### `allocate_network_ip(network_name: str, vm_name: str) -> str`
-
-Allocate the next available IP from a network's subnet and register the lease.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `network_name` | `str` | Network name |
-| `vm_name` | `str` | VM name for the lease |
-
-**Returns:** Allocated IP address string.
-
-**Raises:** `fcm.exceptions.NetworkError` if network not found or no IPs available.
-
----
-
-### `release_network_ip(network_name: str, vm_name: str) -> None`
-
-Release a VM's IP lease from a network.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `network_name` | `str` | Network name |
-| `vm_name` | `str` | VM name whose lease to release |
-
----
-
-### `get_network_leases(name: str) -> list[NetworkLease]`
-
-Get all IP leases for a network.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `str` | Network name |
-
-**Returns:** List of `NetworkLease` instances.
-
----
-
-### `ensure_default_network() -> NetworkConfig`
-
-Ensure the default network exists, creating it if needed.
-
-**Returns:** The default `NetworkConfig` (existing or newly created).
-
-**Raises:** `fcm.exceptions.NetworkError` if creation fails.
-
----
-
-### `NetworkConfig` dataclass
-
-```python
-@dataclass
-class NetworkConfig:
-    name: str
-    cidr: str
-    gateway: str
-    bridge: str
-    nat_enabled: bool = True
-    created_at: str = ...  # ISO timestamp
-```
-
----
-
-### `NetworkLease` dataclass
-
-```python
-@dataclass
-class NetworkLease:
-    vm_name: str
-    ip: str
-```
-
----
-
-## fcm.core.network
-
-Low-level Linux network infrastructure management.
-
-### `setup_bridge(bridge: str, cidr: str = BRIDGE_CIDR, gateway_cidr: str | None = None) -> None`
-
-Create and configure a bridge interface. Idempotent.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `bridge` | `str` | Bridge interface name |
-| `cidr` | `str` | CIDR to assign to bridge |
-| `gateway_cidr` | `str \| None` | Override CIDR for bridge IP assignment |
-
-**Raises:** `fcm.exceptions.NetworkError` on failure.
-
----
-
-### `teardown_bridge(bridge: str) -> None`
-
-Remove a bridge interface.
-
-**Raises:** `fcm.exceptions.NetworkError` on failure.
-
----
-
-### `setup_nat(bridge: str, host_iface: str | None = None) -> None`
-
-Set up NAT MASQUERADE and FORWARD rules for the bridge subnet. Idempotent.
-
-**Raises:** `fcm.exceptions.NetworkError` on failure.
-
----
-
-### `teardown_nat(bridge: str, force: bool = False) -> None`
-
-Remove NAT rules for the bridge. Only removes MASQUERADE if `force=True` or no TAP devices remain.
-
-**Raises:** `fcm.exceptions.NetworkError` on failure.
-
----
-
-### `create_tap(tap_name: str, bridge: str) -> None`
-
-Create a TAP device and attach it to the bridge.
-
-**Raises:** `fcm.exceptions.NetworkError` if tap already exists or creation fails.
-
----
-
-### `delete_tap(tap_name: str) -> None`
-
-Delete a TAP device. Safe to call if tap doesn't exist (logs warning).
-
-**Raises:** `fcm.exceptions.NetworkError` on failure.
-
----
-
-### `allocate_ip(existing_ips: list[str], subnet: str, gateway: str) -> str`
-
-Allocate the next available IP in the subnet, skipping gateway and reserved addresses.
-
-**Returns:** Available IP address string.
-
-**Raises:** `fcm.exceptions.NetworkError` if no IPs available.
-
----
-
-### `generate_mac() -> str`
-
-Generate a random MAC address with `02:FC:` prefix.
-
-**Returns:** MAC address string in format `02:FC:XX:XX:XX:XX`.
-
----
-
-### `bridge_exists(bridge: str) -> bool`
-
-Return `True` if the bridge interface exists.
-
----
-
-### `tap_exists(tap_name: str) -> bool`
-
-Return `True` if the TAP device exists.
-
----
-
-### `get_tap_devices(bridge: str) -> list[str]`
-
-List all TAP devices currently attached to the bridge.
-
-**Returns:** List of interface name strings.
-
----
-
-### `get_default_interface() -> str`
-
-Get the default network interface by parsing `ip route show default`.
-
-**Returns:** Interface name (e.g., `"eth0"`, `"ens3"`).
-
-**Raises:** `fcm.exceptions.NetworkError` if not found.
-
----
-
-### `get_iptables_rules_for_bridge(bridge: str) -> list[str]`
-
-Return iptables FORWARD and NAT POSTROUTING rules that reference the given bridge.
-
-**Returns:** List of matching rule strings (may be empty).
-
----
-
-## fcm.core.vm_manager
-
-VM state persistence under `~/.cache/firecracker-manager/vms/`.
-
-### `VMManager(run_dir: Path | None = None)`
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `run_dir` | `Path \| None` | Override for state directory. Defaults to `get_vms_dir()`. |
-
-### `VMManager.register(vm: VMInstance) -> None`
-
-Register a new VM in state.
-
-**Parameters:** `vm` — a `VMInstance` dataclass.
-
----
-
-### `VMManager.deregister(name: str) -> None`
-
-Remove a VM from state.
-
----
-
-### `VMManager.get(name: str) -> VMInstance | None`
-
-Get VM by name. Returns `None` if not found.
-
----
-
-### `VMManager.list_all() -> list[VMInstance]`
-
-List all registered VMs regardless of status.
-
----
-
-### `VMManager.update_status(name: str, status: VMState) -> None`
-
-Update the status of a registered VM.
-
-**Raises:** `fcm.exceptions.VMNotFoundError` if VM not found.
-
----
-
-## fcm.core.firecracker
-
-Firecracker HTTP API client over Unix domain socket.
-
-### `FirecrackerClient(socket_path: Path)`
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `socket_path` | `Path` | Path to Firecracker Unix socket |
-
-### `FirecrackerClient.send_ctrl_alt_del() -> bool`
-
-Send Ctrl+Alt+Del action to the VM (graceful shutdown request).
-
-**Returns:** `True` if successful (HTTP 204), `False` otherwise.
-
----
-
-### `FirecrackerClient.pause_vm() -> bool`
-
-Pause the VM via the Firecracker API.
-
-**Returns:** `True` if successful.
-
----
-
-### `FirecrackerClient.resume_vm() -> bool`
-
-Resume the VM via the Firecracker API.
-
-**Returns:** `True` if successful.
-
----
-
-### `FirecrackerClient.create_snapshot(mem_path: Path, snapshot_path: Path) -> bool`
-
-Create a VM snapshot.
-
-**Returns:** `True` if successful.
-
----
-
-### `FirecrackerClient.load_snapshot(mem_path: Path, snapshot_path: Path, resume: bool = True) -> bool`
-
-Load VM from snapshot.
-
-**Returns:** `True` if successful.
-
----
-
-### `FirecrackerClient.get_instance_info() -> dict[str, object] | None`
-
-Get VM instance information.
-
-**Returns:** Instance info dict, or `None` on failure.
-
----
-
-### `FirecrackerClient.close() -> None`
-
-Close the connection.
-
----
-
-### `get_vm_socket_path(vm_name: str) -> Path | None`
-
-Get socket path for a named VM from the cache directory.
-
-**Returns:** `Path` to socket file if found, `None` otherwise.
-
----
-
-## fcm.core.host
-
-Host configuration management for Firecracker prerequisites.
-
-### `init_host(cache_dir: Path) -> list[HostChange]`
-
-Apply host configuration: enable IP forwarding, persist sysctl, load KVM modules.
-Idempotent — returns empty list if no changes needed.
-
-**Returns:** List of `HostChange` describing applied changes.
-
-**Raises:** `fcm.exceptions.HostError` if KVM not accessible, required binaries missing, or operations fail.
-
----
-
-### `restore_host(cache_dir: Path) -> list[HostChange]`
-
-Revert host changes using the saved snapshot.
-
-**Returns:** List of `HostChange` describing reverted changes.
-
-**Raises:** `fcm.exceptions.HostError` if no saved state or revert fails.
-
----
-
-### `prune_host(cache_dir: Path) -> list[str]`
-
-Tear down all named networks (bridges, TAP devices, iptables rules) and revert
-sysctl changes. Does NOT remove VM cache files, images, kernels, or binaries.
-
-**Returns:** List of summary strings describing what was torn down.
-
----
-
-### `get_host_state(cache_dir: Path) -> HostState | None`
-
-Load and return the saved host state snapshot.
-
-**Returns:** `HostState` if snapshot exists, `None` otherwise.
-
-**Raises:** `fcm.exceptions.HostError` if state file is corrupt.
-
----
-
-### `check_kvm_access() -> bool`
-
-Return `True` if `/dev/kvm` exists and is readable/writable.
-
----
-
-### `check_required_binaries() -> list[str]`
-
-Return list of missing required binary names (`ip`, `iptables`, `qemu-img`, one of `mkisofs`/`genisoimage`).
-Empty list means all required binaries are present.
-
----
-
-### `HostChange` dataclass
-
-```python
-@dataclass
-class HostChange:
-    setting: str
-    original_value: str | None
-    applied_value: str
-    mechanism: str
-```
-
----
-
-## fcm.models.vm
-
-### `VMState` enum
+#### `VMState`
 
 ```python
 class VMState(str, Enum):
     RUNNING = "running"
     STOPPED = "stopped"
-    PAUSED  = "paused"
     ERROR   = "error"
 ```
 
----
-
-### `VMConfig` dataclass
+#### `VMConfig`
 
 Configuration for launching a Firecracker VM.
 
-```python
-@dataclass
-class VMConfig:
-    name: str
-    vcpu_count: int
-    mem_size_mib: int
-    kernel_path: Path
-    rootfs_path: Path
-    guest_ip: str
-    guest_mac: str
-    tap_device: str
-    enable_api_socket: bool = False
-    enable_pci: bool = False
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | VM name; also used as hostname inside the guest |
+| `vcpu_count` | `int` | Number of vCPUs (default: 2) |
+| `mem_size_mib` | `int` | Memory in MiB (default: 2048) |
+| `kernel_path` | `Path` | Path to the vmlinux kernel image |
+| `rootfs_path` | `Path` | Path to the root filesystem ext4 image |
+| `guest_ip` | `str \| None` | Static IP address for the guest NIC |
+| `guest_mac` | `str \| None` | MAC address for the guest NIC |
+| `tap_device` | `str \| None` | Host TAP interface name |
+| `boot_args` | `str \| None` | Override kernel boot arguments |
+| `enable_api_socket` | `bool` | Enable Firecracker HTTP API socket (default: False) |
+| `enable_pci` | `bool` | Enable PCI device support (default: False) |
+| `lsm_flags` | `str` | Linux Security Module flags for boot args |
 
----
-
-### `VMInstance` dataclass
+#### `VMInstance`
 
 Runtime state for a registered VM.
 
-```python
-@dataclass
-class VMInstance:
-    name: str
-    pid: int | None
-    socket_path: Path | None
-    ip: str | None
-    mac: str | None
-    created_at: datetime
-    status: VMState
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | VM name |
+| `pid` | `int \| None` | Firecracker process PID, or None if stopped |
+| `socket_path` | `Path \| None` | Path to Firecracker API socket, or None |
+| `ip` | `str \| None` | Assigned guest IP address |
+| `mac` | `str \| None` | Assigned guest MAC address |
+| `network_name` | `str \| None` | Name of the network this VM is attached to |
+| `created_at` | `datetime` | UTC timestamp of VM creation |
+| `status` | `VMState` | Current lifecycle state |
+| `config` | `VMConfig \| None` | Launch config, if persisted |
+
+### `fcm.core.network_manager`
+
+#### `NetworkConfig`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Network name |
+| `cidr` | `str` | IP subnet in CIDR notation, e.g. `"10.20.0.0/24"` |
+| `gateway` | `str` | Host-side gateway IP (first usable host in CIDR) |
+| `bridge` | `str` | Linux bridge device name |
+| `nat_enabled` | `bool` | Whether NAT/masquerade rules are active |
+| `created_at` | `str` | ISO 8601 timestamp of network creation |
+
+#### `NetworkLease`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `vm_name` | `str` | VM name holding the lease |
+| `ip` | `str` | Leased IP address |
+
+### `fcm.core.key_manager`
+
+#### `KeyInfo`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Key name (identifier used in `--ssh-key`) |
+| `fingerprint` | `str` | SHA256 fingerprint in `SHA256:...` format |
+| `algorithm` | `str` | Key algorithm, e.g. `"ssh-ed25519"` |
+| `comment` | `str` | Key comment from the `.pub` file |
+| `added_at` | `str` | ISO 8601 timestamp when the key was added |
+
+### `fcm.core.host`
+
+#### `HostChange`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `setting` | `str` | Name of the setting that was changed |
+| `original_value` | `str \| None` | Value before the change, or None if not previously set |
+| `applied_value` | `str` | Value that was applied |
+| `mechanism` | `str` | How the change was made (`"sysctl"`, `"modprobe"`, `"file_create"`) |
+
+#### `HostState`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `init_timestamp` | `str` | ISO 8601 timestamp when `host init` was last run |
+| `changes` | `list[HostChange]` | All changes applied during init (used to restore) |
+
+### `fcm.core.binary_manager`
+
+#### `BinaryVersion`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | `str` | Semantic version string, e.g. `"1.12.0"` |
+| `firecracker_path` | `Path \| None` | Path to the firecracker binary |
+| `jailer_path` | `Path \| None` | Path to the jailer binary |
+| `is_active` | `bool` | Whether this version is symlinked as the active binary |
 
 ---
 
-## fcm.exceptions
+## Error Handling
 
-### Exception hierarchy
+All exceptions derive from `fcm.exceptions.FCMError`.
+
+### Exception Hierarchy
 
 ```
 FCMError
@@ -628,7 +181,571 @@ FCMError
 ├── ProcessError          — Subprocess execution failure
 ├── AssetNotFoundError    — Asset not found locally or remotely
 ├── BinaryError           — Firecracker/jailer binary management failure
-└── KeyError              — SSH key management failure
+└── FCMKeyError           — SSH key management failure
 ```
 
-All exceptions derive from `fcm.exceptions.FCMError` which derives from `Exception`.
+### Catching Typed Exceptions
+
+```python
+from fcm.api import network, keys
+from fcm.exceptions import FCMError, NetworkError, FCMKeyError
+
+try:
+    net = network.create_network("my-net", cidr="192.168.100.0/24")
+except NetworkError as e:
+    print(f"Network setup failed: {e}")
+except FCMError as e:
+    print(f"Unexpected FCM error: {e}")
+
+try:
+    key_info = keys.add_key("my-key", "/home/user/.ssh/id_ed25519.pub")
+except FCMKeyError as e:
+    print(f"Key error: {e}")
+```
+
+---
+
+## Function Reference
+
+### `fcm.api.vms`
+
+#### `list_vms(include_stopped: bool = True) -> list[VMInstance]`
+
+Return all registered VMs.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `include_stopped` | `bool` | `True` | When `False`, only return VMs with `RUNNING` status |
+
+**Returns:** List of `VMInstance` objects.
+
+---
+
+#### `get_vm(name: str) -> VMInstance | None`
+
+Look up a VM by name.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name as registered in the cache |
+
+**Returns:** `VMInstance` if found, `None` otherwise.
+
+---
+
+#### `deregister_vm(name: str) -> None`
+
+Remove a VM entry from the state registry. Does not stop the process or clean up
+networking — use `fcm vm remove` (or the CLI) for the full teardown sequence.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name to deregister |
+
+**Raises:** `VMNotFoundError` if the VM does not exist.
+
+---
+
+#### `vm_cache_dir(name: str) -> Path`
+
+Return the cache directory path for a VM. The directory may not yet exist.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name |
+
+**Returns:** Absolute path to `<cache-root>/vms/<name>/`.
+
+---
+
+### `fcm.api.network`
+
+#### `list_networks() -> list[NetworkConfig]`
+
+List all named networks.
+
+**Returns:** List of `NetworkConfig` instances.
+
+---
+
+#### `get_network(name: str) -> NetworkConfig | None`
+
+Get a named network by name.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Network name |
+
+**Returns:** `NetworkConfig` if found, `None` if not found.
+
+---
+
+#### `get_network_leases(name: str) -> list[NetworkLease]`
+
+Get all IP leases for a network.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Network name |
+
+**Returns:** List of `NetworkLease` instances.
+
+---
+
+#### `create_network(name: str, cidr: str | None = None, gateway: str | None = None, nat: bool = True) -> NetworkConfig`
+
+Create a named bridge network: sets up the bridge device, assigns the gateway IP, and optionally configures NAT rules.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Network name (must be unique) |
+| `cidr` | `str \| None` | `None` | Subnet in CIDR notation, e.g. `"192.168.100.0/24"`. Auto-allocated if `None`. |
+| `gateway` | `str \| None` | `None` | Host-side gateway IP. Defaults to the first usable host in the CIDR. |
+| `nat` | `bool` | `True` | Configure NAT/masquerade for outbound internet access |
+
+**Returns:** The created `NetworkConfig`.
+
+**Raises:** `NetworkError` if the name already exists, the CIDR overlaps an existing network, or bridge/iptables setup fails.
+
+---
+
+#### `remove_network(name: str) -> None`
+
+Remove a named network: tears down the bridge device and NAT rules, removes persisted state.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Network name |
+
+**Raises:** `NetworkError` if the network has VMs attached or does not exist.
+
+---
+
+#### `inspect_network(name: str) -> dict[str, object]`
+
+Return full details for a named network, including live bridge status and attached VMs.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Network name |
+
+**Returns:** Dict with keys: `name`, `cidr`, `gateway`, `bridge`, `nat_enabled`, `created_at`, `bridge_exists`, `vms`.
+
+**Raises:** `NetworkError` if network not found.
+
+---
+
+#### `allocate_network_ip(network_name: str, vm_name: str) -> str`
+
+Pick the next available IP from a network's subnet and register the lease.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `network_name` | `str` | — | Network name |
+| `vm_name` | `str` | — | VM name to associate with the lease |
+
+**Returns:** Allocated IP address string.
+
+**Raises:** `NetworkError` if the network does not exist or no IPs are available.
+
+---
+
+#### `release_network_ip(network_name: str, vm_name: str) -> None`
+
+Release a VM's IP lease from a network, returning the address to the pool.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `network_name` | `str` | — | Network name |
+| `vm_name` | `str` | — | VM name whose lease to release |
+
+---
+
+#### `ensure_default_network() -> NetworkConfig`
+
+Ensure the default network exists, creating it if needed. Called automatically by `host init`.
+
+**Returns:** The default `NetworkConfig` (existing or newly created).
+
+**Raises:** `NetworkError` if creation fails.
+
+---
+
+### `fcm.api.assets`
+
+#### `fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion`
+
+Download a specific Firecracker binary version from GitHub releases and extract it.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `version` | `str` | — | Semantic version string, e.g. `"1.12.0"` |
+| `bin_dir` | `Path \| None` | `None` | Override cache directory. Defaults to `<cache-root>/bin/`. |
+
+**Returns:** `BinaryVersion` describing the downloaded binaries.
+
+**Raises:** `BinaryError` on download or extraction failure.
+
+---
+
+#### `list_local_versions(bin_dir: Path | None = None) -> list[BinaryVersion]`
+
+List all locally cached Firecracker binary versions.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `bin_dir` | `Path \| None` | `None` | Override cache directory |
+
+**Returns:** List of `BinaryVersion` instances, sorted newest first. `is_active=True` for the currently symlinked version.
+
+---
+
+#### `list_remote_versions(limit: int = 10) -> list[str]`
+
+Fetch available Firecracker versions from the GitHub releases API.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | `int` | `10` | Maximum number of versions to return |
+
+**Returns:** List of version strings (no `v` prefix), newest first.
+
+**Raises:** `BinaryError` on network failure.
+
+---
+
+#### `set_active_version(version: str, bin_dir: Path | None = None) -> None`
+
+Symlink a specific version as the active Firecracker binary.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `version` | `str` | — | Version to activate |
+| `bin_dir` | `Path \| None` | `None` | Override cache directory |
+
+**Raises:** `BinaryError` if the version is not locally cached.
+
+---
+
+#### `remove_version(version: str, bin_dir: Path | None = None) -> None`
+
+Remove a cached Firecracker binary version.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `version` | `str` | — | Version to remove |
+| `bin_dir` | `Path \| None` | `None` | Override cache directory |
+
+**Raises:** `BinaryError` if the version is not found.
+
+---
+
+#### `fetch_image(spec: object, output_dir: Path, force: bool = False) -> Path`
+
+Download and convert a VM rootfs image (qcow2, tar, or raw) to an ext4 file.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `spec` | `ImageSpec` | — | Image specification (from `load_images_config`) |
+| `output_dir` | `Path` | — | Directory to write the output `.ext4` file |
+| `force` | `bool` | `False` | Re-download even if already cached |
+
+**Returns:** Path to the output `.ext4` file.
+
+**Raises:** `ImageError` on download or conversion failure.
+
+---
+
+#### `load_images_config(config_path: Path | None = None) -> list[object]`
+
+Load the built-in image catalogue from YAML.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `config_path` | `Path \| None` | `None` | Override config file path. Defaults to the bundled `assets/images.yaml`. |
+
+**Returns:** List of image spec objects.
+
+---
+
+#### `build_kernel_pipeline(version: str, source_url: str, output_path: Path, build_dir: Path, sha256: str | None = None, jobs: int | None = None) -> Path`
+
+Run the full kernel build pipeline: download source, extract, configure, compile, copy `vmlinux`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `version` | `str` | — | Kernel version string, e.g. `"6.1.102"` |
+| `source_url` | `str` | — | URL to download the kernel tarball from |
+| `output_path` | `Path` | — | Destination path for the compiled `vmlinux` |
+| `build_dir` | `Path` | — | Directory for intermediate build artifacts |
+| `sha256` | `str \| None` | `None` | Expected SHA256 checksum for integrity verification |
+| `jobs` | `int \| None` | `None` | Parallel make jobs. Defaults to CPU count. |
+
+**Returns:** Path to the compiled `vmlinux`.
+
+**Raises:** `KernelError` on any build step failure.
+
+---
+
+### `fcm.api.keys`
+
+#### `list_keys() -> list[KeyInfo]`
+
+List all keys in the cache.
+
+**Returns:** List of `KeyInfo` instances.
+
+---
+
+#### `get_key(name: str) -> KeyInfo | None`
+
+Get a key by name.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Key name |
+
+**Returns:** `KeyInfo` if found, `None` otherwise.
+
+---
+
+#### `add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> KeyInfo`
+
+Import an existing `.pub` file into the cache under a given name.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Name to register the key under |
+| `pub_key_path` | `str \| Path` | — | Path to the `.pub` file on disk |
+| `overwrite` | `bool` | `False` | Replace an existing key with the same name |
+
+**Returns:** `KeyInfo` with fingerprint, algorithm, comment, and timestamp.
+
+**Raises:** `FCMKeyError` if the file is not found, empty, or the name already exists (when `overwrite=False`).
+
+---
+
+#### `create_key(name: str, output_dir: str | Path | None = None, comment: str | None = None, overwrite: bool = False) -> tuple[KeyInfo, Path]`
+
+Generate a new ED25519 keypair via `ssh-keygen` and register the public key in the cache.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Key name and base filename |
+| `output_dir` | `str \| Path \| None` | `None` | Directory for the private key file. Defaults to `~/.ssh/`. |
+| `comment` | `str \| None` | `None` | Key comment. Defaults to `name@hostname`. |
+| `overwrite` | `bool` | `False` | Overwrite existing key files and registry entry |
+
+**Returns:** `(KeyInfo, private_key_path)` tuple.
+
+**Raises:** `FCMKeyError` if `ssh-keygen` fails or the key already exists (when `overwrite=False`).
+
+---
+
+#### `remove_key(name: str) -> None`
+
+Remove a key from the cache registry and delete its `.pub` file from the cache.
+Does not touch private key files on disk.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Key name |
+
+**Raises:** `FCMKeyError` if the key is not found.
+
+---
+
+#### `inspect_key(name: str) -> dict[str, object]`
+
+Return detailed info about a named key, including the full public key content.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | Key name |
+
+**Returns:** Dict with keys: `name`, `fingerprint`, `algorithm`, `comment`, `added_at`, `public_key`.
+
+**Raises:** `FCMKeyError` if the key is not found.
+
+---
+
+### `fcm.api.host`
+
+#### `init_host(cache_dir: Path) -> list[HostChange]`
+
+Apply host configuration: enable IP forwarding, persist sysctl, load KVM modules.
+Fully idempotent — if already configured, returns an empty list.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cache_dir` | `Path` | — | Cache root directory for saving the host state snapshot |
+
+**Returns:** List of `HostChange` describing every change applied.
+
+**Raises:** `HostError` if KVM is not accessible, required binaries are missing, or an operation fails.
+
+---
+
+#### `restore_host(cache_dir: Path) -> list[HostChange]`
+
+Revert host changes using the saved snapshot created by `init_host`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cache_dir` | `Path` | — | Cache root directory containing the state snapshot |
+
+**Returns:** List of `HostChange` describing reverted changes.
+
+**Raises:** `HostError` if no saved state exists or a revert operation fails.
+
+---
+
+#### `prune_host(cache_dir: Path) -> list[str]`
+
+Tear down all networking added by this tool: every bridge device, every TAP device, every
+iptables rule, and the IP forwarding sysctl change. Does not remove VM cache files, images,
+kernels, or binaries.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cache_dir` | `Path` | — | Cache root directory |
+
+**Returns:** List of summary strings describing what was torn down.
+
+---
+
+#### `get_host_state(cache_dir: Path) -> HostState | None`
+
+Load and return the saved host state snapshot.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cache_dir` | `Path` | — | Cache root directory |
+
+**Returns:** `HostState` if a snapshot exists, `None` otherwise.
+
+**Raises:** `HostError` if the state file is corrupt.
+
+---
+
+#### `check_kvm_access() -> bool`
+
+Return `True` if `/dev/kvm` exists and is readable and writable by the current user.
+
+---
+
+#### `check_required_binaries() -> list[str]`
+
+Return a list of missing required binary names (`ip`, `iptables`, `qemu-img`, and one of
+`mkisofs`/`genisoimage`). An empty list means all required binaries are present.
+
+---
+
+#### `get_ip_forward_status() -> str | None`
+
+Return the current value of `net.ipv4.ip_forward` (`"0"` or `"1"`), or `None` on error.
+
+---
+
+#### `default_cache_dir() -> Path`
+
+Return the default cache root directory (`~/.cache/firecracker-manager` or `$FCM_CACHE_DIR`).
+
+---
+
+## End-to-End Example
+
+The following complete script creates a VM from scratch using the Python API:
+
+```python
+#!/usr/bin/env python3
+"""
+End-to-end example: create a Firecracker VM using the fcm Python API.
+
+Prerequisites:
+    - Linux x86_64 with KVM (/dev/kvm accessible)
+    - System packages: ip, iptables, genisoimage/mkisofs, qemu-img
+    - Run as root (networking operations require root)
+    - pip install firecracker-manager
+"""
+
+from pathlib import Path
+
+from fcm.api import assets, host, keys, network, vms
+from fcm.exceptions import FCMError
+
+CACHE_DIR = host.default_cache_dir()
+
+
+def main() -> None:
+    # 1. Initialise the host (idempotent — safe to run repeatedly)
+    changes = host.init_host(CACHE_DIR)
+    if changes:
+        for change in changes:
+            print(f"  Applied: {change.setting} = {change.applied_value}")
+    else:
+        print("Host already configured.")
+
+    # 2. Ensure a Firecracker binary is available
+    local = assets.list_local_versions()
+    if not local:
+        print("Downloading Firecracker 1.12.0 ...")
+        assets.fetch_binary("1.12.0")
+        assets.set_active_version("1.12.0")
+
+    # 3. Ensure a kernel is available
+    kernels_dir = CACHE_DIR / "kernels"
+    vmlinux = kernels_dir / "vmlinux"
+    if not vmlinux.exists():
+        print("Fetching prebuilt kernel ...")
+        # This requires the CLI: run `fcm asset kernel fetch` instead,
+        # or call build_kernel_pipeline() to build from source.
+
+    # 4. Ensure an image is available
+    images_dir = CACHE_DIR / "images"
+    image_path = images_dir / "ubuntu-24.04.ext4"
+    if not image_path.exists():
+        print("Fetching Ubuntu 24.04 image ...")
+        image_specs = assets.load_images_config()
+        spec = next(s for s in image_specs if s.id == "ubuntu-24.04")  # type: ignore[attr-defined]
+        assets.fetch_image(spec, images_dir)
+
+    # 5. Register an SSH key
+    pub_key_path = Path.home() / ".ssh" / "id_ed25519.pub"
+    if pub_key_path.exists() and not keys.get_key("my-key"):
+        key_info = keys.add_key("my-key", pub_key_path)
+        print(f"Registered key: {key_info.name}  {key_info.fingerprint}")
+
+    # 6. Create a named network
+    my_network = network.get_network("example-net")
+    if my_network is None:
+        my_network = network.create_network(
+            name="example-net",
+            cidr="192.168.200.0/24",
+            nat=True,
+        )
+        print(f"Created network '{my_network.name}' — bridge: {my_network.bridge}")
+
+    # 7. Allocate an IP for the VM
+    vm_ip = network.allocate_network_ip("example-net", "my-api-vm")
+    print(f"Allocated IP: {vm_ip}")
+
+    # 8. List VMs
+    all_vms = vms.list_vms()
+    print(f"\nRegistered VMs ({len(all_vms)}):")
+    for vm in all_vms:
+        print(f"  {vm.name:20s}  {vm.status.value:10s}  {vm.ip}")
+
+    # 9. Clean up: release the IP and remove the network
+    network.release_network_ip("example-net", "my-api-vm")
+    network.remove_network("example-net")
+    print("Cleaned up.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except FCMError as e:
+        print(f"Error: {e}")
+        raise SystemExit(1)
+```

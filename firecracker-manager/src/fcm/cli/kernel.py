@@ -41,8 +41,8 @@ def build(
         raise typer.Exit(code=1)
 
 
-@app.command(name="list")
-def list_kernels(
+@app.command(name="ls")
+def ls_kernels(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
 ) -> None:
@@ -65,6 +65,15 @@ def list_kernels(
             columns=["Name", "Size"],
             rows=kernels,
         )
+
+
+@app.command(name="list", hidden=True)
+def list_kernels(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
+) -> None:
+    """Alias for ls."""
+    ls_kernels(json_output=json_output, kernels_dir=kernels_dir)
 
 
 @app.command()

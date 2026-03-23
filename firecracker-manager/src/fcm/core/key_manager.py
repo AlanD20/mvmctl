@@ -9,8 +9,9 @@ import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from fcm.exceptions import KeyError as FCMKeyError
+from fcm.exceptions import FCMKeyError
 from fcm.utils.fs import get_keys_dir
 
 logger = logging.getLogger(__name__)
@@ -31,14 +32,15 @@ def _registry_path() -> Path:
     return get_keys_dir() / "registry.json"
 
 
-def _load_registry() -> dict[str, dict]:
+def _load_registry() -> dict[str, dict[str, Any]]:
     path = _registry_path()
     if not path.exists():
         return {}
-    return json.loads(path.read_text())
+    data: dict[str, dict[str, Any]] = json.loads(path.read_text())
+    return data
 
 
-def _save_registry(registry: dict[str, dict]) -> None:
+def _save_registry(registry: dict[str, dict[str, Any]]) -> None:
     path = _registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(registry, indent=2))
@@ -50,9 +52,11 @@ def _compute_fingerprint(pub_key_content: str) -> str:
     if len(parts) < 2:
         raise FCMKeyError("Invalid public key format")
     import base64
+
     key_bytes = base64.b64decode(parts[1])
     digest = hashlib.sha256(key_bytes).digest()
     import base64 as b64
+
     fp = b64.b64encode(digest).rstrip(b"=").decode()
     return f"SHA256:{fp}"
 
@@ -162,14 +166,19 @@ def create_key(
 
     if comment is None:
         import socket
+
         comment = f"{name}@{socket.gethostname()}"
 
     cmd = [
         "ssh-keygen",
-        "-t", "ed25519",
-        "-f", str(private_key_path),
-        "-N", "",
-        "-C", comment,
+        "-t",
+        "ed25519",
+        "-f",
+        str(private_key_path),
+        "-N",
+        "",
+        "-C",
+        comment,
     ]
     if overwrite:
         cmd.append("-y")  # not needed, but we handle existing file
@@ -180,10 +189,14 @@ def create_key(
             pub_key_path.unlink()
         cmd = [
             "ssh-keygen",
-            "-t", "ed25519",
-            "-f", str(private_key_path),
-            "-N", "",
-            "-C", comment,
+            "-t",
+            "ed25519",
+            "-f",
+            str(private_key_path),
+            "-N",
+            "",
+            "-C",
+            comment,
         ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)

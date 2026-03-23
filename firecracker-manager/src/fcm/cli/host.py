@@ -38,12 +38,18 @@ def init_cmd() -> None:
 
     if not changes:
         print_info("Host already configured — nothing to do.")
-        return
+    else:
+        for change in changes:
+            print_success(f"{change.setting}: {change.original_value!r} → {change.applied_value!r}")
+        print_success(f"Host initialized ({len(changes)} change(s) applied).")
 
-    for change in changes:
-        print_success(f"{change.setting}: {change.original_value!r} → {change.applied_value!r}")
+    from fcm.core.network_manager import ensure_default_network
 
-    print_success(f"Host initialized ({len(changes)} change(s) applied).")
+    try:
+        ensure_default_network()
+        print_success("Default network ready.")
+    except Exception as e:
+        print_warning(f"Default network setup skipped: {e}")
 
 
 @app.command(name="ls")

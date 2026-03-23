@@ -57,8 +57,8 @@ def fetch_all(
     typer.echo(f"\n{success_count}/{len(images)} images ready")
 
 
-@app.command(name="list")
-def list_images(
+@app.command(name="ls")
+def ls_images(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
 ) -> None:
@@ -83,6 +83,15 @@ def list_images(
             columns=["", "ID", "Name", "Format"],
             rows=rows,
         )
+
+
+@app.command(name="list", hidden=True)
+def list_images(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+) -> None:
+    """Alias for ls."""
+    ls_images(json_output=json_output, images_dir=images_dir)
 
 
 @app.command()

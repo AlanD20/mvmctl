@@ -13,7 +13,7 @@ from fcm.core.key_manager import (
     list_keys,
     remove_key,
 )
-from fcm.exceptions import KeyError as FCMKeyError
+from fcm.exceptions import FCMKeyError
 from fcm.utils.console import print_error, print_info, print_success
 
 app = typer.Typer(help="SSH key management", no_args_is_help=True)
@@ -36,6 +36,7 @@ def ls(
 
     if json_output:
         from dataclasses import asdict
+
         typer.echo(json.dumps([asdict(k) for k in keys], indent=2))
         return
 
@@ -65,13 +66,23 @@ def list_cmd(
     ls(json_output=json_output)
 
 
-@app.command()
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def add(
-    name: str = typer.Argument(..., help="Name for this key"),
-    public_key_path: str = typer.Argument(..., help="Path to public key file"),
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Name for this key"),
+    public_key_path: str | None = typer.Argument(None, help="Path to public key file"),
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing key"),
 ) -> None:
     """Import an existing public key into the cache."""
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
+    if public_key_path is None:
+        print_error("Missing argument 'PUBLIC_KEY_PATH'")
+        raise typer.Exit(code=1)
     try:
         info = add_key(name, public_key_path, overwrite=overwrite)
     except FCMKeyError as e:
@@ -85,14 +96,23 @@ def add(
         print_info(f"  Comment:     {info.comment}")
 
 
-@app.command()
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def create(
-    name: str = typer.Argument(..., help="Name for the new keypair"),
-    output: str = typer.Option(None, "--output", help="Directory for private key (default: ~/.ssh/)"),
-    comment: str = typer.Option(None, "--comment", help="Comment for the key"),
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Name for the new keypair"),
+    output: str | None = typer.Option(
+        None, "--output", help="Directory for private key (default: ~/.ssh/)"
+    ),
+    comment: str | None = typer.Option(None, "--comment", help="Comment for the key"),
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing key file"),
 ) -> None:
     """Generate a new ED25519 keypair."""
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
     try:
         info, private_key_path = create_key(
             name=name,
@@ -110,12 +130,21 @@ def create(
     print_info(f"  Fingerprint: {info.fingerprint}")
 
 
-@app.command(name="remove")
+@app.command(
+    name="remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
 def remove(
-    name: str = typer.Argument(..., help="Key name"),
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Key name"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove a key from the cache."""
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
     if not force:
         typer.confirm(f"Remove key '{name}' from cache?", abort=True)
 
@@ -128,21 +157,46 @@ def remove(
     print_success(f"Key '{name}' removed from cache")
 
 
-@app.command(name="rm", hidden=True)
+@app.command(
+    name="rm",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
 def rm(
-    name: str = typer.Argument(..., help="Key name"),
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Key name"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Alias for remove."""
-    remove(name=name, force=force)
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
+    if not force:
+        typer.confirm(f"Remove key '{name}' from cache?", abort=True)
+    try:
+        remove_key(name)
+    except FCMKeyError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    print_success(f"Key '{name}' removed from cache")
 
 
-@app.command()
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def inspect(
-    name: str = typer.Argument(..., help="Key name"),
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Key name"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a key."""
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
     try:
         info = inspect_key(name)
     except FCMKeyError as e:

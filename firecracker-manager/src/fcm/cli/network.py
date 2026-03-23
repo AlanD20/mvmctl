@@ -84,18 +84,26 @@ def list_cmd(
     ls(json_output=json_output)
 
 
-@app.command()
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def create(
-    name: str = typer.Argument(..., help="Network name"),
-    cidr: str = typer.Option(
-        ..., "--cidr", help="IP subnet in CIDR notation (e.g. 192.168.100.0/24)"
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Network name"),
+    cidr: str | None = typer.Option(
+        None, "--cidr", help="IP subnet in CIDR notation (e.g. 192.168.100.0/24)"
     ),
-    gateway: str | None = typer.Option(
-        None, "--gateway", help="Gateway IP for the bridge"
-    ),
+    gateway: str | None = typer.Option(None, "--gateway", help="Gateway IP for the bridge"),
     no_nat: bool = typer.Option(False, "--no-nat", help="Disable NAT/masquerade"),
 ) -> None:
     """Create a named network."""
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
+    if cidr is None:
+        print_error("Missing required option '--cidr'")
+        raise typer.Exit(code=1)
     try:
         config = create_network(
             name=name,
@@ -114,12 +122,21 @@ def create(
     print_info(f"  NAT:     {'enabled' if config.nat_enabled else 'disabled'}")
 
 
-@app.command(name="remove")
+@app.command(
+    name="remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
 def remove(
-    name: str = typer.Argument(..., help="Network name"),
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Network name"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove a named network."""
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
     if not force:
         typer.confirm(f"Remove network '{name}'?", abort=True)
 
@@ -132,21 +149,46 @@ def remove(
     print_success(f"Network '{name}' removed")
 
 
-@app.command(name="rm", hidden=True)
+@app.command(
+    name="rm",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
 def rm(
-    name: str = typer.Argument(..., help="Network name"),
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Network name"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Alias for remove."""
-    remove(name=name, force=force)
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
+    if not force:
+        typer.confirm(f"Remove network '{name}'?", abort=True)
+    try:
+        remove_network(name)
+    except NetworkError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    print_success(f"Network '{name}' removed")
 
 
-@app.command()
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def inspect(
-    name: str = typer.Argument(..., help="Network name"),
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Network name"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a network."""
+    if name == "help":
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+    if name is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=1)
     try:
         info = inspect_network(name)
     except NetworkError as e:

@@ -15,11 +15,18 @@ from fcm.core.image import fetch_image, load_images_config
 from fcm.core.kernel import build_kernel_pipeline
 from fcm.core.key_manager import add_key, create_key, list_keys
 from fcm.exceptions import BinaryError, HostError
-from fcm.exceptions import KeyError as FCMKeyError
+from fcm.exceptions import FCMKeyError
 from fcm.utils.console import print_info, print_success, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
 app = typer.Typer(help="Guided onboarding")
+
+
+@app.command(name="help", hidden=True)
+def help_cmd(ctx: typer.Context) -> None:
+    """Show help for the configure command."""
+    typer.echo(ctx.parent.get_help() if ctx.parent else "")
+    raise typer.Exit()
 
 
 def _step_host(skip: bool, non_interactive: bool) -> None:
@@ -48,24 +55,38 @@ def _step_host(skip: bool, non_interactive: bool) -> None:
     if non_interactive:
         try:
             init_host(cache_dir)
-            print_success("  Host initialized")
+            print_success(" Host initialized")
         except HostError as e:
-            print_warning(f"  Host init failed: {e}")
+            print_warning(f" Host init failed: {e}")
+        try:
+            from fcm.core.network_manager import ensure_default_network
+
+            ensure_default_network()
+            print_success(" Default network ready")
+        except Exception:
+            pass
         return
 
-    print_info("  This will enable IP forwarding and other host settings.")
-    if typer.confirm("  Proceed with host init?", default=True):
+    print_info(" This will enable IP forwarding and other host settings.")
+    if typer.confirm(" Proceed with host init?", default=True):
         try:
             changes = init_host(cache_dir)
             if changes:
-                print_success(f"  Host initialized ({len(changes)} change(s))")
+                print_success(f" Host initialized ({len(changes)} change(s))")
             else:
-                print_success("  Already configured")
+                print_success(" Already configured")
+            try:
+                from fcm.core.network_manager import ensure_default_network
+
+                ensure_default_network()
+                print_success(" Default network ready")
+            except Exception:
+                pass
         except HostError as e:
-            print_warning(f"  Host init failed: {e}")
-            print_info("  Run 'fcm host init' manually when ready.")
+            print_warning(f" Host init failed: {e}")
+            print_info(" Run 'fcm host init' manually when ready.")
     else:
-        print_info("  Skipped. Run 'fcm host init' manually when ready.")
+        print_info(" Skipped. Run 'fcm host init' manually when ready.")
 
 
 def _step_binary(non_interactive: bool) -> None:
@@ -158,8 +179,10 @@ def _step_image(non_interactive: bool) -> None:
     print_info("\n[4/6] Root filesystem image")
 
     images_dir = get_images_dir()
-    if images_dir.exists() and any(images_dir.glob("*.ext4")) or (
-        images_dir.exists() and any(images_dir.glob("*.btrfs"))
+    if (
+        images_dir.exists()
+        and any(images_dir.glob("*.ext4"))
+        or (images_dir.exists() and any(images_dir.glob("*.btrfs")))
     ):
         print_success("  Image available")
         return
@@ -290,6 +313,7 @@ def _step_summary() -> None:
     for label, ok in checks:
         status = "[green]ready[/green]" if ok else "[yellow]missing[/yellow]"
         from rich.console import Console
+
         Console().print(f"  {label}: {status}")
         if not ok:
             all_ok = False
@@ -307,9 +331,7 @@ def configure(
     non_interactive: bool = typer.Option(
         False, "--non-interactive", help="Use defaults, skip prompts"
     ),
-    skip_host: bool = typer.Option(
-        False, "--skip-host", help="Skip host init step"
-    ),
+    skip_host: bool = typer.Option(False, "--skip-host", help="Skip host init step"),
 ) -> None:
     """Guided setup wizard — run this to get started."""
     print_info("Firecracker Manager — Setup Wizard")

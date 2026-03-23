@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from fcm.cli.key import app
 from fcm.core.key_manager import KeyInfo
-from fcm.exceptions import KeyError as FCMKeyError
+from fcm.exceptions import FCMKeyError
 
 runner = CliRunner()
 
@@ -169,3 +169,42 @@ def test_inspect_error(mock_inspect):
     result = runner.invoke(app, ["inspect", "testkey"])
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# help subcommand at subcommand level (Phase 4 §5)
+# ---------------------------------------------------------------------------
+
+
+def test_add_help_arg_shows_help():
+    """key add help → same as key add --help."""
+    result = runner.invoke(app, ["add", "help"])
+    assert result.exit_code == 0
+    assert "Usage" in result.output
+
+
+def test_add_no_args_shows_help():
+    """key add with no args prints help."""
+    result = runner.invoke(app, ["add"])
+    assert "Usage" in result.output
+
+
+def test_create_help_arg_shows_help():
+    """key create help → same as key create --help."""
+    result = runner.invoke(app, ["create", "help"])
+    assert result.exit_code == 0
+    assert "Usage" in result.output
+
+
+def test_remove_help_arg_shows_help():
+    """key remove help → same as key remove --help."""
+    result = runner.invoke(app, ["remove", "help"])
+    assert result.exit_code == 0
+    assert "Usage" in result.output
+
+
+def test_inspect_help_arg_shows_help():
+    """key inspect help → same as key inspect --help."""
+    result = runner.invoke(app, ["inspect", "help"])
+    assert result.exit_code == 0
+    assert "Usage" in result.output

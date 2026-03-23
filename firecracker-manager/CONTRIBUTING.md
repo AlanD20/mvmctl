@@ -171,6 +171,37 @@ All FCM environment variables use the `FCM_` prefix.
 
 When writing code that reads config or paths, always go through the settings module rather than reading env vars directly. That keeps everything in one place and makes testing easier.
 
+## Build System
+
+### Project Name (Single Source of Truth)
+
+The project name is defined once in `pyproject.toml` under `[project] name`. Changing it there automatically propagates to:
+
+- The CLI entry point name (via `[project.scripts]`)
+- The environment variable prefix (`FCM_` — derived from `constants.py` which reads from `pyproject.toml`)
+- The cache directory name (`~/.cache/firecracker-manager/`)
+- The network device prefixes (`fcm-br0`, `fc-<name>-0`)
+
+To rename the project, update `pyproject.toml` and re-run the PyInstaller command with `--name <new-name>`. No grep-and-replace needed.
+
+### Building the Standalone Binary
+
+The project ships a self-contained single-file binary built with PyInstaller. The binary bundles all runtime dependencies and requires no Python installation on the target machine.
+
+```bash
+git clone <repo-url>
+cd firecracker-manager
+
+pip install -e ".[dev]" pyinstaller
+
+pyinstaller --onefile --name fcm src/fcm/main.py
+
+./dist/fcm --version
+./dist/fcm --help
+```
+
+The GitHub Actions `release.yml` workflow runs this automatically on every tagged release and uploads the binary as a release asset. Two binaries are produced — one built on `ubuntu-22.04` and one on `ubuntu-24.04` — because glibc version differences mean a binary from 24.04 will not run on 22.04.
+
 ## Questions
 
 Open an issue if something in this guide is unclear or out of date.

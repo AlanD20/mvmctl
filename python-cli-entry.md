@@ -140,3 +140,4 @@ After completing each phase:
 - **Status files must stay current.** An outdated status file is worse than no status
   file — it causes confusion about what is actually done. Update them continuously as you
   work, not in a single batch at the end.
+- Ensure every unused files are added to gitignore including __pycache__ directory under every sub-directory if this pycache directory is not needed! 

@@ -301,7 +301,51 @@ The document must cover:
 
 ---
 
-## 7. Distribution — binary and public package
+## 7. Versioning
+
+The CLI must expose its version via both `--version` and the `version` subcommand. The
+version value must be read from `pyproject.toml` under `[project] version` using the same
+build-time injection mechanism already established for the project name. There must be no
+separate version constant anywhere else in the codebase — the version has one source of
+truth, the same way the project name does.
+
+```
+<binary> --version      Print the version string and exit.
+<binary> version        Identical output to --version. Follows the same help consistency
+                          rule: version help and version --help both show usage.
+```
+
+`CONTRIBUTING.md` must include a dedicated "Bumping the version" section explaining the
+one file to edit (`pyproject.toml`) and the exact steps required to cut a release. This
+section must reference `docs/RELEASE.md` for the full release process.
+
+---
+
+## 8. Release documentation (`docs/RELEASE.md`)
+
+Create `firecracker-manager/docs/RELEASE.md` as the single reference for anyone cutting a
+release. Nothing release-related should require reading multiple files.
+
+The document must cover:
+
+- **Bumping the version** — edit `[project] version` in `pyproject.toml`. Explain
+  semantic versioning (`MAJOR.MINOR.PATCH`) and when to increment each component.
+- **Tagging and pushing** — the exact git commands to create an annotated tag
+  (`git tag -a v1.2.3 -m "..."`) and push it (`git push origin v1.2.3`). Explain that
+  pushing a tag is what triggers the `release.yml` workflow.
+- **What the release workflow does automatically** — binary builds on ubuntu-22.04 and
+  ubuntu-24.04, PyPI publish, GitHub release creation, artifact upload. The human does not
+  need to do any of this manually.
+- **Verifying a release** — how to confirm the binary works (`curl` download + `--version`
+  check), how to confirm the PyPI package is live (`pip install <project-name>==<version>`),
+  and how to confirm pipx/uvx work.
+- **Issuing a hotfix** — branch from the release tag, fix, bump patch version, tag, push.
+- **Yanking a bad release** — how to yank from PyPI (`pip install twine` + `twine ... yank`)
+  and how to mark a GitHub release as a pre-release or delete it.
+
+---
+
+## 9. Distribution — binary and public package
 
 The project must be fully prepared for public distribution through three channels:
 the prebuilt binary (GitHub releases), pip, and pipx/uvx.
@@ -396,7 +440,7 @@ See the "Building from source" section below.
 
 ---
 
-## 8. Summary of all `vm create` flags (phases 1–4 combined)
+## 10. Summary of all `vm create` flags (phases 1–4 combined)
 
 For the agent's reference, the complete and final flag set for `vm create`:
 
