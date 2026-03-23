@@ -10,7 +10,7 @@ class ImageSpec:
     id: str
     name: str
     source: str
-    format: str
+    format: str  # noqa: N816
     convert_to: str
     size_mib: int
     sha256: str | None = None

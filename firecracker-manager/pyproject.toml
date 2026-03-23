@@ -31,12 +31,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fcm"]
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
 
 [tool.mypy]
 python_version = "3.13"
@@ -47,7 +50,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=src/fcm --cov-branch --cov-report=term-missing"
+addopts = "--cov=src/fcm --cov-branch --cov-report=term-missing --cov-fail-under=79"
 
 [dependency-groups]
 dev = [

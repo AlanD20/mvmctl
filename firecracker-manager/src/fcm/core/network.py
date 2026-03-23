@@ -31,9 +31,6 @@ SUBNET = DEFAULT_NETWORK_CIDR
 GATEWAY = DEFAULT_NETWORK_GATEWAY
 
 
-_default_interface_cache: str | None = None
-
-
 def get_default_interface() -> str:
     """Get the default network interface by parsing ``ip route show default``.
 

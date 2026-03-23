@@ -15,7 +15,7 @@ from fcm.cli import (
     key,
     configure,
 )  # TODO: P-M8 — lazy-load CLI modules when startup time matters
-from fcm.constants import CLI_NAME
+from fcm.constants import CLI_NAME, env_var
 
 
 def _get_version() -> str:
@@ -74,7 +74,7 @@ def callback(
     elif verbose:
         level = logging.INFO
     else:
-        env_level = os.environ.get("FCM_LOG_LEVEL", "WARNING").upper()
+        env_level = os.environ.get(env_var("LOG_LEVEL"), "WARNING").upper()
         level = getattr(logging, env_level, logging.WARNING)
 
     logging.basicConfig(
