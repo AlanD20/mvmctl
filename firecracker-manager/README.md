@@ -97,8 +97,8 @@ fcm asset image fetch ubuntu-24.04
 sudo fcm vm create --name myvm --image ubuntu-24.04
 # ℹ Creating VM 'myvm'
 # ℹ   IP:     10.20.0.2
-# ℹ   vCPUs:  1
-# ℹ   Memory: 512 MiB
+# ℹ   vCPUs:  2
+# ℹ   Memory: 2048 MiB
 # ✓ VM 'myvm' started (PID 12345)
 # ℹ   SSH ready in ~30-60s: fcm vm ssh --name myvm
 
@@ -109,7 +109,7 @@ fcm vm logs --name myvm --type boot --follow
 fcm vm ssh --name myvm
 
 # 7. List running VMs
-fcm vm list
+fcm vm ls
 # ┌──────────────────────────────────────┐
 # │           Firecracker VMs            │
 # ├───────┬──────────┬─────────┬─────────┤
@@ -302,7 +302,7 @@ Manage Firecracker microVMs.
 |---------|-------------|
 | `fcm vm create` | Create and start a new VM |
 | `fcm vm remove` | Stop and remove a VM |
-| `fcm vm list` | List VMs |
+| `fcm vm ls` | List VMs (alias: `list`) |
 | `fcm vm ssh` | SSH into a VM |
 | `fcm vm logs` | View VM logs |
 | `fcm vm cleanup` | Remove stopped VMs |
@@ -322,11 +322,16 @@ Create and start a new Firecracker VM.
 | `--name, -n NAME` | VM name (required) | — |
 | `--image IMAGE` | Image ID or path to `.ext4` file (required) | — |
 | `--kernel PATH` | Path to vmlinux kernel | auto-detected |
-| `--vcpus N` | Number of vCPUs | 1 |
-| `--mem N` | Memory in MiB | 512 |
+| `--vcpus N` | Number of vCPUs | 2 |
+| `--mem N` | Memory in MiB | 2048 |
 | `--ip ADDRESS` | Guest IP (auto-assigned if omitted) | auto |
+| `--network, --net NAME` | Named network to attach to | `default` |
+| `--mac ADDRESS` | Custom MAC address (auto-generated if omitted) | auto |
+| `--ssh-key NAME_OR_PATH` | SSH public key name (from key cache) or file path | auto-detected |
+| `--user-data PATH` | Path to custom cloud-init user-data file | — |
 | `--user USER` | Default SSH user for cloud-init | `root` |
 | `--enable-api-socket` | Enable Firecracker API socket | false |
+| `--enable-pci` | Enable PCI device support | false |
 | `--firecracker-bin PATH` | Path to firecracker binary | `firecracker` |
 
 **Environment variables for `fcm vm create`:**
@@ -347,6 +352,12 @@ sudo fcm vm create --name myvm --image ubuntu-24.04 --vcpus 4 --mem 4096
 
 # Create VM with static IP and socket enabled
 sudo fcm vm create --name myvm --image ubuntu-24.04 --ip 10.20.0.5 --enable-api-socket
+
+# Create VM on a specific network with a custom MAC
+sudo fcm vm create --name myvm --image ubuntu-24.04 --network my-net --mac 02:FC:00:00:00:05
+
+# Create VM with a specific SSH key and custom user-data
+sudo fcm vm create --name myvm --image ubuntu-24.04 --ssh-key my-key --user-data ./cloud-init.yaml
 ```
 
 #### `fcm vm remove`
@@ -367,9 +378,9 @@ sudo fcm vm remove --name myvm
 sudo fcm vm remove --name myvm --force
 ```
 
-#### `fcm vm list`
+#### `fcm vm ls`
 
-List running and stopped VMs.
+List running and stopped VMs. Also available as `fcm vm list`.
 
 **Flags:**
 
@@ -381,9 +392,9 @@ List running and stopped VMs.
 **Example:**
 
 ```bash
-fcm vm list
-fcm vm list --all
-fcm vm list --json
+fcm vm ls
+fcm vm ls --all
+fcm vm ls --json
 ```
 
 #### `fcm vm ssh`
@@ -529,6 +540,150 @@ fcm vm load --name myvm \
 
 ---
 
+### `fcm network` — Network Management
+
+Manage named bridge networks for VM connectivity.
+
+| Command | Description |
+|---------|-------------|
+| `fcm network ls` | List all networks (alias: `list`) |
+| `fcm network create NAME` | Create a named bridge network |
+| `fcm network remove NAME` | Remove a named network (alias: `rm`) |
+| `fcm network inspect NAME` | Show detailed information about a network |
+
+#### `fcm network create`
+
+**Flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--cidr CIDR` | IP subnet in CIDR notation (required) | — |
+| `--gateway IP` | Gateway IP for the bridge | first usable host in CIDR |
+| `--no-nat` | Disable NAT/masquerade | NAT enabled |
+
+#### `fcm network ls`
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+
+#### `fcm network inspect`
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+
+#### `fcm network remove`
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--force, -f` | Skip confirmation |
+
+**Examples:**
+
+```bash
+# List all networks
+fcm network ls
+
+# Create a custom network
+fcm network create my-net --cidr 192.168.100.0/24
+
+# Create a network without NAT
+fcm network create isolated-net --cidr 10.50.0.0/24 --no-nat
+
+# Inspect a network (shows bridge status, attached VMs, iptables rules)
+fcm network inspect my-net
+
+# Remove a network
+fcm network remove my-net --force
+```
+
+---
+
+### `fcm key` — SSH Key Management
+
+Manage SSH keys used for cloud-init injection into VMs.
+
+| Command | Description |
+|---------|-------------|
+| `fcm key ls` | List all keys in the cache (alias: `list`) |
+| `fcm key add NAME PATH` | Import an existing public key into the cache |
+| `fcm key create NAME` | Generate a new ED25519 keypair |
+| `fcm key remove NAME` | Remove a key from the cache (alias: `rm`) |
+| `fcm key inspect NAME` | Show detailed information about a key |
+
+#### `fcm key add`
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--overwrite` | Overwrite existing key with the same name |
+
+#### `fcm key create`
+
+**Flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--output DIR` | Directory for the private key file | `~/.ssh/` |
+| `--comment TEXT` | Comment for the key | `name@hostname` |
+| `--overwrite` | Overwrite existing key files | false |
+
+#### `fcm key ls`
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+
+#### `fcm key inspect`
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+
+#### `fcm key remove`
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--force, -f` | Skip confirmation |
+
+**Examples:**
+
+```bash
+# List all cached keys
+fcm key ls
+
+# Import an existing public key
+fcm key add my-key ~/.ssh/id_ed25519.pub
+
+# Generate a new keypair
+fcm key create vm-key
+
+# Generate a keypair with custom output and comment
+fcm key create vm-key --output /tmp --comment "firecracker VMs"
+
+# Inspect a key (fingerprint, algorithm, public key content)
+fcm key inspect my-key
+
+# Remove a key from cache
+fcm key remove my-key --force
+```
+
+---
+
 ### `fcm config` — Configuration
 
 Inspect and validate fcm configuration.
@@ -584,38 +739,42 @@ fcm config dump-vm --name myvm
 ```yaml
 # Firecracker runtime settings
 firecracker:
-  binary: ""              # Path to firecracker binary (auto-detected if empty)
-  enable_socket: false    # Enable Firecracker API socket by default
-  enable_pci: false       # Enable PCI device support
+  binary: /usr/local/bin/firecracker   # Path to firecracker binary
+  socket_dir: /tmp/fcm/sockets         # Directory for API sockets
+  run_dir: /tmp/fcm/run                # Runtime directory
+  log_dir: /tmp/fcm/logs               # Log directory
 
 # Default values for new VMs
 vm_defaults:
-  vcpu_count: 2           # Default vCPUs
-  mem_size_mib: 2048      # Default memory in MiB
-  network_interface: "eth0"
+  vcpu_count: 2                        # Default vCPUs
+  mem_size_mib: 2048                   # Default memory in MiB
+  network_interface: eth0
   boot_args: "console=ttyS0 reboot=k panic=1 pci=off"
   disk_size: "2G"
+  enable_api_socket: false
+  enable_pci: false
+  lsm_flags: "landlock,lockdown,yama,integrity,selinux,bpf"
 
 # Network topology
 network:
-  host_bridge: "fcm-br0"          # Bridge interface name (uses project name as prefix)
-  gateway: "10.20.0.1"            # Bridge/gateway IP on the host
-  guest_ip_range: "10.20.0.0/24"  # IP pool for auto-assignment
-  mask: "255.255.255.0"
-  tap_prefix: "fcm"               # Prefix for TAP device names
+  single_vm:
+    tap_dev: "fc-tap0"
+    guest_ip: "10.10.0.2"
+    host_ip: "10.10.0.1"
+    mask: "255.255.255.252"
+    mac: "02:FC:00:00:00:01"
+  multi_vm:
+    bridge_name: "fc-br0"
+    bridge_ip: "10.20.0.1/24"
+    guest_ip_start: "10.20.0.2"
+    guest_ip_end: "10.20.0.254"
+    tap_prefix: "fc"
 
-# Kernel boot parameters
-boot:
-  lsm_flags: "landlock,lockdown,yama,integrity,apparmor,bpf"
-  extra_boot_args: ""
-
-# Defaults used when flags are omitted
-defaults:
-  kernel: "minimal"             # "minimal", "upstream", or a file path
-  image: "firecracker-ubuntu"   # Image ID or file path
-  ssh_key: "~/.ssh/id_rsa"      # SSH key injected via cloud-init
-  vcpus: 2                      # Default vCPU count
-  memory: 2048                  # Default memory in MiB
+# Path overrides
+paths:
+  assets_dir: "../assets"
+  single_vm_dir: "../single-vm"
+  multi_vm_dir: "../multi-vm"
 ```
 
 ---
@@ -773,7 +932,7 @@ sudo fcm vm create --name myvm --image ubuntu-24.04 --firecracker-bin /path/to/f
 
 **"host init has not been run"**
 
-`fcm host restore` requires a prior snapshot. Run `sudo fcm host init` first.
+`fcm host reset` requires a prior snapshot. Run `sudo fcm host init` first.
 
 ---
 

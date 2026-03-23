@@ -23,6 +23,10 @@ SYSCTL_CONF = Path(f"/etc/sysctl.d/{PROJECT_NAME}.conf")
 KVM_MODULES = ["kvm"]
 KVM_VENDOR_MODULES = ["kvm_intel", "kvm_amd"]
 
+# Allowlists for restore_host() — only these keys/paths may be restored with root privileges.
+RESTORABLE_SYSCTL_KEYS: frozenset[str] = frozenset({"net.ipv4.ip_forward"})
+RESTORABLE_FILE_PATHS: frozenset[Path] = frozenset({Path(SUDOERS_DROP_IN_PATH), SYSCTL_CONF})
+
 
 @dataclass
 class HostChange:
@@ -353,7 +357,9 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
         "init_timestamp": state.init_timestamp,
         "changes": [asdict(c) for c in state.changes],
     }
-    _state_file(cache_dir).write_text(json.dumps(data, indent=2) + "\n")
+    sf = _state_file(cache_dir)
+    sf.write_text(json.dumps(data, indent=2) + "\n")
+    os.chmod(sf, 0o600)
 
 
 def init_host(cache_dir: Path) -> list[HostChange]:
@@ -486,6 +492,12 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
     reverted: list[HostChange] = []
     for change in reversed(state.changes):
         if change.mechanism == "sysctl" and change.original_value is not None:
+            # S-C1: Validate sysctl key against allowlist before applying
+            if change.setting not in RESTORABLE_SYSCTL_KEYS:
+                logger.warning(
+                    "Skipping disallowed sysctl key '%s' from state file", change.setting
+                )
+                continue
             try:
                 subprocess.run(
                     ["sysctl", "-w", f"{change.setting}={change.original_value}"],
@@ -507,7 +519,13 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
                 raise HostError("sysctl command not found") from e
 
         elif change.mechanism == "file_create":
-            target = Path(change.applied_value)
+            target = Path(change.applied_value).resolve()
+            # S-C2: Validate file path against allowlist before writing
+            if not any(target == allowed.resolve() for allowed in RESTORABLE_FILE_PATHS):
+                logger.warning(
+                    "Skipping disallowed file path '%s' from state file", target
+                )
+                continue
             if target.exists():
                 try:
                     if change.original_value is not None:

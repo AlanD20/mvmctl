@@ -1,6 +1,7 @@
 """VM state management."""
 
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Any, cast
@@ -41,6 +42,7 @@ class VMManager:
             "socket_path": str(vm.socket_path) if vm.socket_path else None,
             "ip": vm.ip,
             "mac": vm.mac,
+            "network_name": vm.network_name,
             "created_at": vm.created_at.isoformat(),
             "status": vm.status.value,
         }
@@ -69,6 +71,7 @@ class VMManager:
             socket_path=Path(vm_data["socket_path"]) if vm_data.get("socket_path") else None,
             ip=vm_data.get("ip"),
             mac=vm_data.get("mac"),
+            network_name=vm_data.get("network_name"),
             created_at=datetime.fromisoformat(vm_data["created_at"]),
             status=VMState(vm_data["status"]),
         )
@@ -87,6 +90,7 @@ class VMManager:
                     else None,
                     ip=vm_data.get("ip"),
                     mac=vm_data.get("mac"),
+                    network_name=vm_data.get("network_name"),
                     created_at=datetime.fromisoformat(vm_data["created_at"]),
                     status=VMState(vm_data["status"]),
                 )
