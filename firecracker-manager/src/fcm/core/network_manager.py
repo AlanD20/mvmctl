@@ -83,6 +83,7 @@ def _save_config(network_dir: Path, config: NetworkConfig) -> None:
     network_dir.mkdir(parents=True, exist_ok=True)
     config_file = network_dir / "config.json"
     config_file.write_text(json.dumps(asdict(config), indent=2))
+    config_file.chmod(0o600)
 
 
 def _load_leases(network_dir: Path) -> list[NetworkLease]:
@@ -97,6 +98,7 @@ def _save_leases(network_dir: Path, leases: list[NetworkLease]) -> None:
     network_dir.mkdir(parents=True, exist_ok=True)
     leases_file = network_dir / "leases.json"
     leases_file.write_text(json.dumps([asdict(lease) for lease in leases], indent=2))
+    leases_file.chmod(0o600)
 
 
 # ---------------------------------------------------------------------------

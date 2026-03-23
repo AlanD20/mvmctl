@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -110,6 +111,25 @@ def list_remote_versions(limit: int = 10) -> list[str]:
     return versions
 
 
+def _verify_sha256(version: str, tgz_path: Path, actual_hex: str) -> None:
+    """Verify downloaded tarball against GitHub SHA-256 sidecar file."""
+    sha_url = f"{GITHUB_DOWNLOAD_URL}/v{version}/firecracker-v{version}-x86_64.tgz.sha256.txt"
+    try:
+        req = Request(sha_url, headers={"User-Agent": "fcm/0.1.0"})
+        with urlopen(req, timeout=30) as resp:
+            content = resp.read().decode().strip()
+        expected = content.split()[0].lower()
+        if actual_hex.lower() != expected:
+            tgz_path.unlink(missing_ok=True)
+            raise BinaryError(
+                f"SHA-256 mismatch for Firecracker v{version}: "
+                f"expected {expected}, got {actual_hex}"
+            )
+        logger.info("SHA-256 verified for Firecracker v%s", version)
+    except URLError:
+        logger.warning("Could not fetch SHA-256 sidecar for v%s — skipping verification", version)
+
+
 def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     """Download Firecracker and jailer binaries for *version*."""
     version = _normalize_version(version)
@@ -133,15 +153,19 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     tgz_path = d / f"firecracker-v{version}-x86_64.tgz"
     try:
         logger.info("Downloading %s", tgz_url)
+        sha256_hash = hashlib.sha256()
         with urlopen(req, timeout=300) as resp, open(tgz_path, "wb") as f:
             while True:
                 chunk = resp.read(8192)
                 if not chunk:
                     break
                 f.write(chunk)
+                sha256_hash.update(chunk)
     except (URLError, OSError) as exc:
         tgz_path.unlink(missing_ok=True)
         raise BinaryError(f"Failed to download Firecracker v{version}: {exc}") from exc
+
+    _verify_sha256(version, tgz_path, sha256_hash.hexdigest())
 
     try:
         with tarfile.open(tgz_path, "r:gz") as tar:

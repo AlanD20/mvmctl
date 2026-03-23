@@ -15,6 +15,7 @@ from fcm.core.key_manager import (
 )
 from fcm.exceptions import FCMKeyError
 from fcm.utils.console import print_error, print_info, print_success
+from fcm.utils.validation import validate_entity_name
 
 app = typer.Typer(help="SSH key management", no_args_is_help=True)
 console = Console()
@@ -80,6 +81,7 @@ def add(
     if name is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=1)
+    validate_entity_name(name, "key")
     if public_key_path is None:
         print_error("Missing argument 'PUBLIC_KEY_PATH'")
         raise typer.Exit(code=1)
@@ -113,6 +115,7 @@ def create(
     if name is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=1)
+    validate_entity_name(name, "key")
     try:
         info, private_key_path = create_key(
             name=name,
@@ -145,6 +148,7 @@ def remove(
     if name is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=1)
+    validate_entity_name(name, "key")
     if not force:
         typer.confirm(f"Remove key '{name}' from cache?", abort=True)
 
@@ -174,6 +178,7 @@ def rm(
     if name is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=1)
+    validate_entity_name(name, "key")
     if not force:
         typer.confirm(f"Remove key '{name}' from cache?", abort=True)
     try:
@@ -197,6 +202,7 @@ def inspect(
     if name is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=1)
+    validate_entity_name(name, "key")
     try:
         info = inspect_key(name)
     except FCMKeyError as e:

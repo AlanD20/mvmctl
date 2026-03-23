@@ -1,5 +1,6 @@
 """Tests for core/binary_manager.py."""
 
+import hashlib
 import io
 import json
 import os
@@ -235,7 +236,14 @@ def test_fetch_binary_downloads_and_extracts(tmp_path: Path):
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
 
-    with patch("fcm.core.binary_manager.urlopen", return_value=mock_resp):
+    sha_resp = MagicMock()
+    sha_resp.read.return_value = (
+        hashlib.sha256(tarball_data).hexdigest() + "  firecracker-v1.5.0-x86_64.tgz\n"
+    ).encode()
+    sha_resp.__enter__ = lambda s: s
+    sha_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, sha_resp]):
         result = fetch_binary("1.5.0", bin_dir=tmp_path)
 
     assert result.version == "1.5.0"
@@ -256,7 +264,6 @@ def test_fetch_binary_download_failure_cleans_up(tmp_path: Path):
 
 
 def test_fetch_binary_missing_binaries_in_archive(tmp_path: Path):
-    # Create a tarball with only firecracker, no jailer
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         content = b"fake"
@@ -270,18 +277,33 @@ def test_fetch_binary_missing_binaries_in_archive(tmp_path: Path):
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
 
-    with patch("fcm.core.binary_manager.urlopen", return_value=mock_resp):
+    sha_resp = MagicMock()
+    sha_resp.read.return_value = (
+        hashlib.sha256(tarball_data).hexdigest() + "  file.tgz\n"
+    ).encode()
+    sha_resp.__enter__ = lambda s: s
+    sha_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, sha_resp]):
         with pytest.raises(BinaryError, match="missing expected binaries"):
             fetch_binary("1.5.0", bin_dir=tmp_path)
 
 
 def test_fetch_binary_corrupt_archive(tmp_path: Path):
+    corrupt_data = b"not a valid tarball"
     mock_resp = MagicMock()
-    mock_resp.read.side_effect = [b"not a valid tarball", b""]
+    mock_resp.read.side_effect = [corrupt_data, b""]
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
 
-    with patch("fcm.core.binary_manager.urlopen", return_value=mock_resp):
+    sha_resp = MagicMock()
+    sha_resp.read.return_value = (
+        hashlib.sha256(corrupt_data).hexdigest() + "  file.tgz\n"
+    ).encode()
+    sha_resp.__enter__ = lambda s: s
+    sha_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, sha_resp]):
         with pytest.raises(BinaryError):
             fetch_binary("1.5.0", bin_dir=tmp_path)
     # Partial files cleaned up
@@ -466,3 +488,44 @@ def test_active_target_path_does_not_exist(tmp_path: Path):
     from fcm.core.binary_manager import _active_target
 
     assert _active_target(tmp_path / "nonexistent") is None
+
+
+# ---------------------------------------------------------------------------
+# S-H3: SHA-256 verification tests
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_binary_sha256_mismatch(tmp_path: Path):
+    """SHA-256 mismatch with sidecar should raise BinaryError."""
+    tarball_data = _make_tarball(tmp_path, "1.5.0")
+    mock_resp = MagicMock()
+    mock_resp.read.side_effect = [tarball_data, b""]
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    sha_resp = MagicMock()
+    sha_resp.read.return_value = (
+        b"0000000000000000000000000000000000000000000000000000000000000000  file.tgz\n"
+    )
+    sha_resp.__enter__ = lambda s: s
+    sha_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, sha_resp]):
+        with pytest.raises(BinaryError, match="SHA-256 mismatch"):
+            fetch_binary("1.5.0", bin_dir=tmp_path)
+
+
+def test_fetch_binary_sha256_sidecar_unavailable(tmp_path: Path):
+    """When SHA sidecar is unavailable, fetch should continue with a warning."""
+    tarball_data = _make_tarball(tmp_path, "1.6.0")
+    mock_resp = MagicMock()
+    mock_resp.read.side_effect = [tarball_data, b""]
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("fcm.core.binary_manager.urlopen", side_effect=[mock_resp, URLError("404")]):
+        result = fetch_binary("1.6.0", bin_dir=tmp_path)
+
+    assert result.version == "1.6.0"
+    assert result.firecracker_path.exists()
+    assert result.jailer_path.exists()

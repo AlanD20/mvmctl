@@ -36,6 +36,9 @@ def download_file(
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
 
+    if expected_sha256 is None:
+        logger.warning("No checksum provided for download: %s", url)
+
     try:
         req = Request(url, headers={"User-Agent": "fcm/0.1.0"})
 

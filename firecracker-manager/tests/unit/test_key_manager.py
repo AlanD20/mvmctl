@@ -17,10 +17,7 @@ from fcm.core.key_manager import (
 )
 from fcm.exceptions import FCMKeyError
 
-SAMPLE_PUB_KEY = (
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtestkeycontent"
-    " testuser@testhost"
-)
+SAMPLE_PUB_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtestkeycontent testuser@testhost"
 
 
 @pytest.fixture()
@@ -254,3 +251,23 @@ def test_inspect_key_success(keys_dir, tmp_path):
 def test_inspect_key_not_found(keys_dir):
     with pytest.raises(FCMKeyError, match="not found"):
         inspect_key("nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# S-H8: Registry file permissions (chmod 0o600)
+# ---------------------------------------------------------------------------
+
+
+def test_save_registry_sets_chmod_600(keys_dir, tmp_path):
+    """After add_key, registry.json should have mode 0o600."""
+    import stat
+
+    pub_file = tmp_path / "id_ed25519.pub"
+    pub_file.write_text(SAMPLE_PUB_KEY)
+
+    add_key("chmod-test", pub_file)
+
+    registry_path = keys_dir / "registry.json"
+    assert registry_path.exists()
+    mode = registry_path.stat().st_mode & 0o777
+    assert mode == 0o600, f"Expected 0o600, got {oct(mode)}"

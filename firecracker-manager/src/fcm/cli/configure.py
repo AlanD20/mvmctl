@@ -71,10 +71,12 @@ def _step_host(skip: bool, non_interactive: bool) -> None:
         return
 
     if typer.confirm("  Run 'sudo fcm host init' now?", default=True):
+        import shutil
         import subprocess
         import sys
 
-        result = subprocess.run(["sudo", sys.argv[0], "host", "init"])
+        fcm_bin = shutil.which("fcm") or sys.executable
+        result = subprocess.run(["sudo", fcm_bin, "host", "init"])
         if result.returncode == 0:
             print_success("  Host initialized.")
             print_warning(

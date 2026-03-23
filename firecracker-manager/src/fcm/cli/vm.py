@@ -36,6 +36,7 @@ from fcm.exceptions import FirecrackerError, NetworkError
 from fcm.models.vm import VMConfig, VMInstance, VMState
 from fcm.utils.console import print_error, print_info, print_success
 from fcm.utils.fs import get_cache_dir, get_images_dir, get_kernels_dir, get_vm_dir
+from fcm.utils.validation import validate_entity_name
 
 app = typer.Typer(help="VM lifecycle management", no_args_is_help=True)
 
@@ -95,6 +96,8 @@ def create(
     """Create and start a new Firecracker VM."""
     import re
 
+    validate_entity_name(name, "VM")
+
     if mac is not None:
         mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
         if not mac_re.match(mac):
@@ -120,6 +123,15 @@ def create(
         print_error(f"Kernel not found: {kernel_path}")
         print_error("Build one with: fcm kernel build")
         raise typer.Exit(code=1)
+
+    fc_bin_path = Path(firecracker_bin)
+    if fc_bin_path.is_absolute() or "/" in firecracker_bin:
+        if not fc_bin_path.exists():
+            print_error(f"Firecracker binary not found: {firecracker_bin}")
+            raise typer.Exit(code=1)
+        if not os.access(fc_bin_path, os.X_OK):
+            print_error(f"Firecracker binary is not executable: {firecracker_bin}")
+            raise typer.Exit(code=1)
 
     image_path: Path
     candidate = get_images_dir() / f"{image}.ext4"
@@ -330,6 +342,7 @@ def remove(
     force: bool = typer.Option(False, "--force", "-f", help="Force kill and skip confirmation"),
 ) -> None:
     """Stop and remove a VM."""
+    validate_entity_name(name, "VM")
     manager = VMManager()
     vm = manager.get(name)
     if not vm:
@@ -493,6 +506,7 @@ def ssh(
     cmd: str | None = typer.Option(None, "--cmd", "-c", help="Command to execute"),
 ) -> None:
     """Open an SSH session into a VM."""
+    validate_entity_name(name, "VM")
     exit_code = connect_to_vm(
         vm_name_or_ip=name,
         user=user,
@@ -522,6 +536,7 @@ def logs(
     Use --type boot for serial console output (what you see during boot).
     Use --type os for the Firecracker process log (hypervisor events).
     """
+    validate_entity_name(name, "VM")
     exit_code = show_logs(
         vm_name=name,
         log_type=log_type,
@@ -602,6 +617,7 @@ def pause(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
 ) -> None:
     """Pause a running VM (not supported in this version)."""
+    validate_entity_name(name, "VM")
     print_info("VM pause/resume is not supported by this version of fcm.")
     raise typer.Exit(code=0)
 
@@ -611,6 +627,7 @@ def resume(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
 ) -> None:
     """Resume a paused VM (not supported in this version)."""
+    validate_entity_name(name, "VM")
     print_info("VM pause/resume is not supported by this version of fcm.")
     raise typer.Exit(code=0)
 
@@ -622,6 +639,7 @@ def snapshot(
     state_out: Path = typer.Option(..., "--state-out", help="VM state output path"),
 ) -> None:
     """Snapshot VM memory and disk state. Requires --enable-api-socket."""
+    validate_entity_name(name, "VM")
     socket_path = get_vm_socket_path(name)
     if not socket_path:
         print_error(f"Socket not found for VM '{name}'")
@@ -647,6 +665,7 @@ def load(
     resume_after: bool = typer.Option(True, "--resume/--no-resume", help="Resume VM after loading"),
 ) -> None:
     """Load VM from snapshot. Requires --enable-api-socket."""
+    validate_entity_name(name, "VM")
     socket_path = get_vm_socket_path(name)
     if not socket_path:
         print_error(f"Socket not found for VM '{name}'")
@@ -767,37 +786,41 @@ def _write_cloud_init(
     prefix_len: int = 24,
 ) -> None:
     """Write cloud-init seed files (meta-data, network-config, user-data)."""
-    # meta-data
-    meta_data = f"instance-id: {vm_name}\nlocal-hostname: {vm_name}\n"
-    (cloud_init_dir / "meta-data").write_text(meta_data)
+    import yaml
 
-    # network-config (static IP)
-    network_config = (
-        "version: 1\n"
-        "config:\n"
-        " - type: physical\n"
-        "   name: eth0\n"
-        "   subnets:\n"
-        "     - type: static\n"
-        f"       address: {guest_ip}/{prefix_len}\n"
-        f"       gateway: {gateway}\n"
-        "       dns_nameservers:\n"
-        "         - 8.8.8.8\n"
-        "         - 1.1.1.1\n"
+    meta_data = {"instance-id": vm_name, "local-hostname": vm_name}
+    (cloud_init_dir / "meta-data").write_text(yaml.dump(meta_data, default_flow_style=False))
+
+    network_config = {
+        "version": 1,
+        "config": [
+            {
+                "type": "physical",
+                "name": "eth0",
+                "subnets": [
+                    {
+                        "type": "static",
+                        "address": f"{guest_ip}/{prefix_len}",
+                        "gateway": gateway,
+                        "dns_nameservers": ["8.8.8.8", "1.1.1.1"],
+                    }
+                ],
+            }
+        ],
+    }
+    (cloud_init_dir / "network-config").write_text(
+        yaml.dump(network_config, default_flow_style=False)
     )
-    (cloud_init_dir / "network-config").write_text(network_config)
 
-    # user-data
     if custom_user_data is not None:
-        # Use custom user-data, potentially merging SSH key
         content = custom_user_data.read_text()
         if ssh_pub_key and "ssh_authorized_keys" not in content:
-            # Inject SSH key block
-            content += (
-                f"\nusers:\n  - name: {user}\n    ssh-authorized-keys:\n      - {ssh_pub_key}\n"
+            extra = yaml.dump(
+                {"users": [{"name": user, "ssh-authorized-keys": [ssh_pub_key]}]},
+                default_flow_style=False,
             )
+            content += "\n" + extra
         elif ssh_pub_key and "ssh_authorized_keys" in content:
-            # Append to existing ssh_authorized_keys section
             content = content.replace(
                 "ssh_authorized_keys:",
                 f"ssh_authorized_keys:\n      - {ssh_pub_key}",
@@ -805,30 +828,27 @@ def _write_cloud_init(
             )
         (cloud_init_dir / "user-data").write_text(content)
     else:
-        # Generate default user-data
-        ssh_section = ""
+        ud: dict[str, object] = {
+            "users": ["default"],
+            "package_update": False,
+            "package_upgrade": False,
+            "runcmd": ["systemctl disable --now snapd.socket 2>/dev/null || true"],
+            "final_message": "fcm cloud-init done",
+        }
         if ssh_pub_key:
-            ssh_section = (
-                f"  - name: {user}\n"
-                "    groups: sudo\n"
-                "    shell: /bin/bash\n"
-                "    sudo: ALL=(ALL) NOPASSWD:ALL\n"
-                "    ssh-authorized-keys:\n"
-                f"      - {ssh_pub_key}\n"
-            )
-
-        ud = (
-            "#cloud-config\n"
-            "users:\n"
-            "  - default\n"
-            f"{ssh_section}"
-            "package_update: false\n"
-            "package_upgrade: false\n"
-            "runcmd:\n"
-            "  - systemctl disable --now snapd.socket 2>/dev/null || true\n"
-            "final_message: 'fcm cloud-init done'\n"
+            ud["users"] = [
+                "default",
+                {
+                    "name": user,
+                    "groups": "sudo",
+                    "shell": "/bin/bash",
+                    "sudo": "ALL=(ALL) NOPASSWD:ALL",
+                    "ssh-authorized-keys": [ssh_pub_key],
+                },
+            ]
+        (cloud_init_dir / "user-data").write_text(
+            "#cloud-config\n" + yaml.dump(ud, default_flow_style=False)
         )
-        (cloud_init_dir / "user-data").write_text(ud)
 
 
 def _inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:

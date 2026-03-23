@@ -208,3 +208,33 @@ def test_inspect_help_arg_shows_help():
     result = runner.invoke(app, ["inspect", "help"])
     assert result.exit_code == 0
     assert "Usage" in result.output
+
+
+# ---------------------------------------------------------------------------
+# S-H1: Entity name validation on key commands
+# ---------------------------------------------------------------------------
+
+
+def test_add_rejects_invalid_name():
+    result = runner.invoke(app, ["add", "../evil", "/tmp/key.pub"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, Exception)
+    assert "Invalid key name" in str(result.exception)
+
+
+def test_create_rejects_invalid_name():
+    """Uppercase key name should be rejected."""
+    result = runner.invoke(app, ["create", "UPPER"])
+    assert result.exit_code == 1
+
+
+def test_remove_rejects_invalid_name():
+    """Key name with semicolon should be rejected."""
+    result = runner.invoke(app, ["remove", "bad;name", "--force"])
+    assert result.exit_code == 1
+
+
+def test_inspect_rejects_invalid_name():
+    """Key name with pipe should be rejected."""
+    result = runner.invoke(app, ["inspect", "pipe|name"])
+    assert result.exit_code == 1

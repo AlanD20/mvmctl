@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from fcm.core.config_gen import ConfigGenerator
 from fcm.models.vm import VMConfig
 
@@ -61,3 +63,60 @@ def test_config_generator_no_network():
     config = generator.generate()
 
     assert len(config["network-interfaces"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# S-H9: Boot arg injection validation
+# ---------------------------------------------------------------------------
+
+
+def test_boot_args_rejects_shell_injection_in_guest_ip():
+    """guest_ip with shell metacharacters should raise FCMError."""
+    from fcm.exceptions import FCMError
+
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("vmlinux"),
+        rootfs_path=Path("rootfs.ext4"),
+        guest_ip="10.0.0.2;rm -rf /",
+        tap_device="fc-tap0",
+        guest_mac="02:FC:00:00:00:01",
+    )
+    generator = ConfigGenerator(vm_config)
+    with pytest.raises(FCMError, match="guest_ip"):
+        generator.generate()
+
+
+def test_boot_args_rejects_shell_injection_in_gateway():
+    """gateway with pipe character should raise FCMError."""
+    from fcm.exceptions import FCMError
+
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("vmlinux"),
+        rootfs_path=Path("rootfs.ext4"),
+        guest_ip="10.0.0.2",
+        gateway="10.0.0.1|evil",
+        tap_device="fc-tap0",
+        guest_mac="02:FC:00:00:00:01",
+    )
+    generator = ConfigGenerator(vm_config)
+    with pytest.raises(FCMError, match="gateway"):
+        generator.generate()
+
+
+def test_boot_args_accepts_normal_ip():
+    """Normal IP addresses should pass validation without error."""
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("vmlinux"),
+        rootfs_path=Path("rootfs.ext4"),
+        guest_ip="10.0.0.2",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+        tap_device="fc-tap0",
+        guest_mac="02:FC:00:00:00:01",
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    assert "10.0.0.2" in config["boot-source"]["boot_args"]

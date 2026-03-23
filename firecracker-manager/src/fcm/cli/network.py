@@ -18,6 +18,7 @@ from fcm.core.network_manager import (
 )
 from fcm.exceptions import NetworkError
 from fcm.utils.console import print_error, print_info, print_success
+from fcm.utils.validation import validate_entity_name
 
 app = typer.Typer(help="Network management", no_args_is_help=True)
 console = Console()
@@ -104,6 +105,7 @@ def create(
     if cidr is None:
         print_error("Missing required option '--cidr'")
         raise typer.Exit(code=1)
+    validate_entity_name(name, "network")
     try:
         config = create_network(
             name=name,
@@ -137,6 +139,7 @@ def remove(
     if name is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=1)
+    validate_entity_name(name, "network")
     if not force:
         typer.confirm(f"Remove network '{name}'?", abort=True)
 
@@ -166,6 +169,7 @@ def rm(
     if name is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=1)
+    validate_entity_name(name, "network")
     if not force:
         typer.confirm(f"Remove network '{name}'?", abort=True)
     try:
@@ -189,6 +193,7 @@ def inspect(
     if name is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(code=1)
+    validate_entity_name(name, "network")
     try:
         info = inspect_network(name)
     except NetworkError as e:

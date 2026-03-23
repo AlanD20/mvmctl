@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from fcm.constants import PROJECT_NAME, env_var
+from fcm.exceptions import FCMError
 
 
 def get_cache_dir() -> Path:
@@ -14,7 +15,15 @@ def get_cache_dir() -> Path:
     """
     override = os.environ.get(env_var("CACHE_DIR"))
     if override:
-        return Path(override)
+        resolved = Path(override).resolve()
+        home = Path.home().resolve()
+        tmp = Path("/tmp").resolve()
+        if not (str(resolved).startswith(str(home)) or str(resolved).startswith(str(tmp))):
+            raise FCMError(
+                f"Unsafe {env_var('CACHE_DIR')} path '{override}': "
+                f"must be under $HOME ({home}) or /tmp"
+            )
+        return resolved
     return Path.home() / ".cache" / PROJECT_NAME
 
 

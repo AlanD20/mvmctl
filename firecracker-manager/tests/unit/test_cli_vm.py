@@ -15,8 +15,11 @@ from fcm.exceptions import FirecrackerError, NetworkError
 from fcm.models.vm import VMInstance, VMState
 
 _FAKE_NET = NetworkConfig(
-    name="default", cidr="10.20.0.0/24", gateway="10.20.0.1",
-    bridge="fcm-br0", nat_enabled=True,
+    name="default",
+    cidr="10.20.0.0/24",
+    gateway="10.20.0.1",
+    bridge="fcm-br0",
+    nat_enabled=True,
 )
 
 runner = CliRunner()
@@ -682,8 +685,9 @@ def test_write_cloud_init_with_ssh_key():
         cloud_init_dir = tmp_path / "cloud-init"
         cloud_init_dir.mkdir()
 
-        _write_cloud_init(cloud_init_dir, "testvm", "10.20.0.2", "root",
-                          ssh_pub_key="ssh-ed25519 AAAA testkey")
+        _write_cloud_init(
+            cloud_init_dir, "testvm", "10.20.0.2", "root", ssh_pub_key="ssh-ed25519 AAAA testkey"
+        )
 
         meta = (cloud_init_dir / "meta-data").read_text()
         assert "testvm" in meta
@@ -716,8 +720,9 @@ def test_write_cloud_init_custom_user_data():
         custom_file = tmp_path / "custom-userdata.yaml"
         custom_file.write_text("#cloud-config\npackages:\n  - nginx\n")
 
-        _write_cloud_init(cloud_init_dir, "testvm3", "10.20.0.4", "root",
-                          custom_user_data=custom_file)
+        _write_cloud_init(
+            cloud_init_dir, "testvm3", "10.20.0.4", "root", custom_user_data=custom_file
+        )
 
         userdata = (cloud_init_dir / "user-data").read_text()
         assert "nginx" in userdata
@@ -733,9 +738,14 @@ def test_write_cloud_init_custom_user_data_with_ssh_key_injection():
         custom_file = tmp_path / "custom-userdata.yaml"
         custom_file.write_text("#cloud-config\npackages:\n  - vim\n")
 
-        _write_cloud_init(cloud_init_dir, "testvm4", "10.20.0.5", "root",
-                          ssh_pub_key="ssh-ed25519 AAAA injected",
-                          custom_user_data=custom_file)
+        _write_cloud_init(
+            cloud_init_dir,
+            "testvm4",
+            "10.20.0.5",
+            "root",
+            ssh_pub_key="ssh-ed25519 AAAA injected",
+            custom_user_data=custom_file,
+        )
 
         userdata = (cloud_init_dir / "user-data").read_text()
         assert "ssh-ed25519 AAAA injected" in userdata
@@ -755,9 +765,14 @@ def test_write_cloud_init_custom_user_data_merge_existing_ssh():
             "    ssh_authorized_keys:\n      - ssh-rsa EXISTING\n"
         )
 
-        _write_cloud_init(cloud_init_dir, "testvm5", "10.20.0.6", "root",
-                          ssh_pub_key="ssh-ed25519 AAAA newkey",
-                          custom_user_data=custom_file)
+        _write_cloud_init(
+            cloud_init_dir,
+            "testvm5",
+            "10.20.0.6",
+            "root",
+            ssh_pub_key="ssh-ed25519 AAAA newkey",
+            custom_user_data=custom_file,
+        )
 
         userdata = (cloud_init_dir / "user-data").read_text()
         assert "ssh-rsa EXISTING" in userdata
@@ -794,11 +809,18 @@ def test_create_vm_with_custom_mac():
             patch("fcm.cli.vm._inject_cloud_init"),
         ):
             mock_mgr_cls.return_value.list_all.return_value = []
-            result = runner.invoke(app, [
-                "create", "--name", "macvm",
-                "--image", "ubuntu-24.04",
-                "--mac", "02:AA:BB:CC:DD:EE",
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "--name",
+                    "macvm",
+                    "--image",
+                    "ubuntu-24.04",
+                    "--mac",
+                    "02:AA:BB:CC:DD:EE",
+                ],
+            )
 
         assert result.exit_code == 0
         assert "02:AA:BB:CC:DD:EE" in result.output
@@ -837,11 +859,18 @@ def test_create_vm_with_user_data():
             patch("fcm.cli.vm._inject_cloud_init"),
         ):
             mock_mgr_cls.return_value.list_all.return_value = []
-            result = runner.invoke(app, [
-                "create", "--name", "udvm",
-                "--image", "ubuntu-24.04",
-                "--user-data", str(ud_file),
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "--name",
+                    "udvm",
+                    "--image",
+                    "ubuntu-24.04",
+                    "--user-data",
+                    str(ud_file),
+                ],
+            )
 
         assert result.exit_code == 0
 
@@ -861,11 +890,18 @@ def test_create_vm_user_data_file_not_found():
             patch("fcm.cli.vm.get_network", return_value=_FAKE_NET),
             patch("fcm.cli.vm.allocate_network_ip", return_value="10.20.0.9"),
         ):
-            result = runner.invoke(app, [
-                "create", "--name", "badud",
-                "--image", "ubuntu-24.04",
-                "--user-data", "/nonexistent/path.yaml",
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "--name",
+                    "badud",
+                    "--image",
+                    "ubuntu-24.04",
+                    "--user-data",
+                    "/nonexistent/path.yaml",
+                ],
+            )
 
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
@@ -899,11 +935,162 @@ def test_create_vm_user_data_warns_no_cloud_config_header():
             patch("fcm.cli.vm._inject_cloud_init"),
         ):
             mock_mgr_cls.return_value.list_all.return_value = []
-            result = runner.invoke(app, [
-                "create", "--name", "warnvm",
-                "--image", "ubuntu-24.04",
-                "--user-data", str(ud_file),
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "--name",
+                    "warnvm",
+                    "--image",
+                    "ubuntu-24.04",
+                    "--user-data",
+                    str(ud_file),
+                ],
+            )
 
         assert result.exit_code == 0
         assert "warning" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# S-H1: Entity name validation on vm commands
+# ---------------------------------------------------------------------------
+
+
+def test_create_vm_rejects_invalid_name():
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--name",
+            "../evil",
+            "--image",
+            "ubuntu-24.04",
+        ],
+    )
+    assert result.exit_code != 0
+    assert isinstance(result.exception, Exception)
+    assert "Invalid VM name" in str(result.exception)
+
+
+def test_remove_vm_rejects_invalid_name():
+    result = runner.invoke(
+        app,
+        [
+            "remove",
+            "--name",
+            "UPPER",
+            "--force",
+        ],
+    )
+    assert result.exit_code == 1
+
+
+def test_ssh_vm_rejects_invalid_name():
+    result = runner.invoke(
+        app,
+        [
+            "ssh",
+            "--name",
+            "bad;name",
+        ],
+    )
+    assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# S-H12: Firecracker binary path validation
+# ---------------------------------------------------------------------------
+
+
+def test_create_vm_rejects_nonexistent_firecracker_bin():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        kernels_dir = tmp_path / "kernels"
+        kernels_dir.mkdir(parents=True)
+        (kernels_dir / "vmlinux").write_text("fake kernel")
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True)
+        (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
+
+        with patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}):
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "--name",
+                    "testvm",
+                    "--image",
+                    "ubuntu-24.04",
+                    "--firecracker-bin",
+                    "/nonexistent/firecracker",
+                ],
+            )
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()
+
+
+def test_create_vm_rejects_non_executable_firecracker_bin():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        kernels_dir = tmp_path / "kernels"
+        kernels_dir.mkdir(parents=True)
+        (kernels_dir / "vmlinux").write_text("fake kernel")
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True)
+        (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
+
+        fc_bin = tmp_path / "firecracker-fake"
+        fc_bin.write_text("not executable")
+        fc_bin.chmod(0o644)
+
+        with patch.dict(os.environ, {"FCM_CACHE_DIR": tmp}):
+            result = runner.invoke(
+                app,
+                [
+                    "create",
+                    "--name",
+                    "testvm",
+                    "--image",
+                    "ubuntu-24.04",
+                    "--firecracker-bin",
+                    str(fc_bin),
+                ],
+            )
+    assert result.exit_code == 1
+    assert "not executable" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# S-H2: cloud-init YAML safety
+# ---------------------------------------------------------------------------
+
+
+def test_write_cloud_init_escapes_special_yaml_chars():
+    import yaml
+
+    with tempfile.TemporaryDirectory() as tmp:
+        ci_dir = Path(tmp) / "cloud-init"
+        ci_dir.mkdir()
+
+        _write_cloud_init(
+            cloud_init_dir=ci_dir,
+            vm_name="vm: injected",
+            guest_ip="10.20.0.2",
+            user="root",
+            ssh_pub_key="ssh-ed25519 AAAA test@host",
+        )
+
+        meta_raw = (ci_dir / "meta-data").read_text()
+        meta = yaml.safe_load(meta_raw)
+        assert meta["instance-id"] == "vm: injected"
+        assert meta["local-hostname"] == "vm: injected"
+
+        net_raw = (ci_dir / "network-config").read_text()
+        net = yaml.safe_load(net_raw)
+        assert net["version"] == 1
+
+        ud_raw = (ci_dir / "user-data").read_text()
+        assert ud_raw.startswith("#cloud-config\n")
+        ud = yaml.safe_load(ud_raw.removeprefix("#cloud-config\n"))
+        assert "users" in ud

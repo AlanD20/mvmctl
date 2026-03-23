@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fcm.models.vm import VMConfig
 from fcm.utils.fs import get_vm_dir
+from fcm.utils.validation import validate_boot_arg_component
 
 
 class ConfigGenerator:
@@ -61,12 +62,21 @@ class ConfigGenerator:
         pci_arg = "pci=off" if not self.vm_config.enable_pci else ""
         gateway = self.vm_config.gateway or "10.20.0.1"
         subnet_mask = self.vm_config.subnet_mask or "255.255.255.0"
+
+        # Validate user-controllable boot arg components
+        if self.vm_config.guest_ip:
+            validate_boot_arg_component(self.vm_config.guest_ip, "guest_ip")
+        validate_boot_arg_component(gateway, "gateway")
+        validate_boot_arg_component(subnet_mask, "subnet_mask")
+
         ip_arg = (
             f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:off"
             if self.vm_config.guest_ip
             else ""
         )
         lsm_flags = getattr(self.vm_config, "lsm_flags", None)
+        if lsm_flags:
+            validate_boot_arg_component(lsm_flags, "lsm_flags")
         lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
         parts = [
             "console=ttyS0",

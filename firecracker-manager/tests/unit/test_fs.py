@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from fcm.utils.fs import (
     get_cache_dir,
     get_vm_dir,
@@ -50,3 +52,42 @@ def test_get_assets_dir_points_to_package():
     assert result.is_dir()
     assert (result / "defaults.yaml").exists()
     assert (result / "images.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# S-H4: FCM_CACHE_DIR path validation
+# ---------------------------------------------------------------------------
+
+
+def test_get_cache_dir_rejects_path_outside_home_and_tmp():
+    """FCM_CACHE_DIR pointing to /etc should be rejected."""
+    from fcm.exceptions import FCMError
+
+    os.environ["FCM_CACHE_DIR"] = "/etc/shadow"
+    try:
+        with pytest.raises(FCMError, match="Unsafe"):
+            get_cache_dir()
+    finally:
+        del os.environ["FCM_CACHE_DIR"]
+
+
+def test_get_cache_dir_rejects_traversal_path():
+    """FCM_CACHE_DIR with traversal to /etc should be rejected."""
+    from fcm.exceptions import FCMError
+
+    os.environ["FCM_CACHE_DIR"] = "/tmp/../../etc"
+    try:
+        with pytest.raises(FCMError, match="Unsafe"):
+            get_cache_dir()
+    finally:
+        del os.environ["FCM_CACHE_DIR"]
+
+
+def test_get_cache_dir_accepts_tmp_subdir():
+    """FCM_CACHE_DIR under /tmp should be accepted."""
+    os.environ["FCM_CACHE_DIR"] = "/tmp/fcm-test-cache"
+    try:
+        result = get_cache_dir()
+        assert result == Path("/tmp/fcm-test-cache")
+    finally:
+        del os.environ["FCM_CACHE_DIR"]

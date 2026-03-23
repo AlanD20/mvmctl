@@ -533,8 +533,15 @@ def test_init_host_missing_binaries(mock_exists, mock_access, mock_which, mock_r
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
 def test_init_host_ip_forward_already_enabled(
-    mock_access, mock_which, mock_run, mock_sysctl_conf,
-    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
+    mock_access,
+    mock_which,
+    mock_run,
+    mock_sysctl_conf,
+    mock_validate,
+    mock_create_grp,
+    mock_add_user,
+    mock_get_user,
+    tmp_path,
 ):
     # Path.exists for /dev/kvm returns True
     with patch("fcm.core.host.Path.exists", return_value=True):
@@ -570,8 +577,15 @@ def test_init_host_ip_forward_already_enabled(
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
 def test_init_host_enables_ip_forward(
-    mock_access, mock_which, mock_run, mock_sysctl_conf,
-    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
+    mock_access,
+    mock_which,
+    mock_run,
+    mock_sysctl_conf,
+    mock_validate,
+    mock_create_grp,
+    mock_add_user,
+    mock_get_user,
+    tmp_path,
 ):
     with patch("fcm.core.host.Path.exists", return_value=True):
 
@@ -613,8 +627,15 @@ def test_init_host_enables_ip_forward(
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
 def test_init_host_writes_state_file(
-    mock_access, mock_which, mock_run, mock_sysctl_conf,
-    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
+    mock_access,
+    mock_which,
+    mock_run,
+    mock_sysctl_conf,
+    mock_validate,
+    mock_create_grp,
+    mock_add_user,
+    mock_get_user,
+    tmp_path,
 ):
     with patch("fcm.core.host.Path.exists", return_value=True):
 
@@ -648,8 +669,15 @@ def test_init_host_writes_state_file(
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
 def test_init_host_idempotent(
-    mock_access, mock_which, mock_run, mock_sysctl_conf,
-    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
+    mock_access,
+    mock_which,
+    mock_run,
+    mock_sysctl_conf,
+    mock_validate,
+    mock_create_grp,
+    mock_add_user,
+    mock_get_user,
+    tmp_path,
 ):
     with patch("fcm.core.host.Path.exists", return_value=True):
         call_count = {"sysctl_n": 0}
@@ -693,8 +721,15 @@ def test_init_host_idempotent(
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
 def test_init_host_with_module_loading(
-    mock_access, mock_which, mock_run, mock_sysctl_conf,
-    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
+    mock_access,
+    mock_which,
+    mock_run,
+    mock_sysctl_conf,
+    mock_validate,
+    mock_create_grp,
+    mock_add_user,
+    mock_get_user,
+    tmp_path,
 ):
     """init_host loads kvm modules when they're not loaded."""
     with patch("fcm.core.host.Path.exists", return_value=True):
@@ -891,7 +926,12 @@ def test_restore_host_reverts_file_create(tmp_path):
     }
     (state_dir / "state.json").write_text(json.dumps(data))
 
-    reverted = restore_host(tmp_path)
+    # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
+    with patch(
+        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        frozenset({target_file}),
+    ):
+        reverted = restore_host(tmp_path)
     assert len(reverted) == 1
     assert reverted[0].setting == "sysctl_persist_file"
     assert reverted[0].applied_value == "(removed)"
@@ -923,7 +963,12 @@ def test_restore_host_reverts_file_create_with_original(tmp_path):
     }
     (state_dir / "state.json").write_text(json.dumps(data))
 
-    reverted = restore_host(tmp_path)
+    # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
+    with patch(
+        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        frozenset({target_file}),
+    ):
+        reverted = restore_host(tmp_path)
     assert len(reverted) == 1
     # File should be restored to original content, not deleted
     assert target_file.read_text() == "old content\n"
@@ -1042,7 +1087,12 @@ def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path):
     (state_dir / "state.json").write_text(json.dumps(data))
     mock_run.return_value = MagicMock(returncode=0)
 
-    reverted = restore_host(tmp_path)
+    # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
+    with patch(
+        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        frozenset({target_file}),
+    ):
+        reverted = restore_host(tmp_path)
     # Changes should be reverted in reverse order
     assert len(reverted) == 2
     # file_create was second, so reverted first
@@ -1054,20 +1104,26 @@ def test_restore_host_file_create_target_missing(tmp_path):
     """file_create target doesn't exist anymore — skip silently."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
+    target_file = tmp_path / "nonexistent.conf"
     data = {
         "init_timestamp": "2025-01-01T00:00:00+00:00",
         "changes": [
             {
                 "setting": "sysctl_persist_file",
                 "original_value": None,
-                "applied_value": str(tmp_path / "nonexistent.conf"),
+                "applied_value": str(target_file),
                 "mechanism": "file_create",
             }
         ],
     }
     (state_dir / "state.json").write_text(json.dumps(data))
 
-    reverted = restore_host(tmp_path)
+    # Patch allowlist so the test reaches the target.exists() check (not blocked by S-C2)
+    with patch(
+        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        frozenset({target_file}),
+    ):
+        reverted = restore_host(tmp_path)
     # Target file doesn't exist, so nothing to revert
     assert reverted == []
 
@@ -1093,9 +1149,11 @@ def test_restore_host_file_create_os_error(tmp_path):
     }
     (state_dir / "state.json").write_text(json.dumps(data))
 
-    with patch("fcm.core.host.Path.unlink", side_effect=OSError("permission denied")):
-        # The Path object used in restore is created from change.applied_value,
-        # so we need to patch Path objects' unlink
+    # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
+    with patch(
+        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        frozenset({target_file}),
+    ):
         with patch("pathlib.Path.unlink", side_effect=OSError("permission denied")):
             with pytest.raises(HostError, match="Failed to revert file"):
                 restore_host(tmp_path)
