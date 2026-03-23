@@ -77,8 +77,8 @@ def check_privileges(binary: str) -> None:
                 f"Run 'sudo fcm host init' to configure privileges, "
                 f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
             )
-    except KeyError:
+    except KeyError as e:
         raise PrivilegeError(
             f"Group '{PROJECT_GROUP}' does not exist. "
             f"Run 'sudo fcm host init' to set up privilege management."
-        )
+        ) from e

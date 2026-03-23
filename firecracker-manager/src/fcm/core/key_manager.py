@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
+import socket
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -52,13 +54,9 @@ def _compute_fingerprint(pub_key_content: str) -> str:
     parts = pub_key_content.strip().split()
     if len(parts) < 2:
         raise FCMKeyError("Invalid public key format")
-    import base64
-
     key_bytes = base64.b64decode(parts[1])
     digest = hashlib.sha256(key_bytes).digest()
-    import base64 as b64
-
-    fp = b64.b64encode(digest).rstrip(b"=").decode()
+    fp = base64.b64encode(digest).rstrip(b"=").decode()
     return f"SHA256:{fp}"
 
 
@@ -166,8 +164,6 @@ def create_key(
             raise FCMKeyError(f"Key '{name}' already exists in cache. Remove it first.")
 
     if comment is None:
-        import socket
-
         comment = f"{name}@{socket.gethostname()}"
 
     if overwrite:

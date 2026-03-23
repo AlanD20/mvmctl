@@ -17,7 +17,6 @@ from fcm.core.network import (
     remove_iptables_forward_rules,
 )
 from fcm.core.network_manager import (
-    DEFAULT_NETWORK_NAME,
     allocate_network_ip,
     ensure_default_network,
     get_network,
@@ -28,7 +27,7 @@ from fcm.core.vm_manager import VMManager
 from fcm.exceptions import NetworkError, FCMError, VMNotFoundError
 from fcm.models.vm import VMConfig, VMInstance, VMState
 from fcm.utils.fs import get_kernels_dir, get_images_dir, get_vm_dir
-from fcm.constants import TAP_PREFIX
+from fcm.constants import DEFAULT_NETWORK_NAME, TAP_PREFIX
 
 
 def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:

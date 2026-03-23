@@ -32,10 +32,11 @@ This creates a `.venv/` directory and installs everything there. You don't need 
 ```
 firecracker-manager/
 ├── src/fcm/
-│   ├── cli/          # Typer command groups (vm.py, image.py, kernel.py, config.py)
-│   ├── core/         # Business logic (vm_manager.py, image_manager.py, etc.)
-│   ├── models/       # Pydantic data models
-│   └── utils/        # Shared helpers (paths, process, networking)
+│   ├── api/          # Public Python API (vms.py, host.py, assets.py, network.py, keys.py)
+│   ├── cli/          # Typer command groups (vm.py, network.py, key.py, asset.py, host.py)
+│   ├── core/         # Business logic (vm_lifecycle.py, network_manager.py, etc.)
+│   ├── models/       # Dataclass models (VMInstance, VMConfig, ImageSpec)
+│   └── utils/        # Shared helpers (fs.py, console.py, process.py)
 ├── tests/
 │   ├── unit/         # Pure unit tests (no root, no KVM)
 │   └── integration/  # Tests that need system resources
@@ -43,7 +44,7 @@ firecracker-manager/
 └── README.md
 ```
 
-The CLI layer (`cli/`) stays thin. It parses args, calls into `core/`, and formats output with Rich. Business logic lives in `core/`.
+Three tiers: `cli/` stays thin (arg parsing + output). `api/` is the stable public interface. `core/` holds business logic. CLI modules call into `api/`, not `core/` directly.
 
 ## Running Tests
 

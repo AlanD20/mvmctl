@@ -1,10 +1,11 @@
 """Log viewing utilities."""
 
 import logging
+import time
 from collections.abc import Generator
 from pathlib import Path
 
-from fcm.exceptions import FCMError, VMNotFoundError
+from fcm.exceptions import ConfigError, FCMError, VMNotFoundError
 from fcm.utils.fs import get_vm_dir
 
 logger = logging.getLogger(__name__)
@@ -37,10 +38,10 @@ def get_log_path(
     elif log_type == "os":
         log_file = vm_dir / "firecracker.log"
     else:
-        raise FCMError(f"Unknown log type '{log_type}'. Valid: boot, os")
+        raise ConfigError(f"Unknown log type '{log_type}'. Valid: boot, os")
 
     if not log_file.exists():
-        raise FCMError(f"Log file not found: {log_file}")
+        raise VMNotFoundError(f"Log file not found for VM '{vm_name}': {log_file}")
 
     return log_file
 
@@ -79,8 +80,6 @@ def follow_log(
             while True:
                 line = f.readline()
                 if not line:
-                    import time
-
                     time.sleep(0.1)  # Wait for new content
                     continue
                 yield line.rstrip("\n")

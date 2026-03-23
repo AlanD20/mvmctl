@@ -33,18 +33,18 @@ Pushing a tag that matches `v*` triggers the `release.yml` GitHub Actions workfl
 Once the tag is pushed, `release.yml` runs without any manual intervention:
 
 1. **Binary builds** — PyInstaller builds a standalone `fcm` binary on two runners:
-   - `ubuntu-22.04` (glibc 2.35) — produces `fcm-linux-ubuntu2204`
-   - `ubuntu-24.04` (glibc 2.39) — produces `fcm-linux-ubuntu2404`
+   - `ubuntu-22.04` (glibc 2.35) — produces artifact named `fcm-linux-ubuntu-22.04`
+   - `ubuntu-24.04` (glibc 2.39) — produces artifact named `fcm-linux-ubuntu-24.04`
 
    Two binaries are needed because a binary linked against glibc 2.39 will not run on a host with glibc 2.35.
 
-2. **PyPI publish** — the workflow builds a wheel and sdist, then uploads them to PyPI using trusted publishing (no manual token needed).
+2. **GitHub release creation** — a GitHub release is created for the tag with auto-generated release notes. Both binaries are attached as release assets.
 
-3. **GitHub release creation** — a GitHub release is created for the tag with auto-generated release notes. Both binaries and the wheel are attached as release assets.
+3. **Artifact upload** — all build artifacts are uploaded as GitHub Actions artifacts for debugging if needed.
 
-4. **Artifact upload** — all build artifacts are uploaded as GitHub Actions artifacts for debugging if needed.
+> **Note:** PyPI publishing is **not** automated by the release workflow. To publish to PyPI, follow the manual steps in the [Yanking a Bad Release](#yanking-a-bad-release) section or run `uv build && twine upload dist/*` after verifying the release.
 
-You do not need to run PyInstaller, twine, or gh release manually. The workflow handles everything.
+You do not need to run PyInstaller or `gh release` manually. Binary builds and GitHub release creation are automated.
 
 ## Verifying a Release
 
@@ -54,7 +54,7 @@ After the workflow completes (typically 5-10 minutes), verify the release is cor
 
 ```bash
 # Download the binary for your platform
-curl -L -o fcm https://github.com/<org>/firecracker-manager/releases/download/v1.2.3/fcm-linux-ubuntu2404
+curl -L -o fcm https://github.com/<org>/firecracker-manager/releases/download/v1.2.3/fcm-linux-ubuntu-24.04
 chmod +x fcm
 
 # Check the version
@@ -88,8 +88,7 @@ uvx firecracker-manager==1.2.3 fcm --version
 
 Visit the releases page and confirm:
 - The release notes are present and accurate.
-- Both binary assets (`fcm-linux-ubuntu2204`, `fcm-linux-ubuntu2404`) are attached.
-- The wheel (`.whl`) and source distribution (`.tar.gz`) are attached.
+- Both binary assets (`fcm-linux-ubuntu-22.04`, `fcm-linux-ubuntu-24.04`) are attached.
 
 ## Issuing a Hotfix
 

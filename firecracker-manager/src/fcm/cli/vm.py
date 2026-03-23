@@ -18,7 +18,7 @@ from fcm.api.vms import (
     get_logs,
     cleanup_vms,
 )
-from fcm.core.network_manager import DEFAULT_NETWORK_NAME
+from fcm.constants import DEFAULT_NETWORK_NAME
 from fcm.exceptions import FCMError
 from fcm.models.vm import VMState
 from fcm.utils.console import print_error, print_info, print_success
@@ -284,7 +284,7 @@ def cleanup(
         print_success(f"Removed VM '{v.name}'")
 
 
-@app.command()
+@app.command(hidden=True)
 def pause(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
 ) -> None:
@@ -295,7 +295,7 @@ def pause(
     raise typer.Exit(code=0)
 
 
-@app.command()
+@app.command(hidden=True)
 def resume(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
 ) -> None:

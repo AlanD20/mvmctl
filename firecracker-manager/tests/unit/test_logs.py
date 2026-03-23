@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from fcm.core.logs import get_log_path, read_log_lines, show_logs
-from fcm.exceptions import FCMError, VMNotFoundError
+from fcm.exceptions import ConfigError, FCMError, VMNotFoundError
 
 
 def test_get_log_path_boot(tmp_path: Path) -> None:
@@ -36,7 +36,7 @@ def test_get_log_path_unknown_type(tmp_path: Path) -> None:
     vm_dir.mkdir()
 
     with patch("fcm.core.logs.get_vm_dir", return_value=vm_dir):
-        with pytest.raises(FCMError, match="Unknown log type"):
+        with pytest.raises(ConfigError, match="Unknown log type"):
             get_log_path("test-vm", log_type="unknown")
 
 
@@ -53,7 +53,7 @@ def test_get_log_path_missing_file(tmp_path: Path) -> None:
     vm_dir.mkdir()
 
     with patch("fcm.core.logs.get_vm_dir", return_value=vm_dir):
-        with pytest.raises(FCMError, match="Log file not found"):
+        with pytest.raises(VMNotFoundError, match="Log file not found"):
             get_log_path("test-vm", log_type="boot")
 
 

@@ -155,11 +155,11 @@
 | Requirement | Status | Notes |
 |---|---|---|
 | `api/assets.py` — fetch_kernel, build_kernel, configure_kernel_flag, fetch_image, fetch_binary, list_binaries, set_active_binary | ✅ | |
-| `api/vms.py` — create_vm, delete_vm, list_vms, ssh_vm, get_logs | ✅ | |
+| `api/vms.py` — list_vms, get_vm, create_vm, remove_vm, ssh_vm, get_logs, cleanup_vms | ✅ | (Sprint 2 realignment added create_vm/remove_vm to api layer) |
 | `api/network.py` — setup_network, teardown_network, allocate_ip, release_ip | ✅ | |
 | `api/keys.py` — key management functions | ✅ | |
 | `api/host.py` — host init, ls, restore, prune | ✅ | |
-| CLI commands are thin wrappers — no business logic in CLI layer | ✅ | |
+| CLI commands are thin wrappers — no business logic in CLI layer | ✅ | All CLI files import from `fcm.api.*` (fixed in Sprint 2: C-1, C-2, BP-C2) |
 | Return types are dataclasses or Pydantic models (not raw dicts) | ✅ | |
 | All user-facing errors raised as typed exceptions from `exceptions.py` | ✅ | |
 | `models.py` / `models/` — shared dataclasses | ✅ | `src/fcm/models/` |
@@ -199,7 +199,7 @@
 | `ruff check .` | ✅ | |
 | `mypy firecracker_manager/` (adapted to `src/fcm/`) | ✅ | |
 | `pytest --cov=firecracker_manager --cov-fail-under=80` | ✅ | |
-| Upload coverage report as artifact | ✅ | |
+| Upload coverage report as artifact | ✅ | Added `actions/upload-artifact` step (Sprint 5 GAP-1 fix) |
 
 ### `release.yml`
 
@@ -213,6 +213,7 @@
 | Create GitHub release and upload binary as asset | ✅ | |
 | Upload binary as workflow artifact | ✅ | |
 | Matrix builds: `ubuntu-22.04` and `ubuntu-24.04` | ✅ | |
+| PyPI publish | ⚠️ | Not automated — PyPI publish is a manual step (see RELEASE.md). `RELEASE.md` previously described this as automated; corrected in Sprint 5. |
 
 ---
 

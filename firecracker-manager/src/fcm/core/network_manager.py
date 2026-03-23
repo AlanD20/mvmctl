@@ -5,10 +5,11 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from fcm.constants import DEFAULT_NETWORK_CIDR, BRIDGE_NAME
+from fcm.constants import DEFAULT_NETWORK_CIDR, BRIDGE_NAME, DEFAULT_NETWORK_NAME
 
 from fcm.constants import device_prefix
 from fcm.core.network import (
@@ -23,8 +24,6 @@ from fcm.exceptions import NetworkError
 from fcm.utils.fs import get_networks_dir, get_network_dir
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_NETWORK_NAME = "default"
 
 
 @dataclass
@@ -240,8 +239,6 @@ def remove_network(name: str) -> None:
         logger.warning("Partial teardown for network '%s': %s", name, e)
 
     # Remove persisted state
-    import shutil
-
     shutil.rmtree(network_dir, ignore_errors=True)
 
 
