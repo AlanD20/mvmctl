@@ -30,8 +30,8 @@ def help_cmd(ctx: typer.Context) -> None:
 
 
 def _step_host(skip: bool, non_interactive: bool) -> None:
-    """Step 1: Host initialisation."""
-    print_info("\n[1/6] Host configuration")
+    """Step 1: Privilege setup and host initialisation."""
+    print_info("\n[1/6] Privilege setup")
     if skip:
         print_info("  Skipped (--skip-host)")
         return
@@ -52,41 +52,40 @@ def _step_host(skip: bool, non_interactive: bool) -> None:
     if not kvm_ok:
         print_warning("  /dev/kvm is not accessible")
 
+    print_info("  This requires sudo once to create the 'fcm' group and sudoers drop-in.")
+    print_info("  After this, you won't need sudo for any fcm commands.")
+
     if non_interactive:
         try:
             init_host(cache_dir)
-            print_success(" Host initialized")
+            print_success("  Host initialized")
         except HostError as e:
-            print_warning(f" Host init failed: {e}")
+            print_warning(f"  Host init failed: {e}")
         try:
             from fcm.core.network_manager import ensure_default_network
 
             ensure_default_network()
-            print_success(" Default network ready")
+            print_success("  Default network ready")
         except Exception:
             pass
         return
 
-    print_info(" This will enable IP forwarding and other host settings.")
-    if typer.confirm(" Proceed with host init?", default=True):
-        try:
-            changes = init_host(cache_dir)
-            if changes:
-                print_success(f" Host initialized ({len(changes)} change(s))")
-            else:
-                print_success(" Already configured")
-            try:
-                from fcm.core.network_manager import ensure_default_network
+    if typer.confirm("  Run 'sudo fcm host init' now?", default=True):
+        import subprocess
+        import sys
 
-                ensure_default_network()
-                print_success(" Default network ready")
-            except Exception:
-                pass
-        except HostError as e:
-            print_warning(f" Host init failed: {e}")
-            print_info(" Run 'fcm host init' manually when ready.")
+        result = subprocess.run(["sudo", sys.argv[0], "host", "init"])
+        if result.returncode == 0:
+            print_success("  Host initialized.")
+            print_warning(
+                "  ACTION REQUIRED: Log out and back in for group membership to take effect."
+            )
+            print_info("  Or run immediately: newgrp fcm")
+            print_info("  Then re-run: fcm configure")
+        else:
+            print_warning("  Host init failed. Run 'sudo fcm host init' manually.")
     else:
-        print_info(" Skipped. Run 'fcm host init' manually when ready.")
+        print_info("  Skipped. Run 'sudo fcm host init' manually when ready.")
 
 
 def _step_binary(non_interactive: bool) -> None:

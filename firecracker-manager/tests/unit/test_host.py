@@ -524,12 +524,17 @@ def test_init_host_missing_binaries(mock_exists, mock_access, mock_which, mock_r
         init_host(tmp_path)
 
 
+@patch("fcm.core.host._get_current_user", return_value="testuser")
+@patch("fcm.core.host._add_user_to_group", return_value=False)
+@patch("fcm.core.host._create_group", return_value=False)
+@patch("fcm.core.host._validate_sudoers_binaries")
 @patch("fcm.core.host.SYSCTL_CONF")
 @patch("fcm.core.host.subprocess.run")
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
 def test_init_host_ip_forward_already_enabled(
-    mock_access, mock_which, mock_run, mock_sysctl_conf, tmp_path
+    mock_access, mock_which, mock_run, mock_sysctl_conf,
+    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
 ):
     # Path.exists for /dev/kvm returns True
     with patch("fcm.core.host.Path.exists", return_value=True):
@@ -556,12 +561,17 @@ def test_init_host_ip_forward_already_enabled(
     assert state_file.exists()
 
 
+@patch("fcm.core.host._get_current_user", return_value="testuser")
+@patch("fcm.core.host._add_user_to_group", return_value=False)
+@patch("fcm.core.host._create_group", return_value=False)
+@patch("fcm.core.host._validate_sudoers_binaries")
 @patch("fcm.core.host.SYSCTL_CONF")
 @patch("fcm.core.host.subprocess.run")
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
 def test_init_host_enables_ip_forward(
-    mock_access, mock_which, mock_run, mock_sysctl_conf, tmp_path
+    mock_access, mock_which, mock_run, mock_sysctl_conf,
+    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
 ):
     with patch("fcm.core.host.Path.exists", return_value=True):
 
@@ -594,11 +604,18 @@ def test_init_host_enables_ip_forward(
     assert ip_fwd_change.mechanism == "sysctl"
 
 
+@patch("fcm.core.host._get_current_user", return_value="testuser")
+@patch("fcm.core.host._add_user_to_group", return_value=False)
+@patch("fcm.core.host._create_group", return_value=False)
+@patch("fcm.core.host._validate_sudoers_binaries")
 @patch("fcm.core.host.SYSCTL_CONF")
 @patch("fcm.core.host.subprocess.run")
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
-def test_init_host_writes_state_file(mock_access, mock_which, mock_run, mock_sysctl_conf, tmp_path):
+def test_init_host_writes_state_file(
+    mock_access, mock_which, mock_run, mock_sysctl_conf,
+    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
+):
     with patch("fcm.core.host.Path.exists", return_value=True):
 
         def run_side_effect(cmd, **kwargs):
@@ -622,11 +639,18 @@ def test_init_host_writes_state_file(mock_access, mock_which, mock_run, mock_sys
     assert "changes" in data
 
 
+@patch("fcm.core.host._get_current_user", return_value="testuser")
+@patch("fcm.core.host._add_user_to_group", return_value=False)
+@patch("fcm.core.host._create_group", return_value=False)
+@patch("fcm.core.host._validate_sudoers_binaries")
 @patch("fcm.core.host.SYSCTL_CONF")
 @patch("fcm.core.host.subprocess.run")
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
-def test_init_host_idempotent(mock_access, mock_which, mock_run, mock_sysctl_conf, tmp_path):
+def test_init_host_idempotent(
+    mock_access, mock_which, mock_run, mock_sysctl_conf,
+    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
+):
     with patch("fcm.core.host.Path.exists", return_value=True):
         call_count = {"sysctl_n": 0}
 
@@ -660,12 +684,17 @@ def test_init_host_idempotent(mock_access, mock_which, mock_run, mock_sysctl_con
     assert len(changes_second) < len(changes_first)
 
 
+@patch("fcm.core.host._get_current_user", return_value="testuser")
+@patch("fcm.core.host._add_user_to_group", return_value=False)
+@patch("fcm.core.host._create_group", return_value=False)
+@patch("fcm.core.host._validate_sudoers_binaries")
 @patch("fcm.core.host.SYSCTL_CONF")
 @patch("fcm.core.host.subprocess.run")
 @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host.os.access", return_value=True)
 def test_init_host_with_module_loading(
-    mock_access, mock_which, mock_run, mock_sysctl_conf, tmp_path
+    mock_access, mock_which, mock_run, mock_sysctl_conf,
+    mock_validate, mock_create_grp, mock_add_user, mock_get_user, tmp_path
 ):
     """init_host loads kvm modules when they're not loaded."""
     with patch("fcm.core.host.Path.exists", return_value=True):

@@ -6,10 +6,12 @@ from rich.table import Table
 from fcm.core.host import (
     check_kvm_access,
     check_required_binaries,
+    clean_host,
     get_host_state,
     get_ip_forward_status,
     init_host,
     prune_host,
+    reset_host,
     restore_host,
 )
 from fcm.exceptions import HostError
@@ -42,6 +44,10 @@ def init_cmd() -> None:
         for change in changes:
             print_success(f"{change.setting}: {change.original_value!r} → {change.applied_value!r}")
         print_success(f"Host initialized ({len(changes)} change(s) applied).")
+        print_warning(
+            "ACTION REQUIRED: Log out and back in for group membership to take effect."
+        )
+        print_info("Or run immediately: newgrp fcm")
 
     from fcm.core.network_manager import ensure_default_network
 
@@ -120,15 +126,96 @@ def ls_cmd(
     console.print(table)
 
 
-@app.command(name="prune")
-def prune(
+@app.command(name="clean")
+def clean_cmd(
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
 ) -> None:
-    """Tear down all bridges, TAPs, and iptables rules. Does not remove cached files."""
+    """Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group."""
     from fcm.core.vm_manager import VMManager
     from fcm.models.vm import VMState
 
     # Refuse if any VMs are running
+    manager = VMManager()
+    running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
+    if running:
+        names = ", ".join(v.name for v in running)
+        print_error(f"Cannot clean: {len(running)} VM(s) still running: {names}")
+        print_error("Stop all VMs first with: fcm vm remove --name <name>")
+        raise typer.Exit(code=1)
+
+    if not force:
+        print_warning(
+            "This will tear down all network bridges, TAP devices, and iptables rules. "
+            "Sysctl, sudoers, and group settings will NOT be touched."
+        )
+        typer.confirm("Proceed with host clean?", abort=True)
+
+    cache_dir = get_cache_dir()
+    try:
+        summary = clean_host(cache_dir)
+    except Exception as e:
+        print_error(f"Clean failed: {e}")
+        raise typer.Exit(code=1)
+
+    if summary:
+        for item in summary:
+            print_info(f"  {item}")
+
+    print_success("Host cleaned successfully.")
+
+
+@app.command(name="reset")
+def reset_cmd(
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
+) -> None:
+    """Full rollback: remove networking, revert sysctl, remove sudoers and group."""
+    from fcm.core.vm_manager import VMManager
+    from fcm.models.vm import VMState
+
+    # Refuse if any VMs are running
+    manager = VMManager()
+    running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
+    if running:
+        names = ", ".join(v.name for v in running)
+        print_error(f"Cannot reset: {len(running)} VM(s) still running: {names}")
+        print_error("Stop all VMs first with: fcm vm remove --name <name>")
+        raise typer.Exit(code=1)
+
+    if not force:
+        print_warning(
+            "This will tear down all networking, revert sysctl changes, "
+            "remove the sudoers drop-in, and remove the project group. "
+            "This is a full rollback to pre-init state."
+        )
+        typer.confirm("Proceed with host reset?", abort=True)
+
+    cache_dir = get_cache_dir()
+    try:
+        summary = reset_host(cache_dir)
+    except Exception as e:
+        print_error(f"Reset failed: {e}")
+        raise typer.Exit(code=1)
+
+    if summary:
+        for item in summary:
+            print_info(f"  {item}")
+
+    print_success("Host reset successfully.")
+
+
+# ---- Deprecated aliases (hidden) ----
+
+
+@app.command(name="prune", hidden=True)
+def prune(
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
+) -> None:
+    """[Deprecated] Use 'fcm host clean' instead."""
+    print_warning("'host prune' is deprecated. Use 'host clean' instead.")
+
+    from fcm.core.vm_manager import VMManager
+    from fcm.models.vm import VMState
+
     manager = VMManager()
     running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
     if running:
@@ -159,9 +246,10 @@ def prune(
     print_success("Host pruned successfully.")
 
 
-@app.command()
+@app.command(name="restore", hidden=True)
 def restore() -> None:
-    """Revert host changes using saved snapshot."""
+    """[Deprecated] Use 'fcm host reset' instead."""
+    print_warning("'host restore' is deprecated. Use 'host reset' instead.")
     cache_dir = get_cache_dir()
     try:
         reverted = restore_host(cache_dir)

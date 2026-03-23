@@ -4,9 +4,18 @@ from unittest.mock import patch
 
 from fcm.constants import (
     BRIDGE_NAME,
+    BRIDGE_PREFIX,
     CLI_NAME,
+    DEFAULT_NETWORK_CIDR,
+    DEFAULT_NETWORK_GATEWAY,
+    DEFAULT_NETWORK_NAME,
+    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+    FIRECRACKER_SIGTERM_WAIT_S,
+    PRIVILEGED_BINARIES,
+    PROJECT_GROUP,
     PROJECT_NAME,
     PROJECT_NAME_UPPER,
+    SUDOERS_DROP_IN_PATH,
     TAP_PREFIX,
     _resolve_project_name,
     cache_dir_name,
@@ -67,4 +76,45 @@ def test_bridge_name():
 
 
 def test_tap_prefix():
-    assert TAP_PREFIX == "fcm"
+    assert TAP_PREFIX == "fcm-tap"
+
+
+def test_project_group():
+    assert PROJECT_GROUP == CLI_NAME
+    assert PROJECT_GROUP == "fcm"
+
+
+def test_sudoers_drop_in_path():
+    assert SUDOERS_DROP_IN_PATH == "/etc/sudoers.d/fcm"
+
+
+def test_default_network_name():
+    assert DEFAULT_NETWORK_NAME == "default"
+
+
+def test_default_network_cidr():
+    assert DEFAULT_NETWORK_CIDR == "10.10.0.0/24"
+
+
+def test_default_network_gateway():
+    assert DEFAULT_NETWORK_GATEWAY == "10.10.0.1"
+
+
+def test_bridge_prefix():
+    assert BRIDGE_PREFIX == "fcm-br"
+
+
+def test_firecracker_graceful_shutdown_timeout():
+    assert FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S == 5
+
+
+def test_firecracker_sigterm_wait():
+    assert FIRECRACKER_SIGTERM_WAIT_S == 1
+
+
+def test_privileged_binaries():
+    assert isinstance(PRIVILEGED_BINARIES, list)
+    assert len(PRIVILEGED_BINARIES) == 5
+    assert "/usr/sbin/ip" in PRIVILEGED_BINARIES
+    assert "/usr/sbin/iptables" in PRIVILEGED_BINARIES
+    assert "/usr/sbin/sysctl" in PRIVILEGED_BINARIES

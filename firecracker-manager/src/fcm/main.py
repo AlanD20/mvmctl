@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 """Firecracker Manager CLI - Main entry point."""
 
+import importlib.metadata
 import logging
 import os
 
 import typer
 from fcm.cli import vm, config, asset, host, network, key, configure
+
+
+def _get_version() -> str:
+    """Read the version from package metadata, falling back to __version__."""
+    try:
+        return importlib.metadata.version("firecracker-manager")
+    except importlib.metadata.PackageNotFoundError:
+        from fcm import __version__
+
+        return __version__
 
 app = typer.Typer(
     name="fcm",
@@ -22,12 +33,25 @@ app.add_typer(key.app, name="key", help="SSH key management")
 app.add_typer(configure.app, name="configure", help="Guided setup wizard")
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def callback(
+    ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
+    version: bool = typer.Option(
+        False, "--version", is_eager=True, help="Show version and exit"
+    ),
 ) -> None:
     """Firecracker Manager CLI."""
+    if version:
+        typer.echo(f"fcm {_get_version()}")
+        raise typer.Exit()
+
+    # If no subcommand was given, show help
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+
     # Determine log level: --debug > --verbose > FCM_LOG_LEVEL env var > WARNING
     if debug:
         level = logging.DEBUG
@@ -41,6 +65,45 @@ def callback(
         level=level,
         format="%(levelname)s: %(name)s: %(message)s",
     )
+
+
+@app.command(name="version")
+def version_cmd(ctx: typer.Context) -> None:
+    """Show the version and exit."""
+    typer.echo(f"fcm {_get_version()}")
+    raise typer.Exit()
+
+
+@app.command(name="help")
+def help_cmd(
+    ctx: typer.Context,
+    args: list[str] = typer.Argument(default=None),
+) -> None:
+    """Show help for fcm or a subcommand."""
+    import click
+
+    if not args:
+        typer.echo(ctx.parent.get_help() if ctx.parent else "")
+        raise typer.Exit()
+
+    # Navigate the click group hierarchy to find the subcommand
+    root = ctx.find_root()
+    cmd = root.command
+    for arg in args:
+        if hasattr(cmd, "get_command"):
+            sub = cmd.get_command(root, arg)
+            if sub is None:
+                typer.echo(f"Unknown command: {' '.join(args)}", err=True)
+                raise typer.Exit(code=1)
+            cmd = sub
+        else:
+            typer.echo(f"'{arg}' has no subcommands", err=True)
+            raise typer.Exit(code=1)
+
+    # Print help for the found command
+    with click.Context(cmd, info_name=" ".join([root.info_name or "fcm"] + args)) as sub_ctx:
+        typer.echo(cmd.get_help(sub_ctx))
+    raise typer.Exit()
 
 
 if __name__ == "__main__":

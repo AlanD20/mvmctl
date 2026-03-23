@@ -45,7 +45,7 @@ from fcm.api import vms, network, assets, keys, host
 | `api/network.py` | Network management: create, remove, list, inspect, IP allocation |
 | `api/assets.py` | Asset management: kernels, images, Firecracker binaries |
 | `api/keys.py` | SSH key registry: add, create, remove, list, inspect |
-| `api/host.py` | Host initialisation, state inspection, prune |
+| `api/host.py` | Host initialisation, state inspection, prune, clean, reset, privileges |
 
 ---
 
@@ -178,6 +178,7 @@ FCMError
 │   └── SocketNotFoundError
 ├── ConfigError           — Configuration loading/validation failure
 ├── HostError             — Host configuration or prerequisite failure
+│   └── PrivilegeError    — Insufficient privileges for an operation
 ├── ProcessError          — Subprocess execution failure
 ├── AssetNotFoundError    — Asset not found locally or remotely
 ├── BinaryError           — Firecracker/jailer binary management failure
@@ -611,6 +612,45 @@ kernels, or binaries.
 | `cache_dir` | `Path` | — | Cache root directory |
 
 **Returns:** List of summary strings describing what was torn down.
+
+---
+
+#### `clean_host(cache_dir: Path) -> list[str]`
+
+Remove all networking config (bridges, TAP devices, iptables rules). Does NOT revert
+sysctl settings, remove the sudoers drop-in, or remove the project group.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cache_dir` | `Path` | — | Cache root directory |
+
+**Returns:** List of summary strings describing what was torn down.
+
+---
+
+#### `reset_host(cache_dir: Path) -> list[str]`
+
+Full rollback to pre-init state. Removes networking config, reverts sysctl changes,
+removes the sudoers drop-in file, and removes the project group.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `cache_dir` | `Path` | — | Cache root directory |
+
+**Returns:** List of summary strings describing what was torn down.
+
+---
+
+#### `check_privileges(binary: str) -> None`
+
+Check that the current process can invoke `binary` with elevated privileges. Verifies
+that the binary exists and the current user is either root or a member of the `fcm` group.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `binary` | `str` | — | Absolute path to a system binary (e.g. `/usr/sbin/ip`) |
+
+**Raises:** `PrivilegeError` if the binary is not found or the user lacks privileges.
 
 ---
 

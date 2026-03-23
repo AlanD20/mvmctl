@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fcm.constants import PROJECT_NAME
+from fcm.constants import CLI_NAME, PRIVILEGED_BINARIES, PROJECT_GROUP, PROJECT_NAME, SUDOERS_DROP_IN_PATH
 from fcm.exceptions import HostError
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,156 @@ def _enable_ip_forward() -> HostChange | None:
     )
 
 
+def _get_current_user() -> str:
+    """Get the current login name."""
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
+def _group_exists(group_name: str) -> bool:
+    import grp
+
+    try:
+        grp.getgrnam(group_name)
+        return True
+    except KeyError:
+        return False
+
+
+def _user_in_group(username: str, group_name: str) -> bool:
+    import grp
+
+    try:
+        g = grp.getgrnam(group_name)
+        return username in g.gr_mem
+    except KeyError:
+        return False
+
+
+def _create_group(group_name: str) -> bool:
+    """Create system group. Returns True if created, False if already exists."""
+    if _group_exists(group_name):
+        return False
+    try:
+        subprocess.run(
+            ["groupadd", "--system", group_name],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        raise HostError(f"Failed to create group {group_name}: {e}") from e
+    except FileNotFoundError as e:
+        raise HostError("groupadd command not found") from e
+
+
+def _add_user_to_group(username: str, group_name: str) -> bool:
+    """Add user to group. Returns True if added, False if already a member."""
+    if _user_in_group(username, group_name):
+        return False
+    try:
+        subprocess.run(
+            ["usermod", "-aG", group_name, username],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        raise HostError(f"Failed to add {username} to group {group_name}: {e}") from e
+    except FileNotFoundError as e:
+        raise HostError("usermod command not found") from e
+
+
+def _validate_sudoers_binaries() -> None:
+    """Verify all PRIVILEGED_BINARIES exist on the host."""
+    for binary in PRIVILEGED_BINARIES:
+        if not Path(binary).exists():
+            pkg_map = {
+                "/usr/sbin/ip": "iproute2",
+                "/usr/sbin/iptables": "iptables",
+                "/usr/sbin/iptables-restore": "iptables",
+                "/usr/sbin/iptables-save": "iptables",
+                "/usr/sbin/sysctl": "procps",
+            }
+            pkg = pkg_map.get(binary, "unknown package")
+            raise HostError(f"Required binary not found: {binary} (install {pkg})")
+
+
+def _generate_sudoers_content(group_name: str) -> str:
+    """Generate sudoers drop-in content from PRIVILEGED_BINARIES."""
+    binaries_str = ", ".join(PRIVILEGED_BINARIES)
+    return (
+        f"# Managed by {CLI_NAME} — do not edit manually.\n"
+        f"# To remove: {CLI_NAME} host reset\n"
+        f"%{group_name} ALL=(root) NOPASSWD: {binaries_str}\n"
+    )
+
+
+def _write_sudoers(path: Path, group_name: str) -> None:
+    """Generate, validate with visudo, and write sudoers drop-in file."""
+    import tempfile
+
+    content = _generate_sudoers_content(group_name)
+    # Write to temp file for validation
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sudoers", delete=False) as f:
+        f.write(content)
+        tmp_path = f.name
+    try:
+        result = subprocess.run(
+            ["visudo", "-c", "-f", tmp_path],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise HostError(f"Generated sudoers file failed visudo validation: {result.stderr}")
+    except FileNotFoundError:
+        logger.warning("visudo not found — skipping sudoers validation")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    # Write to final location
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        path.chmod(0o440)
+    except OSError as e:
+        raise HostError(f"Failed to write sudoers file {path}: {e}") from e
+
+
+def _remove_sudoers(path: Path) -> bool:
+    """Remove sudoers drop-in file. Returns True if removed."""
+    if not path.exists():
+        return False
+    try:
+        path.unlink()
+        return True
+    except OSError as e:
+        raise HostError(f"Failed to remove sudoers file {path}: {e}") from e
+
+
+def _remove_group(group_name: str) -> bool:
+    """Remove system group. Returns True if removed."""
+    if not _group_exists(group_name):
+        return False
+    try:
+        subprocess.run(
+            ["groupdel", group_name],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        raise HostError(f"Failed to remove group {group_name}: {e}") from e
+    except FileNotFoundError as e:
+        raise HostError("groupdel command not found") from e
+
+
 def _persist_sysctl() -> HostChange | None:
     content = f"{SYSCTL_KEY} = 1\n"
     if SYSCTL_CONF.exists() and SYSCTL_CONF.read_text() == content:
@@ -215,6 +365,44 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     missing = check_required_binaries()
     if missing:
         raise HostError(f"Missing required binaries: {', '.join(missing)}")
+
+    # Group and sudoers setup (requires root)
+    _validate_sudoers_binaries()
+
+    group_created = _create_group(PROJECT_GROUP)
+    if group_created:
+        changes.append(
+            HostChange(
+                setting=f"group:{PROJECT_GROUP}",
+                original_value=None,
+                applied_value=PROJECT_GROUP,
+                mechanism="groupadd",
+            )
+        )
+
+    username = _get_current_user()
+    user_added = _add_user_to_group(username, PROJECT_GROUP)
+    if user_added:
+        changes.append(
+            HostChange(
+                setting=f"group_member:{username}",
+                original_value=None,
+                applied_value=f"{username}:{PROJECT_GROUP}",
+                mechanism="usermod",
+            )
+        )
+
+    sudoers_path = Path(SUDOERS_DROP_IN_PATH)
+    if not sudoers_path.exists():
+        _write_sudoers(sudoers_path, PROJECT_GROUP)
+        changes.append(
+            HostChange(
+                setting="sudoers_dropin",
+                original_value=None,
+                applied_value=str(sudoers_path),
+                mechanism="file_create",
+            )
+        )
 
     change = _enable_ip_forward()
     if change:
@@ -342,3 +530,68 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
         state_file.unlink()
 
     return reverted
+
+
+def clean_host(cache_dir: Path) -> list[str]:
+    """Remove all networking config (bridges, TAP devices, iptables rules).
+
+    Does NOT revert sysctl, remove sudoers, or remove project group.
+    Returns list of summary strings.
+    """
+    from fcm.core.network_manager import list_networks, remove_network
+
+    summary: list[str] = []
+    try:
+        networks = list_networks()
+    except Exception:
+        networks = []
+    for net in networks:
+        try:
+            remove_network(net.name)
+            summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
+        except Exception as e:
+            summary.append(f"Warning: failed to remove network '{net.name}': {e}")
+    return summary
+
+
+def reset_host(cache_dir: Path) -> list[str]:
+    """Full rollback to pre-init state.
+
+    Removes networking config, reverts sysctl, removes sudoers drop-in, and removes project group.
+    Returns list of summary strings.
+    """
+    summary = clean_host(cache_dir)
+
+    # Revert sysctl changes
+    try:
+        reverted = restore_host(cache_dir)
+        for change in reverted:
+            summary.append(f"Reverted {change.setting}")
+    except HostError:
+        pass  # No saved state is acceptable
+
+    # Remove sudoers drop-in
+    sudoers_path = Path(SUDOERS_DROP_IN_PATH)
+    try:
+        if _remove_sudoers(sudoers_path):
+            summary.append(f"Removed sudoers file {sudoers_path}")
+    except HostError as e:
+        summary.append(f"Warning: {e}")
+
+    # Remove project group
+    try:
+        if _remove_group(PROJECT_GROUP):
+            summary.append(f"Removed group '{PROJECT_GROUP}'")
+    except HostError as e:
+        summary.append(f"Warning: {e}")
+
+    # Remove state snapshot
+    state_file = _state_file(cache_dir)
+    if state_file.exists():
+        try:
+            state_file.unlink()
+            summary.append("Removed host state snapshot")
+        except OSError:
+            pass
+
+    return summary

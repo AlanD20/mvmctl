@@ -45,6 +45,10 @@ class HostError(FCMError):
     """Host configuration or prerequisite failure."""
 
 
+class PrivilegeError(HostError):
+    """Insufficient privileges for an operation."""
+
+
 class ProcessError(FCMError):
     """Subprocess execution failure."""
 

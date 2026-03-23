@@ -202,6 +202,55 @@ pyinstaller --onefile --name fcm src/fcm/main.py
 
 The GitHub Actions `release.yml` workflow runs this automatically on every tagged release and uploads the binary as a release asset. Two binaries are produced — one built on `ubuntu-22.04` and one on `ubuntu-24.04` — because glibc version differences mean a binary from 24.04 will not run on 22.04.
 
+## Privileged Operations
+
+Networking operations (bridge/TAP setup, iptables, sysctl) require elevated privileges.
+Rather than requiring `sudo` for every command, fcm uses a privilege delegation model:
+
+1. **`sudo fcm host init`** creates a system group (`fcm`) and a sudoers drop-in file
+   (`/etc/sudoers.d/fcm`) that grants members of the `fcm` group passwordless access
+   to a specific set of binaries defined in `fcm.constants.PRIVILEGED_BINARIES`.
+
+2. **`PRIVILEGED_BINARIES`** is the single source of truth for which system binaries
+   the sudoers file grants access to:
+   - `/usr/sbin/ip` (iproute2)
+   - `/usr/sbin/iptables`, `/usr/sbin/iptables-restore`, `/usr/sbin/iptables-save`
+   - `/usr/sbin/sysctl` (procps)
+
+3. **`check_privileges(binary)`** (in `fcm.api.host`) verifies that the current user
+   can invoke a given binary with elevated privileges. It checks:
+   - The binary exists on the host.
+   - The user is either root or a member of the `fcm` group.
+   Raises `PrivilegeError` (a subclass of `HostError`) on failure.
+
+4. **Sudoers generation** is handled by `_generate_sudoers_content()` and
+   `_write_sudoers()` in `core/host.py`. The generated file is validated with
+   `visudo -c` before being written to the final location.
+
+5. **Cleanup**: `fcm host reset` removes the sudoers drop-in and the `fcm` group,
+   fully reverting the privilege setup. `fcm host clean` only tears down networking
+   without touching the privilege model.
+
+When adding a new binary that needs elevated privileges, add it to
+`PRIVILEGED_BINARIES` in `constants.py` and update `_validate_sudoers_binaries()`
+in `core/host.py` if the binary belongs to a specific package.
+
+## Bumping the Version
+
+The project version is defined in exactly one place: the `version` field under `[project]` in `pyproject.toml`. There is no separate version constant to update — `importlib.metadata` reads it at runtime, and `__version__` in `src/fcm/__init__.py` exists only as a fallback for editable installs.
+
+To cut a release:
+
+1. Edit `pyproject.toml` and update `version` (e.g., `"0.1.0"` to `"0.2.0"`).
+2. Update the matching `__version__` in `src/fcm/__init__.py` to the same value.
+3. Commit the change: `git commit -m "chore: bump version to 0.2.0"`.
+4. Tag the commit: `git tag -a v0.2.0 -m "Release v0.2.0"`.
+5. Push the tag: `git push origin v0.2.0`.
+
+Pushing the tag triggers the `release.yml` GitHub Actions workflow, which builds binaries, publishes to PyPI, and creates a GitHub release automatically.
+
+See `docs/RELEASE.md` for the full release process, including hotfix and yank procedures.
+
 ## Questions
 
 Open an issue if something in this guide is unclear or out of date.

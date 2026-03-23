@@ -24,7 +24,7 @@ A Python CLI for managing Firecracker microVMs on Linux.
   - `iptables` — for NAT rules
   - `mkisofs` or `genisoimage` — for cloud-init ISO creation
   - `qemu-img` (qemu-utils) — for image conversion
-- **Root access** — networking operations (TAP devices, bridge setup, iptables) require `sudo`
+- **Root access (one-time)** — run `sudo fcm host init` once to create the `fcm` group and sudoers drop-in; after that, no `sudo` is needed for normal `fcm` commands
 
 Install system packages on Ubuntu/Debian:
 
@@ -78,10 +78,12 @@ uv run fcm --help
 Get a VM running in under 10 commands:
 
 ```bash
-# 1. Initialize the host (KVM, modules, ip_forward) — run once per machine
+# 1. Initialize the host (KVM, modules, ip_forward, group, sudoers) — run once per machine
 sudo fcm host init
-# ✓ net.ipv4.ip_forward: '0' → '1'
-# ✓ Host initialized (1 change(s) applied).
+# ✓ group:fcm: None → 'fcm'
+# ✓ Host initialized (N change(s) applied).
+# ⚠ ACTION REQUIRED: Log out and back in for group membership to take effect.
+# Or run immediately: newgrp fcm
 
 # 2. Fetch a prebuilt kernel
 fcm asset kernel fetch
@@ -116,9 +118,9 @@ fcm vm list
 # │ myvm  │ 10.20.0.2│ running │ 12345   │
 # └───────┴──────────┴─────────┴─────────┘
 
-# 8. Delete the VM when done
-sudo fcm vm delete --name myvm --force
-# ✓ VM 'myvm' deleted
+# 8. Remove the VM when done
+sudo fcm vm remove --name myvm --force
+# ✓ VM 'myvm' removed
 ```
 
 ---
@@ -131,21 +133,26 @@ Manage system-level setup required for Firecracker VMs. These are one-time, mach
 
 | Command | Description |
 |---------|-------------|
-| `fcm host init` | Apply host configuration changes (KVM, modules, ip_forward). Idempotent. |
+| `fcm host init` | Apply host configuration (KVM, modules, ip_forward, group, sudoers). Idempotent. |
 | `fcm host ls` | Show current host configuration state |
-| `fcm host restore` | Revert host changes using saved snapshot |
+| `fcm host clean` | Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group. |
+| `fcm host reset` | Full rollback: networking + sysctl + sudoers + group removal. |
 
 **Examples:**
 
 ```bash
 # Initialize host — run once per machine
 sudo fcm host init
+# Log out and back in (or: newgrp fcm)
 
 # Check host status
 fcm host ls
 
-# Restore host to pre-init state
-sudo fcm host restore
+# Tear down networking only
+sudo fcm host clean
+
+# Full rollback to pre-init state
+sudo fcm host reset
 ```
 
 ---
@@ -293,9 +300,8 @@ Manage Firecracker microVMs.
 
 | Command | Description |
 |---------|-------------|
-| `fcm vm setup` | Manually set up bridge and NAT |
 | `fcm vm create` | Create and start a new VM |
-| `fcm vm delete` | Stop and remove a VM |
+| `fcm vm remove` | Stop and remove a VM |
 | `fcm vm list` | List VMs |
 | `fcm vm ssh` | SSH into a VM |
 | `fcm vm logs` | View VM logs |
@@ -304,22 +310,6 @@ Manage Firecracker microVMs.
 | `fcm vm resume` | Resume a paused VM |
 | `fcm vm snapshot` | Create a snapshot of a running VM |
 | `fcm vm load` | Load a VM from snapshot |
-
-#### `fcm vm setup`
-
-Manually create the bridge interface (`fcm-br0`) and configure NAT. This runs automatically when you create the first VM, but can be called explicitly.
-
-**Flags:**
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--bridge NAME` | Bridge interface name | `fcm-br0` |
-
-**Example:**
-
-```bash
-sudo fcm vm setup
-```
 
 #### `fcm vm create`
 
@@ -336,7 +326,7 @@ Create and start a new Firecracker VM.
 | `--mem N` | Memory in MiB | 512 |
 | `--ip ADDRESS` | Guest IP (auto-assigned if omitted) | auto |
 | `--user USER` | Default SSH user for cloud-init | `root` |
-| `--enable-socket` | Enable Firecracker API socket | false |
+| `--enable-api-socket` | Enable Firecracker API socket | false |
 | `--firecracker-bin PATH` | Path to firecracker binary | `firecracker` |
 
 **Environment variables for `fcm vm create`:**
@@ -356,10 +346,10 @@ sudo fcm vm create --name myvm --image ubuntu-24.04
 sudo fcm vm create --name myvm --image ubuntu-24.04 --vcpus 4 --mem 4096
 
 # Create VM with static IP and socket enabled
-sudo fcm vm create --name myvm --image ubuntu-24.04 --ip 10.20.0.5 --enable-socket
+sudo fcm vm create --name myvm --image ubuntu-24.04 --ip 10.20.0.5 --enable-api-socket
 ```
 
-#### `fcm vm delete`
+#### `fcm vm remove`
 
 Stop and remove a VM.
 
@@ -373,8 +363,8 @@ Stop and remove a VM.
 **Example:**
 
 ```bash
-sudo fcm vm delete --name myvm
-sudo fcm vm delete --name myvm --force
+sudo fcm vm remove --name myvm
+sudo fcm vm remove --name myvm --force
 ```
 
 #### `fcm vm list`
@@ -475,7 +465,7 @@ sudo fcm vm cleanup --all --force
 
 #### `fcm vm pause` / `fcm vm resume`
 
-Pause and resume VMs. Requires `--enable-socket` when creating the VM.
+Pause and resume VMs. Requires `--enable-api-socket` when creating the VM.
 
 **Flags:**
 
@@ -487,7 +477,7 @@ Pause and resume VMs. Requires `--enable-socket` when creating the VM.
 
 ```bash
 # Create VM with socket enabled
-sudo fcm vm create --name myvm --image ubuntu-24.04 --enable-socket
+sudo fcm vm create --name myvm --image ubuntu-24.04 --enable-api-socket
 
 # Pause the VM
 fcm vm pause --name myvm
@@ -498,7 +488,7 @@ fcm vm resume --name myvm
 
 #### `fcm vm snapshot` / `fcm vm load`
 
-Create and restore VM snapshots. Requires `--enable-socket`.
+Create and restore VM snapshots. Requires `--enable-api-socket`.
 
 **Flags for `fcm vm snapshot`:**
 
@@ -697,7 +687,7 @@ Everything `fcm` downloads or generates lives under `~/.cache/firecracker-manage
         ├── firecracker.log           # Firecracker process log (--type os)
         ├── firecracker.console.log   # Serial console output (--type boot)
         ├── firecracker.pid           # Process ID
-        ├── firecracker.sock          # API socket (only if --enable-socket)
+        ├── firecracker.sock          # API socket (only if --enable-api-socket)
         └── cloud-init/               # Generated cloud-init seed files
             ├── meta-data
             ├── network-config
@@ -723,8 +713,7 @@ groups | grep kvm
 The network bridge hasn't been created yet, or it was lost on reboot.
 
 ```bash
-sudo fcm vm setup
-# Or let it auto-create when you create a VM:
+# The bridge is auto-created when you create a VM:
 sudo fcm vm create --name myvm --image ubuntu-24.04
 ```
 

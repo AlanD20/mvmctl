@@ -49,4 +49,20 @@ def config_filename() -> str:
 
 BRIDGE_NAME: str = f"{device_prefix()}-br0"
 
-TAP_PREFIX: str = device_prefix()
+TAP_PREFIX: str = f"{CLI_NAME}-tap"
+
+PROJECT_GROUP: str = CLI_NAME  # "fcm"
+SUDOERS_DROP_IN_PATH: str = f"/etc/sudoers.d/{CLI_NAME}"
+DEFAULT_NETWORK_NAME: str = "default"
+DEFAULT_NETWORK_CIDR: str = "10.10.0.0/24"
+DEFAULT_NETWORK_GATEWAY: str = "10.10.0.1"
+BRIDGE_PREFIX: str = f"{CLI_NAME}-br"
+FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: int = 5
+FIRECRACKER_SIGTERM_WAIT_S: int = 1
+PRIVILEGED_BINARIES: list[str] = [
+    "/usr/sbin/ip",
+    "/usr/sbin/iptables",
+    "/usr/sbin/iptables-restore",
+    "/usr/sbin/iptables-save",
+    "/usr/sbin/sysctl",
+]

@@ -48,3 +48,17 @@ def test_debug_flag():
     """Test --debug flag is accepted."""
     result = runner.invoke(app, ["--debug", "--help"])
     assert result.exit_code == 0
+
+
+def test_version_flag():
+    """Test --version prints version and exits."""
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert "fcm" in result.output
+
+
+def test_version_command():
+    """Test 'version' subcommand prints version and exits."""
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+    assert "fcm" in result.output

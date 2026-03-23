@@ -1,6 +1,6 @@
 """Tests for CLI host commands."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -206,7 +206,71 @@ def test_ls_state_error_handled(mock_kvm, mock_bins, mock_fwd, mock_state, mock_
 
 
 # ---------------------------------------------------------------------------
-# host restore
+# host clean
+# ---------------------------------------------------------------------------
+
+
+@patch("fcm.core.vm_manager.VMManager.list_all", return_value=[])
+@patch("fcm.cli.host.get_cache_dir")
+@patch("fcm.cli.host.clean_host")
+def test_clean_success(mock_clean, mock_cache, mock_list_all, tmp_path):
+    mock_cache.return_value = tmp_path
+    mock_clean.return_value = ["Removed network 'default' (bridge: fcm-br0)"]
+    result = runner.invoke(app, ["clean", "--force"])
+    assert result.exit_code == 0
+    assert "cleaned successfully" in result.output
+    assert "Removed network" in result.output
+
+
+@patch("fcm.core.vm_manager.VMManager.list_all")
+def test_clean_refuses_running_vms(mock_list_all):
+    from fcm.models.vm import VMState
+
+    vm = MagicMock()
+    vm.name = "myvm"
+    vm.status = VMState.RUNNING
+    mock_list_all.return_value = [vm]
+    result = runner.invoke(app, ["clean", "--force"])
+    assert result.exit_code == 1
+    assert "Cannot clean" in result.output
+
+
+# ---------------------------------------------------------------------------
+# host reset
+# ---------------------------------------------------------------------------
+
+
+@patch("fcm.core.vm_manager.VMManager.list_all", return_value=[])
+@patch("fcm.cli.host.get_cache_dir")
+@patch("fcm.cli.host.reset_host")
+def test_reset_success(mock_reset, mock_cache, mock_list_all, tmp_path):
+    mock_cache.return_value = tmp_path
+    mock_reset.return_value = [
+        "Removed network 'default' (bridge: fcm-br0)",
+        "Reverted net.ipv4.ip_forward",
+        "Removed sudoers file /etc/sudoers.d/fcm",
+        "Removed group 'fcm'",
+    ]
+    result = runner.invoke(app, ["reset", "--force"])
+    assert result.exit_code == 0
+    assert "reset successfully" in result.output
+
+
+@patch("fcm.core.vm_manager.VMManager.list_all")
+def test_reset_refuses_running_vms(mock_list_all):
+    from fcm.models.vm import VMState
+
+    vm = MagicMock()
+    vm.name = "myvm"
+    vm.status = VMState.RUNNING
+    mock_list_all.return_value = [vm]
+    result = runner.invoke(app, ["reset", "--force"])
+    assert result.exit_code == 1
+    assert "Cannot reset" in result.output
+
+
+# ---------------------------------------------------------------------------
+# host restore (deprecated alias)
 # ---------------------------------------------------------------------------
 
 
@@ -224,6 +288,7 @@ def test_restore_success(mock_restore, mock_cache, tmp_path):
     ]
     result = runner.invoke(app, ["restore"])
     assert result.exit_code == 0
+    assert "deprecated" in result.output
     assert "Reverted" in result.output
     assert "1 change" in result.output
 
