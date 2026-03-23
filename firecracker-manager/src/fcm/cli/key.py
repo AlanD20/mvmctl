@@ -13,6 +13,7 @@ from fcm.core.key_manager import (
     remove_key,
 )
 from fcm.exceptions import FCMKeyError
+from fcm.cli._helpers import check_name_arg
 from fcm.utils.console import console, print_error, print_info, print_success
 from fcm.utils.validation import validate_entity_name
 
@@ -43,6 +44,7 @@ def ls(
         print_info("No keys found. Add one with: fcm key add <name> <path>")
         return
 
+    # M-22: Direct Table usage acceptable for complex layouts
     table = Table(title="SSH Keys")
     table.add_column("Name", style="cyan", no_wrap=True)
     table.add_column("Fingerprint")
@@ -73,12 +75,7 @@ def add(
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing key"),
 ) -> None:
     """Import an existing public key into the cache."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
+    name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
     if public_key_path is None:
         print_error("Missing argument 'PUBLIC_KEY_PATH'")
@@ -107,12 +104,7 @@ def create(
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing key file"),
 ) -> None:
     """Generate a new ED25519 keypair."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
+    name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
     try:
         info, private_key_path = create_key(
@@ -140,12 +132,7 @@ def remove(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove a key from the cache."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
+    name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
     if not force:
         typer.confirm(f"Remove key '{name}' from cache?", abort=True)
@@ -170,21 +157,7 @@ def rm(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Alias for remove."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
-    validate_entity_name(name, "key")
-    if not force:
-        typer.confirm(f"Remove key '{name}' from cache?", abort=True)
-    try:
-        remove_key(name)
-    except FCMKeyError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    print_success(f"Key '{name}' removed from cache")
+    remove(ctx=ctx, name=name, force=force)
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -194,12 +167,7 @@ def inspect(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a key."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
+    name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
     try:
         info = inspect_key(name)

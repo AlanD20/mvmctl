@@ -16,6 +16,7 @@ from fcm.core.network_manager import (
     remove_network,
 )
 from fcm.exceptions import NetworkError
+from fcm.cli._helpers import check_name_arg
 from fcm.utils.console import console, print_error, print_info, print_success
 from fcm.utils.validation import validate_entity_name
 
@@ -56,6 +57,7 @@ def ls(
         print_info("No networks found. Create one with: fcm network create <name>")
         return
 
+    # M-22: Direct Table usage acceptable for complex layouts
     table = Table(title="Networks")
     table.add_column("Name", style="cyan", no_wrap=True)
     table.add_column("CIDR", style="green")
@@ -94,12 +96,7 @@ def create(
     no_nat: bool = typer.Option(False, "--no-nat", help="Disable NAT/masquerade"),
 ) -> None:
     """Create a named network."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
+    name = check_name_arg(ctx, name)
     if cidr is None:
         print_error("Missing required option '--cidr'")
         raise typer.Exit(code=1)
@@ -131,12 +128,7 @@ def remove(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove a named network."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
+    name = check_name_arg(ctx, name)
     validate_entity_name(name, "network")
     if not force:
         typer.confirm(f"Remove network '{name}'?", abort=True)
@@ -161,21 +153,7 @@ def rm(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Alias for remove."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
-    validate_entity_name(name, "network")
-    if not force:
-        typer.confirm(f"Remove network '{name}'?", abort=True)
-    try:
-        remove_network(name)
-    except NetworkError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    print_success(f"Network '{name}' removed")
+    remove(ctx=ctx, name=name, force=force)
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -185,12 +163,7 @@ def inspect(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a network."""
-    if name == "help":
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-    if name is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit(code=1)
+    name = check_name_arg(ctx, name)
     validate_entity_name(name, "network")
     try:
         info = inspect_network(name)

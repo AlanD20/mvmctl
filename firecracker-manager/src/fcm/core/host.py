@@ -144,18 +144,11 @@ def get_ip_forward_status() -> str:
 
 
 def _is_module_loaded(module: str) -> bool:
-    result = subprocess.run(
-        ["lsmod"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
+    try:
+        modules = Path("/proc/modules").read_text()
+        return any(line.split()[0] == module for line in modules.splitlines() if line)
+    except OSError:
         return False
-    for line in result.stdout.splitlines():
-        if line.split() and line.split()[0] == module:
-            return True
-    return False
 
 
 def _load_module(module: str) -> None:

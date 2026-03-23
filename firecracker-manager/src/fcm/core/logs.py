@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections import deque
 from collections.abc import Callable, Generator
 from pathlib import Path
 
@@ -64,8 +65,8 @@ def read_log_lines(
     """
     try:
         with open(log_file, "r") as f:
-            all_lines = f.readlines()
-            return all_lines[-lines:] if len(all_lines) > lines else all_lines
+            last_lines = deque(f, maxlen=lines)
+            return list(last_lines)
     except IOError as e:
         raise FCMError(f"Error reading log file: {e}") from e
 
@@ -87,7 +88,7 @@ def follow_log(
             while True:
                 line = f.readline()
                 if not line:
-                    time.sleep(0.1)  # Wait for new content
+                    time.sleep(0.3)  # Wait for new content
                     continue
                 yield line.rstrip("\n")
     except KeyboardInterrupt:

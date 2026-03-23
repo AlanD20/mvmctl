@@ -85,10 +85,12 @@ def inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
 
     Requires root. Falls back gracefully if loop mount fails.
     """
+    import os
     import tempfile
 
     seed_target = "/var/lib/cloud/seed/nocloud"
     mount_point = Path(tempfile.mkdtemp(prefix="fcm-mount-"))
+    os.chmod(mount_point, 0o700)
 
     try:
         # Mount the rootfs ext4 image

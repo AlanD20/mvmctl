@@ -153,10 +153,9 @@ def create_key(
     private_key_path = output_dir / name
     pub_key_path = output_dir / f"{name}.pub"
 
-    if not overwrite and private_key_path.exists():
-        raise FCMKeyError(
-            f"Key file already exists: {private_key_path}. Use --overwrite to replace."
-        )
+    if not overwrite and (private_key_path.exists() or pub_key_path.exists()):
+        existing = private_key_path if private_key_path.exists() else pub_key_path
+        raise FCMKeyError(f"Key file already exists: {existing}. Use --overwrite to replace.")
 
     registry = _load_registry()
     if name in registry:

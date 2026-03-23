@@ -38,8 +38,6 @@ class MultiVMNetworkConfig:
 
     bridge_name: str = BRIDGE_NAME
     bridge_ip: str = "10.20.0.1/24"
-    guest_ip_start: str = "10.20.0.2"
-    guest_ip_end: str = "10.20.0.254"
     tap_prefix: str = CLI_NAME
 
 
@@ -67,6 +65,9 @@ class FCMConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
 
 
+_config_cache: dict[Path, FCMConfig] = {}
+
+
 def load_yaml(path: Path) -> dict[str, Any]:
     """Load YAML file."""
     if not path.exists():
@@ -88,6 +89,9 @@ def load_config(config_dir: Path) -> FCMConfig:
     Returns:
         Parsed configuration
     """
+    if config_dir in _config_cache:
+        return _config_cache[config_dir]
+
     defaults_path = config_dir / "defaults.yaml"
     data = load_yaml(defaults_path)
 
@@ -100,14 +104,21 @@ def load_config(config_dir: Path) -> FCMConfig:
     valid_path_fields = {f.name for f in fields(PathsConfig)}
     paths_data_filtered = {k: v for k, v in paths_data.items() if k in valid_path_fields}
 
-    return FCMConfig(
+    # Filter multi_vm data to only known MultiVMNetworkConfig fields
+    multi_vm_data = network_data.get("multi_vm", {})
+    valid_multi_vm_fields = {f.name for f in fields(MultiVMNetworkConfig)}
+    multi_vm_data_filtered = {k: v for k, v in multi_vm_data.items() if k in valid_multi_vm_fields}
+
+    result = FCMConfig(
         firecracker=FirecrackerConfig(**firecracker_data),
         vm_defaults=VMDefaultsConfig(**vm_defaults_data),
         network=NetworkTopologyConfig(
-            multi_vm=MultiVMNetworkConfig(**network_data.get("multi_vm", {})),
+            multi_vm=MultiVMNetworkConfig(**multi_vm_data_filtered),
         ),
         paths=PathsConfig(**paths_data_filtered),
     )
+    _config_cache[config_dir] = result
+    return result
 
 
 def validate_config(config: FCMConfig) -> list[str]:
@@ -115,13 +126,11 @@ def validate_config(config: FCMConfig) -> list[str]:
     errors = []
 
     # Validate paths exist
-    paths = [
-        ("firecracker.binary", config.firecracker.binary),
-    ]
-
-    for name, path in paths:
-        if not Path(path).exists():
-            errors.append(f"{name}: File not found: {path}")
+    if not config.firecracker.binary:
+        errors.append("firecracker.binary: Must not be empty")
+    else:
+        if not Path(config.firecracker.binary).exists():
+            errors.append(f"firecracker.binary: File not found: {config.firecracker.binary}")
 
     # Validate VM resources
     if config.vm_defaults.vcpu_count < 1:

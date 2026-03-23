@@ -6,7 +6,15 @@ import logging
 import os
 
 import typer
-from fcm.cli import vm, config, asset, host, network, key, configure
+from fcm.cli import (
+    vm,
+    config,
+    asset,
+    host,
+    network,
+    key,
+    configure,
+)  # TODO: P-M8 — lazy-load CLI modules when startup time matters
 from fcm.constants import CLI_NAME
 
 
@@ -51,6 +59,14 @@ def callback(
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit()
+
+    if os.getuid() == 0:
+        from fcm.utils.console import console as _console
+
+        _console.print(
+            "[yellow]Warning: running as root. Consider using the 'fcm' group instead "
+            "(set up via 'sudo fcm host init').[/yellow]"
+        )
 
     # Determine log level: --debug > --verbose > FCM_LOG_LEVEL env var > WARNING
     if debug:

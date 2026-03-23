@@ -155,7 +155,7 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
 
     sha256_hash = hashlib.sha256()
     with open(tgz_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
+        for chunk in iter(lambda: f.read(524288), b""):
             sha256_hash.update(chunk)
     _verify_sha256(version, tgz_path, sha256_hash.hexdigest())
 
@@ -196,7 +196,7 @@ def _extract_member(tar: tarfile.TarFile, member: tarfile.TarInfo, dest: Path) -
         raise BinaryError(f"Cannot read {member.name} from archive")
     with open(dest, "wb") as out:
         while True:
-            chunk = reader.read(8192)
+            chunk = reader.read(524288)
             if not chunk:
                 break
             out.write(chunk)

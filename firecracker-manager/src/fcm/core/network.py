@@ -1,4 +1,11 @@
-"""Network infrastructure management for Firecracker multi-VM setup."""
+"""Network infrastructure management for Firecracker multi-VM setup.
+
+.. todo:: S-M5 — Add network namespace isolation between VMs.
+   Currently all VMs share the host network namespace, separated only by
+   iptables rules.  A future improvement should place each VM's TAP in its
+   own network namespace to provide kernel-level isolation.  See
+   ``ip netns`` / ``ip link set <tap> netns <ns>`` for the primitives.
+"""
 
 import ipaddress
 import logging
@@ -22,6 +29,9 @@ BRIDGE_IP = DEFAULT_NETWORK_GATEWAY
 BRIDGE_CIDR = f"{DEFAULT_NETWORK_GATEWAY}/24"
 SUBNET = DEFAULT_NETWORK_CIDR
 GATEWAY = DEFAULT_NETWORK_GATEWAY
+
+
+_default_interface_cache: str | None = None
 
 
 def get_default_interface() -> str:
@@ -63,6 +73,19 @@ def bridge_exists(bridge: str = BRIDGE_NAME) -> bool:
     return result.returncode == 0
 
 
+def _bridge_has_ip(bridge: str, cidr: str) -> bool:
+    """Return True if the bridge already has the given CIDR assigned."""
+    result = subprocess.run(
+        ["ip", "-o", "addr", "show", bridge],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    return cidr in result.stdout
+
+
 def setup_bridge(
     bridge: str = BRIDGE_NAME, cidr: str = BRIDGE_CIDR, gateway_cidr: str | None = None
 ) -> None:
@@ -82,6 +105,7 @@ def setup_bridge(
         return
 
     try:
+        # P-L2: capture_output acceptable — error messages in CalledProcessError use captured stderr
         subprocess.run(
             ["ip", "link", "add", "name", bridge, "type", "bridge"],
             check=True,
@@ -109,6 +133,7 @@ def setup_bridge(
         raise NetworkError(f"Failed to bring up bridge {bridge}: {e}") from e
 
     try:
+        # Direct procfs write is equivalent to sysctl -w net.ipv4.ip_forward=1
         Path("/proc/sys/net/ipv4/ip_forward").write_text("1\n")
     except OSError as e:
         raise NetworkError(f"Failed to enable IP forwarding: {e}") from e
@@ -144,6 +169,30 @@ def teardown_bridge(bridge: str = BRIDGE_NAME) -> None:
     logger.info("Bridge %s removed", bridge)
 
 
+def _iptables_rule_exists(rule_args: list[str]) -> bool:
+    """Check if an iptables rule exists using ``-C`` (check)."""
+    result = subprocess.run(
+        rule_args,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _ensure_iptables_rule(
+    check_args: list[str],
+    add_args: list[str],
+    error_label: str,
+) -> None:
+    """Add an iptables rule only if it doesn't already exist (idempotent)."""
+    if _iptables_rule_exists(check_args):
+        return
+    try:
+        subprocess.run(add_args, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        raise NetworkError(f"{error_label}: {e}") from e
+
+
 def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
     """Set up NAT (MASQUERADE) for the bridge subnet.
 
@@ -156,64 +205,23 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
     if host_iface is None:
         host_iface = get_default_interface()
 
-    check = subprocess.run(
+    _ensure_iptables_rule(
         ["iptables", "-t", "nat", "-C", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
-        capture_output=True,
-        check=False,
+        ["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
+        f"Failed to add MASQUERADE rule for {host_iface}",
     )
-    if check.returncode != 0:
-        try:
-            subprocess.run(
-                [
-                    "iptables",
-                    "-t",
-                    "nat",
-                    "-A",
-                    "POSTROUTING",
-                    "-o",
-                    host_iface,
-                    "-j",
-                    "MASQUERADE",
-                ],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to add MASQUERADE rule for {host_iface}: {e}") from e
 
-    check = subprocess.run(
+    _ensure_iptables_rule(
         ["iptables", "-C", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-        capture_output=True,
-        check=False,
+        ["iptables", "-A", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
+        f"Failed to add FORWARD rule bridge→host ({bridge}→{host_iface})",
     )
-    if check.returncode != 0:
-        try:
-            subprocess.run(
-                ["iptables", "-A", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(
-                f"Failed to add FORWARD rule bridge→host ({bridge}→{host_iface}): {e}"
-            ) from e
 
-    check = subprocess.run(
+    _ensure_iptables_rule(
         ["iptables", "-C", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
-        capture_output=True,
-        check=False,
+        ["iptables", "-A", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
+        f"Failed to add FORWARD rule host→bridge ({host_iface}→{bridge})",
     )
-    if check.returncode != 0:
-        try:
-            subprocess.run(
-                ["iptables", "-A", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(
-                f"Failed to add FORWARD rule host→bridge ({host_iface}→{bridge}): {e}"
-            ) from e
 
     logger.info("NAT rules configured for bridge %s via %s", bridge, host_iface)
 
@@ -228,15 +236,15 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
     - Removes: `iptables -t nat -D POSTROUTING -o {host_iface} -j MASQUERADE`
     - Raises NetworkError on failure.
     """
-    tap_devices = get_tap_devices(bridge)
-
-    if not force and len(tap_devices) > 0:
-        logger.debug(
-            "Skipping MASQUERADE removal: %d TAP device(s) still attached to %s",
-            len(tap_devices),
-            bridge,
-        )
-        return
+    if not force:
+        tap_devices = get_tap_devices(bridge)
+        if len(tap_devices) > 0:
+            logger.debug(
+                "Skipping MASQUERADE removal: %d TAP device(s) still attached to %s",
+                len(tap_devices),
+                bridge,
+            )
+            return
 
     try:
         host_iface = get_default_interface()
@@ -347,35 +355,17 @@ def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None
     - `iptables -A FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
     - `iptables -A FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     """
-    check = subprocess.run(
+    _ensure_iptables_rule(
         ["iptables", "-C", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
-        capture_output=True,
-        check=False,
+        ["iptables", "-A", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
+        f"Failed to add FORWARD rule {bridge}→{tap_name}",
     )
-    if check.returncode != 0:
-        try:
-            subprocess.run(
-                ["iptables", "-A", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to add FORWARD rule {bridge}→{tap_name}: {e}") from e
 
-    check = subprocess.run(
+    _ensure_iptables_rule(
         ["iptables", "-C", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
-        capture_output=True,
-        check=False,
+        ["iptables", "-A", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
+        f"Failed to add FORWARD rule {tap_name}→{bridge}",
     )
-    if check.returncode != 0:
-        try:
-            subprocess.run(
-                ["iptables", "-A", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to add FORWARD rule {tap_name}→{bridge}: {e}") from e
 
     logger.debug("FORWARD rules added for TAP %s ↔ bridge %s", tap_name, bridge)
 

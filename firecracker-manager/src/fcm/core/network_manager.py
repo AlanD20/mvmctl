@@ -201,8 +201,8 @@ def create_network(
         # Best-effort cleanup on failure
         try:
             teardown_bridge(bridge)
-        except NetworkError:
-            pass
+        except NetworkError as e:
+            logger.warning("Rollback: failed to tear down bridge: %s", e)
         raise
 
     _save_config(network_dir, config)

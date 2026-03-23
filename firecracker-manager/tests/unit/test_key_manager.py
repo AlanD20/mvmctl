@@ -273,3 +273,124 @@ def test_save_registry_sets_chmod_600(keys_dir, tmp_path):
     assert registry_path.exists()
     mode = registry_path.stat().st_mode & 0o777
     assert mode == 0o600, f"Expected 0o600, got {oct(mode)}"
+
+
+# ---------------------------------------------------------------------------
+# T-H9: key_manager error paths
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "../../../etc/shadow",
+        "key/../../escape",
+        "key\x00null",
+        "",
+    ],
+)
+def test_add_key_with_path_traversal_name(keys_dir, tmp_path, bad_name):
+    pub_file = tmp_path / "id_ed25519.pub"
+    pub_file.write_text(SAMPLE_PUB_KEY)
+    try:
+        info = add_key(bad_name, pub_file)
+        cached = keys_dir / f"{bad_name}.pub"
+    except (FCMKeyError, OSError, ValueError):
+        pass
+
+
+def test_add_key_from_nonexistent_path(keys_dir):
+    with pytest.raises(FCMKeyError, match="not found"):
+        add_key("mykey", Path("/nonexistent/path/to/key.pub"))
+
+
+def test_add_key_overwrite_existing(keys_dir, tmp_path):
+    pub_file = tmp_path / "id_ed25519.pub"
+    pub_file.write_text(SAMPLE_PUB_KEY)
+
+    add_key("overwrite-me", pub_file)
+    info = add_key("overwrite-me", pub_file, overwrite=True)
+    assert info.name == "overwrite-me"
+
+    registry = json.loads((keys_dir / "registry.json").read_text())
+    assert "overwrite-me" in registry
+
+
+def test_remove_key_not_in_registry(keys_dir):
+    with pytest.raises(FCMKeyError, match="not found"):
+        remove_key("never-added-key")
+
+
+def test_remove_key_pub_file_already_gone(keys_dir, tmp_path):
+    pub_file = tmp_path / "id_ed25519.pub"
+    pub_file.write_text(SAMPLE_PUB_KEY)
+    add_key("vanished", pub_file)
+
+    (keys_dir / "vanished.pub").unlink()
+
+    remove_key("vanished")
+    assert get_key("vanished") is None
+
+
+def test_corrupt_registry_resets_to_empty(keys_dir):
+    (keys_dir / "registry.json").write_text("NOT VALID JSON {{{")
+    result = list_keys()
+    assert result == []
+
+
+def test_inspect_key_missing_pub_file(keys_dir, tmp_path):
+    pub_file = tmp_path / "id_ed25519.pub"
+    pub_file.write_text(SAMPLE_PUB_KEY)
+    add_key("orphan", pub_file)
+
+    (keys_dir / "orphan.pub").unlink()
+
+    info = inspect_key("orphan")
+    assert info["name"] == "orphan"
+    assert info["public_key"] == ""
+
+
+def test_create_key_overwrite_removes_old_files(keys_dir, tmp_path):
+    output_dir = tmp_path / "ssh"
+    output_dir.mkdir()
+    (output_dir / "overkey").write_text("OLD PRIVATE")
+    (output_dir / "overkey.pub").write_text("OLD PUB")
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    def fake_keygen(*args, **kwargs):
+        cmd = args[0]
+        for i, arg in enumerate(cmd):
+            if arg == "-f" and i + 1 < len(cmd):
+                key_path = Path(cmd[i + 1])
+                key_path.write_text("NEW PRIVATE")
+                key_path.with_suffix(".pub").write_text(SAMPLE_PUB_KEY)
+        return mock_result
+
+    with patch("fcm.core.key_manager.subprocess.run", side_effect=fake_keygen):
+        info, private_path = create_key("overkey", output_dir=output_dir, overwrite=True)
+
+    assert info.name == "overkey"
+    assert private_path.read_text() == "NEW PRIVATE"
+
+
+def test_compute_fingerprint_invalid_key():
+    from fcm.core.key_manager import _compute_fingerprint
+
+    with pytest.raises(FCMKeyError, match="Invalid public key format"):
+        _compute_fingerprint("not-a-valid-key")
+
+
+def test_parse_algorithm_empty_key():
+    from fcm.core.key_manager import _parse_algorithm
+
+    with pytest.raises(FCMKeyError, match="Invalid public key format"):
+        _parse_algorithm("")
+
+
+def test_parse_comment_no_comment():
+    from fcm.core.key_manager import _parse_comment
+
+    result = _parse_comment("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI")
+    assert result == ""

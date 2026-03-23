@@ -23,6 +23,19 @@ from fcm.utils.fs import get_cache_dir
 app = typer.Typer(help="Host configuration", no_args_is_help=True)
 
 
+def _abort_if_vms_running(action: str) -> None:
+    from fcm.core.vm_manager import get_vm_manager
+    from fcm.models.vm import VMState
+
+    manager = get_vm_manager()
+    running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
+    if running:
+        names = ", ".join(v.name for v in running)
+        print_error(f"Cannot {action}: {len(running)} VM(s) still running: {names}")
+        print_error("Stop all VMs first with: fcm vm remove --name <name>")
+        raise typer.Exit(code=1)
+
+
 @app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the host command group."""
@@ -39,6 +52,10 @@ def init_cmd() -> None:
     except HostError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
+
+    from fcm.utils.audit import log_audit
+
+    log_audit("host.init", f"changes={len(changes)}")
 
     if not changes:
         print_info("Host already configured — nothing to do.")
@@ -94,6 +111,7 @@ def ls_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
 
+    # M-22: Direct Table usage acceptable for complex layouts
     table = Table(title="Host Configuration")
     table.add_column("Check", style="cyan", no_wrap=True)
     table.add_column("Status", style="bold")
@@ -131,17 +149,7 @@ def clean_cmd(
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
 ) -> None:
     """Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group."""
-    from fcm.core.vm_manager import get_vm_manager
-    from fcm.models.vm import VMState
-
-    # Refuse if any VMs are running
-    manager = get_vm_manager()
-    running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
-    if running:
-        names = ", ".join(v.name for v in running)
-        print_error(f"Cannot clean: {len(running)} VM(s) still running: {names}")
-        print_error("Stop all VMs first with: fcm vm remove --name <name>")
-        raise typer.Exit(code=1)
+    _abort_if_vms_running("clean")
 
     if not force:
         print_warning(
@@ -169,17 +177,7 @@ def reset_cmd(
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
 ) -> None:
     """Full rollback: remove networking, revert sysctl, remove sudoers and group."""
-    from fcm.core.vm_manager import get_vm_manager
-    from fcm.models.vm import VMState
-
-    # Refuse if any VMs are running
-    manager = get_vm_manager()
-    running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
-    if running:
-        names = ", ".join(v.name for v in running)
-        print_error(f"Cannot reset: {len(running)} VM(s) still running: {names}")
-        print_error("Stop all VMs first with: fcm vm remove --name <name>")
-        raise typer.Exit(code=1)
+    _abort_if_vms_running("reset")
 
     if not force:
         print_warning(
@@ -195,6 +193,10 @@ def reset_cmd(
     except FCMError as e:
         print_error(f"Reset failed: {e}")
         raise typer.Exit(code=1)
+
+    from fcm.utils.audit import log_audit
+
+    log_audit("host.reset")
 
     if summary:
         for item in summary:
@@ -213,16 +215,7 @@ def prune(
     """[Deprecated] Use 'fcm host clean' instead."""
     print_warning("'host prune' is deprecated. Use 'host clean' instead.")
 
-    from fcm.core.vm_manager import get_vm_manager
-    from fcm.models.vm import VMState
-
-    manager = get_vm_manager()
-    running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
-    if running:
-        names = ", ".join(v.name for v in running)
-        print_error(f"Cannot prune: {len(running)} VM(s) still running: {names}")
-        print_error("Stop all VMs first with: fcm vm remove --name <name>")
-        raise typer.Exit(code=1)
+    _abort_if_vms_running("prune")
 
     if not force:
         print_warning(

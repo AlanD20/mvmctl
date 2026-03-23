@@ -1,9 +1,11 @@
 """Project identity constants derived from pyproject.toml metadata."""
 
+import functools
 import importlib.metadata
 from typing import Final
 
 
+@functools.lru_cache(maxsize=1)
 def _resolve_project_name() -> str:
     try:
         return importlib.metadata.metadata("firecracker-manager")["Name"]
@@ -11,6 +13,7 @@ def _resolve_project_name() -> str:
         return "firecracker-manager"
 
 
+@functools.lru_cache(maxsize=1)
 def _resolve_cli_name() -> str:
     """Resolve CLI name from entry points, falling back to 'fcm'."""
     try:
@@ -66,3 +69,4 @@ PRIVILEGED_BINARIES: Final[list[str]] = [
     "/usr/sbin/sysctl",
 ]
 HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/0.1.0"
+MAX_VMS: Final[int] = 50

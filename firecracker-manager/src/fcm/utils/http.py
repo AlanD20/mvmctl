@@ -54,7 +54,7 @@ def download_file(
 
             with open(dest, "wb") as f:
                 while True:
-                    chunk = response.read(8192)
+                    chunk = response.read(524288)
                     if not chunk:
                         break
                     f.write(chunk)

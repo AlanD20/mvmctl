@@ -91,6 +91,9 @@ def create(
             enable_pci=enable_pci,
             firecracker_bin=firecracker_bin,
         )
+        from fcm.utils.audit import log_audit
+
+        log_audit("vm.create", f"name={name}")
         print_success(f"VM '{name}' started (PID {vm.pid})")
         print_info(f"  SSH ready in ~30-60s: fcm vm ssh --name {name}")
         print_info(f"  Logs: fcm vm logs --name {name} --type os --follow")
@@ -115,6 +118,9 @@ def remove(
             typer.confirm(f"Delete VM '{name}' (IP: {vm.ip})?", abort=True)
 
         remove_vm(name)
+        from fcm.utils.audit import log_audit
+
+        log_audit("vm.remove", f"name={name}")
         print_success(f"VM '{name}' removed")
     except FCMError as e:
         print_error(str(e))
@@ -169,6 +175,7 @@ def ls_vms(
         print_info("No VMs found." + (" Use --all to include stopped VMs." if not all_vms else ""))
         return
 
+    # M-22: Direct Table usage acceptable for complex layouts
     table = Table(title="Firecracker VMs")
     table.add_column("Name", style="cyan", no_wrap=True)
     table.add_column("IP", style="green")

@@ -199,3 +199,246 @@ def test_load_failure(mocker: MockerFixture):
         ],
     )
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# T-H3: vm create error-path tests
+# ---------------------------------------------------------------------------
+
+
+def test_create_missing_name_flag():
+    """Omitting --name should fail (required option)."""
+    result = runner.invoke(app, ["create", "--image", "ubuntu-24.04"])
+    assert result.exit_code != 0
+
+
+def test_create_missing_image_flag():
+    """Omitting --image should fail (required option)."""
+    result = runner.invoke(app, ["create", "--name", "myvm"])
+    assert result.exit_code != 0
+
+
+def test_create_invalid_image_not_found(mocker: MockerFixture):
+    """Image that doesn't exist should result in exit code 1."""
+    mocker.patch(
+        "fcm.cli.vm.create_vm",
+        side_effect=FCMError("Image not found: 'no-such-image'"),
+    )
+    result = runner.invoke(app, ["create", "--name", "myvm", "--image", "no-such-image"])
+    assert result.exit_code == 1
+    assert "Image not found" in result.output
+
+
+def test_create_duplicate_vm_name(mocker: MockerFixture):
+    """Creating a VM whose name already exists should fail with exit code 1."""
+    mocker.patch(
+        "fcm.cli.vm.create_vm",
+        side_effect=FCMError("VM 'myvm' already exists"),
+    )
+    result = runner.invoke(app, ["create", "--name", "myvm", "--image", "ubuntu-24.04"])
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+
+
+# ---------------------------------------------------------------------------
+# T-H3 (via main app): vm create error-path tests through the top-level CLI
+# ---------------------------------------------------------------------------
+
+from fcm.main import app as main_app
+
+main_runner = CliRunner()
+
+
+def test_main_app_create_missing_name():
+    """Missing --name via the top-level app should fail."""
+    result = main_runner.invoke(main_app, ["vm", "create", "--image", "ubuntu-24.04"])
+    assert result.exit_code != 0
+
+
+def test_main_app_create_missing_image():
+    """Missing --image via the top-level app should fail."""
+    result = main_runner.invoke(main_app, ["vm", "create", "--name", "myvm"])
+    assert result.exit_code != 0
+
+
+def test_main_app_create_invalid_image(mocker: MockerFixture):
+    """Invalid image via the top-level app should exit 1."""
+    mocker.patch(
+        "fcm.cli.vm.create_vm",
+        side_effect=FCMError("Image not found: 'bogus'"),
+    )
+    result = main_runner.invoke(main_app, ["vm", "create", "--name", "myvm", "--image", "bogus"])
+    assert result.exit_code == 1
+    assert "Image not found" in result.output
+
+
+def test_main_app_create_duplicate(mocker: MockerFixture):
+    """Duplicate VM name via the top-level app should exit 1."""
+    mocker.patch(
+        "fcm.cli.vm.create_vm",
+        side_effect=FCMError("VM 'myvm' already exists at /some/path"),
+    )
+    result = main_runner.invoke(
+        main_app, ["vm", "create", "--name", "myvm", "--image", "ubuntu-24.04"]
+    )
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+
+
+# ---------------------------------------------------------------------------
+# T-H8: vm snapshot / vm load — error-path tests
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_vm_not_found(mocker: MockerFixture):
+    """Snapshot on a non-existent VM should exit 1."""
+    mocker.patch(
+        "fcm.cli.vm.snapshot_vm",
+        side_effect=FCMError(
+            "Socket not found for VM 'ghost'. Must be running with --enable-api-socket"
+        ),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "snapshot",
+            "--name",
+            "ghost",
+            "--mem-out",
+            "/tmp/mem.snap",
+            "--state-out",
+            "/tmp/state.snap",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Socket not found" in result.output
+
+
+def test_snapshot_no_api_socket(mocker: MockerFixture):
+    """Snapshot without API socket enabled should exit 1."""
+    mocker.patch(
+        "fcm.cli.vm.snapshot_vm",
+        side_effect=FCMError(
+            "Socket not found for VM 'myvm'. Must be running with --enable-api-socket"
+        ),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "snapshot",
+            "--name",
+            "myvm",
+            "--mem-out",
+            "/tmp/mem.snap",
+            "--state-out",
+            "/tmp/state.snap",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "enable-api-socket" in result.output
+
+
+def test_snapshot_missing_required_flags():
+    """Snapshot without --mem-out or --state-out should fail."""
+    result = runner.invoke(app, ["snapshot", "--name", "myvm"])
+    assert result.exit_code != 0
+
+
+def test_load_vm_not_found(mocker: MockerFixture):
+    """Load snapshot on a non-existent VM should exit 1."""
+    mocker.patch(
+        "fcm.cli.vm.load_snapshot",
+        side_effect=FCMError(
+            "Socket not found for VM 'ghost'. Must be running with --enable-api-socket"
+        ),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "load",
+            "--name",
+            "ghost",
+            "--mem-in",
+            "/tmp/mem.snap",
+            "--state-in",
+            "/tmp/state.snap",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Socket not found" in result.output
+
+
+def test_load_no_api_socket(mocker: MockerFixture):
+    """Load without API socket enabled should exit 1."""
+    mocker.patch(
+        "fcm.cli.vm.load_snapshot",
+        side_effect=FCMError(
+            "Socket not found for VM 'myvm'. Must be running with --enable-api-socket"
+        ),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "load",
+            "--name",
+            "myvm",
+            "--mem-in",
+            "/tmp/mem.snap",
+            "--state-in",
+            "/tmp/state.snap",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "enable-api-socket" in result.output
+
+
+def test_load_missing_snapshot_files(mocker: MockerFixture):
+    """Load with non-existent snapshot files should exit 1."""
+    mocker.patch(
+        "fcm.cli.vm.load_snapshot",
+        side_effect=FCMError("Snapshot file not found: /nonexistent/mem.snap"),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "load",
+            "--name",
+            "myvm",
+            "--mem-in",
+            "/nonexistent/mem.snap",
+            "--state-in",
+            "/nonexistent/state.snap",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "not found" in result.output
+
+
+def test_load_missing_required_flags():
+    """Load without --mem-in or --state-in should fail."""
+    result = runner.invoke(app, ["load", "--name", "myvm"])
+    assert result.exit_code != 0
+
+
+def test_load_no_resume_flag(mocker: MockerFixture):
+    """Load with --no-resume flag should invoke load_snapshot with resume_after=False."""
+    mock_load = mocker.patch("fcm.cli.vm.load_snapshot")
+    result = runner.invoke(
+        app,
+        [
+            "load",
+            "--name",
+            "myvm",
+            "--mem-in",
+            "/tmp/mem.snap",
+            "--state-in",
+            "/tmp/state.snap",
+            "--no-resume",
+        ],
+    )
+    assert result.exit_code == 0
+    mock_load.assert_called_once()
+    call_kwargs = mock_load.call_args
+    assert call_kwargs.kwargs.get("resume_after") is False or (
+        len(call_kwargs.args) >= 4 and call_kwargs.args[3] is False
+    )

@@ -1,3 +1,5 @@
+import fcntl
+import logging
 import os
 import shutil
 import signal
@@ -11,10 +13,13 @@ from fcm.core.config_gen import ConfigGenerator
 from fcm.core.firecracker import FirecrackerClient, get_vm_socket_path
 from fcm.core.network import (
     add_iptables_forward_rules,
+    bridge_exists,
     create_tap,
     delete_tap,
     generate_mac,
     remove_iptables_forward_rules,
+    setup_bridge,
+    setup_nat,
 )
 from fcm.core.network_manager import (
     allocate_network_ip,
@@ -27,7 +32,37 @@ from fcm.core.vm_manager import VMManager, get_vm_manager
 from fcm.exceptions import NetworkError, FCMError, VMNotFoundError
 from fcm.models.vm import VMConfig, VMInstance, VMState
 from fcm.utils.fs import get_kernels_dir, get_images_dir, get_vm_dir
-from fcm.constants import DEFAULT_NETWORK_NAME, TAP_PREFIX
+from fcm.constants import DEFAULT_NETWORK_NAME, MAX_VMS, TAP_PREFIX
+
+logger = logging.getLogger(__name__)
+
+
+def _write_pid_file(pid_file: Path, pid: int) -> None:
+    """Write PID to file with an exclusive advisory lock."""
+    fd = os.open(str(pid_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        os.write(fd, str(pid).encode())
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _read_pid_file(pid_file: Path) -> int | None:
+    """Read PID from file and verify the process actually exists."""
+    if not pid_file.exists():
+        return None
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (ValueError, OSError):
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        pass  # process exists but we can't signal it
+    return pid
 
 
 def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
@@ -50,6 +85,7 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
             pass
         for _ in range(50):
             time.sleep(0.1)
+            # P-L3: single check per iteration — no fix needed
             if not _is_alive(pid):
                 break
 
@@ -97,6 +133,18 @@ def create_vm(
     from fcm.utils.validation import validate_entity_name
 
     validate_entity_name(name, "VM")
+
+    manager = vm_manager or get_vm_manager()
+    existing_vms = manager.list_all()
+    if len(existing_vms) >= MAX_VMS:
+        raise FCMError(
+            f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
+        )
+
+    if not (1 <= vcpus <= 32):
+        raise FCMError(f"Invalid vcpus={vcpus}: must be between 1 and 32")
+    if not (128 <= mem <= 65536):
+        raise FCMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
 
     if mac is not None:
         mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
@@ -175,7 +223,7 @@ def create_vm(
         raise FCMError(f"Failed to copy image: {e}")
 
     cloud_init_dir = vm_dir / "cloud-init"
-    cloud_init_dir.mkdir(exist_ok=True)
+    cloud_init_dir.mkdir(mode=0o700, exist_ok=True)
 
     ssh_pub_key = resolve_ssh_key(ssh_key)
 
@@ -213,6 +261,17 @@ def create_vm(
     )
     config_file = vm_dir / "firecracker.json"
     ConfigGenerator(vm_config).write_to_file(config_file)
+
+    # AUDIT-4: Reconcile bridge if it has drifted (e.g. lost after reboot).
+    if not bridge_exists(bridge):
+        logger.info("Bridge %s not found — recreating for network '%s'", bridge, network_name)
+        _gw_cidr = (
+            f"{net_config.gateway}"
+            f"/{_ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen}"
+        )
+        setup_bridge(bridge, gateway_cidr=_gw_cidr)
+        if net_config.nat_enabled:
+            setup_nat(bridge)
 
     try:
         create_tap(tap_name, bridge=bridge)
@@ -257,9 +316,8 @@ def create_vm(
         shutil.rmtree(vm_dir, ignore_errors=True)
         raise FCMError(f"Failed to start Firecracker: {e}")
 
-    pid_file.write_text(str(proc.pid))
+    _write_pid_file(pid_file, proc.pid)
 
-    manager = vm_manager or get_vm_manager()
     vm_instance = VMInstance(
         name=name,
         pid=proc.pid,
@@ -284,7 +342,9 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     tap_name = f"{TAP_PREFIX}-{name}-0"
 
     pid_file = vm_dir / "firecracker.pid"
-    pid = int(pid_file.read_text().strip()) if pid_file.exists() else vm.pid
+    pid = _read_pid_file(pid_file)
+    if pid is None:
+        pid = vm.pid
 
     graceful_shutdown(pid, vm.socket_path)
 

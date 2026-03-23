@@ -16,7 +16,12 @@ class ConfigGenerator:
 
     def generate(self) -> dict[str, object]:
         """Generate Firecracker config dictionary."""
-        boot_args = self.vm_config.boot_args or self._build_default_boot_args()
+        if self.vm_config.boot_args:
+            for component in self.vm_config.boot_args.split():
+                validate_boot_arg_component(component, "boot_args")
+            boot_args = self.vm_config.boot_args
+        else:
+            boot_args = self._build_default_boot_args()
 
         return {
             "boot-source": {

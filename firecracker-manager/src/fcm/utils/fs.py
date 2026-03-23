@@ -1,5 +1,6 @@
 """Filesystem path helpers for FCM cache directories."""
 
+import functools
 import os
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from fcm.constants import PROJECT_NAME, env_var
 from fcm.exceptions import FCMError
 
 
+@functools.lru_cache(maxsize=1)
 def get_cache_dir() -> Path:
     """Return the FCM cache root directory.
 
@@ -27,6 +29,7 @@ def get_cache_dir() -> Path:
     return Path.home() / ".cache" / PROJECT_NAME
 
 
+@functools.lru_cache(maxsize=1)
 def get_vms_dir() -> Path:
     """Return the directory that holds VM state and per-VM dirs."""
     return get_cache_dir() / "vms"
@@ -37,21 +40,25 @@ def get_vm_dir(name: str) -> Path:
     return get_vms_dir() / name
 
 
+@functools.lru_cache(maxsize=1)
 def get_images_dir() -> Path:
     """Return the directory for cached images."""
     return get_cache_dir() / "images"
 
 
+@functools.lru_cache(maxsize=1)
 def get_kernels_dir() -> Path:
     """Return the directory for cached kernels."""
     return get_cache_dir() / "kernels"
 
 
+@functools.lru_cache(maxsize=1)
 def get_state_file() -> Path:
     """Return the path to the VM state JSON file."""
     return get_vms_dir() / "state.json"
 
 
+@functools.lru_cache(maxsize=1)
 def get_networks_dir() -> Path:
     """Return the directory for named network state."""
     return get_cache_dir() / "networks"
@@ -62,11 +69,13 @@ def get_network_dir(name: str) -> Path:
     return get_networks_dir() / name
 
 
+@functools.lru_cache(maxsize=1)
 def get_keys_dir() -> Path:
     """Return the directory for SSH key management."""
     return get_cache_dir() / "keys"
 
 
+@functools.lru_cache(maxsize=1)
 def get_bin_dir() -> Path:
     """Return the directory for cached Firecracker binaries."""
     return get_cache_dir() / "bin"

@@ -49,6 +49,29 @@ def convert_qcow2_to_raw(
 _NO_PARTITION_TABLE = object()  # Sentinel: raw image is the filesystem
 
 
+def _has_partition_table(raw_path: Path) -> bool | None:
+    """Quick Python-based MBR/GPT signature check (avoids subprocess for simple cases).
+
+    Returns True if a partition table signature is found, False if not, None if unsure.
+    """
+    try:
+        with open(raw_path, "rb") as f:
+            header = f.read(512)
+            if len(header) < 512:
+                return None
+            # MBR signature at bytes 510-511
+            if header[510:512] == b"\x55\xaa":
+                return True
+            # GPT: check for EFI PART at LBA 1
+            f.seek(512)
+            gpt_header = f.read(8)
+            if gpt_header[:8] == b"EFI PART":
+                return True
+            return False
+    except OSError:
+        return None
+
+
 def _parse_partitions_sfdisk(
     raw_path: Path,
     partition: int | None,
@@ -221,15 +244,18 @@ def extract_partition_from_raw(
 
         logger.info("Extracting partition %d (start=%d)...", partition, start_sector)
 
+        skip_bytes = start_sector * 512
         dd_args = [
             "dd",
             f"if={raw_path}",
             f"of={output_path}",
-            "bs=512",
-            f"skip={start_sector}",
+            "bs=1M",
+            f"skip={skip_bytes}",
+            "iflag=skip_bytes",
         ]
         if sector_count:
-            dd_args.append(f"count={sector_count}")
+            count_bytes = sector_count * 512
+            dd_args += [f"count={count_bytes}", "iflag=skip_bytes,count_bytes"]
 
         subprocess.run(dd_args, capture_output=True, check=True)
 
