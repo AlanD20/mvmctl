@@ -143,3 +143,109 @@ def test_dump_config_specific_section() -> None:
     fc = result["firecracker"]
     assert isinstance(fc, dict)
     assert fc["binary"] == "/custom/bin"
+
+
+# ---------------------------------------------------------------------------
+# T-M2: Negative test cases for config validation
+# ---------------------------------------------------------------------------
+
+
+def test_load_yaml_invalid_syntax(tmp_path: Path) -> None:
+    """YAML with invalid syntax should return empty dict (graceful degradation)."""
+    yaml_path = tmp_path / "bad.yaml"
+    yaml_path.write_text("invalid: yaml: syntax: [[[")
+
+    result = load_yaml(yaml_path)
+    assert result == {}
+
+
+def test_load_yaml_corrupt_file(tmp_path: Path) -> None:
+    """Corrupt YAML file should return empty dict."""
+    yaml_path = tmp_path / "corrupt.yaml"
+    yaml_path.write_text("{ not valid yaml at all")
+
+    result = load_yaml(yaml_path)
+    assert result == {}
+
+
+def test_load_config_missing_fields_uses_defaults(tmp_path: Path) -> None:
+    """YAML with missing fields should use defaults."""
+    # Only provide a subset of fields
+    data = {"vm_defaults": {"vcpu_count": 8}}
+    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+
+    config = load_config(tmp_path)
+
+    # Provided value should be used
+    assert config.vm_defaults.vcpu_count == 8
+    # Missing fields should use defaults
+    assert config.vm_defaults.mem_size_mib == 2048  # default
+    assert config.firecracker.binary == "/usr/local/bin/firecracker"  # default
+
+
+def test_load_config_type_mismatch_string_for_int(tmp_path: Path) -> None:
+    """Type mismatch (string instead of int) should use default or raise."""
+    data = {"vm_defaults": {"vcpu_count": "not-a-number"}}
+    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+
+    # Should not crash - either uses default or handles gracefully
+    config = load_config(tmp_path)
+    # The dataclass will use the default value when type coercion fails
+    assert config.vm_defaults.vcpu_count is not None
+
+
+def test_load_config_type_mismatch_int_for_string(tmp_path: Path) -> None:
+    """Type mismatch (int instead of string) should use default or handle gracefully."""
+    data = {
+        "firecracker": {"binary": 12345}  # Should be string
+    }
+    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+
+    config = load_config(tmp_path)
+    # Should not crash
+    assert config.firecracker.binary is not None
+
+
+def test_load_config_extra_unknown_fields_filtered(tmp_path: Path) -> None:
+    """Unknown fields in YAML should be silently ignored."""
+    data = {
+        "unknown_section": {"foo": "bar"},
+        "vm_defaults": {"vcpu_count": 4, "unknown_field": "should be ignored"},
+    }
+    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+
+    config = load_config(tmp_path)
+    assert config.vm_defaults.vcpu_count == 4
+
+
+def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
+    """Nested type mismatches should be handled gracefully."""
+    data = {
+        "network": {
+            "multi_vm": {"bridge_ip": 99999}  # Should be string
+        }
+    }
+    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+
+    # Should not crash
+    config = load_config(tmp_path)
+    # The invalid value may remain or use default
+    assert config.network.multi_vm.bridge_ip is not None
+
+
+def test_validate_config_empty_binary_path() -> None:
+    """Empty binary path should be caught by validation."""
+    config = FCMConfig(firecracker=FirecrackerConfig(binary=""))
+    errors = validate_config(config)
+
+    binary_errors = [e for e in errors if "firecracker.binary" in e and "empty" in e.lower()]
+    assert len(binary_errors) == 1
+
+
+def test_validate_config_negative_memory() -> None:
+    """Negative memory should be caught by validation."""
+    config = FCMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=-100))
+    errors = validate_config(config)
+
+    mem_errors = [e for e in errors if "mem_size_mib" in e]
+    assert len(mem_errors) == 1

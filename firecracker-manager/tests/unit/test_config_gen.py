@@ -84,7 +84,7 @@ def test_boot_args_rejects_shell_injection_in_guest_ip():
     )
     generator = ConfigGenerator(vm_config)
     with pytest.raises(FCMError, match="guest_ip"):
-        generator.generate()
+        generator.validate()
 
 
 def test_boot_args_rejects_shell_injection_in_gateway():
@@ -102,7 +102,7 @@ def test_boot_args_rejects_shell_injection_in_gateway():
     )
     generator = ConfigGenerator(vm_config)
     with pytest.raises(FCMError, match="gateway"):
-        generator.generate()
+        generator.validate()
 
 
 def test_boot_args_accepts_normal_ip():
@@ -190,7 +190,7 @@ def test_config_gen_invalid_ip_with_shell_chars():
     )
     generator = ConfigGenerator(vm_config)
     with pytest.raises(FCMError, match="guest_ip"):
-        generator.generate()
+        generator.validate()
 
 
 def test_config_gen_write_to_file(tmp_path):

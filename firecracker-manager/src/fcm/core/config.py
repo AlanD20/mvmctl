@@ -73,9 +73,12 @@ def load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
 
-    with open(path, "r") as f:
-        result: dict[str, Any] = yaml.safe_load(f) or {}
-        return result
+    try:
+        with open(path, "r") as f:
+            result: dict[str, Any] = yaml.safe_load(f) or {}
+            return result
+    except yaml.YAMLError:
+        return {}
 
 
 def load_config(config_dir: Path) -> FCMConfig:
@@ -100,7 +103,17 @@ def load_config(config_dir: Path) -> FCMConfig:
     network_data = data.get("network", {})
     paths_data = data.get("paths", {})
 
-    # Filter paths_data to only known PathsConfig fields
+    # Filter to only known fields for each dataclass
+    valid_firecracker_fields = {f.name for f in fields(FirecrackerConfig)}
+    firecracker_data_filtered = {
+        k: v for k, v in firecracker_data.items() if k in valid_firecracker_fields
+    }
+
+    valid_vm_defaults_fields = {f.name for f in fields(VMDefaultsConfig)}
+    vm_defaults_data_filtered = {
+        k: v for k, v in vm_defaults_data.items() if k in valid_vm_defaults_fields
+    }
+
     valid_path_fields = {f.name for f in fields(PathsConfig)}
     paths_data_filtered = {k: v for k, v in paths_data.items() if k in valid_path_fields}
 
@@ -110,8 +123,8 @@ def load_config(config_dir: Path) -> FCMConfig:
     multi_vm_data_filtered = {k: v for k, v in multi_vm_data.items() if k in valid_multi_vm_fields}
 
     result = FCMConfig(
-        firecracker=FirecrackerConfig(**firecracker_data),
-        vm_defaults=VMDefaultsConfig(**vm_defaults_data),
+        firecracker=FirecrackerConfig(**firecracker_data_filtered),
+        vm_defaults=VMDefaultsConfig(**vm_defaults_data_filtered),
         network=NetworkTopologyConfig(
             multi_vm=MultiVMNetworkConfig(**multi_vm_data_filtered),
         ),

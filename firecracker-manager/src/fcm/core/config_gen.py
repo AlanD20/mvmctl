@@ -7,13 +7,13 @@ from fcm.models.vm import VMConfig
 from fcm.utils.fs import get_vm_dir
 from fcm.utils.validation import validate_boot_arg_component
 
-
-
 from typing import TypedDict
+
 
 class BootSourceConfig(TypedDict):
     kernel_image_path: str
     boot_args: str
+
 
 class DriveConfig(TypedDict):
     drive_id: str
@@ -26,10 +26,12 @@ class DriveConfig(TypedDict):
     rate_limiter: object | None
     socket: str | None
 
+
 class NetworkInterfaceConfig(TypedDict):
     iface_id: str
     guest_mac: str
     host_dev_name: str
+
 
 class MachineConfig(TypedDict):
     vcpu_count: int
@@ -37,14 +39,17 @@ class MachineConfig(TypedDict):
     smt: bool
     cpu_template: str | None
 
+
 class LoggerConfig(TypedDict):
     log_path: str
     level: str
     show_level: bool
     show_log_origin: bool
 
+
 class MetricsConfig(TypedDict):
     metrics_path: str
+
 
 FirecrackerConfig = TypedDict(
     "FirecrackerConfig",
@@ -61,17 +66,40 @@ FirecrackerConfig = TypedDict(
     },
 )
 
+
 class ConfigGenerator:
     """Generates Firecracker JSON configuration."""
 
     def __init__(self, vm_config: VMConfig):
         self.vm_config = vm_config
 
-    def generate(self) -> FirecrackerConfig:
-        """Generate Firecracker config dictionary."""
+    def validate(self) -> None:
+        """Validate vm_config before generation.
+
+        Raises FCMError if validation fails.
+        """
         if self.vm_config.boot_args:
             for component in self.vm_config.boot_args.split():
                 validate_boot_arg_component(component, "boot_args")
+        self._validate_boot_components()
+
+    def _validate_boot_components(self) -> None:
+        """Validate boot-related components."""
+        gateway = self.vm_config.gateway or "10.20.0.1"
+        subnet_mask = self.vm_config.subnet_mask or "255.255.255.0"
+
+        if self.vm_config.guest_ip:
+            validate_boot_arg_component(self.vm_config.guest_ip, "guest_ip")
+        validate_boot_arg_component(gateway, "gateway")
+        validate_boot_arg_component(subnet_mask, "subnet_mask")
+
+        lsm_flags = getattr(self.vm_config, "lsm_flags", None)
+        if lsm_flags:
+            validate_boot_arg_component(lsm_flags, "lsm_flags")
+
+    def generate(self) -> FirecrackerConfig:
+        """Generate Firecracker config dictionary."""
+        if self.vm_config.boot_args:
             boot_args = self.vm_config.boot_args
         else:
             boot_args = self._build_default_boot_args()
@@ -121,20 +149,12 @@ class ConfigGenerator:
         gateway = self.vm_config.gateway or "10.20.0.1"
         subnet_mask = self.vm_config.subnet_mask or "255.255.255.0"
 
-        # Validate user-controllable boot arg components
-        if self.vm_config.guest_ip:
-            validate_boot_arg_component(self.vm_config.guest_ip, "guest_ip")
-        validate_boot_arg_component(gateway, "gateway")
-        validate_boot_arg_component(subnet_mask, "subnet_mask")
-
         ip_arg = (
             f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:off"
             if self.vm_config.guest_ip
             else ""
         )
         lsm_flags = getattr(self.vm_config, "lsm_flags", None)
-        if lsm_flags:
-            validate_boot_arg_component(lsm_flags, "lsm_flags")
         lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
         parts = [
             "console=ttyS0",
@@ -172,7 +192,11 @@ class ConfigGenerator:
         return get_vm_dir(self.vm_config.name) / "firecracker.metrics"
 
     def write_to_file(self, path: Path) -> None:
-        """Write config to JSON file."""
+        """Write config to JSON file.
+
+        Validates before generating to maintain backward compatibility.
+        """
+        self.validate()
         config = self.generate()
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
