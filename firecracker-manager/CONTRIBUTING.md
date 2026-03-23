@@ -103,6 +103,40 @@ All code should pass ruff with no errors. mypy is configured with `--strict`; ne
 
 For entirely new command groups, create both `src/fcm/cli/mygroup.py` and register the Typer app in `src/fcm/cli/__init__.py` or `main.py`.
 
+## Adding a New Image Type
+
+Image specifications are defined in YAML config files and loaded using the `ImageSpec` model
+(`src/fcm/models/image.py`). Each entry describes where to download an image, its source
+format, and how to convert it for use with Firecracker.
+
+**Supported source formats** (handled by `_FORMAT_HANDLERS` in `src/fcm/core/image.py`):
+
+- `qcow2` — QEMU copy-on-write image; converted to raw with `qemu-img`, then the root
+  partition is extracted.
+- `tar-rootfs` — Root filesystem tarball; unpacked into a new ext4 image.
+- `raw` — Raw disk image; the root partition is extracted directly.
+
+**Steps to add a new image:**
+
+1. Open (or create) the images YAML config at `src/fcm/assets/images.yaml`.
+2. Add an entry following the `ImageSpec` schema:
+
+   ```yaml
+   images:
+     - id: debian-12
+       name: "Debian 12 (Bookworm)"
+       source: "https://example.com/debian-12-rootfs.tar.gz"
+       format: tar-rootfs
+       convert_to: ext4
+       size_mib: 2048
+       sha256: "abc123..."   # optional but recommended
+   ```
+
+3. Confirm the `format` value has a corresponding handler in `_FORMAT_HANDLERS` in
+   `src/fcm/core/image.py`. If you need a new format, add a handler function and register
+   it in that dict.
+4. Add tests in `tests/unit/` covering the new handler or any conversion logic.
+
 ## Adding a Test
 
 Tests live in `tests/unit/` for pure logic and `tests/integration/` for anything touching the filesystem or system calls.
@@ -192,11 +226,8 @@ The project ships a self-contained single-file binary built with PyInstaller. Th
 ```bash
 git clone https://github.com/your-org/firecracker-manager
 cd firecracker-manager
-
-pip install -e ".[dev]" pyinstaller
-
+uv sync --group dev --group build
 pyinstaller --onefile --name fcm src/fcm/main.py
-
 ./dist/fcm --version
 ./dist/fcm --help
 ```

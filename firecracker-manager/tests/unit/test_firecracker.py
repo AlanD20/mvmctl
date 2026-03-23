@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from fcm.core.firecracker import FirecrackerClient, get_vm_socket_path
 
 
+
 def test_pause_vm_sends_correct_body() -> None:
     """pause_vm must send state=Paused."""
     client = FirecrackerClient(Path("/nonexistent.socket"))
@@ -22,30 +23,18 @@ def test_resume_vm_sends_correct_body() -> None:
     mock_req.assert_called_once_with("PATCH", "/vm", {"state": "Resumed"})
 
 
-def test_get_vm_socket_path_not_found(tmp_path: Path) -> None:
-    import os
-
-    os.environ["FCM_CACHE_DIR"] = str(tmp_path)
-    try:
-        result = get_vm_socket_path("novm")
-        assert result is None
-    finally:
-        del os.environ["FCM_CACHE_DIR"]
+def test_get_vm_socket_path_not_found(mock_cache_dir: Path) -> None:
+    result = get_vm_socket_path("novm")
+    assert result is None
 
 
-def test_get_vm_socket_path_found(tmp_path: Path) -> None:
-    import os
-
-    os.environ["FCM_CACHE_DIR"] = str(tmp_path)
-    try:
-        vm_dir = tmp_path / "vms" / "myvm"
-        vm_dir.mkdir(parents=True)
-        sock = vm_dir / "firecracker.socket"
-        sock.touch()
-        result = get_vm_socket_path("myvm")
-        assert result == sock
-    finally:
-        del os.environ["FCM_CACHE_DIR"]
+def test_get_vm_socket_path_found(mock_cache_dir: Path) -> None:
+    vm_dir = mock_cache_dir / "vms" / "myvm"
+    vm_dir.mkdir(parents=True)
+    sock = vm_dir / "firecracker.socket"
+    sock.touch()
+    result = get_vm_socket_path("myvm")
+    assert result == sock
 
 
 def test_request_raises_socket_not_found_when_no_socket(tmp_path: Path) -> None:

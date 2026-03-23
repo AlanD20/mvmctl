@@ -5,6 +5,7 @@ import json
 import logging
 import socket
 from pathlib import Path
+from typing import override
 
 from fcm.exceptions import FirecrackerError, SocketNotFoundError
 
@@ -18,6 +19,7 @@ class UnixSocketHTTPConnection(http.client.HTTPConnection):
         self.socket_path = socket_path
         super().__init__("localhost")
 
+    @override
     def connect(self) -> None:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(5.0)
@@ -37,7 +39,7 @@ class FirecrackerClient:
         return self
 
     def __exit__(
-        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object
+        self, _exc_type: type[BaseException] | None, _exc_val: BaseException | None, _exc_tb: object
     ) -> None:
         """Close the socket connection."""
         self.close()
@@ -250,7 +252,7 @@ class FirecrackerClient:
             FirecrackerError: If the start operation fails.
         """
         logger.info("Starting VM...")
-        status, data = self._request("PUT", "/actions", {"action_type": "InstanceStart"})
+        status, _ = self._request("PUT", "/actions", {"action_type": "InstanceStart"})
 
         if status == 204:
             logger.info("VM started")
@@ -265,7 +267,7 @@ class FirecrackerClient:
             True if successful, False otherwise
         """
         try:
-            status, data = self._request("PUT", "/actions", {"action_type": "SendCtrlAltDel"})
+            status, _ = self._request("PUT", "/actions", {"action_type": "SendCtrlAltDel"})
         except (SocketNotFoundError, FirecrackerError):
             logger.error("Failed to send Ctrl+Alt+Del")
             return False

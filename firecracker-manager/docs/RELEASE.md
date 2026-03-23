@@ -2,6 +2,15 @@
 
 This document covers how to release a new version of firecracker-manager.
 
+## Prerequisites
+
+Before releasing, ensure the following are available on your workstation:
+
+- **Python 3.13+** — required for local development and building
+- **Linux (KVM-capable host)** — required to run integration tests and to produce a valid binary
+- **git** — for tagging and pushing
+- **uv** — for dependency management and running tools (`pip install uv` or see [uv docs](https://docs.astral.sh/uv/))
+
 ## Bumping the Version
 
 The version is defined in one place: the `version` field under `[project]` in `pyproject.toml`. Update it there, and also update the `__version__` fallback in `src/fcm/__init__.py` to match.
@@ -27,6 +36,8 @@ git push origin v1.2.3
 ```
 
 Pushing a tag that matches `v*` triggers the `release.yml` GitHub Actions workflow. Do not push the tag until the version bump commit is on `main` and CI is green.
+
+> **Test gate**: The `ci.yml` workflow runs `pytest` with a 79% coverage minimum on every push and pull request to `main`. If tests fail, the CI run is red and the tag must not be pushed — the release workflow does not re-run tests, so a red `main` means a broken binary may be released. Always verify CI is green on the version-bump commit before tagging.
 
 ## What the Release Workflow Does Automatically
 

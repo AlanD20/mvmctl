@@ -44,6 +44,18 @@ def _normalize_version(version: str) -> str:
     return version.removeprefix("v")
 
 
+def _parse_version_string(name: str, prefix: str) -> str | None:
+    """Extract the version string from a binary filename.
+
+    Given a filename like ``firecracker-v1.2.3`` and the prefix
+    ``firecracker-v``, returns ``"1.2.3"``.  Returns *None* when
+    *name* does not start with *prefix*.
+    """
+    if not name.startswith(prefix):
+        return None
+    return name[len(prefix):]
+
+
 def _active_target(symlink: Path) -> str | None:
     if symlink.is_symlink():
         target = os.readlink(symlink)
@@ -63,14 +75,14 @@ def list_local_versions(bin_dir: Path | None = None) -> list[BinaryVersion]:
         if path.is_symlink() or path.is_dir():
             continue
         name = path.name
-        if name.startswith("firecracker-v"):
-            ver = name.removeprefix("firecracker-v")
-            fc, jl = versions.get(ver, (None, None))
-            versions[ver] = (path, jl)
-        elif name.startswith("jailer-v"):
-            ver = name.removeprefix("jailer-v")
-            fc, jl = versions.get(ver, (None, None))
-            versions[ver] = (fc, path)
+        fc_ver = _parse_version_string(name, "firecracker-v")
+        jl_ver = _parse_version_string(name, "jailer-v")
+        if fc_ver is not None:
+            fc, jl = versions.get(fc_ver, (None, None))
+            versions[fc_ver] = (path, jl)
+        elif jl_ver is not None:
+            fc, jl = versions.get(jl_ver, (None, None))
+            versions[jl_ver] = (fc, path)
 
     result: list[BinaryVersion] = []
     for ver in sorted(versions, reverse=True):

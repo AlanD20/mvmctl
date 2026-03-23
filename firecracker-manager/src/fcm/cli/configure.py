@@ -157,6 +157,17 @@ def _step_kernel(non_interactive: bool) -> None:
 
 
 def _build_default_kernel() -> None:
+    """Build the default minimal kernel (v6.1.102) for Firecracker.
+
+    Downloads the Linux 6.1.102 source tarball from kernel.org, applies the
+    Firecracker microvm kernel configuration, compiles ``vmlinux``, and copies
+    it to ``<cache-dir>/kernels/vmlinux``. Intermediate build artifacts are
+    kept in ``<cache-dir>/kernel-build/``.
+
+    Prints a success or warning message depending on the outcome. Callers
+    should check for the presence of the output file afterwards if they need
+    to handle failure programmatically.
+    """
     version = "6.1.102"
     out = get_kernels_dir() / "vmlinux"
     out.parent.mkdir(parents=True, exist_ok=True)

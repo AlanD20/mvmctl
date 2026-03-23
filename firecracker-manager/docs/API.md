@@ -47,6 +47,10 @@ from fcm.api import vms, network, assets, keys, host
 | `api/keys.py` | SSH key registry: add, create, remove, list, inspect |
 | `api/host.py` | Host initialisation, state inspection, prune, clean, reset, privileges |
 
+> **Note:** All `api/` modules are thin wrappers that re-export functions from their
+> corresponding `core/` counterparts. Business logic lives in `core/`; `api/` provides a
+> stable, documented entry point without containing business logic itself.
+
 ---
 
 ## Utility Modules
@@ -109,6 +113,22 @@ Runtime state for a registered VM.
 | `created_at` | `datetime` | UTC timestamp of VM creation |
 | `status` | `VMState` | Current lifecycle state |
 | `config` | `VMConfig \| None` | Launch config, if persisted |
+
+### `fcm.models.image`
+
+#### `ImageSpec`
+
+Specification for downloading and converting a VM root filesystem image.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `str` | — | Unique identifier for the image; used as the output filename base |
+| `name` | `str` | — | Human-readable display name |
+| `source` | `str` | — | Download URL for the image |
+| `format` | `str` | — | Source format: `"qcow2"`, `"tar-rootfs"`, or `"raw"` |
+| `convert_to` | `str` | — | Target format after conversion (e.g., `"ext4"`) |
+| `size_mib` | `int` | `2048` | Target filesystem size in MiB (used for `tar-rootfs` images) |
+| `sha256` | `str \| None` | `None` | Expected SHA256 checksum for integrity verification |
 
 ### `fcm.core.network_manager`
 

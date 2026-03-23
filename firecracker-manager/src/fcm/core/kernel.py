@@ -230,7 +230,7 @@ def configure_kernel(
     logger.info("Enabling serial console...")
     _run_config_script(config_script, ["--enable", "CONFIG_SERIAL_8250"], kernel_dir)
     _run_config_script(config_script, ["--enable", "CONFIG_SERIAL_8250_CONSOLE"], kernel_dir)
-    _run_config_script(config_script, ["--set-val", "CONFIG_SERIAL_8250_NR_UARTS", "4"], kernel_dir)
+    _run_config_script(config_script, ["--set-val", "CONFIG_SERIAL_8250_NR_UARTS", "4"], kernel_dir)  # 4 UARTs: COM1 (console), COM2 (firecracker serial log), COM3-4 reserved — minimum for Firecracker serial console support
 
     # Enable network
     logger.info("Enabling network support...")
@@ -299,7 +299,7 @@ def build_kernel(
     logger.info("Building vmlinux with %d parallel jobs...", jobs)
     logger.info("This may take 10-30 minutes...")
 
-    returncode, stdout, stderr = run_make(kernel_dir, "vmlinux", jobs, capture_output=True)
+    returncode, _, stderr = run_make(kernel_dir, "vmlinux", jobs, capture_output=True)
 
     if returncode != 0:
         # Show last error lines

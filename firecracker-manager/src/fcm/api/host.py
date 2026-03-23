@@ -38,4 +38,13 @@ __all__ = [
 
 
 def default_cache_dir() -> Path:
+    """Return the default cache root directory.
+
+    Checks the ``FCM_CACHE_DIR`` environment variable first; if set, that path
+    is used (it must be under ``$HOME`` or ``/tmp``). Falls back to
+    ``~/.cache/firecracker-manager`` when the variable is unset.
+
+    Returns:
+        Absolute path to the FCM cache root directory.
+    """
     return get_cache_dir()

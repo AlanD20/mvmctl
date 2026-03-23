@@ -168,7 +168,7 @@ Manage kernels, images, and Firecracker binaries.
 | `fcm asset kernel ls` | List cached kernels |
 | `fcm asset kernel fetch` | Download the official minimal kernel |
 | `fcm asset kernel build` | Build a custom upstream kernel from source |
-| `fcm asset kernel rm NAME` | Remove a cached kernel |
+| `fcm asset kernel remove NAME` | Remove a cached kernel (`rm` is an alias) |
 
 **Flags for `fcm asset kernel fetch` / `fcm asset kernel build`:**
 
@@ -194,7 +194,7 @@ fcm asset kernel fetch --version 6.1.102
 fcm asset kernel build --version 6.1.102 --jobs 4
 
 # Remove a kernel
-fcm asset kernel rm vmlinux
+fcm asset kernel remove vmlinux
 ```
 
 #### `fcm asset image` — Image Management
@@ -203,7 +203,7 @@ fcm asset kernel rm vmlinux
 |---------|-------------|
 | `fcm asset image ls` | List available images |
 | `fcm asset image fetch NAME` | Download and convert an image |
-| `fcm asset image rm NAME` | Remove a cached image |
+| `fcm asset image remove NAME` | Remove a cached image (`rm` is an alias) |
 
 **Supported image types for `fcm asset image fetch`:**
 
@@ -234,7 +234,7 @@ fcm asset image fetch ubuntu-24.04
 fcm asset image fetch ubuntu-24.04 --force
 
 # Remove an image
-fcm asset image rm ubuntu-24.04
+fcm asset image remove ubuntu-24.04
 ```
 
 #### `fcm asset bin` — Binary Management
@@ -244,7 +244,7 @@ fcm asset image rm ubuntu-24.04
 | `fcm asset bin ls` | List Firecracker binary versions |
 | `fcm asset bin fetch VERSION` | Download a specific Firecracker version |
 | `fcm asset bin use VERSION` | Set active Firecracker version |
-| `fcm asset bin rm VERSION` | Remove a cached version |
+| `fcm asset bin remove VERSION` | Remove a cached version (`rm` is an alias) |
 
 **Flags for `fcm asset bin ls`:**
 
@@ -269,7 +269,7 @@ fcm asset bin fetch 1.12.0
 fcm asset bin use 1.12.0
 
 # Remove a version
-fcm asset bin rm 1.12.0
+fcm asset bin remove 1.12.0
 ```
 
 #### `fcm asset clear` — Clear Cache
