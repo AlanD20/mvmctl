@@ -2,503 +2,94 @@
 
 from __future__ import annotations
 
-import grp
-import json
 import logging
-import os
-import pwd
-import shutil
 import subprocess
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
-from fcm.constants import (
-    CLI_NAME,
-    PRIVILEGED_BINARIES,
-    PROJECT_GROUP,
-    PROJECT_NAME,
-    SUDOERS_DROP_IN_PATH,
+from fcm.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH
+from fcm.exceptions import HostError
+
+from fcm.core.host_state import HostState, HostChange, get_host_state, restore_host, _state_file
+from fcm.core.host_privilege import check_privileges, _remove_sudoers, _remove_group
+from fcm.core.host_setup import (
+    check_kvm_access,
+    check_required_binaries,
+    get_ip_forward_status,
+    init_host,
 )
-from fcm.exceptions import HostError, PrivilegeError
+
+__all__ = [
+    "clean_host",
+    "prune_host",
+    "reset_host",
+    "HostState",
+    "HostChange",
+    "get_host_state",
+    "restore_host",
+    "_state_file",
+    "check_privileges",
+    "_remove_sudoers",
+    "_remove_group",
+    "check_kvm_access",
+    "check_required_binaries",
+    "get_ip_forward_status",
+    "init_host",
+]
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_BINARIES = ["ip", "iptables", "qemu-img"]
-ISO_BINARIES = ["mkisofs", "genisoimage"]
-SYSCTL_KEY = "net.ipv4.ip_forward"
-SYSCTL_CONF = Path(f"/etc/sysctl.d/{PROJECT_NAME}.conf")
-KVM_MODULES = ["kvm"]
-KVM_VENDOR_MODULES = ["kvm_intel", "kvm_amd"]
 
 # Allowlists for restore_host() — only these keys/paths may be restored with root privileges.
-RESTORABLE_SYSCTL_KEYS: frozenset[str] = frozenset({"net.ipv4.ip_forward"})
-RESTORABLE_FILE_PATHS: frozenset[Path] = frozenset({Path(SUDOERS_DROP_IN_PATH), SYSCTL_CONF})
-
-
-@dataclass
-class HostChange:
-    setting: str
-    original_value: str | None
-    applied_value: str
-    mechanism: str
-
-
-@dataclass
-class HostState:
-    init_timestamp: str
-    changes: list[HostChange]
-
-
-def _state_dir(cache_dir: Path) -> Path:
-    return cache_dir / "host"
-
-
-def _state_file(cache_dir: Path) -> Path:
-    return _state_dir(cache_dir) / "state.json"
-
-
-def check_kvm_access() -> bool:
-    """Check whether the current user has read/write access to ``/dev/kvm``.
-
-    Returns:
-        True if ``/dev/kvm`` exists and is readable/writable, False otherwise.
-    """
-    kvm = Path("/dev/kvm")
-    return kvm.exists() and os.access(kvm, os.R_OK | os.W_OK)
-
-
-def check_required_binaries() -> list[str]:
-    """Return names of required system binaries that are not found on ``$PATH``.
-
-    Returns:
-        List of missing binary names. Empty if all are present.
-    """
-    missing: list[str] = []
-    for name in REQUIRED_BINARIES:
-        if not shutil.which(name):
-            missing.append(name)
-    has_iso = any(shutil.which(b) for b in ISO_BINARIES)
-    if not has_iso:
-        missing.append(" or ".join(ISO_BINARIES))
-    return missing
-
-
-def check_privileges(binary: str) -> None:
-    """Check that the current process can invoke *binary* with elevated privileges.
-
-    Verifies that the binary exists on the host and that the current user is
-    either root or a member of the project group.
-
-    Args:
-        binary: Path or name of the binary to check.
-
-    Raises:
-        PrivilegeError: If the binary is not found or the user lacks group membership.
-    """
-    if not shutil.which(binary) and not Path(binary).exists():
-        raise PrivilegeError(
-            f"Binary not found: {binary}. Run 'fcm host init' to set up required dependencies."
-        )
-
-    if os.getuid() == 0:
-        return
-
-    try:
-        g = grp.getgrnam(PROJECT_GROUP)
-        username = pwd.getpwuid(os.getuid()).pw_name
-        if username not in g.gr_mem:
-            raise PrivilegeError(
-                f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
-                f"Run 'sudo fcm host init' to configure privileges, "
-                f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
-            )
-    except KeyError as e:
-        raise PrivilegeError(
-            f"Group '{PROJECT_GROUP}' does not exist. "
-            f"Run 'sudo fcm host init' to set up privilege management."
-        ) from e
-
-
-def get_ip_forward_status() -> str:
-    """Read the current value of ``net.ipv4.ip_forward`` via sysctl.
-
-    Returns:
-        The sysctl value as a string (typically ``"0"`` or ``"1"``).
-
-    Raises:
-        HostError: If the sysctl command fails or is not found.
-    """
-    try:
-        result = subprocess.run(
-            ["sysctl", "-n", SYSCTL_KEY],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        raise HostError(f"Failed to read {SYSCTL_KEY}: {e}") from e
-    except FileNotFoundError as e:
-        raise HostError("sysctl command not found") from e
-
-
-def _is_module_loaded(module: str) -> bool:
-    try:
-        result = subprocess.run(
-            ["lsmod"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return False
-        return any(line.split()[0] == module for line in result.stdout.splitlines() if line)
-    except (OSError, subprocess.CalledProcessError):
-        return False
-
-
-def _load_module(module: str) -> None:
-    try:
-        subprocess.run(
-            ["modprobe", module],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise HostError(f"Failed to load kernel module {module}: {e}") from e
-    except FileNotFoundError as e:
-        raise HostError("modprobe command not found") from e
-
-
-def _enable_ip_forward() -> HostChange | None:
-    current = get_ip_forward_status()
-    if current == "1":
-        logger.debug("IP forwarding already enabled")
-        return None
-
-    try:
-        subprocess.run(
-            ["sysctl", "-w", f"{SYSCTL_KEY}=1"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise HostError(f"Failed to enable IP forwarding: {e}") from e
-    except FileNotFoundError as e:
-        raise HostError("sysctl command not found") from e
-
-    return HostChange(
-        setting=SYSCTL_KEY,
-        original_value=current,
-        applied_value="1",
-        mechanism="sysctl",
-    )
-
-
-def _get_current_user() -> str:
-    """Get the current login name."""
-    import pwd
-
-    return pwd.getpwuid(os.getuid()).pw_name
-
-
-def _group_exists(group_name: str) -> bool:
-    import grp
-
-    try:
-        grp.getgrnam(group_name)
-        return True
-    except KeyError:
-        return False
-
-
-def _user_in_group(username: str, group_name: str) -> bool:
-    import grp
-
-    try:
-        g = grp.getgrnam(group_name)
-        return username in g.gr_mem
-    except KeyError:
-        return False
-
-
-def _create_group(group_name: str) -> bool:
-    """Create system group. Returns True if created, False if already exists."""
-    if _group_exists(group_name):
-        return False
-    try:
-        subprocess.run(
-            ["groupadd", "--system", group_name],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return True
-    except subprocess.CalledProcessError as e:
-        raise HostError(f"Failed to create group {group_name}: {e}") from e
-    except FileNotFoundError as e:
-        raise HostError("groupadd command not found") from e
-
-
-def _add_user_to_group(username: str, group_name: str) -> bool:
-    """Add user to group. Returns True if added, False if already a member."""
-    if _user_in_group(username, group_name):
-        return False
-    try:
-        subprocess.run(
-            ["usermod", "-aG", group_name, username],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return True
-    except subprocess.CalledProcessError as e:
-        raise HostError(f"Failed to add {username} to group {group_name}: {e}") from e
-    except FileNotFoundError as e:
-        raise HostError("usermod command not found") from e
-
-
-def _validate_sudoers_binaries() -> None:
-    """Verify all PRIVILEGED_BINARIES exist on the host."""
-    for binary in PRIVILEGED_BINARIES:
-        if not Path(binary).exists():
-            pkg_map = {
-                "/usr/sbin/ip": "iproute2",
-                "/usr/sbin/iptables": "iptables",
-                "/usr/sbin/iptables-restore": "iptables",
-                "/usr/sbin/iptables-save": "iptables",
-                "/usr/sbin/sysctl": "procps",
-            }
-            pkg = pkg_map.get(binary, "unknown package")
-            raise HostError(f"Required binary not found: {binary} (install {pkg})")
-
-
-def _generate_sudoers_content(group_name: str) -> str:
-    """Generate sudoers drop-in content from PRIVILEGED_BINARIES."""
-    binaries_str = ", ".join(PRIVILEGED_BINARIES)
-    return (
-        f"# Managed by {CLI_NAME} — do not edit manually.\n"
-        f"# To remove: {CLI_NAME} host reset\n"
-        f"%{group_name} ALL=(root) NOPASSWD: {binaries_str}\n"
-    )
-
-
-def _write_sudoers(path: Path, group_name: str) -> None:
-    """Generate, validate with visudo, and write sudoers drop-in file."""
-    import tempfile
-
-    content = _generate_sudoers_content(group_name)
-    # Write to temp file for validation
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".sudoers", delete=False) as f:
-        f.write(content)
-        tmp_path = f.name
-    try:
-        result = subprocess.run(
-            ["visudo", "-c", "-f", tmp_path],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise HostError(f"Generated sudoers file failed visudo validation: {result.stderr}")
-    except FileNotFoundError:
-        logger.warning("visudo not found — skipping sudoers validation")
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-    # Write to final location
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
-        path.chmod(0o440)
-    except OSError as e:
-        raise HostError(f"Failed to write sudoers file {path}: {e}") from e
-
-
-def _remove_sudoers(path: Path) -> bool:
-    """Remove sudoers drop-in file. Returns True if removed."""
-    if not path.exists():
-        return False
-    try:
-        path.unlink()
-        return True
-    except OSError as e:
-        raise HostError(f"Failed to remove sudoers file {path}: {e}") from e
-
-
-def _remove_group(group_name: str) -> bool:
-    """Remove system group. Returns True if removed."""
-    if not _group_exists(group_name):
-        return False
-    try:
-        subprocess.run(
-            ["groupdel", group_name],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return True
-    except subprocess.CalledProcessError as e:
-        raise HostError(f"Failed to remove group {group_name}: {e}") from e
-    except FileNotFoundError as e:
-        raise HostError("groupdel command not found") from e
-
-
-def _persist_sysctl() -> HostChange | None:
-    content = f"{SYSCTL_KEY} = 1\n"
-    if SYSCTL_CONF.exists() and SYSCTL_CONF.read_text() == content:
-        logger.debug("sysctl persist file already exists with correct content")
-        return None
-
-    original: str | None = None
-    if SYSCTL_CONF.exists():
-        original = SYSCTL_CONF.read_text()
-
-    try:
-        SYSCTL_CONF.parent.mkdir(parents=True, exist_ok=True)
-        SYSCTL_CONF.write_text(content)
-    except OSError as e:
-        raise HostError(f"Failed to write {SYSCTL_CONF}: {e}") from e
-
-    return HostChange(
-        setting="sysctl_persist_file",
-        original_value=original,
-        applied_value=str(SYSCTL_CONF),
-        mechanism="file_create",
-    )
-
-
-def _ensure_kvm_modules() -> list[HostChange]:
-    changes: list[HostChange] = []
-    for module in KVM_MODULES:
-        if _is_module_loaded(module):
-            logger.debug("Module %s already loaded", module)
-            continue
-        _load_module(module)
-        changes.append(
-            HostChange(
-                setting=f"module:{module}",
-                original_value=None,
-                applied_value=module,
-                mechanism="modprobe",
-            )
-        )
-
-    vendor_loaded = any(_is_module_loaded(m) for m in KVM_VENDOR_MODULES)
-    if not vendor_loaded:
-        for module in KVM_VENDOR_MODULES:
-            try:
-                _load_module(module)
-                changes.append(
-                    HostChange(
-                        setting=f"module:{module}",
-                        original_value=None,
-                        applied_value=module,
-                        mechanism="modprobe",
-                    )
-                )
-                break
-            except HostError:
-                continue
-
-    return changes
-
-
-def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
-    state_dir = _state_dir(cache_dir)
-    state_dir.mkdir(parents=True, exist_ok=True)
-    state = HostState(
-        init_timestamp=datetime.now(timezone.utc).isoformat(),
-        changes=changes,
-    )
-    data = {
-        "init_timestamp": state.init_timestamp,
-        "changes": [asdict(c) for c in state.changes],
-    }
-    sf = _state_file(cache_dir)
-    sf.write_text(json.dumps(data, indent=2) + "\n")
-    os.chmod(sf, 0o600)
-
-
-def init_host(cache_dir: Path) -> list[HostChange]:
-    """Apply one-time host configuration for Firecracker (KVM, modules, sysctl, group, sudoers).
-
-    Idempotent — running twice applies no duplicate changes. Pre-change state
-    is persisted so it can be reverted with ``restore_host``.
-
-    Args:
-        cache_dir: Root cache directory for persisting host state.
-
-    Returns:
-        List of changes that were applied.
-
-    Raises:
-        HostError: If KVM is inaccessible or required binaries are missing.
-    """
-    changes: list[HostChange] = []
-
-    if not check_kvm_access():
-        raise HostError("/dev/kvm is not accessible — check permissions or load KVM modules")
-
-    missing = check_required_binaries()
-    if missing:
-        raise HostError(f"Missing required binaries: {', '.join(missing)}")
-
-    # Group and sudoers setup (requires root)
-    _validate_sudoers_binaries()
-
-    group_created = _create_group(PROJECT_GROUP)
-    if group_created:
-        changes.append(
-            HostChange(
-                setting=f"group:{PROJECT_GROUP}",
-                original_value=None,
-                applied_value=PROJECT_GROUP,
-                mechanism="groupadd",
-            )
-        )
-
-    username = _get_current_user()
-    user_added = _add_user_to_group(username, PROJECT_GROUP)
-    if user_added:
-        changes.append(
-            HostChange(
-                setting=f"group_member:{username}",
-                original_value=None,
-                applied_value=f"{username}:{PROJECT_GROUP}",
-                mechanism="usermod",
-            )
-        )
-
-    sudoers_path = Path(SUDOERS_DROP_IN_PATH)
-    if not sudoers_path.exists():
-        _write_sudoers(sudoers_path, PROJECT_GROUP)
-        changes.append(
-            HostChange(
-                setting="sudoers_dropin",
-                original_value=None,
-                applied_value=str(sudoers_path),
-                mechanism="file_create",
-            )
-        )
-
-    change = _enable_ip_forward()
-    if change:
-        changes.append(change)
-
-    change = _persist_sysctl()
-    if change:
-        changes.append(change)
-
-    module_changes = _ensure_kvm_modules()
-    changes.extend(module_changes)
-
-    _save_state(cache_dir, changes)
-    return changes
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def prune_host(cache_dir: Path) -> list[str]:
@@ -534,107 +125,8 @@ def prune_host(cache_dir: Path) -> list[str]:
     return summary
 
 
-def get_host_state(cache_dir: Path) -> HostState | None:
-    """Retrieve the saved host configuration state.
-
-    Args:
-        cache_dir: Root cache directory containing the host state snapshot.
-
-    Returns:
-        The ``HostState`` if it exists, or ``None`` if no state is saved.
-
-    Raises:
-        HostError: If the state file is corrupt or invalid.
-    """
-    path = _state_file(cache_dir)
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-        return HostState(
-            init_timestamp=data["init_timestamp"],
-            changes=[HostChange(**c) for c in data["changes"]],
-        )
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        raise HostError(f"Corrupt state file {path}: {e}") from e
 
 
-def restore_host(cache_dir: Path) -> list[HostChange]:
-    """Revert host changes recorded by ``init_host`` back to their original state.
-
-    Reads the saved state snapshot and reverses each change (sysctl values,
-    config files, sudoers, group) in LIFO order.
-
-    Args:
-        cache_dir: Root cache directory containing the host state snapshot.
-
-    Returns:
-        List of changes that were reverted.
-
-    Raises:
-        HostError: If no saved host state exists.
-    """
-    state = get_host_state(cache_dir)
-    if not state:
-        raise HostError("No saved host state to restore")
-
-    reverted: list[HostChange] = []
-    for change in reversed(state.changes):
-        if change.mechanism == "sysctl" and change.original_value is not None:
-            # S-C1: Validate sysctl key against allowlist before applying
-            if change.setting not in RESTORABLE_SYSCTL_KEYS:
-                logger.warning(
-                    "Skipping disallowed sysctl key '%s' from state file", change.setting
-                )
-                continue
-            try:
-                subprocess.run(
-                    ["sysctl", "-w", f"{change.setting}={change.original_value}"],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                reverted.append(
-                    HostChange(
-                        setting=change.setting,
-                        original_value=change.applied_value,
-                        applied_value=change.original_value,
-                        mechanism="sysctl",
-                    )
-                )
-            except subprocess.CalledProcessError as e:
-                raise HostError(f"Failed to revert {change.setting}: {e}") from e
-            except FileNotFoundError as e:
-                raise HostError("sysctl command not found") from e
-
-        elif change.mechanism == "file_create":
-            target = Path(change.applied_value).resolve()
-            # S-C2: Validate file path against allowlist before writing
-            if not any(target == allowed.resolve() for allowed in RESTORABLE_FILE_PATHS):
-                logger.warning("Skipping disallowed file path '%s' from state file", target)
-                continue
-            if target.exists():
-                try:
-                    if change.original_value is not None:
-                        target.write_text(change.original_value)
-                    else:
-                        target.unlink()
-                    reverted.append(
-                        HostChange(
-                            setting=change.setting,
-                            original_value=change.applied_value,
-                            applied_value=change.original_value or "(removed)",
-                            mechanism="file_remove",
-                        )
-                    )
-                except OSError as e:
-                    raise HostError(f"Failed to revert file {target}: {e}") from e
-
-    state_file = _state_file(cache_dir)
-    if state_file.exists():
-        state_file.unlink()
-
-    return reverted
 
 
 def clean_host(cache_dir: Path) -> list[str]:

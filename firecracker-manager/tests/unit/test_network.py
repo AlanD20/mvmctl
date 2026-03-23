@@ -166,7 +166,7 @@ def test_setup_bridge_success():
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch.object(Path, "write_text") as mock_write:
                 setup_bridge("fc-br0", "10.20.0.1/24")
-                assert mock_run.call_count == 3
+                assert mock_run.call_count == 1
                 mock_write.assert_called_once_with("1\n")
 
 
@@ -177,41 +177,10 @@ def test_setup_bridge_create_fails():
         with patch(
             "fcm.core.network.subprocess.run",
             side_effect=[
-                subprocess.CalledProcessError(1, ["ip", "link", "add"]),
+                subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
             ],
         ):
-            with pytest.raises(NetworkError, match="Failed to create bridge"):
-                setup_bridge("fc-br0", "10.20.0.1/24")
-
-
-def test_setup_bridge_ip_fails():
-    with patch("fcm.core.network.bridge_exists", return_value=False):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        with patch(
-            "fcm.core.network.subprocess.run",
-            side_effect=[
-                mock_result,
-                subprocess.CalledProcessError(1, ["ip", "addr", "add"]),
-            ],
-        ):
-            with pytest.raises(NetworkError, match="Failed to assign IP"):
-                setup_bridge("fc-br0", "10.20.0.1/24")
-
-
-def test_setup_bridge_up_fails():
-    with patch("fcm.core.network.bridge_exists", return_value=False):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        with patch(
-            "fcm.core.network.subprocess.run",
-            side_effect=[
-                mock_result,
-                mock_result,
-                subprocess.CalledProcessError(1, ["ip", "link", "set"]),
-            ],
-        ):
-            with pytest.raises(NetworkError, match="Failed to bring up bridge"):
+            with pytest.raises(NetworkError, match="Failed to setup bridge"):
                 setup_bridge("fc-br0", "10.20.0.1/24")
 
 
@@ -235,35 +204,16 @@ def test_teardown_bridge_success():
     mock_result.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
         teardown_bridge("fc-br0")
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 1
 
 
 def test_teardown_bridge_down_fails():
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=subprocess.CalledProcessError(1, ["ip", "link", "set"]),
+        side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
     ):
-        with pytest.raises(NetworkError, match="Failed to bring down bridge"):
+        with pytest.raises(NetworkError, match="Failed to teardown bridge"): # Updated match
             teardown_bridge("fc-br0")
-
-
-def test_teardown_bridge_delete_fails():
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    with patch(
-        "fcm.core.network.subprocess.run",
-        side_effect=[
-            mock_result,
-            subprocess.CalledProcessError(1, ["ip", "link", "delete"]),
-        ],
-    ):
-        with pytest.raises(NetworkError, match="Failed to delete bridge"):
-            teardown_bridge("fc-br0")
-
-
-# ---------------------------------------------------------------------------
-# setup_nat
-# ---------------------------------------------------------------------------
 
 
 def test_setup_nat_all_rules_exist():
@@ -273,7 +223,7 @@ def test_setup_nat_all_rules_exist():
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
             setup_nat("fc-br0", "eth0")
             # 3 check calls, no add calls
-            assert mock_run.call_count == 3
+            assert mock_run.call_count == 1
 
 
 def test_setup_nat_no_rules_exist():
@@ -283,68 +233,23 @@ def test_setup_nat_no_rules_exist():
     mock_add.returncode = 0
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=[mock_check, mock_add, mock_check, mock_add, mock_check, mock_add],
+        return_value=mock_check,
     ) as mock_run:
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
             setup_nat("fc-br0", "eth0")
             # 3 checks + 3 adds = 6 calls
-            assert mock_run.call_count == 6
+            assert mock_run.call_count == 1
 
 
 def test_setup_nat_masquerade_add_fails():
-    mock_check = MagicMock()
-    mock_check.returncode = 1
+    import subprocess
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=[
-            mock_check,
-            subprocess.CalledProcessError(1, ["iptables", "-t", "nat", "-A"]),
-        ],
+        side_effect=subprocess.CalledProcessError(1, ["/bin/bash"]),
     ):
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-            with pytest.raises(NetworkError, match="Failed to add MASQUERADE rule"):
+            with pytest.raises(NetworkError, match="Failed to setup NAT"):
                 setup_nat("fc-br0", "eth0")
-
-
-def test_setup_nat_forward_bridge_to_host_fails():
-    mock_check = MagicMock()
-    mock_check.returncode = 1
-    mock_add = MagicMock()
-    mock_add.returncode = 0
-    with patch(
-        "fcm.core.network.subprocess.run",
-        side_effect=[
-            mock_check,
-            mock_add,
-            mock_check,
-            subprocess.CalledProcessError(1, ["iptables", "-A", "FORWARD"]),
-        ],
-    ):
-        with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-            with pytest.raises(NetworkError, match="Failed to add FORWARD rule bridge"):
-                setup_nat("fc-br0", "eth0")
-
-
-def test_setup_nat_forward_host_to_bridge_fails():
-    mock_check = MagicMock()
-    mock_check.returncode = 1
-    mock_add = MagicMock()
-    mock_add.returncode = 0
-    with patch(
-        "fcm.core.network.subprocess.run",
-        side_effect=[
-            mock_check,
-            mock_add,
-            mock_check,
-            mock_add,
-            mock_check,
-            subprocess.CalledProcessError(1, ["iptables", "-A", "FORWARD"]),
-        ],
-    ):
-        with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-            with pytest.raises(NetworkError, match="Failed to add FORWARD rule host"):
-                setup_nat("fc-br0", "eth0")
-
 
 def test_setup_nat_auto_detect_interface():
     mock_check = MagicMock()
@@ -449,53 +354,17 @@ def test_create_tap_success():
         mock_result.returncode = 0
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             create_tap("fc-vm1-0", "fc-br0")
-            assert mock_run.call_count == 3
+            assert mock_run.call_count == 1
 
 
 def test_create_tap_create_fails():
     with patch("fcm.core.network.tap_exists", return_value=False):
         with patch(
             "fcm.core.network.subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, ["ip", "tuntap", "add"]),
+            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
         ):
-            with pytest.raises(NetworkError, match="Failed to create TAP"):
+            with pytest.raises(NetworkError, match="Failed to create TAP"): # Updated match
                 create_tap("fc-vm1-0", "fc-br0")
-
-
-def test_create_tap_attach_fails():
-    with patch("fcm.core.network.tap_exists", return_value=False):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        with patch(
-            "fcm.core.network.subprocess.run",
-            side_effect=[
-                mock_result,
-                subprocess.CalledProcessError(1, ["ip", "link", "set"]),
-            ],
-        ):
-            with pytest.raises(NetworkError, match="Failed to attach TAP"):
-                create_tap("fc-vm1-0", "fc-br0")
-
-
-def test_create_tap_up_fails():
-    with patch("fcm.core.network.tap_exists", return_value=False):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        with patch(
-            "fcm.core.network.subprocess.run",
-            side_effect=[
-                mock_result,
-                mock_result,
-                subprocess.CalledProcessError(1, ["ip", "link", "set"]),
-            ],
-        ):
-            with pytest.raises(NetworkError, match="Failed to bring up TAP"):
-                create_tap("fc-vm1-0", "fc-br0")
-
-
-# ---------------------------------------------------------------------------
-# delete_tap
-# ---------------------------------------------------------------------------
 
 
 def test_delete_tap_does_not_exist():
@@ -511,37 +380,17 @@ def test_delete_tap_success():
         mock_result.returncode = 0
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             delete_tap("fc-vm1-0")
-            assert mock_run.call_count == 2
+            assert mock_run.call_count == 1
 
 
 def test_delete_tap_down_fails():
     with patch("fcm.core.network.tap_exists", return_value=True):
         with patch(
             "fcm.core.network.subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, ["ip", "link", "set"]),
+            side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
         ):
-            with pytest.raises(NetworkError, match="Failed to bring down TAP"):
+            with pytest.raises(NetworkError, match="Failed to delete TAP"): # Updated match
                 delete_tap("fc-vm1-0")
-
-
-def test_delete_tap_delete_fails():
-    with patch("fcm.core.network.tap_exists", return_value=True):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        with patch(
-            "fcm.core.network.subprocess.run",
-            side_effect=[
-                mock_result,
-                subprocess.CalledProcessError(1, ["ip", "link", "delete"]),
-            ],
-        ):
-            with pytest.raises(NetworkError, match="Failed to delete TAP"):
-                delete_tap("fc-vm1-0")
-
-
-# ---------------------------------------------------------------------------
-# add_iptables_forward_rules
-# ---------------------------------------------------------------------------
 
 
 def test_add_iptables_forward_rules_already_exist():
@@ -550,7 +399,7 @@ def test_add_iptables_forward_rules_already_exist():
     with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
         add_iptables_forward_rules("fc-vm1-0", "fc-br0")
         # 2 checks, no adds
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 1
 
 
 def test_add_iptables_forward_rules_add_success():
@@ -560,56 +409,28 @@ def test_add_iptables_forward_rules_add_success():
     mock_add.returncode = 0
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=[mock_check, mock_add, mock_check, mock_add],
+        return_value=mock_check,
     ) as mock_run:
         add_iptables_forward_rules("fc-vm1-0", "fc-br0")
         # 2 checks + 2 adds = 4 calls
-        assert mock_run.call_count == 4
+        assert mock_run.call_count == 1
 
 
 def test_add_iptables_forward_rules_bridge_to_tap_fails():
-    mock_check = MagicMock()
-    mock_check.returncode = 1
+    import subprocess
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=[
-            mock_check,
-            subprocess.CalledProcessError(1, ["iptables", "-A", "FORWARD"]),
-        ],
+        side_effect=subprocess.CalledProcessError(1, ["/bin/bash"]),
     ):
-        with pytest.raises(NetworkError, match="Failed to add FORWARD rule"):
+        with pytest.raises(NetworkError, match="Failed to add FORWARD rules"):
             add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-
-
-def test_add_iptables_forward_rules_tap_to_bridge_fails():
-    mock_check = MagicMock()
-    mock_check.returncode = 1
-    mock_add = MagicMock()
-    mock_add.returncode = 0
-    with patch(
-        "fcm.core.network.subprocess.run",
-        side_effect=[
-            mock_check,
-            mock_add,
-            mock_check,
-            subprocess.CalledProcessError(1, ["iptables", "-A", "FORWARD"]),
-        ],
-    ):
-        with pytest.raises(NetworkError, match="Failed to add FORWARD rule"):
-            add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-
-
-# ---------------------------------------------------------------------------
-# remove_iptables_forward_rules
-# ---------------------------------------------------------------------------
-
 
 def test_remove_iptables_forward_rules_success():
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
         remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 1
 
 
 def test_remove_iptables_forward_rules_already_absent():
@@ -622,4 +443,4 @@ def test_remove_iptables_forward_rules_already_absent():
     ) as mock_run:
         remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
         # Should not raise, just log
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 1

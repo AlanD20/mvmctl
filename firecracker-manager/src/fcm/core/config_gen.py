@@ -8,13 +8,66 @@ from fcm.utils.fs import get_vm_dir
 from fcm.utils.validation import validate_boot_arg_component
 
 
+
+from typing import TypedDict
+
+class BootSourceConfig(TypedDict):
+    kernel_image_path: str
+    boot_args: str
+
+class DriveConfig(TypedDict):
+    drive_id: str
+    path_on_host: str
+    is_root_device: bool
+    is_read_only: bool
+    partuuid: str | None
+    cache_type: str
+    io_engine: str
+    rate_limiter: object | None
+    socket: str | None
+
+class NetworkInterfaceConfig(TypedDict):
+    iface_id: str
+    guest_mac: str
+    host_dev_name: str
+
+class MachineConfig(TypedDict):
+    vcpu_count: int
+    mem_size_mib: int
+    smt: bool
+    cpu_template: str | None
+
+class LoggerConfig(TypedDict):
+    log_path: str
+    level: str
+    show_level: bool
+    show_log_origin: bool
+
+class MetricsConfig(TypedDict):
+    metrics_path: str
+
+FirecrackerConfig = TypedDict(
+    "FirecrackerConfig",
+    {
+        "boot-source": BootSourceConfig,
+        "drives": list[DriveConfig],
+        "network-interfaces": list[NetworkInterfaceConfig],
+        "machine-config": MachineConfig,
+        "cpu-config": object | None,
+        "balloon": object | None,
+        "vsock": object | None,
+        "logger": LoggerConfig,
+        "metrics": MetricsConfig,
+    },
+)
+
 class ConfigGenerator:
     """Generates Firecracker JSON configuration."""
 
     def __init__(self, vm_config: VMConfig):
         self.vm_config = vm_config
 
-    def generate(self) -> dict[str, object]:
+    def generate(self) -> FirecrackerConfig:
         """Generate Firecracker config dictionary."""
         if self.vm_config.boot_args:
             for component in self.vm_config.boot_args.split():
@@ -97,7 +150,7 @@ class ConfigGenerator:
         ]
         return " ".join(p for p in parts if p).strip()
 
-    def _build_network_config(self) -> list[dict[str, object]]:
+    def _build_network_config(self) -> list[NetworkInterfaceConfig]:
         """Build network interface configuration."""
         if not self.vm_config.tap_device:
             return []

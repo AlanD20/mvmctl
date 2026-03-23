@@ -102,32 +102,16 @@ def setup_bridge(
         return
 
     try:
-        # P-L2: capture_output acceptable — error messages in CalledProcessError use captured stderr
+        batch = f"link add name {bridge} type bridge\naddr add {effective_cidr} dev {bridge}\nlink set {bridge} up\n"
         subprocess.run(
-            ["ip", "link", "add", "name", bridge, "type", "bridge"],
+            ["ip", "-batch", "-"],
+            input=batch,
+            text=True,
             check=True,
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to create bridge {bridge}: {e}") from e
-
-    try:
-        subprocess.run(
-            ["ip", "addr", "add", effective_cidr, "dev", bridge],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to assign IP {effective_cidr} to bridge {bridge}: {e}") from e
-
-    try:
-        subprocess.run(
-            ["ip", "link", "set", bridge, "up"],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to bring up bridge {bridge}: {e}") from e
+        raise NetworkError(f"Failed to setup bridge {bridge}: {e}\n{e.stderr}") from e
 
     try:
         # Direct procfs write is equivalent to sysctl -w net.ipv4.ip_forward=1
@@ -146,22 +130,16 @@ def teardown_bridge(bridge: str = BRIDGE_NAME) -> None:
     - Raises NetworkError on failure.
     """
     try:
+        batch = f"link set {bridge} down\nlink delete {bridge} type bridge\n"
         subprocess.run(
-            ["ip", "link", "set", bridge, "down"],
+            ["ip", "-batch", "-"],
+            input=batch,
+            text=True,
             check=True,
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to bring down bridge {bridge}: {e}") from e
-
-    try:
-        subprocess.run(
-            ["ip", "link", "delete", bridge, "type", "bridge"],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to delete bridge {bridge}: {e}") from e
+        raise NetworkError(f"Failed to teardown bridge {bridge}: {e}\n{e.stderr}") from e
 
     logger.info("Bridge %s removed", bridge)
 
@@ -202,23 +180,14 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
     if host_iface is None:
         host_iface = get_default_interface()
 
-    _ensure_iptables_rule(
-        ["iptables", "-t", "nat", "-C", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
-        ["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
-        f"Failed to add MASQUERADE rule for {host_iface}",
-    )
-
-    _ensure_iptables_rule(
-        ["iptables", "-C", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-        ["iptables", "-A", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-        f"Failed to add FORWARD rule bridge→host ({bridge}→{host_iface})",
-    )
-
-    _ensure_iptables_rule(
-        ["iptables", "-C", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
-        ["iptables", "-A", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
-        f"Failed to add FORWARD rule host→bridge ({host_iface}→{bridge})",
-    )
+    script = f"""iptables -t nat -C POSTROUTING -o {host_iface} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o {host_iface} -j MASQUERADE
+iptables -C FORWARD -i {bridge} -o {host_iface} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {bridge} -o {host_iface} -j ACCEPT
+iptables -C FORWARD -i {host_iface} -o {bridge} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {host_iface} -o {bridge} -j ACCEPT
+"""
+    try:
+        subprocess.run(script, shell=True, executable="/bin/bash", check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        raise NetworkError(f"Failed to setup NAT for {bridge} via {host_iface}: {e}\n{e.stderr}") from e
 
     logger.info("NAT rules configured for bridge %s via %s", bridge, host_iface)
 
@@ -283,31 +252,16 @@ def create_tap(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
         raise NetworkError(f"TAP device {tap_name} already exists")
 
     try:
+        batch = f"tuntap add dev {tap_name} mode tap\nlink set {tap_name} master {bridge}\nlink set {tap_name} up\n"
         subprocess.run(
-            ["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"],
+            ["ip", "-batch", "-"],
+            input=batch,
+            text=True,
             check=True,
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to create TAP {tap_name}: {e}") from e
-
-    try:
-        subprocess.run(
-            ["ip", "link", "set", tap_name, "master", bridge],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to attach TAP {tap_name} to bridge {bridge}: {e}") from e
-
-    try:
-        subprocess.run(
-            ["ip", "link", "set", tap_name, "up"],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to bring up TAP {tap_name}: {e}") from e
+        raise NetworkError(f"Failed to create TAP {tap_name}: {e}\n{e.stderr}") from e
 
     logger.info("TAP device %s created and attached to bridge %s", tap_name, bridge)
 
@@ -325,22 +279,16 @@ def delete_tap(tap_name: str) -> None:
         return
 
     try:
+        batch = f"link set {tap_name} down\nlink delete {tap_name}\n"
         subprocess.run(
-            ["ip", "link", "set", tap_name, "down"],
+            ["ip", "-batch", "-"],
+            input=batch,
+            text=True,
             check=True,
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to bring down TAP {tap_name}: {e}") from e
-
-    try:
-        subprocess.run(
-            ["ip", "link", "delete", tap_name],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to delete TAP {tap_name}: {e}") from e
+        raise NetworkError(f"Failed to delete TAP {tap_name}: {e}\n{e.stderr}") from e
 
     logger.info("TAP device %s deleted", tap_name)
 
@@ -352,17 +300,13 @@ def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None
     - `iptables -A FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
     - `iptables -A FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     """
-    _ensure_iptables_rule(
-        ["iptables", "-C", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
-        ["iptables", "-A", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
-        f"Failed to add FORWARD rule {bridge}→{tap_name}",
-    )
-
-    _ensure_iptables_rule(
-        ["iptables", "-C", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
-        ["iptables", "-A", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
-        f"Failed to add FORWARD rule {tap_name}→{bridge}",
-    )
+    script = f"""iptables -C FORWARD -i {bridge} -o {tap_name} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {bridge} -o {tap_name} -j ACCEPT
+iptables -C FORWARD -i {tap_name} -o {bridge} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {tap_name} -o {bridge} -j ACCEPT
+"""
+    try:
+        subprocess.run(script, shell=True, executable="/bin/bash", check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        raise NetworkError(f"Failed to add FORWARD rules for {tap_name}: {e}\n{e.stderr}") from e
 
     logger.debug("FORWARD rules added for TAP %s ↔ bridge %s", tap_name, bridge)
 
@@ -374,16 +318,10 @@ def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> N
     - `iptables -D FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     - Safe to call even if rules don't exist (ignore errors).
     """
-    subprocess.run(
-        ["iptables", "-D", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
-        capture_output=True,
-        check=False,
-    )
-    subprocess.run(
-        ["iptables", "-D", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
-        capture_output=True,
-        check=False,
-    )
+    script = f"""iptables -D FORWARD -i {bridge} -o {tap_name} -j ACCEPT 2>/dev/null || true
+iptables -D FORWARD -i {tap_name} -o {bridge} -j ACCEPT 2>/dev/null || true
+"""
+    subprocess.run(script, shell=True, executable="/bin/bash", check=False, capture_output=True, text=True)
     logger.debug("FORWARD rules removed for TAP %s ↔ bridge %s", tap_name, bridge)
 
 

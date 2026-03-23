@@ -6,34 +6,37 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fcm.core.host import (
+from fcm.core.host import clean_host, prune_host, reset_host
+from fcm.core.host_state import (
     HostChange,
     HostState,
-    _add_user_to_group,
-    _create_group,
-    _enable_ip_forward,
-    _ensure_kvm_modules,
-    _generate_sudoers_content,
-    _get_current_user,
-    _group_exists,
-    _is_module_loaded,
-    _load_module,
-    _persist_sysctl,
-    _remove_group,
     _save_state,
     _state_dir,
     _state_file,
+    get_host_state,
+    restore_host,
+)
+from fcm.core.host_privilege import (
+    _add_user_to_group,
+    _create_group,
+    _generate_sudoers_content,
+    _get_current_user,
+    _group_exists,
+    _remove_group,
     _user_in_group,
     _validate_sudoers_binaries,
-    check_kvm_access,
     check_privileges,
+)
+from fcm.core.host_setup import (
+    _enable_ip_forward,
+    _ensure_kvm_modules,
+    _is_module_loaded,
+    _load_module,
+    _persist_sysctl,
+    check_kvm_access,
     check_required_binaries,
-    clean_host,
-    get_host_state,
     get_ip_forward_status,
     init_host,
-    reset_host,
-    restore_host,
 )
 from fcm.exceptions import HostError, PrivilegeError
 
@@ -58,19 +61,19 @@ def test_state_file(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.host.os.access", return_value=True)
-@patch("fcm.core.host.Path.exists", return_value=True)
+@patch("fcm.core.host_setup.os.access", return_value=True)
+@patch("fcm.core.host_setup.Path.exists", return_value=True)
 def test_check_kvm_access_ok(mock_exists, mock_access):
     assert check_kvm_access() is True
 
 
-@patch("fcm.core.host.Path.exists", return_value=False)
+@patch("fcm.core.host_setup.Path.exists", return_value=False)
 def test_check_kvm_access_missing(mock_exists):
     assert check_kvm_access() is False
 
 
-@patch("fcm.core.host.os.access", return_value=False)
-@patch("fcm.core.host.Path.exists", return_value=True)
+@patch("fcm.core.host_setup.os.access", return_value=False)
+@patch("fcm.core.host_setup.Path.exists", return_value=True)
 def test_check_kvm_access_no_permission(mock_exists, mock_access):
     assert check_kvm_access() is False
 
@@ -80,14 +83,14 @@ def test_check_kvm_access_no_permission(mock_exists, mock_access):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.host.shutil.which")
+@patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_all_found(mock_which):
     mock_which.return_value = "/usr/bin/something"
     result = check_required_binaries()
     assert result == []
 
 
-@patch("fcm.core.host.shutil.which")
+@patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_missing_some(mock_which):
     def side_effect(name):
         if name == "ip":
@@ -99,7 +102,7 @@ def test_check_required_binaries_missing_some(mock_which):
     assert "ip" in result
 
 
-@patch("fcm.core.host.shutil.which")
+@patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_no_iso_tool(mock_which):
     def side_effect(name):
         if name in ("mkisofs", "genisoimage"):
@@ -111,7 +114,7 @@ def test_check_required_binaries_no_iso_tool(mock_which):
     assert "mkisofs or genisoimage" in result
 
 
-@patch("fcm.core.host.shutil.which")
+@patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_has_genisoimage_only(mock_which):
     def side_effect(name):
         if name == "mkisofs":
@@ -123,7 +126,7 @@ def test_check_required_binaries_has_genisoimage_only(mock_which):
     assert result == []
 
 
-@patch("fcm.core.host.shutil.which")
+@patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_has_mkisofs_only(mock_which):
     def side_effect(name):
         if name == "genisoimage":
@@ -135,7 +138,7 @@ def test_check_required_binaries_has_mkisofs_only(mock_which):
     assert result == []
 
 
-@patch("fcm.core.host.shutil.which")
+@patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_all_missing(mock_which):
     mock_which.return_value = None
     result = check_required_binaries()
@@ -150,7 +153,7 @@ def test_check_required_binaries_all_missing(mock_which):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_get_ip_forward_status_success(mock_run):
     mock_run.return_value = MagicMock(stdout="1\n")
     result = get_ip_forward_status()
@@ -163,20 +166,20 @@ def test_get_ip_forward_status_success(mock_run):
     )
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_get_ip_forward_status_zero(mock_run):
     mock_run.return_value = MagicMock(stdout="0\n")
     assert get_ip_forward_status() == "0"
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_get_ip_forward_status_called_process_error(mock_run):
     mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl")
     with pytest.raises(HostError, match="Failed to read"):
         get_ip_forward_status()
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_get_ip_forward_status_file_not_found(mock_run):
     mock_run.side_effect = FileNotFoundError("sysctl")
     with pytest.raises(HostError, match="sysctl command not found"):
@@ -188,7 +191,7 @@ def test_get_ip_forward_status_file_not_found(mock_run):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_found(mock_run):
     mock_run.return_value = MagicMock(
         returncode=0,
@@ -197,7 +200,7 @@ def test_is_module_loaded_found(mock_run):
     assert _is_module_loaded("kvm") is True
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_not_found(mock_run):
     mock_run.return_value = MagicMock(
         returncode=0,
@@ -206,19 +209,19 @@ def test_is_module_loaded_not_found(mock_run):
     assert _is_module_loaded("kvm") is False
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_lsmod_fails(mock_run):
     mock_run.return_value = MagicMock(returncode=1, stdout="")
     assert _is_module_loaded("kvm") is False
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_empty_output(mock_run):
     mock_run.return_value = MagicMock(returncode=0, stdout="")
     assert _is_module_loaded("kvm") is False
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_partial_name_no_match(mock_run):
     """Module name 'kvm_intel' should not match query for 'kvm'."""
     mock_run.return_value = MagicMock(
@@ -228,7 +231,7 @@ def test_is_module_loaded_partial_name_no_match(mock_run):
     assert _is_module_loaded("kvm") is False
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_empty_lines(mock_run):
     mock_run.return_value = MagicMock(
         returncode=0,
@@ -242,7 +245,7 @@ def test_is_module_loaded_empty_lines(mock_run):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_load_module_success(mock_run):
     mock_run.return_value = MagicMock(returncode=0)
     _load_module("kvm")  # Should not raise
@@ -254,14 +257,14 @@ def test_load_module_success(mock_run):
     )
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_load_module_called_process_error(mock_run):
     mock_run.side_effect = subprocess.CalledProcessError(1, "modprobe")
     with pytest.raises(HostError, match="Failed to load kernel module kvm"):
         _load_module("kvm")
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_setup.subprocess.run")
 def test_load_module_file_not_found(mock_run):
     mock_run.side_effect = FileNotFoundError("modprobe")
     with pytest.raises(HostError, match="modprobe command not found"):
@@ -273,16 +276,16 @@ def test_load_module_file_not_found(mock_run):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.get_ip_forward_status", return_value="1")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.get_ip_forward_status", return_value="1")
 def test_enable_ip_forward_already_enabled(mock_status, mock_run):
     result = _enable_ip_forward()
     assert result is None
     mock_run.assert_not_called()
 
 
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.get_ip_forward_status", return_value="0")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.get_ip_forward_status", return_value="0")
 def test_enable_ip_forward_needs_enabling(mock_status, mock_run):
     mock_run.return_value = MagicMock(returncode=0)
     result = _enable_ip_forward()
@@ -299,16 +302,16 @@ def test_enable_ip_forward_needs_enabling(mock_status, mock_run):
     )
 
 
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.get_ip_forward_status", return_value="0")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.get_ip_forward_status", return_value="0")
 def test_enable_ip_forward_called_process_error(mock_status, mock_run):
     mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl")
     with pytest.raises(HostError, match="Failed to enable IP forwarding"):
         _enable_ip_forward()
 
 
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.get_ip_forward_status", return_value="0")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.get_ip_forward_status", return_value="0")
 def test_enable_ip_forward_file_not_found(mock_status, mock_run):
     mock_run.side_effect = FileNotFoundError("sysctl")
     with pytest.raises(HostError, match="sysctl command not found"):
@@ -320,7 +323,7 @@ def test_enable_ip_forward_file_not_found(mock_status, mock_run):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.host.SYSCTL_CONF")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
 def test_persist_sysctl_already_correct(mock_conf):
     mock_conf.exists.return_value = True
     mock_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
@@ -328,7 +331,7 @@ def test_persist_sysctl_already_correct(mock_conf):
     assert result is None
 
 
-@patch("fcm.core.host.SYSCTL_CONF")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
 def test_persist_sysctl_file_does_not_exist(mock_conf):
     mock_conf.exists.return_value = False
     mock_conf.parent = MagicMock()
@@ -342,7 +345,7 @@ def test_persist_sysctl_file_does_not_exist(mock_conf):
     mock_conf.write_text.assert_called_once_with("net.ipv4.ip_forward = 1\n")
 
 
-@patch("fcm.core.host.SYSCTL_CONF")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
 def test_persist_sysctl_file_has_wrong_content(mock_conf):
     mock_conf.exists.return_value = True
     mock_conf.read_text.return_value = "net.ipv4.ip_forward = 0\n"
@@ -354,7 +357,7 @@ def test_persist_sysctl_file_has_wrong_content(mock_conf):
     mock_conf.write_text.assert_called_once_with("net.ipv4.ip_forward = 1\n")
 
 
-@patch("fcm.core.host.SYSCTL_CONF")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
 def test_persist_sysctl_write_fails(mock_conf):
     mock_conf.exists.return_value = False
     mock_conf.parent = MagicMock()
@@ -368,8 +371,8 @@ def test_persist_sysctl_write_fails(mock_conf):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.host._load_module")
-@patch("fcm.core.host._is_module_loaded")
+@patch("fcm.core.host_setup._load_module")
+@patch("fcm.core.host_setup._is_module_loaded")
 def test_ensure_kvm_modules_all_loaded(mock_loaded, mock_load):
     # kvm loaded, kvm_intel loaded
     mock_loaded.side_effect = lambda m: m in ("kvm", "kvm_intel")
@@ -378,8 +381,8 @@ def test_ensure_kvm_modules_all_loaded(mock_loaded, mock_load):
     mock_load.assert_not_called()
 
 
-@patch("fcm.core.host._load_module")
-@patch("fcm.core.host._is_module_loaded")
+@patch("fcm.core.host_setup._load_module")
+@patch("fcm.core.host_setup._is_module_loaded")
 def test_ensure_kvm_modules_need_loading(mock_loaded, mock_load):
     # Nothing loaded initially
     call_count = {"kvm": 0, "kvm_intel": 0, "kvm_amd": 0}
@@ -395,8 +398,8 @@ def test_ensure_kvm_modules_need_loading(mock_loaded, mock_load):
     assert any(c.setting == "module:kvm_intel" for c in changes)
 
 
-@patch("fcm.core.host._load_module")
-@patch("fcm.core.host._is_module_loaded")
+@patch("fcm.core.host_setup._load_module")
+@patch("fcm.core.host_setup._is_module_loaded")
 def test_ensure_kvm_modules_vendor_fallback(mock_loaded, mock_load):
     """kvm_intel fails, kvm_amd succeeds."""
 
@@ -418,8 +421,8 @@ def test_ensure_kvm_modules_vendor_fallback(mock_loaded, mock_load):
     assert any(c.setting == "module:kvm_amd" for c in changes)
 
 
-@patch("fcm.core.host._load_module")
-@patch("fcm.core.host._is_module_loaded")
+@patch("fcm.core.host_setup._load_module")
+@patch("fcm.core.host_setup._is_module_loaded")
 def test_ensure_kvm_modules_both_vendor_fail(mock_loaded, mock_load):
     """Both kvm_intel and kvm_amd fail — no vendor change recorded."""
     mock_loaded.return_value = False
@@ -436,8 +439,8 @@ def test_ensure_kvm_modules_both_vendor_fail(mock_loaded, mock_load):
     assert not any(c.setting.startswith("module:kvm_") for c in changes)
 
 
-@patch("fcm.core.host._load_module")
-@patch("fcm.core.host._is_module_loaded")
+@patch("fcm.core.host_setup._load_module")
+@patch("fcm.core.host_setup._is_module_loaded")
 def test_ensure_kvm_modules_kvm_already_loaded_vendor_not(mock_loaded, mock_load):
     """kvm already loaded, vendor not loaded."""
 
@@ -516,33 +519,33 @@ def _mock_lsmod_with_kvm():
     return result
 
 
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
-@patch("fcm.core.host.os.access", return_value=False)
-@patch("fcm.core.host.Path.exists", return_value=False)
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
+@patch("fcm.core.host_setup.os.access", return_value=False)
+@patch("fcm.core.host_setup.Path.exists", return_value=False)
 def test_init_host_kvm_not_accessible(mock_exists, mock_access, mock_which, mock_run, tmp_path):
     with pytest.raises(HostError, match="/dev/kvm is not accessible"):
         init_host(tmp_path)
 
 
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.shutil.which")
-@patch("fcm.core.host.os.access", return_value=True)
-@patch("fcm.core.host.Path.exists", return_value=True)
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.shutil.which")
+@patch("fcm.core.host_setup.os.access", return_value=True)
+@patch("fcm.core.host_setup.Path.exists", return_value=True)
 def test_init_host_missing_binaries(mock_exists, mock_access, mock_which, mock_run, tmp_path):
     mock_which.return_value = None
     with pytest.raises(HostError, match="Missing required binaries"):
         init_host(tmp_path)
 
 
-@patch("fcm.core.host._get_current_user", return_value="testuser")
-@patch("fcm.core.host._add_user_to_group", return_value=False)
-@patch("fcm.core.host._create_group", return_value=False)
-@patch("fcm.core.host._validate_sudoers_binaries")
-@patch("fcm.core.host.SYSCTL_CONF")
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
-@patch("fcm.core.host.os.access", return_value=True)
+@patch("fcm.core.host_setup._get_current_user", return_value="testuser")
+@patch("fcm.core.host_setup._add_user_to_group", return_value=False)
+@patch("fcm.core.host_setup._create_group", return_value=False)
+@patch("fcm.core.host_setup._validate_sudoers_binaries")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
+@patch("fcm.core.host_setup.os.access", return_value=True)
 def test_init_host_ip_forward_already_enabled(
     mock_access,
     mock_which,
@@ -555,7 +558,7 @@ def test_init_host_ip_forward_already_enabled(
     tmp_path,
 ):
     # Path.exists for /dev/kvm returns True
-    with patch("fcm.core.host.Path.exists", return_value=True):
+    with patch("fcm.core.host_setup.Path.exists", return_value=True):
         # sysctl -n returns "1", lsmod returns kvm loaded
         def run_side_effect(cmd, **kwargs):
             if cmd[0] == "sysctl" and "-n" in cmd:
@@ -579,14 +582,14 @@ def test_init_host_ip_forward_already_enabled(
     assert state_file.exists()
 
 
-@patch("fcm.core.host._get_current_user", return_value="testuser")
-@patch("fcm.core.host._add_user_to_group", return_value=False)
-@patch("fcm.core.host._create_group", return_value=False)
-@patch("fcm.core.host._validate_sudoers_binaries")
-@patch("fcm.core.host.SYSCTL_CONF")
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
-@patch("fcm.core.host.os.access", return_value=True)
+@patch("fcm.core.host_setup._get_current_user", return_value="testuser")
+@patch("fcm.core.host_setup._add_user_to_group", return_value=False)
+@patch("fcm.core.host_setup._create_group", return_value=False)
+@patch("fcm.core.host_setup._validate_sudoers_binaries")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
+@patch("fcm.core.host_setup.os.access", return_value=True)
 def test_init_host_enables_ip_forward(
     mock_access,
     mock_which,
@@ -598,7 +601,7 @@ def test_init_host_enables_ip_forward(
     mock_get_user,
     tmp_path,
 ):
-    with patch("fcm.core.host.Path.exists", return_value=True):
+    with patch("fcm.core.host_setup.Path.exists", return_value=True):
 
         def run_side_effect(cmd, **kwargs):
             if cmd[0] == "sysctl" and "-n" in cmd:
@@ -629,14 +632,14 @@ def test_init_host_enables_ip_forward(
     assert ip_fwd_change.mechanism == "sysctl"
 
 
-@patch("fcm.core.host._get_current_user", return_value="testuser")
-@patch("fcm.core.host._add_user_to_group", return_value=False)
-@patch("fcm.core.host._create_group", return_value=False)
-@patch("fcm.core.host._validate_sudoers_binaries")
-@patch("fcm.core.host.SYSCTL_CONF")
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
-@patch("fcm.core.host.os.access", return_value=True)
+@patch("fcm.core.host_setup._get_current_user", return_value="testuser")
+@patch("fcm.core.host_setup._add_user_to_group", return_value=False)
+@patch("fcm.core.host_setup._create_group", return_value=False)
+@patch("fcm.core.host_setup._validate_sudoers_binaries")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
+@patch("fcm.core.host_setup.os.access", return_value=True)
 def test_init_host_writes_state_file(
     mock_access,
     mock_which,
@@ -648,7 +651,7 @@ def test_init_host_writes_state_file(
     mock_get_user,
     tmp_path,
 ):
-    with patch("fcm.core.host.Path.exists", return_value=True):
+    with patch("fcm.core.host_setup.Path.exists", return_value=True):
 
         def run_side_effect(cmd, **kwargs):
             if cmd[0] == "sysctl" and "-n" in cmd:
@@ -671,14 +674,14 @@ def test_init_host_writes_state_file(
     assert "changes" in data
 
 
-@patch("fcm.core.host._get_current_user", return_value="testuser")
-@patch("fcm.core.host._add_user_to_group", return_value=False)
-@patch("fcm.core.host._create_group", return_value=False)
-@patch("fcm.core.host._validate_sudoers_binaries")
-@patch("fcm.core.host.SYSCTL_CONF")
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
-@patch("fcm.core.host.os.access", return_value=True)
+@patch("fcm.core.host_setup._get_current_user", return_value="testuser")
+@patch("fcm.core.host_setup._add_user_to_group", return_value=False)
+@patch("fcm.core.host_setup._create_group", return_value=False)
+@patch("fcm.core.host_setup._validate_sudoers_binaries")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
+@patch("fcm.core.host_setup.os.access", return_value=True)
 def test_init_host_idempotent(
     mock_access,
     mock_which,
@@ -690,7 +693,7 @@ def test_init_host_idempotent(
     mock_get_user,
     tmp_path,
 ):
-    with patch("fcm.core.host.Path.exists", return_value=True):
+    with patch("fcm.core.host_setup.Path.exists", return_value=True):
         call_count = {"sysctl_n": 0}
 
         def run_side_effect(cmd, **kwargs):
@@ -723,14 +726,14 @@ def test_init_host_idempotent(
     assert len(changes_second) < len(changes_first)
 
 
-@patch("fcm.core.host._get_current_user", return_value="testuser")
-@patch("fcm.core.host._add_user_to_group", return_value=False)
-@patch("fcm.core.host._create_group", return_value=False)
-@patch("fcm.core.host._validate_sudoers_binaries")
-@patch("fcm.core.host.SYSCTL_CONF")
-@patch("fcm.core.host.subprocess.run")
-@patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
-@patch("fcm.core.host.os.access", return_value=True)
+@patch("fcm.core.host_setup._get_current_user", return_value="testuser")
+@patch("fcm.core.host_setup._add_user_to_group", return_value=False)
+@patch("fcm.core.host_setup._create_group", return_value=False)
+@patch("fcm.core.host_setup._validate_sudoers_binaries")
+@patch("fcm.core.host_setup.SYSCTL_CONF")
+@patch("fcm.core.host_setup.subprocess.run")
+@patch("fcm.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
+@patch("fcm.core.host_setup.os.access", return_value=True)
 def test_init_host_with_module_loading(
     mock_access,
     mock_which,
@@ -743,7 +746,7 @@ def test_init_host_with_module_loading(
     tmp_path,
 ):
     """init_host loads kvm modules when they're not loaded."""
-    with patch("fcm.core.host.Path.exists", return_value=True):
+    with patch("fcm.core.host_setup.Path.exists", return_value=True):
 
         def run_side_effect(cmd, **kwargs):
             if cmd[0] == "sysctl" and "-n" in cmd:
@@ -879,7 +882,7 @@ def test_restore_host_no_state(tmp_path):
         restore_host(tmp_path)
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_reverts_sysctl(mock_run, tmp_path):
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
@@ -939,7 +942,7 @@ def test_restore_host_reverts_file_create(tmp_path):
 
     # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
     with patch(
-        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        "fcm.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
         reverted = restore_host(tmp_path)
@@ -976,7 +979,7 @@ def test_restore_host_reverts_file_create_with_original(tmp_path):
 
     # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
     with patch(
-        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        "fcm.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
         reverted = restore_host(tmp_path)
@@ -985,7 +988,7 @@ def test_restore_host_reverts_file_create_with_original(tmp_path):
     assert target_file.read_text() == "old content\n"
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_deletes_state_file(mock_run, tmp_path):
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
@@ -1000,7 +1003,7 @@ def test_restore_host_deletes_state_file(mock_run, tmp_path):
     assert not state_file.exists()
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path):
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
@@ -1023,7 +1026,7 @@ def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path):
     mock_run.assert_not_called()
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_sysctl_failure(mock_run, tmp_path):
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
@@ -1046,7 +1049,7 @@ def test_restore_host_sysctl_failure(mock_run, tmp_path):
         restore_host(tmp_path)
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_sysctl_file_not_found(mock_run, tmp_path):
     """sysctl command not found during restore."""
     state_dir = tmp_path / "host"
@@ -1070,7 +1073,7 @@ def test_restore_host_sysctl_file_not_found(mock_run, tmp_path):
         restore_host(tmp_path)
 
 
-@patch("fcm.core.host.subprocess.run")
+@patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path):
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
@@ -1100,7 +1103,7 @@ def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path):
 
     # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
     with patch(
-        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        "fcm.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
         reverted = restore_host(tmp_path)
@@ -1131,7 +1134,7 @@ def test_restore_host_file_create_target_missing(tmp_path):
 
     # Patch allowlist so the test reaches the target.exists() check (not blocked by S-C2)
     with patch(
-        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        "fcm.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
         reverted = restore_host(tmp_path)
@@ -1162,7 +1165,7 @@ def test_restore_host_file_create_os_error(tmp_path):
 
     # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
     with patch(
-        "fcm.core.host.RESTORABLE_FILE_PATHS",
+        "fcm.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
         with patch("pathlib.Path.unlink", side_effect=OSError("permission denied")):
@@ -1224,19 +1227,19 @@ def test_host_state_dataclass():
 
 
 class TestCheckPrivileges:
-    @patch("fcm.core.host.shutil.which", return_value=None)
-    @patch("fcm.core.host.Path.exists", return_value=False)
+    @patch("fcm.core.host_privilege.shutil.which", return_value=None)
+    @patch("fcm.core.host_privilege.Path.exists", return_value=False)
     def test_binary_not_found(self, mock_exists, mock_which):
         with pytest.raises(PrivilegeError, match="Binary not found"):
             check_privileges("/usr/sbin/nonexistent")
 
-    @patch("fcm.core.host.shutil.which", return_value="/usr/sbin/ip")
-    @patch("fcm.core.host.os.getuid", return_value=0)
+    @patch("fcm.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
+    @patch("fcm.core.host_privilege.os.getuid", return_value=0)
     def test_root_user_passes(self, mock_uid, mock_which):
         check_privileges("/usr/sbin/ip")
 
-    @patch("fcm.core.host.shutil.which", return_value="/usr/sbin/ip")
-    @patch("fcm.core.host.os.getuid", return_value=1000)
+    @patch("fcm.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
+    @patch("fcm.core.host_privilege.os.getuid", return_value=1000)
     def test_user_in_group_passes(self, mock_uid, mock_which):
         import grp
         import pwd
@@ -1252,8 +1255,8 @@ class TestCheckPrivileges:
         ):
             check_privileges("/usr/sbin/ip")
 
-    @patch("fcm.core.host.shutil.which", return_value="/usr/sbin/ip")
-    @patch("fcm.core.host.os.getuid", return_value=1000)
+    @patch("fcm.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
+    @patch("fcm.core.host_privilege.os.getuid", return_value=1000)
     def test_user_not_in_group_fails(self, mock_uid, mock_which):
         import grp
         import pwd
@@ -1270,8 +1273,8 @@ class TestCheckPrivileges:
             with pytest.raises(PrivilegeError, match="not in the 'fcm' group"):
                 check_privileges("/usr/sbin/ip")
 
-    @patch("fcm.core.host.shutil.which", return_value="/usr/sbin/ip")
-    @patch("fcm.core.host.os.getuid", return_value=1000)
+    @patch("fcm.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
+    @patch("fcm.core.host_privilege.os.getuid", return_value=1000)
     def test_group_not_exists(self, mock_uid, mock_which):
         import grp
 
@@ -1332,31 +1335,31 @@ class TestHostHelpers:
         with patch.object(grp, "getgrnam", side_effect=KeyError("fcm")):
             assert _user_in_group("alice", "fcm") is False
 
-    @patch("fcm.core.host._group_exists", return_value=True)
+    @patch("fcm.core.host_privilege._group_exists", return_value=True)
     def test_create_group_already_exists(self, mock_exists):
         assert _create_group("fcm") is False
 
-    @patch("fcm.core.host._group_exists", return_value=False)
-    @patch("fcm.core.host.subprocess.run")
+    @patch("fcm.core.host_privilege._group_exists", return_value=False)
+    @patch("fcm.core.host_privilege.subprocess.run")
     def test_create_group_success(self, mock_run, mock_exists):
         assert _create_group("fcm") is True
         mock_run.assert_called_once()
 
-    @patch("fcm.core.host._group_exists", return_value=False)
+    @patch("fcm.core.host_privilege._group_exists", return_value=False)
     @patch(
-        "fcm.core.host.subprocess.run",
+        "fcm.core.host_privilege.subprocess.run",
         side_effect=FileNotFoundError("groupadd"),
     )
     def test_create_group_command_not_found(self, mock_run, mock_exists):
         with pytest.raises(HostError, match="groupadd command not found"):
             _create_group("fcm")
 
-    @patch("fcm.core.host._user_in_group", return_value=True)
+    @patch("fcm.core.host_privilege._user_in_group", return_value=True)
     def test_add_user_to_group_already_member(self, mock_in_group):
         assert _add_user_to_group("alice", "fcm") is False
 
-    @patch("fcm.core.host._user_in_group", return_value=False)
-    @patch("fcm.core.host.subprocess.run")
+    @patch("fcm.core.host_privilege._user_in_group", return_value=False)
+    @patch("fcm.core.host_privilege.subprocess.run")
     def test_add_user_to_group_success(self, mock_run, mock_in_group):
         assert _add_user_to_group("alice", "fcm") is True
 
@@ -1366,21 +1369,21 @@ class TestHostHelpers:
         assert "/usr/sbin/ip" in content
         assert "do not edit manually" in content
 
-    @patch("fcm.core.host.Path.exists", return_value=True)
+    @patch("fcm.core.host_privilege.Path.exists", return_value=True)
     def test_validate_sudoers_binaries_all_present(self, mock_exists):
         _validate_sudoers_binaries()  # Should not raise
 
-    @patch("fcm.core.host.Path.exists", return_value=False)
+    @patch("fcm.core.host_privilege.Path.exists", return_value=False)
     def test_validate_sudoers_binaries_missing(self, mock_exists):
         with pytest.raises(HostError, match="Required binary not found"):
             _validate_sudoers_binaries()
 
-    @patch("fcm.core.host._group_exists", return_value=False)
+    @patch("fcm.core.host_privilege._group_exists", return_value=False)
     def test_remove_group_not_exists(self, mock_exists):
         assert _remove_group("fcm") is False
 
-    @patch("fcm.core.host._group_exists", return_value=True)
-    @patch("fcm.core.host.subprocess.run")
+    @patch("fcm.core.host_privilege._group_exists", return_value=True)
+    @patch("fcm.core.host_privilege.subprocess.run")
     def test_remove_group_success(self, mock_run, mock_exists):
         assert _remove_group("fcm") is True
 
@@ -1478,21 +1481,21 @@ class TestResetHost:
 class TestInitHostErrorPaths:
     """Error-path tests for init_host / configure_host."""
 
-    @patch("fcm.core.host.os.access", return_value=False)
-    @patch("fcm.core.host.Path.exists", return_value=False)
+    @patch("fcm.core.host_setup.os.access", return_value=False)
+    @patch("fcm.core.host_setup.Path.exists", return_value=False)
     def test_configure_host_kvm_not_available(self, mock_exists, mock_access, tmp_path):
         """init_host raises HostError when /dev/kvm is not available."""
         with pytest.raises(HostError, match="/dev/kvm is not accessible"):
             init_host(tmp_path)
 
-    @patch("fcm.core.host._get_current_user", return_value="testuser")
-    @patch("fcm.core.host._add_user_to_group", return_value=False)
-    @patch("fcm.core.host._create_group", return_value=False)
-    @patch("fcm.core.host._validate_sudoers_binaries")
-    @patch("fcm.core.host.SYSCTL_CONF")
-    @patch("fcm.core.host.subprocess.run")
-    @patch("fcm.core.host.shutil.which", side_effect=_mock_which_all_found)
-    @patch("fcm.core.host.os.access", return_value=True)
+    @patch("fcm.core.host_setup._get_current_user", return_value="testuser")
+    @patch("fcm.core.host_setup._add_user_to_group", return_value=False)
+    @patch("fcm.core.host_setup._create_group", return_value=False)
+    @patch("fcm.core.host_setup._validate_sudoers_binaries")
+    @patch("fcm.core.host_setup.SYSCTL_CONF")
+    @patch("fcm.core.host_setup.subprocess.run")
+    @patch("fcm.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
+    @patch("fcm.core.host_setup.os.access", return_value=True)
     def test_configure_host_ip_forward_sysctl_fails(
         self,
         mock_access,
@@ -1506,7 +1509,7 @@ class TestInitHostErrorPaths:
         tmp_path,
     ):
         """init_host raises HostError when sysctl -w ip_forward=1 fails."""
-        with patch("fcm.core.host.Path.exists", return_value=True):
+        with patch("fcm.core.host_setup.Path.exists", return_value=True):
 
             def run_side_effect(cmd, **kwargs):
                 if cmd[0] == "sysctl" and "-n" in cmd:
@@ -1603,7 +1606,7 @@ class TestRestoreHostErrorPaths:
 class TestCheckRequiredBinariesErrorPaths:
     """Error-path tests for check_required_binaries."""
 
-    @patch("fcm.core.host.shutil.which")
+    @patch("fcm.core.host_setup.shutil.which")
     def test_single_required_binary_missing(self, mock_which):
         """check_required_binaries detects when only 'iptables' is missing."""
 
@@ -1618,7 +1621,7 @@ class TestCheckRequiredBinariesErrorPaths:
         assert "ip" not in result
         assert "qemu-img" not in result
 
-    @patch("fcm.core.host.shutil.which")
+    @patch("fcm.core.host_setup.shutil.which")
     def test_qemu_img_missing(self, mock_which):
         """check_required_binaries detects when only 'qemu-img' is missing."""
 
@@ -1632,7 +1635,7 @@ class TestCheckRequiredBinariesErrorPaths:
         assert "qemu-img" in result
         assert "ip" not in result
 
-    @patch("fcm.core.host.shutil.which", return_value=None)
+    @patch("fcm.core.host_setup.shutil.which", return_value=None)
     def test_all_binaries_missing(self, mock_which):
         """check_required_binaries reports all binaries when none are found."""
         result = check_required_binaries()
@@ -1642,7 +1645,7 @@ class TestCheckRequiredBinariesErrorPaths:
         assert "mkisofs or genisoimage" in result
         assert len(result) == 4
 
-    @patch("fcm.core.host.shutil.which")
+    @patch("fcm.core.host_setup.shutil.which")
     def test_only_iso_binaries_missing(self, mock_which):
         """check_required_binaries detects when both ISO tools are missing."""
 
@@ -1675,26 +1678,26 @@ class TestGetIpForwardErrorPaths:
 
 
 class TestWriteSudoersErrorPaths:
-    @patch("fcm.core.host.subprocess.run")
+    @patch("fcm.core.host_privilege.subprocess.run")
     def test_visudo_failure(self, mock_run, tmp_path):
         """_write_sudoers raises HostError if visudo validation fails."""
         mock_run.return_value = MagicMock(returncode=1, stderr="syntax error")
-        from fcm.core.host import _write_sudoers
+        from fcm.core.host_privilege import _write_sudoers
         with pytest.raises(HostError, match="Generated sudoers file failed visudo validation"):
             _write_sudoers(tmp_path / "sudoers", "testgrp")
 
 
 class TestAddUserToGroupErrorPaths:
-    @patch("fcm.core.host._user_in_group", return_value=False)
-    @patch("fcm.core.host.subprocess.run")
+    @patch("fcm.core.host_privilege._user_in_group", return_value=False)
+    @patch("fcm.core.host_privilege.subprocess.run")
     def test_usermod_failure(self, mock_run, mock_in_group):
         """_add_user_to_group raises HostError if usermod fails."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "usermod", stderr="user not found")
         with pytest.raises(HostError, match="Failed to add usr to group grp"):
             _add_user_to_group("usr", "grp")
 
-    @patch("fcm.core.host._user_in_group", return_value=False)
-    @patch("fcm.core.host.subprocess.run", side_effect=FileNotFoundError("usermod"))
+    @patch("fcm.core.host_privilege._user_in_group", return_value=False)
+    @patch("fcm.core.host_privilege.subprocess.run", side_effect=FileNotFoundError("usermod"))
     def test_usermod_not_found(self, mock_run, mock_in_group):
         """_add_user_to_group raises HostError if usermod is missing."""
         with pytest.raises(HostError, match="usermod command not found"):
