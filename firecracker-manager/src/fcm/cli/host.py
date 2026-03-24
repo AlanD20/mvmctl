@@ -50,7 +50,24 @@ def help_cmd(ctx: typer.Context) -> None:
 
 @app.command(name="init")
 def init_cmd() -> None:
-    """Apply host configuration changes. Idempotent."""
+    """Apply host configuration changes. Idempotent.
+
+    This command must be run with sudo the first time. It performs the
+    following steps:
+
+    - Creates the 'fcm' system group and adds the current user to it.
+    - Installs a sudoers drop-in so group members can manage TAP devices,
+      bridges, and iptables rules without a password.
+    - Enables IP forwarding (net.ipv4.ip_forward=1).
+    - Snapshots the pre-change host state so 'fcm host reset' can roll back.
+    - Creates the default network bridge.
+
+    After running, log out and back in (or run ``newgrp fcm``) for group
+    membership to take effect.
+
+    Examples:
+        sudo fcm host init
+    """
     cache_dir = get_cache_dir()
     try:
         changes = init_host(cache_dir)
@@ -181,7 +198,20 @@ def clean_cmd(
 def reset_cmd(
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
 ) -> None:
-    """Full rollback: remove networking, revert sysctl, remove sudoers and group."""
+    """Full rollback: remove networking, revert sysctl, remove sudoers and group.
+
+    Reverts every change made by 'fcm host init':
+
+    - Tears down all network bridges, TAP devices, and iptables rules.
+    - Restores the original sysctl ip_forward value.
+    - Removes the sudoers drop-in file.
+    - Removes the 'fcm' system group.
+
+    All running VMs must be stopped before running this command.
+
+    Examples:
+        sudo fcm host reset --force
+    """
     _abort_if_vms_running("reset")
 
     if not force:

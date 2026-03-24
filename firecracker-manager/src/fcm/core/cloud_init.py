@@ -1,9 +1,11 @@
+import logging
 import shutil
 import subprocess
 from pathlib import Path
+
 import yaml
 
-from fcm.utils.console import print_error, print_info
+logger = logging.getLogger(__name__)
 
 
 def write_cloud_init(
@@ -117,8 +119,8 @@ def inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
             for f in cloud_init_dir.iterdir():
                 shutil.copy2(f, target / f.name)
         except subprocess.CalledProcessError as e:
-            print_error(f"Warning: could not inject cloud-init (requires root): {e}")
-            print_info("VM will boot without cloud-init pre-seeding")
+            logger.warning("Could not inject cloud-init (requires root): %s", e)
+            logger.info("VM will boot without cloud-init pre-seeding")
         finally:
             if mounted:
                 subprocess.run(

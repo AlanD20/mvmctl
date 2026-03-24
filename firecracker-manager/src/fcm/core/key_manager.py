@@ -142,6 +142,71 @@ def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> Key
     return info
 
 
+def _generate_keypair(private_key_path: Path, pub_key_path: Path, comment: str) -> str:
+    """Run ssh-keygen to create an ED25519 keypair and return the public key content.
+
+    Args:
+        private_key_path: Destination path for the private key file.
+        pub_key_path: Destination path for the public key file.
+        comment: Comment string embedded in the public key.
+
+    Returns:
+        The public key content as a stripped string.
+
+    Raises:
+        FCMKeyError: If ssh-keygen exits with a non-zero return code.
+    """
+    cmd = [
+        "ssh-keygen",
+        "-t",
+        "ed25519",
+        "-f",
+        str(private_key_path),
+        "-N",
+        "",
+        "-C",
+        comment,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise FCMKeyError(f"ssh-keygen failed: {result.stderr.strip()}")
+
+    return pub_key_path.read_text().strip()
+
+
+def _build_key_info(name: str, pub_key_content: str) -> KeyInfo:
+    """Create a KeyInfo from a public key's content string.
+
+    Args:
+        name: Logical name for the key.
+        pub_key_content: Raw public key text (algorithm + base64 + optional comment).
+
+    Returns:
+        A fully populated KeyInfo dataclass instance.
+    """
+    return KeyInfo(
+        name=name,
+        fingerprint=_compute_fingerprint(pub_key_content),
+        algorithm=_parse_algorithm(pub_key_content),
+        comment=_parse_comment(pub_key_content),
+        added_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def _cache_public_key(name: str, pub_key_content: str) -> None:
+    """Write a public key to the keys directory cache.
+
+    Args:
+        name: Logical key name (used as the filename stem).
+        pub_key_content: Raw public key text to persist.
+    """
+    keys_dir = get_keys_dir()
+    keys_dir.mkdir(parents=True, exist_ok=True)
+    cache_pub = keys_dir / f"{name}.pub"
+    cache_pub.write_text(pub_key_content + "\n")
+
+
 def create_key(
     name: str,
     output_dir: str | Path | None = None,
@@ -182,38 +247,10 @@ def create_key(
         if pub_key_path.exists():
             pub_key_path.unlink()
 
-    cmd = [
-        "ssh-keygen",
-        "-t",
-        "ed25519",
-        "-f",
-        str(private_key_path),
-        "-N",
-        "",
-        "-C",
-        comment,
-    ]
+    content = _generate_keypair(private_key_path, pub_key_path, comment)
+    _cache_public_key(name, content)
+    info = _build_key_info(name, content)
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise FCMKeyError(f"ssh-keygen failed: {result.stderr.strip()}")
-
-    # Read generated public key
-    content = pub_key_path.read_text().strip()
-
-    # Store in cache
-    keys_dir = get_keys_dir()
-    keys_dir.mkdir(parents=True, exist_ok=True)
-    cache_pub = keys_dir / f"{name}.pub"
-    cache_pub.write_text(content + "\n")
-
-    info = KeyInfo(
-        name=name,
-        fingerprint=_compute_fingerprint(content),
-        algorithm=_parse_algorithm(content),
-        comment=_parse_comment(content),
-        added_at=datetime.now(timezone.utc).isoformat(),
-    )
     registry[name] = asdict(info)
     _save_registry(registry)
 

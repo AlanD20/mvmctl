@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from fcm.api.assets import (
@@ -26,6 +28,44 @@ def help_cmd(ctx: typer.Context) -> None:
     """Show help for the configure command."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
     raise typer.Exit()
+
+
+def _run_host_init_noninteractive(cache_dir: Path) -> None:
+    """Run host initialisation without prompts (for --non-interactive mode)."""
+    try:
+        init_host(cache_dir)
+        print_success("  Host initialized")
+    except HostError as e:
+        print_warning(f"  Host init failed: {e}")
+    try:
+        from fcm.api.network import ensure_default_network
+
+        ensure_default_network()
+        print_success("  Default network ready")
+    except FCMError:
+        pass
+
+
+def _run_host_init_interactive() -> None:
+    """Prompt the user and run host initialisation interactively."""
+    if typer.confirm("  Run 'sudo fcm host init' now?", default=True):
+        import shutil
+        import subprocess
+        import sys
+
+        fcm_bin = shutil.which("fcm") or sys.executable
+        result = subprocess.run(["sudo", fcm_bin, "host", "init"])
+        if result.returncode == 0:
+            print_success("  Host initialized.")
+            print_warning(
+                "  ACTION REQUIRED: Log out and back in for group membership to take effect."
+            )
+            print_info("  Or run immediately: newgrp fcm")
+            print_info("  Then re-run: fcm configure")
+        else:
+            print_warning("  Host init failed. Run 'sudo fcm host init' manually.")
+    else:
+        print_info("  Skipped. Run 'sudo fcm host init' manually when ready.")
 
 
 def _step_host(skip: bool, non_interactive: bool) -> None:
@@ -55,38 +95,9 @@ def _step_host(skip: bool, non_interactive: bool) -> None:
     print_info("  After this, you won't need sudo for any fcm commands.")
 
     if non_interactive:
-        try:
-            init_host(cache_dir)
-            print_success("  Host initialized")
-        except HostError as e:
-            print_warning(f"  Host init failed: {e}")
-        try:
-            from fcm.api.network import ensure_default_network
-
-            ensure_default_network()
-            print_success("  Default network ready")
-        except FCMError:
-            pass
-        return
-
-    if typer.confirm("  Run 'sudo fcm host init' now?", default=True):
-        import shutil
-        import subprocess
-        import sys
-
-        fcm_bin = shutil.which("fcm") or sys.executable
-        result = subprocess.run(["sudo", fcm_bin, "host", "init"])
-        if result.returncode == 0:
-            print_success("  Host initialized.")
-            print_warning(
-                "  ACTION REQUIRED: Log out and back in for group membership to take effect."
-            )
-            print_info("  Or run immediately: newgrp fcm")
-            print_info("  Then re-run: fcm configure")
-        else:
-            print_warning("  Host init failed. Run 'sudo fcm host init' manually.")
+        _run_host_init_noninteractive(cache_dir)
     else:
-        print_info("  Skipped. Run 'sudo fcm host init' manually when ready.")
+        _run_host_init_interactive()
 
 
 def _step_binary(non_interactive: bool) -> None:
@@ -345,7 +356,21 @@ def configure(
     ),
     skip_host: bool = typer.Option(False, "--skip-host", help="Skip host init step"),
 ) -> None:
-    """Guided setup wizard — run this to get started."""
+    """Guided setup wizard -- run this to get started.
+
+    Walks through six steps: host privilege setup, Firecracker binary
+    download, kernel build, root filesystem image download, SSH key
+    creation, and a final readiness summary.
+
+    In interactive mode (the default), each step prompts before making
+    changes. Use --non-interactive to accept all defaults for headless or
+    CI environments.
+
+    Examples:
+        fcm configure
+        fcm configure --non-interactive
+        fcm configure --skip-host --non-interactive
+    """
     print_info("Firecracker Manager — Setup Wizard")
     print_info("=" * 40)
 

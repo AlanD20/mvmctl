@@ -19,7 +19,7 @@ from fcm.api.vms import (
 )
 from fcm.constants import DEFAULT_NETWORK_NAME
 from fcm.exceptions import FCMError
-from fcm.models.vm import VMState
+from fcm.models.vm import VMInstance, VMState
 from fcm.utils.console import console, print_error, print_info, print_success
 
 app = typer.Typer(help="VM lifecycle management", no_args_is_help=True)
@@ -70,7 +70,21 @@ def create(
         help="Path to firecracker binary",
     ),
 ) -> None:
-    """Create and start a new Firecracker VM."""
+    """Create and start a new Firecracker VM.
+
+    Examples:
+        # Create a VM with defaults:
+        fcm vm create --name myvm --image ubuntu-24.04
+
+        # Create with custom resources and SSH key:
+        fcm vm create --name myvm --image ubuntu-24.04 --vcpus 4 --mem 4096 --ssh-key mykey
+
+        # Create with static IP:
+        fcm vm create --name myvm --image ubuntu-24.04 --ip 10.20.0.10
+
+        # Create with API socket for snapshot support:
+        fcm vm create --name myvm --image ubuntu-24.04 --enable-api-socket
+    """
     from fcm.utils.validation import validate_entity_name
 
     validate_entity_name(name, "VM")
@@ -175,7 +189,11 @@ def ls_vms(
         print_info("No VMs found." + (" Use --all to include stopped VMs." if not all_vms else ""))
         return
 
-    # M-22: Direct Table usage acceptable for complex layouts
+    console.print(_build_vm_table(vms))
+
+
+def _build_vm_table(vms: list[VMInstance]) -> Table:
+    """Build a Rich Table displaying VM information."""
     table = Table(title="Firecracker VMs")
     table.add_column("Name", style="cyan", no_wrap=True)
     table.add_column("IP", style="green")
@@ -203,7 +221,7 @@ def ls_vms(
             created,
         )
 
-    console.print(table)
+    return table
 
 
 @app.command(name="list", hidden=True)

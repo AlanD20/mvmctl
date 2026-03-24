@@ -194,6 +194,40 @@ def _detect_and_rename_fs(output_path: Path) -> Path:
     return output_path
 
 
+_COPY_CHUNK_SIZE = 1024 * 1024  # 1 MiB
+
+
+def _copy_bytes(
+    src: Path,
+    dst: Path,
+    offset: int,
+    count: int | None,
+) -> None:
+    """Copy bytes from *src* starting at *offset* into *dst*.
+
+    Args:
+        src: Source file path.
+        dst: Destination file path (created/overwritten).
+        offset: Byte offset to start reading from in *src*.
+        count: Number of bytes to copy, or ``None`` to copy to EOF.
+    """
+    with open(src, "rb") as fin, open(dst, "wb") as fout:
+        fin.seek(offset)
+        remaining = count
+        while True:
+            chunk_size = _COPY_CHUNK_SIZE
+            if remaining is not None:
+                chunk_size = min(chunk_size, remaining)
+            data = fin.read(chunk_size)
+            if not data:
+                break
+            fout.write(data)
+            if remaining is not None:
+                remaining -= len(data)
+                if remaining <= 0:
+                    break
+
+
 def extract_partition_from_raw(
     raw_path: Path,
     output_path: Path,
@@ -229,26 +263,15 @@ def extract_partition_from_raw(
         logger.info("Extracting partition %d (start=%d)...", partition, start_sector)
 
         skip_bytes = start_sector * _SECTOR_SIZE
-        dd_args = [
-            "dd",
-            f"if={raw_path}",
-            f"of={output_path}",
-            "bs=1M",
-            f"skip={skip_bytes}",
-            "iflag=skip_bytes",
-        ]
-        if sector_count:
-            count_bytes = sector_count * _SECTOR_SIZE
-            dd_args += [f"count={count_bytes}", "iflag=skip_bytes,count_bytes"]
-
-        subprocess.run(dd_args, capture_output=True, check=True)
+        count_bytes = sector_count * _SECTOR_SIZE if sector_count else None
+        _copy_bytes(raw_path, output_path, skip_bytes, count_bytes)
 
         output_path = _detect_and_rename_fs(output_path)
 
         logger.info("Extracted to %s", output_path.name)
         return output_path
 
-    except subprocess.CalledProcessError as e:
+    except OSError as e:
         raise ImageError(f"Extraction failed: {e}") from e
     except (IndexError, ValueError) as e:
         raise ImageError(f"Failed to parse partition table: {e}") from e

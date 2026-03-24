@@ -86,8 +86,8 @@ def test_inject_cloud_init_success(mock_run, tmp_path):
 
 
 @patch("fcm.core.cloud_init.subprocess.run")
-@patch("fcm.core.cloud_init.print_error")
-def test_inject_cloud_init_mount_error(mock_print_error, mock_run, tmp_path):
+@patch("fcm.core.cloud_init.logger")
+def test_inject_cloud_init_mount_error(mock_logger, mock_run, tmp_path):
     """inject_cloud_init gracefully handles mount errors."""
     mock_run.side_effect = subprocess.CalledProcessError(1, "mount")
 
@@ -95,7 +95,7 @@ def test_inject_cloud_init_mount_error(mock_print_error, mock_run, tmp_path):
     cloud_init_dir.mkdir()
 
     rootfs = tmp_path / "rootfs.ext4"
-    
+
     inject_cloud_init(rootfs, cloud_init_dir)
 
-    mock_print_error.assert_called_once()
+    mock_logger.warning.assert_called_once()

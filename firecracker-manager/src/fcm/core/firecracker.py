@@ -1,4 +1,9 @@
-"""Firecracker API client over Unix socket."""
+"""Firecracker API client over Unix socket.
+
+Two layers:
+- :class:`UnixSocketHTTPConnection` — low-level HTTP-over-Unix-socket transport.
+- :class:`FirecrackerClient` — high-level VM operation API using the transport.
+"""
 
 import http.client
 import json
@@ -24,6 +29,11 @@ class UnixSocketHTTPConnection(http.client.HTTPConnection):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(5.0)
         self.sock.connect(str(self.socket_path))
+
+
+# ---------------------------------------------------------------------------
+# VM API operations
+# ---------------------------------------------------------------------------
 
 
 class FirecrackerClient:

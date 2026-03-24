@@ -20,6 +20,7 @@ from fcm.core.binary_manager import (
     set_active_version,
 )
 from fcm.core.image import fetch_image, load_images_config
+from fcm.models.image import ImageSpec
 from fcm.core.kernel import build_kernel_pipeline
 from fcm.exceptions import ImageError
 from fcm.utils.fs import get_assets_dir, get_images_dir, get_kernels_dir
@@ -35,11 +36,13 @@ __all__ = [
     "set_active_version",
     "remove_version",
     "fetch_image",
+    "fetch_images_parallel",
     "load_images_config",
     "build_kernel_pipeline",
     "setup_assets",
     "pull_kernel",
     "pull_image",
+    "pull_images",
     "list_assets",
     "remove_asset",
 ]
@@ -153,6 +156,92 @@ def pull_image(
         raise ImageError(f"Image ID '{image_id}' not found in {images_yaml}")
         
     return fetch_image(spec, output_dir, force=force)
+
+
+def fetch_images_parallel(
+    specs: list[ImageSpec],
+    output_dir: Path,
+    force: bool = False,
+    max_workers: int = 4,
+) -> list[Path]:
+    """Fetch multiple images concurrently using a thread pool.
+
+    Args:
+        specs: Image specifications to fetch.
+        output_dir: Directory to store downloaded/converted images.
+        force: Re-download even if images already exist.
+        max_workers: Maximum number of concurrent download threads.
+
+    Returns:
+        List of paths to the fetched images (order matches *specs*).
+
+    Raises:
+        ImageError: If one or more fetches fail.  The message lists
+            every individual failure.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: dict[int, Path] = {}
+    errors: list[str] = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_idx = {
+            pool.submit(fetch_image, spec, output_dir, force): idx
+            for idx, spec in enumerate(specs)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = future.result()
+            except Exception as exc:
+                errors.append(f"{specs[idx].id}: {exc}")
+
+    if errors:
+        raise ImageError(
+            "Failed to fetch the following images:\n" + "\n".join(errors)
+        )
+
+    return [results[i] for i in range(len(specs))]
+
+
+def pull_images(
+    image_ids: list[str],
+    force: bool = False,
+    images_yaml: Path | None = None,
+    output_dir: Path | None = None,
+    max_workers: int = 4,
+) -> list[Path]:
+    """Fetch multiple image IDs in parallel.
+
+    Args:
+        image_ids: IDs of images defined in the YAML configuration.
+        force: Re-download even if images already exist.
+        images_yaml: Override path to the images configuration.
+        output_dir: Override rootfs destination directory.
+        max_workers: Maximum number of concurrent download threads.
+
+    Returns:
+        List of paths to the fetched images (order matches *image_ids*).
+
+    Raises:
+        ImageError: If any image ID is unknown or fetching fails.
+    """
+    if images_yaml is None:
+        images_yaml = get_assets_dir() / "images.yaml"
+    if output_dir is None:
+        output_dir = get_images_dir()
+
+    all_specs = load_images_config(images_yaml)
+    specs_by_id = {s.id: s for s in all_specs}
+
+    missing = [iid for iid in image_ids if iid not in specs_by_id]
+    if missing:
+        raise ImageError(
+            f"Image IDs not found in {images_yaml}: {', '.join(missing)}"
+        )
+
+    specs = [specs_by_id[iid] for iid in image_ids]
+    return fetch_images_parallel(specs, output_dir, force=force, max_workers=max_workers)
 
 
 def list_assets() -> list[AssetInfo]:

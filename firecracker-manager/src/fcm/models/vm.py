@@ -16,7 +16,24 @@ class VMState(StrEnum):
 
 @dataclass
 class VMConfig:
-    """VM configuration parameters."""
+    """VM configuration parameters.
+
+    Attributes:
+        name: VM name; also used as hostname inside the guest.
+        vcpu_count: Number of vCPUs to allocate (1-32).
+        mem_size_mib: Memory in MiB (128-32768).
+        kernel_path: Path to vmlinux kernel image.
+        rootfs_path: Path to root filesystem ext4 image.
+        guest_ip: Static IP address for the guest NIC.
+        guest_mac: MAC address for the guest NIC (auto-generated if None).
+        gateway: Host-side gateway IP for the guest.
+        subnet_mask: Subnet mask for the guest network.
+        tap_device: Host TAP interface name (auto-created if None).
+        boot_args: Override kernel boot arguments (uses defaults if None).
+        enable_api_socket: Enable Firecracker HTTP API socket.
+        enable_pci: Enable PCI device support.
+        lsm_flags: Linux Security Module flags for the kernel cmdline.
+    """
 
     name: str  # VM name; also used as hostname inside the guest
     vcpu_count: int = 2  # Number of vCPUs to allocate
@@ -47,7 +64,19 @@ class VMConfig:
 
 @dataclass
 class VMInstance:
-    """VM instance metadata."""
+    """VM instance metadata.
+
+    Attributes:
+        name: VM name (matches VMConfig.name).
+        pid: PID of the running firecracker process (None if stopped).
+        socket_path: Path to Firecracker API socket (if enabled).
+        ip: Assigned guest IP address.
+        mac: Assigned guest MAC address.
+        network_name: Name of the attached named network (if any).
+        created_at: Creation timestamp (UTC).
+        status: Current lifecycle state.
+        config: Original VM configuration used to launch this instance.
+    """
 
     name: str  # VM name (matches VMConfig.name)
     pid: int | None = None  # PID of the running firecracker process (None if stopped)

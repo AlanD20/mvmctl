@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from fcm.core.image import (
+    _copy_bytes,
     convert_qcow2_to_raw,
     create_ext4_from_tar,
     download_file,
@@ -292,8 +293,11 @@ def test_fetch_image_qcow2(
     mock_extract.assert_called_once()
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_success_sfdisk(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_success_sfdisk(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     import json
 
     sfdisk_output = json.dumps(
@@ -310,8 +314,6 @@ def test_extract_partition_from_raw_success_sfdisk(mock_run: MagicMock, tmp_path
         mock_result = MagicMock()
         if cmd[0] == "sfdisk":
             mock_result.stdout = sfdisk_output
-            mock_result.returncode = 0
-        elif cmd[0] == "dd":
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
             mock_result.stdout = "ext4\n"
@@ -330,10 +332,14 @@ def test_extract_partition_from_raw_success_sfdisk(mock_run: MagicMock, tmp_path
 
     assert isinstance(result, Path)
     assert result.suffix == ".img"
+    mock_copy.assert_called_once()
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_success_fdisk(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_success_fdisk(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     raw_path_str = str(tmp_path / "image.raw")
 
     def mock_run_side_effect(cmd, **kwargs):
@@ -342,8 +348,6 @@ def test_extract_partition_from_raw_success_fdisk(mock_run: MagicMock, tmp_path:
             raise FileNotFoundError("sfdisk not found")
         elif cmd[0] == "fdisk":
             mock_result.stdout = f"{raw_path_str}1  2048  100000  97953  83 Linux\n"
-            mock_result.returncode = 0
-        elif cmd[0] == "dd":
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
             mock_result.stdout = "ext4\n"
@@ -363,6 +367,7 @@ def test_extract_partition_from_raw_success_fdisk(mock_run: MagicMock, tmp_path:
     assert isinstance(result, Path)
     assert result == output_path
     assert result.suffix == ".img"
+    mock_copy.assert_called_once()
 
 
 @patch("fcm.core.image.subprocess.run")
@@ -388,8 +393,11 @@ def test_extract_partition_from_raw_no_partitions(mock_run: MagicMock, tmp_path:
     assert output_path.exists()
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_dd_failure(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_copy_failure(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     import json
 
     sfdisk_output = json.dumps(
@@ -401,13 +409,12 @@ def test_extract_partition_from_raw_dd_failure(mock_run: MagicMock, tmp_path: Pa
         if cmd[0] == "sfdisk":
             mock_result.stdout = sfdisk_output
             mock_result.returncode = 0
-        elif cmd[0] == "dd":
-            raise subprocess.CalledProcessError(1, "dd", stderr="dd failed")
         else:
             mock_result.returncode = 0
         return mock_result
 
     mock_run.side_effect = mock_run_side_effect
+    mock_copy.side_effect = OSError("I/O error during copy")
 
     raw_path = tmp_path / "image.raw"
     raw_path.write_bytes(b"\x00" * 1024)
@@ -417,8 +424,11 @@ def test_extract_partition_from_raw_dd_failure(mock_run: MagicMock, tmp_path: Pa
         extract_partition_from_raw(raw_path, output_path)
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_sfdisk_multi_partition(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_sfdisk_multi_partition(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     import json
 
     sfdisk_output = json.dumps(
@@ -432,14 +442,18 @@ def test_extract_partition_from_raw_sfdisk_multi_partition(mock_run: MagicMock, 
         }
     )
 
+    output_path = tmp_path / "output.img"
+
+    def mock_copy_side_effect(*args: object, **kwargs: object) -> None:
+        # Create the output file so rename works
+        output_path.write_bytes(b"\x00" * 64)
+
+    mock_copy.side_effect = mock_copy_side_effect
+
     def mock_run_side_effect(cmd, **kwargs):
         mock_result = MagicMock()
         if cmd[0] == "sfdisk":
             mock_result.stdout = sfdisk_output
-            mock_result.returncode = 0
-        elif cmd[0] == "dd":
-            # Create the output file so rename works
-            output_path.write_bytes(b"\x00" * 64)
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
             mock_result.stdout = "btrfs\n"
@@ -452,7 +466,6 @@ def test_extract_partition_from_raw_sfdisk_multi_partition(mock_run: MagicMock, 
 
     raw_path = tmp_path / "image.raw"
     raw_path.write_bytes(b"\x00" * 1024)
-    output_path = tmp_path / "output.img"
 
     result = extract_partition_from_raw(raw_path, output_path)
 
@@ -460,8 +473,11 @@ def test_extract_partition_from_raw_sfdisk_multi_partition(mock_run: MagicMock, 
     assert result.suffix == ".btrfs"
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_sfdisk_explicit_partition(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_sfdisk_explicit_partition(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     import json
 
     sfdisk_output = json.dumps(
@@ -475,13 +491,17 @@ def test_extract_partition_from_raw_sfdisk_explicit_partition(mock_run: MagicMoc
         }
     )
 
+    output_path = tmp_path / "output.img"
+
+    def mock_copy_side_effect(*args: object, **kwargs: object) -> None:
+        output_path.write_bytes(b"\x00" * 64)
+
+    mock_copy.side_effect = mock_copy_side_effect
+
     def mock_run_side_effect(cmd, **kwargs):
         mock_result = MagicMock()
         if cmd[0] == "sfdisk":
             mock_result.stdout = sfdisk_output
-            mock_result.returncode = 0
-        elif cmd[0] == "dd":
-            output_path.write_bytes(b"\x00" * 64)
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
             mock_result.stdout = "xfs\n"
@@ -494,7 +514,6 @@ def test_extract_partition_from_raw_sfdisk_explicit_partition(mock_run: MagicMoc
 
     raw_path = tmp_path / "image.raw"
     raw_path.write_bytes(b"\x00" * 1024)
-    output_path = tmp_path / "output.img"
 
     result = extract_partition_from_raw(raw_path, output_path, partition=1)
 
@@ -527,8 +546,11 @@ def test_extract_partition_from_raw_fdisk_no_partitions(mock_run: MagicMock, tmp
     assert output_path.exists()
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_fdisk_multi_partition(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_fdisk_multi_partition(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     raw_path = tmp_path / "image.raw"
     raw_path.write_bytes(b"\x00" * 1024)
     raw_path_str = str(raw_path)
@@ -542,8 +564,6 @@ def test_extract_partition_from_raw_fdisk_multi_partition(mock_run: MagicMock, t
                 f"{raw_path_str}1  2048  50000  47953  ef EFI\n"
                 f"{raw_path_str}2  52048  200000  147953  83 Linux\n"
             )
-            mock_result.returncode = 0
-        elif cmd[0] == "dd":
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
             mock_result.stdout = ""
@@ -588,8 +608,11 @@ def test_extract_partition_from_raw_fdisk_parse_failure(mock_run: MagicMock, tmp
         extract_partition_from_raw(raw_path, output_path)
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_blkid_not_found(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_blkid_not_found(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     import json
 
     sfdisk_output = json.dumps(
@@ -600,8 +623,6 @@ def test_extract_partition_from_raw_blkid_not_found(mock_run: MagicMock, tmp_pat
         mock_result = MagicMock()
         if cmd[0] == "sfdisk":
             mock_result.stdout = sfdisk_output
-            mock_result.returncode = 0
-        elif cmd[0] == "dd":
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
             raise FileNotFoundError("blkid not found")
@@ -621,8 +642,11 @@ def test_extract_partition_from_raw_blkid_not_found(mock_run: MagicMock, tmp_pat
     assert result.suffix == ".img"
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_sfdisk_json_error(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_sfdisk_json_error(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     raw_path = tmp_path / "image.raw"
     raw_path.write_bytes(b"\x00" * 1024)
     raw_path_str = str(raw_path)
@@ -634,8 +658,6 @@ def test_extract_partition_from_raw_sfdisk_json_error(mock_run: MagicMock, tmp_p
             mock_result.returncode = 0
         elif cmd[0] == "fdisk":
             mock_result.stdout = f"{raw_path_str}1  2048  100000  97953  83 Linux\n"
-            mock_result.returncode = 0
-        elif cmd[0] == "dd":
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
             mock_result.stdout = "ext4\n"
@@ -655,8 +677,11 @@ def test_extract_partition_from_raw_sfdisk_json_error(mock_run: MagicMock, tmp_p
     assert result.suffix == ".img"
 
 
+@patch("fcm.core.image._copy_bytes")
 @patch("fcm.core.image.subprocess.run")
-def test_extract_partition_from_raw_unknown_fs_type(mock_run: MagicMock, tmp_path: Path):
+def test_extract_partition_from_raw_unknown_fs_type(
+    mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
+):
     import json
 
     sfdisk_output = json.dumps(
@@ -667,8 +692,6 @@ def test_extract_partition_from_raw_unknown_fs_type(mock_run: MagicMock, tmp_pat
         mock_result = MagicMock()
         if cmd[0] == "sfdisk":
             mock_result.stdout = sfdisk_output
-            mock_result.returncode = 0
-        elif cmd[0] == "dd":
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
             mock_result.stdout = "ntfs\n"
