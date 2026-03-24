@@ -475,9 +475,7 @@ def import_image(
     final_path = output_dir / f"{spec.id}.{spec.convert_to}"
 
     if final_path.exists() and not force:
-        raise ImageError(
-            f"Image already exists: {final_path}. Use --force to overwrite."
-        )
+        raise ImageError(f"Image already exists: {final_path}. Use --force to overwrite.")
 
     if not spec.source_path.exists():
         raise ImageError(f"Source file not found: {spec.source_path}")
@@ -493,9 +491,7 @@ def import_image(
         raw_path = output_dir / f"{spec.id}.raw"
         convert_qcow2_to_raw(spec.source_path, raw_path)
         try:
-            actual_path = extract_partition_from_raw(
-                raw_path, final_path.with_suffix(".img")
-            )
+            actual_path = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
         finally:
             raw_path.unlink(missing_ok=True)
         return actual_path

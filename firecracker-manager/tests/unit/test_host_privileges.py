@@ -99,40 +99,6 @@ class TestCliReset:
 
 
 # ---------------------------------------------------------------------------
-# Deprecated prune alias
-# ---------------------------------------------------------------------------
-
-
-class TestDeprecatedPrune:
-    @patch("fcm.core.vm_manager.VMManager.list_all", return_value=[])
-    @patch("fcm.cli.host.get_cache_dir")
-    @patch("fcm.cli.host.prune_host")
-    def test_prune_shows_deprecation(self, mock_prune, mock_cache, mock_list_all, tmp_path):
-        from fcm.cli.host import app
-
-        mock_cache.return_value = tmp_path
-        mock_prune.return_value = []
-        result = runner.invoke(app, ["prune", "--force"])
-        assert result.exit_code == 0
-        assert "deprecated" in result.output
-
-
-class TestDeprecatedRestore:
-    @patch("fcm.cli.host.get_cache_dir")
-    @patch("fcm.cli.host.restore_host")
-    def test_restore_shows_deprecation(self, mock_restore, mock_cache, tmp_path):
-        from fcm.cli.host import app
-
-        mock_cache.return_value = tmp_path
-        mock_restore.return_value = [
-            MagicMock(setting="net.ipv4.ip_forward", original_value="1", applied_value="0"),
-        ]
-        result = runner.invoke(app, ["restore"])
-        assert result.exit_code == 0
-        assert "deprecated" in result.output
-
-
-# ---------------------------------------------------------------------------
 # Top-level help command
 # ---------------------------------------------------------------------------
 

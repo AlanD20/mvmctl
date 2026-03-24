@@ -24,7 +24,7 @@ def _make_vm(name: str, status: VMState = VMState.RUNNING, ip: str = "10.20.0.2"
 
 def test_list_vms_empty(mocker: MockerFixture):
     mocker.patch("fcm.cli.vm.list_vms", return_value=[])
-    result = runner.invoke(app, ["list"])
+    result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "No VMs found" in result.output
 
@@ -32,7 +32,7 @@ def test_list_vms_empty(mocker: MockerFixture):
 def test_list_vms_json(mocker: MockerFixture):
     vm = _make_vm("myvm")
     mocker.patch("fcm.cli.vm.list_vms", return_value=[vm])
-    result = runner.invoke(app, ["list", "--json"])
+    result = runner.invoke(app, ["ls", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert len(data) == 1
@@ -43,7 +43,7 @@ def test_list_vms_all_flag(mocker: MockerFixture):
     running_vm = _make_vm("vm-running", VMState.RUNNING, "10.20.0.2")
     stopped_vm = _make_vm("vm-stopped", VMState.STOPPED, "10.20.0.3")
     mocker.patch("fcm.cli.vm.list_vms", return_value=[running_vm, stopped_vm])
-    result = runner.invoke(app, ["list", "--all", "--json"])
+    result = runner.invoke(app, ["ls", "--all", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     names = {item["name"] for item in data}
@@ -51,33 +51,33 @@ def test_list_vms_all_flag(mocker: MockerFixture):
     assert "vm-stopped" in names
 
 
-def test_delete_vm_not_found(mocker: MockerFixture):
+def test_rm_vm_not_found(mocker: MockerFixture):
     mocker.patch("fcm.cli.vm.get_vm", return_value=None)
-    result = runner.invoke(app, ["delete", "--name", "nonexistent", "--force"])
+    result = runner.invoke(app, ["rm", "--name", "nonexistent", "--force"])
     assert result.exit_code == 1
 
 
-def test_delete_force_running_vm(mocker: MockerFixture):
+def test_rm_force_running_vm(mocker: MockerFixture):
     vm = _make_vm("delvm", VMState.RUNNING)
     mocker.patch("fcm.cli.vm.get_vm", return_value=vm)
     mocker.patch("fcm.cli.vm.remove_vm")
-    result = runner.invoke(app, ["delete", "--name", "delvm", "--force"])
+    result = runner.invoke(app, ["rm", "--name", "delvm", "--force"])
     assert result.exit_code == 0
     assert "removed" in result.output.lower()
 
 
-def test_cleanup_nothing_to_do(mocker: MockerFixture):
+def test_prune_nothing_to_do(mocker: MockerFixture):
     mocker.patch("fcm.cli.vm.list_vms", return_value=[])
-    result = runner.invoke(app, ["cleanup"])
+    result = runner.invoke(app, ["prune"])
     assert result.exit_code == 0
     assert "Nothing to clean up" in result.output
 
 
-def test_cleanup_with_vms(mocker: MockerFixture):
+def test_prune_with_vms(mocker: MockerFixture):
     stopped_vm = _make_vm("vm-stopped", VMState.STOPPED, "10.20.0.3")
     mocker.patch("fcm.cli.vm.list_vms", return_value=[stopped_vm])
     mocker.patch("fcm.cli.vm.cleanup_vms")
-    result = runner.invoke(app, ["cleanup", "--force"])
+    result = runner.invoke(app, ["prune", "--force"])
     assert result.exit_code == 0
     assert "Removed" in result.output
 
@@ -440,10 +440,13 @@ def test_ps_alias(mocker: MockerFixture):
 
 
 def test_ps_all_flag(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[
-        _make_vm("running", VMState.RUNNING),
-        _make_vm("stopped", VMState.STOPPED),
-    ])
+    mocker.patch(
+        "fcm.cli.vm.list_vms",
+        return_value=[
+            _make_vm("running", VMState.RUNNING),
+            _make_vm("stopped", VMState.STOPPED),
+        ],
+    )
     result = runner.invoke(app, ["ps", "--all"])
     assert result.exit_code == 0
     assert "running" in result.output
@@ -462,10 +465,3 @@ def test_prune_dry_run(mocker: MockerFixture):
     result = runner.invoke(app, ["prune", "--dry-run"])
     assert result.exit_code == 0
     assert "Dry run" in result.output
-
-
-def test_cleanup_deprecated_alias(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[_make_vm("myvm")])
-    result = runner.invoke(app, ["cleanup"])
-    assert result.exit_code == 0
-    assert "deprecated" in result.output.lower() or "cleanup" in result.output.lower()

@@ -168,8 +168,8 @@ def create(
         raise typer.Exit(code=1)
 
 
-@app.command(name="remove", hidden=True)
-def remove(
+@app.command(name="rm")
+def rm(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
@@ -191,25 +191,6 @@ def remove(
     except FCMError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
-
-
-# Aliases
-@app.command(name="rm")
-def rm(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-) -> None:
-    """Stop and remove a VM."""
-    remove(name=name, force=force)
-
-
-@app.command(name="delete", hidden=True)
-def delete(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-) -> None:
-    """Alias for remove."""
-    remove(name=name, force=force)
 
 
 @app.command(name="ls")
@@ -274,15 +255,6 @@ def _build_vm_table(vms: list[VMInstance]) -> Table:
         )
 
     return table
-
-
-@app.command(name="list", hidden=True)
-def list_vms_cmd(
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    all_vms: bool = typer.Option(False, "--all", "-a", help="Show all VMs including stopped"),
-) -> None:
-    """Alias for ls."""
-    ls_vms(json_output=json_output, all_vms=all_vms)
 
 
 @app.command(name="ps")
@@ -413,21 +385,6 @@ def prune(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove stopped VMs and stale directories."""
-    _do_prune(all_vms=all_vms, dry_run=dry_run, force=force)
-
-
-@app.command(hidden=True)
-def cleanup(
-    all_vms: bool = typer.Option(False, "--all", help="Remove all VMs, not just stopped"),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show what would be removed without deleting"
-    ),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-) -> None:
-    """Deprecated alias for prune."""
-    from fcm.utils.console import print_warning
-
-    print_warning("'fcm vm cleanup' is deprecated. Use 'fcm vm prune' instead.")
     _do_prune(all_vms=all_vms, dry_run=dry_run, force=force)
 
 

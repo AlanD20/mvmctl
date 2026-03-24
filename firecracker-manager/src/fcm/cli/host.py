@@ -12,9 +12,7 @@ from fcm.api.host import (
     get_ip_forward_status,
     get_vm_manager,
     init_host,
-    prune_host,
     reset_host,
-    restore_host,
 )
 from fcm.constants import PROJECT_GROUP
 from fcm.exceptions import HostError
@@ -238,60 +236,3 @@ def reset_cmd(
             print_info(f"  {item}")
 
     print_success("Host reset successfully.")
-
-
-# ---- Deprecated aliases (hidden) ----
-
-
-@app.command(name="prune", hidden=True)
-def prune(
-    force: bool = typer.Option(False, "--force", help="Skip confirmation"),
-) -> None:
-    """[Deprecated] Use 'fcm host clean' instead."""
-    print_warning("'host prune' is deprecated. Use 'host clean' instead.")
-
-    _abort_if_vms_running("prune")
-
-    if not force:
-        print_warning(
-            "This will tear down all network bridges, TAP devices, iptables rules, "
-            "and revert host sysctl changes. VM cache files, images, kernels, and "
-            "binaries will NOT be removed."
-        )
-        typer.confirm("Proceed with host prune?", abort=True)
-
-    cache_dir = get_cache_dir()
-    try:
-        summary = prune_host(cache_dir)
-    except FCMError as e:
-        print_error(f"Prune failed: {e}")
-        raise typer.Exit(code=1)
-
-    if summary:
-        for item in summary:
-            print_info(f"  {item}")
-
-    print_success("Host pruned successfully.")
-
-
-@app.command(name="restore", hidden=True)
-def restore() -> None:
-    """[Deprecated] Use 'fcm host reset' instead."""
-    print_warning("'host restore' is deprecated. Use 'host reset' instead.")
-    cache_dir = get_cache_dir()
-    try:
-        reverted = restore_host(cache_dir)
-    except HostError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-
-    if not reverted:
-        print_warning("No changes to revert.")
-        return
-
-    for change in reverted:
-        print_info(
-            f"Reverted {change.setting}: {change.original_value!r} → {change.applied_value!r}"
-        )
-
-    print_success(f"Host restored ({len(reverted)} change(s) reverted).")

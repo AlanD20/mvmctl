@@ -226,8 +226,8 @@ def kernel_set_default(
     print_success(f"Default kernel set to: {name}")
 
 
-@kernel_app.command(name="remove", hidden=True)
-def kernel_remove(
+@kernel_app.command(name="rm")
+def kernel_rm(
     name: str = typer.Argument(..., help="Kernel file name to remove"),
     kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
@@ -243,16 +243,6 @@ def kernel_remove(
 
     path.unlink()
     print_success(f"Removed {path}")
-
-
-@kernel_app.command(name="rm")
-def kernel_rm(
-    name: str = typer.Argument(..., help="Kernel file name to remove"),
-    kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-) -> None:
-    """Alias for remove."""
-    kernel_remove(name=name, kernels_dir=kernels_dir, force=force)
 
 
 def _load_image_meta(images_dir: Path, image_id: str) -> dict[str, str]:
@@ -464,8 +454,8 @@ def image_set_default(
     print_success(f"✓ Default image set to: {image_id}")
 
 
-@image_app.command(name="remove", hidden=True)
-def image_remove(
+@image_app.command(name="rm")
+def image_rm(
     id: str = typer.Argument(..., help="Image ID to remove"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
@@ -489,16 +479,6 @@ def image_remove(
         print_success(f"Removed: {path}")
 
     raise typer.Exit(code=0)
-
-
-@image_app.command(name="rm")
-def image_rm(
-    id: str = typer.Argument(..., help="Image ID to remove"),
-    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-) -> None:
-    """Alias for remove."""
-    image_remove(id=id, images_dir=images_dir, force=force)
 
 
 _FORMAT_EXT_MAP: dict[str, str] = {
@@ -649,16 +629,8 @@ def bin_set_default(
     print_success(f"Active version set to {version}")
 
 
-@bin_app.command(name="use", hidden=True)
-def bin_use(
-    version: str = typer.Argument(..., help="Version to activate"),
-) -> None:
-    """Set the active Firecracker version (deprecated: use set-default)."""
-    bin_set_default(version)
-
-
-@bin_app.command(name="remove", hidden=True)
-def bin_remove(
+@bin_app.command(name="rm")
+def bin_rm(
     version: str = typer.Argument(..., help="Version to remove"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
@@ -673,15 +645,6 @@ def bin_remove(
         raise typer.Exit(code=1)
 
     print_success(f"Removed v{version}")
-
-
-@bin_app.command(name="rm")
-def bin_rm(
-    version: str = typer.Argument(..., help="Version to remove"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-) -> None:
-    """Alias for remove."""
-    bin_remove(version=version, force=force)
 
 
 def clear_assets(

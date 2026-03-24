@@ -59,14 +59,6 @@ def ls(
     console.print(table)
 
 
-@app.command(name="list", hidden=True)
-def list_cmd(
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-) -> None:
-    """Alias for ls."""
-    ls(json_output=json_output)
-
-
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def add(
     ctx: typer.Context,

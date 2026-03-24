@@ -454,24 +454,24 @@ def test_bin_fetch_error():
 
 
 # ---------------------------------------------------------------------------
-# bin use
+# bin set-default
 # ---------------------------------------------------------------------------
 
 
-def test_bin_use_success():
+def test_bin_set_default_success():
     with patch("fcm.cli.asset.set_active_version") as mock_set:
-        result = runner.invoke(main_app, ["bin", "use", "1.5.0"])
+        result = runner.invoke(main_app, ["bin", "set-default", "1.5.0"])
     assert result.exit_code == 0
     assert "Active version set" in result.output
     mock_set.assert_called_once_with("1.5.0")
 
 
-def test_bin_use_not_found():
+def test_bin_set_default_not_found():
     with patch(
         "fcm.cli.asset.set_active_version",
         side_effect=AssetNotFoundError("not downloaded"),
     ):
-        result = runner.invoke(main_app, ["bin", "use", "9.9.9"])
+        result = runner.invoke(main_app, ["bin", "set-default", "9.9.9"])
     assert result.exit_code == 1
 
 
