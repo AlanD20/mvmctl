@@ -9,6 +9,7 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TypedDict
 from fcm.constants import DEFAULT_NETWORK_CIDR, BRIDGE_NAME, DEFAULT_NETWORK_NAME
 
 from fcm.constants import device_prefix
@@ -242,7 +243,23 @@ def remove_network(name: str) -> None:
     shutil.rmtree(network_dir, ignore_errors=True)
 
 
-def inspect_network(name: str) -> dict[str, object]:
+class _VMLease(TypedDict):
+    vm_name: str
+    ip: str
+
+
+class NetworkInspect(TypedDict):
+    name: str
+    cidr: str
+    gateway: str
+    bridge: str
+    nat_enabled: bool
+    created_at: str
+    bridge_exists: bool
+    vms: list[_VMLease]
+
+
+def inspect_network(name: str) -> NetworkInspect:
     """Return full details for a named network."""
     network_dir = get_network_dir(name)
     config = _load_config(network_dir)

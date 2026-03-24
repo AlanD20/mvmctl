@@ -140,27 +140,25 @@ def test_config_gen_empty_vm_name():
 
 
 def test_config_gen_zero_vcpus():
-    vm_config = VMConfig(
-        name="zero-cpu",
-        vcpu_count=0,
-        kernel_path=Path("/tmp/vmlinux"),
-        rootfs_path=Path("/tmp/rootfs.ext4"),
-    )
-    generator = ConfigGenerator(vm_config)
-    config = generator.generate()
-    assert config["machine-config"]["vcpu_count"] == 0
+    """VMConfig with vcpu_count=0 raises ValueError (out of bounds)."""
+    with pytest.raises(ValueError, match="vcpu_count must be between"):
+        VMConfig(
+            name="zero-cpu",
+            vcpu_count=0,
+            kernel_path=Path("/tmp/vmlinux"),
+            rootfs_path=Path("/tmp/rootfs.ext4"),
+        )
 
 
 def test_config_gen_zero_memory():
-    vm_config = VMConfig(
-        name="zero-mem",
-        mem_size_mib=0,
-        kernel_path=Path("/tmp/vmlinux"),
-        rootfs_path=Path("/tmp/rootfs.ext4"),
-    )
-    generator = ConfigGenerator(vm_config)
-    config = generator.generate()
-    assert config["machine-config"]["mem_size_mib"] == 0
+    """VMConfig with mem_size_mib=0 raises ValueError (out of bounds)."""
+    with pytest.raises(ValueError, match="mem_size_mib must be between"):
+        VMConfig(
+            name="zero-mem",
+            mem_size_mib=0,
+            kernel_path=Path("/tmp/vmlinux"),
+            rootfs_path=Path("/tmp/rootfs.ext4"),
+        )
 
 
 def test_config_gen_missing_kernel_path_default():

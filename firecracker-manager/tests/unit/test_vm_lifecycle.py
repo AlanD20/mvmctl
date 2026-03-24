@@ -82,13 +82,13 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("fcm.core.vm_lifecycle._write_pid_file")
 @patch("fcm.core.vm_lifecycle.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
-def test_create_vm_success(
+def test_create_vm_core_success(
     mock_open, mock_bridge_exists,
     mock_write_pid, mock_popen, mock_add_rules, mock_create_tap, mock_config_gen,
     mock_inject, mock_write_ci, mock_copy, mock_gen_mac, mock_alloc_ip, mock_get_net,
     mock_get_kernels, mock_get_images, mock_get_vm_dir, mock_get_vm_mgr
 ):
-    """create_vm runs through successfully and registers WM."""
+    """Test core create_vm() runs through successfully and registers VM."""
     mock_manager = MagicMock()
     mock_manager.list_all.return_value = []
     mock_get_vm_mgr.return_value = mock_manager

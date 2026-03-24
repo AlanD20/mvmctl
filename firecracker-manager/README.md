@@ -49,7 +49,7 @@ Choose one of the following three methods:
 Download the latest release from GitHub (no Python required):
 
 ```bash
-curl -L -o fcm <repo-url>/releases/latest/download/fcm
+curl -L -o fcm https://github.com/your-org/firecracker-manager/releases/latest/download/fcm
 chmod +x fcm
 sudo mv fcm /usr/local/bin/
 fcm --help
@@ -65,7 +65,7 @@ fcm --help
 ### 3. Install from Source with uv
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/your-org/firecracker-manager
 cd firecracker-manager
 uv sync
 uv run fcm --help
@@ -839,7 +839,7 @@ To build a standalone single-file binary that requires no Python at runtime:
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/your-org/firecracker-manager
 cd firecracker-manager
 
 # Install Python 3.13 and build dependencies

@@ -8,10 +8,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         python-version: ["3.12", "3.13"]
+        os: [ubuntu-22.04, ubuntu-24.04]
 
     steps:
     - uses: actions/checkout@v4
@@ -41,7 +42,7 @@ jobs:
       if: matrix.python-version == '3.13'
       uses: actions/upload-artifact@v4
       with:
-        name: coverage-report
+        name: coverage-report-${{ matrix.os }}
         path: firecracker-manager/coverage.xml
         retention-days: 30
 

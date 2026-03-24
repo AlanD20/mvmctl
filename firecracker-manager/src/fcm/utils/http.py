@@ -11,6 +11,8 @@ from fcm.exceptions import FCMError, ChecksumMismatchError
 
 logger = logging.getLogger(__name__)
 
+_DOWNLOAD_CHUNK_SIZE = 524288
+
 
 def download_file(
     url: str,
@@ -54,7 +56,7 @@ def download_file(
 
             with open(dest, "wb") as f:
                 while True:
-                    chunk = response.read(524288)
+                    chunk = response.read(_DOWNLOAD_CHUNK_SIZE)
                     if not chunk:
                         break
                     f.write(chunk)

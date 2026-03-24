@@ -11,7 +11,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from fcm.exceptions import FCMKeyError
 from fcm.utils.fs import get_keys_dir
@@ -238,7 +238,16 @@ def remove_key(name: str) -> None:
     logger.info("Removed key '%s' from cache", name)
 
 
-def inspect_key(name: str) -> dict[str, object]:
+class KeyInspect(TypedDict):
+    name: str
+    fingerprint: str
+    algorithm: str
+    comment: str
+    added_at: str
+    public_key: str
+
+
+def inspect_key(name: str) -> KeyInspect:
     """Return detailed info about a named key."""
     registry = _load_registry()
     if name not in registry:
@@ -250,7 +259,11 @@ def inspect_key(name: str) -> dict[str, object]:
     if pub_file.exists():
         public_key_content = pub_file.read_text().strip()
 
-    return {
-        **entry,
-        "public_key": public_key_content,
-    }
+    return KeyInspect(
+        name=entry["name"],
+        fingerprint=entry["fingerprint"],
+        algorithm=entry["algorithm"],
+        comment=entry["comment"],
+        added_at=entry["added_at"],
+        public_key=public_key_content,
+    )
