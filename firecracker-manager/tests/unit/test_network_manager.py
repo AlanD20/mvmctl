@@ -29,8 +29,8 @@ from fcm.exceptions import NetworkError
 
 
 def test_bridge_name_for():
-    assert _bridge_name_for("default") == "fcm-br0"
-    assert _bridge_name_for("custom_net_name") == "fcm-custom_n"
+    assert _bridge_name_for("default") == "fcm-default"
+    assert _bridge_name_for("custom_net_name") == "fcm-custom_net"
 
 
 def test_gateway_for_subnet():
@@ -283,11 +283,11 @@ def test_release_network_ip(mock_cache_dir: Path):
 def test_ensure_default_network(mock_create_network, mock_cache_dir: Path):
     # Doesn't exist, will be created
     mock_create_network.return_value = NetworkConfig(
-        "default", "10.20.0.0/24", "10.20.0.1", "fcm-br0"
+        "default", "172.35.0.0/24", "172.35.0.1", "fcm-default"
     )
     config = ensure_default_network()
     assert config is not None
-    mock_create_network.assert_called_once_with("default", cidr="10.10.0.0/24", nat=True)
+    mock_create_network.assert_called_once_with("default", cidr="172.35.0.0/24", nat=True)
 
     # Exists, should return immediately
     net_dir = mock_cache_dir / "networks" / "default"

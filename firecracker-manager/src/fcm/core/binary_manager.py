@@ -123,6 +123,14 @@ def list_remote_versions(limit: int = 10) -> list[str]:
         tag = release.get("tag_name")
         if isinstance(tag, str):
             versions.append(_normalize_version(tag))
+
+    def _semver_key(v: str) -> tuple[int, ...]:
+        try:
+            return tuple(int(x) for x in v.split("."))
+        except ValueError:
+            return (0,)
+
+    versions.sort(key=_semver_key, reverse=True)
     return versions
 
 
@@ -238,6 +246,17 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
         link = d / link_name
         link.unlink(missing_ok=True)
         link.symlink_to(target)
+
+    parts = version.split(".")
+    ci_version = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else version
+    try:
+        from fcm.core.cli_state import set_cli_state_value
+
+        set_cli_state_value("ci_version", ci_version)
+        set_cli_state_value("active_firecracker_version", version)
+        set_cli_state_value("active_firecracker_bin", str(d / "firecracker"))
+    except Exception:
+        pass
 
 
 def remove_version(version: str, bin_dir: Path | None = None) -> None:

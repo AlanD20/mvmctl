@@ -93,11 +93,11 @@ def test_default_network_name():
 
 
 def test_default_network_cidr():
-    assert DEFAULT_NETWORK_CIDR == "10.10.0.0/24"
+    assert DEFAULT_NETWORK_CIDR == "172.35.0.0/24"
 
 
 def test_default_network_gateway():
-    assert DEFAULT_NETWORK_GATEWAY == "10.10.0.1"
+    assert DEFAULT_NETWORK_GATEWAY == "172.35.0.1"
 
 
 def test_bridge_prefix():

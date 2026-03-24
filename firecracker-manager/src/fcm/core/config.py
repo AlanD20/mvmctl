@@ -5,13 +5,17 @@ from pathlib import Path
 from dataclasses import dataclass, field, fields
 from typing import Any
 
-from fcm.constants import BRIDGE_NAME, CLI_NAME
+from fcm.constants import DEFAULT_BRIDGE_NAME, CLI_NAME, DEFAULT_NETWORK_CIDR
+
+
+def _default_assets_dir() -> str:
+    from fcm.utils.fs import get_cache_dir
+
+    return str(get_cache_dir())
 
 
 @dataclass
 class FirecrackerConfig:
-    """Firecracker binary configuration."""
-
     binary: str = "/usr/local/bin/firecracker"
     socket_dir: str = ""
     run_dir: str = ""
@@ -20,8 +24,6 @@ class FirecrackerConfig:
 
 @dataclass
 class VMDefaultsConfig:
-    """Default VM settings."""
-
     vcpu_count: int = 2
     mem_size_mib: int = 2048
     network_interface: str = "eth0"
@@ -34,25 +36,20 @@ class VMDefaultsConfig:
 
 @dataclass
 class VMNetworkConfig:
-    """VM network settings."""
-
-    bridge_name: str = BRIDGE_NAME
-    bridge_ip: str = "10.20.0.1/24"
+    bridge_name: str = DEFAULT_BRIDGE_NAME
+    bridge_ip: str = "172.35.0.1/24"
+    bridge_subnet: str = DEFAULT_NETWORK_CIDR
     tap_prefix: str = CLI_NAME
 
 
 @dataclass
 class NetworkTopologyConfig:
-    """Network topology configuration (wraps VM network settings)."""
-
     vm_network: VMNetworkConfig = field(default_factory=VMNetworkConfig)
 
 
 @dataclass
 class PathsConfig:
-    """Directory paths."""
-
-    assets_dir: str = ""
+    assets_dir: str = field(default_factory=_default_assets_dir)
 
 
 @dataclass

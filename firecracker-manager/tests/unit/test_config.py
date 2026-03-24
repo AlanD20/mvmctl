@@ -48,10 +48,10 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.enable_api_socket is False
     assert config.vm_defaults.enable_pci is False
 
-    assert config.network.vm_network.bridge_name == "fcm-br0"
-    assert config.network.vm_network.bridge_ip == "10.20.0.1/24"
+    assert config.network.vm_network.bridge_name == "fcm-bridge"
+    assert config.network.vm_network.bridge_ip == "172.35.0.1/24"
 
-    assert config.paths.assets_dir == ""
+    assert config.paths.assets_dir != ""
 
 
 def test_load_config_from_yaml(tmp_path: Path) -> None:

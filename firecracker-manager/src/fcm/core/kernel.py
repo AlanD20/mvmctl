@@ -1,15 +1,29 @@
 """Kernel download and build utilities."""
 
+import json
 import logging
 import os
+import re
 import subprocess
 import tarfile
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fcm.exceptions import KernelError, ChecksumMismatchError, FCMError, ProcessError
 from fcm.utils.http import download_file
 from fcm.utils.process import stream_cmd
-from fcm.constants import HTTP_USER_AGENT, FIRECRACKER_GITHUB_RAW_URL
+from fcm.constants import (
+    HTTP_USER_AGENT,
+    FIRECRACKER_CI_KERNEL_S3_BASE,
+    FIRECRACKER_CI_KERNEL_LIST_URL,
+    FIRECRACKER_KERNEL_CONFIG_URL,
+    KERNEL_ENABLED_CONFIGS,
+    KERNEL_DISABLED_CONFIGS,
+    KERNEL_SET_VAL_CONFIGS,
+    KERNEL_REQUIRED_SETTINGS,
+    KERNEL_SHA256_URL_TEMPLATE,
+)
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
@@ -90,10 +104,7 @@ def download_firecracker_config(
         KernelError: If download fails
     """
     major_minor = ".".join(version.split(".")[:2])
-    config_url = (
-        f"{FIRECRACKER_GITHUB_RAW_URL}/"
-        f"resources/guest_configs/microvm-kernel-ci-x86_64-{major_minor}.config"
-    )
+    config_url = FIRECRACKER_KERNEL_CONFIG_URL.format(major_minor=major_minor)
 
     try:
         logger.info("Downloading Firecracker kernel config...")
@@ -170,6 +181,7 @@ def _run_config_script(config_script: Path, args: list[str], kernel_dir: Path) -
 def configure_kernel(
     kernel_dir: Path,
     version: str,
+    user_config_path: Path | None = None,
 ) -> None:
     """Configure kernel with Firecracker settings.
 
@@ -197,83 +209,35 @@ def configure_kernel(
     if returncode != 0:
         raise KernelError("olddefconfig failed")
 
-    # Enable filesystems
-    logger.info("Enabling filesystems...")
     config_script = kernel_dir / "scripts" / "config"
 
-    options = [
-        ("--enable", "CONFIG_BTRFS_FS"),
-        ("--enable", "CONFIG_BTRFS_FS_POSIX_ACL"),
-        ("--enable", "CONFIG_EXT4_FS"),
-        ("--enable", "CONFIG_EXT4_FS_POSIX_ACL"),
-        ("--enable", "CONFIG_XFS_FS"),
-        ("--enable", "CONFIG_SQUASHFS"),
-    ]
-
-    for flag, option in options:
-        _run_config_script(config_script, [flag, option], kernel_dir)
-
-    # Enable VirtIO (built-in, not module)
-    logger.info("Enabling VirtIO drivers...")
-    virtio_options = [
-        "CONFIG_VIRTIO",
-        "CONFIG_VIRTIO_MENU",
-        "CONFIG_VIRTIO_PCI",
-        "CONFIG_VIRTIO_BLK",
-        "CONFIG_VIRTIO_NET",
-        "CONFIG_VIRTIO_CONSOLE",
-    ]
-
-    for option in virtio_options:
+    logger.info("Applying default kernel options from constants...")
+    for option in KERNEL_ENABLED_CONFIGS:
         _run_config_script(config_script, ["--enable", option], kernel_dir)
 
-    # Enable serial console
-    logger.info("Enabling serial console...")
-    _run_config_script(config_script, ["--enable", "CONFIG_SERIAL_8250"], kernel_dir)
-    _run_config_script(config_script, ["--enable", "CONFIG_SERIAL_8250_CONSOLE"], kernel_dir)
-    _run_config_script(
-        config_script, ["--set-val", "CONFIG_SERIAL_8250_NR_UARTS", "4"], kernel_dir
-    )  # 4 UARTs: COM1 (console), COM2 (firecracker serial log), COM3-4 reserved — minimum for Firecracker serial console support
+    for option in KERNEL_DISABLED_CONFIGS:
+        _run_config_script(config_script, ["--disable", option], kernel_dir)
 
-    # Enable network
-    logger.info("Enabling network support...")
-    network_options = ["CONFIG_NET", "CONFIG_INET", "CONFIG_IPV6"]
-    for option in network_options:
-        _run_config_script(config_script, ["--enable", option], kernel_dir)
+    for option, value in KERNEL_SET_VAL_CONFIGS:
+        _run_config_script(config_script, ["--set-val", option, value], kernel_dir)
 
-    # Enable KVM guest optimizations
-    logger.info("Enabling KVM guest optimizations...")
-    _run_config_script(config_script, ["--enable", "CONFIG_KVM_GUEST"], kernel_dir)
-    _run_config_script(config_script, ["--enable", "CONFIG_PARAVIRT"], kernel_dir)
+    if user_config_path is not None:
+        logger.info("Applying user kernel config overlay from %s...", user_config_path)
+        import shutil
 
-    # Enable LandLock
-    logger.info("Enabling LandLock...")
-    _run_config_script(config_script, ["--enable", "CONFIG_SECURITY_LANDLOCK"], kernel_dir)
-    _run_config_script(config_script, ["--enable", "CONFIG_BPF_SYSCALL"], kernel_dir)
-    _run_config_script(config_script, ["--enable", "CONFIG_CGROUPS"], kernel_dir)
-    _run_config_script(config_script, ["--enable", "CONFIG_MEMCG"], kernel_dir)
+        shutil.copy2(user_config_path, kernel_dir / ".config")
 
-    # Resolve dependencies again
     logger.info("Resolving dependencies...")
     returncode, _, _ = run_make(kernel_dir, "olddefconfig")
     if returncode != 0:
         raise KernelError("olddefconfig failed after enabling options")
 
-    # Verify critical settings
     logger.info("Verifying configuration...")
     config_path = kernel_dir / ".config"
-    required_settings = [
-        "CONFIG_BTRFS_FS=y",
-        "CONFIG_VIRTIO_BLK=y",
-        "CONFIG_VIRTIO_NET=y",
-        "CONFIG_SERIAL_8250_CONSOLE=y",
-        "CONFIG_KVM_GUEST=y",
-    ]
-
     config_content = config_path.read_text()
     all_present = True
 
-    for setting in required_settings:
+    for setting in KERNEL_REQUIRED_SETTINGS:
         if setting in config_content:
             logger.info("  %s", setting)
         else:
@@ -326,52 +290,217 @@ def build_kernel(
     logger.info("Kernel built: %s (%.1f MiB)", output_path.name, size_mb)
 
 
+def fetch_kernel_sha256(version: str) -> str | None:
+    sha256_url = KERNEL_SHA256_URL_TEMPLATE.format(version=version)
+    try:
+        req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urlopen(req, timeout=30) as resp:
+            content = resp.read().decode().strip()
+        parts = content.split()
+        return str(parts[0]).lower() if parts else None
+    except (URLError, OSError):
+        logger.debug("Could not fetch SHA-256 for kernel %s", version)
+        return None
+
+
 def build_kernel_pipeline(
     version: str,
     source_url: str,
     output_path: Path,
-    build_dir: Path,
+    build_dir: Path | None = None,
     sha256: str | None = None,
     jobs: int | None = None,
+    keep_build_dir: bool = False,
+    user_config_path: Path | None = None,
 ) -> None:
-    """Full kernel build pipeline.
-
-    Args:
-        version: Kernel version string
-        source_url: URL to kernel tarball
-        output_path: Where to copy vmlinux
-        build_dir: Build directory
-        sha256: Optional SHA-256 checksum
-        jobs: Number of parallel jobs (defaults to CPU count)
-
-    Raises:
-        KernelError: If any pipeline step fails
-        ChecksumMismatchError: If checksum verification fails
-    """
     if jobs is None:
         jobs = os.cpu_count() or 1
+
+    if build_dir is None:
+        build_id = str(uuid.uuid4())[:8]
+        build_dir = Path("/tmp/firecracker-manager") / f"build-{build_id}"
+
+    build_dir.mkdir(parents=True, exist_ok=True)
 
     if output_path.exists():
         logger.info("Using cached kernel: %s", output_path)
         return
 
+    if sha256 is None:
+        sha256 = fetch_kernel_sha256(version)
+
     tarball = build_dir / f"linux-{version}.tar.xz"
     kernel_src_dir = build_dir / f"linux-{version}"
 
-    # Download
     if not tarball.exists():
         download_kernel_source(source_url, tarball, sha256)
     else:
         logger.info("Using cached tarball: %s", tarball)
 
-    # Extract
     if not kernel_src_dir.exists():
         extract_kernel_tarball(tarball, build_dir)
     else:
         logger.info("Using existing source: %s", kernel_src_dir)
 
-    # Configure
-    configure_kernel(kernel_src_dir, version)
+    configure_kernel(kernel_src_dir, version, user_config_path=user_config_path)
 
-    # Build
     build_kernel(kernel_src_dir, output_path, jobs)
+
+    save_kernel_metadata(
+        output_path.parent,
+        output_path.name,
+        version=version,
+        kernel_type="official",
+    )
+
+    if not keep_build_dir:
+        import shutil
+
+        shutil.rmtree(build_dir, ignore_errors=True)
+        logger.info("Build directory cleaned up")
+    else:
+        logger.info("Build directory kept at: %s", build_dir)
+
+
+def save_kernel_metadata(
+    kernels_dir: Path,
+    kernel_name: str,
+    version: str,
+    kernel_type: str,
+    arch: str = "x86_64",
+) -> None:
+    meta = {
+        "name": kernel_name,
+        "version": version,
+        "type": kernel_type,
+        "arch": arch,
+        "built_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    meta_path = kernels_dir / f"{kernel_name}.json"
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+
+def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+    default_name = _load_default_kernel(kernels_dir)
+    results: list[dict[str, str]] = []
+    for path in sorted(kernels_dir.iterdir()):
+        if not path.is_file() or path.suffix == ".json":
+            continue
+        if not (path.name.startswith("vmlinux") or path.name.startswith("kernel")):
+            continue
+        size_mb = path.stat().st_size / (1024 * 1024)
+        meta_path = path.with_suffix(".json")
+        if meta_path.exists():
+            try:
+                meta: dict[str, str] = json.loads(meta_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                meta = {}
+        else:
+            meta = {}
+        results.append(
+            {
+                "name": path.name,
+                "version": meta.get("version", "-"),
+                "type": meta.get("type", "unknown"),
+                "arch": meta.get("arch", "-"),
+                "built_at": meta.get("built_at", "-"),
+                "size": f"{size_mb:.1f} MiB",
+                "is_default": str(path.name == default_name).lower(),
+            }
+        )
+    return results
+
+
+def _default_kernel_path(kernels_dir: Path) -> Path:
+    return kernels_dir / "default.json"
+
+
+def _load_default_kernel(kernels_dir: Path) -> str | None:
+    path = _default_kernel_path(kernels_dir)
+    if not path.exists():
+        return None
+    try:
+        data: dict[str, str] = json.loads(path.read_text())
+        return data.get("name")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def set_default_kernel(kernels_dir: Path, kernel_name: str) -> None:
+    kernel_path = kernels_dir / kernel_name
+    if not kernel_path.exists():
+        raise KernelError(f"Kernel not found: {kernel_path}")
+    _default_kernel_path(kernels_dir).write_text(json.dumps({"name": kernel_name}, indent=2))
+    logger.info("Default kernel set to: %s", kernel_name)
+
+
+def get_default_kernel_path(kernels_dir: Path) -> Path | None:
+    name = _load_default_kernel(kernels_dir)
+    if name is None:
+        vmlinux = kernels_dir / "vmlinux"
+        if vmlinux.exists():
+            return vmlinux
+        return None
+    path = kernels_dir / name
+    return path if path.exists() else None
+
+
+def download_firecracker_kernel(
+    ci_version: str,
+    arch: str = "amd64",
+    kernels_dir: Path | None = None,
+    output_name: str | None = None,
+) -> Path:
+    if kernels_dir is None:
+        from fcm.utils.fs import get_kernels_dir
+
+        kernels_dir = get_kernels_dir()
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    list_url = FIRECRACKER_CI_KERNEL_LIST_URL.format(ci_version=ci_version, arch=arch)
+    try:
+        req = Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urlopen(req, timeout=30) as resp:
+            xml_content = resp.read().decode("utf-8")
+    except (URLError, OSError) as exc:
+        raise KernelError(f"Failed to list CI kernels: {exc}") from exc
+
+    pattern = (
+        rf"<Key>(firecracker-ci/{re.escape(ci_version)}/{re.escape(arch)}/vmlinux-[\d.]+)</Key>"
+    )
+    keys = re.findall(pattern, xml_content)
+    if not keys:
+        raise KernelError(f"No vmlinux found for Firecracker CI version {ci_version} / arch {arch}")
+
+    keys.sort()
+    chosen_key = keys[-1]
+    kernel_version = chosen_key.split("/vmlinux-")[-1]
+
+    if output_name is None:
+        output_name = f"vmlinux-fc-{ci_version}-{arch}"
+
+    output_path = kernels_dir / output_name
+
+    if output_path.exists():
+        logger.info("Firecracker CI kernel already cached: %s", output_path)
+        return output_path
+
+    download_url = f"{FIRECRACKER_CI_KERNEL_S3_BASE}/{chosen_key}"
+    logger.info("Downloading Firecracker CI kernel from %s", download_url)
+    try:
+        download_file(download_url, output_path, expected_sha256=None, timeout=300)
+    except FCMError as exc:
+        raise KernelError(f"Failed to download Firecracker CI kernel: {exc}") from exc
+
+    output_path.chmod(0o755)
+
+    save_kernel_metadata(
+        kernels_dir,
+        output_name,
+        version=kernel_version,
+        kernel_type="firecracker",
+        arch=arch,
+    )
+    logger.info("Firecracker CI kernel saved: %s", output_path)
+    return output_path

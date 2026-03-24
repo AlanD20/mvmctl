@@ -49,12 +49,8 @@ class NetworkLease:
 
 
 def _bridge_name_for(network_name: str) -> str:
-    """Derive a bridge device name from a network name."""
     prefix = device_prefix()
-    if network_name == DEFAULT_NETWORK_NAME:
-        return f"{prefix}-br0"
-    # Truncate to keep device name <= 15 chars (Linux limit)
-    truncated = network_name[:8]
+    truncated = network_name[:10]
     return f"{prefix}-{truncated}"
 
 

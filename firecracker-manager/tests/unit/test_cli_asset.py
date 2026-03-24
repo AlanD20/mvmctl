@@ -63,11 +63,15 @@ def test_kernel_ls_json(tmp_path: Path):
     assert isinstance(data, list)
     assert len(data) == 1
     assert data[0]["name"] == "vmlinux"
+    assert "version" in data[0]
+    assert "type" in data[0]
 
 
 def test_kernel_ls_dir_not_found(tmp_path: Path):
-    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path / "nope")])
-    assert result.exit_code == 1
+    missing = tmp_path / "nope"
+    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(missing)])
+    assert result.exit_code == 0
+    assert missing.exists()
 
 
 def test_kernel_ls_multiple_files(tmp_path: Path):
@@ -95,66 +99,64 @@ def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.cli.asset.build_kernel_pipeline", return_value=True)
-def test_kernel_fetch_success(mock_build: MagicMock, tmp_path: Path):
-    out = tmp_path / "vmlinux"
-    result = runner.invoke(main_app, ["kernel", "fetch", "--version", "6.1.102", "--out", str(out)])
+@patch("fcm.cli.asset.build_kernel_pipeline", return_value=None)
+def test_kernel_fetch_official_success(mock_build: MagicMock, tmp_path: Path):
+    out = tmp_path / "vmlinux-6.1.9"
+    out.write_bytes(b"\x7fELF")
+    result = runner.invoke(
+        main_app, ["kernel", "fetch", "--type", "official", "--version", "6.1.9", "--out", str(out)]
+    )
     assert result.exit_code == 0
-    assert "Kernel built" in result.output
+    assert "Kernel" in result.output
     mock_build.assert_called_once()
 
 
 @patch("fcm.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
-def test_kernel_fetch_failure(mock_build: MagicMock, tmp_path: Path):
-    out = tmp_path / "vmlinux"
-    result = runner.invoke(main_app, ["kernel", "fetch", "--version", "6.1.102", "--out", str(out)])
+def test_kernel_fetch_official_failure(mock_build: MagicMock, tmp_path: Path):
+    out = tmp_path / "vmlinux-6.1.9"
+    result = runner.invoke(
+        main_app, ["kernel", "fetch", "--type", "official", "--version", "6.1.9", "--out", str(out)]
+    )
     assert result.exit_code == 1
 
 
-# ---------------------------------------------------------------------------
-# kernel build
-# ---------------------------------------------------------------------------
+@patch("fcm.core.kernel.download_firecracker_kernel")
+@patch("fcm.cli.asset._get_ci_version", return_value="1.12")
+def test_kernel_fetch_firecracker_success(mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path):
+    fc_kernel = tmp_path / "vmlinux-fc-1.12-amd64"
+    fc_kernel.write_bytes(b"\x7fELF")
+    mock_dl.return_value = fc_kernel
+    result = runner.invoke(
+        main_app,
+        ["kernel", "fetch", "--type", "firecracker", "--version", "1.12"],
+    )
+    assert result.exit_code == 0
+    assert "ready" in result.output.lower() or "kernel" in result.output.lower()
 
 
-@patch("fcm.cli.asset.build_kernel_pipeline", return_value=True)
-def test_kernel_build_success(mock_build: MagicMock, tmp_path: Path):
-    out = tmp_path / "vmlinux"
-    build_dir = tmp_path / "build"
+def test_kernel_fetch_missing_type(tmp_path: Path):
+    result = runner.invoke(main_app, ["kernel", "fetch"])
+    assert result.exit_code != 0
+
+
+@patch("fcm.cli.asset.build_kernel_pipeline", return_value=None)
+def test_kernel_fetch_with_jobs(mock_build: MagicMock, tmp_path: Path):
+    out = tmp_path / "vmlinux-6.1.9"
+    out.write_bytes(b"\x7fELF")
     result = runner.invoke(
         main_app,
         [
             "kernel",
-            "build",
+            "fetch",
+            "--type",
+            "official",
             "--version",
-            "6.1.102",
+            "6.1.9",
+            "-j",
+            "4",
             "--out",
             str(out),
-            "--build-dir",
-            str(build_dir),
         ],
-    )
-    assert result.exit_code == 0
-    assert "Kernel built" in result.output
-    mock_build.assert_called_once()
-    call_kwargs = mock_build.call_args
-    assert call_kwargs.kwargs.get("version") or call_kwargs[1].get(
-        "version", call_kwargs[0][0] if call_kwargs[0] else None
-    )
-
-
-@patch("fcm.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
-def test_kernel_build_failure(mock_build: MagicMock, tmp_path: Path):
-    out = tmp_path / "vmlinux"
-    result = runner.invoke(main_app, ["kernel", "build", "--version", "6.1.102", "--out", str(out)])
-    assert result.exit_code == 1
-
-
-@patch("fcm.cli.asset.build_kernel_pipeline", return_value=True)
-def test_kernel_build_with_jobs(mock_build: MagicMock, tmp_path: Path):
-    out = tmp_path / "vmlinux"
-    result = runner.invoke(
-        main_app,
-        ["kernel", "build", "--version", "6.1.102", "-j", "4", "--out", str(out)],
     )
     assert result.exit_code == 0
     mock_build.assert_called_once()
@@ -215,6 +217,8 @@ def test_kernel_rm_abort_confirmation(tmp_path: Path):
 
 
 def test_image_ls_normal(tmp_path: Path):
+    (tmp_path / "ubuntu-24.04.ext4").write_bytes(b"\x00" * 1024)
+    (tmp_path / "debian-12.ext4").write_bytes(b"\x00" * 1024)
     with (
         patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
         patch("fcm.cli.asset.get_images_dir", return_value=tmp_path),
@@ -567,3 +571,68 @@ def test_cache_clear_preserves_vms_dir(tmp_path: Path):
         result = runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert (tmp_path / "vms").exists()
+
+
+def test_image_set_default(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    (tmp_path / "images").mkdir()
+    (tmp_path / "images" / "ubuntu-24.04.ext4").write_bytes(b"\x00" * 1024)
+    result = runner.invoke(
+        main_app,
+        ["image", "set-default", "ubuntu-24.04", "--images-dir", str(tmp_path / "images")],
+    )
+    assert result.exit_code == 0
+    assert "ubuntu-24.04" in result.output
+
+
+def test_image_set_default_not_found(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    (tmp_path / "images").mkdir()
+    result = runner.invoke(
+        main_app,
+        ["image", "set-default", "ubuntu-24.04", "--images-dir", str(tmp_path / "images")],
+    )
+    assert result.exit_code == 1
+
+
+def test_image_ls_remote(tmp_path: Path):
+    with (
+        patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("fcm.cli.asset.get_images_dir", return_value=tmp_path),
+    ):
+        result = runner.invoke(main_app, ["image", "ls", "--remote", "--images-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "ubuntu-24.04" in result.output
+
+
+def test_kernel_set_default_cli(tmp_path: Path):
+    vmlinux = tmp_path / "vmlinux"
+    vmlinux.write_bytes(b"\x7fELF")
+    result = runner.invoke(
+        main_app,
+        ["kernel", "set-default", "vmlinux", "--kernels-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+    assert "vmlinux" in result.output
+
+
+def test_kernel_set_default_not_found(tmp_path: Path):
+    result = runner.invoke(
+        main_app,
+        ["kernel", "set-default", "vmlinux", "--kernels-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 1
+
+
+def test_bin_ls_default_limit():
+    from fcm.cli.asset import bin_app
+
+    result = runner.invoke(bin_app, ["ls", "--help"])
+    assert "5" in result.output
+
+
+def test_kernel_ls_auto_creates_dir(tmp_path: Path):
+    missing = tmp_path / "kernels"
+    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(missing)])
+    assert result.exit_code == 0
+    assert missing.exists()

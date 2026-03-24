@@ -1,23 +1,27 @@
-"""Configuration commands."""
-
 import json
 from pathlib import Path
 
 import typer
 
-from fcm.api.config import dump_config, load_config, validate_config
+from fcm.api.config import (
+    dump_config,
+    load_config,
+    validate_config,
+    get_config_value,
+    set_config_value,
+)
 from fcm.exceptions import FCMError
-from fcm.utils.console import print_error, print_success
+from fcm.utils.console import print_error, print_info, print_success
 from fcm.utils.fs import get_assets_dir, get_vm_dir
 
 app = typer.Typer(help="Configuration commands")
 
 
-@app.command(name="help", hidden=True)
-def help_cmd(ctx: typer.Context) -> None:
-    """Show help for the config command group."""
-    typer.echo(ctx.parent.get_help() if ctx.parent else "")
-    raise typer.Exit()
+@app.callback(invoke_without_command=True)
+def config_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command()
@@ -83,3 +87,29 @@ def dump_vm(
     except json.JSONDecodeError as e:
         print_error(f"Invalid JSON in config file: {e}")
         raise typer.Exit(code=1)
+
+
+@app.command(name="get")
+def config_get(
+    key: str = typer.Argument(..., help="Config key (dot-notation, e.g. network_interface)"),
+) -> None:
+    """Get a configuration value."""
+    value = get_config_value(key)
+    if value is None:
+        print_info(f"{key} = (not set)")
+    else:
+        typer.echo(f"{key} = {value}")
+
+
+@app.command(name="set")
+def config_set(
+    key: str = typer.Argument(..., help="Config key (dot-notation, e.g. network_interface)"),
+    value: str = typer.Argument(..., help="Value to set"),
+) -> None:
+    """Set a configuration value."""
+    try:
+        set_config_value(key, value)
+    except Exception as exc:
+        print_error(f"Failed to set config: {exc}")
+        raise typer.Exit(code=1)
+    print_success(f"{key} = {value}")

@@ -32,15 +32,25 @@ from fcm.core.vm_manager import VMManager, get_vm_manager
 from fcm.exceptions import NetworkError, FCMError, VMNotFoundError
 from fcm.models.vm import VMConfig, VMInstance, VMState
 from fcm.utils.fs import get_kernels_dir, get_images_dir, get_vm_dir
+import random
+import string
+
 from fcm.constants import (
     DEFAULT_NETWORK_NAME,
     FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
     FIRECRACKER_SIGTERM_WAIT_S,
     MAX_VMS,
-    TAP_PREFIX,
+    CLI_NAME,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _generate_tap_name(network_name: str, vm_name: str) -> str:
+    rand_suffix = "".join(random.choices(string.ascii_lowercase, k=3))
+    net_part = network_name[:3]
+    vm_part = vm_name[:3]
+    return f"{CLI_NAME}-{net_part}-{vm_part}-{rand_suffix}"
 
 
 def _write_pid_file(pid_file: Path, pid: int) -> None:
@@ -221,7 +231,7 @@ def create_vm(
     # P4 §3: use random MAC (02:FC:XX:XX:XX:XX prefix) — intentionally
     # overrides P3's deterministic-from-name scheme per spec precedence rule.
     guest_mac = mac if mac else generate_mac()
-    tap_name = f"{TAP_PREFIX}-{name}-0"
+    tap_name = _generate_tap_name(network_name, name)
     bridge = net_config.bridge
 
     vm_dir.mkdir(parents=True, exist_ok=False)
@@ -335,6 +345,7 @@ def create_vm(
         ip=guest_ip,
         mac=guest_mac,
         network_name=network_name,
+        tap_device=tap_name,
         created_at=datetime.now(tz=timezone.utc),
         status=VMState.RUNNING,
     )
@@ -349,7 +360,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
         raise VMNotFoundError(f"VM '{name}' not found")
 
     vm_dir = get_vm_dir(name)
-    tap_name = f"{TAP_PREFIX}-{name}-0"
+    tap_name = vm.tap_device or _generate_tap_name(vm.network_name or DEFAULT_NETWORK_NAME, name)
 
     pid_file = vm_dir / "firecracker.pid"
     pid = _read_pid_file(pid_file)

@@ -70,8 +70,9 @@ TAP_PREFIX: Final[str] = f"{CLI_NAME}-tap"
 PROJECT_GROUP: Final[str] = CLI_NAME  # "fcm"
 SUDOERS_DROP_IN_PATH: Final[str] = f"/etc/sudoers.d/{CLI_NAME}"
 DEFAULT_NETWORK_NAME: Final[str] = "default"
-DEFAULT_NETWORK_CIDR: Final[str] = "10.10.0.0/24"
-DEFAULT_NETWORK_GATEWAY: Final[str] = "10.10.0.1"
+DEFAULT_NETWORK_CIDR: Final[str] = "172.35.0.0/24"
+DEFAULT_NETWORK_GATEWAY: Final[str] = "172.35.0.1"
+DEFAULT_BRIDGE_NAME: Final[str] = "fcm-bridge"
 BRIDGE_PREFIX: Final[str] = f"{CLI_NAME}-br"
 FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: Final[int] = 5
 FIRECRACKER_SIGTERM_WAIT_S: Final[int] = 1
@@ -84,6 +85,91 @@ PRIVILEGED_BINARIES: Final[list[str]] = [
 ]
 REQUIRED_BINARIES: Final[list[str]] = ["ip", "iptables", "qemu-img"]
 ISO_BINARIES: Final[list[str]] = ["mkisofs", "genisoimage"]
+
+# ---------------------------------------------------------------------------
+# Kernel defaults
+# ---------------------------------------------------------------------------
+
+# Default kernel version for official upstream builds
+DEFAULT_KERNEL_VERSION: Final[str] = "6.1.9"
+
+# Default architecture for Firecracker CI kernel downloads
+DEFAULT_FC_KERNEL_ARCH: Final[str] = "amd64"
+
+# Base URL for the Firecracker CI S3 kernel bucket
+FIRECRACKER_CI_KERNEL_S3_BASE: Final[str] = "https://s3.amazonaws.com/spec.ccfc.min"
+
+# S3 listing URL template; fill in {ci_version} and {arch}
+FIRECRACKER_CI_KERNEL_LIST_URL: Final[str] = (
+    "http://spec.ccfc.min.s3.amazonaws.com/"
+    "?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-&list-type=2"
+)
+
+# Firecracker microvm kernel config URL — the {major_minor} placeholder is
+# e.g. "6.1" and is substituted at runtime.
+FIRECRACKER_KERNEL_CONFIG_URL: Final[str] = (
+    "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main"
+    "/resources/guest_configs/microvm-kernel-ci-x86_64-{major_minor}.config"
+)
+
+# Kernel options to enable (--enable) when building an official kernel.
+# Applied BEFORE any user-supplied --kernel-config override so users can
+# reverse individual items if they know what they are doing.
+KERNEL_ENABLED_CONFIGS: Final[list[str]] = [
+    # Filesystems
+    "CONFIG_BTRFS_FS",
+    "CONFIG_BTRFS_FS_POSIX_ACL",
+    "CONFIG_EXT4_FS",
+    "CONFIG_EXT4_FS_POSIX_ACL",
+    "CONFIG_XFS_FS",
+    "CONFIG_SQUASHFS",
+    # VirtIO (all must be built-in for Firecracker)
+    "CONFIG_VIRTIO",
+    "CONFIG_VIRTIO_MENU",
+    "CONFIG_VIRTIO_PCI",
+    "CONFIG_VIRTIO_BLK",
+    "CONFIG_VIRTIO_NET",
+    "CONFIG_VIRTIO_CONSOLE",
+    # Serial console
+    "CONFIG_SERIAL_8250",
+    "CONFIG_SERIAL_8250_CONSOLE",
+    # Network
+    "CONFIG_NET",
+    "CONFIG_INET",
+    "CONFIG_IPV6",
+    # KVM guest optimisations
+    "CONFIG_KVM_GUEST",
+    "CONFIG_PARAVIRT",
+    # Security / BPF / cgroups
+    "CONFIG_SECURITY_LANDLOCK",
+    "CONFIG_BPF_SYSCALL",
+    "CONFIG_CGROUPS",
+    "CONFIG_MEMCG",
+    # PCI (required for some upstream kernels)
+    "CONFIG_PCI",
+]
+
+# Kernel options to disable (--disable) when building an official kernel.
+KERNEL_DISABLED_CONFIGS: Final[list[str]] = [
+    "CONFIG_BLK_DEV_ZONED",
+    "CONFIG_VIRTIO_BLK_F_SECURE_ERASE",
+    "CONFIG_VIRTIO_BLK_SCSI",
+]
+
+# Integer-valued kernel options (--set-val).  Each entry is (option, value).
+KERNEL_SET_VAL_CONFIGS: Final[list[tuple[str, str]]] = [
+    ("CONFIG_SERIAL_8250_NR_UARTS", "4"),
+]
+
+# Critical settings that MUST be =y for Firecracker to boot.  If any is
+# missing after configuration, the build is aborted with an error.
+KERNEL_REQUIRED_SETTINGS: Final[list[str]] = [
+    "CONFIG_BTRFS_FS=y",
+    "CONFIG_VIRTIO_BLK=y",
+    "CONFIG_VIRTIO_NET=y",
+    "CONFIG_SERIAL_8250_CONSOLE=y",
+    "CONFIG_KVM_GUEST=y",
+]
 
 
 def _resolve_version() -> str:
@@ -108,4 +194,7 @@ FIRECRACKER_GITHUB_RAW_URL: Final[str] = (
 )
 KERNEL_TARBALL_URL_TEMPLATE: Final[str] = (
     "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
+)
+KERNEL_SHA256_URL_TEMPLATE: Final[str] = (
+    "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz.sha256"
 )

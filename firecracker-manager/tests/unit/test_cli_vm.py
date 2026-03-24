@@ -430,3 +430,42 @@ def test_load_no_resume_flag(mocker: MockerFixture):
     assert call_kwargs.kwargs.get("resume_after") is False or (
         len(call_kwargs.args) >= 4 and call_kwargs.args[3] is False
     )
+
+
+def test_ps_alias(mocker: MockerFixture):
+    mocker.patch("fcm.cli.vm.list_vms", return_value=[_make_vm("myvm")])
+    result = runner.invoke(app, ["ps"])
+    assert result.exit_code == 0
+    assert "myvm" in result.output
+
+
+def test_ps_all_flag(mocker: MockerFixture):
+    mocker.patch("fcm.cli.vm.list_vms", return_value=[
+        _make_vm("running", VMState.RUNNING),
+        _make_vm("stopped", VMState.STOPPED),
+    ])
+    result = runner.invoke(app, ["ps", "--all"])
+    assert result.exit_code == 0
+    assert "running" in result.output
+    assert "stopped" in result.output
+
+
+def test_prune_no_stopped(mocker: MockerFixture):
+    mocker.patch("fcm.cli.vm.list_vms", return_value=[_make_vm("myvm")])
+    result = runner.invoke(app, ["prune"])
+    assert result.exit_code == 0
+    assert "Nothing" in result.output
+
+
+def test_prune_dry_run(mocker: MockerFixture):
+    mocker.patch("fcm.cli.vm.list_vms", return_value=[_make_vm("stopped", VMState.STOPPED)])
+    result = runner.invoke(app, ["prune", "--dry-run"])
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+
+
+def test_cleanup_deprecated_alias(mocker: MockerFixture):
+    mocker.patch("fcm.cli.vm.list_vms", return_value=[_make_vm("myvm")])
+    result = runner.invoke(app, ["cleanup"])
+    assert result.exit_code == 0
+    assert "deprecated" in result.output.lower() or "cleanup" in result.output.lower()

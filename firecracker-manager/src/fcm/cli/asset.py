@@ -5,6 +5,7 @@ import shutil
 
 import typer
 from pathlib import Path
+from typing import Optional
 
 from fcm.api.assets import (
     BinaryVersion,
@@ -17,104 +18,210 @@ from fcm.api.assets import (
     load_images_config,
     build_kernel_pipeline,
 )
-from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE
+from fcm.constants import (
+    KERNEL_TARBALL_URL_TEMPLATE,
+    DEFAULT_KERNEL_VERSION,
+    DEFAULT_FC_KERNEL_ARCH,
+)
 from fcm.exceptions import AssetNotFoundError, BinaryError, KernelError
-from fcm.utils.console import print_error, print_success, print_table, print_warning
+from fcm.utils.console import print_error, print_info, print_success, print_table, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
-kernel_app = typer.Typer(help="Kernel management")
-image_app = typer.Typer(help="Image management")
-bin_app = typer.Typer(help="Binary management")
+kernel_app = typer.Typer(help="Kernel management", no_args_is_help=False)
+image_app = typer.Typer(help="Image management", no_args_is_help=False)
+bin_app = typer.Typer(help="Binary management", no_args_is_help=False)
 
 
-@kernel_app.command(name="help", hidden=True)
-def kernel_help(ctx: typer.Context) -> None:
-    """Show help for the kernel subcommand."""
-    typer.echo(ctx.parent.get_help() if ctx.parent else "")
-    raise typer.Exit()
+@kernel_app.callback(invoke_without_command=True)
+def kernel_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
-@image_app.command(name="help", hidden=True)
-def image_help(ctx: typer.Context) -> None:
-    """Show help for the image subcommand."""
-    typer.echo(ctx.parent.get_help() if ctx.parent else "")
-    raise typer.Exit()
+@image_app.callback(invoke_without_command=True)
+def image_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
-@bin_app.command(name="help", hidden=True)
-def bin_help(ctx: typer.Context) -> None:
-    """Show help for the bin subcommand."""
-    typer.echo(ctx.parent.get_help() if ctx.parent else "")
-    raise typer.Exit()
+@bin_app.callback(invoke_without_command=True)
+def bin_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @kernel_app.command(name="ls")
 def kernel_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
+    firecracker_only: bool = typer.Option(
+        False, "--firecracker", help="Show only firecracker kernels"
+    ),
+    official_only: bool = typer.Option(
+        False, "--official", help="Show only official/upstream kernels"
+    ),
 ) -> None:
-    """List cached kernels."""
-    if not kernels_dir.exists():
-        print_error(f"Kernels directory not found: {kernels_dir}")
-        raise typer.Exit(code=1)
+    """List cached kernels (both Firecracker CI and official upstream)."""
+    from fcm.core.kernel import list_kernels
 
-    kernels: list[list[str]] = []
-    for path in kernels_dir.iterdir():
-        if path.is_file() and path.name.startswith("vmlinux"):
-            size_mb = path.stat().st_size / (1024 * 1024)
-            kernels.append([path.name, f"{size_mb:.1f} MiB"])
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+    kernels = list_kernels(kernels_dir)
+
+    if firecracker_only:
+        kernels = [k for k in kernels if k.get("type") == "firecracker"]
+    elif official_only:
+        kernels = [k for k in kernels if k.get("type") == "official"]
 
     if json_output:
-        typer.echo(json.dumps([{"name": k[0], "size": k[1]} for k in kernels], indent=2))
-    else:
-        print_table(title="Available Kernels", columns=["Name", "Size"], rows=kernels)
+        typer.echo(json.dumps(kernels, indent=2))
+        return
+
+    if not kernels:
+        from fcm.utils.console import print_info
+
+        print_info("No kernels found. Use 'fcm kernel fetch --type firecracker' to download one.")
+        return
+
+    rows: list[list[str]] = []
+    for k in kernels:
+        default_marker = "*" if k.get("is_default") else " "
+        rows.append(
+            [
+                default_marker,
+                k.get("name", ""),
+                k.get("version", ""),
+                k.get("type", ""),
+                k.get("built_at", "-"),
+                k.get("size", "-"),
+            ]
+        )
+    print_table(
+        title="Cached Kernels",
+        columns=["Def", "Name", "Version", "Type", "Built At", "Size"],
+        rows=rows,
+    )
+
+
+def _get_ci_version() -> str:
+    from fcm.core.cli_state import get_cli_state
+
+    state = get_cli_state()
+    ci_version = state.get("ci_version") or ""
+    if not ci_version:
+        from fcm.core.binary_manager import list_local_versions as _lv
+
+        local = _lv()
+        active = next((b for b in local if b.is_active), None)
+        if active:
+            parts = active.version.split(".")
+            ci_version = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else active.version
+    return ci_version or "1.12"
 
 
 @kernel_app.command(name="fetch")
 def kernel_fetch(
-    version: str = typer.Option("6.1.102", "--version", help="Kernel version"),
-    out: Path = typer.Option(get_kernels_dir() / "vmlinux", "--out", help="Output path"),
+    kernel_type: str = typer.Option(..., "--type", help="Kernel type: firecracker or official"),
+    version: Optional[str] = typer.Option(
+        None,
+        "--version",
+        help="Kernel version (default: CI_VERSION for firecracker, 6.1.9 for official)",
+    ),
+    arch: str = typer.Option(
+        DEFAULT_FC_KERNEL_ARCH, "--arch", help="Architecture (for firecracker type)"
+    ),
+    out: Optional[Path] = typer.Option(None, "--out", help="Output path/name"),
+    jobs: Optional[int] = typer.Option(
+        None, "--jobs", "-j", help="Parallel build jobs (official only)"
+    ),
+    keep_build_dir: bool = typer.Option(
+        False, "--keep-build-dir", help="Keep build directory after build"
+    ),
+    kernel_config: Optional[Path] = typer.Option(
+        None, "--kernel-config", help="Path to custom kernel .config file"
+    ),
+    set_default: bool = typer.Option(False, "--set-default", help="Set this kernel as default"),
 ) -> None:
-    """Download the official minimal kernel."""
-    source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=version)
-    try:
-        build_kernel_pipeline(
-            version=version,
-            source_url=source_url,
-            output_path=out,
-            build_dir=get_cache_dir() / "kernel-build",
-            jobs=None,
-        )
-    except KernelError as exc:
-        print_error(f"Kernel build failed: {exc}")
-        raise typer.Exit(code=1) from exc
-    print_success(f"Kernel built: {out}")
+    """Fetch or build a kernel. --type firecracker|official is required."""
+    from fcm.core.kernel import download_firecracker_kernel
+
+    kernels_dir = get_kernels_dir()
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    if kernel_type == "firecracker":
+        ci_version = version or _get_ci_version()
+        output_name = f"vmlinux-fc-{ci_version}-{arch}" if out is None else out.name
+        try:
+            result = download_firecracker_kernel(
+                ci_version=ci_version,
+                arch=arch,
+                kernels_dir=kernels_dir,
+                output_name=output_name,
+            )
+        except KernelError as exc:
+            print_error(f"Kernel fetch failed: {exc}")
+            raise typer.Exit(code=1) from exc
+        print_success(f"Firecracker CI kernel ready: {result}")
+
+    elif kernel_type == "official":
+        effective_version = version or DEFAULT_KERNEL_VERSION
+        output_name_str = f"vmlinux-{effective_version}"
+        output_path = out if out is not None else kernels_dir / output_name_str
+
+        if kernel_config and not kernel_config.exists():
+            print_error(f"Kernel config file not found: {kernel_config}")
+            raise typer.Exit(code=1)
+
+        source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=effective_version)
+        try:
+            build_kernel_pipeline(
+                version=effective_version,
+                source_url=source_url,
+                output_path=output_path,
+                build_dir=None,
+                jobs=jobs,
+                keep_build_dir=keep_build_dir,
+                user_config_path=kernel_config,
+            )
+        except KernelError as exc:
+            print_error(f"Kernel build failed: {exc}")
+            raise typer.Exit(code=1) from exc
+
+        if keep_build_dir:
+            print_info("Build directory was kept (--keep-build-dir specified)")
+
+        result = output_path
+        print_success(f"Kernel built: {result}")
+
+    else:
+        print_error(f"Unknown kernel type: {kernel_type!r}. Use 'firecracker' or 'official'.")
+        raise typer.Exit(code=1)
+
+    if set_default:
+        from fcm.core.kernel import set_default_kernel as _set_default
+
+        _set_default(kernels_dir, result.name)
+        print_success(f"Default kernel set to: {result.name}")
+
     raise typer.Exit(code=0)
 
 
-@kernel_app.command(name="build")
-def kernel_build(
-    version: str | None = typer.Option("6.1.102", "--version", help="Kernel version to build"),
-    jobs: int | None = typer.Option(None, "--jobs", "-j", help="Parallel build jobs"),
-    out: Path = typer.Option(get_kernels_dir() / "vmlinux", "--out", help="Output path"),
-    build_dir: Path = typer.Option(
-        get_cache_dir() / "kernel-build", "--build-dir", help="Build directory"
-    ),
+@kernel_app.command(name="set-default")
+def kernel_set_default(
+    name: str = typer.Argument(..., help="Kernel file name to set as default"),
+    kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
 ) -> None:
-    """Build a custom upstream kernel."""
-    source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=version or "6.1.102")
+    """Set a kernel as the default for VM creation."""
+    from fcm.core.kernel import set_default_kernel
+
     try:
-        build_kernel_pipeline(
-            version=version or "6.1.102",
-            source_url=source_url,
-            output_path=out,
-            build_dir=build_dir,
-            jobs=jobs,
-        )
+        set_default_kernel(kernels_dir, name)
     except KernelError as exc:
-        print_error(f"Kernel build failed: {exc}")
+        print_error(str(exc))
         raise typer.Exit(code=1) from exc
-    print_success(f"Kernel built: {out}")
+    print_success(f"Default kernel set to: {name}")
 
 
 @kernel_app.command(name="remove")
@@ -146,51 +253,213 @@ def kernel_rm(
     kernel_remove(name=name, kernels_dir=kernels_dir, force=force)
 
 
+def _load_image_meta(images_dir: Path, image_id: str) -> dict[str, str]:
+    for ext in (".ext4", ".btrfs", ".img", ".raw"):
+        meta_path = images_dir / f"{image_id}{ext}.json"
+        if meta_path.exists():
+            try:
+                raw: object = json.loads(meta_path.read_text())
+                if isinstance(raw, dict):
+                    return {str(k): str(v) for k, v in raw.items()}
+            except (json.JSONDecodeError, OSError):
+                pass
+    meta_path = images_dir / f"{image_id}.json"
+    if meta_path.exists():
+        try:
+            raw = json.loads(meta_path.read_text())
+            if isinstance(raw, dict):
+                return {str(k): str(v) for k, v in raw.items()}
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_image_meta(
+    images_dir: Path, image_id: str, image_path: Path, meta: dict[str, str]
+) -> None:
+    from datetime import datetime, timezone
+
+    meta.setdefault("pulled_at", datetime.now(tz=timezone.utc).isoformat())
+    meta.setdefault("fs_type", image_path.suffix.lstrip(".") if image_path.suffix else "unknown")
+    meta_path = images_dir / f"{image_path.name}.json"
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+
 @image_app.command(name="ls")
 def image_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+    remote: bool = typer.Option(False, "--remote", "-r", help="Show available remote images"),
+    name_filter: Optional[str] = typer.Option(None, "--name", help="Filter by image name"),
 ) -> None:
-    """List cached images."""
+    """List cached images (or available remote images with --remote)."""
+    images_dir.mkdir(parents=True, exist_ok=True)
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
 
-    if json_output:
-        data = [{"id": img.id, "name": img.name, "format": img.format} for img in images]
-        typer.echo(json.dumps(data, indent=2))
-    else:
+    if name_filter:
+        images = [
+            img
+            for img in images
+            if name_filter.lower() in img.name.lower() or name_filter.lower() in img.id.lower()
+        ]
+
+    if remote:
         rows: list[list[str]] = []
         for img in images:
-            ext4_path = images_dir / f"{img.id}.ext4"
-            btrfs_path = images_dir / f"{img.id}.btrfs"
-            exists = "✓" if (ext4_path.exists() or btrfs_path.exists()) else " "
-            rows.append([exists, img.id, img.name, img.format])
+            found_path = next(
+                (
+                    images_dir / f"{img.id}{ext}"
+                    for ext in (".ext4", ".btrfs", ".img", ".raw")
+                    if (images_dir / f"{img.id}{ext}").exists()
+                ),
+                None,
+            )
+            downloaded = "✓" if found_path else " "
+            rows.append([downloaded, img.id, img.name, img.convert_to])
+        if json_output:
+            typer.echo(
+                json.dumps(
+                    [
+                        {
+                            "id": img.id,
+                            "name": img.name,
+                            "format": img.format,
+                            "convert_to": img.convert_to,
+                        }
+                        for img in images
+                    ],
+                    indent=2,
+                )
+            )
+        else:
+            print_table(
+                title="Available Images (Remote)",
+                columns=["Downloaded", "ID", "Name", "FS Type"],
+                rows=rows,
+            )
+        return
 
-        print_table(title="Available Images", columns=["", "ID", "Name", "Format"], rows=rows)
+    if json_output:
+        result = []
+        for img in images:
+            meta = _load_image_meta(images_dir, img.id)
+            result.append(
+                {
+                    "id": img.id,
+                    "name": img.name,
+                    "format": img.format,
+                    "fs_type": meta.get("fs_type", img.convert_to),
+                    "pulled_at": meta.get("pulled_at", "-"),
+                }
+            )
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    default_img = _get_default_image()
+    rows_local: list[list[str]] = []
+    for img in images:
+        found_path = next(
+            (
+                images_dir / f"{img.id}{ext}"
+                for ext in (".ext4", ".btrfs", ".img", ".raw")
+                if (images_dir / f"{img.id}{ext}").exists()
+            ),
+            None,
+        )
+        if found_path is None:
+            continue
+        meta = _load_image_meta(images_dir, img.id)
+        pulled_at = meta.get("pulled_at", "-")[:19] if meta.get("pulled_at") else "-"
+        fs_type = meta.get("fs_type", found_path.suffix.lstrip("."))
+        default_marker = "*" if img.id == default_img else " "
+        rows_local.append([default_marker, img.id, img.name, fs_type, pulled_at])
+
+    if not rows_local:
+        print_info("No images downloaded. Use 'fcm image fetch <id>' to download one.")
+        return
+    print_table(
+        title="Downloaded Images",
+        columns=["Def", "ID", "OS Name", "FS Type", "Pulled At"],
+        rows=rows_local,
+    )
+
+
+def _get_default_image() -> str | None:
+    try:
+        from fcm.core.cli_state import get_cli_state_value
+
+        val = get_cli_state_value("default_image")
+        return str(val) if val is not None else None
+    except Exception:
+        return None
 
 
 @image_app.command(name="fetch")
 def image_fetch(
-    id: str = typer.Argument(..., help="Image ID from images.yaml"),
+    image_name: str = typer.Argument(
+        ..., help="Image name/ID (e.g. ubuntu) or full ID (e.g. ubuntu-24.04)"
+    ),
+    codename: Optional[str] = typer.Argument(
+        None, help="Optional version codename (e.g. noble, jammy)"
+    ),
     out: Path = typer.Option(get_images_dir(), "--out", help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
+    set_default: bool = typer.Option(
+        False, "--set-default", help="Set as default image after download"
+    ),
 ) -> None:
-    """Download an image."""
+    """Download an image. Pass name (ubuntu) or full ID (ubuntu-24.04), optionally with codename."""
+    out.mkdir(parents=True, exist_ok=True)
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
 
-    spec = next((img for img in images if img.id == id), None)
-    if not spec:
-        print_error(f"Image '{id}' not found in images.yaml")
+    full_id = f"{image_name}-{codename}" if codename else image_name
+    spec = next((img for img in images if img.id == full_id), None)
+    if spec is None:
+        spec = next(
+            (img for img in images if img.id.startswith(image_name + "-") or img.id == image_name),
+            None,
+        )
+    if spec is None:
+        available = ", ".join(img.id for img in images)
+        print_error(f"Image '{full_id}' not found. Available: {available}")
         raise typer.Exit(code=1)
 
     result = fetch_image(spec, out, force)
     if result:
+        _save_image_meta(
+            out, spec.id, result, {"os_name": spec.name, "fs_type": result.suffix.lstrip(".")}
+        )
         print_success(f"Image ready: {result}")
+        if set_default:
+            from fcm.core.cli_state import set_cli_state_value
+
+            set_cli_state_value("default_image", spec.id)
+            print_success(f"Default image set to: {spec.id}")
         raise typer.Exit(code=0)
     else:
-        print_error(f"Failed to download image '{id}'")
+        print_error(f"Failed to download image '{spec.id}'")
         raise typer.Exit(code=1)
+
+
+@image_app.command(name="set-default")
+def image_set_default(
+    image_id: str = typer.Argument(..., help="Image ID to set as default"),
+    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+) -> None:
+    """Set the default image for VM creation."""
+    images_dir.mkdir(parents=True, exist_ok=True)
+    found = any(
+        (images_dir / f"{image_id}{ext}").exists() for ext in (".ext4", ".btrfs", ".img", ".raw")
+    )
+    if not found:
+        print_error(f"Image '{image_id}' not found in {images_dir}. Download it first.")
+        raise typer.Exit(code=1)
+    from fcm.core.cli_state import set_cli_state_value
+
+    set_cli_state_value("default_image", image_id)
+    print_success(f"Default image set to: {image_id}")
 
 
 @image_app.command(name="remove")
@@ -231,14 +500,6 @@ def image_rm(
 
 
 def _format_bin_row(bv: BinaryVersion) -> list[str]:
-    """Return a table row for a binary version entry.
-
-    Args:
-        bv: The binary version to format.
-
-    Returns:
-        A three-element list containing the active marker, version string, and path.
-    """
     active = "✓" if bv.is_active else " "
     return [active, bv.version, str(bv.firecracker_path)]
 
@@ -246,7 +507,7 @@ def _format_bin_row(bv: BinaryVersion) -> list[str]:
 @bin_app.command(name="ls")
 def bin_ls(
     remote: bool = typer.Option(False, "--remote", "-r", help="Also show remote versions"),
-    limit: int = typer.Option(10, "--limit", help="Max remote versions to show"),
+    limit: int = typer.Option(5, "--limit", help="Max remote versions to show"),
 ) -> None:
     """List local (and optionally remote) Firecracker versions."""
     local = list_local_versions()

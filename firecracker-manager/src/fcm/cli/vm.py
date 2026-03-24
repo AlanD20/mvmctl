@@ -1,7 +1,6 @@
-"""VM lifecycle commands."""
-
 import json
 from pathlib import Path
+from typing import Optional
 
 import typer
 from rich.table import Table
@@ -33,30 +32,69 @@ def help_cmd(ctx: typer.Context) -> None:
     raise typer.Exit()
 
 
+def _resolve_default_image() -> str | None:
+    try:
+        from fcm.core.cli_state import get_cli_state_value
+
+        val = get_cli_state_value("default_image")
+        return str(val) if val is not None else None
+    except Exception:
+        return None
+
+
+def _resolve_default_kernel() -> str | None:
+    try:
+        from fcm.core.kernel import get_default_kernel_path
+        from fcm.utils.fs import get_kernels_dir
+
+        path = get_default_kernel_path(get_kernels_dir())
+        return str(path) if path else None
+    except Exception:
+        return None
+
+
+def _resolve_active_firecracker_bin() -> str:
+    try:
+        from fcm.core.cli_state import get_cli_state_value
+
+        stored = get_cli_state_value("active_firecracker_bin")
+        if stored is not None and Path(str(stored)).exists():
+            return str(stored)
+        from fcm.core.binary_manager import list_local_versions
+
+        local = list_local_versions()
+        active = next((b for b in local if b.is_active), None)
+        if active:
+            return str(active.firecracker_path)
+    except Exception:
+        pass
+    return "firecracker"
+
+
 @app.command()
 def create(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    image: str = typer.Option(
-        ..., "--image", help="Image ID (from `fcm image ls`) or path to .ext4 file"
+    image: Optional[str] = typer.Option(
+        None, "--image", help="Image ID or path to .ext4 file (required if no default image)"
     ),
-    kernel: str | None = typer.Option(
+    kernel: Optional[str] = typer.Option(
         None,
         "--kernel",
-        help="Path to vmlinux kernel (default: FCM_KERNEL or ~/.cache/firecracker-manager/kernels/vmlinux)",
+        help="Path to vmlinux kernel (default: active default kernel or FCM_KERNEL env var)",
     ),
     vcpus: int = typer.Option(2, "--vcpus", "--cpus", help="Number of vCPUs"),
     mem: int = typer.Option(2048, "--mem", "--memory", help="Memory in MiB"),
-    ip: str | None = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
+    ip: Optional[str] = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
     network_name: str = typer.Option(
         DEFAULT_NETWORK_NAME, "--network", "--net", help="Named network to attach to"
     ),
-    mac: str | None = typer.Option(
+    mac: Optional[str] = typer.Option(
         None, "--mac", help="Custom MAC address (auto-generated if omitted)"
     ),
-    ssh_key: str | None = typer.Option(
+    ssh_key: Optional[str] = typer.Option(
         None, "--ssh-key", help="SSH public key name (from key cache) or file path"
     ),
-    user_data: Path | None = typer.Option(
+    user_data: Optional[Path] = typer.Option(
         None, "--user-data", help="Path to custom cloud-init user-data file"
     ),
     user: str = typer.Option("root", "--user", help="Default SSH user for cloud-init"),
@@ -64,11 +102,11 @@ def create(
         False, "--enable-api-socket", help="Enable Firecracker HTTP API socket"
     ),
     enable_pci: bool = typer.Option(False, "--enable-pci", help="Enable PCI device support"),
-    firecracker_bin: str = typer.Option(
-        "firecracker",
+    firecracker_bin: Optional[str] = typer.Option(
+        None,
         "--firecracker-bin",
         envvar="FCM_FIRECRACKER_BIN",
-        help="Path to firecracker binary",
+        help="Path to firecracker binary (default: active version from fcm bin use)",
     ),
 ) -> None:
     """Create and start a new Firecracker VM.
@@ -86,6 +124,20 @@ def create(
         # Create with API socket for snapshot support:
         fcm vm create --name myvm --image ubuntu-24.04 --enable-api-socket
     """
+    if image is None:
+        image = _resolve_default_image()
+        if image is None:
+            print_error(
+                "No --image specified and no default image set. "
+                "Use 'fcm image fetch <name>' then 'fcm image set-default <name>', or pass --image."
+            )
+            raise typer.Exit(code=1)
+
+    if kernel is None:
+        kernel = _resolve_default_kernel()
+
+    effective_bin = firecracker_bin or _resolve_active_firecracker_bin()
+
     try:
         vm = create_vm(
             name=name,
@@ -101,7 +153,7 @@ def create(
             user=user,
             enable_api_socket=enable_api_socket,
             enable_pci=enable_pci,
-            firecracker_bin=firecracker_bin,
+            firecracker_bin=effective_bin,
         )
         from fcm.utils.audit import log_audit
 
@@ -231,18 +283,68 @@ def list_vms_cmd(
     ls_vms(json_output=json_output, all_vms=all_vms)
 
 
+@app.command(name="ps")
+def ps_vms(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    all_vms: bool = typer.Option(False, "--all", "-a", help="Show all VMs including stopped"),
+) -> None:
+    """List running VMs (alias for ls)."""
+    ls_vms(json_output=json_output, all_vms=all_vms)
+
+
+def _find_ssh_key_from_path(key_path: Path) -> Path | None:
+    if key_path.is_file():
+        return key_path
+    if key_path.is_dir():
+        for candidate in sorted(key_path.iterdir()):
+            if (
+                candidate.is_file()
+                and candidate.suffix != ".pub"
+                and not candidate.name.startswith(".")
+            ):
+                return candidate
+    return None
+
+
+def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
+    if key is not None:
+        resolved = _find_ssh_key_from_path(key)
+        if resolved is None:
+            raise FCMError(f"No SSH key found at: {key}")
+        return resolved
+    fcm_keys_dir = Path.home() / ".cache" / "firecracker-manager" / "keys"
+    if fcm_keys_dir.exists():
+        for f in sorted(fcm_keys_dir.iterdir()):
+            if f.is_file() and f.suffix != ".pub" and not f.name.startswith("."):
+                return f
+    ssh_dir = Path.home() / ".ssh"
+    if ssh_dir.exists():
+        for f in sorted(ssh_dir.iterdir()):
+            if (
+                f.is_file()
+                and not f.name.endswith(".pub")
+                and not f.name.startswith(".")
+                and f.name not in ("known_hosts", "config", "authorized_keys")
+            ):
+                return f
+    return None
+
+
 @app.command()
 def ssh(
     name: str = typer.Option(..., "--name", "-n", help="VM name or IP address"),
     user: str = typer.Option("root", "--user", "-u", help="SSH user"),
-    key: Path | None = typer.Option(None, "--key", help="SSH key path"),
-    cmd: str | None = typer.Option(None, "--cmd", "-c", help="Command to execute"),
+    key: Optional[Path] = typer.Option(
+        None, "--key", help="SSH private key file or directory of keys"
+    ),
+    cmd: Optional[str] = typer.Option(None, "--cmd", "-c", help="Command to execute"),
 ) -> None:
     """Open an SSH session into a VM."""
     try:
         if not is_ip_address(name):
             validate_entity_name(name, "VM")
-        exit_code = ssh_vm(name=name, user=user, key=key, cmd=cmd)
+        resolved_key = _resolve_ssh_key_for_vm(key)
+        exit_code = ssh_vm(name=name, user=user, key=resolved_key, cmd=cmd)
         raise typer.Exit(code=exit_code)
     except FCMError as e:
         print_error(str(e))
@@ -276,15 +378,7 @@ def logs(
         raise typer.Exit(code=1)
 
 
-@app.command()
-def cleanup(
-    all_vms: bool = typer.Option(False, "--all", help="Remove all VMs, not just stopped"),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show what would be removed without deleting"
-    ),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-) -> None:
-    """Remove stopped VMs and stale directories."""
+def _do_prune(all_vms: bool, dry_run: bool, force: bool) -> None:
     manager = list_vms(include_stopped=True)
     targets = manager if all_vms else [v for v in manager if v.status != VMState.RUNNING]
 
@@ -306,6 +400,33 @@ def cleanup(
     cleanup_vms(all_vms=all_vms, dry_run=False)
     for v in targets:
         print_success(f"Removed VM '{v.name}'")
+
+
+@app.command()
+def prune(
+    all_vms: bool = typer.Option(False, "--all", help="Remove all VMs, not just stopped"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be removed without deleting"
+    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Remove stopped VMs and stale directories."""
+    _do_prune(all_vms=all_vms, dry_run=dry_run, force=force)
+
+
+@app.command(hidden=True)
+def cleanup(
+    all_vms: bool = typer.Option(False, "--all", help="Remove all VMs, not just stopped"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be removed without deleting"
+    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+) -> None:
+    """Deprecated alias for prune."""
+    from fcm.utils.console import print_warning
+
+    print_warning("'fcm vm cleanup' is deprecated. Use 'fcm vm prune' instead.")
+    _do_prune(all_vms=all_vms, dry_run=dry_run, force=force)
 
 
 @app.command()

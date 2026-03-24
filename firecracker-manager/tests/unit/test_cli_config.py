@@ -85,7 +85,28 @@ def test_dump_vm_success(tmp_path: Path):
 
 
 def test_dump_vm_not_found(tmp_path: Path):
-    """Test 'config dump-vm' exits 1 when VM dir doesn't exist."""
     with patch("fcm.cli.config.get_vm_dir", return_value=tmp_path / "nonexistent"):
         result = runner.invoke(app, ["dump-vm", "--name", "ghost"])
         assert result.exit_code == 1
+
+
+def test_config_set(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FCM_CONFIG", str(tmp_path / "config.yaml"))
+    result = runner.invoke(app, ["set", "network_interface", "wlo0"])
+    assert result.exit_code == 0
+    assert "wlo0" in result.output
+
+
+def test_config_get_existing(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FCM_CONFIG", str(tmp_path / "config.yaml"))
+    runner.invoke(app, ["set", "network_interface", "eth0"])
+    result = runner.invoke(app, ["get", "network_interface"])
+    assert result.exit_code == 0
+    assert "eth0" in result.output
+
+
+def test_config_get_missing(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FCM_CONFIG", str(tmp_path / "config.yaml"))
+    result = runner.invoke(app, ["get", "nonexistent_key"])
+    assert result.exit_code == 0
+    assert "not set" in result.output

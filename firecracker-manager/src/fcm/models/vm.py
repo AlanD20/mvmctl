@@ -82,14 +82,13 @@ class VMInstance:
         config: Original VM configuration used to launch this instance.
     """
 
-    name: str  # VM name (matches VMConfig.name)
-    pid: int | None = None  # PID of the running firecracker process (None if stopped)
-    socket_path: Path | None = None  # Path to Firecracker API socket (if enabled)
-    ip: str | None = None  # Assigned guest IP address
-    mac: str | None = None  # Assigned guest MAC address
-    network_name: str | None = None  # Name of the attached named network (if any)
-    created_at: datetime = field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
-    )  # Creation timestamp (UTC)
-    status: VMState = VMState.STOPPED  # Current lifecycle state
-    config: VMConfig | None = None  # Original VM configuration used to launch this instance
+    name: str
+    pid: int | None = None
+    socket_path: Path | None = None
+    ip: str | None = None
+    mac: str | None = None
+    network_name: str | None = None
+    tap_device: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    status: VMState = VMState.STOPPED
+    config: VMConfig | None = None

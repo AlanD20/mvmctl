@@ -102,8 +102,11 @@ def get_key(name: str) -> KeyInfo | None:
     return KeyInfo(**entry)
 
 
+def _looks_like_private_key(content: str) -> bool:
+    return "BEGIN" in content and "PRIVATE KEY" in content
+
+
 def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> KeyInfo:
-    """Import an existing public key into the cache."""
     pub_key_path = Path(pub_key_path)
     if not pub_key_path.exists():
         raise FCMKeyError(f"Public key file not found: {pub_key_path}")
@@ -111,6 +114,18 @@ def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> Key
     content = pub_key_path.read_text().strip()
     if not content:
         raise FCMKeyError(f"Public key file is empty: {pub_key_path}")
+
+    if _looks_like_private_key(content):
+        pub_path = Path(str(pub_key_path) + ".pub")
+        if pub_path.exists():
+            raise FCMKeyError(
+                f"'{pub_key_path}' looks like a private key.\n"
+                f"Use the public key instead: fcm key add {name} {pub_path}"
+            )
+        raise FCMKeyError(
+            f"'{pub_key_path}' looks like a private key.\n"
+            f"Pass the corresponding .pub file instead: fcm key add {name} <path>.pub"
+        )
 
     registry = _load_registry()
     if name in registry:
