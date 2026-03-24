@@ -1,6 +1,6 @@
 """Unit tests for vm_lifecycle helper functions (no KVM/subprocess required)."""
 
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 
 from fcm.core.vm_lifecycle import cleanup_tap, graceful_shutdown
@@ -45,7 +45,7 @@ def test_cleanup_tap_success() -> None:
         patch("fcm.core.vm_lifecycle.delete_tap") as mock_del,
     ):
         cleanup_tap("fc-vm1-0")
-        mock_rules.assert_called_once_with("fc-vm1-0")
+        mock_rules.assert_called_once_with("fc-vm1-0", bridge=ANY)
         mock_del.assert_called_once_with("fc-vm1-0")
 
 

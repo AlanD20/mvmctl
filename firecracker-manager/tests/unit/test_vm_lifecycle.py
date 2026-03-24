@@ -161,6 +161,8 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
 
 @patch("fcm.core.vm_lifecycle.get_vm_manager")
 @patch("fcm.core.vm_lifecycle.graceful_shutdown")
+@patch("fcm.core.vm_lifecycle.teardown_nat")
+@patch("fcm.core.vm_lifecycle.get_network")
 @patch("fcm.core.vm_lifecycle.remove_iptables_forward_rules")
 @patch("fcm.core.vm_lifecycle.delete_tap")
 @patch("fcm.core.vm_lifecycle.release_network_ip")
@@ -176,6 +178,8 @@ def test_remove_vm_success(
     mock_rel_ip,
     mock_del_tap,
     mock_rm_rules,
+    mock_get_net,
+    mock_teardown_nat,
     mock_graceful,
     mock_mgr,
 ):
@@ -187,6 +191,11 @@ def test_remove_vm_success(
     mock_manager.get.return_value = vm
     mock_mgr.return_value = mock_manager
 
+    net_cfg = MagicMock()
+    net_cfg.bridge = "fcm-default"
+    net_cfg.nat_enabled = True
+    mock_get_net.return_value = net_cfg
+
     mock_read_pid.return_value = 123
 
     mock_vm_dir_ret = MagicMock()
@@ -196,11 +205,61 @@ def test_remove_vm_success(
     remove_vm("myvm")
 
     mock_graceful.assert_called_once_with(123, None)
-    mock_rm_rules.assert_called_once()
+    _, rm_kwargs = mock_rm_rules.call_args
+    assert rm_kwargs.get("bridge") == "fcm-default"
     mock_del_tap.assert_called_once()
+    mock_teardown_nat.assert_called_once_with(bridge="fcm-default", force=False)
     mock_rel_ip.assert_called_once()
     mock_manager.deregister.assert_called_once()
     mock_rmtree.assert_called_once_with(mock_vm_dir_ret)
+
+
+@patch("fcm.core.vm_lifecycle.get_vm_manager")
+@patch("fcm.core.vm_lifecycle.graceful_shutdown")
+@patch("fcm.core.vm_lifecycle.teardown_nat")
+@patch("fcm.core.vm_lifecycle.get_network")
+@patch("fcm.core.vm_lifecycle.remove_iptables_forward_rules")
+@patch("fcm.core.vm_lifecycle.delete_tap")
+@patch("fcm.core.vm_lifecycle.release_network_ip")
+@patch("fcm.core.vm_lifecycle.subprocess.run")
+@patch("fcm.core.vm_lifecycle.shutil.rmtree")
+@patch("fcm.core.vm_lifecycle.get_vm_dir")
+@patch("fcm.core.vm_lifecycle._read_pid_file")
+def test_remove_vm_no_nat_skips_teardown(
+    mock_read_pid,
+    mock_get_vm_dir,
+    mock_rmtree,
+    mock_run,
+    mock_rel_ip,
+    mock_del_tap,
+    mock_rm_rules,
+    mock_get_net,
+    mock_teardown_nat,
+    mock_graceful,
+    mock_mgr,
+):
+    mock_manager = MagicMock()
+    vm = VMInstance(
+        name="vm2", ip="10.20.0.6", pid=456, status=VMState.RUNNING, network_name="isolated"
+    )
+    mock_manager.get.return_value = vm
+    mock_mgr.return_value = mock_manager
+
+    net_cfg = MagicMock()
+    net_cfg.bridge = "fcm-isolated"
+    net_cfg.nat_enabled = False
+    mock_get_net.return_value = net_cfg
+
+    mock_read_pid.return_value = 456
+    mock_vm_dir_ret = MagicMock()
+    mock_vm_dir_ret.exists.return_value = True
+    mock_get_vm_dir.return_value = mock_vm_dir_ret
+
+    remove_vm("vm2")
+
+    _, rm_kwargs = mock_rm_rules.call_args
+    assert rm_kwargs.get("bridge") == "fcm-isolated"
+    mock_teardown_nat.assert_not_called()
 
 
 @patch("fcm.core.vm_lifecycle.get_vm_socket_path")

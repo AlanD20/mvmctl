@@ -120,3 +120,6 @@ Additional requirements to not miss!
 - when running `fcm host init`, it escalates to root and creates the network as root, but the networks state files are also in root which is causing the cache/networks/default/config.json to be unreadable by current user. Only execute networking commands in escalated privileges, creating those files must be under current user.
 - rename the `id` column to image id in `fcm image ls -r`
 - the `fcm network rm` does not remove the NAT for the bridge. Also ensure whem vm is removed, the tap device is removed from nat.
+
+- go through all the commands, any command that shows date/time, it must be relative, if greater than a week, then show the date and time in a friendly standard format. This must be applied to every command!
+- 

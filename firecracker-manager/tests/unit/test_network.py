@@ -298,14 +298,14 @@ def test_setup_nat_auto_detect_interface():
 
 
 def test_teardown_nat_force_true_removes():
-    """teardown_nat with force=True should remove iptables rules even when TAP devices are present."""
+    """teardown_nat with force=True should remove MASQUERADE + FORWARD rules."""
     with patch("fcm.core.network.get_tap_devices", return_value=["tap0"]):
         mock_result = MagicMock()
         mock_result.returncode = 0
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("fcm.core.network.get_default_interface", return_value="eth0"):
                 teardown_nat("fc-br0", force=True)
-                mock_run.assert_called_once()
+                assert mock_run.call_count == 3
 
 
 def test_teardown_nat_tap_devices_present_skips():
@@ -318,14 +318,26 @@ def test_teardown_nat_tap_devices_present_skips():
 
 
 def test_teardown_nat_no_taps_removes():
-    """teardown_nat should remove iptables rules when no TAP devices remain on the bridge."""
+    """teardown_nat should remove MASQUERADE + bridge FORWARD rules when no TAPs remain."""
     with patch("fcm.core.network.get_tap_devices", return_value=[]):
         mock_result = MagicMock()
         mock_result.returncode = 0
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("fcm.core.network.get_default_interface", return_value="eth0"):
                 teardown_nat("fc-br0", force=False)
-                mock_run.assert_called_once()
+                assert mock_run.call_count == 3
+
+
+def test_teardown_nat_removes_forward_rules_for_correct_bridge():
+    with patch("fcm.core.network.get_tap_devices", return_value=[]):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+            with patch("fcm.core.network.get_default_interface", return_value="wlan0"):
+                teardown_nat("fcm-default", force=True)
+        calls = [str(c) for c in mock_run.call_args_list]
+        assert any("MASQUERADE" in c for c in calls)
+        assert any("fcm-default" in c and "wlan0" in c for c in calls)
 
 
 def test_teardown_nat_called_process_error():

@@ -21,6 +21,7 @@ from fcm.core.network import (
     remove_iptables_forward_rules,
     setup_bridge,
     setup_nat,
+    teardown_nat,
 )
 from fcm.core.network_manager import (
     allocate_network_ip,
@@ -37,6 +38,7 @@ import random
 import string
 
 from fcm.constants import (
+    BRIDGE_NAME,
     DEFAULT_NETWORK_NAME,
     FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
     FIRECRACKER_SIGTERM_WAIT_S,
@@ -172,9 +174,9 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
             pass
 
 
-def cleanup_tap(tap_name: str) -> None:
+def cleanup_tap(tap_name: str, bridge: str | None = None) -> None:
     try:
-        remove_iptables_forward_rules(tap_name)
+        remove_iptables_forward_rules(tap_name, bridge=bridge or BRIDGE_NAME)
         delete_tap(tap_name)
     except NetworkError:
         pass
@@ -404,7 +406,11 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
         raise VMNotFoundError(f"VM '{name}' not found")
 
     vm_dir = get_vm_dir(name)
-    tap_name = vm.tap_device or _generate_tap_name(vm.network_name or DEFAULT_NETWORK_NAME, name)
+    net_name = vm.network_name or DEFAULT_NETWORK_NAME
+    tap_name = vm.tap_device or _generate_tap_name(net_name, name)
+
+    net_config = get_network(net_name)
+    bridge = net_config.bridge if net_config else BRIDGE_NAME
 
     pid_file = vm_dir / "firecracker.pid"
     pid = _read_pid_file(pid_file)
@@ -413,13 +419,18 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
 
     graceful_shutdown(pid, vm.socket_path)
 
-    remove_iptables_forward_rules(tap_name)
+    remove_iptables_forward_rules(tap_name, bridge=bridge)
     try:
         delete_tap(tap_name)
     except NetworkError:
         pass
 
-    net_name = vm.network_name or DEFAULT_NETWORK_NAME
+    if net_config and net_config.nat_enabled:
+        try:
+            teardown_nat(bridge=bridge, force=False)
+        except NetworkError as e:
+            logger.warning("Failed to teardown NAT for bridge %s: %s", bridge, e)
+
     try:
         release_network_ip(net_name, name)
     except NetworkError as e:

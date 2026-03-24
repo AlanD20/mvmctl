@@ -217,20 +217,25 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
 
 
 def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
-    """Remove NAT rules for the bridge.
+    """Remove NAT (MASQUERADE + FORWARD) rules for the bridge.
 
-    IMPORTANT: Only removes the MASQUERADE rule if `force=True` OR no VMs
-    are currently using the bridge (i.e., no TAP devices attached to it).
+    IMPORTANT: Only removes rules if `force=True` OR no VMs are currently
+    using the bridge (i.e., no TAP devices attached to it).
     This fixes the bash PoC bug where deleting one VM removed the shared rule.
 
-    - Removes: `iptables -t nat -D POSTROUTING -o {host_iface} -j MASQUERADE`
-    - Raises NetworkError on failure.
+    Removes:
+    - `iptables -t nat -D POSTROUTING -o {host_iface} -j MASQUERADE`
+    - `iptables -D FORWARD -i {bridge} -o {host_iface} -j ACCEPT`
+    - `iptables -D FORWARD -i {host_iface} -o {bridge} -j ACCEPT`
+
+    Raises NetworkError if the MASQUERADE deletion fails.
+    FORWARD rule deletions are best-effort (ignored if missing).
     """
     if not force:
         tap_devices = get_tap_devices(bridge)
         if len(tap_devices) > 0:
             logger.debug(
-                "Skipping MASQUERADE removal: %d TAP device(s) still attached to %s",
+                "Skipping NAT teardown: %d TAP device(s) still attached to %s",
                 len(tap_devices),
                 bridge,
             )
@@ -253,7 +258,13 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
     except subprocess.CalledProcessError as e:
         raise NetworkError(f"Failed to remove MASQUERADE rule for {host_iface}: {e}") from e
 
-    logger.info("MASQUERADE NAT rule removed for %s", host_iface)
+    for rule in [
+        ["iptables", "-D", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
+        ["iptables", "-D", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
+    ]:
+        subprocess.run(_privileged_cmd(rule), capture_output=True, check=False)
+
+    logger.info("NAT rules removed for bridge %s via %s", bridge, host_iface)
 
 
 def tap_exists(tap_name: str) -> bool:
