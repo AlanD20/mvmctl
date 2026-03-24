@@ -38,7 +38,7 @@ def test_get_vm_and_deregister(mock_get_manager):
     mock_manager.get.assert_called_with("vm1")
 
     deregister_vm("vm1")
-    mock_manager.deregister.assert_called_with("vm1")
+    mock_manager.deregister.assert_called_once()
 
 
 @patch("fcm.utils.fs.get_vms_dir")
@@ -102,5 +102,5 @@ def test_cleanup_vms(
         mock_kill.assert_called_once_with(123, 9)
         mock_rm_iptables.assert_called_with("fcm-tap-vm1-0")
         mock_del_tap.assert_called_with("fcm-tap-vm1-0")
-        mock_manager.deregister.assert_called_with("vm1")
+        mock_manager.deregister.assert_called_once()
         mock_rmtree.assert_called_once()

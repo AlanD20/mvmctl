@@ -681,9 +681,21 @@ def download_firecracker_kernel(
         return output_path
 
     download_url = f"{FIRECRACKER_CI_KERNEL_S3_BASE}/{chosen_key}"
+    sha256_url = f"{download_url}.sha256"
+    expected_sha256: str | None = None
+    try:
+        req_sha = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urlopen(req_sha, timeout=15) as resp_sha:
+            content = resp_sha.read().decode().strip()
+        parts = content.split()
+        expected_sha256 = str(parts[0]).lower() if parts else None
+        logger.info("Fetched CI kernel checksum: %s", expected_sha256)
+    except (URLError, OSError):
+        logger.debug("No sha256 sidecar for CI kernel %s — proceeding without checksum", chosen_key)
+
     logger.info("Downloading Firecracker CI kernel from %s", download_url)
     try:
-        download_file(download_url, output_path, expected_sha256=None, timeout=300)
+        download_file(download_url, output_path, expected_sha256=expected_sha256, timeout=300)
     except FCMError as exc:
         raise KernelError(f"Failed to download Firecracker CI kernel: {exc}") from exc
 

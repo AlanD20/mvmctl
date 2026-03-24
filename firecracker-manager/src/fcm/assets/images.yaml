@@ -7,7 +7,8 @@ images:
     format: tar-rootfs
     convert_to: ext4
     size_mib: 2048
-    sha256: null  # Auto-detected or manually set
+    sha256: null
+    sha256_url: https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
 
   - id: ubuntu-22.04
     name: "Ubuntu 22.04 LTS (Jammy)"
@@ -16,6 +17,7 @@ images:
     convert_to: ext4
     size_mib: 2048
     sha256: null
+    sha256_url: https://cloud-images.ubuntu.com/jammy/current/SHA256SUMS
 
   - id: archlinux
     name: "Arch Linux"
@@ -24,6 +26,7 @@ images:
     convert_to: btrfs
     size_mib: 4096
     sha256: null
+    sha256_url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256
 
   - id: debian-bookworm
     name: "Debian 12 (Bookworm)"
@@ -32,6 +35,7 @@ images:
     convert_to: ext4
     size_mib: 2048
     sha256: null
+    sha256_url: https://cloud.debian.org/images/cloud/bookworm/latest/SHA256SUMS
 
   - id: ubuntu-fc
     name: "Ubuntu (Firecracker CI)"
@@ -40,3 +44,4 @@ images:
     convert_to: ext4
     size_mib: 1024
     sha256: null
+    sha256_url: null

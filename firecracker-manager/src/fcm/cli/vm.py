@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 import typer
 
@@ -294,47 +294,98 @@ def create(
 
 @app.command(name="rm")
 def rm(
-    id_or_name: Optional[str] = typer.Argument(None, help="VM ID (short) or name to remove"),
-    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name to remove"),
+    ids: Optional[List[str]] = typer.Argument(None, help="VM short IDs (first 6 chars) to remove"),
+    name: List[str] = typer.Option(
+        [], "--name", "-n", help="VM name to remove (can be specified multiple times)"
+    ),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
-    """Stop and remove a VM by ID or name."""
-    target = name or id_or_name
-    if target is None:
-        print_error("Provide a VM ID or --name")
-        raise typer.Exit(code=1)
+    """Stop and remove VMs by short ID or name.
 
-    try:
-        vms = list_vms(include_stopped=True)
+    Examples:
+        # Remove by short ID:
+        fcm vm rm abc123 def456
 
-        exact = [v for v in vms if v.name == target]
+        # Remove by name (prompts if multiple with same name):
+        fcm vm rm --name runner1 --name runner2
+    """
+    from fcm.core.vm_manager import get_vm_manager
 
-        if not exact:
-            print_error(f"VM '{target}' not found")
-            raise typer.Exit(code=1)
+    manager = get_vm_manager()
+    targets: list[VMInstance] = []
+    errors: list[str] = []
 
-        if len(exact) == 1:
-            vm = exact[0]
+    effective_ids: list[str] = list(ids) if ids else []
+
+    # Resolve short IDs
+    for short_id in effective_ids:
+        matches = manager.find_by_short_id(short_id)
+        if len(matches) == 0:
+            errors.append(f"No VM found with short ID '{short_id}'")
+        elif len(matches) > 1:
+            errors.append(f"Multiple VMs match short ID '{short_id}' — use a longer prefix or name")
         else:
-            print_info(f"Multiple VMs found with name '{target}':")
-            for i, v in enumerate(exact, 1):
-                print_info(f"  {i}. {v.name} (IP: {v.ip or '-'}, status: {v.status.value})")
-            choice = typer.prompt(f"Select VM to remove (1-{len(exact)})", type=int)
-            if choice < 1 or choice > len(exact):
+            targets.append(matches[0])
+
+    # Resolve names
+    for n in name:
+        matches = manager.get_by_name(n)
+        if len(matches) == 0:
+            errors.append(f"No VM found with name '{n}'")
+        elif len(matches) > 1:
+            print_info(f"Multiple VMs found with name '{n}':")
+            for i, v in enumerate(matches, 1):
+                print_info(
+                    f"  {i}. {v.name} (ID: {v.id[:6] if v.id else '-'}, IP: {v.ip or '-'}, status: {v.status.value})"
+                )
+            choice = typer.prompt(f"Select VM to remove (1-{len(matches)})", type=int)
+            if choice < 1 or choice > len(matches):
                 print_error("Invalid selection")
                 raise typer.Exit(code=1)
-            vm = exact[choice - 1]
+            targets.append(matches[choice - 1])
+        else:
+            targets.append(matches[0])
 
-        if not force:
-            typer.confirm(f"Remove VM '{vm.name}' (IP: {vm.ip})?", abort=True)
+    if not targets and not errors:
+        print_error("Provide at least one VM short ID or --name")
+        raise typer.Exit(code=1)
 
-        remove_vm(vm.name)
-        from fcm.utils.audit import log_audit
+    if errors:
+        for err in errors:
+            print_error(err)
+        if not targets:
+            raise typer.Exit(code=1)
 
-        log_audit("vm.remove", f"name={vm.name}")
-        print_success(f"VM '{vm.name}' removed")
-    except FCMError as e:
-        print_error(str(e))
+    # Deduplicate targets by ID
+    seen_ids: set[str] = set()
+    unique_targets: list[VMInstance] = []
+    for vm in targets:
+        if vm.id not in seen_ids:
+            seen_ids.add(vm.id)
+            unique_targets.append(vm)
+    targets = unique_targets
+
+    if not force:
+        target_names = [
+            f"{vm.name} (ID: {vm.id[:6] if vm.id else '-'}, IP: {vm.ip or '-'})" for vm in targets
+        ]
+        typer.confirm(
+            f"Remove {len(targets)} VM(s):\n  " + "\n  ".join(target_names) + "?", abort=True
+        )
+
+    removed_count = 0
+    for vm in targets:
+        try:
+            remove_vm(vm.name)
+            from fcm.utils.audit import log_audit
+
+            log_audit("vm.remove", f"name={vm.name}")
+            print_success(f"VM '{vm.name}' removed")
+            removed_count += 1
+        except FCMError as e:
+            print_error(f"Failed to remove VM '{vm.name}': {e}")
+
+    if removed_count == 0 and targets:
         raise typer.Exit(code=1)
 
 
@@ -349,6 +400,7 @@ def ls_vms(
     if json_output:
         data = [
             {
+                "id": v.id[:6] if v.id else "-",
                 "name": v.name,
                 "ip": v.ip,
                 "mac": v.mac,
@@ -373,6 +425,7 @@ def ls_vms(
 def _build_vm_table(vms: list[VMInstance]) -> Table:
     """Build a Rich Table displaying VM information."""
     table = Table(title="Firecracker VMs")
+    table.add_column("ID", style="magenta", no_wrap=True)
     table.add_column("Name", style="cyan", no_wrap=True)
     table.add_column("IP", style="green")
     table.add_column("Status", style="bold")
@@ -390,7 +443,9 @@ def _build_vm_table(vms: list[VMInstance]) -> Table:
         status_str = status_colors.get(v.status, v.status.value)
         created = v.created_at.strftime("%Y-%m-%d %H:%M") if v.created_at else "-"
         api_str = "[green]on[/green]" if v.socket_path else "[dim]off[/dim]"
+        short_id = v.id[:6] if v.id else "-"
         table.add_row(
+            short_id,
             v.name,
             v.ip or "-",
             status_str,

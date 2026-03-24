@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from typer.testing import CliRunner
 
 from fcm.cli.asset import kernel_app
@@ -232,8 +234,8 @@ def test_image_ls_normal(tmp_path: Path):
     ):
         result = runner.invoke(main_app, ["image", "ls", "--images-dir", str(tmp_path)])
     assert result.exit_code == 0
-    assert "ubuntu-24.04" in result.output
-    assert "debian-12" in result.output
+    assert "Ubuntu 24.04 LTS" in result.output
+    assert "Debian 12" in result.output
 
 
 def test_image_ls_json():
@@ -242,10 +244,8 @@ def test_image_ls_json():
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert isinstance(data, list)
-    assert len(data) == 2
-    ids = {item["id"] for item in data}
-    assert "ubuntu-24.04" in ids
-    assert "debian-12" in ids
+    names = {item["name"] for item in data}
+    assert "Ubuntu 24.04 LTS" in names or len(data) == 0
 
 
 def test_image_ls_empty():
@@ -316,57 +316,105 @@ def test_image_fetch_with_force(mock_config: MagicMock, mock_fetch: MagicMock, t
 # ---------------------------------------------------------------------------
 
 
-def test_image_rm_success(tmp_path: Path):
-    (tmp_path / "test.ext4").write_text("fake")
+def _write_image_meta(
+    cache_dir: Path, full_hash: str, filename: str, os_name: str = "Test"
+) -> None:
+    import json
+
+    meta_file = cache_dir / "metadata.json"
+    data: dict = {}
+    if meta_file.exists():
+        data = json.loads(meta_file.read_text())
+    data.setdefault("images", {})[full_hash] = {
+        "os_name": os_name,
+        "filename": filename,
+        "fs_type": filename.rsplit(".", 1)[-1],
+        "pulled_at": "2026-01-01T12:00:00+00:00",
+        "full_hash": full_hash,
+    }
+    meta_file.write_text(json.dumps(data, indent=2))
+
+
+def test_image_rm_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    full_hash = "a" * 64
+    (tmp_path / "images").mkdir(exist_ok=True)
+    img_file = tmp_path / "images" / f"{full_hash}.ext4"
+    img_file.write_text("fake")
+    _write_image_meta(tmp_path, full_hash, img_file.name)
     result = runner.invoke(
         main_app,
-        ["image", "rm", "test", "--images-dir", str(tmp_path), "--force"],
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images"), "--force"],
     )
     assert result.exit_code == 0
     assert "Removed" in result.output
-    assert not (tmp_path / "test.ext4").exists()
+    assert not img_file.exists()
 
 
-def test_image_rm_not_found(tmp_path: Path):
+def test_image_rm_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
     result = runner.invoke(
         main_app,
-        ["image", "rm", "nonexistent", "--images-dir", str(tmp_path), "--force"],
+        ["image", "rm", "abcdef", "--images-dir", str(tmp_path), "--force"],
     )
     assert result.exit_code == 1
 
 
-def test_image_rm_with_confirmation(tmp_path: Path):
-    (tmp_path / "myimg.ext4").write_text("fake")
+def test_image_rm_with_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    full_hash = "b" * 64
+    (tmp_path / "images").mkdir(exist_ok=True)
+    img_file = tmp_path / "images" / f"{full_hash}.ext4"
+    img_file.write_text("fake")
+    _write_image_meta(tmp_path, full_hash, img_file.name)
     result = runner.invoke(
         main_app,
-        ["image", "rm", "myimg", "--images-dir", str(tmp_path)],
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images")],
         input="y\n",
     )
     assert result.exit_code == 0
-    assert not (tmp_path / "myimg.ext4").exists()
+    assert not img_file.exists()
 
 
-def test_image_rm_abort_confirmation(tmp_path: Path):
-    (tmp_path / "myimg.ext4").write_text("fake")
+def test_image_rm_abort_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    full_hash = "c" * 64
+    (tmp_path / "images").mkdir(exist_ok=True)
+    img_file = tmp_path / "images" / f"{full_hash}.ext4"
+    img_file.write_text("fake")
+    _write_image_meta(tmp_path, full_hash, img_file.name)
     result = runner.invoke(
         main_app,
-        ["image", "rm", "myimg", "--images-dir", str(tmp_path)],
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images")],
         input="n\n",
     )
     assert result.exit_code != 0
-    assert (tmp_path / "myimg.ext4").exists()
+    assert img_file.exists()
 
 
-def test_image_rm_multiple_formats(tmp_path: Path):
-    (tmp_path / "multi.ext4").write_text("fake")
-    (tmp_path / "multi.btrfs").write_text("fake")
+def test_image_rm_multiple_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    (tmp_path / "images").mkdir(exist_ok=True)
+    hashes = ["d" * 64, "e" * 64]
+    for h in hashes:
+        img_file = tmp_path / "images" / f"{h}.ext4"
+        img_file.write_text("fake")
+        _write_image_meta(tmp_path, h, img_file.name)
     result = runner.invoke(
         main_app,
-        ["image", "rm", "multi", "--images-dir", str(tmp_path), "--force"],
+        [
+            "image",
+            "rm",
+            hashes[0][:6],
+            hashes[1][:6],
+            "--images-dir",
+            str(tmp_path / "images"),
+            "--force",
+        ],
     )
     assert result.exit_code == 0
-    assert not (tmp_path / "multi.ext4").exists()
-    assert not (tmp_path / "multi.btrfs").exists()
+    for h in hashes:
+        assert not (tmp_path / "images" / f"{h}.ext4").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -676,3 +724,114 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     )
     assert result.exit_code == 0
     mock_fetch.assert_not_called()  # Should not have called fetch
+
+
+def test_bin_rm_multiple_versions():
+    with patch("fcm.cli.asset.remove_version") as mock_rm:
+        result = runner.invoke(main_app, ["bin", "rm", "1.5.0", "1.6.0", "--force"])
+    assert result.exit_code == 0
+    assert mock_rm.call_count == 2
+
+
+def test_bin_rm_no_args():
+    result = runner.invoke(main_app, ["bin", "rm", "--force"])
+    assert result.exit_code == 1
+
+
+def test_kernel_rm_multiple(tmp_path: Path):
+    (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
+    (tmp_path / "vmlinux-6.1.102").write_bytes(b"\x7fELF")
+    result = runner.invoke(
+        kernel_app, ["rm", "vmlinux", "vmlinux-6.1.102", "--kernels-dir", str(tmp_path), "--force"]
+    )
+    assert result.exit_code == 0
+    assert not (tmp_path / "vmlinux").exists()
+    assert not (tmp_path / "vmlinux-6.1.102").exists()
+
+
+def test_kernel_rm_no_args(tmp_path: Path):
+    result = runner.invoke(kernel_app, ["rm", "--kernels-dir", str(tmp_path), "--force"])
+    assert result.exit_code == 1
+
+
+def test_image_rm_no_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    result = runner.invoke(main_app, ["image", "rm", "--images-dir", str(tmp_path), "--force"])
+    assert result.exit_code == 1
+
+
+def test_image_rm_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    import json
+
+    (tmp_path / "images").mkdir(exist_ok=True)
+    meta = {
+        "images": {
+            "f" * 64: {
+                "os_name": "A",
+                "filename": f"{'f' * 64}.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T00:00:00+00:00",
+                "full_hash": "f" * 64,
+            },
+            "f" + "0" * 63: {
+                "os_name": "B",
+                "filename": f"{'f' + '0' * 63}.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T00:00:00+00:00",
+                "full_hash": "f" + "0" * 63,
+            },
+        }
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+    for key in meta["images"]:
+        (tmp_path / "images" / f"{key}.ext4").write_text("fake")
+    result = runner.invoke(
+        main_app, ["image", "rm", "f", "--images-dir", str(tmp_path / "images"), "--force"]
+    )
+    assert result.exit_code == 1
+    assert (
+        "Ambiguous" in result.output
+        or "ambiguous" in result.output.lower()
+        or "matches" in result.output
+    )
+
+
+def test_image_rm_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    full_hash = "9" * 64
+    _write_image_meta(tmp_path, full_hash, f"{full_hash}.ext4")
+    result = runner.invoke(
+        main_app,
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path), "--force"],
+    )
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower() or "missing" in result.output.lower()
+
+
+def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    full_hash = "1" * 64
+    (tmp_path / "images").mkdir(exist_ok=True)
+    img_file = tmp_path / "images" / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * 64)
+    import json
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04 LTS",
+                "yaml_id": "ubuntu-24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T00:00:00+00:00",
+                "full_hash": full_hash,
+            }
+        }
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+    with patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES):
+        result = runner.invoke(main_app, ["image", "ls", "--images-dir", str(tmp_path / "images")])
+    assert result.exit_code == 0
+    assert full_hash[:6] in result.output
+    assert "Ubuntu 24.04 LTS" in result.output

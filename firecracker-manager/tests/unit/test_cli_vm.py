@@ -52,14 +52,21 @@ def test_list_vms_all_flag(mocker: MockerFixture):
 
 
 def test_rm_vm_not_found(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[])
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.get_by_name.return_value = []
+    mock_mgr.find_by_short_id.return_value = []
+    mocker.patch("fcm.core.vm_manager.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm", "--name", "nonexistent", "--force"])
     assert result.exit_code == 1
 
 
 def test_rm_force_running_vm(mocker: MockerFixture):
     vm = _make_vm("delvm", VMState.RUNNING)
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[vm])
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.get_by_name.return_value = [vm]
+    mock_mgr.find_by_short_id.return_value = []
+    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
     mocker.patch("fcm.cli.vm.remove_vm")
     result = runner.invoke(app, ["rm", "--name", "delvm", "--force"])
     assert result.exit_code == 0
@@ -451,6 +458,39 @@ def test_ps_all_flag(mocker: MockerFixture):
     assert result.exit_code == 0
     assert "running" in result.output
     assert "stopped" in result.output
+
+
+def test_rm_by_short_id(mocker: MockerFixture):
+    vm = _make_vm("myvm")
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.find_by_short_id.return_value = [vm]
+    mock_mgr.get_by_name.return_value = []
+    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
+    mocker.patch("fcm.cli.vm.remove_vm")
+    result = runner.invoke(app, ["rm", "abc123", "--force"])
+    assert result.exit_code == 0
+    assert "myvm" in result.output
+
+
+def test_rm_multiple_names(mocker: MockerFixture):
+    vm1 = _make_vm("vm1")
+    vm2 = _make_vm("vm2")
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.find_by_short_id.return_value = []
+    mock_mgr.get_by_name.side_effect = lambda n: [vm1] if n == "vm1" else [vm2]
+    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
+    mocker.patch("fcm.cli.vm.remove_vm")
+    result = runner.invoke(app, ["rm", "--name", "vm1", "--name", "vm2", "--force"])
+    assert result.exit_code == 0
+
+
+def test_rm_no_targets(mocker: MockerFixture):
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.find_by_short_id.return_value = []
+    mock_mgr.get_by_name.return_value = []
+    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
+    result = runner.invoke(app, ["rm", "--force"])
+    assert result.exit_code == 1
 
 
 def test_prune_no_stopped(mocker: MockerFixture):

@@ -56,7 +56,11 @@ def get_vm(name: str, vm_manager: VMManager | None = None) -> VMInstance | None:
 def deregister_vm(name: str, vm_manager: VMManager | None = None) -> None:
     """Remove a VM from the registry without tearing down its resources."""
     manager = vm_manager or get_vm_manager()
-    manager.deregister(name)
+    vm = manager.get(name)
+    if vm is not None:
+        manager.deregister(vm.id)
+    else:
+        manager.deregister(name)
 
 
 def vm_cache_dir(name: str) -> Path:
@@ -132,7 +136,7 @@ def cleanup_vms(
         except NetworkError:
             pass
 
-        manager.deregister(v.name)
+        manager.deregister(v.id if v.id else v.name)
 
         if vm_dir.exists():
             shutil.rmtree(vm_dir)

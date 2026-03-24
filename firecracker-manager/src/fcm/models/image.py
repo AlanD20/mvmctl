@@ -6,8 +6,6 @@ from pathlib import Path
 
 @dataclass
 class ImageSpec:
-    """Image specification for download and conversion."""
-
     id: str
     name: str
     source: str
@@ -15,6 +13,7 @@ class ImageSpec:
     convert_to: str
     size_mib: int
     sha256: str | None = None
+    sha256_url: str | None = None
 
 
 @dataclass

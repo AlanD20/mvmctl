@@ -79,6 +79,7 @@ class VMInstance:
 
     Attributes:
         name: VM name (matches VMConfig.name).
+        id: Full 64-char SHA256 hex string (unique identifier).
         pid: PID of the running firecracker process (None if stopped).
         socket_path: Path to Firecracker API socket (if enabled).
         ip: Assigned guest IP address.
@@ -90,6 +91,7 @@ class VMInstance:
     """
 
     name: str
+    id: str = ""  # Full 64-char SHA256 hex string
     pid: int | None = None
     socket_path: Path | None = None
     ip: str | None = None

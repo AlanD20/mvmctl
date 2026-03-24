@@ -138,6 +138,27 @@ def remove_image_entry(cache_dir: Path, image_id: str) -> None:
             write_metadata(cache_dir, data)
 
 
+def find_image_by_short_id(cache_dir: Path, short_id: str) -> tuple[str, dict[str, Any]] | None:
+    """Find an image entry whose key starts with short_id. Returns (full_key, meta) or None."""
+    data = read_metadata(cache_dir)
+    images = data.get("images", {})
+    if not isinstance(images, dict):
+        return None
+    matches = [(k, v) for k, v in images.items() if k.startswith(short_id) and isinstance(v, dict)]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def find_images_by_short_id(cache_dir: Path, short_id: str) -> list[tuple[str, dict[str, Any]]]:
+    """Return all image entries whose key starts with short_id."""
+    data = read_metadata(cache_dir)
+    images = data.get("images", {})
+    if not isinstance(images, dict):
+        return []
+    return [(k, v) for k, v in images.items() if k.startswith(short_id) and isinstance(v, dict)]
+
+
 # =============================================================================
 # Binary metadata
 # =============================================================================

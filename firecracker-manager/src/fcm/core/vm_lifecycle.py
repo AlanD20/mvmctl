@@ -1,4 +1,5 @@
 import fcntl
+import hashlib
 import logging
 import os
 import shutil
@@ -48,7 +49,49 @@ from fcm.constants import (
     DEFAULT_VM_ENABLE_PCI,
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_VM_KERNEL_FILENAME,
+    SUPPORTED_IMAGE_EXTENSIONS,
 )
+
+
+def _resolve_image_path(image: str) -> Path:
+    images_dir = get_images_dir()
+
+    for ext in SUPPORTED_IMAGE_EXTENSIONS:
+        candidate = images_dir / f"{image}{ext}"
+        if candidate.exists():
+            return candidate
+
+    direct = Path(image)
+    if direct.is_absolute() and direct.exists():
+        return direct
+
+    from fcm.core.metadata import find_images_by_short_id
+    from fcm.utils.fs import get_cache_dir
+
+    matches = find_images_by_short_id(get_cache_dir(), image)
+    if len(matches) == 1:
+        full_key, meta = matches[0]
+        filename = str(meta.get("filename", ""))
+        if filename:
+            candidate = images_dir / filename
+            if candidate.exists():
+                return candidate
+        for ext in SUPPORTED_IMAGE_EXTENSIONS:
+            candidate = images_dir / f"{full_key}{ext}"
+            if candidate.exists():
+                return candidate
+
+    if direct.exists():
+        return direct
+
+    raise FCMError(f"Image not found: {image!r}")
+
+
+def generate_vm_id(name: str) -> str:
+    """Generate a unique VM ID from name and current time."""
+    data = f"{name}:{time.time()}"
+    return hashlib.sha256(data.encode()).hexdigest()
+
 
 logger = logging.getLogger(__name__)
 
@@ -203,14 +246,7 @@ def create_vm(
         if not os.access(fc_bin_path, os.X_OK):
             raise FCMError(f"Firecracker binary is not executable: {firecracker_bin}")
 
-    image_path: Path
-    candidate = get_images_dir() / f"{image}.ext4"
-    if candidate.exists():
-        image_path = candidate
-    else:
-        image_path = Path(image)
-        if not image_path.exists():
-            raise FCMError(f"Image not found: {image!r}")
+    image_path = _resolve_image_path(image)
 
     if user_data is not None and not user_data.exists():
         raise FCMError(f"User-data file not found: {user_data}")
@@ -347,6 +383,7 @@ def create_vm(
 
     vm_instance = VMInstance(
         name=name,
+        id=generate_vm_id(name),
         pid=proc.pid,
         socket_path=socket_path,
         ip=guest_ip,
@@ -398,7 +435,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
         except FileNotFoundError:
             pass
 
-    manager.deregister(name)
+    manager.deregister(vm.id)
 
     if vm_dir.exists():
         shutil.rmtree(vm_dir)

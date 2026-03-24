@@ -76,11 +76,27 @@ def _load_config(network_dir: Path) -> NetworkConfig | None:
     return NetworkConfig(**data)
 
 
+def _chown_to_real_user(path: Path) -> None:
+    import os
+    import pwd
+
+    sudo_user = os.environ.get("SUDO_USER")
+    if not sudo_user or os.getuid() != 0:
+        return
+    try:
+        pw = pwd.getpwnam(sudo_user)
+        os.chown(path, pw.pw_uid, pw.pw_gid)
+    except (KeyError, OSError):
+        pass
+
+
 def _save_config(network_dir: Path, config: NetworkConfig) -> None:
     network_dir.mkdir(parents=True, exist_ok=True)
     config_file = network_dir / "config.json"
     config_file.write_text(json.dumps(asdict(config), indent=2))
     config_file.chmod(0o600)
+    _chown_to_real_user(config_file)
+    _chown_to_real_user(network_dir)
 
 
 def _load_leases(network_dir: Path) -> list[NetworkLease]:
@@ -96,6 +112,7 @@ def _save_leases(network_dir: Path, leases: list[NetworkLease]) -> None:
     leases_file = network_dir / "leases.json"
     leases_file.write_text(json.dumps([asdict(lease) for lease in leases], indent=2))
     leases_file.chmod(0o600)
+    _chown_to_real_user(leases_file)
 
 
 @dataclass
@@ -116,11 +133,11 @@ def _load_network_state(network_dir: Path) -> NetworkState | None:
 
 
 def _save_network_state(network_dir: Path, state: NetworkState) -> None:
-    """Persist runtime state for a network."""
     network_dir.mkdir(parents=True, exist_ok=True)
     state_file = network_dir / "state.json"
     state_file.write_text(json.dumps(asdict(state), indent=2))
     state_file.chmod(0o600)
+    _chown_to_real_user(state_file)
 
 
 # ---------------------------------------------------------------------------

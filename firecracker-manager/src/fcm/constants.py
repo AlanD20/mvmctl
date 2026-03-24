@@ -124,6 +124,16 @@ DEFAULT_IMAGE_IMPORT_FORMAT: Final[str] = "auto"
 DEFAULT_IMAGE_IMPORT_SIZE_MIB: Final[int] = 2048
 SUPPORTED_IMAGE_EXTENSIONS: Final[list[str]] = [".ext4", ".btrfs", ".img", ".raw"]
 
+IMAGE_IMPORT_FORMAT_MAP: Final[dict[str, str]] = {
+    ".qcow2": "qcow2",
+    ".raw": "raw",
+    ".img": "raw",
+    ".tar": "tar-rootfs",
+    ".tar.gz": "tar-rootfs",
+    ".tar.xz": "tar-rootfs",
+    ".tgz": "tar-rootfs",
+}
+
 # VM log defaults
 DEFAULT_VM_LOG_TYPE: Final[str] = "os"
 DEFAULT_VM_LOG_LINES: Final[int] = 50

@@ -114,3 +114,8 @@ Additional requirements to not miss!
 - the def column when running `fcm kernel ls` is showing for all rows, the checkmark should be only for the default set.
 - defualt bridge and nat allow for this bridge is not created after running `fcm host init`, the command shows default network ready but running `fcm network ls` does not show the default brige which should be `fcm-default` bridge and the default cidr and gateway!
 - creating network is failing due to permission denied despite user is in `fcm` group.
+- when running `fcm vm remove vm1 vm2 vm3` should be supported, where vm1, vm2, and vm3 are vm IDs, and if naming is provided, each vm has to has its own --name, such as `fcm vm remove --name runner1 --name runner2`.
+- supporting multiple deletion must be possible for all subcommands with rm command.
+- rename column from `pulled at` to `added` when running `fcm image ls`, also show the datetime as relative time such as x minutes ago, etc..
+- when running `fcm host init`, it escalates to root and creates the network as root, but the networks state files are also in root which is causing the cache/networks/default/config.json to be unreadable by current user. Only execute networking commands in escalated privileges, creating those files must be under current user.
+- rename the `id` column to image id in `fcm image ls -r`

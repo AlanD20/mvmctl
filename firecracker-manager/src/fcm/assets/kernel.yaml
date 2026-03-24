@@ -1,11 +1,10 @@
-# Kernel build configuration for fcm kernel build command
-
 kernel:
   version: "6.1.102"
   source: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz
-  sha256: null  # Optional: verify download
+  sha256: null
+  sha256_url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz.sha256
   config_fragments:
     - assets/kernel-configs/firecracker-base.config
   output_name: vmlinux
   build_dir: /tmp/fcm/kernel-build
-  parallel_jobs: null  # Defaults to os.cpu_count()
+  parallel_jobs: null

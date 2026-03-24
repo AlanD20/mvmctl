@@ -1,5 +1,7 @@
 """Tests for VM manager."""
 
+from pathlib import Path
+
 import pytest
 
 from fcm.core.vm_manager import VMManager
@@ -43,11 +45,12 @@ def test_vm_manager_list(vm_manager: VMManager):
 
 
 def test_vm_manager_deregister(vm_manager: VMManager):
-    """deregister should remove a VM so that get returns None for that name."""
-    vm_manager.register(VMInstance(name="test-vm", pid=1234, status=VMState.RUNNING))
-    assert vm_manager.get("test-vm") is not None
+    vm = VMInstance(name="test-vm", pid=1234, status=VMState.RUNNING)
+    vm_manager.register(vm)
+    registered = vm_manager.get("test-vm")
+    assert registered is not None
 
-    vm_manager.deregister("test-vm")
+    vm_manager.deregister(registered.id)
     assert vm_manager.get("test-vm") is None
 
 
@@ -74,3 +77,80 @@ def test_vm_manager_update_status_not_found(
 
     with pytest.raises(VMNotFoundError):
         vm_manager.update_status(vm_name, new_status)
+
+
+def test_vm_manager_find_by_short_id(vm_manager: VMManager):
+    vm = VMInstance(name="myvm", pid=1, status=VMState.RUNNING)
+    vm_manager.register(vm)
+    registered = vm_manager.get("myvm")
+    assert registered is not None
+    short_id = registered.id[:6]
+    matches = vm_manager.find_by_short_id(short_id)
+    assert len(matches) == 1
+    assert matches[0].name == "myvm"
+
+
+def test_vm_manager_find_by_short_id_no_match(vm_manager: VMManager):
+    assert vm_manager.find_by_short_id("zzzzzz") == []
+
+
+def test_vm_manager_get_by_short_id_unique(vm_manager: VMManager):
+    vm = VMInstance(name="uniquevm", pid=2, status=VMState.RUNNING)
+    vm_manager.register(vm)
+    registered = vm_manager.get("uniquevm")
+    assert registered is not None
+    result = vm_manager.get_by_short_id(registered.id[:6])
+    assert result is not None
+    assert result.name == "uniquevm"
+
+
+def test_vm_manager_get_by_name_multiple(vm_manager: VMManager):
+    vm1 = VMInstance(name="dup", pid=1, status=VMState.RUNNING)
+    vm2 = VMInstance(name="dup", pid=2, status=VMState.RUNNING)
+    vm_manager.register(vm1)
+    vm_manager.register(vm2)
+    results = vm_manager.get_by_name("dup")
+    assert len(results) == 2
+
+
+def test_vm_manager_update_status_success(vm_manager: VMManager):
+    vm = VMInstance(name="statusvm", pid=3, status=VMState.RUNNING)
+    vm_manager.register(vm)
+    vm_manager.update_status("statusvm", VMState.STOPPED)
+    updated = vm_manager.get("statusvm")
+    assert updated is not None
+    assert updated.status == VMState.STOPPED
+
+
+def test_vm_manager_migration(tmp_path: Path):
+    import json
+    from pathlib import Path
+    from datetime import datetime, timezone
+
+    vms_dir = tmp_path / "vms"
+    vms_dir.mkdir()
+    state_file = vms_dir / "state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "vms": {
+                    "mylegacyvm": {
+                        "pid": 42,
+                        "socket_path": None,
+                        "ip": "10.0.0.2",
+                        "mac": "02:FC:00:00:00:01",
+                        "network_name": "default",
+                        "tap_device": "fcm-tap0",
+                        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                        "status": "running",
+                    }
+                },
+            }
+        )
+    )
+    mgr = VMManager(vms_dir)
+    vms = mgr.list_all()
+    assert len(vms) == 1
+    assert vms[0].name == "mylegacyvm"
+    assert len(vms[0].id) == 64

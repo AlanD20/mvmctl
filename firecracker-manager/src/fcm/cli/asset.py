@@ -5,7 +5,7 @@ import shutil
 
 import typer
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fcm.api.assets import (
     BinaryVersion,
@@ -28,10 +28,16 @@ from fcm.constants import (
     DEFAULT_KERNEL_VERSION,
     DEFAULT_REMOTE_VERSION_LIMIT,
     FALLBACK_FC_CI_VERSION,
+    IMAGE_IMPORT_FORMAT_MAP,
     KERNEL_TARBALL_URL_TEMPLATE,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
-from fcm.core.metadata import get_image_entry, update_image_entry
+from fcm.core.metadata import (
+    get_image_entry,
+    update_image_entry,
+    find_images_by_short_id,
+    remove_image_entry,
+)
 from fcm.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
 from fcm.utils.console import print_error, print_info, print_success, print_table, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
@@ -243,21 +249,29 @@ def kernel_set_default(
 
 @kernel_app.command(name="rm")
 def kernel_rm(
-    name: str = typer.Argument(..., help="Kernel file name to remove"),
+    names: Optional[List[str]] = typer.Argument(None, help="Kernel file name(s) to remove"),
     kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
-    """Remove a cached kernel."""
-    path = kernels_dir / name
-    if not path.exists():
-        print_error(f"Kernel not found: {path}")
+    """Remove one or more cached kernels by filename."""
+    effective_names: list[str] = list(names) if names else []
+    if not effective_names:
+        print_error("Provide at least one kernel file name to remove")
         raise typer.Exit(code=1)
 
-    if not force:
-        typer.confirm(f"Remove {path}?", abort=True)
+    exit_code = 0
+    for name in effective_names:
+        path = kernels_dir / name
+        if not path.exists():
+            print_error(f"Kernel not found: {path}")
+            exit_code = 1
+            continue
+        if not force:
+            typer.confirm(f"Remove {path}?", abort=True)
+        path.unlink()
+        print_success(f"Removed {path}")
 
-    path.unlink()
-    print_success(f"Removed {path}")
+    raise typer.Exit(code=exit_code)
 
 
 def _load_image_meta(images_dir: Path, image_id: str) -> dict[str, str]:
@@ -328,30 +342,61 @@ def image_ls(
         else:
             print_table(
                 title="Available Images (Remote)",
-                columns=["Downloaded", "ID", "Name", "FS Type"],
+                columns=["Downloaded", "Image ID", "Name", "FS Type"],
                 rows=rows,
             )
         return
 
+    default_img = _get_default_image()
+    yaml_ids = {img.id for img in images}
+
+    from fcm.core.metadata import list_image_entries as _list_img_entries
+    from fcm.core.kernel import human_readable_time as _hrt
+    from fcm.utils.fs import get_cache_dir as _get_cache_dir
+
+    _all_meta = _list_img_entries(_get_cache_dir())
+
+    def _find_meta_for_yaml_id(yaml_id: str) -> tuple[str, dict[str, object]] | None:
+        for _k, _v in _all_meta.items():
+            if str(_v.get("yaml_id", "")) == yaml_id:
+                return _k, _v
+        return None
+
     if json_output:
         result = []
         for img in images:
-            meta = _load_image_meta(images_dir, img.id)
+            entry = _find_meta_for_yaml_id(img.id)
+            if entry:
+                meta_key, meta = entry
+                display_id = meta_key[:6]
+                result.append(
+                    {
+                        "id": display_id,
+                        "name": img.name,
+                        "format": img.format,
+                        "fs_type": str(meta.get("fs_type", img.convert_to)),
+                        "added": _hrt(str(meta.get("pulled_at", "")))
+                        if meta.get("pulled_at")
+                        else "-",
+                    }
+                )
+        for meta_id, meta in _all_meta.items():
+            if str(meta.get("yaml_id", meta_id)) in yaml_ids:
+                continue
+            display_id = meta_id[:6] if len(meta_id) >= 6 else meta_id
             result.append(
                 {
-                    "id": img.id,
-                    "name": img.name,
-                    "format": img.format,
-                    "fs_type": meta.get("fs_type", img.convert_to),
-                    "pulled_at": meta.get("pulled_at", "-"),
+                    "id": display_id,
+                    "name": str(meta.get("os_name", meta_id)),
+                    "format": str(meta.get("fs_type", "unknown")),
+                    "fs_type": str(meta.get("fs_type", "unknown")),
+                    "added": _hrt(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-",
                 }
             )
         typer.echo(json.dumps(result, indent=2))
         return
 
-    default_img = _get_default_image()
     rows_local: list[list[str]] = []
-    yaml_ids = {img.id for img in images}
 
     for img in images:
         found_path = next(
@@ -364,19 +409,21 @@ def image_ls(
         )
         if found_path is None:
             continue
-        meta = _load_image_meta(images_dir, img.id)
-        pulled_at = meta.get("pulled_at", "-")[:19] if meta.get("pulled_at") else "-"
-        fs_type = meta.get("fs_type", found_path.suffix.lstrip("."))
+        entry = _find_meta_for_yaml_id(img.id)
+        if entry:
+            meta_key, meta = entry
+            display_id = meta_key[:6]
+            added = _hrt(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+            fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
+        else:
+            display_id = "-"
+            added = "-"
+            fs_type = found_path.suffix.lstrip(".")
         default_marker = "✓" if img.id == default_img else " "
-        rows_local.append([default_marker, img.id, img.name, fs_type, pulled_at])
+        rows_local.append([default_marker, display_id, img.name, fs_type, added])
 
-    # Also show imported images (from metadata, not in YAML config)
-    from fcm.core.metadata import list_image_entries
-    from fcm.utils.fs import get_cache_dir
-
-    all_meta = list_image_entries(get_cache_dir())
-    for meta_id, meta in all_meta.items():
-        if meta_id in yaml_ids:
+    for meta_id, meta in _all_meta.items():
+        if str(meta.get("yaml_id", meta_id)) in yaml_ids:
             continue
         found_path = next(
             (
@@ -387,19 +434,24 @@ def image_ls(
             None,
         )
         if found_path is None:
+            filename = str(meta.get("filename", ""))
+            if filename:
+                found_path = images_dir / filename
+        if found_path is None or not found_path.exists():
             continue
-        pulled_at = str(meta.get("pulled_at", "-"))[:19] if meta.get("pulled_at") else "-"
+        added = _hrt(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
         fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
         os_name = str(meta.get("os_name", meta_id))
         default_marker = "✓" if meta_id == default_img else " "
-        rows_local.append([default_marker, meta_id, os_name, fs_type, pulled_at])
+        display_id = meta_id[:6] if len(meta_id) >= 6 else meta_id
+        rows_local.append([default_marker, display_id, os_name, fs_type, added])
 
     if not rows_local:
         print_info("No images downloaded. Use 'fcm image fetch <id>' to download one.")
         return
     print_table(
         title="Downloaded Images",
-        columns=["Def", "ID", "OS Name", "FS Type", "Pulled At"],
+        columns=["Def", "ID", "OS Name", "FS Type", "Added"],
         rows=rows_local,
     )
 
@@ -416,14 +468,16 @@ def _get_default_image() -> str | None:
 
 @image_app.command(name="fetch")
 def image_fetch(
-    image_id: str = typer.Argument(..., help="Image ID to download (e.g. ubuntu-24.04, ubuntu-fc)"),
+    image_id: str = typer.Argument(
+        ..., help="Image ID from 'fcm image ls --remote' (e.g. ubuntu-24.04)"
+    ),
     out: Path = typer.Option(get_images_dir(), "--out", help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
     set_default: bool = typer.Option(
         False, "--set-default", help="Set as default image after download"
     ),
 ) -> None:
-    """Download an image by its ID. Use 'fcm image ls --remote' to list available IDs."""
+    """Download an image by its ID. Run 'fcm image ls -r' to list available image IDs."""
     out.mkdir(parents=True, exist_ok=True)
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
@@ -460,10 +514,31 @@ def image_fetch(
 
     result = fetch_image(spec, out, force)
     if result:
+        import hashlib
+        import time
+
+        try:
+            file_bytes = result.read_bytes()
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+        except OSError:
+            file_hash = hashlib.sha256(str(result).encode()).hexdigest()
+        timestamp = str(time.time())
+        full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()
+
         _save_image_meta(
-            out, spec.id, result, {"os_name": spec.name, "fs_type": result.suffix.lstrip(".")}
+            out,
+            full_id,
+            result,
+            {
+                "os_name": spec.name,
+                "yaml_id": spec.id,
+                "fs_type": result.suffix.lstrip("."),
+                "full_hash": full_id,
+                "filename": result.name,
+            },
         )
         print_success(f"Image ready: {result}")
+        print_info(f"  ID: {full_id[:6]}")
         if set_default:
             from fcm.core.config_state import set_defaults_value
 
@@ -477,65 +552,115 @@ def image_fetch(
 
 @image_app.command(name="set-default")
 def image_set_default(
-    image_id: str = typer.Argument(..., help="Image ID to set as default"),
+    image_id: str = typer.Argument(..., help="Image short ID or YAML image ID to set as default"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
 ) -> None:
     """Set the default image for VM creation."""
     images_dir.mkdir(parents=True, exist_ok=True)
+
     found = any((images_dir / f"{image_id}{ext}").exists() for ext in SUPPORTED_IMAGE_EXTENSIONS)
+    stored_id = image_id
+
     if not found:
-        print_error(f"Image '{image_id}' not found in {images_dir}. Download it first.")
+        matches = find_images_by_short_id(get_cache_dir(), image_id)
+        if len(matches) == 1:
+            full_key, meta = matches[0]
+            filename = str(meta.get("filename", ""))
+            if filename and (images_dir / filename).exists():
+                found = True
+                stored_id = full_key
+            else:
+                for ext in SUPPORTED_IMAGE_EXTENSIONS:
+                    if (images_dir / f"{full_key}{ext}").exists():
+                        found = True
+                        stored_id = full_key
+                        break
+
+    if not found:
+        print_error(f"Image '{image_id}' not found in {images_dir}. Download or import it first.")
         raise typer.Exit(code=1)
+
     from fcm.core.config_state import set_defaults_value
 
-    set_defaults_value("image", image_id)
+    set_defaults_value("image", stored_id)
     print_success(f"✓ Default image set to: {image_id}")
 
 
 @image_app.command(name="rm")
 def image_rm(
-    id: str = typer.Argument(..., help="Image ID to remove"),
+    short_ids: Optional[List[str]] = typer.Argument(
+        None, help="Image short IDs (6 chars) to remove"
+    ),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
-    """Remove a cached image."""
-    found = [
-        images_dir / f"{id}{ext}"
-        for ext in SUPPORTED_IMAGE_EXTENSIONS
-        if (images_dir / f"{id}{ext}").exists()
-    ]
+    """Remove cached images by short ID.
 
-    if not found:
-        print_error(f"No image files found for '{id}'")
+    Examples:
+        fcm image rm abc123
+        fcm image rm abc123 def456
+    """
+    effective_ids: list[str] = list(short_ids) if short_ids else []
+    if not effective_ids:
+        print_error("Provide at least one image short ID")
         raise typer.Exit(code=1)
 
-    if not force:
-        typer.confirm(f"Remove {len(found)} file(s) for '{id}'?", abort=True)
+    cache_dir = get_cache_dir()
+    exit_code = 0
 
-    for path in found:
-        if path.is_dir():
-            shutil.rmtree(path)
-        else:
-            path.unlink()
-        print_success(f"Removed: {path}")
+    for short_id in effective_ids:
+        matches = find_images_by_short_id(cache_dir, short_id)
+        if not matches:
+            print_error(f"No image found with short ID '{short_id}'")
+            exit_code = 1
+            continue
+        if len(matches) > 1:
+            print_error(
+                f"Ambiguous short ID '{short_id}' matches {len(matches)} images — use more characters"
+            )
+            exit_code = 1
+            continue
 
-    from fcm.core.metadata import remove_image_entry
-    from fcm.utils.fs import get_cache_dir
+        full_key, meta = matches[0]
+        filename = str(meta.get("filename", ""))
+        files_to_remove: list[Path] = []
 
-    remove_image_entry(get_cache_dir(), id)
+        if filename:
+            candidate = images_dir / filename
+            if candidate.exists():
+                files_to_remove.append(candidate)
 
-    raise typer.Exit(code=0)
+        if not files_to_remove:
+            files_to_remove = [
+                images_dir / f"{full_key}{ext}"
+                for ext in SUPPORTED_IMAGE_EXTENSIONS
+                if (images_dir / f"{full_key}{ext}").exists()
+            ]
 
+        if not files_to_remove:
+            print_error(
+                f"Image file not found for ID '{short_id}' (metadata exists but file missing)"
+            )
+            remove_image_entry(cache_dir, full_key)
+            exit_code = 1
+            continue
 
-_FORMAT_EXT_MAP: dict[str, str] = {
-    ".qcow2": "qcow2",
-    ".raw": "raw",
-    ".img": "raw",
-    ".tar": "tar-rootfs",
-    ".tar.gz": "tar-rootfs",
-    ".tar.xz": "tar-rootfs",
-    ".tgz": "tar-rootfs",
-}
+        if not force:
+            typer.confirm(
+                f"Remove image '{meta.get('os_name', short_id)}' ({short_id})? [{len(files_to_remove)} file(s)]",
+                abort=True,
+            )
+
+        for path in files_to_remove:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            print_success(f"Removed: {path}")
+
+        remove_image_entry(cache_dir, full_key)
+
+    raise typer.Exit(code=exit_code)
 
 
 @image_app.command(name="import")
@@ -568,13 +693,14 @@ def image_import(
     file_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     timestamp = str(time.time())
     full_id_hash = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()
-    image_id = full_id_hash[:6]
+    image_id = full_id_hash  # Use FULL hash as key
+    short_id = full_id_hash[:6]  # Display first 6 chars
 
     resolved_format: str | None = format
     if resolved_format == DEFAULT_IMAGE_IMPORT_FORMAT:
         fname = source_path.name.lower()
         resolved_format = next(
-            (fmt for ext, fmt in _FORMAT_EXT_MAP.items() if fname.endswith(ext)),
+            (fmt for ext, fmt in IMAGE_IMPORT_FORMAT_MAP.items() if fname.endswith(ext)),
             None,
         )
     if resolved_format is None:
@@ -603,11 +729,16 @@ def image_import(
         images_dir,
         image_id,
         result,
-        {"os_name": name, "fs_type": result.suffix.lstrip("."), "full_hash": full_id_hash},
+        {
+            "os_name": name,
+            "fs_type": result.suffix.lstrip("."),
+            "full_hash": full_id_hash,
+            "filename": result.name,
+        },
     )
     print_success(f"Image imported: {result}")
     print_info(f"  Name: {name}")
-    print_info(f"  ID:   {image_id}")
+    print_info(f"  ID:   {short_id}")
 
     if set_default:
         from fcm.core.config_state import set_defaults_value
@@ -699,20 +830,27 @@ def bin_set_default(
 
 @bin_app.command(name="rm")
 def bin_rm(
-    version: str = typer.Argument(..., help="Version to remove"),
+    versions: Optional[List[str]] = typer.Argument(None, help="Version(s) to remove"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
-    """Remove a cached Firecracker version."""
-    if not force:
-        typer.confirm(f"Remove Firecracker v{version}?", abort=True)
-
-    try:
-        remove_version(version)
-    except AssetNotFoundError as exc:
-        print_error(str(exc))
+    """Remove one or more cached Firecracker versions."""
+    effective_versions: list[str] = list(versions) if versions else []
+    if not effective_versions:
+        print_error("Provide at least one version to remove")
         raise typer.Exit(code=1)
 
-    print_success(f"Removed v{version}")
+    exit_code = 0
+    for version in effective_versions:
+        if not force:
+            typer.confirm(f"Remove Firecracker v{version}?", abort=True)
+        try:
+            remove_version(version)
+            print_success(f"Removed v{version}")
+        except AssetNotFoundError as exc:
+            print_error(str(exc))
+            exit_code = 1
+
+    raise typer.Exit(code=exit_code)
 
 
 def clear_assets(

@@ -484,23 +484,41 @@ def fetch_image(
     if spec.id == "ubuntu-fc" and spec.format == "squashfs":
         source = _resolve_ubuntu_fc_source(spec)
 
-    # Warn if no checksum configured
-    if not spec.sha256:
-        logger.warning(
-            "Image '%s' has no SHA-256 checksum configured. "
-            "Download will proceed without integrity verification.",
-            spec.id,
-        )
+    resolved_sha256 = spec.sha256
+
+    if not resolved_sha256 and spec.sha256_url:
+        import tempfile
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".sha256", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+            download_file(spec.sha256_url, tmp_path, expected_sha256=None)
+            checksum_text = tmp_path.read_text().strip()
+            source_basename = source.rstrip("/").split("/")[-1]
+            for line in checksum_text.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].lstrip("*") == source_basename:
+                    resolved_sha256 = parts[0]
+                    break
+            if not resolved_sha256 and checksum_text:
+                first_token = checksum_text.splitlines()[0].split()[0]
+                if len(first_token) in (64, 128):
+                    resolved_sha256 = first_token
+            tmp_path.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning("Failed to fetch checksum from %s: %s", spec.sha256_url, e)
+
+    if not resolved_sha256:
         from fcm.utils.console import print_warning
 
         print_warning(
-            f"⚠ No checksum configured for image '{spec.id}'. "
-            "Download will proceed without integrity verification."
+            f"No checksum available for '{spec.id}'. "
+            "Integrity cannot be verified — set sha256 or sha256_url in images.yaml to enable verification."
         )
 
     # Download
     download_path = output_dir / f"{spec.id}.download"
-    download_file(source, download_path, spec.sha256)
+    download_file(source, download_path, resolved_sha256)
 
     # Convert based on format
     handler = _FORMAT_HANDLERS.get(spec.format)
@@ -546,6 +564,7 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
                 convert_to=img["convert_to"],
                 size_mib=img.get("size_mib", 2048),
                 sha256=img.get("sha256"),
+                sha256_url=img.get("sha256_url"),
             )
         )
 

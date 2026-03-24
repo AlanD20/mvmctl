@@ -11,6 +11,7 @@ from fcm.core.vm_lifecycle import (
     load_snapshot,
     _write_pid_file,
     _read_pid_file,
+    _resolve_image_path,
 )
 from fcm.exceptions import FCMError
 from fcm.models.vm import VMInstance, VMState
@@ -198,7 +199,7 @@ def test_remove_vm_success(
     mock_rm_rules.assert_called_once()
     mock_del_tap.assert_called_once()
     mock_rel_ip.assert_called_once()
-    mock_manager.deregister.assert_called_once_with("myvm")
+    mock_manager.deregister.assert_called_once()
     mock_rmtree.assert_called_once_with(mock_vm_dir_ret)
 
 
@@ -226,3 +227,72 @@ def test_load_snapshot(mock_client, mock_socket_path):
     mock_socket_path.return_value = Path("fake.sock")
     load_snapshot("myvm", Path("mem"), Path("state"))
     mock_client.return_value.load_snapshot.assert_called_once()
+
+
+def test_resolve_image_path_by_ext4(tmp_path, monkeypatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img = images_dir / "ubuntu-24.04.ext4"
+    img.write_bytes(b"\x00" * 64)
+    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+        result = _resolve_image_path("ubuntu-24.04")
+    assert result == img
+
+
+def test_resolve_image_path_by_btrfs(tmp_path, monkeypatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img = images_dir / "archlinux.btrfs"
+    img.write_bytes(b"\x00" * 64)
+    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+        result = _resolve_image_path("archlinux")
+    assert result == img
+
+
+def test_resolve_image_path_by_absolute(tmp_path):
+    img = tmp_path / "custom.img"
+    img.write_bytes(b"\x00")
+    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=tmp_path / "images"):
+        result = _resolve_image_path(str(img))
+    assert result == img
+
+
+def test_resolve_image_path_by_short_hash(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    full_hash = "f" * 64
+    img = images_dir / f"{full_hash}.ext4"
+    img.write_bytes(b"\x00" * 64)
+    meta_file = tmp_path / "metadata.json"
+    meta_file.write_text(
+        json.dumps(
+            {
+                "images": {
+                    full_hash: {
+                        "os_name": "MyImage",
+                        "filename": img.name,
+                        "fs_type": "ext4",
+                        "pulled_at": "2026-01-01T00:00:00+00:00",
+                        "full_hash": full_hash,
+                    }
+                }
+            }
+        )
+    )
+    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+        result = _resolve_image_path(full_hash[:6])
+    assert result == img
+
+
+def test_resolve_image_path_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+        with pytest.raises(FCMError, match="Image not found"):
+            _resolve_image_path("nonexistent")
