@@ -241,6 +241,15 @@ def remove_network(name: str) -> None:
     Raises:
         NetworkError: If the network has VMs attached or doesn't exist.
     """
+    if name == DEFAULT_NETWORK_NAME:
+        from fcm.core.vm_manager import VMManager
+
+        existing_vms = VMManager().list_all()
+        if existing_vms:
+            raise NetworkError(
+                "Cannot remove the 'default' network while VMs exist. Remove all VMs first."
+            )
+
     network_dir = get_network_dir(name)
     config = _load_config(network_dir)
     if config is None:
@@ -268,6 +277,9 @@ def remove_network(name: str) -> None:
 class _VMLease(TypedDict):
     vm_name: str
     ip: str
+    status: str
+    pid: int | None
+    socket_path: str | None
 
 
 class NetworkInspect(TypedDict):
@@ -283,6 +295,8 @@ class NetworkInspect(TypedDict):
 
 def inspect_network(name: str) -> NetworkInspect:
     """Return full details for a named network."""
+    from fcm.core.vm_manager import VMManager
+
     network_dir = get_network_dir(name)
     config = _load_config(network_dir)
     if config is None:
@@ -293,6 +307,31 @@ def inspect_network(name: str) -> NetworkInspect:
 
     _save_network_state(network_dir, NetworkState(bridge_active=active))
 
+    vm_manager = VMManager()
+    enriched_vms: list[_VMLease] = []
+    for lease in leases:
+        vm = vm_manager.get(lease.vm_name)
+        if vm is not None:
+            enriched_vms.append(
+                {
+                    "vm_name": lease.vm_name,
+                    "ip": lease.ip,
+                    "status": vm.status.value,
+                    "pid": vm.pid,
+                    "socket_path": str(vm.socket_path) if vm.socket_path else None,
+                }
+            )
+        else:
+            enriched_vms.append(
+                {
+                    "vm_name": lease.vm_name,
+                    "ip": lease.ip,
+                    "status": "unknown",
+                    "pid": None,
+                    "socket_path": None,
+                }
+            )
+
     return {
         "name": config.name,
         "cidr": config.cidr,
@@ -301,7 +340,7 @@ def inspect_network(name: str) -> NetworkInspect:
         "nat_enabled": config.nat_enabled,
         "created_at": config.created_at,
         "bridge_exists": active,
-        "vms": [{"vm_name": lease.vm_name, "ip": lease.ip} for lease in leases],
+        "vms": enriched_vms,
     }
 
 

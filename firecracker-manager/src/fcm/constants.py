@@ -70,6 +70,8 @@ TAP_PREFIX: Final[str] = f"{CLI_NAME}-tap"
 PROJECT_GROUP: Final[str] = CLI_NAME  # "fcm"
 SUDOERS_DROP_IN_PATH: Final[str] = f"/etc/sudoers.d/{CLI_NAME}"
 DEFAULT_NETWORK_NAME: Final[str] = "default"
+# Phase 5 spec proposed 10.10.0.0/24 but Phase 6 (more recent) validated 172.35.0.0/24.
+# Using Phase 6 value per the "use most recent spec" policy.
 DEFAULT_NETWORK_CIDR: Final[str] = "172.35.0.0/24"
 DEFAULT_NETWORK_GATEWAY: Final[str] = "172.35.0.1"
 DEFAULT_BRIDGE_NAME: Final[str] = "fcm-bridge"
@@ -91,10 +93,10 @@ ISO_BINARIES: Final[list[str]] = ["mkisofs", "genisoimage"]
 # ---------------------------------------------------------------------------
 
 # Default kernel version for official upstream builds
-DEFAULT_KERNEL_VERSION: Final[str] = "6.1.9"
+DEFAULT_KERNEL_VERSION: Final[str] = "6.19.9"
 
 # Default architecture for Firecracker CI kernel downloads
-DEFAULT_FC_KERNEL_ARCH: Final[str] = "amd64"
+DEFAULT_FC_KERNEL_ARCH: Final[str] = "x86_64"
 
 # Base URL for the Firecracker CI S3 kernel bucket
 FIRECRACKER_CI_KERNEL_S3_BASE: Final[str] = "https://s3.amazonaws.com/spec.ccfc.min"

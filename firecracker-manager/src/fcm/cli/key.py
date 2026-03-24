@@ -124,7 +124,9 @@ def create(
 
 
 @app.command(
-    name="remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+    name="remove",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def remove(
     ctx: typer.Context,
@@ -148,7 +150,6 @@ def remove(
 
 @app.command(
     name="rm",
-    hidden=True,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def rm(

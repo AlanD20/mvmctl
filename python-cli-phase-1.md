@@ -210,13 +210,11 @@ All commands follow the pattern: `fcm <group> <action> [options]`
 | Command | Description | Key flags |
 |---|---|---|
 | `fcm vm create` | Spawn a new Firecracker VM | `--name`, `--kernel`, `--rootfs`, `--cpu`, `--mem`, `--tap`, `--mac`, `--config` |
-| `fcm vm delete` | Stop and remove a VM | `--name`, `--force` |
+| `fcm vm rm` | Stop and remove a VM | `--name`, `--force` |
 | `fcm vm list` | Show running and stopped VMs | `--json`, `--all` |
 | `fcm vm ssh` | Open an SSH session into a VM | `--name`, `--user`, `--key`, `--cmd` |
 | `fcm vm logs` | Print VM serial console output | `--name`, `--follow`, `--lines` |
-| `fcm vm cleanup` | Remove stopped VMs and stale sockets | `--all`, `--name`, `--dry-run` |
-| `fcm vm pause` | Pause a running VM | `--name` |
-| `fcm vm resume` | Resume a paused VM | `--name` |
+| `fcm vm prune` | Remove stopped VMs and stale sockets | `--all`, `--name`, `--dry-run` |
 | `fcm vm snapshot` | Snapshot VM memory and disk state | `--name`, `--out` |
 
 **Example**
@@ -300,7 +298,6 @@ Responsibilities:
 - `put_drive(socket, drive_id, path, read_only)`
 - `put_network_interface(socket, iface_id, tap_name, mac)`
 - `start_instance(socket)`
-- `pause_vm(socket)` / `resume_vm(socket)`
 - `create_snapshot(socket, mem_path, snapshot_path)`
 
 ### `core/vm_manager.py` — VM state
@@ -426,7 +423,7 @@ The CLI layer catches `FCMError` subclasses and prints a clean Rich error panel,
 ### Phase 5 — Polish
 
 - [ ] `cli/config.py` — `show`, `validate`, `dump-vm`
-- [ ] VM snapshot and pause/resume
+- [ ] VM snapshot
 - [ ] `--json` flag on all list commands
 - [ ] `--dry-run` on destructive commands
 - [ ] Unit tests for `config_gen`, `vm_manager`, `image` pipeline

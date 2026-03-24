@@ -1,12 +1,13 @@
 """Image download and conversion utilities."""
 
 import logging
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
 from fcm.exceptions import ImageError, ConfigError
-from fcm.models.image import ImageSpec
+from fcm.models.image import ImageSpec, ImageImportSpec
 from fcm.utils.http import download_file  # re-exported for backward compatibility
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,16 @@ def convert_qcow2_to_raw(
         logger.info("Converting %s to raw...", qcow2_path.name)
 
         subprocess.run(
-            ["qemu-img", "convert", "-f", "qcow2", "-O", "raw", str(qcow2_path), str(raw_path)],
+            [
+                "qemu-img",
+                "convert",
+                "-f",
+                "qcow2",
+                "-O",
+                "raw",
+                str(qcow2_path),
+                str(raw_path),
+            ],
             capture_output=True,
             text=True,
             check=True,
@@ -439,3 +449,65 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
         )
 
     return images
+
+
+def import_image(
+    spec: ImageImportSpec,
+    output_dir: Path,
+    force: bool = False,
+) -> Path:
+    """Import a local image file into the image cache.
+
+    Args:
+        spec: Import specification (id, name, source_path, format)
+        output_dir: Directory to store the imported image
+        force: Overwrite existing image if present
+
+    Returns:
+        Path to the imported image
+
+    Raises:
+        ImageError: If the image already exists (and not force), source missing,
+            or conversion fails
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    final_path = output_dir / f"{spec.id}.{spec.convert_to}"
+
+    if final_path.exists() and not force:
+        raise ImageError(
+            f"Image already exists: {final_path}. Use --force to overwrite."
+        )
+
+    if not spec.source_path.exists():
+        raise ImageError(f"Source file not found: {spec.source_path}")
+
+    logger.info(
+        "Importing %s as '%s' (format: %s)...",
+        spec.source_path.name,
+        spec.id,
+        spec.format,
+    )
+
+    if spec.format == "qcow2":
+        raw_path = output_dir / f"{spec.id}.raw"
+        convert_qcow2_to_raw(spec.source_path, raw_path)
+        try:
+            actual_path = extract_partition_from_raw(
+                raw_path, final_path.with_suffix(".img")
+            )
+        finally:
+            raw_path.unlink(missing_ok=True)
+        return actual_path
+
+    elif spec.format == "raw":
+        shutil.copy2(spec.source_path, final_path)
+        return final_path
+
+    elif spec.format == "tar-rootfs":
+        size_str = f"{spec.size_mib}M"
+        create_ext4_from_tar(spec.source_path, final_path, size=size_str)
+        return final_path
+
+    else:
+        raise ImageError(f"Unsupported import format: {spec.format}")

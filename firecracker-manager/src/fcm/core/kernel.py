@@ -9,25 +9,29 @@ import tarfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
-from fcm.exceptions import KernelError, ChecksumMismatchError, FCMError, ProcessError
-from fcm.utils.http import download_file
-from fcm.utils.process import stream_cmd
 from fcm.constants import (
-    HTTP_USER_AGENT,
-    FIRECRACKER_CI_KERNEL_S3_BASE,
     FIRECRACKER_CI_KERNEL_LIST_URL,
+    FIRECRACKER_CI_KERNEL_S3_BASE,
     FIRECRACKER_KERNEL_CONFIG_URL,
-    KERNEL_ENABLED_CONFIGS,
+    HTTP_USER_AGENT,
     KERNEL_DISABLED_CONFIGS,
-    KERNEL_SET_VAL_CONFIGS,
+    KERNEL_ENABLED_CONFIGS,
     KERNEL_REQUIRED_SETTINGS,
+    KERNEL_SET_VAL_CONFIGS,
     KERNEL_SHA256_URL_TEMPLATE,
 )
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+from fcm.exceptions import ChecksumMismatchError, FCMError, KernelError, ProcessError
+from fcm.utils.http import download_file
+from fcm.utils.process import stream_cmd
 
 logger = logging.getLogger(__name__)
+
+_BUILD_LOG_PATTERNS = re.compile(
+    r"(?i)(warning|error|cannot find|undefined reference|fatal|note:)",
+)
 
 
 def download_kernel_source(
@@ -266,10 +270,16 @@ def build_kernel(
     logger.info("Building vmlinux with %d parallel jobs...", jobs)
     logger.info("This may take 10-30 minutes...")
 
+    from fcm.utils.console import console
+
+    console.print("[yellow]Building kernel... (this may take 10-30 minutes)[/yellow]")
+
     cmd = ["make", "vmlinux", f"-j{jobs}"]
     try:
         for line in stream_cmd(cmd, cwd=str(kernel_dir)):
             logger.debug("%s", line)
+            if _BUILD_LOG_PATTERNS.search(line):
+                console.print(f"[dim]{line}[/dim]")
     except ProcessError as e:
         raise KernelError(f"Kernel build failed: {e}") from e
 
@@ -312,19 +322,21 @@ def build_kernel_pipeline(
     jobs: int | None = None,
     keep_build_dir: bool = False,
     user_config_path: Path | None = None,
-) -> None:
+) -> Path:
     if jobs is None:
         jobs = os.cpu_count() or 1
 
     if build_dir is None:
+        from fcm.constants import PROJECT_NAME
+
         build_id = str(uuid.uuid4())[:8]
-        build_dir = Path("/tmp/firecracker-manager") / f"build-{build_id}"
+        build_dir = Path(f"/tmp/{PROJECT_NAME}") / f"build-{build_id}"
 
     build_dir.mkdir(parents=True, exist_ok=True)
 
     if output_path.exists():
         logger.info("Using cached kernel: %s", output_path)
-        return
+        return build_dir
 
     if sha256 is None:
         sha256 = fetch_kernel_sha256(version)
@@ -360,6 +372,8 @@ def build_kernel_pipeline(
         logger.info("Build directory cleaned up")
     else:
         logger.info("Build directory kept at: %s", build_dir)
+
+    return build_dir
 
 
 def save_kernel_metadata(
@@ -448,7 +462,7 @@ def get_default_kernel_path(kernels_dir: Path) -> Path | None:
 
 def download_firecracker_kernel(
     ci_version: str,
-    arch: str = "amd64",
+    arch: str = "x86_64",
     kernels_dir: Path | None = None,
     output_name: str | None = None,
 ) -> Path:

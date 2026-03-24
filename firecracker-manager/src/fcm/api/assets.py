@@ -22,8 +22,8 @@ from fcm.core.binary_manager import (
     remove_version,
     set_active_version,
 )
-from fcm.core.image import fetch_image, load_images_config
-from fcm.models.image import ImageSpec
+from fcm.core.image import fetch_image, import_image, load_images_config
+from fcm.models.image import ImageImportSpec, ImageSpec
 from fcm.core.kernel import build_kernel_pipeline
 from fcm.exceptions import ConfigError, ImageError
 from fcm.utils.fs import get_assets_dir, get_images_dir, get_kernels_dir
@@ -40,8 +40,10 @@ __all__ = [
     "set_active_version",
     "remove_version",
     "fetch_image",
+    "import_image",
     "fetch_images_parallel",
     "load_images_config",
+    "ImageImportSpec",
     "build_kernel_pipeline",
     "setup_assets",
     "pull_kernel",

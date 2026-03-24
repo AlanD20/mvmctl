@@ -159,12 +159,6 @@ passed to the guest via the Firecracker boot args (`ip=` kernel parameter) and c
 8. If this was the last VM on a network, do **not** tear down the network — networks
    persist independently of VMs (see Section 2).
 
-### No pause or resume
-
-`vm pause` and `vm resume` are not implemented. Do not add these subcommands. If a user
-types them, the CLI must respond with a clear "not supported" message, not an unrecognised
-command error — the distinction matters for usability.
-
 ### No `vm setup`
 
 There is no `vm setup` subcommand. Setup is handled automatically: the default network is

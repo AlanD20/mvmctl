@@ -1,4 +1,4 @@
-"""CLI state persistence — tracks global settings like active CI_VERSION."""
+"""CLI state persistence — tracks global settings like active FIRECRACKER_CI_VERSION."""
 
 from __future__ import annotations
 

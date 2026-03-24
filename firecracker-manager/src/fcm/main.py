@@ -93,6 +93,14 @@ def callback(
         format="%(levelname)s: %(name)s: %(message)s",
     )
 
+    # Silently reconcile networks (no-op if host not initialized)
+    try:
+        from fcm.core.network_manager import reconcile_networks
+
+        reconcile_networks()
+    except Exception:
+        pass  # Never fail startup
+
 
 @app.command(name="version")
 def version_cmd(ctx: typer.Context) -> None:

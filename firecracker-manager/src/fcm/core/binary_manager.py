@@ -252,7 +252,7 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
     try:
         from fcm.core.cli_state import set_cli_state_value
 
-        set_cli_state_value("ci_version", ci_version)
+        set_cli_state_value("firecracker_ci_version", ci_version)
         set_cli_state_value("active_firecracker_version", version)
         set_cli_state_value("active_firecracker_bin", str(d / "firecracker"))
     except Exception:

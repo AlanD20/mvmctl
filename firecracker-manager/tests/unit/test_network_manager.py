@@ -232,7 +232,11 @@ def test_inspect_network(mock_bridge_exists, mock_cache_dir: Path):
     vms = info["vms"]
     assert isinstance(vms, list)
     assert len(vms) == 1
-    assert vms[0] == {"vm_name": "vm1", "ip": "10.20.1.2"}
+    assert vms[0]["vm_name"] == "vm1"
+    assert vms[0]["ip"] == "10.20.1.2"
+    assert "status" in vms[0]
+    assert "pid" in vms[0]
+    assert "socket_path" in vms[0]
 
 
 def test_inspect_network_not_found():

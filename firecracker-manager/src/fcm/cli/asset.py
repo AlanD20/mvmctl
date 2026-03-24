@@ -10,12 +10,14 @@ from typing import Optional
 from fcm.api.assets import (
     BinaryVersion,
     fetch_binary,
+    fetch_image,
+    import_image,
+    ImageImportSpec,
     list_local_versions,
     list_remote_versions,
+    load_images_config,
     remove_version,
     set_active_version,
-    fetch_image,
-    load_images_config,
     build_kernel_pipeline,
 )
 from fcm.constants import (
@@ -23,7 +25,7 @@ from fcm.constants import (
     DEFAULT_KERNEL_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
 )
-from fcm.exceptions import AssetNotFoundError, BinaryError, KernelError
+from fcm.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
 from fcm.utils.console import print_error, print_info, print_success, print_table, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
@@ -87,7 +89,7 @@ def kernel_ls(
 
     rows: list[list[str]] = []
     for k in kernels:
-        default_marker = "*" if k.get("is_default") else " "
+        default_marker = "✓" if k.get("is_default") else " "
         rows.append(
             [
                 default_marker,
@@ -109,7 +111,7 @@ def _get_ci_version() -> str:
     from fcm.core.cli_state import get_cli_state
 
     state = get_cli_state()
-    ci_version = state.get("ci_version") or ""
+    ci_version = state.get("firecracker_ci_version") or state.get("ci_version") or ""
     if not ci_version:
         from fcm.core.binary_manager import list_local_versions as _lv
 
@@ -127,7 +129,7 @@ def kernel_fetch(
     version: Optional[str] = typer.Option(
         None,
         "--version",
-        help="Kernel version (default: CI_VERSION for firecracker, 6.1.9 for official)",
+        help="Kernel version (default: FIRECRACKER_CI_VERSION for firecracker, 6.19.9 for official)",
     ),
     arch: str = typer.Option(
         DEFAULT_FC_KERNEL_ARCH, "--arch", help="Architecture (for firecracker type)"
@@ -176,7 +178,7 @@ def kernel_fetch(
 
         source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=effective_version)
         try:
-            build_kernel_pipeline(
+            build_dir_path = build_kernel_pipeline(
                 version=effective_version,
                 source_url=source_url,
                 output_path=output_path,
@@ -190,7 +192,7 @@ def kernel_fetch(
             raise typer.Exit(code=1) from exc
 
         if keep_build_dir:
-            print_info("Build directory was kept (--keep-build-dir specified)")
+            print_info(f"Build directory kept at: {build_dir_path}")
 
         result = output_path
         print_success(f"Kernel built: {result}")
@@ -224,7 +226,7 @@ def kernel_set_default(
     print_success(f"Default kernel set to: {name}")
 
 
-@kernel_app.command(name="remove")
+@kernel_app.command(name="remove", hidden=True)
 def kernel_remove(
     name: str = typer.Argument(..., help="Kernel file name to remove"),
     kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
@@ -243,7 +245,7 @@ def kernel_remove(
     print_success(f"Removed {path}")
 
 
-@kernel_app.command(name="rm", hidden=True)
+@kernel_app.command(name="rm")
 def kernel_rm(
     name: str = typer.Argument(..., help="Kernel file name to remove"),
     kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
@@ -372,7 +374,7 @@ def image_ls(
         meta = _load_image_meta(images_dir, img.id)
         pulled_at = meta.get("pulled_at", "-")[:19] if meta.get("pulled_at") else "-"
         fs_type = meta.get("fs_type", found_path.suffix.lstrip("."))
-        default_marker = "*" if img.id == default_img else " "
+        default_marker = "✓" if img.id == default_img else " "
         rows_local.append([default_marker, img.id, img.name, fs_type, pulled_at])
 
     if not rows_local:
@@ -459,10 +461,10 @@ def image_set_default(
     from fcm.core.cli_state import set_cli_state_value
 
     set_cli_state_value("default_image", image_id)
-    print_success(f"Default image set to: {image_id}")
+    print_success(f"✓ Default image set to: {image_id}")
 
 
-@image_app.command(name="remove")
+@image_app.command(name="remove", hidden=True)
 def image_remove(
     id: str = typer.Argument(..., help="Image ID to remove"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
@@ -489,7 +491,7 @@ def image_remove(
     raise typer.Exit(code=0)
 
 
-@image_app.command(name="rm", hidden=True)
+@image_app.command(name="rm")
 def image_rm(
     id: str = typer.Argument(..., help="Image ID to remove"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
@@ -497,6 +499,77 @@ def image_rm(
 ) -> None:
     """Alias for remove."""
     image_remove(id=id, images_dir=images_dir, force=force)
+
+
+_FORMAT_EXT_MAP: dict[str, str] = {
+    ".qcow2": "qcow2",
+    ".raw": "raw",
+    ".img": "raw",
+    ".tar": "tar-rootfs",
+    ".tar.gz": "tar-rootfs",
+    ".tar.xz": "tar-rootfs",
+    ".tgz": "tar-rootfs",
+}
+
+
+@image_app.command(name="import")
+def image_import(
+    image_id: str = typer.Argument(..., help="Unique ID for the imported image"),
+    source_path: Path = typer.Argument(..., help="Path to local image file"),
+    format: str = typer.Option(
+        "auto", "--format", help="Image format: qcow2, raw, tar-rootfs, or auto"
+    ),
+    convert_to: str = typer.Option("ext4", "--convert-to", help="Target filesystem format"),
+    size_mib: int = typer.Option(2048, "--size-mib", help="Size in MiB for tar-rootfs import"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing"),
+    set_default: bool = typer.Option(False, "--set-default", help="Set as default after import"),
+    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Output directory"),
+) -> None:
+    """Import a local image file (qcow2, raw, tar-rootfs)."""
+    resolved_format: str | None = format
+    if resolved_format == "auto":
+        name = source_path.name.lower()
+        resolved_format = next(
+            (fmt for ext, fmt in _FORMAT_EXT_MAP.items() if name.endswith(ext)),
+            None,
+        )
+    if resolved_format is None:
+        print_error(
+            f"Cannot auto-detect format from '{source_path.name}'. "
+            "Use --format qcow2|raw|tar-rootfs."
+        )
+        raise typer.Exit(code=1)
+
+    spec = ImageImportSpec(
+        id=image_id,
+        name=image_id,
+        source_path=source_path,
+        format=str(resolved_format),
+        convert_to=convert_to,
+        size_mib=size_mib,
+    )
+
+    try:
+        result = import_image(spec, images_dir, force=force)
+    except ImageError as exc:
+        print_error(str(exc))
+        raise typer.Exit(code=1)
+
+    _save_image_meta(
+        images_dir,
+        image_id,
+        result,
+        {"os_name": image_id, "fs_type": result.suffix.lstrip(".")},
+    )
+    print_success(f"Image imported: {result}")
+
+    if set_default:
+        from fcm.core.cli_state import set_cli_state_value
+
+        set_cli_state_value("default_image", image_id)
+        print_success(f"Default image set to: {image_id}")
+
+    raise typer.Exit(code=0)
 
 
 def _format_bin_row(bv: BinaryVersion) -> list[str]:
@@ -508,10 +581,25 @@ def _format_bin_row(bv: BinaryVersion) -> list[str]:
 def bin_ls(
     remote: bool = typer.Option(False, "--remote", "-r", help="Also show remote versions"),
     limit: int = typer.Option(5, "--limit", help="Max remote versions to show"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List local (and optionally remote) Firecracker versions."""
     local = list_local_versions()
     local_versions = {bv.version for bv in local}
+
+    if json_output:
+        import json
+
+        data = [
+            {
+                "active": bv.is_active,
+                "version": bv.version,
+                "path": str(bv.firecracker_path) if bv.firecracker_path else "",
+            }
+            for bv in local
+        ]
+        print(json.dumps(data, indent=2))
+        return
 
     if local:
         rows = [_format_bin_row(bv) for bv in local]
@@ -548,21 +636,28 @@ def bin_fetch(
     print_success(f"Downloaded v{bv.version}: {bv.firecracker_path}")
 
 
-@bin_app.command(name="use")
-def bin_use(
-    version: str = typer.Argument(..., help="Version to activate"),
+@bin_app.command(name="set-default")
+def bin_set_default(
+    version: str = typer.Argument(..., help="Version to set as active default"),
 ) -> None:
-    """Set the active Firecracker version."""
+    """Set the active Firecracker binary version."""
     try:
         set_active_version(version)
     except AssetNotFoundError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)
-
     print_success(f"Active version set to {version}")
 
 
-@bin_app.command(name="remove")
+@bin_app.command(name="use", hidden=True)
+def bin_use(
+    version: str = typer.Argument(..., help="Version to activate"),
+) -> None:
+    """Set the active Firecracker version (deprecated: use set-default)."""
+    bin_set_default(version)
+
+
+@bin_app.command(name="remove", hidden=True)
 def bin_remove(
     version: str = typer.Argument(..., help="Version to remove"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
@@ -580,7 +675,7 @@ def bin_remove(
     print_success(f"Removed v{version}")
 
 
-@bin_app.command(name="rm", hidden=True)
+@bin_app.command(name="rm")
 def bin_rm(
     version: str = typer.Argument(..., help="Version to remove"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),

@@ -75,7 +75,9 @@ def _resolve_active_firecracker_bin() -> str:
 def create(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     image: Optional[str] = typer.Option(
-        None, "--image", help="Image ID or path to .ext4 file (required if no default image)"
+        None,
+        "--image",
+        help="Image ID or path to rootfs file with single root partition (required if no default image)",
     ),
     kernel: Optional[str] = typer.Option(
         None,
@@ -166,7 +168,7 @@ def create(
         raise typer.Exit(code=1)
 
 
-@app.command(name="remove")
+@app.command(name="remove", hidden=True)
 def remove(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
@@ -192,12 +194,12 @@ def remove(
 
 
 # Aliases
-@app.command(name="rm", hidden=True)
+@app.command(name="rm")
 def rm(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
-    """Alias for remove."""
+    """Stop and remove a VM."""
     remove(name=name, force=force)
 
 
@@ -464,3 +466,21 @@ def load(
     except FCMError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)
+
+
+@app.command(name="pause", hidden=True)
+def pause(
+    name: str = typer.Option(..., "--name", "-n", help="VM name"),
+) -> None:
+    """Pause a VM (not supported in this version)."""
+    print_info("'vm pause' is not supported by Firecracker. Use 'vm snapshot' instead.")
+    raise typer.Exit(code=0)
+
+
+@app.command(name="resume", hidden=True)
+def resume(
+    name: str = typer.Option(..., "--name", "-n", help="VM name"),
+) -> None:
+    """Resume a paused VM (not supported in this version)."""
+    print_info("'vm resume' is not supported by Firecracker. Use 'vm load' instead.")
+    raise typer.Exit(code=0)
