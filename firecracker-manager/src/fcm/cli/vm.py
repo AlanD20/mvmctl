@@ -21,6 +21,7 @@ from fcm.constants import DEFAULT_NETWORK_NAME
 from fcm.exceptions import FCMError
 from fcm.models.vm import VMInstance, VMState
 from fcm.utils.console import console, print_error, print_info, print_success
+from fcm.utils.validation import is_ip_address, validate_entity_name
 
 app = typer.Typer(help="VM lifecycle management", no_args_is_help=True)
 
@@ -244,10 +245,7 @@ def ssh(
 ) -> None:
     """Open an SSH session into a VM."""
     try:
-        from fcm.utils.validation import validate_entity_name
-        import re
-
-        if not bool(re.match(r"^\d+\.\d+\.\d+\.\d+$", name)):
+        if not is_ip_address(name):
             validate_entity_name(name, "VM")
         exit_code = ssh_vm(name=name, user=user, key=key, cmd=cmd)
         raise typer.Exit(code=exit_code)

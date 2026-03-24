@@ -4,15 +4,11 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fcm.constants import PROJECT_NAME
+from fcm.utils.fs import get_cache_dir
 
 
 def _get_audit_log_path() -> Path:
-    """Return the path to the audit log file, honouring the cache dir env var."""
-    cache_dir = Path(os.environ.get(f"{PROJECT_NAME.upper().replace('-', '_')}_CACHE_DIR", ""))
-    if not cache_dir or not str(cache_dir).strip():
-        cache_dir = Path.home() / ".cache" / PROJECT_NAME
-    return cache_dir / "audit.log"
+    return get_cache_dir() / "audit.log"
 
 
 def _audit_logger() -> logging.Logger:

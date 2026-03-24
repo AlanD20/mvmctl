@@ -189,6 +189,7 @@ def image_fetch(
         print_success(f"Image ready: {result}")
         raise typer.Exit(code=0)
     else:
+        print_error(f"Failed to download image '{id}'")
         raise typer.Exit(code=1)
 
 

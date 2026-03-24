@@ -5,6 +5,7 @@ import re
 from fcm.exceptions import FCMError
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,30}$")
+_IP_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
 
 
 def validate_entity_name(name: str, entity_type: str = "entity") -> str:
@@ -45,3 +46,7 @@ def validate_boot_arg_component(value: str, component_name: str) -> str:
             f"Invalid {component_name} '{value}': must not contain spaces or shell metacharacters"
         )
     return value
+
+
+def is_ip_address(value: str) -> bool:
+    return bool(_IP_PATTERN.match(value))

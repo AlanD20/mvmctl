@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
-from fcm.constants import DEFAULT_NETWORK_CIDR, BRIDGE_NAME, DEFAULT_NETWORK_NAME
+from fcm.constants import DEFAULT_NETWORK_CIDR, DEFAULT_NETWORK_NAME
 
 from fcm.constants import device_prefix
 from fcm.core.network import (
@@ -208,15 +208,6 @@ def create_network(
     if existing_with_bridge:
         raise NetworkError(
             f"Bridge name '{bridge}' conflicts with network '{existing_with_bridge[0].name}'"
-        )
-
-    if name == DEFAULT_NETWORK_NAME:
-        return NetworkConfig(
-            name=name,
-            cidr=DEFAULT_NETWORK_CIDR,
-            gateway=_gateway_for_subnet(DEFAULT_NETWORK_CIDR),
-            bridge=BRIDGE_NAME,
-            nat_enabled=True,
         )
 
     config = NetworkConfig(

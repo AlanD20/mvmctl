@@ -83,8 +83,7 @@ class FirecrackerClient:
         """
         if not self.conn:
             self._connect()
-        if self.conn is None:
-            raise FirecrackerError("Connection not established after _connect()")
+        assert self.conn is not None
 
         headers = {"Content-Type": "application/json"} if body else {}
         body_json = json.dumps(body) if body else None

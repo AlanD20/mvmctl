@@ -7,7 +7,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
-from typing import Any
+from typing import Any, IO
 
 from fcm.models.vm import VMInstance, VMState
 from fcm.utils.fs import get_vms_dir
@@ -36,18 +36,12 @@ class VMManager:
         return Path(str(self.state_file) + ".lock")
 
     @contextmanager
-    def _locked(self, exclusive: bool = True) -> Generator[Any, None, None]:
-        """Context manager that acquires a file lock on the state lock file.
-
-        Invalidates the in-memory cache on entry so that the subsequent
-        ``_load_state()`` reads fresh data from disk, closing the TOCTOU
-        window between read and write.
-        """
-        f = open(self._lock_path, "a+")
+    def _locked(self, exclusive: bool = True) -> Generator[None, None, None]:
+        f: IO[str] = open(self._lock_path, "a+")
         try:
             fcntl.flock(f, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
             self._cache = None
-            yield f
+            yield None
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
             f.close()

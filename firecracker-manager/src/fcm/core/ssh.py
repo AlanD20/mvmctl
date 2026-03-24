@@ -9,6 +9,7 @@ from pathlib import Path
 from fcm.exceptions import VMNotFoundError, FCMKeyError, FCMError
 from fcm.core.vm_manager import VMManager
 from fcm.utils.fs import get_cache_dir
+from fcm.utils.validation import is_ip_address
 
 logger = logging.getLogger(__name__)
 
@@ -139,9 +140,7 @@ def connect_to_vm(
         FCMKeyError: If no SSH keys found or specified key not found
         FCMError: If VM has no IP address
     """
-    import re
-
-    is_ip = bool(re.match(r"^\d+\.\d+\.\d+\.\d+$", vm_name_or_ip))
+    is_ip = is_ip_address(vm_name_or_ip)
 
     if is_ip:
         ip = vm_name_or_ip

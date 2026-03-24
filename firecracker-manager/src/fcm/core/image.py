@@ -258,7 +258,8 @@ def extract_partition_from_raw(
             raw_path.rename(output_path)
             return output_path
 
-        assert isinstance(parsed, tuple)
+        if not isinstance(parsed, tuple):
+            raise ImageError(f"Unexpected parse result type: {type(parsed).__name__}")
         start_sector, sector_count, partition = parsed
         logger.info("Extracting partition %d (start=%d)...", partition, start_sector)
 

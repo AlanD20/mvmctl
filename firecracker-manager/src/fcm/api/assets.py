@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TypedDict, Literal
 
@@ -184,8 +185,6 @@ def fetch_images_parallel(
         ImageError: If one or more fetches fail.  The message lists
             every individual failure.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     results: dict[int, Path] = {}
     errors: list[str] = []
 

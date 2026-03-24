@@ -18,7 +18,7 @@ from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE
 from fcm.api.host import check_kvm_access, get_host_state, init_host
 from fcm.api.keys import add_key, create_key, list_keys
 from fcm.exceptions import BinaryError, FCMError, FCMKeyError, HostError, KernelError
-from fcm.utils.console import print_info, print_success, print_warning
+from fcm.utils.console import console, print_info, print_success, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
 app = typer.Typer(help="Guided onboarding")
@@ -336,8 +336,6 @@ def _step_summary() -> None:
     all_ok = True
     for label, ok in checks:
         status = "[green]ready[/green]" if ok else "[yellow]missing[/yellow]"
-        from fcm.utils.console import console
-
         console.print(f"  {label}: {status}")
         if not ok:
             all_ok = False

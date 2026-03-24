@@ -93,7 +93,7 @@ class ConfigGenerator:
         validate_boot_arg_component(gateway, "gateway")
         validate_boot_arg_component(subnet_mask, "subnet_mask")
 
-        lsm_flags = getattr(self.vm_config, "lsm_flags", None)
+        lsm_flags = self.vm_config.lsm_flags or None
         if lsm_flags:
             validate_boot_arg_component(lsm_flags, "lsm_flags")
 
@@ -154,7 +154,7 @@ class ConfigGenerator:
             if self.vm_config.guest_ip
             else ""
         )
-        lsm_flags = getattr(self.vm_config, "lsm_flags", None)
+        lsm_flags = self.vm_config.lsm_flags or None
         lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
         parts = [
             "console=ttyS0",

@@ -38,7 +38,7 @@ from fcm.core.host_setup import (
     get_ip_forward_status,
     init_host,
 )
-from fcm.exceptions import HostError, PrivilegeError
+from fcm.exceptions import HostError, NetworkError, PrivilegeError
 
 
 # ---------------------------------------------------------------------------
@@ -1476,7 +1476,7 @@ class TestCleanHost:
 
     @patch(
         "fcm.core.network_manager.remove_network",
-        side_effect=subprocess.CalledProcessError(1, "fail"),
+        side_effect=NetworkError("bridge teardown failed"),
     )
     @patch("fcm.core.network_manager.list_networks")
     def test_clean_host_handles_network_failure(self, mock_list, mock_remove):
@@ -1490,7 +1490,7 @@ class TestCleanHost:
 
     @patch(
         "fcm.core.network_manager.list_networks",
-        side_effect=subprocess.CalledProcessError(1, "fail"),
+        side_effect=NetworkError("list failed"),
     )
     def test_clean_host_handles_list_failure(self, mock_list):
         summary = clean_host(MagicMock())
@@ -1604,12 +1604,11 @@ class TestCleanHostErrorPaths:
     @patch("fcm.core.network_manager.remove_network")
     @patch("fcm.core.network_manager.list_networks")
     def test_clean_host_remove_network_subprocess_error(self, mock_list, mock_remove):
-        """clean_host handles CalledProcessError on individual network removal."""
         net = MagicMock()
         net.name = "stale-net"
         net.bridge = "fcm-br99"
         mock_list.return_value = [net]
-        mock_remove.side_effect = subprocess.CalledProcessError(1, "ip link delete")
+        mock_remove.side_effect = NetworkError("ip link delete failed")
 
         summary = clean_host(MagicMock())
         assert len(summary) == 1
@@ -1725,16 +1724,14 @@ class TestCheckRequiredBinariesErrorPaths:
 class TestGetIpForwardErrorPaths:
     """Error-path tests for get_ip_forward_status."""
 
-    @patch("fcm.core.host.subprocess.run")
+    @patch("fcm.core.host_setup.subprocess.run")
     def test_sysctl_command_not_found(self, mock_run):
-        """get_ip_forward_status raises HostError when sysctl is not installed."""
         mock_run.side_effect = FileNotFoundError("sysctl")
         with pytest.raises(HostError, match="sysctl command not found"):
             get_ip_forward_status()
 
-    @patch("fcm.core.host.subprocess.run")
+    @patch("fcm.core.host_setup.subprocess.run")
     def test_sysctl_returns_error(self, mock_run):
-        """get_ip_forward_status raises HostError on non-zero exit."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl", stderr="unknown key")
         with pytest.raises(HostError, match="Failed to read"):
             get_ip_forward_status()

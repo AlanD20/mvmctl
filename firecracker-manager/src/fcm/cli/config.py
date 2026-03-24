@@ -77,12 +77,8 @@ def dump_vm(
 
     try:
         with open(config_file, "r") as f:
-            content = f.read()
-            data = json.loads(content)
+            data = json.load(f)
             typer.echo(json.dumps(data, indent=2))
     except json.JSONDecodeError as e:
         print_error(f"Invalid JSON in config file: {e}")
-        raise typer.Exit(code=1)
-    except FileNotFoundError:
-        print_error(f"Config file not found: {config_file}")
         raise typer.Exit(code=1)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 from pathlib import Path
 
 from fcm.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH
@@ -78,16 +77,18 @@ def clean_host(cache_dir: Path) -> list[str]:
     """
     from fcm.core.network_manager import list_networks, remove_network
 
+    from fcm.exceptions import NetworkError
+
     summary: list[str] = []
     try:
         networks = list_networks()
-    except subprocess.CalledProcessError:
+    except NetworkError:
         networks = []
     for net in networks:
         try:
             remove_network(net.name)
             summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
-        except subprocess.CalledProcessError as e:
+        except NetworkError as e:
             summary.append(f"Warning: failed to remove network '{net.name}': {e}")
     return summary
 
