@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _FIRECRACKER_KEY = "firecracker"
 _ASSETS_KEY = "assets"
+_DEFAULTS_KEY = "defaults"
 
 
 def _config_path() -> Path:
@@ -58,7 +59,13 @@ def set_config_value(key: str, value: Any) -> None:
 
 
 def get_config_value(key: str, default: Any = None) -> Any:
-    return _read_raw().get(key, default)
+    state = _read_raw()
+    if key in state:
+        return state[key]
+    if key == "default_image":
+        defaults = get_defaults_config()
+        return defaults.get("image", default)
+    return default
 
 
 def get_firecracker_config() -> dict[str, str]:
@@ -77,7 +84,8 @@ def get_firecracker_config() -> dict[str, str]:
 def initialize_default_config() -> dict[str, Any]:
     """Initialize config file with default values if not present.
 
-    Creates the config file with default Firecracker version settings.
+    Creates the config file with default Firecracker version settings,
+    assets paths, and defaults section. Migrates legacy default_image to defaults.image.
     Returns the initialized config.
 
     Returns:
@@ -96,6 +104,34 @@ def initialize_default_config() -> dict[str, Any]:
         changed = True
     if "ci_version" not in fc_section:
         fc_section["ci_version"] = DEFAULT_FIRECRACKER_CI_VERSION
+        changed = True
+
+    # Write firecracker section BEFORE calling get_assets_config so it isn't
+    # lost when we re-read the file after get_assets_config() writes assets.
+    if changed:
+        _write_raw(state)
+        changed = False
+
+    get_assets_config()
+    state = _read_raw()
+
+    if _DEFAULTS_KEY not in state or not isinstance(state.get(_DEFAULTS_KEY), dict):
+        state[_DEFAULTS_KEY] = {}
+        changed = True
+
+    defaults_section = state[_DEFAULTS_KEY]
+    if "image" not in defaults_section:
+        if "default_image" in state:
+            defaults_section["image"] = state["default_image"]
+            del state["default_image"]
+        else:
+            defaults_section["image"] = None
+        changed = True
+    if "kernel" not in defaults_section:
+        defaults_section["kernel"] = None
+        changed = True
+    if "firecracker_version" not in defaults_section:
+        defaults_section["firecracker_version"] = DEFAULT_FIRECRACKER_VERSION
         changed = True
 
     if changed:
@@ -174,3 +210,26 @@ def update_assets_config(**fields: str) -> None:
     section.update(fields)
     state[_ASSETS_KEY] = section
     _write_raw(state)
+
+
+def get_defaults_config() -> dict[str, Any]:
+    """Get the defaults section from config.json. Returns {} if missing."""
+    raw = _read_raw()
+    section = raw.get(_DEFAULTS_KEY, {})
+    if not isinstance(section, dict):
+        section = {}
+    return section
+
+
+def set_defaults_value(key: str, value: Any) -> None:
+    """Set a value in the defaults section of config.json."""
+    state = _read_raw()
+    if _DEFAULTS_KEY not in state or not isinstance(state.get(_DEFAULTS_KEY), dict):
+        state[_DEFAULTS_KEY] = {}
+    state[_DEFAULTS_KEY][key] = value
+    _write_raw(state)
+
+
+def get_defaults_value(key: str, default: Any = None) -> Any:
+    """Get a single value from the defaults section."""
+    return get_defaults_config().get(key, default)

@@ -5,6 +5,7 @@ from typing import Optional
 import typer
 from rich.table import Table
 
+from fcm.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from fcm.api.vms import (
     list_vms,
     get_vm,
@@ -110,6 +111,16 @@ def create(
         envvar="FCM_FIRECRACKER_BIN",
         help="Path to firecracker binary (default: active version from fcm bin use)",
     ),
+    output_config: Optional[Path] = typer.Option(
+        None,
+        "--output-config",
+        help="Output VM configuration JSON file with all resolved parameters (for debugging). VM is still created.",
+    ),
+    import_config: Optional[Path] = typer.Option(
+        None,
+        "--import-config",
+        help="Import VM parameters from a JSON config file. CLI flags override file values.",
+    ),
 ) -> None:
     """Create and start a new Firecracker VM.
 
@@ -125,7 +136,47 @@ def create(
 
         # Create with API socket for snapshot support:
         fcm vm create --name myvm --image ubuntu-24.04 --enable-api-socket
+
+        # Import from config file with CLI overrides:
+        fcm vm create --import-config myvm.json --name newname
     """
+    if import_config is not None:
+        try:
+            base_config = load_vm_config_file(import_config)
+        except (FileNotFoundError, ValueError) as e:
+            print_error(str(e))
+            raise typer.Exit(code=1)
+
+        merged = merge_cli_overrides(
+            base_config,
+            name=name,
+            image=image,
+            kernel=kernel,
+            vcpus=vcpus,
+            mem=mem,
+            ip=ip,
+            network=network_name,
+            mac=mac,
+            ssh_key=ssh_key,
+            user=user,
+            enable_api_socket=enable_api_socket,
+            enable_pci=enable_pci,
+            firecracker_bin=firecracker_bin,
+        )
+        name = merged.name
+        image = merged.image
+        kernel = merged.kernel
+        vcpus = merged.vcpus
+        mem = merged.mem
+        ip = merged.ip
+        network_name = merged.network
+        mac = merged.mac
+        ssh_key = merged.ssh_key
+        user = merged.user
+        enable_api_socket = merged.enable_api_socket
+        enable_pci = merged.enable_pci
+        firecracker_bin = merged.firecracker_bin
+
     if image is None:
         image = _resolve_default_image()
         if image is None:
@@ -139,6 +190,42 @@ def create(
         kernel = _resolve_default_kernel()
 
     effective_bin = firecracker_bin or _resolve_active_firecracker_bin()
+
+    if output_config is not None:
+        from fcm.utils.fs import get_images_dir
+
+        image_path: Path | None = None
+        candidate = get_images_dir() / f"{image}.ext4"
+        if candidate.exists():
+            image_path = candidate
+        else:
+            test_path = Path(image)
+            if test_path.exists():
+                image_path = test_path
+
+        kernel_path = Path(kernel) if kernel else None
+
+        vm_config = build_vm_config_file(
+            name=name,
+            image=image,
+            kernel=str(kernel_path) if kernel_path else None,
+            vcpus=vcpus,
+            mem=mem,
+            ip=ip,
+            network=network_name,
+            mac=mac,
+            ssh_key=ssh_key,
+            user=user,
+            enable_api_socket=enable_api_socket,
+            enable_pci=enable_pci,
+            firecracker_bin=effective_bin,
+            rootfs_path=image_path,
+            gateway=None,
+            subnet_mask=None,
+            tap_device=None,
+        )
+        vm_config.to_json_file(output_config)
+        print_info(f"VM config written to: {output_config}")
 
     try:
         vm = create_vm(

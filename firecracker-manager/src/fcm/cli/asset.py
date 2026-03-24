@@ -25,6 +25,7 @@ from fcm.constants import (
     DEFAULT_KERNEL_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
 )
+from fcm.core.metadata import get_image_entry, update_image_entry
 from fcm.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
 from fcm.utils.console import print_error, print_info, print_success, print_table, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
@@ -254,24 +255,9 @@ def kernel_rm(
 
 
 def _load_image_meta(images_dir: Path, image_id: str) -> dict[str, str]:
-    for ext in (".ext4", ".btrfs", ".img", ".raw"):
-        meta_path = images_dir / f"{image_id}{ext}.json"
-        if meta_path.exists():
-            try:
-                raw: object = json.loads(meta_path.read_text())
-                if isinstance(raw, dict):
-                    return {str(k): str(v) for k, v in raw.items()}
-            except (json.JSONDecodeError, OSError):
-                pass
-    meta_path = images_dir / f"{image_id}.json"
-    if meta_path.exists():
-        try:
-            raw = json.loads(meta_path.read_text())
-            if isinstance(raw, dict):
-                return {str(k): str(v) for k, v in raw.items()}
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    cache_dir = get_cache_dir()
+    meta = get_image_entry(cache_dir, image_id)
+    return {str(k): str(v) for k, v in meta.items()}
 
 
 def _save_image_meta(
@@ -279,10 +265,11 @@ def _save_image_meta(
 ) -> None:
     from datetime import datetime, timezone
 
-    meta.setdefault("pulled_at", datetime.now(tz=timezone.utc).isoformat())
-    meta.setdefault("fs_type", image_path.suffix.lstrip(".") if image_path.suffix else "unknown")
-    meta_path = images_dir / f"{image_path.name}.json"
-    meta_path.write_text(json.dumps(meta, indent=2))
+    cache_dir = get_cache_dir()
+    fields: dict[str, object] = dict(meta)
+    fields.setdefault("pulled_at", datetime.now(tz=timezone.utc).isoformat())
+    fields.setdefault("fs_type", image_path.suffix.lstrip(".") if image_path.suffix else "unknown")
+    update_image_entry(cache_dir, image_id, **fields)
 
 
 @image_app.command(name="ls")
@@ -387,9 +374,9 @@ def image_ls(
 
 def _get_default_image() -> str | None:
     try:
-        from fcm.core.config_state import get_config_value
+        from fcm.core.config_state import get_defaults_config
 
-        val = get_config_value("default_image")
+        val = get_defaults_config().get("image")
         return str(val) if val is not None else None
     except Exception:
         return None
@@ -443,9 +430,9 @@ def image_fetch(
             if not typer.confirm("Re-download anyway?", default=False):
                 print_info("Skipping download. Use --force to overwrite.")
                 if set_default:
-                    from fcm.core.config_state import set_config_value
+                    from fcm.core.config_state import set_defaults_value
 
-                    set_config_value("default_image", spec.id)
+                    set_defaults_value("image", spec.id)
                     print_success(f"Default image set to: {spec.id}")
                 raise typer.Exit(code=0)
             force = True  # User confirmed re-download
@@ -457,9 +444,9 @@ def image_fetch(
         )
         print_success(f"Image ready: {result}")
         if set_default:
-            from fcm.core.config_state import set_config_value
+            from fcm.core.config_state import set_defaults_value
 
-            set_config_value("default_image", spec.id)
+            set_defaults_value("image", spec.id)
             print_success(f"Default image set to: {spec.id}")
         raise typer.Exit(code=0)
     else:
@@ -480,9 +467,9 @@ def image_set_default(
     if not found:
         print_error(f"Image '{image_id}' not found in {images_dir}. Download it first.")
         raise typer.Exit(code=1)
-    from fcm.core.config_state import set_config_value
+    from fcm.core.config_state import set_defaults_value
 
-    set_config_value("default_image", image_id)
+    set_defaults_value("image", image_id)
     print_success(f"✓ Default image set to: {image_id}")
 
 
@@ -576,9 +563,9 @@ def image_import(
     print_success(f"Image imported: {result}")
 
     if set_default:
-        from fcm.core.config_state import set_config_value
+        from fcm.core.config_state import set_defaults_value
 
-        set_config_value("default_image", image_id)
+        set_defaults_value("image", image_id)
         print_success(f"Default image set to: {image_id}")
 
     raise typer.Exit(code=0)

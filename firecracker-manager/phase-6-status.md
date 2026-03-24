@@ -32,6 +32,10 @@ Completed: 2026-03-24
 | 21 | `--image` optional when default set | Complete | create resolves default image from cli state |
 | 22 | `--kernel` optional when default set | Complete | create resolves default kernel from kernel metadata |
 | 23 | `--firecracker-bin` from active binary | Complete | _resolve_active_firecracker_bin uses cli state and binary manager |
+| 24 | Unified metadata.json for kernels/images/binaries | Complete | src/fcm/core/metadata.py; cache_dir/metadata.json replaces per-file JSON sidecars; legacy migration on first list |
+| 25 | Kernel not default on download | Complete | get_default_kernel_path returns None if no explicit default set; set-default subcommand writes to config.json defaults.kernel |
+| 26 | config.json paths + defaults section | Complete | initialize_default_config writes assets paths + defaults section (image, kernel, firecracker_version); migrates legacy default_image |
+| 27 | VM configuration file (--output-config / --import-config) | Complete | VMCreateConfigFile model + api/vm_config.py; fcm vm create --output-config PATH writes config + creates VM; --import-config PATH reads params from file, CLI flags override |
 
 ## Decisions
 

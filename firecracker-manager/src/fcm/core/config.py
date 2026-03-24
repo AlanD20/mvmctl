@@ -5,7 +5,13 @@ from pathlib import Path
 from dataclasses import dataclass, field, fields
 from typing import Any
 
-from fcm.constants import DEFAULT_BRIDGE_NAME, CLI_NAME, DEFAULT_NETWORK_CIDR
+from fcm.constants import (
+    DEFAULT_BRIDGE_NAME,
+    CLI_NAME,
+    DEFAULT_NETWORK_CIDR,
+    DEFAULT_VM_VCPU_COUNT,
+    DEFAULT_VM_MEM_MIB,
+)
 
 
 def _default_assets_dir() -> str:
@@ -24,8 +30,8 @@ class FirecrackerConfig:
 
 @dataclass
 class VMDefaultsConfig:
-    vcpu_count: int = 2
-    mem_size_mib: int = 2048
+    vcpu_count: int = DEFAULT_VM_VCPU_COUNT
+    mem_size_mib: int = DEFAULT_VM_MEM_MIB
     network_interface: str = "eth0"
     boot_args: str = "console=ttyS0 reboot=k panic=1 pci=off"
     disk_size: str = "2G"

@@ -75,3 +75,25 @@ Additional requirements to not miss!
   - the `fcm kernel ls` should have id field instead of name and it's a hash of the filename + last modified date, only showing the first 6 digits
   - the base_name should be the name instead
   - the last modified field in the metadata should be full UTC timezone, but when running `fcm kernel ls` it should be human format such as x minutes ago, etc...
+
+- all the metadata files to show kernels, images, binaries, must be in a single json file at cache folder called metadata.json
+- when kernel is downloaded, it should not be a default. user must explicitl set it by using set-default subcommand under fcm kernel.
+- The cli must also put these into the config.json file when it's initialized:
+  - absolute path to kernels directory, default is cache/kernels
+  - absolute path to images directory, default is cache/images
+  - absolute path to binaries directory, default is cache/bin
+  - absolute path to networks directory, default is cache/networks
+  - absolute path to vms directory, default is cache/vms
+  - absolute path to keys directory, default is cache/keys
+  - absolute path to build custom kernels directory, default is /tmp/fcm-kernel-build-{rand 3 chars}
+  - absolute path to import custom images directory, default is /tmp/fcm-image-import-{rand 3 chars}
+  - absolute path to logs directory, default is cache/logs
+  - a new section in the config.json called `defaults` where it points to the default `image`, `kernel`, `firecracker_version`, etc...
+
+- the application needs to handle its own vm configuration file written in json format. This change will introduce the following:
+  - new flags to `fcm vm create` command:
+    - the `--output-config` flag will outputs the cli-owned configuration file to create a vm, all the necessary flags passed to this command will be in this single configuration file, including the firecracker.json file which will have its own key in this configuration file called `firecracker_config`. This will help in debugging why vm is not working.
+    - the `import-config` flag takes a vm configuration json file which will have all the necessary data to create the vm instead of passing the flags. Providing this vm configuration file will make the other flags optional, but if flags are passed, they will override the config file value.
+    - this new vm configuration file is a big feature of this application, therefore it has its own file and everything must be handled at API layer then the cli will use the API layer to perform the logics.
+
+- remove the default config values in the entire CLI codebase. do not hard code config values in any function parameters or as variables! Default config must only come from user config if it's user facing and if it's backend facing, they must come from constants.py file. If major refactoring is required, do it so long as tests are going to pass and nothing breaks by validating your work.

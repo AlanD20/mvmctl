@@ -89,6 +89,15 @@ REQUIRED_BINARIES: Final[list[str]] = ["ip", "iptables", "qemu-img"]
 ISO_BINARIES: Final[list[str]] = ["mkisofs", "genisoimage"]
 
 # ---------------------------------------------------------------------------
+# VM instance defaults (user-facing; also referenced by VMDefaultsConfig)
+# ---------------------------------------------------------------------------
+
+DEFAULT_VM_VCPU_COUNT: Final[int] = 2
+DEFAULT_VM_MEM_MIB: Final[int] = 2048
+DEFAULT_VM_SSH_USER: Final[str] = "root"
+DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = "firecracker"
+
+# ---------------------------------------------------------------------------
 # Firecracker defaults
 # ---------------------------------------------------------------------------
 

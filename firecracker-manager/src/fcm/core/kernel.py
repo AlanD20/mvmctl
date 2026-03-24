@@ -1,7 +1,6 @@
 """Kernel download and build utilities."""
 
 import hashlib
-import json
 import logging
 import os
 import re
@@ -25,7 +24,13 @@ from fcm.constants import (
     KERNEL_SET_VAL_CONFIGS,
     KERNEL_SHA256_URL_TEMPLATE,
 )
+from fcm.core.metadata import (
+    list_kernel_entries,
+    migrate_legacy_metadata,
+    update_kernel_entry,
+)
 from fcm.exceptions import ChecksumMismatchError, FCMError, KernelError, ProcessError
+from fcm.utils.fs import get_cache_dir, get_images_dir
 from fcm.utils.http import download_file
 from fcm.utils.process import stream_cmd
 
@@ -510,7 +515,7 @@ def save_kernel_metadata(
     kernel_type: str | None = None,
     arch: str | None = None,
 ) -> None:
-    """Save kernel metadata JSON file.
+    """Save kernel metadata to unified metadata.json.
 
     Parses the kernel filename to extract base_name, version, and arch if not
     provided. Uses file modification time for last_modified.
@@ -538,36 +543,41 @@ def save_kernel_metadata(
         mtime = kernel_path.stat().st_mtime
         last_modified = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
 
-    meta = {
-        "name": kernel_name,
-        "base_name": parsed.base_name,
-        "version": version,
-        "arch": arch,
-        "type": kernel_type,
-        "last_modified": last_modified,
-    }
-    meta_path = kernels_dir / f"{kernel_name}.json"
-    meta_path.write_text(json.dumps(meta, indent=2))
+    cache_dir = get_cache_dir()
+    update_kernel_entry(
+        cache_dir,
+        kernel_name,
+        name=kernel_name,
+        base_name=parsed.base_name,
+        version=version,
+        arch=arch,
+        type=kernel_type,
+        last_modified=last_modified,
+    )
 
 
 def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
     kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_dir = get_cache_dir()
+    images_dir = get_images_dir()
+
+    migrate_legacy_metadata(cache_dir, kernels_dir, images_dir)
+
     default_name = _load_default_kernel(kernels_dir)
+    entries = list_kernel_entries(cache_dir)
+
     results: list[dict[str, str]] = []
+
     for path in sorted(kernels_dir.iterdir()):
         if not path.is_file() or path.suffix == ".json":
             continue
         if not (path.name.startswith("vmlinux") or path.name.startswith("kernel")):
             continue
+
         size_mb = path.stat().st_size / (1024 * 1024)
-        meta_path = kernels_dir / f"{path.name}.json"
-        if meta_path.exists():
-            try:
-                meta: dict[str, str] = json.loads(meta_path.read_text())
-            except (json.JSONDecodeError, OSError):
-                meta = {}
-        else:
-            meta = {}
+
+        meta = entries.get(path.name, {})
 
         last_modified = meta.get("last_modified")
         if not last_modified:
@@ -575,7 +585,6 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
         kernel_id = generate_kernel_id(path.name, last_modified)
 
-        # Use metadata if available, otherwise parse from filename
         if meta.get("base_name"):
             base_name = meta["base_name"]
             version = meta.get("version", "-")
@@ -601,38 +610,29 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
                 "is_default": str(path.name == default_name).lower(),
             }
         )
+
     return results
 
 
-def _default_kernel_path(kernels_dir: Path) -> Path:
-    return kernels_dir / "default.json"
-
-
 def _load_default_kernel(kernels_dir: Path) -> str | None:
-    path = _default_kernel_path(kernels_dir)
-    if not path.exists():
-        return None
-    try:
-        data: dict[str, str] = json.loads(path.read_text())
-        return data.get("name")
-    except (json.JSONDecodeError, OSError):
-        return None
+    from fcm.core.config_state import get_defaults_config
+
+    return get_defaults_config().get("kernel")
 
 
 def set_default_kernel(kernels_dir: Path, kernel_name: str) -> None:
+    from fcm.core.config_state import set_defaults_value
+
     kernel_path = kernels_dir / kernel_name
     if not kernel_path.exists():
         raise KernelError(f"Kernel not found: {kernel_path}")
-    _default_kernel_path(kernels_dir).write_text(json.dumps({"name": kernel_name}, indent=2))
+    set_defaults_value("kernel", kernel_name)
     logger.info("Default kernel set to: %s", kernel_name)
 
 
 def get_default_kernel_path(kernels_dir: Path) -> Path | None:
     name = _load_default_kernel(kernels_dir)
     if name is None:
-        vmlinux = kernels_dir / "vmlinux"
-        if vmlinux.exists():
-            return vmlinux
         return None
     path = kernels_dir / name
     return path if path.exists() else None
