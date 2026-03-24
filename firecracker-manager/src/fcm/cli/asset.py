@@ -417,6 +417,30 @@ def image_fetch(
         print_error(f"Image '{full_id}' not found. Available: {available}")
         raise typer.Exit(code=1)
 
+    # FIX-009: Check if image already exists locally
+    if not force:
+        existing_paths = [
+            out / f"{spec.id}{ext}"
+            for ext in (".ext4", ".btrfs", ".img", ".raw")
+            if (out / f"{spec.id}{ext}").exists()
+        ]
+        if existing_paths:
+            print_warning(f"Image '{spec.id}' already exists locally:")
+            for path in existing_paths:
+                print_info(f"  {path}")
+            meta = _load_image_meta(out, spec.id)
+            if meta.get("pulled_at"):
+                print_info(f"    Pulled: {meta['pulled_at'][:19]}")
+            if not typer.confirm("Re-download anyway?", default=False):
+                print_info("Skipping download. Use --force to overwrite.")
+                if set_default:
+                    from fcm.core.cli_state import set_cli_state_value
+
+                    set_cli_state_value("default_image", spec.id)
+                    print_success(f"Default image set to: {spec.id}")
+                raise typer.Exit(code=0)
+            force = True  # User confirmed re-download
+
     result = fetch_image(spec, out, force)
     if result:
         _save_image_meta(

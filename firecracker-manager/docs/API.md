@@ -292,6 +292,128 @@ Return the cache directory path for a VM. The directory may not yet exist.
 
 ---
 
+#### `create_vm(config: VMConfig, firecracker_bin: str = "firecracker", vm_manager: VMManager | None = None) -> VMInstance`
+
+Create and start a new Firecracker microVM. Copies the rootfs image, generates cloud-init
+ISO, sets up bridge networking (TAP device + iptables rules), writes the Firecracker JSON
+config, starts the Firecracker process, and registers the VM in the state registry.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `config` | `VMConfig` | — | Full VM launch configuration |
+| `firecracker_bin` | `str` | `"firecracker"` | Path or name of the Firecracker binary |
+| `vm_manager` | `VMManager \| None` | `None` | Override state manager (default: global singleton) |
+
+**Returns:** `VMInstance` with PID, IP, MAC, and runtime state populated.
+
+**Raises:** `VMAlreadyExistsError` if a VM with the same name already exists.
+`NetworkError` if bridge/TAP/iptables setup fails.
+`FirecrackerError` if the Firecracker process fails to start.
+`PrivilegeError` if the calling user lacks required group membership.
+
+**Example:**
+```python
+from pathlib import Path
+from fcm.api import vms
+from fcm.models.vm import VMConfig
+
+config = VMConfig(
+    name="my-vm",
+    kernel_path=Path("/home/user/.cache/firecracker-manager/kernels/vmlinux"),
+    rootfs_path=Path("/home/user/.cache/firecracker-manager/images/ubuntu-24.04.ext4"),
+    vcpu_count=2,
+    mem_size_mib=2048,
+)
+instance = vms.create_vm(config)
+print(f"VM started: PID={instance.pid}, IP={instance.ip}")
+```
+
+---
+
+#### `remove_vm(name: str, force: bool = False, vm_manager: VMManager | None = None) -> None`
+
+Stop and remove a Firecracker VM. Sends SIGTERM (graceful shutdown), waits up to 5 seconds,
+then SIGKILL if still running. Tears down the TAP device, removes iptables forwarding rules,
+deregisters the VM, and deletes its cache directory.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name to remove |
+| `force` | `bool` | `False` | Skip graceful shutdown; go straight to SIGKILL |
+| `vm_manager` | `VMManager \| None` | `None` | Override state manager |
+
+**Raises:** `VMNotFoundError` if the VM does not exist in the registry.
+`PrivilegeError` if the calling user lacks required group membership.
+
+**Example:**
+```python
+from fcm.api import vms
+
+# Graceful shutdown
+vms.remove_vm("my-vm")
+
+# Force-kill immediately
+vms.remove_vm("my-vm", force=True)
+```
+
+---
+
+#### `ssh_vm(name: str, user: str = "root", key: Path | None = None, cmd: str | None = None) -> int`
+
+Open an interactive SSH session into a VM, or execute a single command and return.
+Resolves the VM IP from the registry, then calls `ssh` with appropriate flags.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name or IP address |
+| `user` | `str` | `"root"` | SSH username |
+| `key` | `Path \| None` | `None` | Path to SSH private key. Defaults to auto-detected key in `~/.ssh/`. |
+| `cmd` | `str \| None` | `None` | Command to run instead of opening an interactive shell |
+
+**Returns:** SSH process exit code (`0` = success).
+
+**Example:**
+```python
+from fcm.api import vms
+
+# Interactive shell
+vms.ssh_vm("my-vm")
+
+# Run a command and capture exit code
+rc = vms.ssh_vm("my-vm", cmd="uname -a")
+print(f"Exit code: {rc}")
+```
+
+---
+
+#### `get_logs(name: str, log_type: str = "os", lines: int = 50, follow: bool = False) -> list[str]`
+
+Retrieve log lines for a VM.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name |
+| `log_type` | `str` | `"os"` | Log type: `"os"` (Firecracker process log) or `"boot"` (serial console output) |
+| `lines` | `int` | `50` | Number of lines to return |
+| `follow` | `bool` | `False` | Stream new log lines continuously (blocks until interrupted) |
+
+**Returns:** List of log line strings.
+
+**Example:**
+```python
+from fcm.api import vms
+
+# Get last 100 lines of boot log
+boot_lines = vms.get_logs("my-vm", log_type="boot", lines=100)
+for line in boot_lines:
+    print(line)
+
+# Get OS (Firecracker process) log
+os_lines = vms.get_logs("my-vm", log_type="os")
+```
+
+---
+
 ### `fcm.api.network`
 
 #### `list_networks() -> list[NetworkConfig]`

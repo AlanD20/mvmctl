@@ -343,13 +343,14 @@ def test_configure_kernel_missing_required_settings(
     kernel_dir = tmp_path / "linux-src"
     scripts_dir = kernel_dir / "scripts"
     scripts_dir.mkdir(parents=True)
-    (scripts_dir / "config").write_text("#!/bin/bash\necho config")
+    (scripts_dir / "config").write_text("#!/bin/sh\necho config")
 
     config_path = kernel_dir / ".config"
     config_path.write_text("CONFIG_BTRFS_FS=y\n")
 
-    with pytest.raises(KernelError):
-        configure_kernel(kernel_dir, version="6.1.102")
+    with patch("typer.confirm", return_value=False):
+        with pytest.raises(KernelError):
+            configure_kernel(kernel_dir, version="6.1.102")
 
 
 def test_build_kernel_success(tmp_path: Path):
@@ -641,3 +642,47 @@ def test_build_kernel_pipeline_cached_tarball_needs_extract(
     mock_extract.assert_called_once()
     mock_configure.assert_called_once()
     mock_build.assert_called_once()
+
+
+def test_configure_kernel_missing_settings_prompt(tmp_path: Path):
+    """P2-10: configure_kernel shows confirmation prompt for missing required settings."""
+    # Create a kernel dir with a config missing required settings
+    kernel_dir = tmp_path / "linux-6.1.102"
+    kernel_dir.mkdir()
+    scripts = kernel_dir / "scripts"
+    scripts.mkdir()
+    (scripts / "config").write_text("#!/bin/sh")
+    (scripts / "config").chmod(0o755)
+    (kernel_dir / ".config").write_text("# minimal config\nCONFIG_SOMETHING=y\n")
+
+    with (
+        patch("fcm.core.kernel.download_firecracker_config"),
+        patch("fcm.core.kernel.run_make", return_value=(0, "", "")),
+        patch("fcm.core.kernel.subprocess.run", return_value=MagicMock(returncode=0)),
+        patch("typer.confirm", return_value=False) as mock_confirm,
+    ):
+        with pytest.raises(KernelError, match="Required kernel settings are missing"):
+            configure_kernel(kernel_dir, "6.1.102")
+        mock_confirm.assert_called_once()
+
+
+def test_configure_kernel_missing_settings_proceed(tmp_path: Path):
+    """P2-10: configure_kernel proceeds when user confirms despite missing settings."""
+    # Create a kernel dir with a config missing required settings
+    kernel_dir = tmp_path / "linux-6.1.102"
+    kernel_dir.mkdir()
+    scripts = kernel_dir / "scripts"
+    scripts.mkdir()
+    (scripts / "config").write_text("#!/bin/sh")
+    (scripts / "config").chmod(0o755)
+    (kernel_dir / ".config").write_text("# minimal config\nCONFIG_SOMETHING=y\n")
+
+    with (
+        patch("fcm.core.kernel.download_firecracker_config"),
+        patch("fcm.core.kernel.run_make", return_value=(0, "", "")),
+        patch("fcm.core.kernel.subprocess.run", return_value=MagicMock(returncode=0)),
+        patch("typer.confirm", return_value=True) as mock_confirm,
+    ):
+        # Should not raise when user confirms
+        configure_kernel(kernel_dir, "6.1.102")
+        mock_confirm.assert_called_once()

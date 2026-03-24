@@ -53,6 +53,37 @@ def check_privileges(binary: str) -> None:
         ) from e
 
 
+def check_privileges_interactive(binary: str, operation_description: str = "") -> None:
+    """Check privileges; if lacking, show interactive guidance with actionable options.
+
+    This wrapper is intended for CLI command handlers. It catches ``PrivilegeError``
+    from :func:`check_privileges` and prints structured guidance so the user knows
+    exactly what to do — without leaving them with a raw exception traceback.
+
+    Args:
+        binary: Absolute path or name of the binary requiring elevated privileges.
+        operation_description: Human-readable description of the operation requiring
+            privileges (used in error messages).
+
+    Raises:
+        PrivilegeError: Re-raised after printing guidance (caller decides exit strategy).
+    """
+    try:
+        check_privileges(binary)
+    except PrivilegeError as exc:
+        from fcm.utils.console import print_error, print_info, print_warning
+
+        op_str = f" for: {operation_description}" if operation_description else ""
+        print_error(f"Elevated privileges required{op_str}")
+        print_warning(f"Details: {exc}")
+        print_info("")
+        print_info("Options:")
+        print_info("  1. Run with sudo:              sudo fcm ...")
+        print_info("  2. Configure persistent access: sudo fcm host init")
+        print_info(f"     (then log out and back in, or run: newgrp {PROJECT_GROUP})")
+        raise
+
+
 def _get_current_user() -> str:
     """Return the username of the current process owner."""
     return pwd.getpwuid(os.getuid()).pw_name

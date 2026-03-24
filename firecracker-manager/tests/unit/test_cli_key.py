@@ -237,3 +237,42 @@ def test_inspect_rejects_invalid_name():
     """Key name with pipe should be rejected."""
     result = runner.invoke(app, ["inspect", "pipe|name"])
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# P3-13: Private Key column in ls
+# ---------------------------------------------------------------------------
+
+
+@patch("fcm.cli.key.list_keys")
+def test_key_ls_shows_private_key_column(mock_list):
+    """P3-13: key ls shows whether private key is present locally."""
+    mock_list.return_value = [
+        KeyInfo(
+            name="my-key",
+            fingerprint="SHA256:abc",
+            algorithm="ssh-ed25519",
+            comment="test",
+            added_at="2026-01-01T00:00:00+00:00",
+        )
+    ]
+    result = runner.invoke(app, ["ls"])
+    assert result.exit_code == 0
+    assert "Private Key" in result.output
+
+
+@patch("fcm.cli.key.list_keys")
+def test_key_ls_json_includes_has_private_key(mock_list):
+    """P3-13: key ls --json includes has_private_key field."""
+    mock_list.return_value = [
+        KeyInfo(
+            name="my-key",
+            fingerprint="SHA256:abc",
+            algorithm="ssh-ed25519",
+            comment="test",
+            added_at="2026-01-01T00:00:00+00:00",
+        )
+    ]
+    result = runner.invoke(app, ["ls", "--json"])
+    assert result.exit_code == 0
+    assert '"has_private_key"' in result.output

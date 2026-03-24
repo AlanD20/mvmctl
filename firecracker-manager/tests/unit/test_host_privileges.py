@@ -131,3 +131,15 @@ class TestHelpCommand:
         result = runner.invoke(app, ["help", "nonexistent"])
         assert result.exit_code == 1
         assert "Unknown command" in result.output
+
+def test_check_privileges_interactive_prints_guidance():
+    """FIX-008: check_privileges_interactive prints helpful options when privileges lacking."""
+    import pytest
+    from fcm.core.host_privilege import check_privileges_interactive
+    from fcm.exceptions import PrivilegeError
+    from unittest.mock import patch
+
+    with patch("fcm.core.host_privilege.check_privileges") as mock_check:
+        mock_check.side_effect = PrivilegeError("not in group")
+        with pytest.raises(PrivilegeError):
+            check_privileges_interactive("/usr/sbin/ip", "network create")

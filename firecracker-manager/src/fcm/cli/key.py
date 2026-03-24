@@ -1,6 +1,7 @@
 """SSH key management commands."""
 
 import json
+from pathlib import Path
 
 import typer
 from rich.table import Table
@@ -37,7 +38,13 @@ def ls(
     if json_output:
         from dataclasses import asdict
 
-        typer.echo(json.dumps([asdict(k) for k in keys], indent=2))
+        result = []
+        for k in keys:
+            d = asdict(k)
+            private_key_path = Path.home() / ".ssh" / k.name
+            d["has_private_key"] = private_key_path.exists()
+            result.append(d)
+        typer.echo(json.dumps(result, indent=2))
         return
 
     if not keys:
@@ -50,11 +57,14 @@ def ls(
     table.add_column("Fingerprint")
     table.add_column("Algorithm", style="green")
     table.add_column("Comment")
+    table.add_column("Private Key")
     table.add_column("Date Added")
 
     for k in keys:
         added = k.added_at[:19] if k.added_at else "-"
-        table.add_row(k.name, k.fingerprint, k.algorithm, k.comment, added)
+        private_key_path = Path.home() / ".ssh" / k.name
+        has_private = "✓" if private_key_path.exists() else "-"
+        table.add_row(k.name, k.fingerprint, k.algorithm, k.comment, has_private, added)
 
     console.print(table)
 

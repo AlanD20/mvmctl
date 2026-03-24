@@ -636,3 +636,35 @@ def test_kernel_ls_auto_creates_dir(tmp_path: Path):
     result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(missing)])
     assert result.exit_code == 0
     assert missing.exists()
+
+@patch("fcm.cli.asset.fetch_image")
+@patch("fcm.cli.asset.load_images_config")
+def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
+    """FIX-009: image fetch warns when image already exists."""
+    from fcm.main import app
+    from fcm.models.image import ImageSpec
+    from typer.testing import CliRunner
+    
+    mock_config.return_value = [
+        ImageSpec(
+            id="ubuntu-24.04",
+            name="Ubuntu 24.04 LTS",
+            source="https://example.com/ubuntu.qcow2",
+            format="qcow2",
+            convert_to="ext4",
+            size_mib=2048,
+            sha256="abc" * 21 + "a",
+        )
+    ]
+    # Pre-create existing image file
+    (tmp_path / "ubuntu-24.04.ext4").touch()
+    mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
+    
+    # User says NO to re-download
+    result = CliRunner().invoke(
+        app,
+        ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path)],
+        input="n\n",  # Answer 'no' to confirm prompt
+    )
+    assert result.exit_code == 0
+    mock_fetch.assert_not_called()  # Should not have called fetch

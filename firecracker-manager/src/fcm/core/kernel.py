@@ -240,16 +240,28 @@ def configure_kernel(
     config_path = kernel_dir / ".config"
     config_content = config_path.read_text()
     all_present = True
+    missing_settings: list[str] = []
 
     for setting in KERNEL_REQUIRED_SETTINGS:
         if setting in config_content:
             logger.info("  %s", setting)
         else:
             logger.error("  MISSING: %s", setting)
+            missing_settings.append(setting)
             all_present = False
 
     if not all_present:
-        raise KernelError("Required kernel settings are missing from configuration")
+        from fcm.utils.console import print_warning, print_info
+        import typer
+
+        print_warning(f"Required kernel settings missing: {', '.join(missing_settings)}")
+        if not typer.confirm(
+            "Proceed with build anyway? (missing settings may affect VM stability)", default=False
+        ):
+            raise KernelError("Required kernel settings are missing from configuration")
+        print_info("Proceeding with build despite missing settings...")
+
+        print_info("Proceeding with build despite missing settings...")
 
 
 def build_kernel(
@@ -327,10 +339,11 @@ def build_kernel_pipeline(
         jobs = os.cpu_count() or 1
 
     if build_dir is None:
+        import tempfile
         from fcm.constants import PROJECT_NAME
 
         build_id = str(uuid.uuid4())[:8]
-        build_dir = Path(f"/tmp/{PROJECT_NAME}") / f"build-{build_id}"
+        build_dir = Path(tempfile.gettempdir()) / PROJECT_NAME / f"build-{build_id}"
 
     build_dir.mkdir(parents=True, exist_ok=True)
 

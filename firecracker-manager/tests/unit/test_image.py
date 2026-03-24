@@ -277,6 +277,7 @@ def test_fetch_image_qcow2(
         format="qcow2",
         convert_to="ext4",
         size_mib=4096,
+        sha256="a" * 64,
     )
 
     expected_output = tmp_path / "ubuntu-24.04.ext4"
@@ -725,6 +726,7 @@ def test_fetch_image_tar_rootfs(
         format="tar-rootfs",
         convert_to="ext4",
         size_mib=1024,
+        sha256="a" * 64,
     )
 
     expected_output = tmp_path / "alpine.ext4"
@@ -752,6 +754,7 @@ def test_fetch_image_tar_rootfs_failure(
         format="tar-rootfs",
         convert_to="ext4",
         size_mib=1024,
+        sha256="a" * 64,
     )
 
     mock_download.return_value = True
@@ -777,6 +780,7 @@ def test_fetch_image_force_re_download(
         format="qcow2",
         convert_to="ext4",
         size_mib=4096,
+        sha256="a" * 64,
     )
 
     final = tmp_path / "ubuntu-24.04.ext4"
@@ -805,6 +809,7 @@ def test_fetch_image_download_failure(
         format="qcow2",
         convert_to="ext4",
         size_mib=4096,
+        sha256="a" * 64,
     )
 
     mock_download.side_effect = ImageError("Download failed")
@@ -827,6 +832,7 @@ def test_fetch_image_raw_format(
         format="raw",
         convert_to="ext4",
         size_mib=2048,
+        sha256="a" * 64,
     )
 
     expected_output = tmp_path / "custom-image.ext4"
@@ -852,6 +858,7 @@ def test_fetch_image_unknown_format(
         format="xyz",
         convert_to="ext4",
         size_mib=2048,
+        sha256="a" * 64,
     )
 
     mock_download.return_value = True
@@ -876,6 +883,7 @@ def test_fetch_image_qcow2_convert_fails(
         format="qcow2",
         convert_to="ext4",
         size_mib=4096,
+        sha256="a" * 64,
     )
 
     mock_download.return_value = True
@@ -903,6 +911,7 @@ def test_fetch_image_qcow2_extract_fails(
         format="qcow2",
         convert_to="ext4",
         size_mib=4096,
+        sha256="a" * 64,
     )
 
     mock_download.return_value = True
@@ -928,6 +937,7 @@ def test_fetch_image_raw_extract_fails(
         format="raw",
         convert_to="ext4",
         size_mib=2048,
+        sha256="a" * 64,
     )
 
     mock_download.return_value = True
@@ -936,3 +946,19 @@ def test_fetch_image_raw_extract_fails(
     result = fetch_image(spec, tmp_path)
 
     assert result is None
+
+
+def test_fetch_image_raises_without_checksum(tmp_path: Path):
+    """FIX-007: fetch_image raises ImageError when sha256 is None and download needed."""
+    spec = ImageSpec(
+        id="test-image",
+        name="Test",
+        source="https://example.com/image.qcow2",
+        format="qcow2",
+        convert_to="ext4",
+        size_mib=2048,
+        sha256=None,
+    )
+    # No file pre-existing → must raise
+    with pytest.raises(ImageError, match="does not have a SHA-256 checksum"):
+        fetch_image(spec, tmp_path)

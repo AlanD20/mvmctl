@@ -397,6 +397,13 @@ def fetch_image(
         logger.info("Image already exists: %s", final_path)
         return final_path
 
+    # Enforce checksum before downloading
+    if not spec.sha256:
+        raise ImageError(
+            f"Image '{spec.id}' does not have a SHA-256 checksum configured. "
+            "Cannot proceed with download for security reasons."
+        )
+
     # Download
     download_path = output_dir / f"{spec.id}.download"
     download_file(spec.source, download_path, spec.sha256)

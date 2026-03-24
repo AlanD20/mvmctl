@@ -9,7 +9,12 @@ from fcm.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH
 from fcm.exceptions import HostError
 
 from fcm.core.host_state import HostState, HostChange, get_host_state, restore_host, _state_file
-from fcm.core.host_privilege import check_privileges, _remove_sudoers, _remove_group
+from fcm.core.host_privilege import (
+    check_privileges,
+    check_privileges_interactive,
+    _remove_sudoers,
+    _remove_group,
+)
 from fcm.core.host_setup import (
     check_kvm_access,
     check_required_binaries,
@@ -27,6 +32,7 @@ __all__ = [
     "restore_host",
     "_state_file",
     "check_privileges",
+    "check_privileges_interactive",
     "_remove_sudoers",
     "_remove_group",
     "check_kvm_access",
