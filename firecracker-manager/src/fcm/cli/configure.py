@@ -14,7 +14,7 @@ from fcm.api.assets import (
     load_images_config,
     build_kernel_pipeline,
 )
-from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE
+from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE, DEFAULT_KERNEL_VERSION
 from fcm.api.host import check_kvm_access, get_host_state, init_host
 from fcm.api.keys import add_key, create_key, list_keys
 from fcm.core.config_state import initialize_default_config
@@ -158,12 +158,14 @@ def _step_kernel(non_interactive: bool) -> None:
         return
 
     if non_interactive:
-        print_info("  Building default kernel (6.1.102)...")
+        print_info(f"  Building default kernel ({DEFAULT_KERNEL_VERSION})...")
         _build_default_kernel()
         return
 
     print_info("  No kernel found in cache.")
-    if typer.confirm("  Build the default minimal kernel (v6.1.102)?", default=True):
+    if typer.confirm(
+        f"  Build the default minimal kernel (v{DEFAULT_KERNEL_VERSION})?", default=True
+    ):
         _build_default_kernel()
     else:
         print_info("  Skipped. Run 'fcm kernel build' manually.")
@@ -181,7 +183,7 @@ def _build_default_kernel() -> None:
     should check for the presence of the output file afterwards if they need
     to handle failure programmatically.
     """
-    version = "6.1.102"
+    version = DEFAULT_KERNEL_VERSION
     out = get_kernels_dir() / "vmlinux"
     out.parent.mkdir(parents=True, exist_ok=True)
     source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=version)

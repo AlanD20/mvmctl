@@ -6,6 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from fcm.constants import DEFAULT_VM_SSH_USER
 from fcm.exceptions import VMNotFoundError, FCMKeyError, FCMError
 from fcm.core.vm_manager import VMManager
 from fcm.utils.fs import get_cache_dir
@@ -67,7 +68,7 @@ def extract_ip_from_config(config_path: Path) -> str | None:
 
 def build_ssh_command(
     ip: str,
-    user: str = "root",
+    user: str = DEFAULT_VM_SSH_USER,
     key_path: Path | None = None,
     command: str | None = None,
 ) -> list[str]:
@@ -94,7 +95,7 @@ def build_ssh_command(
 
 def exec_ssh(
     ip: str,
-    user: str = "root",
+    user: str = DEFAULT_VM_SSH_USER,
     key_path: Path | None = None,
     command: str | None = None,
 ) -> None:
@@ -105,7 +106,7 @@ def exec_ssh(
 
 def run_ssh(
     ip: str,
-    user: str = "root",
+    user: str = DEFAULT_VM_SSH_USER,
     key_path: Path | None = None,
     command: str | None = None,
 ) -> int:
@@ -117,7 +118,7 @@ def run_ssh(
 
 def connect_to_vm(
     vm_name_or_ip: str,
-    user: str = "root",
+    user: str = DEFAULT_VM_SSH_USER,
     key_path: Path | None = None,
     command: str | None = None,
     exec_mode: bool = True,

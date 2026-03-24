@@ -1,8 +1,11 @@
 import json
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import typer
+
+if TYPE_CHECKING:
+    from fcm.core.config import VMDefaultsConfig
 from rich.table import Table
 
 from fcm.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
@@ -17,7 +20,14 @@ from fcm.api.vms import (
     get_logs,
     cleanup_vms,
 )
-from fcm.constants import DEFAULT_NETWORK_NAME
+from fcm.constants import (
+    DEFAULT_NETWORK_NAME,
+    DEFAULT_VM_LOG_TYPE,
+    DEFAULT_VM_LOG_LINES,
+    DEFAULT_VM_LOG_FOLLOW,
+    DEFAULT_SNAPSHOT_RESUME,
+    FALLBACK_FIRECRACKER_BIN,
+)
 from fcm.exceptions import FCMError
 from fcm.models.vm import VMInstance, VMState
 from fcm.utils.console import console, print_error, print_info, print_success
@@ -54,6 +64,13 @@ def _resolve_default_kernel() -> str | None:
         return None
 
 
+def _get_vm_defaults() -> "VMDefaultsConfig":
+    from fcm.core.config import load_config
+    from fcm.utils.fs import get_assets_dir
+
+    return load_config(get_assets_dir()).vm_defaults
+
+
 def _resolve_active_firecracker_bin() -> str:
     try:
         from fcm.core.config_state import get_firecracker_config
@@ -69,7 +86,7 @@ def _resolve_active_firecracker_bin() -> str:
             return str(active.firecracker_path)
     except Exception:
         pass
-    return "firecracker"
+    return FALLBACK_FIRECRACKER_BIN
 
 
 @app.command()
@@ -85,8 +102,12 @@ def create(
         "--kernel",
         help="Path to vmlinux kernel (default: active default kernel or FCM_KERNEL env var)",
     ),
-    vcpus: int = typer.Option(2, "--vcpus", "--cpus", help="Number of vCPUs"),
-    mem: int = typer.Option(2048, "--mem", "--memory", help="Memory in MiB"),
+    vcpus: Optional[int] = typer.Option(
+        None, "--vcpus", "--cpus", help="Number of vCPUs (default: from user config)"
+    ),
+    mem: Optional[int] = typer.Option(
+        None, "--mem", "--memory", help="Memory in MiB (default: from user config)"
+    ),
     ip: Optional[str] = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
     network_name: str = typer.Option(
         DEFAULT_NETWORK_NAME, "--network", "--net", help="Named network to attach to"
@@ -100,11 +121,19 @@ def create(
     user_data: Optional[Path] = typer.Option(
         None, "--user-data", help="Path to custom cloud-init user-data file"
     ),
-    user: str = typer.Option("root", "--user", help="Default SSH user for cloud-init"),
-    enable_api_socket: bool = typer.Option(
-        False, "--enable-api-socket", help="Enable Firecracker HTTP API socket"
+    user: Optional[str] = typer.Option(
+        None, "--user", help="Default SSH user for cloud-init (default: from user config)"
     ),
-    enable_pci: bool = typer.Option(False, "--enable-pci", help="Enable PCI device support"),
+    enable_api_socket: Optional[bool] = typer.Option(
+        None,
+        "--enable-api-socket/--no-enable-api-socket",
+        help="Enable Firecracker HTTP API socket (default: from user config)",
+    ),
+    enable_pci: Optional[bool] = typer.Option(
+        None,
+        "--enable-pci/--no-enable-pci",
+        help="Enable PCI device support (default: from user config)",
+    ),
     firecracker_bin: Optional[str] = typer.Option(
         None,
         "--firecracker-bin",
@@ -177,6 +206,15 @@ def create(
         enable_pci = merged.enable_pci
         firecracker_bin = merged.firecracker_bin
 
+    _defaults = _get_vm_defaults()
+    effective_vcpus: int = vcpus if vcpus is not None else _defaults.vcpu_count
+    effective_mem: int = mem if mem is not None else _defaults.mem_size_mib
+    effective_user: str = user if user is not None else _defaults.ssh_user
+    effective_api_socket: bool = (
+        enable_api_socket if enable_api_socket is not None else _defaults.enable_api_socket
+    )
+    effective_pci: bool = enable_pci if enable_pci is not None else _defaults.enable_pci
+
     if image is None:
         image = _resolve_default_image()
         if image is None:
@@ -209,15 +247,15 @@ def create(
             name=name,
             image=image,
             kernel=str(kernel_path) if kernel_path else None,
-            vcpus=vcpus,
-            mem=mem,
+            vcpus=effective_vcpus,
+            mem=effective_mem,
             ip=ip,
             network=network_name,
             mac=mac,
             ssh_key=ssh_key,
-            user=user,
-            enable_api_socket=enable_api_socket,
-            enable_pci=enable_pci,
+            user=effective_user,
+            enable_api_socket=effective_api_socket,
+            enable_pci=effective_pci,
             firecracker_bin=effective_bin,
             rootfs_path=image_path,
             gateway=None,
@@ -232,16 +270,16 @@ def create(
             name=name,
             image=image,
             kernel=kernel,
-            vcpus=vcpus,
-            mem=mem,
+            vcpus=effective_vcpus,
+            mem=effective_mem,
             ip=ip,
             network_name=network_name,
             mac=mac,
             ssh_key=ssh_key,
             user_data=user_data,
-            user=user,
-            enable_api_socket=enable_api_socket,
-            enable_pci=enable_pci,
+            user=effective_user,
+            enable_api_socket=effective_api_socket,
+            enable_pci=effective_pci,
             firecracker_bin=effective_bin,
         )
         from fcm.utils.audit import log_audit
@@ -394,7 +432,9 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
 @app.command()
 def ssh(
     name: str = typer.Option(..., "--name", "-n", help="VM name or IP address"),
-    user: str = typer.Option("root", "--user", "-u", help="SSH user"),
+    user: Optional[str] = typer.Option(
+        None, "--user", "-u", help="SSH user (default: from user config)"
+    ),
     key: Optional[Path] = typer.Option(
         None, "--key", help="SSH private key file or directory of keys"
     ),
@@ -405,7 +445,8 @@ def ssh(
         if not is_ip_address(name):
             validate_entity_name(name, "VM")
         resolved_key = _resolve_ssh_key_for_vm(key)
-        exit_code = ssh_vm(name=name, user=user, key=resolved_key, cmd=cmd)
+        effective_user = user if user is not None else _get_vm_defaults().ssh_user
+        exit_code = ssh_vm(name=name, user=effective_user, key=resolved_key, cmd=cmd)
         raise typer.Exit(code=exit_code)
     except FCMError as e:
         print_error(str(e))
@@ -415,10 +456,12 @@ def ssh(
 @app.command()
 def logs(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    follow: bool = typer.Option(False, "--follow", "-f", help="Follow log output"),
-    lines: int = typer.Option(50, "--lines", help="Number of lines to show"),
+    follow: bool = typer.Option(DEFAULT_VM_LOG_FOLLOW, "--follow", "-f", help="Follow log output"),
+    lines: int = typer.Option(DEFAULT_VM_LOG_LINES, "--lines", help="Number of lines to show"),
     log_type: str = typer.Option(
-        "os", "--type", help="Log type: boot (serial console) or os (firecracker process log)"
+        DEFAULT_VM_LOG_TYPE,
+        "--type",
+        help="Log type: boot (serial console) or os (firecracker process log)",
     ),
 ) -> None:
     """View VM logs.
@@ -498,7 +541,9 @@ def load(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     mem_in: Path = typer.Option(..., "--mem-in", help="Memory snapshot input path"),
     state_in: Path = typer.Option(..., "--state-in", help="VM state input path"),
-    resume_after: bool = typer.Option(True, "--resume/--no-resume", help="Resume VM after loading"),
+    resume_after: bool = typer.Option(
+        DEFAULT_SNAPSHOT_RESUME, "--resume/--no-resume", help="Resume VM after loading"
+    ),
 ) -> None:
     """Load VM from snapshot. Requires --enable-api-socket."""
     from fcm.utils.validation import validate_entity_name

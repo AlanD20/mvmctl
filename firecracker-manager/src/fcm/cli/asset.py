@@ -24,6 +24,9 @@ from fcm.constants import (
     KERNEL_TARBALL_URL_TEMPLATE,
     DEFAULT_KERNEL_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
+    DEFAULT_IMAGE_IMPORT_SIZE_MIB,
+    DEFAULT_REMOTE_VERSION_LIMIT,
+    FALLBACK_FC_CI_VERSION,
 )
 from fcm.core.metadata import get_image_entry, update_image_entry
 from fcm.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
@@ -125,7 +128,7 @@ def _get_ci_version() -> str:
         if active:
             parts = active.version.split(".")
             ci_version = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else active.version
-    return ci_version or "1.12"
+    return ci_version or FALLBACK_FC_CI_VERSION
 
 
 @kernel_app.command(name="fetch")
@@ -519,7 +522,9 @@ def image_import(
         "auto", "--format", help="Image format: qcow2, raw, tar-rootfs, or auto"
     ),
     convert_to: str = typer.Option("ext4", "--convert-to", help="Target filesystem format"),
-    size_mib: int = typer.Option(2048, "--size-mib", help="Size in MiB for tar-rootfs import"),
+    size_mib: int = typer.Option(
+        DEFAULT_IMAGE_IMPORT_SIZE_MIB, "--size-mib", help="Size in MiB for tar-rootfs import"
+    ),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing"),
     set_default: bool = typer.Option(False, "--set-default", help="Set as default after import"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Output directory"),
@@ -579,7 +584,9 @@ def _format_bin_row(bv: BinaryVersion) -> list[str]:
 @bin_app.command(name="ls")
 def bin_ls(
     remote: bool = typer.Option(False, "--remote", "-r", help="Also show remote versions"),
-    limit: int = typer.Option(5, "--limit", help="Max remote versions to show"),
+    limit: int = typer.Option(
+        DEFAULT_REMOTE_VERSION_LIMIT, "--limit", help="Max remote versions to show"
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List local (and optionally remote) Firecracker versions."""

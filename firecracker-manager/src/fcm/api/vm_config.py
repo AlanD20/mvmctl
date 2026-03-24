@@ -6,7 +6,6 @@ from typing import Any
 from fcm.core.config_gen import ConfigGenerator
 from fcm.constants import (
     DEFAULT_NETWORK_NAME,
-    DEFAULT_VM_SSH_USER,
     DEFAULT_FIRECRACKER_BIN_NAME,
 )
 from fcm.models.vm_config_file import VMCreateConfigFile
@@ -52,7 +51,7 @@ def build_vm_config_file(
     effective_vcpus = vcpus if vcpus is not None else vm_defaults.vcpu_count
     effective_mem = mem if mem is not None else vm_defaults.mem_size_mib
     effective_network = network if network is not None else DEFAULT_NETWORK_NAME
-    effective_user = user if user is not None else DEFAULT_VM_SSH_USER
+    effective_user = user if user is not None else vm_defaults.ssh_user
     effective_api_socket = (
         enable_api_socket if enable_api_socket is not None else vm_defaults.enable_api_socket
     )

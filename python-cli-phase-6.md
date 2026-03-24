@@ -97,3 +97,4 @@ Additional requirements to not miss!
     - this new vm configuration file is a big feature of this application, therefore it has its own file and everything must be handled at API layer then the cli will use the API layer to perform the logics.
 
 - remove the default config values in the entire CLI codebase. do not hard code config values in any function parameters or as variables! Default config must only come from user config if it's user facing and if it's backend facing, they must come from constants.py file. If major refactoring is required, do it so long as tests are going to pass and nothing breaks by validating your work.
+  - Fallback default values must be defined in constants.py file with FALLBACK_ prefix to the variable!

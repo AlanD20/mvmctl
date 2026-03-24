@@ -97,6 +97,49 @@ DEFAULT_VM_MEM_MIB: Final[int] = 2048
 DEFAULT_VM_SSH_USER: Final[str] = "root"
 DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = "firecracker"
 
+# VM feature flags
+DEFAULT_VM_ENABLE_API_SOCKET: Final[bool] = False
+DEFAULT_VM_ENABLE_PCI: Final[bool] = False
+
+# VM network defaults
+DEFAULT_VM_SUBNET_MASK: Final[str] = "255.255.255.0"
+DEFAULT_VM_NETWORK_INTERFACE: Final[str] = "eth0"
+DEFAULT_VM_BOOT_ARGS: Final[str] = "console=ttyS0 reboot=k panic=1 pci=off"
+DEFAULT_VM_LSM_FLAGS: Final[str] = "landlock,lockdown,yama,integrity,selinux,bpf"
+DEFAULT_VM_DISK_SIZE: Final[str] = "2G"
+
+# VM model structural defaults (internal path names)
+DEFAULT_VM_KERNEL_FILENAME: Final[str] = "vmlinux"
+DEFAULT_VM_ROOTFS_FILENAME: Final[str] = "rootfs.ext4"
+
+# Firecracker binary path default
+DEFAULT_FIRECRACKER_BINARY_PATH: Final[str] = "/usr/local/bin/firecracker"
+
+# Network bridge defaults
+DEFAULT_NETWORK_BRIDGE_IP: Final[str] = "172.35.0.1/24"
+
+# Image defaults
+DEFAULT_IMAGE_CONVERT_TO: Final[str] = "ext4"
+DEFAULT_IMAGE_IMPORT_SIZE_MIB: Final[int] = 2048
+
+# VM log defaults
+DEFAULT_VM_LOG_TYPE: Final[str] = "os"
+DEFAULT_VM_LOG_LINES: Final[int] = 50
+DEFAULT_VM_LOG_FOLLOW: Final[bool] = False
+
+# Snapshot defaults
+DEFAULT_SNAPSHOT_RESUME: Final[bool] = True
+
+# Binary management defaults
+DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = 5
+
+# ---------------------------------------------------------------------------
+# Fallback values — last-resort runtime values when config lookup fails
+# ---------------------------------------------------------------------------
+
+FALLBACK_FC_CI_VERSION: Final[str] = "1.12"
+FALLBACK_FIRECRACKER_BIN: Final[str] = "firecracker"
+
 # ---------------------------------------------------------------------------
 # Firecracker defaults
 # ---------------------------------------------------------------------------

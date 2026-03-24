@@ -11,6 +11,15 @@ from fcm.constants import (
     DEFAULT_NETWORK_CIDR,
     DEFAULT_VM_VCPU_COUNT,
     DEFAULT_VM_MEM_MIB,
+    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_PCI,
+    DEFAULT_VM_LSM_FLAGS,
+    DEFAULT_VM_NETWORK_INTERFACE,
+    DEFAULT_VM_BOOT_ARGS,
+    DEFAULT_VM_DISK_SIZE,
+    DEFAULT_FIRECRACKER_BINARY_PATH,
+    DEFAULT_NETWORK_BRIDGE_IP,
 )
 
 
@@ -22,7 +31,7 @@ def _default_assets_dir() -> str:
 
 @dataclass
 class FirecrackerConfig:
-    binary: str = "/usr/local/bin/firecracker"
+    binary: str = DEFAULT_FIRECRACKER_BINARY_PATH
     socket_dir: str = ""
     run_dir: str = ""
     log_dir: str = ""
@@ -32,18 +41,19 @@ class FirecrackerConfig:
 class VMDefaultsConfig:
     vcpu_count: int = DEFAULT_VM_VCPU_COUNT
     mem_size_mib: int = DEFAULT_VM_MEM_MIB
-    network_interface: str = "eth0"
-    boot_args: str = "console=ttyS0 reboot=k panic=1 pci=off"
-    disk_size: str = "2G"
-    enable_api_socket: bool = False
-    enable_pci: bool = False
-    lsm_flags: str = "landlock,lockdown,yama,integrity,selinux,bpf"
+    ssh_user: str = DEFAULT_VM_SSH_USER
+    network_interface: str = DEFAULT_VM_NETWORK_INTERFACE
+    boot_args: str = DEFAULT_VM_BOOT_ARGS
+    disk_size: str = DEFAULT_VM_DISK_SIZE
+    enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET
+    enable_pci: bool = DEFAULT_VM_ENABLE_PCI
+    lsm_flags: str = DEFAULT_VM_LSM_FLAGS
 
 
 @dataclass
 class VMNetworkConfig:
     bridge_name: str = DEFAULT_BRIDGE_NAME
-    bridge_ip: str = "172.35.0.1/24"
+    bridge_ip: str = DEFAULT_NETWORK_BRIDGE_IP
     bridge_subnet: str = DEFAULT_NETWORK_CIDR
     tap_prefix: str = CLI_NAME
 

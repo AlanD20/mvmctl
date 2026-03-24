@@ -5,6 +5,17 @@ from datetime import datetime, timezone
 from enum import StrEnum, auto
 from pathlib import Path
 
+from fcm.constants import (
+    DEFAULT_VM_VCPU_COUNT,
+    DEFAULT_VM_MEM_MIB,
+    DEFAULT_VM_SUBNET_MASK,
+    DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_PCI,
+    DEFAULT_VM_LSM_FLAGS,
+    DEFAULT_VM_KERNEL_FILENAME,
+    DEFAULT_VM_ROOTFS_FILENAME,
+)
+
 
 class VMState(StrEnum):
     """VM lifecycle states."""
@@ -35,24 +46,20 @@ class VMConfig:
         lsm_flags: Linux Security Module flags for the kernel cmdline.
     """
 
-    name: str  # VM name; also used as hostname inside the guest
-    vcpu_count: int = 2  # Number of vCPUs to allocate
-    mem_size_mib: int = 2048  # Memory in MiB
-    kernel_path: Path = field(
-        default_factory=lambda: Path("vmlinux")
-    )  # Path to vmlinux kernel image
-    rootfs_path: Path = field(
-        default_factory=lambda: Path("rootfs.ext4")
-    )  # Path to root filesystem ext4 image
-    guest_ip: str | None = None  # Static IP address for the guest NIC
-    guest_mac: str | None = None  # MAC address for the guest NIC (auto-generated if None)
-    gateway: str | None = None  # Host-side gateway IP for the guest
-    subnet_mask: str = "255.255.255.0"  # Subnet mask for the guest network
-    tap_device: str | None = None  # Host TAP interface name (auto-created if None)
-    boot_args: str | None = None  # Override kernel boot arguments (uses defaults if None)
-    enable_api_socket: bool = False  # Enable Firecracker HTTP API socket
-    enable_pci: bool = False  # Enable PCI device support
-    lsm_flags: str = "landlock,lockdown,yama,integrity,selinux,bpf"  # Linux Security Module flags
+    name: str
+    vcpu_count: int = DEFAULT_VM_VCPU_COUNT
+    mem_size_mib: int = DEFAULT_VM_MEM_MIB
+    kernel_path: Path = field(default_factory=lambda: Path(DEFAULT_VM_KERNEL_FILENAME))
+    rootfs_path: Path = field(default_factory=lambda: Path(DEFAULT_VM_ROOTFS_FILENAME))
+    guest_ip: str | None = None
+    guest_mac: str | None = None
+    gateway: str | None = None
+    subnet_mask: str = DEFAULT_VM_SUBNET_MASK
+    tap_device: str | None = None
+    boot_args: str | None = None
+    enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET
+    enable_pci: bool = DEFAULT_VM_ENABLE_PCI
+    lsm_flags: str = DEFAULT_VM_LSM_FLAGS
 
     def __post_init__(self) -> None:
         """Validate that vCPU count and memory size are within acceptable bounds."""

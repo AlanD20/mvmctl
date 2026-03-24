@@ -14,7 +14,13 @@ from fcm.core.vm_lifecycle import (
 )
 from fcm.core.ssh import connect_to_vm
 from fcm.core.logs import show_logs
-from fcm.constants import TAP_PREFIX
+from fcm.constants import (
+    TAP_PREFIX,
+    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_LOG_TYPE,
+    DEFAULT_VM_LOG_LINES,
+    DEFAULT_VM_LOG_FOLLOW,
+)
 from fcm.api.host import check_privileges
 
 __all__ = [
@@ -62,7 +68,7 @@ def vm_cache_dir(name: str) -> Path:
 
 def ssh_vm(
     name: str,
-    user: str = "root",
+    user: str = DEFAULT_VM_SSH_USER,
     key: Path | None = None,
     cmd: str | None = None,
 ) -> int:
@@ -76,7 +82,12 @@ def ssh_vm(
     )
 
 
-def get_logs(name: str, log_type: str = "os", lines: int = 50, follow: bool = False) -> list[str]:
+def get_logs(
+    name: str,
+    log_type: str = DEFAULT_VM_LOG_TYPE,
+    lines: int = DEFAULT_VM_LOG_LINES,
+    follow: bool = DEFAULT_VM_LOG_FOLLOW,
+) -> list[str]:
     """View VM logs. Returns log lines."""
     return show_logs(
         vm_name=name,

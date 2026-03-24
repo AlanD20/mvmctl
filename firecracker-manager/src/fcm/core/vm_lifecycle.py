@@ -41,6 +41,13 @@ from fcm.constants import (
     FIRECRACKER_SIGTERM_WAIT_S,
     MAX_VMS,
     CLI_NAME,
+    DEFAULT_VM_VCPU_COUNT,
+    DEFAULT_VM_MEM_MIB,
+    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_PCI,
+    DEFAULT_FIRECRACKER_BIN_NAME,
+    DEFAULT_VM_KERNEL_FILENAME,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,17 +141,17 @@ def create_vm(
     name: str,
     image: str,
     kernel: str | None = None,
-    vcpus: int = 2,
-    mem: int = 2048,
+    vcpus: int = DEFAULT_VM_VCPU_COUNT,
+    mem: int = DEFAULT_VM_MEM_MIB,
     ip: str | None = None,
     network_name: str = DEFAULT_NETWORK_NAME,
     mac: str | None = None,
     ssh_key: str | None = None,
     user_data: Path | None = None,
-    user: str = "root",
-    enable_api_socket: bool = False,
-    enable_pci: bool = False,
-    firecracker_bin: str = "firecracker",
+    user: str = DEFAULT_VM_SSH_USER,
+    enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET,
+    enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
+    firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
     vm_manager: VMManager | None = None,
 ) -> VMInstance:
     import re
@@ -184,7 +191,7 @@ def create_vm(
         if env_kernel:
             kernel_path = Path(env_kernel)
         else:
-            kernel_path = get_kernels_dir() / "vmlinux"
+            kernel_path = get_kernels_dir() / DEFAULT_VM_KERNEL_FILENAME
 
     if not kernel_path.exists():
         raise FCMError(f"Kernel not found: {kernel_path}")
