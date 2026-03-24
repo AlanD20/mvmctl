@@ -89,6 +89,16 @@ REQUIRED_BINARIES: Final[list[str]] = ["ip", "iptables", "qemu-img"]
 ISO_BINARIES: Final[list[str]] = ["mkisofs", "genisoimage"]
 
 # ---------------------------------------------------------------------------
+# Firecracker defaults
+# ---------------------------------------------------------------------------
+
+# Default Firecracker version (full semantic version)
+DEFAULT_FIRECRACKER_VERSION: Final[str] = "v1.15.0"
+
+# Default Firecracker CI version (major.minor for kernel downloads)
+DEFAULT_FIRECRACKER_CI_VERSION: Final[str] = "v1.15"
+
+# ---------------------------------------------------------------------------
 # Kernel defaults
 # ---------------------------------------------------------------------------
 

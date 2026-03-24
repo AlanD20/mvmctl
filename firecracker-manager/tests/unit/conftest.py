@@ -9,6 +9,21 @@ from fcm.core.vm_manager import VMManager
 from fcm.models.vm import VMConfig, VMInstance, VMState
 
 
+@pytest.fixture(autouse=True)
+def isolate_config_and_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure tests never write to real config or cache directories.
+
+    This autouse fixture runs before every test to isolate the test environment
+    from the user's real configuration and cache files.
+    """
+    config_dir = tmp_path / "config"
+    cache_dir = tmp_path / "cache"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("FCM_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("FCM_CACHE_DIR", str(cache_dir))
+
+
 @pytest.fixture
 def mock_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Creates a mock cache directory with a fake kernel and image."""

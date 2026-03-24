@@ -29,6 +29,33 @@ def get_cache_dir() -> Path:
     return Path.home() / ".cache" / PROJECT_NAME
 
 
+def get_config_dir() -> Path:
+    """Return the FCM config directory.
+
+    Checks FCM_CONFIG_DIR env var first, then falls back to
+    ~/.config/<project-name>.
+    """
+    override = os.environ.get(env_var("CONFIG_DIR"))
+    if override:
+        resolved = Path(override).resolve()
+        home = Path.home().resolve()
+        tmp = Path("/tmp").resolve()
+        under_home = resolved.is_relative_to(home)
+        under_tmp = (os.getuid() != 0) and resolved.is_relative_to(tmp)
+        if not (under_home or under_tmp):
+            raise FCMError(
+                f"Unsafe {env_var('CONFIG_DIR')} path '{override}': "
+                f"must be under $HOME ({home}) or /tmp"
+            )
+        return resolved
+    return Path.home() / ".config" / PROJECT_NAME
+
+
+def get_config_file() -> Path:
+    """Return the path to the FCM config file (config.json)."""
+    return get_config_dir() / "config.json"
+
+
 def get_vms_dir() -> Path:
     """Return the directory that holds VM state and per-VM dirs."""
     return get_cache_dir() / "vms"

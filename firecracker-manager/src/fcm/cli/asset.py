@@ -108,9 +108,9 @@ def kernel_ls(
 
 
 def _get_ci_version() -> str:
-    from fcm.core.cli_state import get_firecracker_state
+    from fcm.core.config_state import get_firecracker_config
 
-    ci_version = get_firecracker_state().get("ci_version", "")
+    ci_version = get_firecracker_config().get("ci_version", "")
     if not ci_version:
         from fcm.core.binary_manager import list_local_versions as _lv
 
@@ -378,9 +378,9 @@ def image_ls(
 
 def _get_default_image() -> str | None:
     try:
-        from fcm.core.cli_state import get_cli_state_value
+        from fcm.core.config_state import get_config_value
 
-        val = get_cli_state_value("default_image")
+        val = get_config_value("default_image")
         return str(val) if val is not None else None
     except Exception:
         return None
@@ -434,9 +434,9 @@ def image_fetch(
             if not typer.confirm("Re-download anyway?", default=False):
                 print_info("Skipping download. Use --force to overwrite.")
                 if set_default:
-                    from fcm.core.cli_state import set_cli_state_value
+                    from fcm.core.config_state import set_config_value
 
-                    set_cli_state_value("default_image", spec.id)
+                    set_config_value("default_image", spec.id)
                     print_success(f"Default image set to: {spec.id}")
                 raise typer.Exit(code=0)
             force = True  # User confirmed re-download
@@ -448,9 +448,9 @@ def image_fetch(
         )
         print_success(f"Image ready: {result}")
         if set_default:
-            from fcm.core.cli_state import set_cli_state_value
+            from fcm.core.config_state import set_config_value
 
-            set_cli_state_value("default_image", spec.id)
+            set_config_value("default_image", spec.id)
             print_success(f"Default image set to: {spec.id}")
         raise typer.Exit(code=0)
     else:
@@ -471,9 +471,9 @@ def image_set_default(
     if not found:
         print_error(f"Image '{image_id}' not found in {images_dir}. Download it first.")
         raise typer.Exit(code=1)
-    from fcm.core.cli_state import set_cli_state_value
+    from fcm.core.config_state import set_config_value
 
-    set_cli_state_value("default_image", image_id)
+    set_config_value("default_image", image_id)
     print_success(f"✓ Default image set to: {image_id}")
 
 
@@ -567,9 +567,9 @@ def image_import(
     print_success(f"Image imported: {result}")
 
     if set_default:
-        from fcm.core.cli_state import set_cli_state_value
+        from fcm.core.config_state import set_config_value
 
-        set_cli_state_value("default_image", image_id)
+        set_config_value("default_image", image_id)
         print_success(f"Default image set to: {image_id}")
 
     raise typer.Exit(code=0)

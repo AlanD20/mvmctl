@@ -34,9 +34,9 @@ def help_cmd(ctx: typer.Context) -> None:
 
 def _resolve_default_image() -> str | None:
     try:
-        from fcm.core.cli_state import get_cli_state_value
+        from fcm.core.config_state import get_config_value
 
-        val = get_cli_state_value("default_image")
+        val = get_config_value("default_image")
         return str(val) if val is not None else None
     except Exception:
         return None
@@ -55,9 +55,9 @@ def _resolve_default_kernel() -> str | None:
 
 def _resolve_active_firecracker_bin() -> str:
     try:
-        from fcm.core.cli_state import get_firecracker_state
+        from fcm.core.config_state import get_firecracker_config
 
-        stored = get_firecracker_state().get("active_binary_path")
+        stored = get_firecracker_config().get("active_binary_path")
         if stored is not None and Path(str(stored)).exists():
             return str(stored)
         from fcm.core.binary_manager import list_local_versions

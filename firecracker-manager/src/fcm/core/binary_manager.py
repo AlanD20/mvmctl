@@ -251,9 +251,9 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
     ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{version}"
     full_version = f"v{version}"
     try:
-        from fcm.core.cli_state import update_firecracker_state
+        from fcm.core.config_state import update_firecracker_config
 
-        update_firecracker_state(
+        update_firecracker_config(
             full_version=full_version,
             ci_version=ci_version,
             active_version=full_version,

@@ -17,6 +17,7 @@ from fcm.api.assets import (
 from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE
 from fcm.api.host import check_kvm_access, get_host_state, init_host
 from fcm.api.keys import add_key, create_key, list_keys
+from fcm.core.config_state import initialize_default_config
 from fcm.exceptions import BinaryError, FCMError, FCMKeyError, HostError, KernelError
 from fcm.utils.console import console, print_info, print_success, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
@@ -368,6 +369,8 @@ def configure(
     """
     print_info("Firecracker Manager — Setup Wizard")
     print_info("=" * 40)
+
+    initialize_default_config()
 
     _step_host(skip=skip_host, non_interactive=non_interactive)
     _step_binary(non_interactive=non_interactive)

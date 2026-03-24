@@ -58,3 +58,29 @@ Additional requirements to not miss!
     - as of currently the only import is qcow2 images where it also has the capability to extract the root partition if the image has multiple partitions such as official archlinux image. Therefore, this implementation must be dynamic.
     - an imported image can be used exactly the same way as the ones come by default in the cli
 - ensure that the `fcm network inspect <my-network>` will show all the attached VMs with full informatioon of the VM.
+
+- create a separation in the cli state:
+    - the firecracker state is a key with these values. Using latest=$(basename "$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/firecracker-microvm/firecracker/releases/latest)") result
+        - full_version = $latest
+        - ci_version = "${latest%.*}"
+        - active_version = $latest
+        - active_binary_path = absolute path to the active firecracker binary path
+    - assets key which has these:
+        - absolute path to kernels directory, default is cache/kernels
+        - absolute path to images directory, default is cache/images
+        - absolute path to binaries directory, default is cache/bin
+        - absolute path to networks directory, default is cache/networks
+        - absolute path to vms directory, default is cache/vms
+        - absolute path to keys directory, default is cache/keys
+        - absolute path to build custom kernels directory, default is /tmp/fcm-kernel-build-{rand 3 chars}
+        - absolute path to import custom images directory, default is /tmp/fcm-image-import-{rand 3 chars}
+        - absolute path to logs directory, default is cache/logs
+
+- the default firecracker version must be in constants.py file and the default in the cli-state.json file must be v1.15.0 and the ci version will be v1.15.
+- Rename the cli-state.json file to config.json file and this must be under FCM_CONFIG_DIR where default is ~/.config/firecracker-manager/config.json. Similar to FCM_BUILD_DIR, this can be overridden by user
+
+- the application needs to handle its own vm configuration file written in json format. This change will introduce the following:
+  - new flags to `fcm vm create` command:
+    - the `--output-config` flag will outputs the cli-owned configuration file to create a vm, all the necessary flags passed to this command will be in this single configuration file, including the firecracker.json file which will have its own key in this configuration file called `firecracker_config`. This will help in debugging why vm is not working.
+    - the `import-config` flag takes a vm configuration json file which will have all the necessary data to create the vm instead of passing the flags. Providing this vm configuration file will make the other flags optional, but if flags are passed, they will override the config file value.
+    - this new vm configuration file is a big feature of this application, therefore it has its own file and everything must be handled at API layer then the cli will use the API layer to perform the logics.
