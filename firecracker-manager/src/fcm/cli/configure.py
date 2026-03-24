@@ -54,7 +54,7 @@ def _run_host_init_interactive() -> None:
         import subprocess
         import sys
 
-        fcm_bin = shutil.which("fcm") or sys.executable
+        fcm_bin = shutil.which("fcm") or sys.argv[0]
         result = subprocess.run(["sudo", fcm_bin, "host", "init"])
         if result.returncode == 0:
             print_success("  Host initialized.")
@@ -203,11 +203,7 @@ def _step_image(non_interactive: bool) -> None:
     print_info("\n[4/6] Root filesystem image")
 
     images_dir = get_images_dir()
-    if (
-        images_dir.exists()
-        and any(images_dir.glob("*.ext4"))
-        or (images_dir.exists() and any(images_dir.glob("*.btrfs")))
-    ):
+    if images_dir.exists() and (any(images_dir.glob("*.ext4")) or any(images_dir.glob("*.btrfs"))):
         print_success("  Image available")
         return
 

@@ -14,15 +14,17 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from fcm.constants import (
-    HTTP_USER_AGENT,
-    FIRECRACKER_GITHUB_RELEASES_API_URL,
     FIRECRACKER_GITHUB_DOWNLOAD_URL,
+    FIRECRACKER_GITHUB_RELEASES_API_URL,
+    HTTP_USER_AGENT,
 )
 from fcm.exceptions import AssetNotFoundError, BinaryError, FCMError
 from fcm.utils.fs import get_bin_dir
 from fcm.utils.http import download_file
 
 logger = logging.getLogger(__name__)
+
+_CHUNK_SIZE = 512 * 1024
 
 GITHUB_RELEASES_URL = FIRECRACKER_GITHUB_RELEASES_API_URL
 GITHUB_DOWNLOAD_URL = FIRECRACKER_GITHUB_DOWNLOAD_URL
@@ -171,7 +173,7 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
 
     sha256_hash = hashlib.sha256()
     with open(tgz_path, "rb") as f:
-        for chunk in iter(lambda: f.read(524288), b""):
+        for chunk in iter(lambda: f.read(_CHUNK_SIZE), b""):
             sha256_hash.update(chunk)
     _verify_sha256(version, tgz_path, sha256_hash.hexdigest())
 
@@ -212,7 +214,7 @@ def _extract_member(tar: tarfile.TarFile, member: tarfile.TarInfo, dest: Path) -
         raise BinaryError(f"Cannot read {member.name} from archive")
     with open(dest, "wb") as out:
         while True:
-            chunk = reader.read(524288)
+            chunk = reader.read(_CHUNK_SIZE)
             if not chunk:
                 break
             out.write(chunk)

@@ -95,8 +95,6 @@ def follow_log(
                     time.sleep(0.3)  # Wait for new content
                     continue
                 yield line.rstrip("\n")
-    except KeyboardInterrupt:
-        raise
     except IOError as e:
         raise FCMError(f"Error following log: {e}") from e
 

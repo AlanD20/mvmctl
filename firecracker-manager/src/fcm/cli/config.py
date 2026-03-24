@@ -1,11 +1,12 @@
 """Configuration commands."""
 
-from fcm.exceptions import FCMError
 import json
-import typer
 from pathlib import Path
 
-from fcm.api.config import load_config, validate_config, dump_config
+import typer
+
+from fcm.api.config import dump_config, load_config, validate_config
+from fcm.exceptions import FCMError
 from fcm.utils.console import print_error, print_success
 from fcm.utils.fs import get_assets_dir, get_vm_dir
 

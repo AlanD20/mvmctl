@@ -84,7 +84,16 @@ PRIVILEGED_BINARIES: Final[list[str]] = [
 ]
 REQUIRED_BINARIES: Final[list[str]] = ["ip", "iptables", "qemu-img"]
 ISO_BINARIES: Final[list[str]] = ["mkisofs", "genisoimage"]
-HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/0.1.0"
+
+
+def _resolve_version() -> str:
+    try:
+        return importlib.metadata.version(_BOOTSTRAP_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        return "0.0.0"
+
+
+HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/{_resolve_version()}"
 MAX_VMS: Final[int] = 50
 
 # External URLs

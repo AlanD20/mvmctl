@@ -86,11 +86,6 @@ def create(
         # Create with API socket for snapshot support:
         fcm vm create --name myvm --image ubuntu-24.04 --enable-api-socket
     """
-    from fcm.utils.validation import validate_entity_name
-
-    validate_entity_name(name, "VM")
-    if network_name:
-        validate_entity_name(network_name)
     try:
         vm = create_vm(
             name=name,
