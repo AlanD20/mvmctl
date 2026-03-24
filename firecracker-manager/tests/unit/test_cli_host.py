@@ -28,6 +28,7 @@ def test_init_success_with_changes(mocker: MockerFixture, tmp_path):
             mechanism="sysctl",
         ),
     ]
+    mocker.patch("fcm.api.network.ensure_default_network")
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0
     assert "ip_forward" in result.output
@@ -51,6 +52,7 @@ def test_init_success_multiple_changes(mocker: MockerFixture, tmp_path):
             mechanism="file_create",
         ),
     ]
+    mocker.patch("fcm.api.network.ensure_default_network")
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0
     assert "ip_forward" in result.output
@@ -61,6 +63,7 @@ def test_init_success_multiple_changes(mocker: MockerFixture, tmp_path):
 def test_init_no_changes(mocker: MockerFixture, tmp_path):
     mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
     mocker.patch("fcm.cli.host.init_host", return_value=[])
+    mocker.patch("fcm.api.network.ensure_default_network")
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0
     assert "already configured" in result.output

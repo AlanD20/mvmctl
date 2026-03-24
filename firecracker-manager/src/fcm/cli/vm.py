@@ -11,7 +11,6 @@ from rich.table import Table
 from fcm.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from fcm.api.vms import (
     list_vms,
-    get_vm,
     create_vm,
     remove_vm,
     snapshot_vm,
@@ -75,7 +74,7 @@ def _resolve_active_firecracker_bin() -> str:
     try:
         from fcm.core.config_state import get_firecracker_config
 
-        stored = get_firecracker_config().get("active_binary_path")
+        stored = get_firecracker_config().get("default_binary_path")
         if stored is not None and Path(str(stored)).exists():
             return str(stored)
         from fcm.core.binary_manager import list_local_versions
@@ -295,24 +294,45 @@ def create(
 
 @app.command(name="rm")
 def rm(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
+    id_or_name: Optional[str] = typer.Argument(None, help="VM ID (short) or name to remove"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name to remove"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
-    """Stop and remove a VM."""
+    """Stop and remove a VM by ID or name."""
+    target = name or id_or_name
+    if target is None:
+        print_error("Provide a VM ID or --name")
+        raise typer.Exit(code=1)
+
     try:
-        vm = get_vm(name)
-        if not vm:
-            print_error(f"VM '{name}' not found")
+        vms = list_vms(include_stopped=True)
+
+        exact = [v for v in vms if v.name == target]
+
+        if not exact:
+            print_error(f"VM '{target}' not found")
             raise typer.Exit(code=1)
 
-        if not force:
-            typer.confirm(f"Remove VM '{name}' (IP: {vm.ip})?", abort=True)
+        if len(exact) == 1:
+            vm = exact[0]
+        else:
+            print_info(f"Multiple VMs found with name '{target}':")
+            for i, v in enumerate(exact, 1):
+                print_info(f"  {i}. {v.name} (IP: {v.ip or '-'}, status: {v.status.value})")
+            choice = typer.prompt(f"Select VM to remove (1-{len(exact)})", type=int)
+            if choice < 1 or choice > len(exact):
+                print_error("Invalid selection")
+                raise typer.Exit(code=1)
+            vm = exact[choice - 1]
 
-        remove_vm(name)
+        if not force:
+            typer.confirm(f"Remove VM '{vm.name}' (IP: {vm.ip})?", abort=True)
+
+        remove_vm(vm.name)
         from fcm.utils.audit import log_audit
 
-        log_audit("vm.remove", f"name={name}")
-        print_success(f"VM '{name}' removed")
+        log_audit("vm.remove", f"name={vm.name}")
+        print_success(f"VM '{vm.name}' removed")
     except FCMError as e:
         print_error(str(e))
         raise typer.Exit(code=1)

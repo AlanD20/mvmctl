@@ -52,14 +52,14 @@ def test_list_vms_all_flag(mocker: MockerFixture):
 
 
 def test_rm_vm_not_found(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.get_vm", return_value=None)
+    mocker.patch("fcm.cli.vm.list_vms", return_value=[])
     result = runner.invoke(app, ["rm", "--name", "nonexistent", "--force"])
     assert result.exit_code == 1
 
 
 def test_rm_force_running_vm(mocker: MockerFixture):
     vm = _make_vm("delvm", VMState.RUNNING)
-    mocker.patch("fcm.cli.vm.get_vm", return_value=vm)
+    mocker.patch("fcm.cli.vm.list_vms", return_value=[vm])
     mocker.patch("fcm.cli.vm.remove_vm")
     result = runner.invoke(app, ["rm", "--name", "delvm", "--force"])
     assert result.exit_code == 0

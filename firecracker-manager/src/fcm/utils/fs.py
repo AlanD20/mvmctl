@@ -7,11 +7,30 @@ from fcm.constants import PROJECT_NAME, env_var
 from fcm.exceptions import FCMError
 
 
+def _get_real_home() -> Path:
+    """Return the real user's home directory.
+
+    When running under ``sudo``, ``SUDO_USER`` is set to the invoking user.
+    Use that user's home so that state files are written to the invoking
+    user's cache dir rather than root's.
+    """
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        import pwd
+
+        try:
+            return Path(pwd.getpwnam(sudo_user).pw_dir)
+        except KeyError:
+            pass
+    return Path.home()
+
+
 def get_cache_dir() -> Path:
     """Return the FCM cache root directory.
 
     Checks FCM_CACHE_DIR env var first, then falls back to
-    ~/.cache/<project-name>.
+    ~/.cache/<project-name>.  When running under sudo, uses the invoking
+    user's home directory so state is shared with the non-root user.
     """
     override = os.environ.get(env_var("CACHE_DIR"))
     if override:
@@ -26,7 +45,7 @@ def get_cache_dir() -> Path:
                 f"must be under $HOME ({home}) or /tmp"
             )
         return resolved
-    return Path.home() / ".cache" / PROJECT_NAME
+    return _get_real_home() / ".cache" / PROJECT_NAME
 
 
 def get_config_dir() -> Path:

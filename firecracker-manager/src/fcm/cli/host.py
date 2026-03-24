@@ -1,6 +1,7 @@
 """Host configuration CLI commands."""
 
-from fcm.exceptions import FCMError
+import sys
+
 import typer
 from rich.table import Table
 
@@ -15,7 +16,7 @@ from fcm.api.host import (
     reset_host,
 )
 from fcm.constants import PROJECT_GROUP
-from fcm.exceptions import HostError
+from fcm.exceptions import FCMError, HostError
 from fcm.utils.console import console, print_error, print_info, print_success, print_warning
 from fcm.utils.fs import get_cache_dir
 
@@ -70,7 +71,18 @@ def init_cmd() -> None:
     try:
         changes = init_host(cache_dir)
     except HostError as e:
-        print_error(str(e))
+        if "Root privileges" in str(e):
+            print_error("Root privileges required for: fcm host init")
+            print_info("Run with sudo: sudo fcm host init")
+            if typer.confirm("Run 'sudo fcm host init' now?", default=False):
+                import subprocess
+
+                try:
+                    subprocess.run(["sudo"] + sys.argv, check=False)
+                except FileNotFoundError:
+                    print_error("sudo command not found")
+        else:
+            print_error(str(e))
         raise typer.Exit(code=1)
 
     from fcm.utils.audit import log_audit

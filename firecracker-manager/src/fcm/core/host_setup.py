@@ -174,6 +174,9 @@ def _ensure_kvm_modules() -> list[HostChange]:
 def init_host(cache_dir: Path) -> list[HostChange]:
     changes: list[HostChange] = []
 
+    if os.getuid() != 0:
+        raise HostError("Root privileges required")
+
     if not check_kvm_access():
         raise HostError("/dev/kvm is not accessible — check permissions or load KVM modules")
 
@@ -207,7 +210,15 @@ def init_host(cache_dir: Path) -> list[HostChange]:
         )
 
     sudoers_path = Path(SUDOERS_DROP_IN_PATH)
-    if not sudoers_path.exists():
+    sudoers_exists = False
+    try:
+        sudoers_exists = sudoers_path.exists()
+    except PermissionError:
+        # Directory not readable (e.g., /etc/sudoers.d/ is root-only)
+        # Treat as non-existent; _write_sudoers will fail appropriately if
+        # the caller lacks privileges to create the file.
+        pass
+    if not sudoers_exists:
         _write_sudoers(sudoers_path, PROJECT_GROUP)
         changes.append(
             HostChange(

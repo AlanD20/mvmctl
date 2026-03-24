@@ -560,27 +560,34 @@ def _mock_lsmod_with_kvm():
     return result
 
 
+@patch("fcm.core.host_setup.os.getuid", return_value=0)
 @patch("fcm.core.host_setup.subprocess.run")
 @patch("fcm.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("fcm.core.host_setup.os.access", return_value=False)
 @patch("fcm.core.host_setup.Path.exists", return_value=False)
-def test_init_host_kvm_not_accessible(mock_exists, mock_access, mock_which, mock_run, tmp_path):
+def test_init_host_kvm_not_accessible(
+    mock_exists, mock_access, mock_which, mock_run, mock_getuid, tmp_path
+):
     """init_host should raise HostError when /dev/kvm is not accessible."""
     with pytest.raises(HostError, match="/dev/kvm is not accessible"):
         init_host(tmp_path)
 
 
+@patch("fcm.core.host_setup.os.getuid", return_value=0)
 @patch("fcm.core.host_setup.subprocess.run")
 @patch("fcm.core.host_setup.shutil.which")
 @patch("fcm.core.host_setup.os.access", return_value=True)
 @patch("fcm.core.host_setup.Path.exists", return_value=True)
-def test_init_host_missing_binaries(mock_exists, mock_access, mock_which, mock_run, tmp_path):
+def test_init_host_missing_binaries(
+    mock_exists, mock_access, mock_which, mock_run, mock_getuid, tmp_path
+):
     """init_host should raise HostError listing missing binaries when required tools are absent."""
     mock_which.return_value = None
     with pytest.raises(HostError, match="Missing required binaries"):
         init_host(tmp_path)
 
 
+@patch("fcm.core.host_setup.os.getuid", return_value=0)
 @patch("fcm.core.host_setup._get_current_user", return_value="testuser")
 @patch("fcm.core.host_setup._add_user_to_group", return_value=False)
 @patch("fcm.core.host_setup._create_group", return_value=False)
@@ -598,6 +605,7 @@ def test_init_host_ip_forward_already_enabled(
     mock_create_grp,
     mock_add_user,
     mock_get_user,
+    mock_getuid,
     tmp_path,
 ):
     """init_host should return no changes when IP forwarding and KVM modules are already configured."""
@@ -626,6 +634,7 @@ def test_init_host_ip_forward_already_enabled(
     assert state_file.exists()
 
 
+@patch("fcm.core.host_setup.os.getuid", return_value=0)
 @patch("fcm.core.host_setup._get_current_user", return_value="testuser")
 @patch("fcm.core.host_setup._add_user_to_group", return_value=False)
 @patch("fcm.core.host_setup._create_group", return_value=False)
@@ -643,6 +652,7 @@ def test_init_host_enables_ip_forward(
     mock_create_grp,
     mock_add_user,
     mock_get_user,
+    mock_getuid,
     tmp_path,
 ):
     """init_host should record ip_forward and sysctl_persist_file changes when forwarding was off."""
@@ -677,6 +687,7 @@ def test_init_host_enables_ip_forward(
     assert ip_fwd_change.mechanism == "sysctl"
 
 
+@patch("fcm.core.host_setup.os.getuid", return_value=0)
 @patch("fcm.core.host_setup._get_current_user", return_value="testuser")
 @patch("fcm.core.host_setup._add_user_to_group", return_value=False)
 @patch("fcm.core.host_setup._create_group", return_value=False)
@@ -694,6 +705,7 @@ def test_init_host_writes_state_file(
     mock_create_grp,
     mock_add_user,
     mock_get_user,
+    mock_getuid,
     tmp_path,
 ):
     """init_host should write a state.json containing init_timestamp and changes fields."""
@@ -720,6 +732,7 @@ def test_init_host_writes_state_file(
     assert "changes" in data
 
 
+@patch("fcm.core.host_setup.os.getuid", return_value=0)
 @patch("fcm.core.host_setup._get_current_user", return_value="testuser")
 @patch("fcm.core.host_setup._add_user_to_group", return_value=False)
 @patch("fcm.core.host_setup._create_group", return_value=False)
@@ -737,6 +750,7 @@ def test_init_host_idempotent(
     mock_create_grp,
     mock_add_user,
     mock_get_user,
+    mock_getuid,
     tmp_path,
 ):
     """init_host should produce fewer changes on the second call when the host is already configured."""
@@ -773,6 +787,7 @@ def test_init_host_idempotent(
     assert len(changes_second) < len(changes_first)
 
 
+@patch("fcm.core.host_setup.os.getuid", return_value=0)
 @patch("fcm.core.host_setup._get_current_user", return_value="testuser")
 @patch("fcm.core.host_setup._add_user_to_group", return_value=False)
 @patch("fcm.core.host_setup._create_group", return_value=False)
@@ -790,6 +805,7 @@ def test_init_host_with_module_loading(
     mock_create_grp,
     mock_add_user,
     mock_get_user,
+    mock_getuid,
     tmp_path,
 ):
     """init_host loads kvm modules when they're not loaded."""
@@ -1544,13 +1560,17 @@ class TestResetHost:
 class TestInitHostErrorPaths:
     """Error-path tests for init_host / configure_host."""
 
+    @patch("fcm.core.host_setup.os.getuid", return_value=0)
     @patch("fcm.core.host_setup.os.access", return_value=False)
     @patch("fcm.core.host_setup.Path.exists", return_value=False)
-    def test_configure_host_kvm_not_available(self, mock_exists, mock_access, tmp_path):
+    def test_configure_host_kvm_not_available(
+        self, mock_exists, mock_access, mock_getuid, tmp_path
+    ):
         """init_host raises HostError when /dev/kvm is not available."""
         with pytest.raises(HostError, match="/dev/kvm is not accessible"):
             init_host(tmp_path)
 
+    @patch("fcm.core.host_setup.os.getuid", return_value=0)
     @patch("fcm.core.host_setup._get_current_user", return_value="testuser")
     @patch("fcm.core.host_setup._add_user_to_group", return_value=False)
     @patch("fcm.core.host_setup._create_group", return_value=False)
@@ -1569,6 +1589,7 @@ class TestInitHostErrorPaths:
         mock_create_grp,
         mock_add_user,
         mock_get_user,
+        mock_getuid,
         tmp_path,
     ):
         """init_host raises HostError when sysctl -w ip_forward=1 fails."""

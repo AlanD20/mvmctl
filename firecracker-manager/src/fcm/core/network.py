@@ -9,6 +9,7 @@
 
 import ipaddress
 import logging
+import os
 import secrets
 import subprocess
 from pathlib import Path
@@ -22,6 +23,14 @@ from fcm.exceptions import NetworkError
 
 
 logger = logging.getLogger(__name__)
+
+
+def _privileged_cmd(cmd: list[str]) -> list[str]:
+    """Prepend sudo if not running as root."""
+    if os.getuid() != 0:
+        return ["sudo"] + cmd
+    return cmd
+
 
 # Derived defaults from constants — kept as module-level aliases so existing
 # function signatures that reference them continue to work.
@@ -105,7 +114,7 @@ def setup_bridge(
     try:
         batch = f"link add name {bridge} type bridge\naddr add {effective_cidr} dev {bridge}\nlink set {bridge} up\n"
         subprocess.run(
-            ["ip", "-batch", "-"],
+            _privileged_cmd(["ip", "-batch", "-"]),
             input=batch,
             text=True,
             check=True,
@@ -115,10 +124,16 @@ def setup_bridge(
         raise NetworkError(f"Failed to setup bridge {bridge}: {e}\n{e.stderr}") from e
 
     try:
-        # Direct procfs write is equivalent to sysctl -w net.ipv4.ip_forward=1
         Path("/proc/sys/net/ipv4/ip_forward").write_text("1\n")
-    except OSError as e:
-        raise NetworkError(f"Failed to enable IP forwarding: {e}") from e
+    except OSError:
+        try:
+            subprocess.run(
+                _privileged_cmd(["sysctl", "-w", "net.ipv4.ip_forward=1"]),
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise NetworkError(f"Failed to enable IP forwarding: {e}") from e
 
     logger.info("Bridge %s created with CIDR %s", bridge, cidr)
 
@@ -133,7 +148,7 @@ def teardown_bridge(bridge: str = BRIDGE_NAME) -> None:
     try:
         batch = f"link set {bridge} down\nlink delete {bridge} type bridge\n"
         subprocess.run(
-            ["ip", "-batch", "-"],
+            _privileged_cmd(["ip", "-batch", "-"]),
             input=batch,
             text=True,
             check=True,
@@ -146,9 +161,8 @@ def teardown_bridge(bridge: str = BRIDGE_NAME) -> None:
 
 
 def _iptables_rule_exists(rule_args: list[str]) -> bool:
-    """Check if an iptables rule exists using ``-C`` (check)."""
     result = subprocess.run(
-        rule_args,
+        _privileged_cmd(rule_args),
         capture_output=True,
         check=False,
     )
@@ -160,11 +174,10 @@ def _ensure_iptables_rule(
     add_args: list[str],
     error_label: str,
 ) -> None:
-    """Add an iptables rule only if it doesn't already exist (idempotent)."""
     if _iptables_rule_exists(check_args):
         return
     try:
-        subprocess.run(add_args, check=True, capture_output=True)
+        subprocess.run(_privileged_cmd(add_args), check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         raise NetworkError(f"{error_label}: {e}") from e
 
@@ -231,7 +244,9 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
 
     try:
         subprocess.run(
-            ["iptables", "-t", "nat", "-D", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
+            _privileged_cmd(
+                ["iptables", "-t", "nat", "-D", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"]
+            ),
             check=True,
             capture_output=True,
         )
@@ -266,7 +281,7 @@ def create_tap(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
     try:
         batch = f"tuntap add dev {tap_name} mode tap\nlink set {tap_name} master {bridge}\nlink set {tap_name} up\n"
         subprocess.run(
-            ["ip", "-batch", "-"],
+            _privileged_cmd(["ip", "-batch", "-"]),
             input=batch,
             text=True,
             check=True,
@@ -293,7 +308,7 @@ def delete_tap(tap_name: str) -> None:
     try:
         batch = f"link set {tap_name} down\nlink delete {tap_name}\n"
         subprocess.run(
-            ["ip", "-batch", "-"],
+            _privileged_cmd(["ip", "-batch", "-"]),
             input=batch,
             text=True,
             check=True,
@@ -337,12 +352,16 @@ def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> N
     - Safe to call even if rules don't exist (ignore errors).
     """
     subprocess.run(
-        ["iptables", "-D", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
+        _privileged_cmd(
+            ["iptables", "-D", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"]
+        ),
         capture_output=True,
         check=False,
     )
     subprocess.run(
-        ["iptables", "-D", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
+        _privileged_cmd(
+            ["iptables", "-D", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"]
+        ),
         capture_output=True,
         check=False,
     )

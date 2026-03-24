@@ -130,10 +130,6 @@ def initialize_default_config() -> dict[str, Any]:
     if "kernel" not in defaults_section:
         defaults_section["kernel"] = None
         changed = True
-    if "firecracker_version" not in defaults_section:
-        defaults_section["firecracker_version"] = DEFAULT_FIRECRACKER_VERSION
-        changed = True
-
     if changed:
         _write_raw(state)
 
@@ -152,7 +148,6 @@ def update_firecracker_config(**fields: str) -> None:
 
 
 def get_assets_config() -> dict[str, str]:
-    from fcm.constants import CLI_NAME
     from fcm.utils.fs import (
         get_bin_dir,
         get_images_dir,
@@ -185,14 +180,6 @@ def get_assets_config() -> dict[str, str]:
     _default("vms_dir", str(get_vms_dir()))
     _default("keys_dir", str(get_keys_dir()))
     _default("logs_dir", str(get_logs_dir()))
-
-    for key, prefix in (
-        ("kernel_build_dir", f"/tmp/{CLI_NAME}-kernel-build-"),
-        ("image_import_dir", f"/tmp/{CLI_NAME}-image-import-"),
-    ):
-        if key not in section:
-            section[key] = prefix + _rand_suffix()
-            changed = True
 
     if changed:
         state[_ASSETS_KEY] = section

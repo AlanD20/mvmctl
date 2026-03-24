@@ -96,5 +96,21 @@ Additional requirements to not miss!
     - the `import-config` flag takes a vm configuration json file which will have all the necessary data to create the vm instead of passing the flags. Providing this vm configuration file will make the other flags optional, but if flags are passed, they will override the config file value.
     - this new vm configuration file is a big feature of this application, therefore it has its own file and everything must be handled at API layer then the cli will use the API layer to perform the logics.
 
-- remove the default config values in the entire CLI codebase. do not hard code config values in any function parameters or as variables! Default config must only come from user config if it's user facing and if it's backend facing, they must come from constants.py file. If major refactoring is required, do it so long as tests are going to pass and nothing breaks by validating your work.
-  - Fallback default values must be defined in constants.py file with FALLBACK_ prefix to the variable!
+- Remove the firecracker_version from defaults list. and rename active_version to default_version and active_binary_path to default_binary_path in the config file.
+- each vm, image, kernel when they are shown with `fcm vm|kernel|image ls`, they have id where the id is generated after creating, downloading, or importing the asset to cache folder by using a full hash of the file + current timestamp. then this full hash is also stored in the metadata file for the asset, but when shown in CLI, it must show a short version which is 6 characters long.
+- removing image, kernel, vm is possible by providing the id only. So this id is critical
+- `fcm vm rm <id>` can be deleted by id or if `--name|-n` is provided, they can be removed by their name only if there is only a single resource, if two resources with same name, then it must prompt the user to select which one to be deleted.
+- when fetching image by `fcm image fetch <image id>` the id of the image must be provided to download the image. only the ID! ensure the deescription of the command is also updated
+- use a supported list of extensions from constants.py file for file firecracker-manager/src/fcm/cli/asset.py in line 423!
+- the firecracker ubuntu is missing from firecracker-manager/src/fcm/assets/images.yaml file, which downloading the file, preparation, and making it ready for use must be done when downloading this type of image. replicate exact same process defined in assets/download-assets.sh in the `download_rootfs_firecracker_ci` function. the image must be named as ubuntu-fc. which the version, arch can be found in the file name!
+- when checksum on an image is missing, it must provide a helpful information that checksum is missing!
+- add checksum for all the images defined in firecracker-manager/src/fcm/assets/images.yaml file
+- add checksum for available kernels
+- add checksum for firecracker binary
+- the `fcm image import` the first argument is a name for the image, and image_ID is generated exactly how it's generated internally when downloading image by the cli.
+- when image is imported by `fcm image import` command, they do not show up when running `fcm image ls` - ensure the `fcm image ls` command is readig the cache/metadata.json file correctly!
+- when running `fcm bin ls -r` the table should say `downloaded`
+- remove these from the config.json file: 1. kernel_build_dir and image_import_dir
+- the def column when running `fcm kernel ls` is showing for all rows, the checkmark should be only for the default set.
+- defualt bridge and nat allow for this bridge is not created after running `fcm host init`, the command shows default network ready but running `fcm network ls` does not show the default brige which should be `fcm-default` bridge and the default cidr and gateway!
+- creating network is failing due to permission denied despite user is in `fcm` group.

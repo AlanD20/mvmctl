@@ -27,6 +27,7 @@ from fcm.constants import (
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
     DEFAULT_REMOTE_VERSION_LIMIT,
     FALLBACK_FC_CI_VERSION,
+    SUPPORTED_IMAGE_EXTENSIONS,
 )
 from fcm.core.metadata import get_image_entry, update_image_entry
 from fcm.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
@@ -95,7 +96,7 @@ def kernel_ls(
 
     rows: list[list[str]] = []
     for k in kernels:
-        default_marker = "✓" if k.get("is_default") else " "
+        default_marker = "✓" if k.get("is_default") == "true" else " "
         last_modified_display = human_readable_time(k.get("last_modified", "-"))
         rows.append(
             [
@@ -300,7 +301,7 @@ def image_ls(
             found_path = next(
                 (
                     images_dir / f"{img.id}{ext}"
-                    for ext in (".ext4", ".btrfs", ".img", ".raw")
+                    for ext in SUPPORTED_IMAGE_EXTENSIONS
                     if (images_dir / f"{img.id}{ext}").exists()
                 ),
                 None,
@@ -348,11 +349,13 @@ def image_ls(
 
     default_img = _get_default_image()
     rows_local: list[list[str]] = []
+    yaml_ids = {img.id for img in images}
+
     for img in images:
         found_path = next(
             (
                 images_dir / f"{img.id}{ext}"
-                for ext in (".ext4", ".btrfs", ".img", ".raw")
+                for ext in SUPPORTED_IMAGE_EXTENSIONS
                 if (images_dir / f"{img.id}{ext}").exists()
             ),
             None,
@@ -364,6 +367,30 @@ def image_ls(
         fs_type = meta.get("fs_type", found_path.suffix.lstrip("."))
         default_marker = "✓" if img.id == default_img else " "
         rows_local.append([default_marker, img.id, img.name, fs_type, pulled_at])
+
+    # Also show imported images (from metadata, not in YAML config)
+    from fcm.core.metadata import list_image_entries
+    from fcm.utils.fs import get_cache_dir
+
+    all_meta = list_image_entries(get_cache_dir())
+    for meta_id, meta in all_meta.items():
+        if meta_id in yaml_ids:
+            continue
+        found_path = next(
+            (
+                images_dir / f"{meta_id}{ext}"
+                for ext in SUPPORTED_IMAGE_EXTENSIONS
+                if (images_dir / f"{meta_id}{ext}").exists()
+            ),
+            None,
+        )
+        if found_path is None:
+            continue
+        pulled_at = str(meta.get("pulled_at", "-"))[:19] if meta.get("pulled_at") else "-"
+        fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
+        os_name = str(meta.get("os_name", meta_id))
+        default_marker = "✓" if meta_id == default_img else " "
+        rows_local.append([default_marker, meta_id, os_name, fs_type, pulled_at])
 
     if not rows_local:
         print_info("No images downloaded. Use 'fcm image fetch <id>' to download one.")
@@ -387,40 +414,29 @@ def _get_default_image() -> str | None:
 
 @image_app.command(name="fetch")
 def image_fetch(
-    image_name: str = typer.Argument(
-        ..., help="Image name/ID (e.g. ubuntu) or full ID (e.g. ubuntu-24.04)"
-    ),
-    codename: Optional[str] = typer.Argument(
-        None, help="Optional version codename (e.g. noble, jammy)"
-    ),
+    image_id: str = typer.Argument(..., help="Image ID to download (e.g. ubuntu-24.04, ubuntu-fc)"),
     out: Path = typer.Option(get_images_dir(), "--out", help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
     set_default: bool = typer.Option(
         False, "--set-default", help="Set as default image after download"
     ),
 ) -> None:
-    """Download an image. Pass name (ubuntu) or full ID (ubuntu-24.04), optionally with codename."""
+    """Download an image by its ID. Use 'fcm image ls --remote' to list available IDs."""
     out.mkdir(parents=True, exist_ok=True)
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
 
-    full_id = f"{image_name}-{codename}" if codename else image_name
-    spec = next((img for img in images if img.id == full_id), None)
-    if spec is None:
-        spec = next(
-            (img for img in images if img.id.startswith(image_name + "-") or img.id == image_name),
-            None,
-        )
+    spec = next((img for img in images if img.id == image_id), None)
     if spec is None:
         available = ", ".join(img.id for img in images)
-        print_error(f"Image '{full_id}' not found. Available: {available}")
+        print_error(f"Image '{image_id}' not found. Available: {available}")
         raise typer.Exit(code=1)
 
-    # FIX-009: Check if image already exists locally
+    # Check if image already exists locally
     if not force:
         existing_paths = [
             out / f"{spec.id}{ext}"
-            for ext in (".ext4", ".btrfs", ".img", ".raw")
+            for ext in SUPPORTED_IMAGE_EXTENSIONS
             if (out / f"{spec.id}{ext}").exists()
         ]
         if existing_paths:
@@ -438,7 +454,7 @@ def image_fetch(
                     set_defaults_value("image", spec.id)
                     print_success(f"Default image set to: {spec.id}")
                 raise typer.Exit(code=0)
-            force = True  # User confirmed re-download
+            force = True
 
     result = fetch_image(spec, out, force)
     if result:
@@ -464,9 +480,7 @@ def image_set_default(
 ) -> None:
     """Set the default image for VM creation."""
     images_dir.mkdir(parents=True, exist_ok=True)
-    found = any(
-        (images_dir / f"{image_id}{ext}").exists() for ext in (".ext4", ".btrfs", ".img", ".raw")
-    )
+    found = any((images_dir / f"{image_id}{ext}").exists() for ext in SUPPORTED_IMAGE_EXTENSIONS)
     if not found:
         print_error(f"Image '{image_id}' not found in {images_dir}. Download it first.")
         raise typer.Exit(code=1)
@@ -500,6 +514,11 @@ def image_rm(
             path.unlink()
         print_success(f"Removed: {path}")
 
+    from fcm.core.metadata import remove_image_entry
+    from fcm.utils.fs import get_cache_dir
+
+    remove_image_entry(get_cache_dir(), id)
+
     raise typer.Exit(code=0)
 
 
@@ -516,7 +535,7 @@ _FORMAT_EXT_MAP: dict[str, str] = {
 
 @image_app.command(name="import")
 def image_import(
-    image_id: str = typer.Argument(..., help="Unique ID for the imported image"),
+    name: str = typer.Argument(..., help="Display name for the imported image"),
     source_path: Path = typer.Argument(..., help="Path to local image file"),
     format: str = typer.Option(
         "auto", "--format", help="Image format: qcow2, raw, tar-rootfs, or auto"
@@ -529,12 +548,24 @@ def image_import(
     set_default: bool = typer.Option(False, "--set-default", help="Set as default after import"),
     images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Output directory"),
 ) -> None:
-    """Import a local image file (qcow2, raw, tar-rootfs)."""
+    """Import a local image file (qcow2, raw, tar-rootfs). The first argument is a display name."""
+    import hashlib
+    import time
+
+    if not source_path.exists():
+        print_error(f"Source file not found: {source_path}")
+        raise typer.Exit(code=1)
+
+    file_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    timestamp = str(time.time())
+    full_id_hash = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()
+    image_id = full_id_hash[:6]
+
     resolved_format: str | None = format
     if resolved_format == "auto":
-        name = source_path.name.lower()
+        fname = source_path.name.lower()
         resolved_format = next(
-            (fmt for ext, fmt in _FORMAT_EXT_MAP.items() if name.endswith(ext)),
+            (fmt for ext, fmt in _FORMAT_EXT_MAP.items() if fname.endswith(ext)),
             None,
         )
     if resolved_format is None:
@@ -546,7 +577,7 @@ def image_import(
 
     spec = ImageImportSpec(
         id=image_id,
-        name=image_id,
+        name=name,
         source_path=source_path,
         format=str(resolved_format),
         convert_to=convert_to,
@@ -563,9 +594,11 @@ def image_import(
         images_dir,
         image_id,
         result,
-        {"os_name": image_id, "fs_type": result.suffix.lstrip(".")},
+        {"os_name": name, "fs_type": result.suffix.lstrip("."), "full_hash": full_id_hash},
     )
     print_success(f"Image imported: {result}")
+    print_info(f"  Name: {name}")
+    print_info(f"  ID:   {image_id}")
 
     if set_default:
         from fcm.core.config_state import set_defaults_value
@@ -625,7 +658,7 @@ def bin_ls(
             cached = "✓" if ver in local_versions else " "
             rows.append([cached, ver])
 
-        print_table(title="Remote Releases", columns=["Cached", "Version"], rows=rows)
+        print_table(title="Remote Releases", columns=["Downloaded", "Version"], rows=rows)
 
 
 @bin_app.command(name="fetch")

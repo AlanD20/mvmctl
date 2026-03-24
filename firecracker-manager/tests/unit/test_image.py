@@ -948,8 +948,7 @@ def test_fetch_image_raw_extract_fails(
     assert result is None
 
 
-def test_fetch_image_raises_without_checksum(tmp_path: Path):
-    """FIX-007: fetch_image raises ImageError when sha256 is None and download needed."""
+def test_fetch_image_warns_without_checksum(tmp_path: Path, mocker):
     spec = ImageSpec(
         id="test-image",
         name="Test",
@@ -959,6 +958,12 @@ def test_fetch_image_raises_without_checksum(tmp_path: Path):
         size_mib=2048,
         sha256=None,
     )
-    # No file pre-existing → must raise
-    with pytest.raises(ImageError, match="does not have a SHA-256 checksum"):
+    mock_download = mocker.patch("fcm.core.image.download_file")
+    mock_download.side_effect = Exception("network error")
+    mock_warn = mocker.patch("fcm.utils.console.print_warning")
+    try:
         fetch_image(spec, tmp_path)
+    except Exception:
+        pass
+    mock_warn.assert_called_once()
+    assert "No checksum" in mock_warn.call_args[0][0]

@@ -121,6 +121,7 @@ DEFAULT_NETWORK_BRIDGE_IP: Final[str] = "172.35.0.1/24"
 # Image defaults
 DEFAULT_IMAGE_CONVERT_TO: Final[str] = "ext4"
 DEFAULT_IMAGE_IMPORT_SIZE_MIB: Final[int] = 2048
+SUPPORTED_IMAGE_EXTENSIONS: Final[list[str]] = [".ext4", ".btrfs", ".img", ".raw"]
 
 # VM log defaults
 DEFAULT_VM_LOG_TYPE: Final[str] = "os"

@@ -256,8 +256,8 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
         update_firecracker_config(
             full_version=full_version,
             ci_version=ci_version,
-            active_version=full_version,
-            active_binary_path=str(d / "firecracker"),
+            default_version=full_version,
+            default_binary_path=str(d / "firecracker"),
         )
     except Exception:
         pass

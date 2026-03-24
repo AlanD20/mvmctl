@@ -363,10 +363,89 @@ def _handle_raw(download_path: Path, final_path: Path) -> Path:
     return extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
 
 
+def _resolve_ubuntu_fc_source(spec: ImageSpec) -> str:
+    """Resolve the ubuntu-fc S3 source URL dynamically."""
+    from urllib.request import Request, urlopen
+    from fcm.constants import HTTP_USER_AGENT, DEFAULT_FIRECRACKER_CI_VERSION
+    import platform
+
+    try:
+        from fcm.core.config_state import get_firecracker_config
+
+        ci_version = get_firecracker_config().get("ci_version", "")
+    except Exception:
+        ci_version = ""
+
+    if not ci_version:
+        ci_version = DEFAULT_FIRECRACKER_CI_VERSION
+
+    arch = platform.machine() or "x86_64"
+    if arch == "x86_64":
+        arch = "x86_64"
+
+    list_url = f"http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2"
+
+    try:
+        req = Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urlopen(req, timeout=30) as resp:
+            xml_content = resp.read().decode("utf-8")
+    except Exception as e:
+        raise ImageError(f"Failed to list Firecracker CI ubuntu images: {e}") from e
+
+    import re
+
+    pattern = rf"<Key>(firecracker-ci/{re.escape(ci_version)}/{re.escape(arch)}/ubuntu-[0-9.]+\.squashfs)</Key>"
+    keys = re.findall(pattern, xml_content)
+    if not keys:
+        raise ImageError(f"No ubuntu squashfs found for CI version {ci_version} / arch {arch}")
+
+    keys.sort()
+    chosen_key = keys[-1]
+    return f"https://s3.amazonaws.com/spec.ccfc.min/{chosen_key}"
+
+
+def _handle_squashfs(download_path: Path, final_path: Path) -> Path:
+    """Extract squashfs to ext4 image."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        extract_dir = tmpdir_path / "squashfs-root"
+
+        try:
+            subprocess.run(
+                ["unsquashfs", "-d", str(extract_dir), str(download_path)],
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise ImageError(f"unsquashfs failed: {e.stderr}") from e
+        except FileNotFoundError as e:
+            raise ImageError("unsquashfs not found. Install squashfs-tools.") from e
+
+        try:
+            subprocess.run(
+                ["truncate", "-s", "1G", str(final_path)],
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["mkfs.ext4", "-d", str(extract_dir), "-F", str(final_path)],
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise ImageError(f"Failed to create ext4 from squashfs: {e}") from e
+
+    logger.info("Created ext4 from squashfs: %s", final_path)
+    return final_path
+
+
 _FORMAT_HANDLERS: dict[str, Callable[[Path, Path], Path]] = {
     "qcow2": _handle_qcow2,
     "tar-rootfs": _handle_tar_rootfs,
     "raw": _handle_raw,
+    "squashfs": _handle_squashfs,
 }
 
 
@@ -397,16 +476,28 @@ def fetch_image(
         logger.info("Image already exists: %s", final_path)
         return final_path
 
-    # Enforce checksum before downloading
+    # Resolve source URL dynamically for ubuntu-fc
+    source = spec.source
+    if spec.id == "ubuntu-fc" and spec.format == "squashfs":
+        source = _resolve_ubuntu_fc_source(spec)
+
+    # Warn if no checksum configured
     if not spec.sha256:
-        raise ImageError(
-            f"Image '{spec.id}' does not have a SHA-256 checksum configured. "
-            "Cannot proceed with download for security reasons."
+        logger.warning(
+            "Image '%s' has no SHA-256 checksum configured. "
+            "Download will proceed without integrity verification.",
+            spec.id,
+        )
+        from fcm.utils.console import print_warning
+
+        print_warning(
+            f"⚠ No checksum configured for image '{spec.id}'. "
+            "Download will proceed without integrity verification."
         )
 
     # Download
     download_path = output_dir / f"{spec.id}.download"
-    download_file(spec.source, download_path, spec.sha256)
+    download_file(source, download_path, spec.sha256)
 
     # Convert based on format
     handler = _FORMAT_HANDLERS.get(spec.format)

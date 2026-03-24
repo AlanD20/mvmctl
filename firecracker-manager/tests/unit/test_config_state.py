@@ -136,11 +136,15 @@ def test_get_assets_config_has_all_expected_keys(cache_dir: Path) -> None:
         "networks_dir",
         "vms_dir",
         "keys_dir",
-        "kernel_build_dir",
-        "image_import_dir",
         "logs_dir",
     }
     assert expected_keys <= assets.keys()
+
+
+def test_get_assets_config_no_temp_build_dirs(cache_dir: Path) -> None:
+    assets = get_assets_config()
+    assert "kernel_build_dir" not in assets
+    assert "image_import_dir" not in assets
 
 
 def test_get_assets_config_cache_dirs_under_cache(cache_dir: Path) -> None:
@@ -155,27 +159,6 @@ def test_get_assets_config_cache_dirs_under_cache(cache_dir: Path) -> None:
         "logs_dir",
     ):
         assert assets[key].startswith(str(cache_dir)), f"{key} not under cache dir"
-
-
-def test_get_assets_config_temp_dirs_under_tmp(cache_dir: Path) -> None:
-    assets = get_assets_config()
-    assert assets["kernel_build_dir"].startswith("/tmp/fcm-kernel-build-")
-    assert assets["image_import_dir"].startswith("/tmp/fcm-image-import-")
-
-
-def test_get_assets_config_temp_dirs_have_3char_suffix(cache_dir: Path) -> None:
-    assets = get_assets_config()
-    suffix_kb = assets["kernel_build_dir"].split("-")[-1]
-    suffix_ii = assets["image_import_dir"].split("-")[-1]
-    assert len(suffix_kb) == 3
-    assert len(suffix_ii) == 3
-
-
-def test_get_assets_config_temp_dirs_are_stable(cache_dir: Path) -> None:
-    first = get_assets_config()
-    second = get_assets_config()
-    assert first["kernel_build_dir"] == second["kernel_build_dir"]
-    assert first["image_import_dir"] == second["image_import_dir"]
 
 
 def test_get_assets_config_persisted_as_nested_key(config_dir: Path) -> None:

@@ -200,11 +200,18 @@ def test_setup_bridge_create_fails():
 
 
 def test_setup_bridge_ip_forward_fails():
-    """setup_bridge should raise NetworkError when writing the IP-forwarding sysctl file fails."""
     with patch("fcm.core.network.bridge_exists", return_value=False):
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        with patch("fcm.core.network.subprocess.run", return_value=mock_result):
+
+        def _run_side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_flat = cmd if isinstance(cmd, list) else list(cmd)
+            if "sysctl" in str(cmd_flat):
+                raise subprocess.CalledProcessError(1, cmd_flat)
+            result = MagicMock()
+            result.returncode = 0
+            return result
+
+        with patch("fcm.core.network.subprocess.run", side_effect=_run_side_effect):
             with patch.object(Path, "write_text", side_effect=OSError("Permission denied")):
                 with pytest.raises(NetworkError, match="Failed to enable IP forwarding"):
                     setup_bridge("fc-br0", "10.20.0.1/24")
