@@ -120,6 +120,7 @@ DEFAULT_NETWORK_BRIDGE_IP: Final[str] = "172.35.0.1/24"
 
 # Image defaults
 DEFAULT_IMAGE_CONVERT_TO: Final[str] = "ext4"
+DEFAULT_IMAGE_IMPORT_FORMAT: Final[str] = "auto"
 DEFAULT_IMAGE_IMPORT_SIZE_MIB: Final[int] = 2048
 SUPPORTED_IMAGE_EXTENSIONS: Final[list[str]] = [".ext4", ".btrfs", ".img", ".raw"]
 
@@ -140,6 +141,8 @@ DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = 5
 
 FALLBACK_FC_CI_VERSION: Final[str] = "1.12"
 FALLBACK_FIRECRACKER_BIN: Final[str] = "firecracker"
+FALLBACK_KERNEL_BUILD_JOBS: Final[int] = 1
+FALLBACK_MAX_PARALLEL_DOWNLOADS: Final[int] = 4
 
 # ---------------------------------------------------------------------------
 # Firecracker defaults

@@ -14,6 +14,8 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from fcm.constants import (
+    DEFAULT_FC_KERNEL_ARCH,
+    FALLBACK_KERNEL_BUILD_JOBS,
     FIRECRACKER_CI_KERNEL_LIST_URL,
     FIRECRACKER_CI_KERNEL_S3_BASE,
     FIRECRACKER_KERNEL_CONFIG_URL,
@@ -247,7 +249,7 @@ def download_firecracker_config(
 def run_make(
     kernel_dir: Path,
     target: str,
-    jobs: int = 1,
+    jobs: int = FALLBACK_KERNEL_BUILD_JOBS,
     capture_output: bool = False,
 ) -> tuple[int, str, str]:
     """Run make command in kernel directory.
@@ -384,7 +386,7 @@ def configure_kernel(
 def build_kernel(
     kernel_dir: Path,
     output_path: Path,
-    jobs: int = 1,
+    jobs: int = FALLBACK_KERNEL_BUILD_JOBS,
 ) -> None:
     """Build the kernel.
 
@@ -640,7 +642,7 @@ def get_default_kernel_path(kernels_dir: Path) -> Path | None:
 
 def download_firecracker_kernel(
     ci_version: str,
-    arch: str = "x86_64",
+    arch: str = DEFAULT_FC_KERNEL_ARCH,
     kernels_dir: Path | None = None,
     output_name: str | None = None,
 ) -> Path:

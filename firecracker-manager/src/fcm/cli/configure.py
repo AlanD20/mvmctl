@@ -14,7 +14,11 @@ from fcm.api.assets import (
     load_images_config,
     build_kernel_pipeline,
 )
-from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE, DEFAULT_KERNEL_VERSION
+from fcm.constants import (
+    DEFAULT_KERNEL_VERSION,
+    KERNEL_TARBALL_URL_TEMPLATE,
+    SUPPORTED_IMAGE_EXTENSIONS,
+)
 from fcm.api.host import check_kvm_access, get_host_state, init_host
 from fcm.api.keys import add_key, create_key, list_keys
 from fcm.core.config_state import initialize_default_config
@@ -206,7 +210,9 @@ def _step_image(non_interactive: bool) -> None:
     print_info("\n[4/6] Root filesystem image")
 
     images_dir = get_images_dir()
-    if images_dir.exists() and (any(images_dir.glob("*.ext4")) or any(images_dir.glob("*.btrfs"))):
+    if images_dir.exists() and any(
+        images_dir.glob(f"*{ext}") for ext in SUPPORTED_IMAGE_EXTENSIONS
+    ):
         print_success("  Image available")
         return
 
@@ -324,8 +330,8 @@ def _step_summary() -> None:
     checks.append(("Kernel", has_kernel))
 
     images_dir = get_images_dir()
-    has_image = images_dir.exists() and (
-        any(images_dir.glob("*.ext4")) or any(images_dir.glob("*.btrfs"))
+    has_image = images_dir.exists() and any(
+        images_dir.glob(f"*{ext}") for ext in SUPPORTED_IMAGE_EXTENSIONS
     )
     checks.append(("Image", has_image))
 

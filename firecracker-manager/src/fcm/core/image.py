@@ -365,9 +365,14 @@ def _handle_raw(download_path: Path, final_path: Path) -> Path:
 
 def _resolve_ubuntu_fc_source(spec: ImageSpec) -> str:
     """Resolve the ubuntu-fc S3 source URL dynamically."""
-    from urllib.request import Request, urlopen
-    from fcm.constants import HTTP_USER_AGENT, DEFAULT_FIRECRACKER_CI_VERSION
     import platform
+    from urllib.request import Request, urlopen
+
+    from fcm.constants import (
+        DEFAULT_FC_KERNEL_ARCH,
+        DEFAULT_FIRECRACKER_CI_VERSION,
+        HTTP_USER_AGENT,
+    )
 
     try:
         from fcm.core.config_state import get_firecracker_config
@@ -379,9 +384,7 @@ def _resolve_ubuntu_fc_source(spec: ImageSpec) -> str:
     if not ci_version:
         ci_version = DEFAULT_FIRECRACKER_CI_VERSION
 
-    arch = platform.machine() or "x86_64"
-    if arch == "x86_64":
-        arch = "x86_64"
+    arch = platform.machine() or DEFAULT_FC_KERNEL_ARCH
 
     list_url = f"http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2"
 

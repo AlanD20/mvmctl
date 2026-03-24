@@ -21,12 +21,14 @@ from fcm.api.assets import (
     build_kernel_pipeline,
 )
 from fcm.constants import (
-    KERNEL_TARBALL_URL_TEMPLATE,
-    DEFAULT_KERNEL_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
+    DEFAULT_IMAGE_CONVERT_TO,
+    DEFAULT_IMAGE_IMPORT_FORMAT,
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
+    DEFAULT_KERNEL_VERSION,
     DEFAULT_REMOTE_VERSION_LIMIT,
     FALLBACK_FC_CI_VERSION,
+    KERNEL_TARBALL_URL_TEMPLATE,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from fcm.core.metadata import get_image_entry, update_image_entry
@@ -497,8 +499,11 @@ def image_rm(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove a cached image."""
-    patterns = [f"{id}.ext4", f"{id}.btrfs", f"{id}.img", f"{id}.raw"]
-    found = [images_dir / p for p in patterns if (images_dir / p).exists()]
+    found = [
+        images_dir / f"{id}{ext}"
+        for ext in SUPPORTED_IMAGE_EXTENSIONS
+        if (images_dir / f"{id}{ext}").exists()
+    ]
 
     if not found:
         print_error(f"No image files found for '{id}'")
@@ -538,9 +543,13 @@ def image_import(
     name: str = typer.Argument(..., help="Display name for the imported image"),
     source_path: Path = typer.Argument(..., help="Path to local image file"),
     format: str = typer.Option(
-        "auto", "--format", help="Image format: qcow2, raw, tar-rootfs, or auto"
+        DEFAULT_IMAGE_IMPORT_FORMAT,
+        "--format",
+        help="Image format: qcow2, raw, tar-rootfs, or auto",
     ),
-    convert_to: str = typer.Option("ext4", "--convert-to", help="Target filesystem format"),
+    convert_to: str = typer.Option(
+        DEFAULT_IMAGE_CONVERT_TO, "--convert-to", help="Target filesystem format"
+    ),
     size_mib: int = typer.Option(
         DEFAULT_IMAGE_IMPORT_SIZE_MIB, "--size-mib", help="Size in MiB for tar-rootfs import"
     ),
@@ -562,7 +571,7 @@ def image_import(
     image_id = full_id_hash[:6]
 
     resolved_format: str | None = format
-    if resolved_format == "auto":
+    if resolved_format == DEFAULT_IMAGE_IMPORT_FORMAT:
         fname = source_path.name.lower()
         resolved_format = next(
             (fmt for ext, fmt in _FORMAT_EXT_MAP.items() if fname.endswith(ext)),

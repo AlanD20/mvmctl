@@ -14,6 +14,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from fcm.constants import (
+    DEFAULT_REMOTE_VERSION_LIMIT,
     FIRECRACKER_GITHUB_DOWNLOAD_URL,
     FIRECRACKER_GITHUB_RELEASES_API_URL,
     HTTP_USER_AGENT,
@@ -107,7 +108,7 @@ def list_local_versions(bin_dir: Path | None = None) -> list[BinaryVersion]:
     return result
 
 
-def list_remote_versions(limit: int = 10) -> list[str]:
+def list_remote_versions(limit: int = DEFAULT_REMOTE_VERSION_LIMIT) -> list[str]:
     """Fetch recent Firecracker release versions from GitHub."""
     url = f"{GITHUB_RELEASES_URL}?per_page={limit}"
     req = Request(url, headers={"User-Agent": HTTP_USER_AGENT, "Accept": "application/json"})

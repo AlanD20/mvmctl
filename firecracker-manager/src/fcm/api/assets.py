@@ -27,7 +27,12 @@ from fcm.models.image import ImageImportSpec, ImageSpec
 from fcm.core.kernel import build_kernel_pipeline
 from fcm.exceptions import ConfigError, ImageError
 from fcm.utils.fs import get_assets_dir, get_images_dir, get_kernels_dir
-from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE
+from fcm.constants import (
+    DEFAULT_KERNEL_VERSION,
+    FALLBACK_MAX_PARALLEL_DOWNLOADS,
+    KERNEL_TARBALL_URL_TEMPLATE,
+    SUPPORTED_IMAGE_EXTENSIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +95,7 @@ def setup_assets(
 
 
 def pull_kernel(
-    version: str = "6.1.102",
+    version: str = DEFAULT_KERNEL_VERSION,
     remote_tar_url: str | None = None,
     output_path: Path | None = None,
     build_dir: Path | None = None,
@@ -170,7 +175,7 @@ def fetch_images_parallel(
     specs: list[ImageSpec],
     output_dir: Path,
     force: bool = False,
-    max_workers: int = 4,
+    max_workers: int = FALLBACK_MAX_PARALLEL_DOWNLOADS,
 ) -> list[Path]:
     """Fetch multiple images concurrently using a thread pool.
 
@@ -212,7 +217,7 @@ def pull_images(
     force: bool = False,
     images_yaml: Path | None = None,
     output_dir: Path | None = None,
-    max_workers: int = 4,
+    max_workers: int = FALLBACK_MAX_PARALLEL_DOWNLOADS,
 ) -> list[Path]:
     """Fetch multiple image IDs in parallel.
 
@@ -287,14 +292,12 @@ def list_assets() -> list[AssetInfo]:
     try:
         image_specs = load_images_config(yaml_path)
         for spec in image_specs:
-            ext4_path = images_dir / f"{spec.id}.ext4"
-            btrfs_path = images_dir / f"{spec.id}.btrfs"
-
-            exists = ext4_path.exists() or btrfs_path.exists()
-            target_path = ext4_path if ext4_path.exists() else btrfs_path
+            candidate_paths = [images_dir / f"{spec.id}{ext}" for ext in SUPPORTED_IMAGE_EXTENSIONS]
+            target_path = next((p for p in candidate_paths if p.exists()), None)
+            exists = target_path is not None
 
             size_mib_out: float | None = None
-            if exists:
+            if exists and target_path is not None:
                 size_mib_out = target_path.stat().st_size / (1024 * 1024)
 
             assets.append(
@@ -335,8 +338,11 @@ def remove_asset(asset_type: Literal["binary", "kernel", "image"], name: str) ->
 
     elif asset_type == "image":
         images_dir = get_images_dir()
-        patterns = [f"{name}.ext4", f"{name}.btrfs", f"{name}.img", f"{name}.raw"]
-        found = [images_dir / p for p in patterns if (images_dir / p).exists()]
+        found = [
+            images_dir / f"{name}{ext}"
+            for ext in SUPPORTED_IMAGE_EXTENSIONS
+            if (images_dir / f"{name}{ext}").exists()
+        ]
 
         if not found:
             raise FileNotFoundError(f"No image files found for '{name}'")

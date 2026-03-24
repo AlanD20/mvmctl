@@ -6,6 +6,7 @@ from collections import deque
 from collections.abc import Callable, Generator
 from pathlib import Path
 
+from fcm.constants import DEFAULT_VM_LOG_LINES, DEFAULT_VM_LOG_TYPE
 from fcm.exceptions import ConfigError, FCMError, VMNotFoundError
 from fcm.utils.fs import get_vm_dir
 
@@ -19,7 +20,7 @@ _LOG_TYPE_FILES: dict[str, str] = {
 
 def get_log_path(
     vm_name: str,
-    log_type: str = "boot",
+    log_type: str = DEFAULT_VM_LOG_TYPE,
 ) -> Path:
     """Get log file path for a VM.
 
@@ -53,7 +54,7 @@ def get_log_path(
 
 def read_log_lines(
     log_file: Path,
-    lines: int = 50,
+    lines: int = DEFAULT_VM_LOG_LINES,
 ) -> list[str]:
     """Read last *lines* lines from a log file.
 
@@ -101,8 +102,8 @@ def follow_log(
 
 def show_logs(
     vm_name: str,
-    log_type: str = "boot",
-    lines: int = 50,
+    log_type: str = DEFAULT_VM_LOG_TYPE,
+    lines: int = DEFAULT_VM_LOG_LINES,
     follow: bool = False,
     output: Callable[[str], object] | None = None,
 ) -> list[str]:
