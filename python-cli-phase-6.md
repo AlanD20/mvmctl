@@ -1,0 +1,46 @@
+- changes to default configuration for the cli application
+    - the assets directory must be an absolute path to the cache folder which FCM_CACHE_DIR by default is ~/.cache/firecracker-manager but users can override this
+    - the default bridge name is fcm-bridge
+    - default bridge cidr is bridge_subnet = 172.35.0.0/24
+    - in the default configuration it's defined as network > vm_network but the default network must be called default, such as user can use network name of default for the default!
+- There must be api implementation to set and get the config, and then the CLI must expose these commands: such as `fcm config set network_interface wlo0` or `fcm config get network_interface`.
+- the firecracker binary path must reflect the absolute path of the firecracker binary that is currently is active in `fcm bin ls`
+- the firecracker version that is selected must be a global config in the cli state file because this is the CI_VERSION that will be used when downloading kernel from firecracker repo!! it's important
+- the `fcm bin ls --remote` must sort by version from highest at the top and lowest at the bottom
+- default `fcm bin ls --remote` limit must be 5 for --limit flag
+- When a command is entered such as `fcm bin` it shows missing command but also it must execute the list of available command which in action it looks like `fcm bin` -> shows current output + shows --help output for the current command
+- when running ls on the asset commands, they should check if the folder exist to list out resources if not they must create the folder, for example $FCM_CACHE_DIR/kernels does not exist, and running `fcm kernel ls` should not error out "kernels directory not found", it must create the folder and then list currently downloaded kernels, which in this case it will be empty table
+- when downloading minimal kernel it shows `WARNING: fcm.utils.http: No checksum provided for download: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz` but this checksum needs to be fixed!
+- kernel builds must be done at /tmp/firecracker-manager/ folder, user can pass `--keep-build-dir` for debugging purposes!
+- the kernel subcommand requires overhaul reworking:
+    - user enters `fcm kernel ls`, by default shows both firecracker and official kernels, using --firecracker only shows firecracker kernels and --official shows official upstream kernels
+    - firecracker kernel can be downloaded without building anything! they are ready to go and to download this, check out the bash scripts at assets/download-assets.sh in download_kernel_firecracker_ci function.
+    - fetching kernel require --type either official or firecracker, this is required!
+    - if --type is firecracker then --arch with default amd64 and --version which is default to the CI_VERSION that is currently set. Reminder CI_VERSION is the firecracker version and this is globally available throughout the CLI state
+    - if --type is official, then this is the upstream kernel and this requires a few patching to work with firecracker, so defaulting values must work out of the box. Check out bash scripts at assets/build-kernel.sh file on how this build works
+        - default version is 6.19.9 and --version to override
+        - parallel job is nproc by default and --parallel-jobs to override
+        - firecracker has default config kernels at https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-x86_64-6.1.config, this must be defined in constants.py file and ability to provide override from --kernel-config which is a config path for kernel configurations when building
+        - document a new page for building custom kernel and put all the dependencies that must be present before building the custom kernel
+        - all the configurations in assets/build-kernel.sh file from line 126 to 178 must be present by default and this list of configuration must be dynamic, define enabled config for custom kernel in constants.py file, and disabled config so that the code will iterate over what to enable and disable automatically. (YOU MAKE THE DECISION IF THIS MUST BE APPLIED BEFORE --kernel-config or after, we want users to easily override configs even if they are defined in the project codebase!)
+        - if any of these are disabled, DO NOT BUILD AND ERROR OUT THAT IT WILL BREAK FIRECRACKER booting, are they sure to proceed? (CONFIG_BTRFS_FS=y , CONFIG_VIRTIO_BLK=y , CONFIG_VIRTIO_NET=y , CONFIG_SERIAL_8250_CONSOLE=y , CONFIG_KVM_GUEST=y)
+        - build the kernel and while building, tail the build log only for warning/error/cannot find/ undefined reference.
+        - once it's built, put the kernel to the cache folder for use so that it's showed.
+        - the `fcm kernel ls` must show the kernel, when it was built, version, type either official or firecracker.
+        - clean up the build kernel result unless --keep-build-dir is present, then skip cleaning up! which means at the end show a message that build dir wasnt cleaned up and output the path, since each build will have its own unique id suffix
+        - there must be a possibility to set a kernel as default by providing the --type and --version
+- the `fcm image` requires an overhaul and complete rewrite
+    - the `fcm image ls` will show the image name, os name, when was pulled, file system type, which official ubuntu cloud images come with ext4 and archlinux image requires re-partitioning to only take out the rootfs and it's btrfs
+    - the `fcm image ls --remote` should show what are the available images to download and providing --name such as ubuntu, debian, arch should filter out the available images, and state if they are downloaded or not!
+    - the `fcm image fetch <image-name>` should pull the latest version by default` or user can provide `fcm image fetch ubuntu noble` to explicitly download a codename. images such as archlinux does not have versioning therefore it's always latest and no versioning is required!
+    - there must be a possibility to set an default image so that when creating vms, it will automatically pick this default image.
+- the `fcm key add my-key ../../.ssh/id_rsa` does not work, because it's a private key, it must print out a friendly name!
+- the network name must be used when creating a device or a bridge with fcm prefix!! A network creation represents a bridge being created! So when i have a network called default, the bridge name is fcm-default and whenever a device is created, they have those prefix such as fcm-default-testvm-<rand> where rand is 3 random char, only ASCII letters!
+- the `fcm vm` subcommand requires substantial changes:
+    - Add `fcm vm ps` as alias for `fcm vm ls` and -a or --all should work the same!
+    - rename `fcm vm cleanup` to `fcm vm prune`
+    - when using `fcm vm ssh`, by default it uses the ~/.ssh folder for the private keys, if none of them are found then fail.
+    - the `fcm vm ssh` where --key flag can point to a single private key or a folder that goes through every private key to use!
+    - the `fcm vm create --image` should be required only if a default image from `fcm image` is not being selected! it must check if there is a default image is set or not
+    - the `fcm vm create --kernel` should be required only if a default kernel is not selected from `fcm kernel`. it must check if there is a default kernel is set or not.
+    - the `fcm vm create --firecracker-bin` should come from the currently active firecracker binary version!
