@@ -52,48 +52,6 @@ def test_request_no_connection(tmp_path: Path):
         client._request("GET", "/")
 
 
-def test_pause_vm_success(tmp_path: Path):
-    client, _ = _make_client(tmp_path)
-    mock_conn = MagicMock()
-    mock_conn.getresponse.return_value = _mock_response(204)
-    client.conn = mock_conn
-
-    assert client.pause_vm() is True
-    mock_conn.request.assert_called_once()
-    call_args = mock_conn.request.call_args
-    assert call_args[0][0] == "PATCH"
-    assert call_args[0][1] == "/vm"
-
-
-def test_pause_vm_failure(tmp_path: Path):
-    client, _ = _make_client(tmp_path)
-    mock_conn = MagicMock()
-    mock_conn.getresponse.return_value = _mock_response(400, {"error": "bad"})
-    client.conn = mock_conn
-
-    with pytest.raises(FirecrackerError, match="Failed to pause VM"):
-        client.pause_vm()
-
-
-def test_resume_vm_success(tmp_path: Path):
-    client, _ = _make_client(tmp_path)
-    mock_conn = MagicMock()
-    mock_conn.getresponse.return_value = _mock_response(204)
-    client.conn = mock_conn
-
-    assert client.resume_vm() is True
-
-
-def test_resume_vm_failure(tmp_path: Path):
-    client, _ = _make_client(tmp_path)
-    mock_conn = MagicMock()
-    mock_conn.getresponse.return_value = _mock_response(500, {"error": "internal"})
-    client.conn = mock_conn
-
-    with pytest.raises(FirecrackerError, match="Failed to resume VM"):
-        client.resume_vm()
-
-
 def test_create_snapshot_success(tmp_path: Path):
     client, _ = _make_client(tmp_path)
     mock_conn = MagicMock()

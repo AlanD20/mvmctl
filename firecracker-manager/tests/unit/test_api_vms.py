@@ -69,17 +69,18 @@ def test_get_logs(mock_show_logs):
     mock_show_logs.return_value = ["log1"]
     res = get_logs("vm1", log_type="console", lines=10)
     assert res == ["log1"]
-    mock_show_logs.assert_called_with(
-        vm_name="vm1", log_type="console", lines=10, follow=False
-    )
+    mock_show_logs.assert_called_with(vm_name="vm1", log_type="console", lines=10, follow=False)
 
 
 @patch("shutil.rmtree")
 @patch("fcm.core.network.delete_tap")
 @patch("fcm.core.network.remove_iptables_forward_rules")
 @patch("os.kill")
+@patch("fcm.api.vms.check_privileges")
 @patch("fcm.api.vms.get_vm_manager")
-def test_cleanup_vms(mock_get_manager, mock_kill, mock_rm_iptables, mock_del_tap, mock_rmtree):
+def test_cleanup_vms(
+    mock_get_manager, mock_check_privs, mock_kill, mock_rm_iptables, mock_del_tap, mock_rmtree
+):
     """cleanup_vms cleans stopped vms properly."""
     mock_manager = MagicMock()
     vm1 = VMInstance(name="vm1", status=VMState.STOPPED, pid=123)
@@ -97,8 +98,9 @@ def test_cleanup_vms(mock_get_manager, mock_kill, mock_rm_iptables, mock_del_tap
         assert len(res) == 1
         assert res[0].name == "vm1"
 
+        mock_check_privs.assert_called_once_with("/usr/sbin/ip")
         mock_kill.assert_called_once_with(123, 9)
-        mock_rm_iptables.assert_called_with("fc-vm1-0")
-        mock_del_tap.assert_called_with("fc-vm1-0")
+        mock_rm_iptables.assert_called_with("fcm-tap-vm1-0")
+        mock_del_tap.assert_called_with("fcm-tap-vm1-0")
         mock_manager.deregister.assert_called_with("vm1")
         mock_rmtree.assert_called_once()

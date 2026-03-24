@@ -36,7 +36,7 @@ def help_cmd(ctx: typer.Context) -> None:
 def create(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     image: str = typer.Option(
-        ..., "--image", help="Image ID (from `fcm image list`) or path to .ext4 file"
+        ..., "--image", help="Image ID (from `fcm image ls`) or path to .ext4 file"
     ),
     kernel: str | None = typer.Option(
         None,
@@ -88,6 +88,8 @@ def create(
     from fcm.utils.validation import validate_entity_name
 
     validate_entity_name(name, "VM")
+    if network_name:
+        validate_entity_name(network_name)
     try:
         vm = create_vm(
             name=name,
@@ -119,7 +121,7 @@ def create(
 @app.command(name="remove")
 def remove(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force kill and skip confirmation"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Stop and remove a VM."""
     try:
@@ -129,7 +131,7 @@ def remove(
             raise typer.Exit(code=1)
 
         if not force:
-            typer.confirm(f"Delete VM '{name}' (IP: {vm.ip})?", abort=True)
+            typer.confirm(f"Remove VM '{name}' (IP: {vm.ip})?", abort=True)
 
         remove_vm(name)
         from fcm.utils.audit import log_audit
@@ -145,7 +147,7 @@ def remove(
 @app.command(name="rm", hidden=True)
 def rm(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force kill and skip confirmation"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Alias for remove."""
     remove(name=name, force=force)
@@ -154,7 +156,7 @@ def rm(
 @app.command(name="delete", hidden=True)
 def delete(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force kill and skip confirmation"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Alias for remove."""
     remove(name=name, force=force)
@@ -311,30 +313,6 @@ def cleanup(
     cleanup_vms(all_vms=all_vms, dry_run=False)
     for v in targets:
         print_success(f"Removed VM '{v.name}'")
-
-
-@app.command(hidden=True)
-def pause(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
-) -> None:
-    """Pause a running VM (not supported in this version)."""
-    from fcm.utils.validation import validate_entity_name
-
-    validate_entity_name(name, "VM")
-    print_info("VM pause/resume is not supported by this version of fcm.")
-    raise typer.Exit(code=0)
-
-
-@app.command(hidden=True)
-def resume(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
-) -> None:
-    """Resume a paused VM (not supported in this version)."""
-    from fcm.utils.validation import validate_entity_name
-
-    validate_entity_name(name, "VM")
-    print_info("VM pause/resume is not supported by this version of fcm.")
-    raise typer.Exit(code=0)
 
 
 @app.command()

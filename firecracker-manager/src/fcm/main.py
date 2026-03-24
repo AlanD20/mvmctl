@@ -34,13 +34,20 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 
-app.add_typer(vm.app, name="vm", help="VM lifecycle management")
-app.add_typer(network.app, name="network", help="Network management")
-app.add_typer(asset.app, name="asset", help="Asset management")
-app.add_typer(config.app, name="config", help="Configuration commands")
-app.add_typer(host.app, name="host", help="Host configuration")
-app.add_typer(key.app, name="key", help="SSH key management")
-app.add_typer(configure.app, name="configure", help="Guided setup wizard")
+app.add_typer(vm.app, name="vm", help="VM lifecycle management", rich_help_panel="VM Management")
+app.add_typer(host.app, name="host", help="Host configuration", rich_help_panel="Host Management")
+app.add_typer(network.app, name="network", help="Network management", rich_help_panel="Networking")
+app.add_typer(key.app, name="key", help="SSH key management", rich_help_panel="Keys")
+app.add_typer(
+    config.app, name="config", help="Configuration commands", rich_help_panel="Configuration"
+)
+app.add_typer(
+    configure.app, name="configure", help="Guided setup wizard", rich_help_panel="Configuration"
+)
+app.add_typer(asset.kernel_app, name="kernel", help="Kernel management", rich_help_panel="Assets")
+app.add_typer(asset.image_app, name="image", help="Image management", rich_help_panel="Assets")
+app.add_typer(asset.bin_app, name="bin", help="Binary management", rich_help_panel="Assets")
+app.command("clear")(asset.clear_assets)
 
 
 @app.callback(invoke_without_command=True)

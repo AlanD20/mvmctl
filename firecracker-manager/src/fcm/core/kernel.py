@@ -6,9 +6,10 @@ import subprocess
 import tarfile
 from pathlib import Path
 
-from fcm.exceptions import KernelError, ChecksumMismatchError, FCMError
+from fcm.exceptions import KernelError, ChecksumMismatchError, FCMError, ProcessError
 from fcm.utils.http import download_file
-from fcm.constants import HTTP_USER_AGENT
+from fcm.utils.process import stream_cmd
+from fcm.constants import HTTP_USER_AGENT, FIRECRACKER_GITHUB_RAW_URL
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
@@ -90,7 +91,7 @@ def download_firecracker_config(
     """
     major_minor = ".".join(version.split(".")[:2])
     config_url = (
-        "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/"
+        f"{FIRECRACKER_GITHUB_RAW_URL}/"
         f"resources/guest_configs/microvm-kernel-ci-x86_64-{major_minor}.config"
     )
 
@@ -230,7 +231,9 @@ def configure_kernel(
     logger.info("Enabling serial console...")
     _run_config_script(config_script, ["--enable", "CONFIG_SERIAL_8250"], kernel_dir)
     _run_config_script(config_script, ["--enable", "CONFIG_SERIAL_8250_CONSOLE"], kernel_dir)
-    _run_config_script(config_script, ["--set-val", "CONFIG_SERIAL_8250_NR_UARTS", "4"], kernel_dir)  # 4 UARTs: COM1 (console), COM2 (firecracker serial log), COM3-4 reserved — minimum for Firecracker serial console support
+    _run_config_script(
+        config_script, ["--set-val", "CONFIG_SERIAL_8250_NR_UARTS", "4"], kernel_dir
+    )  # 4 UARTs: COM1 (console), COM2 (firecracker serial log), COM3-4 reserved — minimum for Firecracker serial console support
 
     # Enable network
     logger.info("Enabling network support...")
@@ -299,19 +302,12 @@ def build_kernel(
     logger.info("Building vmlinux with %d parallel jobs...", jobs)
     logger.info("This may take 10-30 minutes...")
 
-    returncode, _, stderr = run_make(kernel_dir, "vmlinux", jobs, capture_output=True)
-
-    if returncode != 0:
-        # Show last error lines
-        lines = stderr.split("\n")
-        error_lines = [
-            line for line in lines if "error:" in line.lower() or "undefined" in line.lower()
-        ]
-        if error_lines:
-            logger.error("Build errors:")
-            for line in error_lines[-10:]:
-                logger.error("  %s", line)
-        raise KernelError("Kernel build failed")
+    cmd = ["make", "vmlinux", f"-j{jobs}"]
+    try:
+        for line in stream_cmd(cmd, cwd=str(kernel_dir)):
+            logger.debug("%s", line)
+    except ProcessError as e:
+        raise KernelError(f"Kernel build failed: {e}") from e
 
     # Copy vmlinux to output
     vmlinux_path = kernel_dir / "vmlinux"

@@ -23,6 +23,7 @@ from fcm.core.network import (
 )
 from fcm.exceptions import NetworkError
 from fcm.utils.fs import get_networks_dir, get_network_dir
+from fcm.utils.validation import validate_entity_name
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,8 @@ def create_network(
     Raises:
         NetworkError: If the network already exists or setup fails.
     """
+    validate_entity_name(name, "network")
+
     # Handle legacy subnet parameter
     if cidr is None and subnet is not None:
         cidr = subnet
@@ -175,6 +178,12 @@ def create_network(
         gateway = _gateway_for_subnet(cidr)
 
     bridge = _bridge_name_for(name)
+
+    existing_with_bridge = [n for n in list_networks() if n.bridge == bridge]
+    if existing_with_bridge:
+        raise NetworkError(
+            f"Bridge name '{bridge}' conflicts with network '{existing_with_bridge[0].name}'"
+        )
 
     if name == DEFAULT_NETWORK_NAME:
         return NetworkConfig(

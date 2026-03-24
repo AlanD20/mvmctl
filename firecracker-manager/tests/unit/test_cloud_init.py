@@ -32,7 +32,9 @@ def test_write_cloud_init_basic(tmp_path):
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
     assert "default" in ud["users"]
     users = ud["users"]
-    myuser_entry = next((u for u in users if isinstance(u, dict) and u.get("name") == "myuser"), None)
+    myuser_entry = next(
+        (u for u in users if isinstance(u, dict) and u.get("name") == "myuser"), None
+    )
     assert myuser_entry is not None
     assert "ssh-rsa AAAAB3..." in myuser_entry["ssh-authorized-keys"]
 

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from fcm.exceptions import ConfigError
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,14 +46,20 @@ def write_cloud_init(
     )
 
     from typing import Any
+
     if custom_user_data is not None:
         ud: dict[str, Any] = {}
+        content = custom_user_data.read_text()
+        if not (content.startswith("#cloud-config") or content.startswith("Content-Type:")):
+            logger.warning(
+                "user-data file does not start with '#cloud-config' or MIME boundary header"
+            )
         try:
-            loaded = yaml.safe_load(custom_user_data.read_text())
+            loaded = yaml.safe_load(content)
             if isinstance(loaded, dict):
                 ud = loaded
-        except yaml.YAMLError:
-            pass
+        except yaml.YAMLError as exc:
+            raise ConfigError(f"Invalid YAML in user-data file: {exc}") from exc
         if ssh_pub_key:
             if "users" not in ud:
                 ud["users"] = [{"name": user, "ssh-authorized-keys": [ssh_pub_key]}]
@@ -68,7 +76,9 @@ def write_cloud_init(
                             break
                     if not user_found:
                         users_list.append({"name": user, "ssh-authorized-keys": [ssh_pub_key]})
-        (cloud_init_dir / "user-data").write_text("#cloud-config\n" + yaml.dump(ud, default_flow_style=False))
+        (cloud_init_dir / "user-data").write_text(
+            "#cloud-config\n" + yaml.dump(ud, default_flow_style=False)
+        )
     else:
         ud = {
             "users": ["default"],

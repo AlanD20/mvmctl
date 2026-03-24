@@ -14,6 +14,7 @@ from fcm.api.assets import (
     load_images_config,
     build_kernel_pipeline,
 )
+from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE
 from fcm.api.host import check_kvm_access, get_host_state, init_host
 from fcm.api.keys import add_key, create_key, list_keys
 from fcm.exceptions import BinaryError, FCMError, FCMKeyError, HostError, KernelError
@@ -128,7 +129,7 @@ def _step_binary(non_interactive: bool) -> None:
         versions = list_remote_versions(limit=5)
     except BinaryError:
         print_warning("  Could not list remote versions.")
-        print_info("  Run 'fcm asset bin fetch <version>' manually.")
+        print_info("  Run 'fcm bin fetch <version>' manually.")
         return
 
     if not versions:
@@ -143,7 +144,7 @@ def _step_binary(non_interactive: bool) -> None:
         except BinaryError as e:
             print_warning(f"  Download failed: {e}")
     else:
-        print_info("  Skipped. Run 'fcm asset bin fetch <version>' manually.")
+        print_info("  Skipped. Run 'fcm bin fetch <version>' manually.")
 
 
 def _step_kernel(non_interactive: bool) -> None:
@@ -164,7 +165,7 @@ def _step_kernel(non_interactive: bool) -> None:
     if typer.confirm("  Build the default minimal kernel (v6.1.102)?", default=True):
         _build_default_kernel()
     else:
-        print_info("  Skipped. Run 'fcm asset kernel build' manually.")
+        print_info("  Skipped. Run 'fcm kernel build' manually.")
 
 
 def _build_default_kernel() -> None:
@@ -182,7 +183,7 @@ def _build_default_kernel() -> None:
     version = "6.1.102"
     out = get_kernels_dir() / "vmlinux"
     out.parent.mkdir(parents=True, exist_ok=True)
-    source_url = f"https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
+    source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=version)
     try:
         build_kernel_pipeline(
             version=version,
@@ -192,7 +193,7 @@ def _build_default_kernel() -> None:
             jobs=None,
         )
     except KernelError as exc:
-        print_warning(f"  Kernel build failed: {exc}. Run 'fcm asset kernel build' manually.")
+        print_warning(f"  Kernel build failed: {exc}. Run 'fcm kernel build' manually.")
     else:
         print_success(f"  Kernel built: {out}")
 
@@ -215,7 +216,7 @@ def _step_image(non_interactive: bool) -> None:
         images = load_images_config(config_path)
     except FCMError:
         print_warning("  Could not load images config.")
-        print_info("  Run 'fcm asset image fetch <id>' manually.")
+        print_info("  Run 'fcm image fetch <id>' manually.")
         return
 
     if not images:
@@ -245,7 +246,7 @@ def _step_image(non_interactive: bool) -> None:
         idx = 0
 
     if idx < 1 or idx > len(images):
-        print_info("  Skipped. Run 'fcm asset image fetch <id>' manually.")
+        print_info("  Skipped. Run 'fcm image fetch <id>' manually.")
         return
 
     spec = images[idx - 1]

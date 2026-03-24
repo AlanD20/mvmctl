@@ -10,7 +10,6 @@ import pytest
 import yaml
 
 from fcm.core.image import (
-    _copy_bytes,
     convert_qcow2_to_raw,
     create_ext4_from_tar,
     download_file,

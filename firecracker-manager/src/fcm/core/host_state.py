@@ -21,6 +21,7 @@ SYSCTL_CONF = Path(f"/etc/sysctl.d/{PROJECT_NAME}.conf")
 RESTORABLE_SYSCTL_KEYS: frozenset[str] = frozenset({"net.ipv4.ip_forward"})
 RESTORABLE_FILE_PATHS: frozenset[Path] = frozenset({Path(SUDOERS_DROP_IN_PATH), SYSCTL_CONF})
 
+
 @dataclass
 class HostChange:
     setting: str
@@ -28,18 +29,22 @@ class HostChange:
     applied_value: str
     mechanism: str
 
+
 @dataclass
 class HostState:
     init_timestamp: str
     changes: list[HostChange]
 
+
 def _state_dir(cache_dir: Path) -> Path:
     """Return the host state subdirectory within the cache directory."""
     return cache_dir / "host"
 
+
 def _state_file(cache_dir: Path) -> Path:
     """Return the path to the JSON host state snapshot file."""
     return _state_dir(cache_dir) / "state.json"
+
 
 def get_host_state(cache_dir: Path) -> HostState | None:
     """Load the saved host state snapshot, or return ``None`` if none exists.
@@ -65,6 +70,7 @@ def get_host_state(cache_dir: Path) -> HostState | None:
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         raise HostError(f"Corrupt state file {path}: {e}") from e
 
+
 def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
     """Persist host changes to the JSON state snapshot file.
 
@@ -85,6 +91,7 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
     sf = _state_file(cache_dir)
     sf.write_text(json.dumps(data, indent=2) + "\n")
     os.chmod(sf, 0o600)
+
 
 def restore_host(cache_dir: Path) -> list[HostChange]:
     """Revert host changes recorded in the state snapshot.
@@ -142,6 +149,19 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
             if target.exists():
                 try:
                     if change.original_value is not None:
+                        # Validate sudoers content before writing to /etc/sudoers.d/
+                        if str(target).startswith("/etc/sudoers"):
+                            result = subprocess.run(
+                                ["visudo", "-c", "-f", "-"],
+                                input=change.original_value,
+                                capture_output=True,
+                                text=True,
+                            )
+                            if result.returncode != 0:
+                                raise HostError(
+                                    f"Sudoers content from state file failed visudo validation: "
+                                    f"{result.stderr}"
+                                )
                         target.write_text(change.original_value)
                     else:
                         target.unlink()

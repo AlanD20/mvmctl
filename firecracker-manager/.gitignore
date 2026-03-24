@@ -48,6 +48,9 @@ Thumbs.db
 
 # FCM runtime data (user cache dir)
 # Note: actual files go to ~/.cache/firecracker-manager/ not in project
+*.pid
+*.socket
+*.log
 
 # Build artifacts
 *.tar.xz

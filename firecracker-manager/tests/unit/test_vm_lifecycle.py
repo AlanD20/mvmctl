@@ -13,7 +13,7 @@ from fcm.core.vm_lifecycle import (
     _read_pid_file,
 )
 from fcm.exceptions import FCMError
-from fcm.models.vm import VMInstance
+from fcm.models.vm import VMInstance, VMState
 
 
 def test_write_read_pid_file(tmp_path):
@@ -39,9 +39,10 @@ def test_graceful_shutdown(mock_kill):
     mock_kill.return_value = None
 
     graceful_shutdown(pid=99999, socket_path=None)
-    
+
     assert mock_kill.call_count >= 2
     import signal
+
     mock_kill.assert_any_call(99999, signal.SIGTERM)
     mock_kill.assert_any_call(99999, signal.SIGKILL)
 
@@ -52,15 +53,16 @@ def test_graceful_shutdown(mock_kill):
 def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
     """graceful_shutdown sends ctrl_alt_del if socket exists."""
     mock_exists.return_value = True
-    
+
     # Process is alive until ctrl_alt_del
     def side_effect(pid, sig):
         if sig == 0:
             raise ProcessLookupError()
+
     mock_kill.side_effect = side_effect
 
     graceful_shutdown(pid=99999, socket_path=Path("fake.sock"))
-    
+
     # The client must send ctrl_alt_del
     mock_client.return_value.send_ctrl_alt_del.assert_called_once()
 
@@ -83,10 +85,23 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("fcm.core.vm_lifecycle.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
 def test_create_vm_core_success(
-    mock_open, mock_bridge_exists,
-    mock_write_pid, mock_popen, mock_add_rules, mock_create_tap, mock_config_gen,
-    mock_inject, mock_write_ci, mock_copy, mock_gen_mac, mock_alloc_ip, mock_get_net,
-    mock_get_kernels, mock_get_images, mock_get_vm_dir, mock_get_vm_mgr
+    mock_open,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_inject,
+    mock_write_ci,
+    mock_copy,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
 ):
     """Test core create_vm() runs through successfully and registers VM."""
     mock_manager = MagicMock()
@@ -153,11 +168,21 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
 @patch("fcm.core.vm_lifecycle.get_vm_dir")
 @patch("fcm.core.vm_lifecycle._read_pid_file")
 def test_remove_vm_success(
-    mock_read_pid, mock_get_vm_dir, mock_rmtree, mock_run, mock_rel_ip, mock_del_tap, mock_rm_rules, mock_graceful, mock_mgr
+    mock_read_pid,
+    mock_get_vm_dir,
+    mock_rmtree,
+    mock_run,
+    mock_rel_ip,
+    mock_del_tap,
+    mock_rm_rules,
+    mock_graceful,
+    mock_mgr,
 ):
     """remove_vm deletes everything correctly."""
     mock_manager = MagicMock()
-    vm = VMInstance(name="myvm", ip="10.20.0.5", pid=123, status="running", network_name="default")
+    vm = VMInstance(
+        name="myvm", ip="10.20.0.5", pid=123, status=VMState.RUNNING, network_name="default"
+    )
     mock_manager.get.return_value = vm
     mock_mgr.return_value = mock_manager
 
@@ -192,6 +217,7 @@ def test_snapshot_vm_no_socket(mock_socket_path):
     mock_socket_path.return_value = None
     with pytest.raises(FCMError, match="Socket not found for VM"):
         snapshot_vm("myvm", Path("mem"), Path("state"))
+
 
 @patch("fcm.core.vm_lifecycle.get_vm_socket_path")
 @patch("fcm.core.vm_lifecycle.FirecrackerClient")

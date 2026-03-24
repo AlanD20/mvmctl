@@ -5,7 +5,7 @@ import json
 import typer
 from rich.table import Table
 
-from fcm.core.key_manager import (
+from fcm.api.keys import (
     add_key,
     create_key,
     inspect_key,

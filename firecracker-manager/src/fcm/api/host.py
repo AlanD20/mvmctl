@@ -18,6 +18,7 @@ from fcm.core.host import (
     reset_host,
     restore_host,
 )
+from fcm.core.vm_manager import get_vm_manager
 from fcm.utils.fs import get_cache_dir
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "default_cache_dir",
     "get_host_state",
     "get_ip_forward_status",
+    "get_vm_manager",
     "init_host",
     "prune_host",
     "reset_host",

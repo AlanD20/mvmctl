@@ -30,10 +30,22 @@ def test_subcommand_help_vm() -> None:
     assert "create" in result.output
 
 
-def test_subcommand_help_asset() -> None:
-    result = runner.invoke(app, ["asset", "--help"])
+def test_subcommand_help_kernel() -> None:
+    result = runner.invoke(app, ["kernel", "--help"])
     assert result.exit_code == 0
-    assert "kernel" in result.output
+    assert "ls" in result.output
+
+
+def test_subcommand_help_image() -> None:
+    result = runner.invoke(app, ["image", "--help"])
+    assert result.exit_code == 0
+    assert "ls" in result.output
+
+
+def test_subcommand_help_bin() -> None:
+    result = runner.invoke(app, ["bin", "--help"])
+    assert result.exit_code == 0
+    assert "ls" in result.output
 
 
 def test_subcommand_help_network() -> None:

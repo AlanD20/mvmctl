@@ -18,7 +18,9 @@ def get_cache_dir() -> Path:
         resolved = Path(override).resolve()
         home = Path.home().resolve()
         tmp = Path("/tmp").resolve()
-        if not (str(resolved).startswith(str(home)) or str(resolved).startswith(str(tmp))):
+        under_home = resolved.is_relative_to(home)
+        under_tmp = (os.getuid() != 0) and resolved.is_relative_to(tmp)
+        if not (under_home or under_tmp):
             raise FCMError(
                 f"Unsafe {env_var('CACHE_DIR')} path '{override}': "
                 f"must be under $HOME ({home}) or /tmp"

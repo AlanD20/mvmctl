@@ -21,7 +21,7 @@ class VMConfig:
     Attributes:
         name: VM name; also used as hostname inside the guest.
         vcpu_count: Number of vCPUs to allocate (1-32).
-        mem_size_mib: Memory in MiB (128-32768).
+        mem_size_mib: Memory in MiB (128-65536).
         kernel_path: Path to vmlinux kernel image.
         rootfs_path: Path to root filesystem ext4 image.
         guest_ip: Static IP address for the guest NIC.
@@ -38,8 +38,12 @@ class VMConfig:
     name: str  # VM name; also used as hostname inside the guest
     vcpu_count: int = 2  # Number of vCPUs to allocate
     mem_size_mib: int = 2048  # Memory in MiB
-    kernel_path: Path = field(default_factory=lambda: Path("vmlinux"))  # Path to vmlinux kernel image
-    rootfs_path: Path = field(default_factory=lambda: Path("rootfs.ext4"))  # Path to root filesystem ext4 image
+    kernel_path: Path = field(
+        default_factory=lambda: Path("vmlinux")
+    )  # Path to vmlinux kernel image
+    rootfs_path: Path = field(
+        default_factory=lambda: Path("rootfs.ext4")
+    )  # Path to root filesystem ext4 image
     guest_ip: str | None = None  # Static IP address for the guest NIC
     guest_mac: str | None = None  # MAC address for the guest NIC (auto-generated if None)
     gateway: str | None = None  # Host-side gateway IP for the guest
@@ -56,9 +60,9 @@ class VMConfig:
             raise ValueError(
                 f"vcpu_count must be between 1 and 32 (inclusive), got {self.vcpu_count}"
             )
-        if not 128 <= self.mem_size_mib <= 32768:
+        if not 128 <= self.mem_size_mib <= 65536:
             raise ValueError(
-                f"mem_size_mib must be between 128 and 32768 (inclusive), got {self.mem_size_mib}"
+                f"mem_size_mib must be between 128 and 65536 (inclusive), got {self.mem_size_mib}"
             )
 
 
@@ -84,6 +88,8 @@ class VMInstance:
     ip: str | None = None  # Assigned guest IP address
     mac: str | None = None  # Assigned guest MAC address
     network_name: str | None = None  # Name of the attached named network (if any)
-    created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))  # Creation timestamp (UTC)
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(tz=timezone.utc)
+    )  # Creation timestamp (UTC)
     status: VMState = VMState.STOPPED  # Current lifecycle state
     config: VMConfig | None = None  # Original VM configuration used to launch this instance

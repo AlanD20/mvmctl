@@ -17,24 +17,14 @@ from fcm.api.assets import (
     load_images_config,
     build_kernel_pipeline,
 )
+from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE
 from fcm.exceptions import AssetNotFoundError, BinaryError, KernelError
 from fcm.utils.console import print_error, print_success, print_table, print_warning
 from fcm.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
-app = typer.Typer(help="Asset management")
 kernel_app = typer.Typer(help="Kernel management")
 image_app = typer.Typer(help="Image management")
 bin_app = typer.Typer(help="Binary management")
-app.add_typer(kernel_app, name="kernel")
-app.add_typer(image_app, name="image")
-app.add_typer(bin_app, name="bin")
-
-
-@app.command(name="help", hidden=True)
-def help_cmd(ctx: typer.Context) -> None:
-    """Show help for the asset command group."""
-    typer.echo(ctx.parent.get_help() if ctx.parent else "")
-    raise typer.Exit()
 
 
 @kernel_app.command(name="help", hidden=True)
@@ -86,7 +76,7 @@ def kernel_fetch(
     out: Path = typer.Option(get_kernels_dir() / "vmlinux", "--out", help="Output path"),
 ) -> None:
     """Download the official minimal kernel."""
-    source_url = f"https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
+    source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=version)
     try:
         build_kernel_pipeline(
             version=version,
@@ -112,7 +102,7 @@ def kernel_build(
     ),
 ) -> None:
     """Build a custom upstream kernel."""
-    source_url = f"https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
+    source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=version or "6.1.102")
     try:
         build_kernel_pipeline(
             version=version or "6.1.102",
@@ -337,8 +327,7 @@ def bin_rm(
     bin_remove(version=version, force=force)
 
 
-@app.command(name="clear")
-def cache_clear(
+def clear_assets(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove all cached assets (bin, kernels, images). Does NOT touch VMs."""

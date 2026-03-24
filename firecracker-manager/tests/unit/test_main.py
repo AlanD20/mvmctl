@@ -20,10 +20,11 @@ def test_vm_subcommand_registered():
     assert result.exit_code == 0
 
 
-def test_asset_subcommand_registered():
-    """Test 'asset --help' is reachable."""
-    result = runner.invoke(app, ["asset", "--help"])
-    assert result.exit_code == 0
+def test_asset_subcommands_registered():
+    """Test 'kernel --help', 'image --help', 'bin --help' are reachable (asset flattened)."""
+    for subcmd in ("kernel", "image", "bin"):
+        result = runner.invoke(app, [subcmd, "--help"])
+        assert result.exit_code == 0
 
 
 def test_network_subcommand_registered():

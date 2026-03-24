@@ -33,8 +33,8 @@ class VMDefaultsConfig:
 
 
 @dataclass
-class MultiVMNetworkConfig:
-    """Multi VM network settings."""
+class VMNetworkConfig:
+    """VM network settings."""
 
     bridge_name: str = BRIDGE_NAME
     bridge_ip: str = "10.20.0.1/24"
@@ -43,9 +43,9 @@ class MultiVMNetworkConfig:
 
 @dataclass
 class NetworkTopologyConfig:
-    """Network topology configuration (wraps multi-VM network settings)."""
+    """Network topology configuration (wraps VM network settings)."""
 
-    multi_vm: MultiVMNetworkConfig = field(default_factory=MultiVMNetworkConfig)
+    vm_network: VMNetworkConfig = field(default_factory=VMNetworkConfig)
 
 
 @dataclass
@@ -117,16 +117,18 @@ def load_config(config_dir: Path) -> FCMConfig:
     valid_path_fields = {f.name for f in fields(PathsConfig)}
     paths_data_filtered = {k: v for k, v in paths_data.items() if k in valid_path_fields}
 
-    # Filter multi_vm data to only known MultiVMNetworkConfig fields
-    multi_vm_data = network_data.get("multi_vm", {})
-    valid_multi_vm_fields = {f.name for f in fields(MultiVMNetworkConfig)}
-    multi_vm_data_filtered = {k: v for k, v in multi_vm_data.items() if k in valid_multi_vm_fields}
+    # Filter vm_network data to only known VMNetworkConfig fields
+    vm_network_data = network_data.get("vm_network") or network_data.get("multi_vm", {})
+    valid_vm_network_fields = {f.name for f in fields(VMNetworkConfig)}
+    vm_network_data_filtered = {
+        k: v for k, v in vm_network_data.items() if k in valid_vm_network_fields
+    }
 
     result = FCMConfig(
         firecracker=FirecrackerConfig(**firecracker_data_filtered),
         vm_defaults=VMDefaultsConfig(**vm_defaults_data_filtered),
         network=NetworkTopologyConfig(
-            multi_vm=MultiVMNetworkConfig(**multi_vm_data_filtered),
+            vm_network=VMNetworkConfig(**vm_network_data_filtered),
         ),
         paths=PathsConfig(**paths_data_filtered),
     )
@@ -156,9 +158,9 @@ def validate_config(config: FCMConfig) -> list[str]:
     try:
         import ipaddress
 
-        ipaddress.ip_network(config.network.multi_vm.bridge_ip, strict=False)
+        ipaddress.ip_network(config.network.vm_network.bridge_ip, strict=False)
     except ValueError as e:
-        errors.append(f"network.multi_vm.bridge_ip: Invalid CIDR: {e}")
+        errors.append(f"network.vm_network.bridge_ip: Invalid CIDR: {e}")
 
     return errors
 
@@ -177,7 +179,7 @@ def dump_config(config: FCMConfig, section: str | None = None) -> dict[str, obje
         "firecracker": config.firecracker.__dict__,
         "vm_defaults": config.vm_defaults.__dict__,
         "network": {
-            "multi_vm": config.network.multi_vm.__dict__,
+            "vm_network": config.network.vm_network.__dict__,
         },
         "paths": config.paths.__dict__,
     }

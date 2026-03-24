@@ -22,8 +22,7 @@ def validate_entity_name(name: str, entity_type: str = "entity") -> str:
     """
     if not _NAME_PATTERN.match(name):
         raise FCMError(
-            f"Invalid {entity_type} name '{name}': "
-            f"must match [a-z0-9][a-z0-9._-]{{0,30}}"
+            f"Invalid {entity_type} name '{name}': must match [a-z0-9][a-z0-9._-]{{0,30}}"
         )
     return name
 
@@ -43,7 +42,6 @@ def validate_boot_arg_component(value: str, component_name: str) -> str:
     """
     if re.search(r"[\s;|&$`\\\"']", value):
         raise FCMError(
-            f"Invalid {component_name} '{value}': "
-            f"must not contain spaces or shell metacharacters"
+            f"Invalid {component_name} '{value}': must not contain spaces or shell metacharacters"
         )
     return value

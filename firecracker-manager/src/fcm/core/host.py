@@ -73,10 +73,6 @@ def prune_host(cache_dir: Path) -> list[str]:
     return summary
 
 
-
-
-
-
 def clean_host(cache_dir: Path) -> list[str]:
     """Remove all networking config (bridges, TAP devices, iptables rules).
 

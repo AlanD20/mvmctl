@@ -6,9 +6,9 @@ import typer
 from rich.table import Table
 
 from fcm.constants import DEFAULT_NETWORK_NAME
-from fcm.core.network import get_iptables_rules_for_bridge
-from fcm.core.network_manager import (
+from fcm.api.network import (
     create_network,
+    get_iptables_rules_for_bridge,
     get_network_leases,
     inspect_network,
     list_networks,

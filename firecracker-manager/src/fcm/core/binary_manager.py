@@ -13,15 +13,19 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from fcm.constants import HTTP_USER_AGENT
+from fcm.constants import (
+    HTTP_USER_AGENT,
+    FIRECRACKER_GITHUB_RELEASES_API_URL,
+    FIRECRACKER_GITHUB_DOWNLOAD_URL,
+)
 from fcm.exceptions import AssetNotFoundError, BinaryError, FCMError
 from fcm.utils.fs import get_bin_dir
 from fcm.utils.http import download_file
 
 logger = logging.getLogger(__name__)
 
-GITHUB_RELEASES_URL = "https://api.github.com/repos/firecracker-microvm/firecracker/releases"
-GITHUB_DOWNLOAD_URL = "https://github.com/firecracker-microvm/firecracker/releases/download"
+GITHUB_RELEASES_URL = FIRECRACKER_GITHUB_RELEASES_API_URL
+GITHUB_DOWNLOAD_URL = FIRECRACKER_GITHUB_DOWNLOAD_URL
 
 
 @dataclass
@@ -53,7 +57,7 @@ def _parse_version_string(name: str, prefix: str) -> str | None:
     """
     if not name.startswith(prefix):
         return None
-    return name[len(prefix):]
+    return name[len(prefix) :]
 
 
 def _active_target(symlink: Path) -> str | None:
@@ -225,7 +229,7 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
 
     if not fc_src.exists() or not jl_src.exists():
         raise AssetNotFoundError(
-            f"Version {version} not downloaded — run 'fcm asset bin fetch {version}' first"
+            f"Version {version} not downloaded — run 'fcm bin fetch {version}' first"
         )
 
     for link_name, target in [("firecracker", fc_src.name), ("jailer", jl_src.name)]:

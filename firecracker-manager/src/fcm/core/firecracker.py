@@ -111,48 +111,6 @@ class FirecrackerClient:
             self.conn.close()
             self.conn = None
 
-    def pause_vm(self) -> bool:
-        """Pause the VM.
-
-        Returns:
-            True if successful.
-
-        Raises:
-            FirecrackerError: If the pause operation fails.
-        """
-        logger.info("Pausing VM...")
-        status, data = self._request("PATCH", "/vm", {"state": "Paused"})
-
-        if status == 204:
-            logger.info("VM paused")
-            return True
-        else:
-            msg = f"Failed to pause VM: {status}"
-            if data:
-                msg += f" Response: {data}"
-            raise FirecrackerError(msg)
-
-    def resume_vm(self) -> bool:
-        """Resume the VM.
-
-        Returns:
-            True if successful.
-
-        Raises:
-            FirecrackerError: If the resume operation fails.
-        """
-        logger.info("Resuming VM...")
-        status, data = self._request("PATCH", "/vm", {"state": "Resumed"})
-
-        if status == 204:
-            logger.info("VM resumed")
-            return True
-        else:
-            msg = f"Failed to resume VM: {status}"
-            if data:
-                msg += f" Response: {data}"
-            raise FirecrackerError(msg)
-
     def create_snapshot(
         self,
         mem_path: Path,

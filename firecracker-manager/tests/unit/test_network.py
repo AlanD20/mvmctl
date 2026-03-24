@@ -230,7 +230,7 @@ def test_teardown_bridge_down_fails():
         "fcm.core.network.subprocess.run",
         side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
     ):
-        with pytest.raises(NetworkError, match="Failed to teardown bridge"): # Updated match
+        with pytest.raises(NetworkError, match="Failed to teardown bridge"):  # Updated match
             teardown_bridge("fc-br0")
 
 
@@ -241,36 +241,39 @@ def test_setup_nat_all_rules_exist():
     with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
             setup_nat("fc-br0", "eth0")
-            # 3 check calls, no add calls
-            assert mock_run.call_count == 1
+            # 3 check calls (one per _ensure_iptables_rule), no add calls
+            assert mock_run.call_count == 3
 
 
 def test_setup_nat_no_rules_exist():
     """setup_nat should add iptables rules when none currently exist."""
-    mock_check = MagicMock()
-    mock_check.returncode = 1
-    mock_add = MagicMock()
-    mock_add.returncode = 0
+    mock_result = MagicMock()
+    mock_result.returncode = 1  # check says rule doesn't exist
     with patch(
         "fcm.core.network.subprocess.run",
-        return_value=mock_check,
+        return_value=mock_result,
     ) as mock_run:
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
             setup_nat("fc-br0", "eth0")
             # 3 checks + 3 adds = 6 calls
-            assert mock_run.call_count == 1
+            assert mock_run.call_count == 6
 
 
 def test_setup_nat_masquerade_add_fails():
     """setup_nat should raise NetworkError when the iptables MASQUERADE rule cannot be added."""
-    import subprocess
+    check_result = MagicMock()
+    check_result.returncode = 1
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=subprocess.CalledProcessError(1, ["/bin/bash"]),
+        side_effect=[
+            check_result,
+            subprocess.CalledProcessError(1, ["iptables", "-t", "nat", "-A"]),
+        ],
     ):
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
             with pytest.raises(NetworkError, match="Failed to setup NAT"):
                 setup_nat("fc-br0", "eth0")
+
 
 def test_setup_nat_auto_detect_interface():
     """setup_nat should auto-detect the default interface when none is supplied."""
@@ -395,7 +398,7 @@ def test_create_tap_create_fails():
             "fcm.core.network.subprocess.run",
             side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
         ):
-            with pytest.raises(NetworkError, match="Failed to create TAP"): # Updated match
+            with pytest.raises(NetworkError, match="Failed to create TAP"):  # Updated match
                 create_tap("fc-vm1-0", "fc-br0")
 
 
@@ -424,7 +427,7 @@ def test_delete_tap_down_fails():
             "fcm.core.network.subprocess.run",
             side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
         ):
-            with pytest.raises(NetworkError, match="Failed to delete TAP"): # Updated match
+            with pytest.raises(NetworkError, match="Failed to delete TAP"):  # Updated match
                 delete_tap("fc-vm1-0")
 
 
@@ -434,42 +437,44 @@ def test_add_iptables_forward_rules_already_exist():
     mock_check.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
         add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-        # 2 checks, no adds
-        assert mock_run.call_count == 1
+        assert mock_run.call_count == 2
 
 
 def test_add_iptables_forward_rules_add_success():
     """add_iptables_forward_rules should add rules when they are absent."""
-    mock_check = MagicMock()
-    mock_check.returncode = 1
-    mock_add = MagicMock()
-    mock_add.returncode = 0
+    mock_result = MagicMock()
+    mock_result.returncode = 1  # check says rule doesn't exist
     with patch(
         "fcm.core.network.subprocess.run",
-        return_value=mock_check,
+        return_value=mock_result,
     ) as mock_run:
         add_iptables_forward_rules("fc-vm1-0", "fc-br0")
         # 2 checks + 2 adds = 4 calls
-        assert mock_run.call_count == 1
+        assert mock_run.call_count == 4
 
 
 def test_add_iptables_forward_rules_bridge_to_tap_fails():
     """add_iptables_forward_rules should raise NetworkError when the iptables command fails."""
-    import subprocess
+    check_result = MagicMock()
+    check_result.returncode = 1
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=subprocess.CalledProcessError(1, ["/bin/bash"]),
+        side_effect=[
+            check_result,
+            subprocess.CalledProcessError(1, ["iptables", "-A", "FORWARD"]),
+        ],
     ):
         with pytest.raises(NetworkError, match="Failed to add FORWARD rules"):
             add_iptables_forward_rules("fc-vm1-0", "fc-br0")
 
+
 def test_remove_iptables_forward_rules_success():
-    """remove_iptables_forward_rules should call subprocess once to delete FORWARD rules."""
+    """remove_iptables_forward_rules should call subprocess twice to delete FORWARD rules."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
         remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
-        assert mock_run.call_count == 1
+        assert mock_run.call_count == 2
 
 
 def test_remove_iptables_forward_rules_already_absent():
@@ -482,5 +487,4 @@ def test_remove_iptables_forward_rules_already_absent():
         ],
     ) as mock_run:
         remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
-        # Should not raise, just log
-        assert mock_run.call_count == 1
+        assert mock_run.call_count == 2

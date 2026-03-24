@@ -7,22 +7,6 @@ from unittest.mock import MagicMock, patch
 from fcm.core.firecracker import FirecrackerClient, get_vm_socket_path
 
 
-
-def test_pause_vm_sends_correct_body() -> None:
-    """pause_vm must send state=Paused."""
-    client = FirecrackerClient(Path("/nonexistent.socket"))
-    with patch.object(client, "_request", return_value=(204, None)) as mock_req:
-        client.pause_vm()
-    mock_req.assert_called_once_with("PATCH", "/vm", {"state": "Paused"})
-
-
-def test_resume_vm_sends_correct_body() -> None:
-    client = FirecrackerClient(Path("/nonexistent.socket"))
-    with patch.object(client, "_request", return_value=(204, None)) as mock_req:
-        client.resume_vm()
-    mock_req.assert_called_once_with("PATCH", "/vm", {"state": "Resumed"})
-
-
 def test_get_vm_socket_path_not_found(mock_cache_dir: Path) -> None:
     result = get_vm_socket_path("novm")
     assert result is None
@@ -94,26 +78,6 @@ def test_request_returns_none_body_for_empty_response() -> None:
     status, data = client._request("DELETE", "/vm")
     assert status == 204
     assert data is None
-
-
-def test_pause_vm_raises_on_non_204() -> None:
-    """pause_vm raises FirecrackerError when status is not 204."""
-    from fcm.exceptions import FirecrackerError
-
-    client = FirecrackerClient(Path("/fake.socket"))
-    with patch.object(client, "_request", return_value=(400, {"fault_message": "bad"})):
-        with pytest.raises(FirecrackerError):
-            client.pause_vm()
-
-
-def test_resume_vm_raises_on_non_204() -> None:
-    """resume_vm raises FirecrackerError when status is not 204."""
-    from fcm.exceptions import FirecrackerError
-
-    client = FirecrackerClient(Path("/fake.socket"))
-    with patch.object(client, "_request", return_value=(500, None)):
-        with pytest.raises(FirecrackerError):
-            client.resume_vm()
 
 
 def test_create_snapshot_sends_correct_body() -> None:

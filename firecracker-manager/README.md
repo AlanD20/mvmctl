@@ -55,14 +55,28 @@ sudo mv fcm /usr/local/bin/
 fcm --help
 ```
 
-### 2. Install via pip
+### 2. Install with pipx (recommended for isolated installation)
+
+```bash
+pipx install firecracker-manager
+fcm --help
+```
+
+Or with uvx:
+
+```bash
+uvx install firecracker-manager
+fcm --help
+```
+
+### 3. Install via pip
 
 ```bash
 pip install firecracker-manager
 fcm --help
 ```
 
-### 3. Install from Source with uv
+### 4. Install from Source with uv
 
 ```bash
 git clone https://github.com/your-org/firecracker-manager
@@ -86,11 +100,11 @@ sudo fcm host init
 # Or run immediately: newgrp fcm
 
 # 2. Fetch a prebuilt kernel
-fcm asset kernel fetch
+fcm kernel fetch
 # ✓ Kernel built: /home/user/.cache/firecracker-manager/kernels/vmlinux
 
 # 3. Fetch an Ubuntu image
-fcm asset image fetch ubuntu-24.04
+fcm image fetch ubuntu-24.04
 # ✓ Image ready: /home/user/.cache/firecracker-manager/images/ubuntu-24.04.ext4
 
 # 4. Create and start a VM
@@ -157,20 +171,20 @@ sudo fcm host reset
 
 ---
 
-### `fcm asset` — Asset Management
+### `fcm kernel` / `fcm image` / `fcm bin` — Asset Management
 
 Manage kernels, images, and Firecracker binaries.
 
-#### `fcm asset kernel` — Kernel Management
+#### `fcm kernel` — Kernel Management
 
 | Command | Description |
 |---------|-------------|
-| `fcm asset kernel ls` | List cached kernels |
-| `fcm asset kernel fetch` | Download the official minimal kernel |
-| `fcm asset kernel build` | Build a custom upstream kernel from source |
-| `fcm asset kernel remove NAME` | Remove a cached kernel (`rm` is an alias) |
+| `fcm kernel ls` | List cached kernels |
+| `fcm kernel fetch` | Download the official minimal kernel |
+| `fcm kernel build` | Build a custom upstream kernel from source |
+| `fcm kernel remove NAME` | Remove a cached kernel (`rm` is an alias) |
 
-**Flags for `fcm asset kernel fetch` / `fcm asset kernel build`:**
+**Flags for `fcm kernel fetch` / `fcm kernel build`:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -182,30 +196,30 @@ Manage kernels, images, and Firecracker binaries.
 
 ```bash
 # List cached kernels
-fcm asset kernel ls
+fcm kernel ls
 
 # Download minimal kernel (default version)
-fcm asset kernel fetch
+fcm kernel fetch
 
 # Download a specific version
-fcm asset kernel fetch --version 6.1.102
+fcm kernel fetch --version 6.1.102
 
 # Build custom kernel from source (takes 10-20 minutes)
-fcm asset kernel build --version 6.1.102 --jobs 4
+fcm kernel build --version 6.1.102 --jobs 4
 
 # Remove a kernel
-fcm asset kernel remove vmlinux
+fcm kernel remove vmlinux
 ```
 
-#### `fcm asset image` — Image Management
+#### `fcm image` — Image Management
 
 | Command | Description |
 |---------|-------------|
-| `fcm asset image ls` | List available images |
-| `fcm asset image fetch NAME` | Download and convert an image |
-| `fcm asset image remove NAME` | Remove a cached image (`rm` is an alias) |
+| `fcm image ls` | List available images |
+| `fcm image fetch NAME` | Download and convert an image |
+| `fcm image remove NAME` | Remove a cached image (`rm` is an alias) |
 
-**Supported image types for `fcm asset image fetch`:**
+**Supported image types for `fcm image fetch`:**
 
 | ID | Description |
 |----|-------------|
@@ -214,7 +228,7 @@ fcm asset kernel remove vmlinux
 | `arch` | Arch Linux cloud image |
 | `debian` | Debian cloud image (bookworm) |
 
-**Flags for `fcm asset image fetch`:**
+**Flags for `fcm image fetch`:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -225,28 +239,28 @@ fcm asset kernel remove vmlinux
 
 ```bash
 # List available images (✓ = already cached)
-fcm asset image ls
+fcm image ls
 
 # Fetch Ubuntu 24.04
-fcm asset image fetch ubuntu-24.04
+fcm image fetch ubuntu-24.04
 
 # Force re-download
-fcm asset image fetch ubuntu-24.04 --force
+fcm image fetch ubuntu-24.04 --force
 
 # Remove an image
-fcm asset image remove ubuntu-24.04
+fcm image remove ubuntu-24.04
 ```
 
-#### `fcm asset bin` — Binary Management
+#### `fcm bin` — Binary Management
 
 | Command | Description |
 |---------|-------------|
-| `fcm asset bin ls` | List Firecracker binary versions |
-| `fcm asset bin fetch VERSION` | Download a specific Firecracker version |
-| `fcm asset bin use VERSION` | Set active Firecracker version |
-| `fcm asset bin remove VERSION` | Remove a cached version (`rm` is an alias) |
+| `fcm bin ls` | List Firecracker binary versions |
+| `fcm bin fetch VERSION` | Download a specific Firecracker version |
+| `fcm bin use VERSION` | Set active Firecracker version |
+| `fcm bin remove VERSION` | Remove a cached version (`rm` is an alias) |
 
-**Flags for `fcm asset bin ls`:**
+**Flags for `fcm bin ls`:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -257,22 +271,22 @@ fcm asset image remove ubuntu-24.04
 
 ```bash
 # List local binaries
-fcm asset bin ls
+fcm bin ls
 
 # List local + remote available versions
-fcm asset bin ls --remote
+fcm bin ls --remote
 
 # Download Firecracker v1.12.0
-fcm asset bin fetch 1.12.0
+fcm bin fetch 1.12.0
 
 # Set active version
-fcm asset bin use 1.12.0
+fcm bin use 1.12.0
 
 # Remove a version
-fcm asset bin remove 1.12.0
+fcm bin remove 1.12.0
 ```
 
-#### `fcm asset clear` — Clear Cache
+#### `fcm clear` — Clear Asset Cache
 
 Remove all cached assets without touching VM runtime state.
 
@@ -286,10 +300,10 @@ Remove all cached assets without touching VM runtime state.
 
 ```bash
 # Remove all cached assets (bin, kernels, images) — does NOT touch VMs
-fcm asset clear
+fcm clear
 
 # Skip confirmation
-fcm asset clear --force
+fcm clear --force
 ```
 
 ---
@@ -306,8 +320,6 @@ Manage Firecracker microVMs.
 | `fcm vm ssh` | SSH into a VM |
 | `fcm vm logs` | View VM logs |
 | `fcm vm cleanup` | Remove stopped VMs |
-| `fcm vm pause` | Pause a running VM |
-| `fcm vm resume` | Resume a paused VM |
 | `fcm vm snapshot` | Create a snapshot of a running VM |
 | `fcm vm load` | Load a VM from snapshot |
 
@@ -472,29 +484,6 @@ sudo fcm vm cleanup
 
 # Remove all VMs
 sudo fcm vm cleanup --all --force
-```
-
-#### `fcm vm pause` / `fcm vm resume`
-
-Pause and resume VMs. Requires `--enable-api-socket` when creating the VM.
-
-**Flags:**
-
-| Flag | Description |
-|------|-------------|
-| `--name, -n NAME` | VM name (required) |
-
-**Example:**
-
-```bash
-# Create VM with socket enabled
-sudo fcm vm create --name myvm --image ubuntu-24.04 --enable-api-socket
-
-# Pause the VM
-fcm vm pause --name myvm
-
-# Resume the VM
-fcm vm resume --name myvm
 ```
 
 #### `fcm vm snapshot` / `fcm vm load`
@@ -803,7 +792,7 @@ network:
     host_ip: "10.10.0.1"
     mask: "255.255.255.252"
     mac: "02:FC:00:00:00:01"
-  multi_vm:
+  vm_network:
     bridge_name: "fcm-br0"
     bridge_ip: "10.10.0.1/24"
     guest_ip_start: "10.10.0.2"
@@ -814,7 +803,6 @@ network:
 paths:
   assets_dir: "../assets"
   single_vm_dir: "../single-vm"
-  multi_vm_dir: "../multi-vm"
 ```
 
 ---
@@ -922,10 +910,10 @@ You need to fetch or build a kernel first.
 
 ```bash
 # Download prebuilt minimal kernel
-fcm asset kernel fetch
+fcm kernel fetch
 
 # Or build from source (takes 10-20 minutes)
-fcm asset kernel build
+fcm kernel build
 ```
 
 **VM isn't booting / SSH times out**
@@ -955,8 +943,8 @@ fcm vm logs --name myvm --type boot
 Fetch the image first:
 
 ```bash
-fcm asset image fetch ubuntu-24.04
-fcm asset image ls  # Confirm the ✓ appears
+fcm image fetch ubuntu-24.04
+fcm image ls  # Confirm the ✓ appears
 ```
 
 **"Firecracker binary not found"**
@@ -964,8 +952,8 @@ fcm asset image ls  # Confirm the ✓ appears
 Either install Firecracker on your `$PATH`, or download a versioned binary via `fcm`:
 
 ```bash
-fcm asset bin fetch 1.12.0
-fcm asset bin use 1.12.0
+fcm bin fetch 1.12.0
+fcm bin use 1.12.0
 # Or point directly at a binary:
 sudo fcm vm create --name myvm --image ubuntu-24.04 --firecracker-bin /path/to/firecracker
 ```

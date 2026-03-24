@@ -1,4 +1,4 @@
-"""Network infrastructure management for Firecracker multi-VM setup.
+"""Network infrastructure management for Firecracker VM setup.
 
 .. todo:: S-M5 — Add network namespace isolation between VMs.
    Currently all VMs share the host network namespace, separated only by
@@ -181,14 +181,24 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
     if host_iface is None:
         host_iface = get_default_interface()
 
-    script = f"""iptables -t nat -C POSTROUTING -o {host_iface} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o {host_iface} -j MASQUERADE
-iptables -C FORWARD -i {bridge} -o {host_iface} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {bridge} -o {host_iface} -j ACCEPT
-iptables -C FORWARD -i {host_iface} -o {bridge} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {host_iface} -o {bridge} -j ACCEPT
-"""
     try:
-        subprocess.run(script, shell=True, executable="/bin/bash", check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to setup NAT for {bridge} via {host_iface}: {e}\n{e.stderr}") from e
+        _ensure_iptables_rule(
+            ["iptables", "-t", "nat", "-C", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
+            ["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
+            f"Failed to add MASQUERADE rule for {host_iface}",
+        )
+        _ensure_iptables_rule(
+            ["iptables", "-C", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
+            ["iptables", "-A", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
+            f"Failed to add FORWARD rule for {bridge} -> {host_iface}",
+        )
+        _ensure_iptables_rule(
+            ["iptables", "-C", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
+            ["iptables", "-A", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
+            f"Failed to add FORWARD rule for {host_iface} -> {bridge}",
+        )
+    except NetworkError as e:
+        raise NetworkError(f"Failed to setup NAT for {bridge} via {host_iface}: {e}") from e
 
     logger.info("NAT rules configured for bridge %s via %s", bridge, host_iface)
 
@@ -302,13 +312,19 @@ def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None
     - `iptables -A FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
     - `iptables -A FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     """
-    script = f"""iptables -C FORWARD -i {bridge} -o {tap_name} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {bridge} -o {tap_name} -j ACCEPT
-iptables -C FORWARD -i {tap_name} -o {bridge} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i {tap_name} -o {bridge} -j ACCEPT
-"""
     try:
-        subprocess.run(script, shell=True, executable="/bin/bash", check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to add FORWARD rules for {tap_name}: {e}\n{e.stderr}") from e
+        _ensure_iptables_rule(
+            ["iptables", "-C", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
+            ["iptables", "-A", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
+            f"Failed to add FORWARD rule for {bridge} -> {tap_name}",
+        )
+        _ensure_iptables_rule(
+            ["iptables", "-C", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
+            ["iptables", "-A", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
+            f"Failed to add FORWARD rule for {tap_name} -> {bridge}",
+        )
+    except NetworkError as e:
+        raise NetworkError(f"Failed to add FORWARD rules for {tap_name}: {e}") from e
 
     logger.debug("FORWARD rules added for TAP %s ↔ bridge %s", tap_name, bridge)
 
@@ -320,10 +336,16 @@ def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> N
     - `iptables -D FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     - Safe to call even if rules don't exist (ignore errors).
     """
-    script = f"""iptables -D FORWARD -i {bridge} -o {tap_name} -j ACCEPT 2>/dev/null || true
-iptables -D FORWARD -i {tap_name} -o {bridge} -j ACCEPT 2>/dev/null || true
-"""
-    subprocess.run(script, shell=True, executable="/bin/bash", check=False, capture_output=True, text=True)
+    subprocess.run(
+        ["iptables", "-D", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
+        capture_output=True,
+        check=False,
+    )
+    subprocess.run(
+        ["iptables", "-D", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
+        capture_output=True,
+        check=False,
+    )
     logger.debug("FORWARD rules removed for TAP %s ↔ bridge %s", tap_name, bridge)
 
 

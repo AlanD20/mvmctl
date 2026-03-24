@@ -24,7 +24,7 @@ network:
     host_ip: "10.10.0.1"
     mask: "255.255.255.252"
     mac: "02:FC:00:00:00:01"
-  multi_vm:
+  vm_network:
     bridge_name: "fcm-br0"
     bridge_ip: "10.10.0.1/24"
     guest_ip_start: "10.10.0.2"
@@ -34,4 +34,3 @@ network:
 paths:
   assets_dir: "../assets"
   single_vm_dir: "../single-vm"
-  multi_vm_dir: "../multi-vm"

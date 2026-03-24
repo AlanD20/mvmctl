@@ -6,7 +6,7 @@ import yaml
 from fcm.core.config import (
     FCMConfig,
     FirecrackerConfig,
-    MultiVMNetworkConfig,
+    VMNetworkConfig,
     NetworkTopologyConfig,
     VMDefaultsConfig,
     dump_config,
@@ -48,8 +48,8 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.enable_api_socket is False
     assert config.vm_defaults.enable_pci is False
 
-    assert config.network.multi_vm.bridge_name == "fcm-br0"
-    assert config.network.multi_vm.bridge_ip == "10.20.0.1/24"
+    assert config.network.vm_network.bridge_name == "fcm-br0"
+    assert config.network.vm_network.bridge_ip == "10.20.0.1/24"
 
     assert config.paths.assets_dir == ""
 
@@ -59,7 +59,7 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
         "firecracker": {"binary": "/opt/firecracker"},
         "vm_defaults": {"vcpu_count": 8, "mem_size_mib": 4096},
         "network": {
-            "multi_vm": {"bridge_name": "custom-br0", "bridge_ip": "172.16.0.1/16"},
+            "vm_network": {"bridge_name": "custom-br0", "bridge_ip": "172.16.0.1/16"},
         },
         "paths": {"assets_dir": "/tmp/assets"},
     }
@@ -70,8 +70,8 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
     assert config.firecracker.binary == "/opt/firecracker"
     assert config.vm_defaults.vcpu_count == 8
     assert config.vm_defaults.mem_size_mib == 4096
-    assert config.network.multi_vm.bridge_name == "custom-br0"
-    assert config.network.multi_vm.bridge_ip == "172.16.0.1/16"
+    assert config.network.vm_network.bridge_name == "custom-br0"
+    assert config.network.vm_network.bridge_ip == "172.16.0.1/16"
     assert config.paths.assets_dir == "/tmp/assets"
 
 
@@ -109,7 +109,7 @@ def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
 def test_validate_config_invalid_cidr() -> None:
     config = FCMConfig(
         network=NetworkTopologyConfig(
-            multi_vm=MultiVMNetworkConfig(bridge_ip="not-a-cidr"),
+            vm_network=VMNetworkConfig(bridge_ip="not-a-cidr"),
         ),
     )
     errors = validate_config(config)
@@ -130,7 +130,7 @@ def test_dump_config_all_sections() -> None:
 
     network = result["network"]
     assert isinstance(network, dict)
-    assert "multi_vm" in network
+    assert "vm_network" in network
 
 
 def test_dump_config_specific_section() -> None:
@@ -230,7 +230,7 @@ def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
     # Should not crash
     config = load_config(tmp_path)
     # The invalid value may remain or use default
-    assert config.network.multi_vm.bridge_ip is not None
+    assert config.network.vm_network.bridge_ip is not None
 
 
 def test_validate_config_empty_binary_path() -> None:

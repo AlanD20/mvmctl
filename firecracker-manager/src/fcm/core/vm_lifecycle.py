@@ -32,7 +32,13 @@ from fcm.core.vm_manager import VMManager, get_vm_manager
 from fcm.exceptions import NetworkError, FCMError, VMNotFoundError
 from fcm.models.vm import VMConfig, VMInstance, VMState
 from fcm.utils.fs import get_kernels_dir, get_images_dir, get_vm_dir
-from fcm.constants import DEFAULT_NETWORK_NAME, MAX_VMS, TAP_PREFIX
+from fcm.constants import (
+    DEFAULT_NETWORK_NAME,
+    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+    FIRECRACKER_SIGTERM_WAIT_S,
+    MAX_VMS,
+    TAP_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +89,10 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
             client.close()
         except (ProcessLookupError, PermissionError, InterruptedError):
             pass
-        # Poll for 5 seconds (50 * 0.1s) to allow graceful shutdown before SIGTERM/SIGKILL.
-        for _ in range(50):
+        # Poll for FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S seconds (100ms steps)
+        # to allow graceful shutdown before SIGTERM/SIGKILL.
+        _poll_steps = int(FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S / 0.1)
+        for _ in range(_poll_steps):
             time.sleep(0.1)
             # P-L3: single check per iteration — no fix needed
             if not _is_alive(pid):
@@ -95,7 +103,7 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
             os.kill(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             pass
-        time.sleep(1.0)
+        time.sleep(float(FIRECRACKER_SIGTERM_WAIT_S))
 
     if _is_alive(pid):
         try:
@@ -300,14 +308,13 @@ def create_vm(
         ]
 
     try:
-        log_fp = open(log_file, "w")
-        console_fp = open(console_log_file, "w")
-        proc = subprocess.Popen(
-            fc_cmd,
-            stdout=console_fp,
-            stderr=log_fp,
-            start_new_session=True,
-        )
+        with open(log_file, "w") as log_fp, open(console_log_file, "w") as console_fp:
+            proc = subprocess.Popen(
+                fc_cmd,
+                stdout=console_fp,
+                stderr=log_fp,
+                start_new_session=True,
+            )
     except FileNotFoundError:
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)
@@ -358,8 +365,8 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     net_name = vm.network_name or DEFAULT_NETWORK_NAME
     try:
         release_network_ip(net_name, name)
-    except NetworkError:
-        pass
+    except NetworkError as e:
+        logger.warning("Failed to release network IP: %s", e)
 
     if vm.ip:
         try:

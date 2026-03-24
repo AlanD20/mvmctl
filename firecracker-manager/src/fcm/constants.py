@@ -82,3 +82,17 @@ PRIVILEGED_BINARIES: Final[list[str]] = [
 ]
 HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/0.1.0"
 MAX_VMS: Final[int] = 50
+
+# External URLs
+FIRECRACKER_GITHUB_RELEASES_API_URL: Final[str] = (
+    "https://api.github.com/repos/firecracker-microvm/firecracker/releases"
+)
+FIRECRACKER_GITHUB_DOWNLOAD_URL: Final[str] = (
+    "https://github.com/firecracker-microvm/firecracker/releases/download"
+)
+FIRECRACKER_GITHUB_RAW_URL: Final[str] = (
+    "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main"
+)
+KERNEL_TARBALL_URL_TEMPLATE: Final[str] = (
+    "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
+)

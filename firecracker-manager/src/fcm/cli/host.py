@@ -4,12 +4,13 @@ from fcm.exceptions import FCMError
 import typer
 from rich.table import Table
 
-from fcm.core.host import (
+from fcm.api.host import (
     check_kvm_access,
     check_required_binaries,
     clean_host,
     get_host_state,
     get_ip_forward_status,
+    get_vm_manager,
     init_host,
     prune_host,
     reset_host,
@@ -29,7 +30,6 @@ def _abort_if_vms_running(action: str) -> None:
     Args:
         action: Short description of the action being blocked (used in the error message).
     """
-    from fcm.core.vm_manager import get_vm_manager
     from fcm.models.vm import VMState
 
     manager = get_vm_manager()
@@ -88,7 +88,7 @@ def init_cmd() -> None:
         print_warning("ACTION REQUIRED: Log out and back in for group membership to take effect.")
         print_info(f"Or run immediately: newgrp {PROJECT_GROUP}")
 
-    from fcm.core.network_manager import ensure_default_network
+    from fcm.api.network import ensure_default_network
 
     try:
         ensure_default_network()
@@ -168,7 +168,7 @@ def ls_cmd(
 
 @app.command(name="clean")
 def clean_cmd(
-    force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
     """Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group."""
     _abort_if_vms_running("clean")
@@ -196,7 +196,7 @@ def clean_cmd(
 
 @app.command(name="reset")
 def reset_cmd(
-    force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
     """Full rollback: remove networking, revert sysctl, remove sudoers and group.
 
@@ -245,7 +245,7 @@ def reset_cmd(
 
 @app.command(name="prune", hidden=True)
 def prune(
-    force: bool = typer.Option(False, "--force", help="Skip confirmation prompt"),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
     """[Deprecated] Use 'fcm host clean' instead."""
     print_warning("'host prune' is deprecated. Use 'host clean' instead.")

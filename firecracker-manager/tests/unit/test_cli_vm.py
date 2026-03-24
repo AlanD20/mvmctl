@@ -121,18 +121,6 @@ def test_logs_failure(mocker: MockerFixture):
     assert result.exit_code == 1
 
 
-def test_pause_not_supported():
-    result = runner.invoke(app, ["pause", "--name", "myvm"])
-    assert result.exit_code == 0
-    assert "not supported" in result.output.lower()
-
-
-def test_resume_not_supported():
-    result = runner.invoke(app, ["resume", "--name", "myvm"])
-    assert result.exit_code == 0
-    assert "not supported" in result.output.lower()
-
-
 def test_snapshot_success(mocker: MockerFixture):
     mocker.patch("fcm.cli.vm.snapshot_vm")
     result = runner.invoke(

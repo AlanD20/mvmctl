@@ -14,6 +14,8 @@ from fcm.core.vm_lifecycle import (
 )
 from fcm.core.ssh import connect_to_vm
 from fcm.core.logs import show_logs
+from fcm.constants import TAP_PREFIX
+from fcm.api.host import check_privileges
 
 __all__ = [
     "list_vms",
@@ -31,6 +33,7 @@ __all__ = [
 
 
 def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) -> list[VMInstance]:
+    """Return all registered VMs, optionally filtering out stopped ones."""
     manager = vm_manager or get_vm_manager()
     all_vms = manager.list_all()
     if not include_stopped:
@@ -39,11 +42,13 @@ def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) 
 
 
 def get_vm(name: str, vm_manager: VMManager | None = None) -> VMInstance | None:
+    """Return the VMInstance for the given name, or None if not found."""
     manager = vm_manager or get_vm_manager()
     return manager.get(name)
 
 
 def deregister_vm(name: str, vm_manager: VMManager | None = None) -> None:
+    """Remove a VM from the registry without tearing down its resources."""
     manager = vm_manager or get_vm_manager()
     manager.deregister(name)
 
@@ -84,6 +89,8 @@ def get_logs(name: str, log_type: str = "os", lines: int = 50, follow: bool = Fa
 def cleanup_vms(
     all_vms: bool = False, dry_run: bool = False, vm_manager: VMManager | None = None
 ) -> list[VMInstance]:
+    """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules."""
+    check_privileges("/usr/sbin/ip")
     import os
     import signal
     import shutil
@@ -100,7 +107,7 @@ def cleanup_vms(
 
     for v in targets:
         vm_dir = vm_cache_dir(v.name)
-        tap_name = f"fc-{v.name}-0"
+        tap_name = f"{TAP_PREFIX}-{v.name}-0"
 
         if v.pid:
             try:

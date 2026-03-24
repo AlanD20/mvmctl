@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fcm.core.host import clean_host, prune_host, reset_host
+from fcm.core.host import clean_host, reset_host
 from fcm.core.host_state import (
     HostChange,
     HostState,
@@ -99,6 +99,7 @@ def test_check_required_binaries_all_found(mock_which):
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_missing_some(mock_which):
     """check_required_binaries should list each missing binary name when some are absent."""
+
     def side_effect(name):
         if name == "ip":
             return None
@@ -112,6 +113,7 @@ def test_check_required_binaries_missing_some(mock_which):
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_no_iso_tool(mock_which):
     """check_required_binaries should report the iso-tool pair as missing when neither is found."""
+
     def side_effect(name):
         if name in ("mkisofs", "genisoimage"):
             return None
@@ -125,6 +127,7 @@ def test_check_required_binaries_no_iso_tool(mock_which):
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_has_genisoimage_only(mock_which):
     """check_required_binaries should succeed when genisoimage is present even if mkisofs is absent."""
+
     def side_effect(name):
         if name == "mkisofs":
             return None
@@ -138,6 +141,7 @@ def test_check_required_binaries_has_genisoimage_only(mock_which):
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_has_mkisofs_only(mock_which):
     """check_required_binaries should succeed when mkisofs is present even if genisoimage is absent."""
+
     def side_effect(name):
         if name == "genisoimage":
             return None
@@ -1742,6 +1746,7 @@ class TestWriteSudoersErrorPaths:
         """_write_sudoers raises HostError if visudo validation fails."""
         mock_run.return_value = MagicMock(returncode=1, stderr="syntax error")
         from fcm.core.host_privilege import _write_sudoers
+
         with pytest.raises(HostError, match="Generated sudoers file failed visudo validation"):
             _write_sudoers(tmp_path / "sudoers", "testgrp")
 
@@ -1773,10 +1778,11 @@ class TestPruneHostErrorPaths:
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
         mock_state_file.return_value = mock_sf
-        
+
         from fcm.core.host import prune_host
+
         summary = prune_host(tmp_path)
-        
+
         assert "cleaned" in summary
         assert "Removed host state snapshot" in summary
         mock_sf.unlink.assert_called_once()
@@ -1788,15 +1794,18 @@ class TestResetHostErrorPaths:
     @patch("fcm.core.host._remove_sudoers", side_effect=HostError("fake sudoers error"))
     @patch("fcm.core.host._remove_group", side_effect=HostError("fake group error"))
     @patch("fcm.core.host._state_file")
-    def test_reset_host_all_errors(self, mock_state_file, mock_rg, mock_rs, mock_rh, mock_ch, tmp_path):
+    def test_reset_host_all_errors(
+        self, mock_state_file, mock_rg, mock_rs, mock_rh, mock_ch, tmp_path
+    ):
         """reset_host catches all intermediary HostErrors and still returns a summary."""
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
         mock_state_file.return_value = mock_sf
-        
+
         from fcm.core.host import reset_host
+
         summary = reset_host(tmp_path)
-        
+
         assert "cleaned" in summary
         assert "Warning: fake sudoers error" in summary
         assert "Warning: fake group error" in summary

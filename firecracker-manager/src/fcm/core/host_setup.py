@@ -26,9 +26,11 @@ ISO_BINARIES = ["mkisofs", "genisoimage"]
 KVM_MODULES = ["kvm"]
 KVM_VENDOR_MODULES = ["kvm_intel", "kvm_amd"]
 
+
 def check_kvm_access() -> bool:
     kvm = Path("/dev/kvm")
     return kvm.exists() and os.access(kvm, os.R_OK | os.W_OK)
+
 
 def check_required_binaries() -> list[str]:
     missing: list[str] = []
@@ -39,6 +41,7 @@ def check_required_binaries() -> list[str]:
     if not has_iso:
         missing.append(" or ".join(ISO_BINARIES))
     return missing
+
 
 def get_ip_forward_status() -> str:
     try:
@@ -54,6 +57,7 @@ def get_ip_forward_status() -> str:
     except FileNotFoundError as e:
         raise HostError("sysctl command not found") from e
 
+
 def _is_module_loaded(module: str) -> bool:
     try:
         result = subprocess.run(
@@ -68,6 +72,7 @@ def _is_module_loaded(module: str) -> bool:
     except (OSError, subprocess.CalledProcessError):
         return False
 
+
 def _load_module(module: str) -> None:
     try:
         subprocess.run(
@@ -80,6 +85,7 @@ def _load_module(module: str) -> None:
         raise HostError(f"Failed to load kernel module {module}: {e}") from e
     except FileNotFoundError as e:
         raise HostError("modprobe command not found") from e
+
 
 def _enable_ip_forward() -> HostChange | None:
     current = get_ip_forward_status()
@@ -106,6 +112,7 @@ def _enable_ip_forward() -> HostChange | None:
         mechanism="sysctl",
     )
 
+
 def _persist_sysctl() -> HostChange | None:
     content = f"{SYSCTL_KEY} = 1\n"
     if SYSCTL_CONF.exists() and SYSCTL_CONF.read_text() == content:
@@ -128,6 +135,7 @@ def _persist_sysctl() -> HostChange | None:
         applied_value=str(SYSCTL_CONF),
         mechanism="file_create",
     )
+
 
 def _ensure_kvm_modules() -> list[HostChange]:
     changes: list[HostChange] = []
@@ -163,6 +171,7 @@ def _ensure_kvm_modules() -> list[HostChange]:
                 continue
 
     return changes
+
 
 def init_host(cache_dir: Path) -> list[HostChange]:
     changes: list[HostChange] = []
