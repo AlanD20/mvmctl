@@ -1,131 +1,142 @@
 # fcm/core/ — Business Logic Layer
 
-**Scope:** Core business logic, system operations, Firecracker interaction  
-**Rules:** All subprocess calls, privilege checks, and VM lifecycle logic live here
+**Scope:** All subprocess calls, privilege checks, VM lifecycle, network, image, kernel  
+**Rule:** Return data or raise typed exceptions — NEVER format output here
 
 ## STRUCTURE
 
 ```
 src/fcm/core/
-├── __init__.py
-├── vm_lifecycle.py      # VM create/start/stop/remove (405 lines)
-├── network.py           # Bridge, TAP, NAT, iptables (409 lines)
-├── network_manager.py   # Named network management
-├── host*.py             # Host initialization (split into 4 modules)
-│   ├── host.py          # Orchestration (clean_host, prune_host, reset_host)
-│   ├── host_setup.py    # KVM, sysctl, modules
-│   ├── host_state.py    # State snapshots, restore
-│   └── host_privilege.py # Group/sudoers management
-├── image.py             # Image download, conversion, partition extraction
-├── kernel.py            # Kernel download/build pipeline
-├── firecracker.py       # Firecracker API client
-├── vm_manager.py        # VM registry, state management
-├── key_manager.py       # SSH key generation, caching
-├── binary_manager.py    # Firecracker binary management
-├── config_gen.py        # Firecracker JSON config generation
-├── cloud_init.py        # cloud-init ISO creation
-├── logs.py              # VM log retrieval
-├── ssh.py               # SSH command building/execution
-└── config.py            # YAML config loading
+├── vm_lifecycle.py      # VM create/start/stop/remove (469 lines)
+├── vm_manager.py        # VM registry; state.json keyed by full 64-char hash
+├── network.py           # Low-level: bridge, TAP, NAT, iptables (452 lines)
+├── network_manager.py   # Named networks with IP lease tracking (487 lines)
+├── host.py              # Host orchestration: clean/prune/reset
+├── host_setup.py        # Host init: KVM, sysctl, binary checks (244 lines)
+├── host_privilege.py    # Group/sudoers management; check_privileges() (296 lines)
+├── host_state.py        # Host state snapshots for rollback (183 lines)
+├── image.py             # Image download, QCOW2→raw conversion, partition extract (629 lines)
+├── kernel.py            # Kernel fetch (FC CI S3) + build-from-source pipeline (712 lines)
+├── binary_manager.py    # Firecracker/jailer version management (287 lines)
+├── metadata.py          # Unified metadata.json for images/kernels/binaries (282 lines)
+├── config_state.py      # config.json persistence: active binary, defaults (222 lines)
+├── config_gen.py        # Generates Firecracker boot JSON (203 lines)
+├── firecracker.py       # HTTP API client for live VM control (265 lines)
+├── ssh.py               # SSH command building + key resolution (211 lines)
+├── key_manager.py       # SSH key import/create/registry (321 lines)
+├── cloud_init.py        # cloud-init ISO creation (140 lines)
+├── logs.py              # VM log retrieval (149 lines)
+└── config.py            # YAML config loading (203 lines)
 ```
 
 ## WHERE TO LOOK
 
-| Task | Module | Function/Class |
-|------|--------|----------------|
+| Task | Module | Key entry point |
+|------|--------|-----------------|
 | Create VM | `vm_lifecycle.py` | `create_vm()` |
-| Stop/remove VM | `vm_lifecycle.py` | `remove_vm()`, `cleanup_tap()` |
-| Setup bridge | `network.py` | `setup_bridge()`, `setup_nat()` |
-| Create TAP | `network.py` | `create_tap()` |
-| Manage networks | `network_manager.py` | `create_network()`, `remove_network()` |
+| Resolve image by ID/hash | `vm_lifecycle.py` | `_resolve_image_path()` |
+| Remove VM | `vm_lifecycle.py` | `remove_vm()` |
+| VM registry (CRUD) | `vm_manager.py` | `VMManager` class |
+| Bridge/TAP/NAT | `network.py` | `setup_bridge()`, `create_tap()`, `setup_nat()` |
+| Named networks | `network_manager.py` | `create_network()`, `ensure_default_network()` |
 | Host init | `host_setup.py` | `init_host()` |
-| Reset host | `host.py` | `reset_host()` |
-| Fetch image | `image.py` | `fetch_image()` |
-| Build kernel | `kernel.py` | `build_kernel_pipeline()` |
-| VM registry | `vm_manager.py` | `VMManager.register()`, `.get()` |
-| SSH access | `ssh.py` | `ssh_vm()`, `build_ssh_command()` |
-| Firecracker API | `firecracker.py` | `FirecrackerClient` |
+| Privilege check | `host_privilege.py` | `check_privileges(binary_path)` |
+| Image download/convert | `image.py` | `fetch_image()`, `import_image()` |
+| Kernel fetch/build | `kernel.py` | `download_firecracker_kernel()`, `build_kernel_pipeline()` |
+| Firecracker binary | `binary_manager.py` | `fetch_binary()`, `set_active_version()` |
+| Asset metadata | `metadata.py` | `find_images_by_short_id()`, `update_kernel_entry()` |
+| Active version/binary | `config_state.py` | `get_firecracker_config()`, `update_firecracker_config()` |
+| Firecracker HTTP API | `firecracker.py` | `FirecrackerClient` |
+
+## STATE SCHEMAS
+
+**VM state** (`$FCM_CACHE_DIR/vms/state.json`):
+```json
+{ "vms": { "<full-64-char-sha256>": { "id": "...", "name": "myvm", "pid": 1234, ... } } }
+```
+- Key = full 64-char hash generated by `generate_vm_id(name)` at creation
+- `VMManager.get(name)` searches by name; `find_by_short_id(prefix)` searches by hash prefix
+- Migration: old name-keyed state auto-migrates on first load
+
+**Asset metadata** (`$FCM_CACHE_DIR/metadata.json`):
+```json
+{
+  "images":  { "<full-hash>": { "yaml_id": "ubuntu-24.04", "filename": "...", ... } },
+  "kernels": { "<filename>":  { "version": "6.1", "type": "firecracker", ... } }
+}
+```
+- Use `find_images_by_short_id(cache_dir, "abc123")` for 6-char prefix lookup
+- Images downloaded via `fcm image fetch` store `yaml_id` to link back to images.yaml
+
+**Config** (`$FCM_CONFIG_DIR/config.json`):
+```json
+{
+  "firecracker": { "full_version": "v1.15.0", "ci_version": "v1.15", "default_version": "...", "default_binary_path": "..." },
+  "assets":      { "kernels_dir": "...", "images_dir": "...", "bin_dir": "...", ... },
+  "defaults":    { "image": "ubuntu-24.04", "kernel": "vmlinux-fc-v1.15-x86_64" }
+}
+```
 
 ## CONVENTIONS
 
 ### Subprocess Handling
-- ALWAYS check return codes
-- Capture stderr for error messages
-- Use typed exceptions from `fcm.exceptions`
-- Mock in tests (tests must not require root)
-
-### Error Handling Pattern
 ```python
-from fcm.exceptions import NetworkError, HostError
-
 try:
-    subprocess.run(cmd, capture_output=True, text=True, check=True)
+    subprocess.run(["ip", "link", "add", ...], capture_output=True, text=True, check=True)
 except subprocess.CalledProcessError as e:
-    raise NetworkError(f"Failed to setup bridge: {e}\n{e.stderr}") from e
-except FileNotFoundError as e:
-    raise NetworkError(f"ip command not found") from e
+    raise NetworkError(f"Bridge creation failed: {e.stderr}") from e
+except FileNotFoundError:
+    raise NetworkError("'ip' binary not found — install iproute2")
 ```
+- Always list form (not shell string)
+- Capture stderr; include in exception message
+- Raise typed exception from `fcm.exceptions`
 
 ### Privilege Checks
-- Use `check_privileges(binary_path)` before privileged operations
-- Binary paths from `PRIVILEGED_BINARIES` constant
-- NOT root → check group membership
-
-### State Management
-- Host state: Snapshots saved to `cache_dir/host/state.json`
-- VM state: Registry in `cache_dir/vms/{name}/`
-- Changes tracked via `HostChange` dataclass for rollback
+```python
+from fcm.core.host_privilege import check_privileges
+check_privileges("/usr/sbin/ip")  # validates fcm group membership
+```
+Called in `api/` layer before entering core, or explicitly in core for ops needing root.
 
 ## ANTI-PATTERNS
 
-### NEVER
-- **Direct `print()`** — Use `fcm.utils.console` (Rich) for output
-- **Hardcoded binary paths** — Use `PRIVILEGED_BINARIES`
-- **Bare subprocess calls without error handling** — Always wrap in try/except
-- **Skip privilege checks** — Always validate before privileged ops
-- **Modify CLI output here** — Return data/exceptions; formatting in CLI layer
-
-### Code Smells to Avoid
-- Large functions (>100 lines) — Already have several; avoid adding more
-- Deep nesting (>3 levels) — Use early returns
-- String concatenation for commands — Use lists for subprocess args
+| Forbidden | Correct |
+|-----------|---------|
+| `print()` or `console.print()` | Raise exception or return data; let CLI format |
+| Hardcoded `"/usr/sbin/ip"` | `PRIVILEGED_BINARIES["ip"]` from constants |
+| `except Exception: pass` | Catch specific type, re-raise as FCMError subclass |
+| Large functions (>100 lines) | Extract helpers; early returns to reduce nesting |
+| `subprocess.run(..., shell=True)` | Always use list form |
 
 ## KEY MODULES
 
-### vm_lifecycle.py (405 lines)
-VM creation orchestration:
-- Copies rootfs from image
-- Generates cloud-init ISO
-- Creates Firecracker JSON config
-- Sets up network (bridge, TAP, iptables)
-- Starts Firecracker process
-- Registers VM in manager
+### vm_lifecycle.py (469 lines)
+- `_resolve_image_path(image)` — checks all extensions + metadata short-hash lookup
+- `generate_vm_id(name)` — `sha256(name:timestamp).hexdigest()`
+- `create_vm()` — full orchestration: image→rootfs copy, cloud-init, config, network, process, register
+- TAP naming: `fcm-{net[:3]}-{vm[:3]}-{rand3}` (15-char Linux IFNAMSIZ limit)
 
-### network.py (409 lines)
-Network infrastructure:
-- Bridge: `setup_bridge()`, `teardown_bridge()`
-- TAP: `create_tap()`, `delete_tap()`
-- NAT: `setup_nat()`, `teardown_nat()`
-- iptables: `add_iptables_forward_rules()`, `remove_iptables_forward_rules()`
-- Uses `ip -batch` for batch operations
+### network_manager.py (487 lines)
+- `NetworkConfig` + `NetworkLease` dataclasses; persisted as JSON under `$FCM_CACHE_DIR/networks/`
+- Bridge = `fcm-{network_name}` (e.g. `fcm-default`)
+- `ensure_default_network()` — idempotent; called at VM create and host init
 
-### host_*.py (4 modules, ~520 lines total)
-Split from original monolithic host.py:
-- `host_setup.py` — KVM check, sysctl, module loading
-- `host_privilege.py` — Group creation, sudoers management
-- `host_state.py` — State snapshots, JSON serialization
-- `host.py` — Orchestration (clean, prune, reset)
+### kernel.py (712 lines)
+- `fetch_kernel_sha256(version)` — fetches `.sha256` sidecar before download
+- `build_kernel_pipeline()` — auto-fetches sha256, downloads tarball, patches config, builds
+- `download_firecracker_kernel()` — downloads prebuilt from Firecracker CI S3
+- `human_readable_time(iso)` — "5 minutes ago" format; imported by CLI asset.py
+- `parse_kernel_filename(name)` → `ParsedKernelFilename(base_name, version, arch)`
 
-### image.py (422 lines)
-Image handling:
-- Download with SHA256 verification
-- QCOW2 → raw conversion via `qemu-img`
-- Partition extraction via `dd` (bs=1M)
-- Filesystem detection via `blkid`
+### image.py (629 lines)
+- `fetch_image(spec, out, force)` — download + sha256 verify + optional QCOW2 convert
+- `import_image(spec, output_dir)` — local file conversion to ext4/btrfs
+- `_detect_and_rename_fs(path)` — uses `blkid` to detect FS, renames `.img` → `.ext4` etc.
+- `sha256_url` on `ImageSpec` — fetched before download for verification
 
-## NOTES
-
-- **Complexity hotspots:** `vm_lifecycle.py`, `network.py`, `image.py` are all >400 lines
-- **Subprocess-heavy:** All modules use subprocess for system operations
-- **Privilege-aware:** Most functions require root or fcm group membership
-- **Test isolation:** All subprocess calls must be mockable for unit tests
+### metadata.py (282 lines)
+- `find_images_by_short_id(cache_dir, short_id)` → `list[tuple[str, dict]]` (full_key, meta)
+- `find_kernels_by_short_id(cache_dir, short_id)` → same
+- `update_kernel_entry()`, `update_image_entry()` — upsert by full key
+- `migrate_legacy_metadata()` — converts old name-keyed entries on first load
