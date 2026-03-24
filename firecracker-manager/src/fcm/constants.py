@@ -7,6 +7,7 @@ from typing import Final
 
 @functools.lru_cache(maxsize=1)
 def _resolve_project_name() -> str:
+    """Resolve the project name from package metadata, falling back to 'firecracker-manager'."""
     try:
         return importlib.metadata.metadata("firecracker-manager")["Name"]
     except importlib.metadata.PackageNotFoundError:
@@ -34,18 +35,29 @@ CLI_NAME: Final[str] = _resolve_cli_name()
 
 
 def env_var(suffix: str) -> str:
+    """Return the environment variable name for the given suffix (e.g. FCM_SUFFIX).
+
+    Args:
+        suffix: The variable suffix to append after the CLI name prefix.
+
+    Returns:
+        Full environment variable name in uppercase.
+    """
     return f"{CLI_NAME.upper()}_{suffix}"
 
 
 def cache_dir_name() -> str:
+    """Return the project cache directory name derived from the project name."""
     return PROJECT_NAME
 
 
 def device_prefix() -> str:
+    """Return the network device name prefix derived from the CLI name."""
     return CLI_NAME
 
 
 def config_filename() -> str:
+    """Return the config file name for the CLI (e.g. fcm.yaml)."""
     return f"{CLI_NAME}.yaml"
 
 

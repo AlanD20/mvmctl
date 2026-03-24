@@ -7,7 +7,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 from fcm.models.vm import VMInstance, VMState
 from fcm.utils.fs import get_vms_dir
@@ -60,7 +60,8 @@ class VMManager:
             return {"vms": {}, "schema_version": _STATE_SCHEMA_VERSION}
         try:
             with open(self.state_file, "r") as f:
-                state = cast(dict[str, Any], json.load(f))
+                loaded = json.load(f)
+                state: dict[str, Any] = loaded if isinstance(loaded, dict) else {}
         except (json.JSONDecodeError, ValueError):
             logger.warning("Corrupt state file at %s — resetting to empty", self.state_file)
             return {"vms": {}, "schema_version": _STATE_SCHEMA_VERSION}

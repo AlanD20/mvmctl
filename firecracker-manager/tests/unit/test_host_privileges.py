@@ -1,4 +1,4 @@
-"""Tests for Phase 5 features: privilege model, clean/reset, help command."""
+"""Tests for privilege/exception hierarchy and host clean/reset CLI commands."""
 
 from __future__ import annotations
 

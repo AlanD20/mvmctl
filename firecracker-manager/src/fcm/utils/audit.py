@@ -8,6 +8,7 @@ from fcm.constants import PROJECT_NAME
 
 
 def _get_audit_log_path() -> Path:
+    """Return the path to the audit log file, honouring the cache dir env var."""
     cache_dir = Path(os.environ.get(f"{PROJECT_NAME.upper().replace('-', '_')}_CACHE_DIR", ""))
     if not cache_dir or not str(cache_dir).strip():
         cache_dir = Path.home() / ".cache" / PROJECT_NAME
@@ -15,6 +16,7 @@ def _get_audit_log_path() -> Path:
 
 
 def _audit_logger() -> logging.Logger:
+    """Return the singleton audit logger, configuring a file handler on first call."""
     audit = logging.getLogger("fcm.audit")
     if audit.handlers:
         return audit
@@ -34,6 +36,12 @@ def _audit_logger() -> logging.Logger:
 
 
 def log_audit(operation: str, detail: str = "") -> None:
+    """Write a structured audit log entry for the given operation.
+
+    Args:
+        operation: Short identifier for the operation performed (e.g. ``host.init``).
+        detail: Optional additional context appended to the log entry.
+    """
     try:
         user = getpass.getuser()
     except Exception:

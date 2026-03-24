@@ -12,12 +12,13 @@ permissions:
 
 jobs:
   test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.13"]
+        os: [ubuntu-22.04, ubuntu-24.04]
 
     steps:
       - uses: actions/checkout@v4

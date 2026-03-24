@@ -33,6 +33,7 @@ from fcm.exceptions import NetworkError
 
 
 def test_bridge_exists_true():
+    """bridge_exists should return True when the ip command exits with code 0."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
@@ -42,6 +43,7 @@ def test_bridge_exists_true():
 
 
 def test_bridge_exists_false():
+    """bridge_exists should return False when the ip command exits with a non-zero code."""
     mock_result = MagicMock()
     mock_result.returncode = 1
     with patch("fcm.core.network.subprocess.run", return_value=mock_result):
@@ -55,12 +57,14 @@ def test_bridge_exists_false():
 
 
 def test_generate_mac_format():
+    """generate_mac should return a MAC address matching the expected 02:FC:xx:xx:xx:xx format."""
     mac = generate_mac()
     pattern = r"^02:FC:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$"
     assert re.match(pattern, mac), f"MAC {mac!r} does not match expected format"
 
 
 def test_generate_mac_uniqueness():
+    """generate_mac should produce unique addresses across 100 consecutive calls."""
     macs = {generate_mac() for _ in range(100)}
     assert len(macs) == 100, "Expected 100 unique MAC addresses"
 
@@ -71,21 +75,25 @@ def test_generate_mac_uniqueness():
 
 
 def test_allocate_ip_basic():
+    """allocate_ip should return the first available host address in the subnet."""
     ip = allocate_ip([], "10.20.0.0/24", "10.20.0.1")
     assert ip == "10.20.0.2"
 
 
 def test_allocate_ip_skips_gateway():
+    """allocate_ip should skip the gateway IP and return the next available address."""
     ip = allocate_ip([], "10.20.0.0/24", "10.20.0.1")
     assert ip != "10.20.0.1"
 
 
 def test_allocate_ip_skips_existing():
+    """allocate_ip should skip already-allocated IPs and return the next free address."""
     ip = allocate_ip(["10.20.0.2", "10.20.0.3"], "10.20.0.0/24", "10.20.0.1")
     assert ip == "10.20.0.4"
 
 
 def test_allocate_ip_exhausted():
+    """allocate_ip should raise NetworkError when all addresses in the subnet are taken."""
     network = ipaddress.IPv4Network("10.20.0.0/24", strict=False)
     gateway = "10.20.0.1"
     # All hosts except the gateway
@@ -100,6 +108,7 @@ def test_allocate_ip_exhausted():
 
 
 def test_get_tap_devices_empty():
+    """get_tap_devices should return an empty list when no TAP devices are attached to the bridge."""
     mock_result = MagicMock()
     mock_result.returncode = 1
     mock_result.stdout = ""
@@ -109,6 +118,7 @@ def test_get_tap_devices_empty():
 
 
 def test_get_tap_devices_parses():
+    """get_tap_devices should parse interface names from ip link show output correctly."""
     # Sample output of `ip link show master fc-br0` with 2 TAP devices
     sample_output = (
         "3: fc-vm1-0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 master fc-br0\n"
@@ -130,6 +140,7 @@ def test_get_tap_devices_parses():
 
 
 def test_get_default_interface_found():
+    """get_default_interface should return the interface name from the default route."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = "default via 10.0.0.1 dev eth0 proto dhcp src 10.0.0.5 metric 100\n"
@@ -139,6 +150,7 @@ def test_get_default_interface_found():
 
 
 def test_get_default_interface_not_found():
+    """get_default_interface should raise NetworkError when no default route is found."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = ""
@@ -153,6 +165,7 @@ def test_get_default_interface_not_found():
 
 
 def test_setup_bridge_already_exists():
+    """setup_bridge should skip creation and not call subprocess when the bridge already exists."""
     with patch("fcm.core.network.bridge_exists", return_value=True):
         with patch("fcm.core.network.subprocess.run") as mock_run:
             setup_bridge("fc-br0", "10.20.0.1/24")
@@ -160,6 +173,7 @@ def test_setup_bridge_already_exists():
 
 
 def test_setup_bridge_success():
+    """setup_bridge should create the bridge and enable IP forwarding when it does not exist."""
     with patch("fcm.core.network.bridge_exists", return_value=False):
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -171,6 +185,7 @@ def test_setup_bridge_success():
 
 
 def test_setup_bridge_create_fails():
+    """setup_bridge should raise NetworkError when the ip command fails to create the bridge."""
     with patch("fcm.core.network.bridge_exists", return_value=False):
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -185,6 +200,7 @@ def test_setup_bridge_create_fails():
 
 
 def test_setup_bridge_ip_forward_fails():
+    """setup_bridge should raise NetworkError when writing the IP-forwarding sysctl file fails."""
     with patch("fcm.core.network.bridge_exists", return_value=False):
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -200,6 +216,7 @@ def test_setup_bridge_ip_forward_fails():
 
 
 def test_teardown_bridge_success():
+    """teardown_bridge should call subprocess once to bring down and delete the bridge."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
@@ -208,6 +225,7 @@ def test_teardown_bridge_success():
 
 
 def test_teardown_bridge_down_fails():
+    """teardown_bridge should raise NetworkError when the ip command fails."""
     with patch(
         "fcm.core.network.subprocess.run",
         side_effect=subprocess.CalledProcessError(1, ["ip", "-batch", "-"]),
@@ -217,6 +235,7 @@ def test_teardown_bridge_down_fails():
 
 
 def test_setup_nat_all_rules_exist():
+    """setup_nat should not add rules when all iptables rules already exist."""
     mock_check = MagicMock()
     mock_check.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
@@ -227,6 +246,7 @@ def test_setup_nat_all_rules_exist():
 
 
 def test_setup_nat_no_rules_exist():
+    """setup_nat should add iptables rules when none currently exist."""
     mock_check = MagicMock()
     mock_check.returncode = 1
     mock_add = MagicMock()
@@ -242,6 +262,7 @@ def test_setup_nat_no_rules_exist():
 
 
 def test_setup_nat_masquerade_add_fails():
+    """setup_nat should raise NetworkError when the iptables MASQUERADE rule cannot be added."""
     import subprocess
     with patch(
         "fcm.core.network.subprocess.run",
@@ -252,6 +273,7 @@ def test_setup_nat_masquerade_add_fails():
                 setup_nat("fc-br0", "eth0")
 
 def test_setup_nat_auto_detect_interface():
+    """setup_nat should auto-detect the default interface when none is supplied."""
     mock_check = MagicMock()
     mock_check.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_check):
@@ -266,6 +288,7 @@ def test_setup_nat_auto_detect_interface():
 
 
 def test_teardown_nat_force_true_removes():
+    """teardown_nat with force=True should remove iptables rules even when TAP devices are present."""
     with patch("fcm.core.network.get_tap_devices", return_value=["tap0"]):
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -276,6 +299,7 @@ def test_teardown_nat_force_true_removes():
 
 
 def test_teardown_nat_tap_devices_present_skips():
+    """teardown_nat with force=False should skip removal when TAP devices are still present."""
     with patch("fcm.core.network.get_tap_devices", return_value=["tap0"]) as mock_get_taps:
         with patch("fcm.core.network.subprocess.run") as mock_run:
             teardown_nat("fc-br0", force=False)
@@ -284,6 +308,7 @@ def test_teardown_nat_tap_devices_present_skips():
 
 
 def test_teardown_nat_no_taps_removes():
+    """teardown_nat should remove iptables rules when no TAP devices remain on the bridge."""
     with patch("fcm.core.network.get_tap_devices", return_value=[]):
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -294,6 +319,7 @@ def test_teardown_nat_no_taps_removes():
 
 
 def test_teardown_nat_called_process_error():
+    """teardown_nat should raise NetworkError when the iptables deletion command fails."""
     with patch("fcm.core.network.get_tap_devices", return_value=[]):
         with patch(
             "fcm.core.network.subprocess.run",
@@ -305,6 +331,7 @@ def test_teardown_nat_called_process_error():
 
 
 def test_teardown_nat_get_default_interface_fails_gracefully():
+    """teardown_nat should silently skip removal when the default interface cannot be determined."""
     with patch("fcm.core.network.get_tap_devices", return_value=[]):
         with patch(
             "fcm.core.network.get_default_interface",
@@ -321,6 +348,7 @@ def test_teardown_nat_get_default_interface_fails_gracefully():
 
 
 def test_tap_exists_true():
+    """tap_exists should return True when the ip command exits with code 0."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
@@ -330,6 +358,7 @@ def test_tap_exists_true():
 
 
 def test_tap_exists_false():
+    """tap_exists should return False when the ip command exits with a non-zero code."""
     mock_result = MagicMock()
     mock_result.returncode = 1
     with patch("fcm.core.network.subprocess.run", return_value=mock_result):
@@ -343,12 +372,14 @@ def test_tap_exists_false():
 
 
 def test_create_tap_already_exists():
+    """create_tap should raise NetworkError when the TAP device already exists."""
     with patch("fcm.core.network.tap_exists", return_value=True):
         with pytest.raises(NetworkError, match="TAP device .* already exists"):
             create_tap("fc-vm1-0", "fc-br0")
 
 
 def test_create_tap_success():
+    """create_tap should call subprocess once to create and attach the TAP device to the bridge."""
     with patch("fcm.core.network.tap_exists", return_value=False):
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -358,6 +389,7 @@ def test_create_tap_success():
 
 
 def test_create_tap_create_fails():
+    """create_tap should raise NetworkError when the ip command fails to create the TAP device."""
     with patch("fcm.core.network.tap_exists", return_value=False):
         with patch(
             "fcm.core.network.subprocess.run",
@@ -368,6 +400,7 @@ def test_create_tap_create_fails():
 
 
 def test_delete_tap_does_not_exist():
+    """delete_tap should be a no-op when the TAP device does not exist."""
     with patch("fcm.core.network.tap_exists", return_value=False):
         with patch("fcm.core.network.subprocess.run") as mock_run:
             delete_tap("fc-vm1-0")
@@ -375,6 +408,7 @@ def test_delete_tap_does_not_exist():
 
 
 def test_delete_tap_success():
+    """delete_tap should call subprocess once to delete an existing TAP device."""
     with patch("fcm.core.network.tap_exists", return_value=True):
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -384,6 +418,7 @@ def test_delete_tap_success():
 
 
 def test_delete_tap_down_fails():
+    """delete_tap should raise NetworkError when the ip command fails to delete the TAP device."""
     with patch("fcm.core.network.tap_exists", return_value=True):
         with patch(
             "fcm.core.network.subprocess.run",
@@ -394,6 +429,7 @@ def test_delete_tap_down_fails():
 
 
 def test_add_iptables_forward_rules_already_exist():
+    """add_iptables_forward_rules should not add rules when they already exist."""
     mock_check = MagicMock()
     mock_check.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
@@ -403,6 +439,7 @@ def test_add_iptables_forward_rules_already_exist():
 
 
 def test_add_iptables_forward_rules_add_success():
+    """add_iptables_forward_rules should add rules when they are absent."""
     mock_check = MagicMock()
     mock_check.returncode = 1
     mock_add = MagicMock()
@@ -417,6 +454,7 @@ def test_add_iptables_forward_rules_add_success():
 
 
 def test_add_iptables_forward_rules_bridge_to_tap_fails():
+    """add_iptables_forward_rules should raise NetworkError when the iptables command fails."""
     import subprocess
     with patch(
         "fcm.core.network.subprocess.run",
@@ -426,6 +464,7 @@ def test_add_iptables_forward_rules_bridge_to_tap_fails():
             add_iptables_forward_rules("fc-vm1-0", "fc-br0")
 
 def test_remove_iptables_forward_rules_success():
+    """remove_iptables_forward_rules should call subprocess once to delete FORWARD rules."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
@@ -434,6 +473,7 @@ def test_remove_iptables_forward_rules_success():
 
 
 def test_remove_iptables_forward_rules_already_absent():
+    """remove_iptables_forward_rules should not raise when the rules are already absent."""
     with patch(
         "fcm.core.network.subprocess.run",
         side_effect=[

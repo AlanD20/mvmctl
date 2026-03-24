@@ -4,6 +4,7 @@ import logging
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Optional, cast
 
 from fcm.exceptions import ImageError, ConfigError
 from fcm.models.image import ImageSpec
@@ -241,8 +242,7 @@ def extract_partition_from_raw(
             raw_path.rename(output_path)
             return output_path
 
-        import typing
-        start_sector, sector_count, partition = typing.cast(tuple[int, typing.Optional[int], int], parsed)
+        start_sector, sector_count, partition = cast(tuple[int, Optional[int], int], parsed)
         logger.info("Extracting partition %d (start=%d)...", partition, start_sector)
 
         skip_bytes = start_sector * 512

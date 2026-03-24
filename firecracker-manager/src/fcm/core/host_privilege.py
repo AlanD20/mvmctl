@@ -16,6 +16,17 @@ from fcm.exceptions import HostError, PrivilegeError
 logger = logging.getLogger(__name__)
 
 def check_privileges(binary: str) -> None:
+    """Verify the current user has the required privileges to run a binary.
+
+    Checks that the binary exists and either the process is root or the current
+    user is a member of the project group configured by ``fcm host init``.
+
+    Args:
+        binary: Absolute path or name of the binary to check.
+
+    Raises:
+        PrivilegeError: If the binary is missing or the user lacks group membership.
+    """
     if not shutil.which(binary) and not Path(binary).exists():
         raise PrivilegeError(
             f"Binary not found: {binary}. Run 'fcm host init' to set up required dependencies."
@@ -40,9 +51,11 @@ def check_privileges(binary: str) -> None:
         ) from e
 
 def _get_current_user() -> str:
+    """Return the username of the current process owner."""
     return pwd.getpwuid(os.getuid()).pw_name
 
 def _group_exists(group_name: str) -> bool:
+    """Return ``True`` if the named group exists on the system."""
     try:
         grp.getgrnam(group_name)
         return True
@@ -50,6 +63,7 @@ def _group_exists(group_name: str) -> bool:
         return False
 
 def _user_in_group(username: str, group_name: str) -> bool:
+    """Return ``True`` if ``username`` is a member of ``group_name``."""
     try:
         g = grp.getgrnam(group_name)
         return username in g.gr_mem
@@ -57,6 +71,17 @@ def _user_in_group(username: str, group_name: str) -> bool:
         return False
 
 def _create_group(group_name: str) -> bool:
+    """Create a system group. Return ``True`` if created, ``False`` if it already existed.
+
+    Args:
+        group_name: Name of the group to create.
+
+    Returns:
+        ``True`` if the group was newly created, ``False`` if it already existed.
+
+    Raises:
+        HostError: If the group creation command fails or is not found.
+    """
     if _group_exists(group_name):
         return False
     try:
@@ -73,6 +98,18 @@ def _create_group(group_name: str) -> bool:
         raise HostError("groupadd command not found") from e
 
 def _add_user_to_group(username: str, group_name: str) -> bool:
+    """Add a user to a group. Return ``True`` if added, ``False`` if already a member.
+
+    Args:
+        username: The user to add.
+        group_name: Target group name.
+
+    Returns:
+        ``True`` if the user was added, ``False`` if they were already in the group.
+
+    Raises:
+        HostError: If the usermod command fails or is not found.
+    """
     if _user_in_group(username, group_name):
         return False
     try:
@@ -89,6 +126,11 @@ def _add_user_to_group(username: str, group_name: str) -> bool:
         raise HostError("usermod command not found") from e
 
 def _validate_sudoers_binaries() -> None:
+    """Verify that all privileged binaries referenced in the sudoers drop-in exist on disk.
+
+    Raises:
+        HostError: If any required binary is missing, with an install hint.
+    """
     for binary in PRIVILEGED_BINARIES:
         if not Path(binary).exists():
             pkg_map = {
@@ -102,6 +144,14 @@ def _validate_sudoers_binaries() -> None:
             raise HostError(f"Required binary not found: {binary} (install {pkg})")
 
 def _generate_sudoers_content(group_name: str) -> str:
+    """Generate the sudoers drop-in content granting the group passwordless access.
+
+    Args:
+        group_name: The group to grant NOPASSWD privileges.
+
+    Returns:
+        A string containing the sudoers drop-in file content.
+    """
     binaries_str = ", ".join(PRIVILEGED_BINARIES)
     return (
         f"# Managed by {CLI_NAME} — do not edit manually.\n"
@@ -110,6 +160,18 @@ def _generate_sudoers_content(group_name: str) -> str:
     )
 
 def _write_sudoers(path: Path, group_name: str) -> None:
+    """Write and validate the sudoers drop-in file for the given group.
+
+    The generated content is validated with ``visudo -c`` before being written
+    to ``path`` with mode 0o440.
+
+    Args:
+        path: Destination path for the sudoers drop-in file.
+        group_name: The group to include in the sudoers rule.
+
+    Raises:
+        HostError: If visudo validation fails or the file cannot be written.
+    """
     import tempfile
     content = _generate_sudoers_content(group_name)
     with tempfile.NamedTemporaryFile(mode="w", suffix=".sudoers", delete=False) as f:
@@ -138,6 +200,17 @@ def _write_sudoers(path: Path, group_name: str) -> None:
         raise HostError(f"Failed to write sudoers file {path}: {e}") from e
 
 def _remove_sudoers(path: Path) -> bool:
+    """Remove the sudoers drop-in file if it exists.
+
+    Args:
+        path: Path to the sudoers drop-in file.
+
+    Returns:
+        ``True`` if the file was removed, ``False`` if it did not exist.
+
+    Raises:
+        HostError: If the file exists but cannot be removed.
+    """
     if not path.exists():
         return False
     try:
@@ -147,6 +220,17 @@ def _remove_sudoers(path: Path) -> bool:
         raise HostError(f"Failed to remove sudoers file {path}: {e}") from e
 
 def _remove_group(group_name: str) -> bool:
+    """Delete a system group if it exists.
+
+    Args:
+        group_name: Name of the group to remove.
+
+    Returns:
+        ``True`` if the group was removed, ``False`` if it did not exist.
+
+    Raises:
+        HostError: If the groupdel command fails or is not found.
+    """
     if not _group_exists(group_name):
         return False
     try:

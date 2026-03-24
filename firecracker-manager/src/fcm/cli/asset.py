@@ -240,6 +240,14 @@ def image_rm(
 
 
 def _format_bin_row(bv: BinaryVersion) -> list[str]:
+    """Return a table row for a binary version entry.
+
+    Args:
+        bv: The binary version to format.
+
+    Returns:
+        A three-element list containing the active marker, version string, and path.
+    """
     active = "✓" if bv.is_active else " "
     return [active, bv.version, str(bv.firecracker_path)]
 

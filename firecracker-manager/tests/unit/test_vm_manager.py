@@ -15,6 +15,7 @@ from fcm.models.vm import VMInstance, VMState
     ],
 )
 def test_vm_manager_register(vm_manager: VMManager, vm_name: str, pid: int, ip: str):
+    """register should store a VMInstance that is retrievable by name with correct attributes."""
     vm = VMInstance(
         name=vm_name,
         pid=pid,
@@ -33,6 +34,7 @@ def test_vm_manager_register(vm_manager: VMManager, vm_name: str, pid: int, ip: 
 
 
 def test_vm_manager_list(vm_manager: VMManager):
+    """list_all should return all registered VMs."""
     vm_manager.register(VMInstance(name="vm1", pid=1, status=VMState.RUNNING))
     vm_manager.register(VMInstance(name="vm2", pid=2, status=VMState.STOPPED))
 
@@ -41,6 +43,7 @@ def test_vm_manager_list(vm_manager: VMManager):
 
 
 def test_vm_manager_deregister(vm_manager: VMManager):
+    """deregister should remove a VM so that get returns None for that name."""
     vm_manager.register(VMInstance(name="test-vm", pid=1234, status=VMState.RUNNING))
     assert vm_manager.get("test-vm") is not None
 
@@ -50,6 +53,7 @@ def test_vm_manager_deregister(vm_manager: VMManager):
 
 @pytest.mark.parametrize("vm_name", ["non-existent", "ghost-vm", "missing-123"])
 def test_vm_manager_not_found(vm_manager: VMManager, vm_name: str):
+    """get should return None when a VM with the given name has not been registered."""
     result = vm_manager.get(vm_name)
     assert result is None
 
@@ -65,6 +69,7 @@ def test_vm_manager_not_found(vm_manager: VMManager, vm_name: str):
 def test_vm_manager_update_status_not_found(
     vm_manager: VMManager, vm_name: str, new_status: VMState
 ):
+    """update_status should raise VMNotFoundError when the named VM does not exist."""
     from fcm.exceptions import VMNotFoundError
 
     with pytest.raises(VMNotFoundError):

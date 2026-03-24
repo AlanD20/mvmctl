@@ -47,11 +47,13 @@ from fcm.exceptions import HostError, PrivilegeError
 
 
 def test_state_dir(tmp_path):
+    """_state_dir should return the 'host' subdirectory of the given cache path."""
     result = _state_dir(tmp_path)
     assert result == tmp_path / "host"
 
 
 def test_state_file(tmp_path):
+    """_state_file should return the state.json path within the host subdirectory."""
     result = _state_file(tmp_path)
     assert result == tmp_path / "host" / "state.json"
 
@@ -64,17 +66,20 @@ def test_state_file(tmp_path):
 @patch("fcm.core.host_setup.os.access", return_value=True)
 @patch("fcm.core.host_setup.Path.exists", return_value=True)
 def test_check_kvm_access_ok(mock_exists, mock_access):
+    """check_kvm_access should return True when /dev/kvm exists and is accessible."""
     assert check_kvm_access() is True
 
 
 @patch("fcm.core.host_setup.Path.exists", return_value=False)
 def test_check_kvm_access_missing(mock_exists):
+    """check_kvm_access should return False when /dev/kvm does not exist."""
     assert check_kvm_access() is False
 
 
 @patch("fcm.core.host_setup.os.access", return_value=False)
 @patch("fcm.core.host_setup.Path.exists", return_value=True)
 def test_check_kvm_access_no_permission(mock_exists, mock_access):
+    """check_kvm_access should return False when /dev/kvm exists but is not readable."""
     assert check_kvm_access() is False
 
 
@@ -85,6 +90,7 @@ def test_check_kvm_access_no_permission(mock_exists, mock_access):
 
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_all_found(mock_which):
+    """check_required_binaries should return an empty list when all required binaries are present."""
     mock_which.return_value = "/usr/bin/something"
     result = check_required_binaries()
     assert result == []
@@ -92,6 +98,7 @@ def test_check_required_binaries_all_found(mock_which):
 
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_missing_some(mock_which):
+    """check_required_binaries should list each missing binary name when some are absent."""
     def side_effect(name):
         if name == "ip":
             return None
@@ -104,6 +111,7 @@ def test_check_required_binaries_missing_some(mock_which):
 
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_no_iso_tool(mock_which):
+    """check_required_binaries should report the iso-tool pair as missing when neither is found."""
     def side_effect(name):
         if name in ("mkisofs", "genisoimage"):
             return None
@@ -116,6 +124,7 @@ def test_check_required_binaries_no_iso_tool(mock_which):
 
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_has_genisoimage_only(mock_which):
+    """check_required_binaries should succeed when genisoimage is present even if mkisofs is absent."""
     def side_effect(name):
         if name == "mkisofs":
             return None
@@ -128,6 +137,7 @@ def test_check_required_binaries_has_genisoimage_only(mock_which):
 
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_has_mkisofs_only(mock_which):
+    """check_required_binaries should succeed when mkisofs is present even if genisoimage is absent."""
     def side_effect(name):
         if name == "genisoimage":
             return None
@@ -140,6 +150,7 @@ def test_check_required_binaries_has_mkisofs_only(mock_which):
 
 @patch("fcm.core.host_setup.shutil.which")
 def test_check_required_binaries_all_missing(mock_which):
+    """check_required_binaries should report all required binaries when none are found."""
     mock_which.return_value = None
     result = check_required_binaries()
     assert "ip" in result
@@ -155,6 +166,7 @@ def test_check_required_binaries_all_missing(mock_which):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_get_ip_forward_status_success(mock_run):
+    """get_ip_forward_status should return the stripped sysctl value on success."""
     mock_run.return_value = MagicMock(stdout="1\n")
     result = get_ip_forward_status()
     assert result == "1"
@@ -168,12 +180,14 @@ def test_get_ip_forward_status_success(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_get_ip_forward_status_zero(mock_run):
+    """get_ip_forward_status should return '0' when IP forwarding is disabled."""
     mock_run.return_value = MagicMock(stdout="0\n")
     assert get_ip_forward_status() == "0"
 
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_get_ip_forward_status_called_process_error(mock_run):
+    """get_ip_forward_status should raise HostError when the sysctl command fails."""
     mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl")
     with pytest.raises(HostError, match="Failed to read"):
         get_ip_forward_status()
@@ -181,6 +195,7 @@ def test_get_ip_forward_status_called_process_error(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_get_ip_forward_status_file_not_found(mock_run):
+    """get_ip_forward_status should raise HostError when the sysctl binary is not found."""
     mock_run.side_effect = FileNotFoundError("sysctl")
     with pytest.raises(HostError, match="sysctl command not found"):
         get_ip_forward_status()
@@ -193,6 +208,7 @@ def test_get_ip_forward_status_file_not_found(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_found(mock_run):
+    """_is_module_loaded should return True when the module name appears in lsmod output."""
     mock_run.return_value = MagicMock(
         returncode=0,
         stdout="kvm                   1234  0\nkvm_intel              567  0\n",
@@ -202,6 +218,7 @@ def test_is_module_loaded_found(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_not_found(mock_run):
+    """_is_module_loaded should return False when the module is absent from lsmod output."""
     mock_run.return_value = MagicMock(
         returncode=0,
         stdout="ext4                  1234  1\n",
@@ -211,12 +228,14 @@ def test_is_module_loaded_not_found(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_lsmod_fails(mock_run):
+    """_is_module_loaded should return False when lsmod exits with a non-zero code."""
     mock_run.return_value = MagicMock(returncode=1, stdout="")
     assert _is_module_loaded("kvm") is False
 
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_empty_output(mock_run):
+    """_is_module_loaded should return False when lsmod returns empty output."""
     mock_run.return_value = MagicMock(returncode=0, stdout="")
     assert _is_module_loaded("kvm") is False
 
@@ -233,6 +252,7 @@ def test_is_module_loaded_partial_name_no_match(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_is_module_loaded_empty_lines(mock_run):
+    """_is_module_loaded should correctly parse output that contains blank lines."""
     mock_run.return_value = MagicMock(
         returncode=0,
         stdout="\n\nkvm  1234  0\n\n",
@@ -247,6 +267,7 @@ def test_is_module_loaded_empty_lines(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_load_module_success(mock_run):
+    """_load_module should call modprobe without raising when the command succeeds."""
     mock_run.return_value = MagicMock(returncode=0)
     _load_module("kvm")  # Should not raise
     mock_run.assert_called_once_with(
@@ -259,6 +280,7 @@ def test_load_module_success(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_load_module_called_process_error(mock_run):
+    """_load_module should raise HostError when modprobe exits with an error code."""
     mock_run.side_effect = subprocess.CalledProcessError(1, "modprobe")
     with pytest.raises(HostError, match="Failed to load kernel module kvm"):
         _load_module("kvm")
@@ -266,6 +288,7 @@ def test_load_module_called_process_error(mock_run):
 
 @patch("fcm.core.host_setup.subprocess.run")
 def test_load_module_file_not_found(mock_run):
+    """_load_module should raise HostError when the modprobe binary is not found."""
     mock_run.side_effect = FileNotFoundError("modprobe")
     with pytest.raises(HostError, match="modprobe command not found"):
         _load_module("kvm")
@@ -279,6 +302,7 @@ def test_load_module_file_not_found(mock_run):
 @patch("fcm.core.host_setup.subprocess.run")
 @patch("fcm.core.host_setup.get_ip_forward_status", return_value="1")
 def test_enable_ip_forward_already_enabled(mock_status, mock_run):
+    """_enable_ip_forward should return None and skip sysctl when forwarding is already enabled."""
     result = _enable_ip_forward()
     assert result is None
     mock_run.assert_not_called()
@@ -287,6 +311,7 @@ def test_enable_ip_forward_already_enabled(mock_status, mock_run):
 @patch("fcm.core.host_setup.subprocess.run")
 @patch("fcm.core.host_setup.get_ip_forward_status", return_value="0")
 def test_enable_ip_forward_needs_enabling(mock_status, mock_run):
+    """_enable_ip_forward should call sysctl and return a HostChange when forwarding is disabled."""
     mock_run.return_value = MagicMock(returncode=0)
     result = _enable_ip_forward()
     assert result is not None
@@ -305,6 +330,7 @@ def test_enable_ip_forward_needs_enabling(mock_status, mock_run):
 @patch("fcm.core.host_setup.subprocess.run")
 @patch("fcm.core.host_setup.get_ip_forward_status", return_value="0")
 def test_enable_ip_forward_called_process_error(mock_status, mock_run):
+    """_enable_ip_forward should raise HostError when the sysctl -w command fails."""
     mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl")
     with pytest.raises(HostError, match="Failed to enable IP forwarding"):
         _enable_ip_forward()
@@ -313,6 +339,7 @@ def test_enable_ip_forward_called_process_error(mock_status, mock_run):
 @patch("fcm.core.host_setup.subprocess.run")
 @patch("fcm.core.host_setup.get_ip_forward_status", return_value="0")
 def test_enable_ip_forward_file_not_found(mock_status, mock_run):
+    """_enable_ip_forward should raise HostError when the sysctl binary is not found."""
     mock_run.side_effect = FileNotFoundError("sysctl")
     with pytest.raises(HostError, match="sysctl command not found"):
         _enable_ip_forward()
@@ -325,6 +352,7 @@ def test_enable_ip_forward_file_not_found(mock_status, mock_run):
 
 @patch("fcm.core.host_setup.SYSCTL_CONF")
 def test_persist_sysctl_already_correct(mock_conf):
+    """_persist_sysctl should return None when the sysctl conf file already has the correct content."""
     mock_conf.exists.return_value = True
     mock_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
     result = _persist_sysctl()
@@ -333,6 +361,7 @@ def test_persist_sysctl_already_correct(mock_conf):
 
 @patch("fcm.core.host_setup.SYSCTL_CONF")
 def test_persist_sysctl_file_does_not_exist(mock_conf):
+    """_persist_sysctl should create the conf file and return a HostChange when it does not exist."""
     mock_conf.exists.return_value = False
     mock_conf.parent = MagicMock()
     mock_conf.__str__ = lambda self: "/etc/sysctl.d/firecracker-manager.conf"
@@ -347,6 +376,7 @@ def test_persist_sysctl_file_does_not_exist(mock_conf):
 
 @patch("fcm.core.host_setup.SYSCTL_CONF")
 def test_persist_sysctl_file_has_wrong_content(mock_conf):
+    """_persist_sysctl should overwrite the conf file and return a HostChange when content is wrong."""
     mock_conf.exists.return_value = True
     mock_conf.read_text.return_value = "net.ipv4.ip_forward = 0\n"
     mock_conf.parent = MagicMock()
@@ -359,6 +389,7 @@ def test_persist_sysctl_file_has_wrong_content(mock_conf):
 
 @patch("fcm.core.host_setup.SYSCTL_CONF")
 def test_persist_sysctl_write_fails(mock_conf):
+    """_persist_sysctl should raise HostError when the directory cannot be created."""
     mock_conf.exists.return_value = False
     mock_conf.parent = MagicMock()
     mock_conf.parent.mkdir.side_effect = OSError("permission denied")
@@ -374,6 +405,7 @@ def test_persist_sysctl_write_fails(mock_conf):
 @patch("fcm.core.host_setup._load_module")
 @patch("fcm.core.host_setup._is_module_loaded")
 def test_ensure_kvm_modules_all_loaded(mock_loaded, mock_load):
+    """_ensure_kvm_modules should return no changes and skip modprobe when all modules are loaded."""
     # kvm loaded, kvm_intel loaded
     mock_loaded.side_effect = lambda m: m in ("kvm", "kvm_intel")
     changes = _ensure_kvm_modules()
@@ -384,6 +416,7 @@ def test_ensure_kvm_modules_all_loaded(mock_loaded, mock_load):
 @patch("fcm.core.host_setup._load_module")
 @patch("fcm.core.host_setup._is_module_loaded")
 def test_ensure_kvm_modules_need_loading(mock_loaded, mock_load):
+    """_ensure_kvm_modules should load kvm and a vendor module when neither is present."""
     # Nothing loaded initially
     call_count = {"kvm": 0, "kvm_intel": 0, "kvm_amd": 0}
 
@@ -442,7 +475,7 @@ def test_ensure_kvm_modules_both_vendor_fail(mock_loaded, mock_load):
 @patch("fcm.core.host_setup._load_module")
 @patch("fcm.core.host_setup._is_module_loaded")
 def test_ensure_kvm_modules_kvm_already_loaded_vendor_not(mock_loaded, mock_load):
-    """kvm already loaded, vendor not loaded."""
+    """_ensure_kvm_modules should load only the vendor module when kvm is already loaded."""
 
     def loaded_side_effect(m):
         return m == "kvm"
@@ -461,6 +494,7 @@ def test_ensure_kvm_modules_kvm_already_loaded_vendor_not(mock_loaded, mock_load
 
 
 def test_save_state_writes_json(tmp_path):
+    """_save_state should create a state.json with an init_timestamp and the provided changes."""
     changes = [
         HostChange(
             setting="net.ipv4.ip_forward",
@@ -479,6 +513,7 @@ def test_save_state_writes_json(tmp_path):
 
 
 def test_save_state_empty_changes(tmp_path):
+    """_save_state should create a valid state.json with an empty changes list."""
     _save_state(tmp_path, [])
     state_file = tmp_path / "host" / "state.json"
     assert state_file.exists()
@@ -487,6 +522,7 @@ def test_save_state_empty_changes(tmp_path):
 
 
 def test_save_state_creates_directories(tmp_path):
+    """_save_state should create any missing parent directories before writing the state file."""
     nested = tmp_path / "deep" / "nested"
     _save_state(nested, [])
     state_file = nested / "host" / "state.json"
@@ -494,6 +530,7 @@ def test_save_state_creates_directories(tmp_path):
 
 
 def test_save_state_multiple_changes(tmp_path):
+    """_save_state should persist all provided HostChange entries to the state file."""
     changes = [
         HostChange("a", "0", "1", "sysctl"),
         HostChange("b", None, "v", "modprobe"),
@@ -524,6 +561,7 @@ def _mock_lsmod_with_kvm():
 @patch("fcm.core.host_setup.os.access", return_value=False)
 @patch("fcm.core.host_setup.Path.exists", return_value=False)
 def test_init_host_kvm_not_accessible(mock_exists, mock_access, mock_which, mock_run, tmp_path):
+    """init_host should raise HostError when /dev/kvm is not accessible."""
     with pytest.raises(HostError, match="/dev/kvm is not accessible"):
         init_host(tmp_path)
 
@@ -533,6 +571,7 @@ def test_init_host_kvm_not_accessible(mock_exists, mock_access, mock_which, mock
 @patch("fcm.core.host_setup.os.access", return_value=True)
 @patch("fcm.core.host_setup.Path.exists", return_value=True)
 def test_init_host_missing_binaries(mock_exists, mock_access, mock_which, mock_run, tmp_path):
+    """init_host should raise HostError listing missing binaries when required tools are absent."""
     mock_which.return_value = None
     with pytest.raises(HostError, match="Missing required binaries"):
         init_host(tmp_path)
@@ -557,6 +596,7 @@ def test_init_host_ip_forward_already_enabled(
     mock_get_user,
     tmp_path,
 ):
+    """init_host should return no changes when IP forwarding and KVM modules are already configured."""
     # Path.exists for /dev/kvm returns True
     with patch("fcm.core.host_setup.Path.exists", return_value=True):
         # sysctl -n returns "1", lsmod returns kvm loaded
@@ -601,6 +641,7 @@ def test_init_host_enables_ip_forward(
     mock_get_user,
     tmp_path,
 ):
+    """init_host should record ip_forward and sysctl_persist_file changes when forwarding was off."""
     with patch("fcm.core.host_setup.Path.exists", return_value=True):
 
         def run_side_effect(cmd, **kwargs):
@@ -651,6 +692,7 @@ def test_init_host_writes_state_file(
     mock_get_user,
     tmp_path,
 ):
+    """init_host should write a state.json containing init_timestamp and changes fields."""
     with patch("fcm.core.host_setup.Path.exists", return_value=True):
 
         def run_side_effect(cmd, **kwargs):
@@ -693,6 +735,7 @@ def test_init_host_idempotent(
     mock_get_user,
     tmp_path,
 ):
+    """init_host should produce fewer changes on the second call when the host is already configured."""
     with patch("fcm.core.host_setup.Path.exists", return_value=True):
         call_count = {"sysctl_n": 0}
 
@@ -775,11 +818,13 @@ def test_init_host_with_module_loading(
 
 
 def test_get_host_state_no_file(tmp_path):
+    """get_host_state should return None when no state file has been written."""
     result = get_host_state(tmp_path)
     assert result is None
 
 
 def test_get_host_state_valid(tmp_path):
+    """get_host_state should return a HostState object when a valid state file exists."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     data = {
@@ -806,6 +851,7 @@ def test_get_host_state_valid(tmp_path):
 
 
 def test_get_host_state_corrupt_json(tmp_path):
+    """get_host_state should raise HostError when the state file contains invalid JSON."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     (state_dir / "state.json").write_text("{bad json")
@@ -815,6 +861,7 @@ def test_get_host_state_corrupt_json(tmp_path):
 
 
 def test_get_host_state_missing_key(tmp_path):
+    """get_host_state should raise HostError when the state file is missing required keys."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     (state_dir / "state.json").write_text(json.dumps({"init_timestamp": "t"}))
@@ -824,6 +871,7 @@ def test_get_host_state_missing_key(tmp_path):
 
 
 def test_get_host_state_empty_changes(tmp_path):
+    """get_host_state should return a HostState with an empty changes list when none were recorded."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     data = {"init_timestamp": "2025-01-01T00:00:00+00:00", "changes": []}
@@ -846,6 +894,7 @@ def test_get_host_state_type_error(tmp_path):
 
 
 def test_get_host_state_multiple_changes(tmp_path):
+    """get_host_state should return all HostChange entries when the state file has multiple changes."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     data = {
@@ -878,12 +927,14 @@ def test_get_host_state_multiple_changes(tmp_path):
 
 
 def test_restore_host_no_state(tmp_path):
+    """restore_host should raise HostError when no state file exists to restore from."""
     with pytest.raises(HostError, match="No saved host state to restore"):
         restore_host(tmp_path)
 
 
 @patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_reverts_sysctl(mock_run, tmp_path):
+    """restore_host should revert a sysctl change to its original value and delete the state file."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     data = {
@@ -920,6 +971,7 @@ def test_restore_host_reverts_sysctl(mock_run, tmp_path):
 
 
 def test_restore_host_reverts_file_create(tmp_path):
+    """restore_host should delete a file that was created during init when original_value is None."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
 
@@ -958,6 +1010,7 @@ def test_restore_host_reverts_file_create(tmp_path):
 
 
 def test_restore_host_reverts_file_create_with_original(tmp_path):
+    """restore_host should restore a file to its original content when original_value is set."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
 
@@ -990,6 +1043,7 @@ def test_restore_host_reverts_file_create_with_original(tmp_path):
 
 @patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_deletes_state_file(mock_run, tmp_path):
+    """restore_host should remove the state.json after a successful restore."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     data = {
@@ -1005,6 +1059,7 @@ def test_restore_host_deletes_state_file(mock_run, tmp_path):
 
 @patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path):
+    """restore_host should skip reverting a sysctl change when original_value is None."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     data = {
@@ -1028,6 +1083,7 @@ def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path):
 
 @patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_sysctl_failure(mock_run, tmp_path):
+    """restore_host should raise HostError when the sysctl revert command fails."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
     data = {
@@ -1075,6 +1131,7 @@ def test_restore_host_sysctl_file_not_found(mock_run, tmp_path):
 
 @patch("fcm.core.host_state.subprocess.run")
 def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path):
+    """restore_host should revert changes in reverse order so later changes are undone first."""
     state_dir = tmp_path / "host"
     state_dir.mkdir(parents=True)
 
@@ -1200,6 +1257,7 @@ def test_restore_host_modprobe_mechanism_ignored(tmp_path):
 
 
 def test_host_change_dataclass():
+    """HostChange should store and expose all four fields correctly."""
     change = HostChange(
         setting="test",
         original_value="old",
@@ -1213,6 +1271,7 @@ def test_host_change_dataclass():
 
 
 def test_host_state_dataclass():
+    """HostState should store init_timestamp and changes fields correctly."""
     state = HostState(
         init_timestamp="2025-01-01T00:00:00+00:00",
         changes=[],

@@ -49,7 +49,7 @@ Choose one of the following three methods:
 Download the latest release from GitHub (no Python required):
 
 ```bash
-curl -L -o fcm <repo-url>/releases/latest/download/fcm-linux
+curl -L -o fcm <repo-url>/releases/latest/download/fcm
 chmod +x fcm
 sudo mv fcm /usr/local/bin/
 fcm --help

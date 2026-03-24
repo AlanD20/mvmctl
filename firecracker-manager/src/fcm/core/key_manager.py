@@ -31,10 +31,12 @@ class KeyInfo:
 
 
 def _registry_path() -> Path:
+    """Return the path to the key registry JSON file."""
     return get_keys_dir() / "registry.json"
 
 
 def _load_registry() -> dict[str, dict[str, Any]]:
+    """Load the key registry from disk, returning an empty dict if missing or corrupt."""
     path = _registry_path()
     if not path.exists():
         return {}
@@ -47,6 +49,11 @@ def _load_registry() -> dict[str, dict[str, Any]]:
 
 
 def _save_registry(registry: dict[str, dict[str, Any]]) -> None:
+    """Persist the key registry to disk with mode 0o600.
+
+    Args:
+        registry: Mapping of key name to key metadata dict.
+    """
     path = _registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(registry, indent=2))

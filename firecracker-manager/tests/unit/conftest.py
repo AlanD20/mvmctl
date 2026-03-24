@@ -67,7 +67,7 @@ def vm_manager(tmp_path: Path) -> VMManager:
 def mock_subprocess_run_success(monkeypatch):
     """Shared fixture: mock subprocess.run to return success (returncode=0)."""
     mock = MagicMock(returncode=0, stdout="", stderr="")
-    monkeypatch.setattr("subprocess.run", lambda *a, **kw: mock)
+    monkeypatch.setattr("subprocess.run", MagicMock(return_value=mock))
     return mock
 
 
@@ -75,5 +75,5 @@ def mock_subprocess_run_success(monkeypatch):
 def mock_subprocess_run_failure(monkeypatch):
     """Shared fixture: mock subprocess.run to return failure (returncode=1)."""
     mock = MagicMock(returncode=1, stdout="", stderr="error")
-    monkeypatch.setattr("subprocess.run", lambda *a, **kw: mock)
+    monkeypatch.setattr("subprocess.run", MagicMock(return_value=mock))
     return mock

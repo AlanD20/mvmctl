@@ -24,6 +24,11 @@ app = typer.Typer(help="Host configuration", no_args_is_help=True)
 
 
 def _abort_if_vms_running(action: str) -> None:
+    """Exit with an error if any VMs are currently running.
+
+    Args:
+        action: Short description of the action being blocked (used in the error message).
+    """
     from fcm.core.vm_manager import get_vm_manager
     from fcm.models.vm import VMState
 

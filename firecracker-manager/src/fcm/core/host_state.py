@@ -34,12 +34,25 @@ class HostState:
     changes: list[HostChange]
 
 def _state_dir(cache_dir: Path) -> Path:
+    """Return the host state subdirectory within the cache directory."""
     return cache_dir / "host"
 
 def _state_file(cache_dir: Path) -> Path:
+    """Return the path to the JSON host state snapshot file."""
     return _state_dir(cache_dir) / "state.json"
 
 def get_host_state(cache_dir: Path) -> HostState | None:
+    """Load the saved host state snapshot, or return ``None`` if none exists.
+
+    Args:
+        cache_dir: Root cache directory containing the host state snapshot.
+
+    Returns:
+        The deserialized ``HostState``, or ``None`` if no snapshot is present.
+
+    Raises:
+        HostError: If the state file exists but cannot be parsed.
+    """
     path = _state_file(cache_dir)
     if not path.exists():
         return None
@@ -53,6 +66,12 @@ def get_host_state(cache_dir: Path) -> HostState | None:
         raise HostError(f"Corrupt state file {path}: {e}") from e
 
 def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
+    """Persist host changes to the JSON state snapshot file.
+
+    Args:
+        cache_dir: Root cache directory where the snapshot will be written.
+        changes: List of host changes to record.
+    """
     state_dir = _state_dir(cache_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     state = HostState(
@@ -68,6 +87,21 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
     os.chmod(sf, 0o600)
 
 def restore_host(cache_dir: Path) -> list[HostChange]:
+    """Revert host changes recorded in the state snapshot.
+
+    Processes changes in reverse order, restoring sysctl values and removing
+    files that were created during ``init_host``. The state snapshot file is
+    deleted after a successful restore.
+
+    Args:
+        cache_dir: Root cache directory containing the host state snapshot.
+
+    Returns:
+        List of ``HostChange`` records describing each reverted change.
+
+    Raises:
+        HostError: If no saved state exists, or if a revert operation fails.
+    """
     state = get_host_state(cache_dir)
     if not state:
         raise HostError("No saved host state to restore")

@@ -18,6 +18,20 @@ def run_cmd(
     capture: bool = True,
     cwd: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess command and return the completed-process result.
+
+    Args:
+        args: Command and arguments to execute.
+        check: Raise ``ProcessError`` on non-zero exit code when ``True``.
+        capture: Capture stdout/stderr when ``True``; inherit from parent otherwise.
+        cwd: Working directory for the subprocess, or ``None`` for the current directory.
+
+    Returns:
+        The ``subprocess.CompletedProcess`` result.
+
+    Raises:
+        ProcessError: If the command is not found or exits with a non-zero code.
+    """
     try:
         result = subprocess.run(
             args,
@@ -42,6 +56,18 @@ def stream_cmd(
     *,
     cwd: str | None = None,
 ) -> Iterator[str]:
+    """Stream stdout lines from a subprocess command as they are produced.
+
+    Args:
+        args: Command and arguments to execute.
+        cwd: Working directory for the subprocess, or ``None`` for the current directory.
+
+    Yields:
+        Each output line with the trailing newline stripped.
+
+    Raises:
+        ProcessError: If the command is not found or exits with a non-zero code.
+    """
     try:
         proc = subprocess.Popen(
             args,

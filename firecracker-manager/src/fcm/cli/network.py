@@ -1,7 +1,6 @@
 """Network management commands."""
 
 import json
-from typing import cast
 
 import typer
 from rich.table import Table
@@ -183,7 +182,8 @@ def inspect(
     print_info(f"  Bridge alive: {'yes' if info['bridge_exists'] else 'no'}")
     print_info(f"  Created:      {info['created_at']}")
 
-    vms = cast(list[dict[str, str]], info.get("vms") or [])
+    raw_vms = info.get("vms")
+    vms = [v for v in (raw_vms if isinstance(raw_vms, list) else []) if isinstance(v, dict)]
     if vms:
         print_info(f"  VMs ({len(vms)}):")
         for vm in vms:
