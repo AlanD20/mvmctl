@@ -44,3 +44,17 @@
     - the `fcm vm create --image` should be required only if a default image from `fcm image` is not being selected! it must check if there is a default image is set or not
     - the `fcm vm create --kernel` should be required only if a default kernel is not selected from `fcm kernel`. it must check if there is a default kernel is set or not.
     - the `fcm vm create --firecracker-bin` should come from the currently active firecracker binary version!
+
+Additional requirements to not miss!
+- standardize the command to set defaults, lets stick with set-default for everything that sets a value as default in the cli state!
+- The `fcm image fetch <image-id>` must use the image id that is provided in `fcm image ls --remote`
+- Add a checkmark when an image id is set to default!
+- ensure checksums are provided when fetching any assets
+- commands that requires elevated root privileges such as mount, iptable, ip, or sysctl, they must provide a confirmation that the user must have the group assigned to their user to utilize elevated privileges
+    - for conveniency, when a command is run that needs sudo, it can show do you want to elevate as sudo to perform the action or cancel. in the meantime, the message should indicate that the fcm configure hasnt be ran since that should handle creating a new sudo file with binaries to be allowed
+- images always must be checked locally before fetching the image id!!
+- a user can import a custom image, this require overhaul implementation under `fcm image`
+    - the user runs `fcm image import <image-id> <path-to-image, local or remote>
+    - as of currently the only import is qcow2 images where it also has the capability to extract the root partition if the image has multiple partitions such as official archlinux image. Therefore, this implementation must be dynamic.
+    - an imported image can be used exactly the same way as the ones come by default in the cli
+- ensure that the `fcm network inspect <my-network>` will show all the attached VMs with full informatioon of the VM.
