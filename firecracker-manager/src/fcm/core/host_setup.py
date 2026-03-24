@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from fcm.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH
+from fcm.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH, REQUIRED_BINARIES, ISO_BINARIES
 from fcm.exceptions import HostError
 from fcm.core.host_state import HostChange, SYSCTL_KEY, SYSCTL_CONF, _save_state
 from fcm.core.host_privilege import (
@@ -21,8 +21,6 @@ from fcm.core.host_privilege import (
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_BINARIES = ["ip", "iptables", "qemu-img"]
-ISO_BINARIES = ["mkisofs", "genisoimage"]
 KVM_MODULES = ["kvm"]
 KVM_VENDOR_MODULES = ["kvm_intel", "kvm_amd"]
 

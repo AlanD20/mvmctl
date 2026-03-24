@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 import subprocess
 from collections.abc import Iterator
 
@@ -32,6 +33,7 @@ def run_cmd(
     Raises:
         ProcessError: If the command is not found or exits with a non-zero code.
     """
+    logger.debug("$ %s", shlex.join(args))
     try:
         result = subprocess.run(
             args,
@@ -68,6 +70,7 @@ def stream_cmd(
     Raises:
         ProcessError: If the command is not found or exits with a non-zero code.
     """
+    logger.debug("$ %s", shlex.join(args))
     try:
         proc = subprocess.Popen(
             args,

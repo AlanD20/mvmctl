@@ -11,6 +11,8 @@ import shutil
 from pathlib import Path
 from typing import TypedDict, Literal
 
+import yaml
+
 from fcm.core.binary_manager import (
     BinaryVersion,
     fetch_binary,
@@ -22,7 +24,7 @@ from fcm.core.binary_manager import (
 from fcm.core.image import fetch_image, load_images_config
 from fcm.models.image import ImageSpec
 from fcm.core.kernel import build_kernel_pipeline
-from fcm.exceptions import ImageError
+from fcm.exceptions import ConfigError, ImageError
 from fcm.utils.fs import get_assets_dir, get_images_dir, get_kernels_dir
 from fcm.constants import KERNEL_TARBALL_URL_TEMPLATE
 
@@ -303,7 +305,7 @@ def list_assets() -> list[AssetInfo]:
                     "details": f"Format: {spec.format}",
                 }
             )
-    except Exception as e:
+    except (ConfigError, ImageError, yaml.YAMLError, KeyError, OSError) as e:
         logger.warning("Failed to parse images.yaml for list_assets: %s", e)
 
     return assets

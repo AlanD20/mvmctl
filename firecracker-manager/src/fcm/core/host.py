@@ -39,7 +39,6 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-# Allowlists for restore_host() — only these keys/paths may be restored with root privileges.
 def prune_host(cache_dir: Path) -> list[str]:
     """Tear down all bridges, TAPs, iptables rules and revert host sysctl changes.
 
@@ -53,15 +52,13 @@ def prune_host(cache_dir: Path) -> list[str]:
     """
     summary = clean_host(cache_dir)
 
-    # Revert sysctl changes using saved snapshot
     try:
         reverted = restore_host(cache_dir)
         for change in reverted:
             summary.append(f"Reverted {change.setting}")
-    except HostError:
-        pass  # No saved state is acceptable
+    except HostError as e:
+        logger.warning("No saved host state to restore: %s", e)
 
-    # Remove the state snapshot file if it exists
     state_file = _state_file(cache_dir)
     if state_file.exists():
         try:
@@ -103,15 +100,13 @@ def reset_host(cache_dir: Path) -> list[str]:
     """
     summary = clean_host(cache_dir)
 
-    # Revert sysctl changes
     try:
         reverted = restore_host(cache_dir)
         for change in reverted:
             summary.append(f"Reverted {change.setting}")
-    except HostError:
-        pass  # No saved state is acceptable
+    except HostError as e:
+        logger.warning("No saved host state to restore: %s", e)
 
-    # Remove sudoers drop-in
     sudoers_path = Path(SUDOERS_DROP_IN_PATH)
     try:
         if _remove_sudoers(sudoers_path):
@@ -119,14 +114,12 @@ def reset_host(cache_dir: Path) -> list[str]:
     except HostError as e:
         summary.append(f"Warning: {e}")
 
-    # Remove project group
     try:
         if _remove_group(PROJECT_GROUP):
             summary.append(f"Removed group '{PROJECT_GROUP}'")
     except HostError as e:
         summary.append(f"Warning: {e}")
 
-    # Remove state snapshot
     state_file = _state_file(cache_dir)
     if state_file.exists():
         try:

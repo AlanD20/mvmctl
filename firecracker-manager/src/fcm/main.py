@@ -15,13 +15,13 @@ from fcm.cli import (
     key,
     configure,
 )  # TODO: P-M8 — lazy-load CLI modules when startup time matters
-from fcm.constants import CLI_NAME, env_var
+from fcm.constants import CLI_NAME, _BOOTSTRAP_NAME, env_var
 
 
 def _get_version() -> str:
     """Read the version from package metadata, falling back to __version__."""
     try:
-        return importlib.metadata.version("firecracker-manager")
+        return importlib.metadata.version(_BOOTSTRAP_NAME)
     except importlib.metadata.PackageNotFoundError:
         from fcm import __version__
 
@@ -32,6 +32,8 @@ app = typer.Typer(
     name=CLI_NAME,
     help="Firecracker Manager - Manage microVMs",
     rich_markup_mode="rich",
+    pretty_exceptions_short=True,
+    pretty_exceptions_show_locals=False,
 )
 
 app.add_typer(vm.app, name="vm", help="VM lifecycle management", rich_help_panel="VM Management")
@@ -78,6 +80,8 @@ def callback(
     # Determine log level: --debug > --verbose > FCM_LOG_LEVEL env var > WARNING
     if debug:
         level = logging.DEBUG
+        # Show locals in tracebacks when debug mode is active
+        app.pretty_exceptions_show_locals = True
     elif verbose:
         level = logging.INFO
     else:

@@ -94,7 +94,13 @@ class VMManager:
         self._cache = state
 
     def register(self, vm: VMInstance) -> None:
-        """Register a new VM in state."""
+        """Register a new VM in the shared ``state.json`` registry.
+
+        The ``socket_path`` is persisted here (rather than in per-VM
+        directories) so that ``list_all`` / ``get`` can return fully-
+        hydrated ``VMInstance`` objects from a single read, avoiding a
+        per-VM directory scan.
+        """
         with self._locked():
             state = self._load_state()
             state["vms"][vm.name] = {

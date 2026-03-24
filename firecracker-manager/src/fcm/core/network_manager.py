@@ -102,6 +102,31 @@ def _save_leases(network_dir: Path, leases: list[NetworkLease]) -> None:
     leases_file.chmod(0o600)
 
 
+@dataclass
+class NetworkState:
+    """Runtime state for a named network, persisted as ``state.json``."""
+
+    bridge_active: bool
+    last_checked: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
+
+
+def _load_network_state(network_dir: Path) -> NetworkState | None:
+    """Load persisted runtime state for a network."""
+    state_file = network_dir / "state.json"
+    if not state_file.exists():
+        return None
+    data = json.loads(state_file.read_text())
+    return NetworkState(**data)
+
+
+def _save_network_state(network_dir: Path, state: NetworkState) -> None:
+    """Persist runtime state for a network."""
+    network_dir.mkdir(parents=True, exist_ok=True)
+    state_file = network_dir / "state.json"
+    state_file.write_text(json.dumps(asdict(state), indent=2))
+    state_file.chmod(0o600)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -217,6 +242,7 @@ def create_network(
 
     _save_config(network_dir, config)
     _save_leases(network_dir, [])
+    _save_network_state(network_dir, NetworkState(bridge_active=True))
     return config
 
 
@@ -276,6 +302,10 @@ def inspect_network(name: str) -> NetworkInspect:
         raise NetworkError(f"Network '{name}' not found")
 
     leases = _load_leases(network_dir)
+    active = bridge_exists(config.bridge)
+
+    _save_network_state(network_dir, NetworkState(bridge_active=active))
+
     return {
         "name": config.name,
         "cidr": config.cidr,
@@ -283,7 +313,7 @@ def inspect_network(name: str) -> NetworkInspect:
         "bridge": config.bridge,
         "nat_enabled": config.nat_enabled,
         "created_at": config.created_at,
-        "bridge_exists": bridge_exists(config.bridge),
+        "bridge_exists": active,
         "vms": [{"vm_name": lease.vm_name, "ip": lease.ip} for lease in leases],
     }
 
@@ -326,6 +356,54 @@ def ensure_default_network() -> NetworkConfig:
     if config is not None:
         return config
     return create_network(DEFAULT_NETWORK_NAME, cidr=DEFAULT_NETWORK_CIDR, nat=True)
+
+
+@dataclass
+class ReconcileResult:
+    """Result of reconciling stored network state against kernel state."""
+
+    name: str
+    bridge: str
+    stored_active: bool | None
+    actual_active: bool
+    stale: bool
+
+
+def reconcile_networks() -> list[ReconcileResult]:
+    """Compare stored network state with actual kernel bridge state.
+
+    For each persisted network, checks whether its bridge device still
+    exists on the host.  Updates each network's ``state.json`` and
+    returns a list of reconciliation results.  Entries where
+    ``stale is True`` indicate that the bridge was expected to be up
+    but is no longer present in the kernel.
+    """
+    results: list[ReconcileResult] = []
+    for config in list_networks():
+        network_dir = get_network_dir(config.name)
+        stored = _load_network_state(network_dir)
+        actual_active = bridge_exists(config.bridge)
+
+        stored_active = stored.bridge_active if stored else None
+        stale = (stored_active is True) and (not actual_active)
+
+        _save_network_state(network_dir, NetworkState(bridge_active=actual_active))
+
+        results.append(
+            ReconcileResult(
+                name=config.name,
+                bridge=config.bridge,
+                stored_active=stored_active,
+                actual_active=actual_active,
+                stale=stale,
+            )
+        )
+
+    if any(r.stale for r in results):
+        stale_names = [r.name for r in results if r.stale]
+        logger.warning("Stale networks detected (bridge missing): %s", ", ".join(stale_names))
+
+    return results
 
 
 # ---------------------------------------------------------------------------

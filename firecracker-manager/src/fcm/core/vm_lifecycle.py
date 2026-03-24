@@ -218,6 +218,8 @@ def create_vm(
     else:
         guest_ip = allocate_network_ip(network_name, name)
 
+    # P4 §3: use random MAC (02:FC:XX:XX:XX:XX prefix) — intentionally
+    # overrides P3's deterministic-from-name scheme per spec precedence rule.
     guest_mac = mac if mac else generate_mac()
     tap_name = f"{TAP_PREFIX}-{name}-0"
     bridge = net_config.bridge

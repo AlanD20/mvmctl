@@ -4,14 +4,16 @@ import functools
 import importlib.metadata
 from typing import Final
 
+_BOOTSTRAP_NAME: Final[str] = "firecracker-manager"
+
 
 @functools.lru_cache(maxsize=1)
 def _resolve_project_name() -> str:
-    """Resolve the project name from package metadata, falling back to 'firecracker-manager'."""
+    """Resolve the project name from package metadata, falling back to bootstrap name."""
     try:
-        return importlib.metadata.metadata("firecracker-manager")["Name"]
+        return importlib.metadata.metadata(_BOOTSTRAP_NAME)["Name"]
     except importlib.metadata.PackageNotFoundError:
-        return "firecracker-manager"
+        return _BOOTSTRAP_NAME
 
 
 @functools.lru_cache(maxsize=1)
@@ -80,6 +82,8 @@ PRIVILEGED_BINARIES: Final[list[str]] = [
     "/usr/sbin/iptables-save",
     "/usr/sbin/sysctl",
 ]
+REQUIRED_BINARIES: Final[list[str]] = ["ip", "iptables", "qemu-img"]
+ISO_BINARIES: Final[list[str]] = ["mkisofs", "genisoimage"]
 HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/0.1.0"
 MAX_VMS: Final[int] = 50
 
