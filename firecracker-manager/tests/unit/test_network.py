@@ -12,6 +12,7 @@ from fcm.core.network import (
     add_iptables_forward_rules,
     allocate_ip,
     bridge_exists,
+    chain_exists,
     create_tap,
     delete_tap,
     generate_mac,
@@ -19,9 +20,11 @@ from fcm.core.network import (
     get_tap_devices,
     remove_iptables_forward_rules,
     setup_bridge,
+    setup_fcm_chains,
     setup_nat,
     tap_exists,
     teardown_bridge,
+    teardown_fcm_chains,
     teardown_nat,
 )
 from fcm.exceptions import NetworkError
@@ -247,9 +250,11 @@ def test_setup_nat_all_rules_exist():
     mock_check.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-            setup_nat("fc-br0", "eth0")
-            # 3 check calls (one per _ensure_iptables_rule), no add calls
-            assert mock_run.call_count == 3
+            with patch("fcm.core.network.setup_fcm_chains"):
+                with patch("fcm.core.network._iptables_rule_exists", return_value=True):
+                    setup_nat("fc-br0", "eth0")
+                    # Rules already exist, no subprocess calls needed
+                    mock_run.assert_not_called()
 
 
 def test_setup_nat_no_rules_exist():
@@ -261,9 +266,10 @@ def test_setup_nat_no_rules_exist():
         return_value=mock_result,
     ) as mock_run:
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-            setup_nat("fc-br0", "eth0")
-            # 3 checks + 3 adds = 6 calls
-            assert mock_run.call_count == 6
+            with patch("fcm.core.network.setup_fcm_chains"):
+                setup_nat("fc-br0", "eth0")
+                # 3 checks (don't exist) + 3 adds = 6 calls
+                assert mock_run.call_count == 6
 
 
 def test_setup_nat_masquerade_add_fails():
@@ -273,13 +279,16 @@ def test_setup_nat_masquerade_add_fails():
     with patch(
         "fcm.core.network.subprocess.run",
         side_effect=[
+            # setup_nat: check MASQUERADE
             check_result,
+            # setup_nat: add MASQUERADE - fails
             subprocess.CalledProcessError(1, ["iptables", "-t", "nat", "-A"]),
         ],
     ):
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-            with pytest.raises(NetworkError, match="Failed to setup NAT"):
-                setup_nat("fc-br0", "eth0")
+            with patch("fcm.core.network.setup_fcm_chains"):
+                with pytest.raises(NetworkError, match="Failed to setup NAT"):
+                    setup_nat("fc-br0", "eth0")
 
 
 def test_setup_nat_auto_detect_interface():
@@ -304,8 +313,10 @@ def test_teardown_nat_force_true_removes():
         mock_result.returncode = 0
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-                teardown_nat("fc-br0", force=True)
-                assert mock_run.call_count == 3
+                with patch("fcm.core.network.chain_exists", return_value=True):
+                    teardown_nat("fc-br0", force=True)
+                    # 3 rule deletions = 3 calls
+                    assert mock_run.call_count == 3
 
 
 def test_teardown_nat_tap_devices_present_skips():
@@ -324,8 +335,10 @@ def test_teardown_nat_no_taps_removes():
         mock_result.returncode = 0
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-                teardown_nat("fc-br0", force=False)
-                assert mock_run.call_count == 3
+                with patch("fcm.core.network.chain_exists", return_value=True):
+                    teardown_nat("fc-br0", force=False)
+                    # 3 rule deletions = 3 calls
+                    assert mock_run.call_count == 3
 
 
 def test_teardown_nat_removes_forward_rules_for_correct_bridge():
@@ -334,7 +347,8 @@ def test_teardown_nat_removes_forward_rules_for_correct_bridge():
         mock_result.returncode = 0
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("fcm.core.network.get_default_interface", return_value="wlan0"):
-                teardown_nat("fcm-default", force=True)
+                with patch("fcm.core.network.chain_exists", return_value=True):
+                    teardown_nat("fcm-default", force=True)
         calls = [str(c) for c in mock_run.call_args_list]
         assert any("MASQUERADE" in c for c in calls)
         assert any("fcm-default" in c and "wlan0" in c for c in calls)
@@ -343,13 +357,14 @@ def test_teardown_nat_removes_forward_rules_for_correct_bridge():
 def test_teardown_nat_called_process_error():
     """teardown_nat should raise NetworkError when the iptables deletion command fails."""
     with patch("fcm.core.network.get_tap_devices", return_value=[]):
-        with patch(
-            "fcm.core.network.subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, ["iptables", "-t", "nat", "-D"]),
-        ):
-            with patch("fcm.core.network.get_default_interface", return_value="eth0"):
-                with pytest.raises(NetworkError, match="Failed to remove MASQUERADE rule"):
-                    teardown_nat("fc-br0", force=True)
+        with patch("fcm.core.network.chain_exists", return_value=True):
+            with patch(
+                "fcm.core.network.subprocess.run",
+                side_effect=subprocess.CalledProcessError(1, ["iptables", "-t", "nat", "-D"]),
+            ):
+                with patch("fcm.core.network.get_default_interface", return_value="eth0"):
+                    with pytest.raises(NetworkError, match="Failed to remove MASQUERADE rule"):
+                        teardown_nat("fc-br0", force=True)
 
 
 def test_teardown_nat_get_default_interface_fails_gracefully():
@@ -455,8 +470,11 @@ def test_add_iptables_forward_rules_already_exist():
     mock_check = MagicMock()
     mock_check.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
-        add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-        assert mock_run.call_count == 2
+        with patch("fcm.core.network.setup_fcm_chains"):
+            with patch("fcm.core.network._iptables_rule_exists", return_value=True):
+                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+                # Rules already exist, no subprocess calls needed
+                mock_run.assert_not_called()
 
 
 def test_add_iptables_forward_rules_add_success():
@@ -467,9 +485,10 @@ def test_add_iptables_forward_rules_add_success():
         "fcm.core.network.subprocess.run",
         return_value=mock_result,
     ) as mock_run:
-        add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-        # 2 checks + 2 adds = 4 calls
-        assert mock_run.call_count == 4
+        with patch("fcm.core.network.setup_fcm_chains"):
+            add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+            # 2 checks (don't exist) + 2 adds = 4 calls
+            assert mock_run.call_count == 4
 
 
 def test_add_iptables_forward_rules_bridge_to_tap_fails():
@@ -479,12 +498,15 @@ def test_add_iptables_forward_rules_bridge_to_tap_fails():
     with patch(
         "fcm.core.network.subprocess.run",
         side_effect=[
+            # check bridge->tap rule
             check_result,
+            # add bridge->tap rule - fails
             subprocess.CalledProcessError(1, ["iptables", "-A", "FORWARD"]),
         ],
     ):
-        with pytest.raises(NetworkError, match="Failed to add FORWARD rules"):
-            add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+        with patch("fcm.core.network.setup_fcm_chains"):
+            with pytest.raises(NetworkError, match="Failed to add FORWARD rules"):
+                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
 
 
 def test_remove_iptables_forward_rules_success():
@@ -492,18 +514,265 @@ def test_remove_iptables_forward_rules_success():
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
-        remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
-        assert mock_run.call_count == 2
+        with patch("fcm.core.network.chain_exists", return_value=True):
+            remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
+            # 2 rule deletions = 2 calls
+            assert mock_run.call_count == 2
 
 
 def test_remove_iptables_forward_rules_already_absent():
     """remove_iptables_forward_rules should not raise when the rules are already absent."""
-    with patch(
-        "fcm.core.network.subprocess.run",
-        side_effect=[
-            subprocess.CompletedProcess(["iptables", "-D", "FORWARD"], returncode=1),
-            subprocess.CompletedProcess(["iptables", "-D", "FORWARD"], returncode=1),
-        ],
-    ) as mock_run:
-        remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
-        assert mock_run.call_count == 2
+    with patch("fcm.core.network.chain_exists", return_value=True):
+        with patch(
+            "fcm.core.network.subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess(["iptables", "-D", "FORWARD"], returncode=1),
+                subprocess.CompletedProcess(["iptables", "-D", "FORWARD"], returncode=1),
+            ],
+        ) as mock_run:
+            remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
+            # 2 delete attempts = 2 calls
+            assert mock_run.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# chain_exists
+# ---------------------------------------------------------------------------
+
+
+def test_chain_exists_true():
+    """chain_exists should return True when the iptables chain exists."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        result = chain_exists("FCM-FORWARD", "filter")
+        assert result is True
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert "-L" in args
+        assert "FCM-FORWARD" in args
+
+
+def test_chain_exists_false():
+    """chain_exists should return False when the iptables chain does not exist."""
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result):
+        result = chain_exists("FCM-FORWARD", "filter")
+        assert result is False
+
+
+def test_chain_exists_nat_table():
+    """chain_exists should work with nat table."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        result = chain_exists("FCM-POSTROUTING", "nat")
+        assert result is True
+        args = mock_run.call_args[0][0]
+        assert "-t" in args
+        assert "nat" in args
+
+
+# ---------------------------------------------------------------------------
+# setup_fcm_chains
+# ---------------------------------------------------------------------------
+
+
+def test_setup_fcm_chains_creates_both_chains():
+    """setup_fcm_chains should create both FORWARD and POSTROUTING chains."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.chain_exists", return_value=False):
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+            with patch("fcm.core.network._iptables_rule_exists", return_value=False):
+                setup_fcm_chains()
+                # 2 chain creations + 2 jump rule additions = 4 calls
+                assert mock_run.call_count == 4
+
+
+def test_setup_fcm_chains_idempotent():
+    """setup_fcm_chains should not recreate chains that already exist."""
+    with patch("fcm.core.network.chain_exists", return_value=True):
+        with patch("fcm.core.network._iptables_rule_exists", return_value=True):
+            with patch("fcm.core.network.subprocess.run") as mock_run:
+                setup_fcm_chains()
+                mock_run.assert_not_called()
+
+
+def test_setup_fcm_chains_adds_jump_rules():
+    """setup_fcm_chains should add jump rules from built-in chains to FCM chains."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.chain_exists", return_value=True):
+        with patch("fcm.core.network._iptables_rule_exists", return_value=False):
+            with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+                setup_fcm_chains()
+                # 2 jump rules (FORWARD -> FCM-FORWARD, POSTROUTING -> FCM-POSTROUTING)
+                assert mock_run.call_count == 2
+
+
+def test_setup_fcm_chains_raises_on_failure():
+    """setup_fcm_chains should raise NetworkError when chain creation fails."""
+    with patch("fcm.core.network.chain_exists", return_value=False):
+        with patch(
+            "fcm.core.network.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, ["iptables", "-N"]),
+        ):
+            with pytest.raises(NetworkError, match="Failed to create FCM-FORWARD chain"):
+                setup_fcm_chains()
+
+
+# ---------------------------------------------------------------------------
+# teardown_fcm_chains
+# ---------------------------------------------------------------------------
+
+
+def test_teardown_fcm_chains_removes_both_chains():
+    """teardown_fcm_chains should remove both FORWARD and POSTROUTING chains."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.chain_exists", return_value=True):
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+            teardown_fcm_chains()
+            # 2 jump removals + 2 flushes + 2 deletions = 6 calls
+            assert mock_run.call_count == 6
+
+
+def test_teardown_fcm_chains_safe_when_missing():
+    """teardown_fcm_chains should be safe when chains don't exist."""
+    with patch("fcm.core.network.chain_exists", return_value=False):
+        with patch("fcm.core.network.subprocess.run") as mock_run:
+            teardown_fcm_chains()
+            mock_run.assert_not_called()
+
+
+def test_teardown_fcm_chains_raises_on_flush_failure():
+    """teardown_fcm_chains should raise NetworkError when chain flush fails."""
+    with patch("fcm.core.network.chain_exists", return_value=True):
+        mock_success = MagicMock()
+        mock_success.returncode = 0
+        with patch(
+            "fcm.core.network.subprocess.run",
+            side_effect=[
+                # Jump removal from FORWARD (check=False, ignored)
+                mock_success,
+                # Flush FCM-FORWARD chain - fails
+                subprocess.CalledProcessError(1, ["iptables", "-F"]),
+            ],
+        ):
+            with pytest.raises(NetworkError, match="Failed to remove FCM-FORWARD chain"):
+                teardown_fcm_chains()
+
+
+# ---------------------------------------------------------------------------
+# setup_nat with FCM chains
+# ---------------------------------------------------------------------------
+
+
+def test_setup_nat_calls_setup_fcm_chains():
+    """setup_nat should call setup_fcm_chains to ensure chains exist."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.setup_fcm_chains") as mock_setup_chains:
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result):
+            with patch("fcm.core.network.get_default_interface", return_value="eth0"):
+                with patch("fcm.core.network._iptables_rule_exists", return_value=True):
+                    setup_nat("fc-br0", "eth0")
+                    mock_setup_chains.assert_called_once()
+
+
+def test_setup_nat_adds_rules_to_fcm_chains():
+    """setup_nat should add rules to FCM chains, not built-in chains."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.setup_fcm_chains"):
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+            with patch("fcm.core.network.get_default_interface", return_value="eth0"):
+                with patch("fcm.core.network._iptables_rule_exists", return_value=False):
+                    setup_nat("fc-br0", "eth0")
+                    # Check that rules are added to FCM chains
+                    calls = [str(c) for c in mock_run.call_args_list]
+                    assert any("FCM-POSTROUTING" in c for c in calls)
+                    assert any("FCM-FORWARD" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# teardown_nat with FCM chains
+# ---------------------------------------------------------------------------
+
+
+def test_teardown_nat_skips_when_chains_missing():
+    """teardown_nat should skip when FCM chains don't exist."""
+    with patch("fcm.core.network.get_tap_devices", return_value=[]):
+        with patch("fcm.core.network.chain_exists", return_value=False):
+            with patch("fcm.core.network.subprocess.run") as mock_run:
+                with patch("fcm.core.network.get_default_interface", return_value="eth0"):
+                    teardown_nat("fc-br0", force=True)
+                    mock_run.assert_not_called()
+
+
+def test_teardown_nat_removes_rules_from_fcm_chains():
+    """teardown_nat should remove rules from FCM chains."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.get_tap_devices", return_value=[]):
+        with patch("fcm.core.network.chain_exists", return_value=True):
+            with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+                with patch("fcm.core.network.get_default_interface", return_value="eth0"):
+                    teardown_nat("fc-br0", force=True)
+                    calls = [str(c) for c in mock_run.call_args_list]
+                    assert any("FCM-POSTROUTING" in c for c in calls)
+                    assert any("FCM-FORWARD" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# add_iptables_forward_rules with FCM chains
+# ---------------------------------------------------------------------------
+
+
+def test_add_iptables_forward_rules_calls_setup_chains():
+    """add_iptables_forward_rules should call setup_fcm_chains."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.setup_fcm_chains") as mock_setup_chains:
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result):
+            with patch("fcm.core.network._iptables_rule_exists", return_value=True):
+                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+                mock_setup_chains.assert_called_once()
+
+
+def test_add_iptables_forward_rules_uses_fcm_chain():
+    """add_iptables_forward_rules should add rules to FCM-FORWARD chain."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.setup_fcm_chains"):
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+            with patch("fcm.core.network._iptables_rule_exists", return_value=False):
+                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+                calls = [str(c) for c in mock_run.call_args_list]
+                assert all("FCM-FORWARD" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# remove_iptables_forward_rules with FCM chains
+# ---------------------------------------------------------------------------
+
+
+def test_remove_iptables_forward_rules_skips_when_chain_missing():
+    """remove_iptables_forward_rules should skip when FCM chain doesn't exist."""
+    with patch("fcm.core.network.chain_exists", return_value=False):
+        with patch("fcm.core.network.subprocess.run") as mock_run:
+            remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
+            mock_run.assert_not_called()
+
+
+def test_remove_iptables_forward_rules_uses_fcm_chain():
+    """remove_iptables_forward_rules should remove rules from FCM-FORWARD chain."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.chain_exists", return_value=True):
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+            remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
+            calls = [str(c) for c in mock_run.call_args_list]
+            assert all("FCM-FORWARD" in c for c in calls)

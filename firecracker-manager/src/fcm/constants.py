@@ -67,6 +67,10 @@ BRIDGE_NAME: Final[str] = f"{device_prefix()}-br0"
 
 TAP_PREFIX: Final[str] = f"{CLI_NAME}-tap"
 
+# iptables chain names for FCM rules
+FCM_FORWARD_CHAIN: Final[str] = f"{CLI_NAME.upper()}-FORWARD"
+FCM_POSTROUTING_CHAIN: Final[str] = f"{CLI_NAME.upper()}-POSTROUTING"
+
 PROJECT_GROUP: Final[str] = CLI_NAME  # "fcm"
 SUDOERS_DROP_IN_PATH: Final[str] = f"/etc/sudoers.d/{CLI_NAME}"
 DEFAULT_NETWORK_NAME: Final[str] = "default"

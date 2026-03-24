@@ -120,6 +120,8 @@ Additional requirements to not miss!
 - when running `fcm host init`, it escalates to root and creates the network as root, but the networks state files are also in root which is causing the cache/networks/default/config.json to be unreadable by current user. Only execute networking commands in escalated privileges, creating those files must be under current user.
 - rename the `id` column to image id in `fcm image ls -r`
 - the `fcm network rm` does not remove the NAT for the bridge. Also ensure whem vm is removed, the tap device is removed from nat.
+- implement custom iptables chains that are created during fcm host init and cleaned up during fcm host clean. They also want tests.
 
 - go through all the commands, any command that shows date/time, it must be relative, if greater than a week, then show the date and time in a friendly standard format. This must be applied to every command!
-- 
+- [!IMPORTANT] when sudo is being used, the cli is making too many attempts and causing the user to get locked and unable to use sudo, this needs to be addressed! this is happening with any sudo commands such as network create, host init.
+- Ensure every file is created in cache or config directory are under the current user! sudo is being used in the entire project for escalation which the application is prone to mistakenly create files with root permission only causing breaking behaviors.

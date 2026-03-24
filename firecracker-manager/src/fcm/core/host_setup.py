@@ -18,6 +18,7 @@ from fcm.core.host_privilege import (
     _add_user_to_group,
     _write_sudoers,
 )
+from fcm.core.network import setup_fcm_chains
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,9 @@ def init_host(cache_dir: Path) -> list[HostChange]:
 
     module_changes = _ensure_kvm_modules()
     changes.extend(module_changes)
+
+    # Set up FCM iptables chains for network rules
+    setup_fcm_chains()
 
     _save_state(cache_dir, changes)
     return changes

@@ -18,6 +18,8 @@ from fcm.constants import (
     BRIDGE_NAME,
     DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_GATEWAY,
+    FCM_FORWARD_CHAIN,
+    FCM_POSTROUTING_CHAIN,
 )
 from fcm.exceptions import NetworkError
 
@@ -182,32 +184,215 @@ def _ensure_iptables_rule(
         raise NetworkError(f"{error_label}: {e}") from e
 
 
+def chain_exists(chain: str, table: str = "filter") -> bool:
+    """Check if an iptables chain exists.
+
+    Uses iptables -L to check if the chain is present.
+
+    Args:
+        chain: Chain name to check.
+        table: Table name (filter, nat, mangle, raw). Default is filter.
+
+    Returns:
+        True if the chain exists, False otherwise.
+    """
+    cmd = ["iptables", "-t", table, "-L", chain, "-n"]
+    result = subprocess.run(
+        _privileged_cmd(cmd),
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def setup_fcm_chains() -> None:
+    """Create FCM iptables chains and link them to built-in chains.
+
+    Creates:
+    - FCM-FORWARD chain in filter table
+    - FCM-POSTROUTING chain in nat table
+    - Jumps from built-in chains to FCM chains
+
+    Idempotent: checks if chains exist before creating.
+    Raises NetworkError on failure.
+    """
+    forward_chain = FCM_FORWARD_CHAIN
+    postrouting_chain = FCM_POSTROUTING_CHAIN
+
+    # Create FCM-FORWARD chain in filter table
+    if not chain_exists(forward_chain, "filter"):
+        try:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-N", forward_chain]),
+                check=True,
+                capture_output=True,
+            )
+            logger.debug("Created iptables chain %s", forward_chain)
+        except subprocess.CalledProcessError as e:
+            raise NetworkError(f"Failed to create {forward_chain} chain: {e}") from e
+
+    # Create FCM-POSTROUTING chain in nat table
+    if not chain_exists(postrouting_chain, "nat"):
+        try:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-t", "nat", "-N", postrouting_chain]),
+                check=True,
+                capture_output=True,
+            )
+            logger.debug("Created iptables chain %s in nat table", postrouting_chain)
+        except subprocess.CalledProcessError as e:
+            raise NetworkError(f"Failed to create {postrouting_chain} chain: {e}") from e
+
+    # Add jump from FORWARD to FCM-FORWARD
+    jump_rule = ["iptables", "-C", "FORWARD", "-j", forward_chain]
+    if not _iptables_rule_exists(jump_rule):
+        try:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-A", "FORWARD", "-j", forward_chain]),
+                check=True,
+                capture_output=True,
+            )
+            logger.debug("Added jump from FORWARD to %s", forward_chain)
+        except subprocess.CalledProcessError as e:
+            raise NetworkError(f"Failed to add jump to {forward_chain}: {e}") from e
+
+    # Add jump from POSTROUTING to FCM-POSTROUTING
+    jump_rule_nat = ["iptables", "-t", "nat", "-C", "POSTROUTING", "-j", postrouting_chain]
+    if not _iptables_rule_exists(jump_rule_nat):
+        try:
+            subprocess.run(
+                _privileged_cmd(
+                    ["iptables", "-t", "nat", "-A", "POSTROUTING", "-j", postrouting_chain]
+                ),
+                check=True,
+                capture_output=True,
+            )
+            logger.debug("Added jump from POSTROUTING to %s", postrouting_chain)
+        except subprocess.CalledProcessError as e:
+            raise NetworkError(f"Failed to add jump to {postrouting_chain}: {e}") from e
+
+    logger.info("FCM iptables chains configured")
+
+
+def teardown_fcm_chains() -> None:
+    """Remove FCM iptables chains and their jumps from built-in chains.
+
+    Removes:
+    - Jump rules from FORWARD and POSTROUTING
+    - All rules in FCM chains (flush)
+    - The FCM chains themselves
+
+    Safe to call even if chains don't exist.
+    Raises NetworkError on failure.
+    """
+    forward_chain = FCM_FORWARD_CHAIN
+    postrouting_chain = FCM_POSTROUTING_CHAIN
+
+    # Remove jump from FORWARD to FCM-FORWARD
+    if chain_exists(forward_chain, "filter"):
+        subprocess.run(
+            _privileged_cmd(["iptables", "-D", "FORWARD", "-j", forward_chain]),
+            capture_output=True,
+            check=False,
+        )
+
+        # Flush and delete FCM-FORWARD chain
+        try:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-F", forward_chain]),
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                _privileged_cmd(["iptables", "-X", forward_chain]),
+                check=True,
+                capture_output=True,
+            )
+            logger.debug("Removed iptables chain %s", forward_chain)
+        except subprocess.CalledProcessError as e:
+            raise NetworkError(f"Failed to remove {forward_chain} chain: {e}") from e
+
+    # Remove jump from POSTROUTING to FCM-POSTROUTING
+    if chain_exists(postrouting_chain, "nat"):
+        subprocess.run(
+            _privileged_cmd(
+                ["iptables", "-t", "nat", "-D", "POSTROUTING", "-j", postrouting_chain]
+            ),
+            capture_output=True,
+            check=False,
+        )
+
+        # Flush and delete FCM-POSTROUTING chain
+        try:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-t", "nat", "-F", postrouting_chain]),
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                _privileged_cmd(["iptables", "-t", "nat", "-X", postrouting_chain]),
+                check=True,
+                capture_output=True,
+            )
+            logger.debug("Removed iptables chain %s from nat table", postrouting_chain)
+        except subprocess.CalledProcessError as e:
+            raise NetworkError(f"Failed to remove {postrouting_chain} chain: {e}") from e
+
+    logger.info("FCM iptables chains removed")
+
+
 def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
-    """Set up NAT (MASQUERADE) for the bridge subnet.
+    """Set up NAT (MASQUERADE) for the bridge subnet using FCM chains.
 
     - Gets host_iface via get_default_interface() if not provided
-    - Adds iptables rule: `iptables -t nat -A POSTROUTING -o {host_iface} -j MASQUERADE`
-    - Also adds FORWARD rules to allow traffic through the bridge
+    - Adds MASQUERADE rule to FCM-POSTROUTING chain
+    - Adds FORWARD rules to FCM-FORWARD chain
     - Is idempotent: checks if rule exists before adding (use -C to check)
     - Raises NetworkError on failure.
     """
     if host_iface is None:
         host_iface = get_default_interface()
 
+    forward_chain = FCM_FORWARD_CHAIN
+    postrouting_chain = FCM_POSTROUTING_CHAIN
+
+    # Ensure FCM chains exist before adding rules
+    setup_fcm_chains()
+
     try:
         _ensure_iptables_rule(
-            ["iptables", "-t", "nat", "-C", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
-            ["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"],
+            [
+                "iptables",
+                "-t",
+                "nat",
+                "-C",
+                postrouting_chain,
+                "-o",
+                host_iface,
+                "-j",
+                "MASQUERADE",
+            ],
+            [
+                "iptables",
+                "-t",
+                "nat",
+                "-A",
+                postrouting_chain,
+                "-o",
+                host_iface,
+                "-j",
+                "MASQUERADE",
+            ],
             f"Failed to add MASQUERADE rule for {host_iface}",
         )
         _ensure_iptables_rule(
-            ["iptables", "-C", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-            ["iptables", "-A", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
+            ["iptables", "-C", forward_chain, "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
+            ["iptables", "-A", forward_chain, "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
             f"Failed to add FORWARD rule for {bridge} -> {host_iface}",
         )
         _ensure_iptables_rule(
-            ["iptables", "-C", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
-            ["iptables", "-A", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
+            ["iptables", "-C", forward_chain, "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
+            ["iptables", "-A", forward_chain, "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
             f"Failed to add FORWARD rule for {host_iface} -> {bridge}",
         )
     except NetworkError as e:
@@ -217,16 +402,15 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
 
 
 def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
-    """Remove NAT (MASQUERADE + FORWARD) rules for the bridge.
+    """Remove NAT (MASQUERADE + FORWARD) rules for the bridge from FCM chains.
 
     IMPORTANT: Only removes rules if `force=True` OR no VMs are currently
     using the bridge (i.e., no TAP devices attached to it).
     This fixes the bash PoC bug where deleting one VM removed the shared rule.
 
-    Removes:
-    - `iptables -t nat -D POSTROUTING -o {host_iface} -j MASQUERADE`
-    - `iptables -D FORWARD -i {bridge} -o {host_iface} -j ACCEPT`
-    - `iptables -D FORWARD -i {host_iface} -o {bridge} -j ACCEPT`
+    Removes rules from FCM chains:
+    - MASQUERADE rule from FCM-POSTROUTING chain
+    - FORWARD rules from FCM-FORWARD chain
 
     Raises NetworkError if the MASQUERADE deletion fails.
     FORWARD rule deletions are best-effort (ignored if missing).
@@ -247,10 +431,28 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
         logger.warning("Could not detect default interface, skipping NAT teardown")
         return
 
+    forward_chain = FCM_FORWARD_CHAIN
+    postrouting_chain = FCM_POSTROUTING_CHAIN
+
+    # Only try to remove rules if FCM chains exist
+    if not chain_exists(forward_chain, "filter") or not chain_exists(postrouting_chain, "nat"):
+        logger.debug("FCM chains do not exist, skipping NAT teardown")
+        return
+
     try:
         subprocess.run(
             _privileged_cmd(
-                ["iptables", "-t", "nat", "-D", "POSTROUTING", "-o", host_iface, "-j", "MASQUERADE"]
+                [
+                    "iptables",
+                    "-t",
+                    "nat",
+                    "-D",
+                    postrouting_chain,
+                    "-o",
+                    host_iface,
+                    "-j",
+                    "MASQUERADE",
+                ]
             ),
             check=True,
             capture_output=True,
@@ -259,8 +461,8 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
         raise NetworkError(f"Failed to remove MASQUERADE rule for {host_iface}: {e}") from e
 
     for rule in [
-        ["iptables", "-D", "FORWARD", "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-        ["iptables", "-D", "FORWARD", "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
+        ["iptables", "-D", forward_chain, "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
+        ["iptables", "-D", forward_chain, "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
     ]:
         subprocess.run(_privileged_cmd(rule), capture_output=True, check=False)
 
@@ -332,21 +534,26 @@ def delete_tap(tap_name: str) -> None:
 
 
 def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
-    """Add iptables FORWARD rules for a specific TAP device.
+    """Add iptables FORWARD rules for a specific TAP device to FCM chain.
 
-    Rules to add (idempotent — check with -C before adding with -A):
-    - `iptables -A FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
-    - `iptables -A FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
+    Rules to add in FCM-FORWARD chain (idempotent — check with -C before adding with -A):
+    - `iptables -A FCM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
+    - `iptables -A FCM-FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     """
+    forward_chain = FCM_FORWARD_CHAIN
+
+    # Ensure FCM chains exist before adding rules
+    setup_fcm_chains()
+
     try:
         _ensure_iptables_rule(
-            ["iptables", "-C", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
-            ["iptables", "-A", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
+            ["iptables", "-C", forward_chain, "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
+            ["iptables", "-A", forward_chain, "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
             f"Failed to add FORWARD rule for {bridge} -> {tap_name}",
         )
         _ensure_iptables_rule(
-            ["iptables", "-C", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
-            ["iptables", "-A", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
+            ["iptables", "-C", forward_chain, "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
+            ["iptables", "-A", forward_chain, "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
             f"Failed to add FORWARD rule for {tap_name} -> {bridge}",
         )
     except NetworkError as e:
@@ -356,22 +563,28 @@ def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None
 
 
 def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
-    """Remove iptables FORWARD rules for a specific TAP device.
+    """Remove iptables FORWARD rules for a specific TAP device from FCM chain.
 
-    - `iptables -D FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
-    - `iptables -D FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
+    - `iptables -D FCM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
+    - `iptables -D FCM-FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     - Safe to call even if rules don't exist (ignore errors).
     """
+    forward_chain = FCM_FORWARD_CHAIN
+
+    # Only try to remove rules if FCM chain exists
+    if not chain_exists(forward_chain, "filter"):
+        return
+
     subprocess.run(
         _privileged_cmd(
-            ["iptables", "-D", "FORWARD", "-i", bridge, "-o", tap_name, "-j", "ACCEPT"]
+            ["iptables", "-D", forward_chain, "-i", bridge, "-o", tap_name, "-j", "ACCEPT"]
         ),
         capture_output=True,
         check=False,
     )
     subprocess.run(
         _privileged_cmd(
-            ["iptables", "-D", "FORWARD", "-i", tap_name, "-o", bridge, "-j", "ACCEPT"]
+            ["iptables", "-D", forward_chain, "-i", tap_name, "-o", bridge, "-j", "ACCEPT"]
         ),
         capture_output=True,
         check=False,

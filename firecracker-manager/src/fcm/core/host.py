@@ -76,12 +76,13 @@ def prune_host(cache_dir: Path) -> list[str]:
 
 
 def clean_host(cache_dir: Path) -> list[str]:
-    """Remove all networking config (bridges, TAP devices, iptables rules).
+    """Remove all networking config (bridges, TAP devices, iptables rules, FCM chains).
 
     Does NOT revert sysctl, remove sudoers, or remove project group.
     Returns list of summary strings.
     """
     from fcm.core.network_manager import list_networks, remove_network
+    from fcm.core.network import teardown_fcm_chains
 
     from fcm.exceptions import NetworkError
 
@@ -96,6 +97,14 @@ def clean_host(cache_dir: Path) -> list[str]:
             summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
         except NetworkError as e:
             summary.append(f"Warning: failed to remove network '{net.name}': {e}")
+
+    # Remove FCM iptables chains after networks are removed
+    try:
+        teardown_fcm_chains()
+        summary.append("Removed FCM iptables chains")
+    except NetworkError as e:
+        summary.append(f"Warning: failed to remove FCM chains: {e}")
+
     return summary
 
 

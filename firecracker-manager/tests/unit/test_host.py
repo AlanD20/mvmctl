@@ -1473,44 +1473,54 @@ class TestHostHelpers:
 
 
 class TestCleanHost:
+    @patch("fcm.core.network.teardown_fcm_chains")
     @patch("fcm.core.network_manager.list_networks", return_value=[])
-    def test_clean_host_no_networks(self, mock_list):
+    def test_clean_host_no_networks(self, mock_list, mock_teardown_chains):
         summary = clean_host(MagicMock())
-        assert summary == []
+        # Even with no networks, FCM chains are still removed
+        assert len(summary) == 1
+        assert "Removed FCM iptables chains" in summary[0]
 
+    @patch("fcm.core.network.teardown_fcm_chains")
     @patch("fcm.core.network_manager.remove_network")
     @patch("fcm.core.network_manager.list_networks")
-    def test_clean_host_removes_networks(self, mock_list, mock_remove):
+    def test_clean_host_removes_networks(self, mock_list, mock_remove, mock_teardown_chains):
         net = MagicMock()
         net.name = "default"
         net.bridge = "fcm-br0"
         mock_list.return_value = [net]
 
         summary = clean_host(MagicMock())
-        assert len(summary) == 1
-        assert "Removed network 'default'" in summary[0]
+        assert len(summary) == 2
+        assert any("Removed network 'default'" in s for s in summary)
+        assert any("Removed FCM iptables chains" in s for s in summary)
 
     @patch(
         "fcm.core.network_manager.remove_network",
         side_effect=NetworkError("bridge teardown failed"),
     )
     @patch("fcm.core.network_manager.list_networks")
-    def test_clean_host_handles_network_failure(self, mock_list, mock_remove):
+    @patch("fcm.core.network.teardown_fcm_chains")
+    def test_clean_host_handles_network_failure(self, mock_teardown_chains, mock_list, mock_remove):
         net = MagicMock()
         net.name = "default"
         net.bridge = "fcm-br0"
         mock_list.return_value = [net]
 
         summary = clean_host(MagicMock())
-        assert "Warning" in summary[0]
+        assert any("Warning" in s for s in summary)
+        assert any("Removed FCM iptables chains" in s for s in summary)
 
+    @patch("fcm.core.network.teardown_fcm_chains")
     @patch(
         "fcm.core.network_manager.list_networks",
         side_effect=NetworkError("list failed"),
     )
-    def test_clean_host_handles_list_failure(self, mock_list):
+    def test_clean_host_handles_list_failure(self, mock_list, mock_teardown_chains):
         summary = clean_host(MagicMock())
-        assert summary == []
+        # Even when listing networks fails, FCM chains are still removed
+        assert len(summary) == 1
+        assert "Removed FCM iptables chains" in summary[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1615,16 +1625,21 @@ class TestInitHostErrorPaths:
 class TestCleanHostErrorPaths:
     """Error-path tests for clean_host."""
 
+    @patch("fcm.core.network.teardown_fcm_chains")
     @patch("fcm.core.network_manager.list_networks", return_value=[])
-    def test_clean_host_bridge_doesnt_exist(self, mock_list):
-        """clean_host returns empty summary when no bridges/networks exist."""
+    def test_clean_host_bridge_doesnt_exist(self, mock_list, mock_teardown_chains):
+        """clean_host removes FCM chains even when no bridges/networks exist."""
         summary = clean_host(MagicMock())
-        assert summary == []
+        assert len(summary) == 1
+        assert "Removed FCM iptables chains" in summary[0]
         mock_list.assert_called_once()
 
+    @patch("fcm.core.network.teardown_fcm_chains")
     @patch("fcm.core.network_manager.remove_network")
     @patch("fcm.core.network_manager.list_networks")
-    def test_clean_host_remove_network_subprocess_error(self, mock_list, mock_remove):
+    def test_clean_host_remove_network_subprocess_error(
+        self, mock_list, mock_remove, mock_teardown_chains
+    ):
         net = MagicMock()
         net.name = "stale-net"
         net.bridge = "fcm-br99"
@@ -1632,9 +1647,10 @@ class TestCleanHostErrorPaths:
         mock_remove.side_effect = NetworkError("ip link delete failed")
 
         summary = clean_host(MagicMock())
-        assert len(summary) == 1
-        assert "Warning" in summary[0]
-        assert "stale-net" in summary[0]
+        assert len(summary) == 2
+        assert any("Warning" in s for s in summary)
+        assert any("stale-net" in s for s in summary)
+        assert any("Removed FCM iptables chains" in s for s in summary)
 
 
 class TestRestoreHostErrorPaths:
