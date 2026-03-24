@@ -74,6 +74,11 @@ def get_bin_dir() -> Path:
     return get_cache_dir() / "bin"
 
 
+def get_logs_dir() -> Path:
+    """Return the directory for VM and process log files."""
+    return get_cache_dir() / "logs"
+
+
 def get_assets_dir() -> Path:
     """Return the path to the bundled assets directory inside the package."""
     return Path(__file__).parent.parent / "assets"

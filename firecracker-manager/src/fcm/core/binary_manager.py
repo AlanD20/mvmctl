@@ -248,13 +248,17 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
         link.symlink_to(target)
 
     parts = version.split(".")
-    ci_version = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else version
+    ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{version}"
+    full_version = f"v{version}"
     try:
-        from fcm.core.cli_state import set_cli_state_value
+        from fcm.core.cli_state import update_firecracker_state
 
-        set_cli_state_value("firecracker_ci_version", ci_version)
-        set_cli_state_value("active_firecracker_version", version)
-        set_cli_state_value("active_firecracker_bin", str(d / "firecracker"))
+        update_firecracker_state(
+            full_version=full_version,
+            ci_version=ci_version,
+            active_version=full_version,
+            active_binary_path=str(d / "firecracker"),
+        )
     except Exception:
         pass
 

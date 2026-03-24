@@ -6,12 +6,13 @@ from pathlib import Path
 import pytest
 
 from fcm.utils.fs import (
+    get_assets_dir,
     get_cache_dir,
-    get_vm_dir,
     get_images_dir,
     get_kernels_dir,
+    get_logs_dir,
     get_state_file,
-    get_assets_dir,
+    get_vm_dir,
     get_vms_dir,
 )
 
@@ -41,8 +42,17 @@ def test_subdirs_are_under_cache(tmp_path: Path):
         assert get_vms_dir() == tmp_path / "vms"
         assert get_images_dir() == tmp_path / "images"
         assert get_kernels_dir() == tmp_path / "kernels"
+        assert get_logs_dir() == tmp_path / "logs"
         assert get_state_file() == tmp_path / "vms" / "state.json"
         assert get_vm_dir("vm1") == tmp_path / "vms" / "vm1"
+    finally:
+        del os.environ["FCM_CACHE_DIR"]
+
+
+def test_get_logs_dir_is_under_cache(tmp_path: Path):
+    os.environ["FCM_CACHE_DIR"] = str(tmp_path)
+    try:
+        assert get_logs_dir() == tmp_path / "logs"
     finally:
         del os.environ["FCM_CACHE_DIR"]
 

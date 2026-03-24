@@ -108,10 +108,9 @@ def kernel_ls(
 
 
 def _get_ci_version() -> str:
-    from fcm.core.cli_state import get_cli_state
+    from fcm.core.cli_state import get_firecracker_state
 
-    state = get_cli_state()
-    ci_version = state.get("firecracker_ci_version") or state.get("ci_version") or ""
+    ci_version = get_firecracker_state().get("ci_version", "")
     if not ci_version:
         from fcm.core.binary_manager import list_local_versions as _lv
 
