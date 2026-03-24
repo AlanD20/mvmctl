@@ -40,58 +40,6 @@ logger = logging.getLogger(__name__)
 
 
 # Allowlists for restore_host() — only these keys/paths may be restored with root privileges.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def prune_host(cache_dir: Path) -> list[str]:
     """Tear down all bridges, TAPs, iptables rules and revert host sysctl changes.
 
