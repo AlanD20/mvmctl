@@ -87,22 +87,27 @@ def kernel_ls(
         print_info("No kernels found. Use 'fcm kernel fetch --type firecracker' to download one.")
         return
 
+    from fcm.core.kernel import human_readable_time
+
     rows: list[list[str]] = []
     for k in kernels:
         default_marker = "✓" if k.get("is_default") else " "
+        last_modified_display = human_readable_time(k.get("last_modified", "-"))
         rows.append(
             [
                 default_marker,
-                k.get("name", ""),
+                k.get("id", ""),
+                k.get("name", "-"),
                 k.get("version", ""),
+                k.get("arch", "-"),
                 k.get("type", ""),
-                k.get("built_at", "-"),
+                last_modified_display,
                 k.get("size", "-"),
             ]
         )
     print_table(
         title="Cached Kernels",
-        columns=["Def", "Name", "Version", "Type", "Built At", "Size"],
+        columns=["Def", "ID", "Name", "Version", "Arch", "Type", "Last Modified", "Size"],
         rows=rows,
     )
 
@@ -167,8 +172,11 @@ def kernel_fetch(
         print_success(f"Firecracker CI kernel ready: {result}")
 
     elif kernel_type == "official":
+        import platform
+
         effective_version = version or DEFAULT_KERNEL_VERSION
-        output_name_str = f"vmlinux-{effective_version}"
+        effective_arch = arch if arch != DEFAULT_FC_KERNEL_ARCH else platform.machine() or "x86_64"
+        output_name_str = f"vmlinux-{effective_version}-{effective_arch}"
         output_path = out if out is not None else kernels_dir / output_name_str
 
         if kernel_config and not kernel_config.exists():
@@ -185,6 +193,7 @@ def kernel_fetch(
                 jobs=jobs,
                 keep_build_dir=keep_build_dir,
                 user_config_path=kernel_config,
+                arch=effective_arch,
             )
         except KernelError as exc:
             print_error(f"Kernel build failed: {exc}")

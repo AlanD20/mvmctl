@@ -1,5 +1,6 @@
 """Kernel download and build utilities."""
 
+import hashlib
 import json
 import logging
 import os
@@ -7,6 +8,7 @@ import re
 import subprocess
 import tarfile
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
@@ -32,6 +34,116 @@ logger = logging.getLogger(__name__)
 _BUILD_LOG_PATTERNS = re.compile(
     r"(?i)(warning|error|cannot find|undefined reference|fatal|note:)",
 )
+
+
+@dataclass
+class ParsedKernelFilename:
+    """Parsed components from a kernel filename."""
+
+    base_name: str
+    version: str
+    arch: str
+
+
+def generate_kernel_id(kernel_name: str, last_modified: str) -> str:
+    """Generate a short ID from kernel name and last modified date.
+
+    Args:
+        kernel_name: Kernel filename
+        last_modified: Last modified timestamp
+
+    Returns:
+        First 6 characters of SHA256 hash
+    """
+    data = f"{kernel_name}:{last_modified}"
+    hash_full = hashlib.sha256(data.encode()).hexdigest()
+    return hash_full[:6]
+
+
+def human_readable_time(iso_timestamp: str) -> str:
+    """Convert ISO timestamp to human-readable relative time.
+
+    Args:
+        iso_timestamp: ISO format timestamp (e.g., 2026-03-24T17:37:45.896256+00:00)
+
+    Returns:
+        Human-readable string like "2 minutes ago", "1 hour ago", "3 days ago"
+    """
+    if not iso_timestamp or iso_timestamp == "-":
+        return "-"
+
+    try:
+        # Parse the ISO timestamp
+        dt = datetime.fromisoformat(iso_timestamp)
+        now = datetime.now(tz=timezone.utc)
+        diff = now - dt
+
+        total_seconds = int(diff.total_seconds())
+
+        if total_seconds < 60:
+            return "just now"
+        elif total_seconds < 3600:
+            minutes = total_seconds // 60
+            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+        elif total_seconds < 86400:
+            hours = total_seconds // 3600
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        elif total_seconds < 604800:
+            days = total_seconds // 86400
+            return f"{days} day{'s' if days != 1 else ''} ago"
+        elif total_seconds < 2592000:
+            weeks = total_seconds // 604800
+            return f"{weeks} week{'s' if weeks != 1 else ''} ago"
+        elif total_seconds < 31536000:
+            months = total_seconds // 2592000
+            return f"{months} month{'s' if months != 1 else ''} ago"
+        else:
+            years = total_seconds // 31536000
+            return f"{years} year{'s' if years != 1 else ''} ago"
+    except (ValueError, TypeError):
+        return "-"
+
+
+def parse_kernel_filename(filename: str) -> ParsedKernelFilename:
+    """Parse a kernel filename to extract base name, version, and arch.
+
+    Supports formats like:
+    - vmlinux-fc-v1.15-x86_64 -> base_name="vmlinux-fc", version="v1.15", arch="x86_64"
+    - vmlinux-fc-1.15-arm64 -> base_name="vmlinux-fc", version="1.15", arch="arm64"
+    - vmlinux-6.1.102 -> base_name="vmlinux", version="6.1.102", arch="-"
+    - vmlinux -> base_name="vmlinux", version="-", arch="-"
+
+    Args:
+        filename: Kernel filename (without path)
+
+    Returns:
+        ParsedKernelFilename with base_name, version, and arch
+    """
+    name = filename
+    arches = ["x86_64", "amd64", "arm64", "aarch64"]
+
+    arch = "-"
+    for a in arches:
+        if name.endswith(f"-{a}"):
+            arch = a
+            name = name[: -(len(a) + 1)]
+            break
+
+    version = "-"
+    base_name = name
+
+    version_pattern = r"-v?(\d+(?:\.\d+)*)(?:-[a-z]+)?$"
+    match = re.search(version_pattern, name)
+    if match:
+        full_match = match.group(0)
+        version_num = match.group(1)
+        if full_match.startswith("-v"):
+            version = f"v{version_num}"
+        else:
+            version = version_num
+        base_name = name[: match.start()]
+
+    return ParsedKernelFilename(base_name=base_name, version=version, arch=arch)
 
 
 def download_kernel_source(
@@ -334,6 +446,7 @@ def build_kernel_pipeline(
     jobs: int | None = None,
     keep_build_dir: bool = False,
     user_config_path: Path | None = None,
+    arch: str | None = None,
 ) -> Path:
     if jobs is None:
         jobs = os.cpu_count() or 1
@@ -376,6 +489,7 @@ def build_kernel_pipeline(
         output_path.name,
         version=version,
         kernel_type="official",
+        arch=arch,
     )
 
     if not keep_build_dir:
@@ -392,16 +506,45 @@ def build_kernel_pipeline(
 def save_kernel_metadata(
     kernels_dir: Path,
     kernel_name: str,
-    version: str,
-    kernel_type: str,
-    arch: str = "x86_64",
+    version: str | None = None,
+    kernel_type: str | None = None,
+    arch: str | None = None,
 ) -> None:
+    """Save kernel metadata JSON file.
+
+    Parses the kernel filename to extract base_name, version, and arch if not
+    provided. Uses file modification time for last_modified.
+
+    Args:
+        kernels_dir: Directory containing kernel files
+        kernel_name: Kernel filename
+        version: Kernel version (parsed from filename if None)
+        kernel_type: Kernel type (e.g., "firecracker", "official")
+        arch: Architecture (parsed from filename if None)
+    """
+    kernel_path = kernels_dir / kernel_name
+
+    parsed = parse_kernel_filename(kernel_name)
+
+    if version is None:
+        version = parsed.version
+    if arch is None:
+        arch = parsed.arch
+    if kernel_type is None:
+        kernel_type = "unknown"
+
+    last_modified = "-"
+    if kernel_path.exists():
+        mtime = kernel_path.stat().st_mtime
+        last_modified = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+
     meta = {
         "name": kernel_name,
+        "base_name": parsed.base_name,
         "version": version,
-        "type": kernel_type,
         "arch": arch,
-        "built_at": datetime.now(tz=timezone.utc).isoformat(),
+        "type": kernel_type,
+        "last_modified": last_modified,
     }
     meta_path = kernels_dir / f"{kernel_name}.json"
     meta_path.write_text(json.dumps(meta, indent=2))
@@ -417,7 +560,7 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
         if not (path.name.startswith("vmlinux") or path.name.startswith("kernel")):
             continue
         size_mb = path.stat().st_size / (1024 * 1024)
-        meta_path = path.with_suffix(".json")
+        meta_path = kernels_dir / f"{path.name}.json"
         if meta_path.exists():
             try:
                 meta: dict[str, str] = json.loads(meta_path.read_text())
@@ -425,13 +568,35 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
                 meta = {}
         else:
             meta = {}
+
+        last_modified = meta.get("last_modified")
+        if not last_modified:
+            last_modified = meta.get("built_at", "-")
+
+        kernel_id = generate_kernel_id(path.name, last_modified)
+
+        # Use metadata if available, otherwise parse from filename
+        if meta.get("base_name"):
+            base_name = meta["base_name"]
+            version = meta.get("version", "-")
+            arch = meta.get("arch", "-")
+            kernel_type = meta.get("type", "unknown")
+        else:
+            parsed = parse_kernel_filename(path.name)
+            base_name = parsed.base_name
+            version = parsed.version
+            arch = parsed.arch
+            kernel_type = "unknown"
+
         results.append(
             {
-                "name": path.name,
-                "version": meta.get("version", "-"),
-                "type": meta.get("type", "unknown"),
-                "arch": meta.get("arch", "-"),
-                "built_at": meta.get("built_at", "-"),
+                "id": kernel_id,
+                "name": base_name,
+                "full_name": path.name,
+                "version": version,
+                "type": kernel_type,
+                "arch": arch,
+                "last_modified": last_modified,
                 "size": f"{size_mb:.1f} MiB",
                 "is_default": str(path.name == default_name).lower(),
             }

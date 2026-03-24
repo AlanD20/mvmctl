@@ -77,10 +77,17 @@ def test_kernel_ls_dir_not_found(tmp_path: Path):
 def test_kernel_ls_multiple_files(tmp_path: Path):
     (tmp_path / "vmlinux").write_bytes(b"\x00" * 1024)
     (tmp_path / "vmlinux-6.1.102").write_bytes(b"\x00" * 2048)
-    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path)])
+    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
     assert result.exit_code == 0
-    assert "vmlinux" in result.output
-    assert "vmlinux-6.1.102" in result.output
+    data = json.loads(result.output)
+    # name is now base_name, so both will be "vmlinux"
+    names = [e["name"] for e in data]
+    assert "vmlinux" in names
+    assert len(data) == 2
+    # full_name contains the actual filenames
+    full_names = [e["full_name"] for e in data]
+    assert "vmlinux" in full_names
+    assert "vmlinux-6.1.102" in full_names
 
 
 def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
@@ -637,6 +644,7 @@ def test_kernel_ls_auto_creates_dir(tmp_path: Path):
     assert result.exit_code == 0
     assert missing.exists()
 
+
 @patch("fcm.cli.asset.fetch_image")
 @patch("fcm.cli.asset.load_images_config")
 def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
@@ -644,7 +652,7 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     from fcm.main import app
     from fcm.models.image import ImageSpec
     from typer.testing import CliRunner
-    
+
     mock_config.return_value = [
         ImageSpec(
             id="ubuntu-24.04",
@@ -659,7 +667,7 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     # Pre-create existing image file
     (tmp_path / "ubuntu-24.04.ext4").touch()
     mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
-    
+
     # User says NO to re-download
     result = CliRunner().invoke(
         app,

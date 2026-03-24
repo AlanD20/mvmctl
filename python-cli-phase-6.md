@@ -66,21 +66,12 @@ Additional requirements to not miss!
         - active_version = $latest
         - active_binary_path = absolute path to the active firecracker binary path
     - assets key which has these:
-        - absolute path to kernels directory, default is cache/kernels
-        - absolute path to images directory, default is cache/images
-        - absolute path to binaries directory, default is cache/bin
-        - absolute path to networks directory, default is cache/networks
-        - absolute path to vms directory, default is cache/vms
-        - absolute path to keys directory, default is cache/keys
-        - absolute path to build custom kernels directory, default is /tmp/fcm-kernel-build-{rand 3 chars}
-        - absolute path to import custom images directory, default is /tmp/fcm-image-import-{rand 3 chars}
-        - absolute path to logs directory, default is cache/logs
 
 - the default firecracker version must be in constants.py file and the default in the cli-state.json file must be v1.15.0 and the ci version will be v1.15.
 - Rename the cli-state.json file to config.json file and this must be under FCM_CONFIG_DIR where default is ~/.config/firecracker-manager/config.json. Similar to FCM_BUILD_DIR, this can be overridden by user
 
-- the application needs to handle its own vm configuration file written in json format. This change will introduce the following:
-  - new flags to `fcm vm create` command:
-    - the `--output-config` flag will outputs the cli-owned configuration file to create a vm, all the necessary flags passed to this command will be in this single configuration file, including the firecracker.json file which will have its own key in this configuration file called `firecracker_config`. This will help in debugging why vm is not working.
-    - the `import-config` flag takes a vm configuration json file which will have all the necessary data to create the vm instead of passing the flags. Providing this vm configuration file will make the other flags optional, but if flags are passed, they will override the config file value.
-    - this new vm configuration file is a big feature of this application, therefore it has its own file and everything must be handled at API layer then the cli will use the API layer to perform the logics.
+- when downloading the fcm kernel fetch --type firecracker, the file name is vmlinux-fc-v1.15-x86_64, from this filename, we should get the version, strip out the name as vmlinux-fc, add another col for arch, and also lets rename built at to last modified so that it applies to once it's downloaded grab the last modified there and this will work for custom kernel as well
+  - when building custom kernel, the data must be stored temporarily and then the final file name must be the same convention! a custom built kernel will be vmlinux-6.19-x86_64. ensure this will be the final kernel file name
+  - the `fcm kernel ls` should have id field instead of name and it's a hash of the filename + last modified date, only showing the first 6 digits
+  - the base_name should be the name instead
+  - the last modified field in the metadata should be full UTC timezone, but when running `fcm kernel ls` it should be human format such as x minutes ago, etc...

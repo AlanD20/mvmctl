@@ -9,13 +9,58 @@ from fcm.core.kernel import (
     fetch_kernel_sha256,
     get_default_kernel_path,
     list_kernels,
+    parse_kernel_filename,
     save_kernel_metadata,
     set_default_kernel,
 )
 from fcm.exceptions import KernelError
 
 
+def test_parse_kernel_filename_fc_with_v_prefix():
+    result = parse_kernel_filename("vmlinux-fc-v1.15-x86_64")
+    assert result.base_name == "vmlinux-fc"
+    assert result.version == "v1.15"
+    assert result.arch == "x86_64"
+
+
+def test_parse_kernel_filename_fc_without_v_prefix():
+    result = parse_kernel_filename("vmlinux-fc-1.15-arm64")
+    assert result.base_name == "vmlinux-fc"
+    assert result.version == "1.15"
+    assert result.arch == "arm64"
+
+
+def test_parse_kernel_filename_official():
+    result = parse_kernel_filename("vmlinux-6.1.102")
+    assert result.base_name == "vmlinux"
+    assert result.version == "6.1.102"
+    assert result.arch == "-"
+
+
+def test_parse_kernel_filename_plain():
+    result = parse_kernel_filename("vmlinux")
+    assert result.base_name == "vmlinux"
+    assert result.version == "-"
+    assert result.arch == "-"
+
+
+def test_parse_kernel_filename_with_amd64():
+    result = parse_kernel_filename("vmlinux-fc-1.12-amd64")
+    assert result.base_name == "vmlinux-fc"
+    assert result.version == "1.12"
+    assert result.arch == "amd64"
+
+
+def test_parse_kernel_filename_with_aarch64():
+    result = parse_kernel_filename("vmlinux-6.1-aarch64")
+    assert result.base_name == "vmlinux"
+    assert result.version == "6.1"
+    assert result.arch == "aarch64"
+
+
 def test_save_kernel_metadata(tmp_path: Path):
+    kernel_file = tmp_path / "vmlinux"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
     save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
     meta_file = tmp_path / "vmlinux.json"
     assert meta_file.exists()
@@ -23,9 +68,27 @@ def test_save_kernel_metadata(tmp_path: Path):
 
     data = json.loads(meta_file.read_text())
     assert data["name"] == "vmlinux"
+    assert data["base_name"] == "vmlinux"
     assert data["version"] == "6.1.9"
     assert data["type"] == "official"
-    assert "built_at" in data
+    assert "last_modified" in data
+
+
+def test_save_kernel_metadata_parses_filename(tmp_path: Path):
+    kernel_file = tmp_path / "vmlinux-fc-v1.15-x86_64"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    save_kernel_metadata(tmp_path, "vmlinux-fc-v1.15-x86_64", kernel_type="firecracker")
+    meta_file = tmp_path / "vmlinux-fc-v1.15-x86_64.json"
+    assert meta_file.exists()
+    import json
+
+    data = json.loads(meta_file.read_text())
+    assert data["name"] == "vmlinux-fc-v1.15-x86_64"
+    assert data["base_name"] == "vmlinux-fc"
+    assert data["version"] == "v1.15"
+    assert data["arch"] == "x86_64"
+    assert data["type"] == "firecracker"
+    assert "last_modified" in data
 
 
 def test_list_kernels_empty(tmp_path: Path):
