@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fcm.constants import PROJECT_NAME, SUDOERS_DROP_IN_PATH
+from fcm.constants import IPTABLES_RULES_V4, PROJECT_NAME, SUDOERS_DROP_IN_PATH
 from fcm.exceptions import HostError
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,27 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
                 raise HostError(f"Failed to revert {change.setting}: {e}") from e
             except FileNotFoundError as e:
                 raise HostError("sysctl command not found") from e
+
+        elif change.mechanism == "iptables_save":
+            rules_path = Path(IPTABLES_RULES_V4)
+            try:
+                if change.original_value is not None:
+                    rules_path.write_text(change.original_value)
+                    rules_path.chmod(0o640)
+                    logger.info("Restored original iptables rules to %s", rules_path)
+                elif rules_path.exists():
+                    rules_path.unlink()
+                    logger.info("Removed %s (did not exist before host init)", rules_path)
+                reverted.append(
+                    HostChange(
+                        setting=change.setting,
+                        original_value=change.applied_value,
+                        applied_value=change.original_value or "(removed)",
+                        mechanism="iptables_restore",
+                    )
+                )
+            except OSError as e:
+                raise HostError(f"Failed to restore iptables rules: {e}") from e
 
         elif change.mechanism == "file_create":
             target = Path(change.applied_value).resolve()

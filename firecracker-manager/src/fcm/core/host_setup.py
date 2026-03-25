@@ -8,17 +8,23 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from fcm.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH, REQUIRED_BINARIES, ISO_BINARIES
-from fcm.exceptions import HostError
-from fcm.core.host_state import HostChange, SYSCTL_KEY, SYSCTL_CONF, _save_state
+from fcm.constants import (
+    IPTABLES_RULES_V4,
+    ISO_BINARIES,
+    PROJECT_GROUP,
+    REQUIRED_BINARIES,
+    SUDOERS_DROP_IN_PATH,
+)
 from fcm.core.host_privilege import (
-    _validate_sudoers_binaries,
+    _add_user_to_group,
     _create_group,
     _get_current_user,
-    _add_user_to_group,
+    _validate_sudoers_binaries,
     _write_sudoers,
 )
+from fcm.core.host_state import SYSCTL_CONF, SYSCTL_KEY, HostChange, _save_state
 from fcm.core.network import setup_fcm_chains
+from fcm.exceptions import HostError
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +178,86 @@ def _ensure_kvm_modules() -> list[HostChange]:
     return changes
 
 
+def _get_active_tap_names() -> set[str]:
+    try:
+        result = subprocess.run(
+            ["ip", "-o", "link", "show", "type", "tuntap"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        names: set[str] = set()
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                names.add(parts[1].rstrip(":"))
+        return names
+    except FileNotFoundError:
+        return set()
+
+
+def _strip_tap_rules(rules_text: str) -> str:
+    tap_names = _get_active_tap_names()
+    if not tap_names:
+        return rules_text
+    filtered: list[str] = []
+    for line in rules_text.splitlines(keepends=True):
+        if any(tap in line for tap in tap_names):
+            logger.debug("Excluding transient TAP rule from persistence: %s", line.strip())
+            continue
+        filtered.append(line)
+    return "".join(filtered)
+
+
+def save_iptables_rules() -> HostChange | None:
+    rules_path = Path(IPTABLES_RULES_V4)
+
+    try:
+        result = subprocess.run(
+            ["iptables-save"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        logger.warning(
+            "iptables-save unavailable — rules will not survive reboot. "
+            "Install iptables-persistent (Debian/Ubuntu) or iptables-services (RHEL)."
+        )
+        return None
+
+    raw = result.stdout
+    if not isinstance(raw, str):
+        logger.debug("iptables-save stdout is not a str (likely mocked); skipping persistence")
+        return None
+    filtered = _strip_tap_rules(raw)
+
+    original: str | None = None
+    if rules_path.exists():
+        try:
+            original = rules_path.read_text()
+        except OSError:
+            original = None
+    if original == filtered:
+        logger.debug("iptables rules already up-to-date in %s", rules_path)
+        return None
+
+    try:
+        rules_path.parent.mkdir(parents=True, exist_ok=True)
+        rules_path.write_text(filtered)
+        rules_path.chmod(0o640)
+    except OSError as e:
+        raise HostError(f"Failed to write {rules_path}: {e}") from e
+
+    logger.info("Persisted iptables rules to %s (TAP rules excluded)", rules_path)
+    return HostChange(
+        setting="iptables_rules_v4",
+        original_value=original,
+        applied_value=str(rules_path),
+        mechanism="iptables_save",
+    )
+
+
 def init_host(cache_dir: Path) -> list[HostChange]:
     changes: list[HostChange] = []
 
@@ -215,9 +301,6 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     try:
         sudoers_exists = sudoers_path.exists()
     except PermissionError:
-        # Directory not readable (e.g., /etc/sudoers.d/ is root-only)
-        # Treat as non-existent; _write_sudoers will fail appropriately if
-        # the caller lacks privileges to create the file.
         pass
     if not sudoers_exists:
         _write_sudoers(sudoers_path, PROJECT_GROUP)
@@ -241,8 +324,11 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     module_changes = _ensure_kvm_modules()
     changes.extend(module_changes)
 
-    # Set up FCM iptables chains for network rules
     setup_fcm_chains()
+
+    iptables_change = save_iptables_rules()
+    if iptables_change:
+        changes.append(iptables_change)
 
     _save_state(cache_dir, changes)
     return changes

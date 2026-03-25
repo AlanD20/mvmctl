@@ -5,24 +5,24 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+import os
 import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
-from fcm.constants import DEFAULT_NETWORK_CIDR, DEFAULT_NETWORK_NAME
 
-from fcm.constants import device_prefix
+from fcm.constants import DEFAULT_NETWORK_CIDR, DEFAULT_NETWORK_NAME, device_prefix
 from fcm.core.network import (
     allocate_ip,
+    bridge_exists,
     setup_bridge,
     setup_nat,
     teardown_bridge,
     teardown_nat,
-    bridge_exists,
 )
 from fcm.exceptions import NetworkError
-from fcm.utils.fs import get_networks_dir, get_network_dir
+from fcm.utils.fs import get_network_dir, get_networks_dir
 from fcm.utils.validation import validate_entity_name
 
 logger = logging.getLogger(__name__)
@@ -171,6 +171,14 @@ def get_network_leases(name: str) -> list[NetworkLease]:
     return _load_leases(get_network_dir(name))
 
 
+def _persist_iptables_if_root() -> None:
+    if os.getuid() != 0:
+        return
+    from fcm.core.host_setup import save_iptables_rules
+
+    save_iptables_rules()
+
+
 def create_network(
     name: str,
     cidr: str | None = None,
@@ -247,6 +255,9 @@ def create_network(
     _save_config(network_dir, config)
     _save_leases(network_dir, [])
     _save_network_state(network_dir, NetworkState(bridge_active=True))
+
+    _persist_iptables_if_root()
+
     return config
 
 
@@ -287,8 +298,9 @@ def remove_network(name: str) -> None:
     except NetworkError as e:
         logger.warning("Partial teardown for network '%s': %s", name, e)
 
-    # Remove persisted state
     shutil.rmtree(network_dir, ignore_errors=True)
+
+    _persist_iptables_if_root()
 
 
 class _VMLease(TypedDict):
