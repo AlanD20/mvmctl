@@ -127,5 +127,5 @@ Additional requirements to not miss!
 - Ensure every file is created in cache or config directory are under the current user! sudo is being used in the entire project for escalation which the application is prone to mistakenly create files with root permission only causing breaking behaviors.
 
 - do not use sudo in the tests, they shouldnt require suo privileges to run tests!!!
-- ensure that when runnnig `fcm host init` the FCM chains are persisted!! it's important that after reboot the networks that are created by the CLI are persisted.
+- ensure that when runnnig `fcm host init` the FCM chains are persisted!! it's important that after reboot the networks that are created by the CLI are persisted. use iptables-save to do this action. Ensure when VMs are already has tap devices in this chain, running `fcm host init` will not persist those tap devices. it must only persist the bridges with cidrs, NO tap devices.
 - Do not persist VM tap devices, they must be temporary
