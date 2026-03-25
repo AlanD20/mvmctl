@@ -27,6 +27,9 @@ packages = ["src/fcm"]
 line-length = 100
 target-version = "py313"
 
+[tool.ruff.lint]
+extend-select = ["I"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -37,7 +40,7 @@ python_version = "3.13"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["tests.*", "test_*", "tests"]
+module = ["tests.*", "tests"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false
