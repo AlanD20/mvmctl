@@ -38,16 +38,16 @@ def print_table(title: str, columns: list[str], rows: list[list[str]]) -> None:
 
 
 def print_error(message: str) -> None:
-    console.print(f"[red]Error: {message}[/red]")
+    console.print(f"[red]Error: {message}[/red]", highlight=False)
 
 
 def print_success(message: str) -> None:
-    console.print(f"[green]{message}[/green]")
+    console.print(f"[green]{message}[/green]", highlight=False)
 
 
 def print_warning(message: str) -> None:
-    console.print(f"[yellow]{message}[/yellow]")
+    console.print(f"[yellow]{message}[/yellow]", highlight=False)
 
 
 def print_info(message: str) -> None:
-    console.print(f"[blue]{message}[/blue]")
+    console.print(f"[blue]{message}[/blue]", highlight=False)

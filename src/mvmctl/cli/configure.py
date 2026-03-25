@@ -22,7 +22,7 @@ from mvmctl.constants import (
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.core.config_state import initialize_default_config
-from mvmctl.exceptions import BinaryError, MVMError, MVMKeyError, HostError, KernelError
+from mvmctl.exceptions import BinaryError, HostError, KernelError, MVMError, MVMKeyError
 from mvmctl.utils.console import console, print_info, print_success, print_warning
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 

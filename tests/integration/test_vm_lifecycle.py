@@ -34,7 +34,7 @@ def _make_vm(
         status=status,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
         network_name=network,
-        socket_path=Path(f"/tmp/fcm/{name}.sock"),
+        socket_path=Path(f"/tmp/mvm/{name}.sock"),
     )
 
 

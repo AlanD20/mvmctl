@@ -9,7 +9,6 @@ from mvmctl.core.vm_manager import VMManager
 from mvmctl.models.vm import VMConfig, VMInstance, VMState
 
 
-
 @pytest.fixture(autouse=True)
 def isolate_config_and_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure tests never write to real config or cache directories.
@@ -130,7 +129,7 @@ def sample_network_config() -> dict:
     """Sample network configuration dict for tests."""
     return {
         "name": "default",
-        "bridge": "fcmbr0",
+        "bridge": "mvm-br0",
         "subnet": "10.20.0.0/24",
         "gateway": "10.20.0.1",
     }

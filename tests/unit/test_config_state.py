@@ -200,9 +200,9 @@ def test_update_assets_config_merges(cache_dir: Path) -> None:
 
 
 def test_update_assets_config_persisted_as_nested_key(config_dir: Path) -> None:
-    update_assets_config(logs_dir="/var/log/fcm")
+    update_assets_config(logs_dir="/var/log/mvm")
     raw = json.loads((config_dir / "config.json").read_text())
-    assert raw["assets"]["logs_dir"] == "/var/log/fcm"
+    assert raw["assets"]["logs_dir"] == "/var/log/mvm"
 
 
 def test_firecracker_and_assets_coexist(config_dir: Path) -> None:

@@ -7,26 +7,27 @@
 
 ```
 src/mvmctl/core/
-├── vm_lifecycle.py      # VM create/start/stop/remove (469 lines)
-├── vm_manager.py        # VM registry; state.json keyed by full 64-char hash
-├── network.py           # Low-level: bridge, TAP, NAT, iptables (452 lines)
-├── network_manager.py   # Named networks with IP lease tracking (487 lines)
-├── host.py              # Host orchestration: clean/prune/reset
-├── host_setup.py        # Host init: KVM, sysctl, binary checks (244 lines)
+├── vm_lifecycle.py      # VM create/start/stop/remove (556 lines)
+├── vm_manager.py        # VM registry; state.json keyed by full 64-char hash (306 lines)
+├── network.py           # Low-level: bridge, TAP, NAT, iptables (815 lines)
+├── network_manager.py   # Named networks with IP lease tracking (499 lines)
+├── host.py              # Host orchestration: clean/prune/reset (145 lines)
+├── host_setup.py        # Host init: KVM, sysctl, binary checks (334 lines)
 ├── host_privilege.py    # Group/sudoers management; check_privileges() (296 lines)
-├── host_state.py        # Host state snapshots for rollback (183 lines)
-├── image.py             # Image download, QCOW2→raw conversion, partition extract (629 lines)
-├── kernel.py            # Kernel fetch (FC CI S3) + build-from-source pipeline (712 lines)
-├── binary_manager.py    # Firecracker/jailer version management (287 lines)
-├── metadata.py          # Unified metadata.json for images/kernels/binaries (282 lines)
-├── config_state.py      # config.json persistence: active binary, defaults (222 lines)
-├── config_gen.py        # Generates Firecracker boot JSON (203 lines)
+├── host_state.py        # Host state snapshots for rollback (204 lines)
+├── image.py             # Image download, QCOW2→raw conversion, partition extract (666 lines)
+├── kernel.py            # Kernel fetch (FC CI S3) + build-from-source pipeline (805 lines)
+├── binary_manager.py    # Firecracker/jailer version management (283 lines)
+├── metadata.py          # Unified metadata.json for images/kernels/binaries (508 lines)
+├── config_state.py      # config.json persistence: active binary, defaults (223 lines)
+├── config_gen.py        # Generates Firecracker boot JSON (202 lines)
 ├── firecracker.py       # HTTP API client for live VM control (265 lines)
 ├── ssh.py               # SSH command building + key resolution (211 lines)
 ├── key_manager.py       # SSH key import/create/registry (321 lines)
-├── cloud_init.py        # cloud-init ISO creation (140 lines)
+├── cloud_init.py        # cloud-init ISO creation (178 lines)
 ├── logs.py              # VM log retrieval (149 lines)
-└── config.py            # YAML config loading (203 lines)
+├── config.py            # YAML config loading (204 lines)
+└── user_config.py       # User-specific config get/set (83 lines)
 ```
 
 ## WHERE TO LOOK
@@ -38,6 +39,7 @@ src/mvmctl/core/
 | Remove VM | `vm_lifecycle.py` | `remove_vm()` |
 | VM registry (CRUD) | `vm_manager.py` | `VMManager` class |
 | Bridge/TAP/NAT | `network.py` | `setup_bridge()`, `create_tap()`, `setup_nat()` |
+| iptables chains | `network.py` | `setup_mvm_chains()`, `teardown_mvm_chains()` |
 | Named networks | `network_manager.py` | `create_network()`, `ensure_default_network()` |
 | Host init | `host_setup.py` | `init_host()` |
 | Privilege check | `host_privilege.py` | `check_privileges(binary_path)` |
@@ -47,6 +49,7 @@ src/mvmctl/core/
 | Asset metadata | `metadata.py` | `find_images_by_short_id()`, `update_kernel_entry()` |
 | Active version/binary | `config_state.py` | `get_firecracker_config()`, `update_firecracker_config()` |
 | Firecracker HTTP API | `firecracker.py` | `FirecrackerClient` |
+| Config dataclass | `config.py` | `MVMConfig`, `load_config()` |
 
 ## STATE SCHEMAS
 
@@ -77,6 +80,10 @@ src/mvmctl/core/
 }
 ```
 
+**Network state** (`$MVM_CACHE_DIR/networks/{name}/config.json` + `leases.json`):
+- `NetworkConfig` dataclass persisted per network
+- `NetworkLease` list tracks IP → VM mappings
+
 ## CONVENTIONS
 
 ### Subprocess Handling
@@ -95,7 +102,7 @@ except FileNotFoundError:
 ### Privilege Checks
 ```python
 from mvmctl.core.host_privilege import check_privileges
-check_privileges("/usr/sbin/ip")  # validates fcm group membership
+check_privileges("/usr/sbin/ip")  # validates mvm group membership
 ```
 Called in `api/` layer before entering core, or explicitly in core for ops needing root.
 
@@ -104,39 +111,44 @@ Called in `api/` layer before entering core, or explicitly in core for ops needi
 | Forbidden | Correct |
 |-----------|---------|
 | `print()` or `console.print()` | Raise exception or return data; let CLI format |
-| Hardcoded `"/usr/sbin/ip"` | `PRIVILEGED_BINARIES["ip"]` from constants |
-| `except Exception: pass` | Catch specific type, re-raise as FCMError subclass |
+| Hardcoded `"/usr/sbin/ip"` | `PRIVILEGED_BINARIES` from constants |
+| `except Exception: pass` | Catch specific type, re-raise as MVMError subclass |
 | Large functions (>100 lines) | Extract helpers; early returns to reduce nesting |
 | `subprocess.run(..., shell=True)` | Always use list form |
 
+## KNOWN VIOLATIONS
+
+- `kernel.py:385-444` — calls `print_warning`/`print_info`/`console.print` (should be CLI layer)
+- `host_privilege.py:check_privileges_interactive()` — interactive print_error/print_warning/print_info in core
+
 ## KEY MODULES
 
-### vm_lifecycle.py (469 lines)
+### vm_lifecycle.py (556 lines)
 - `_resolve_image_path(image)` — checks all extensions + metadata short-hash lookup
 - `generate_vm_id(name)` — `sha256(name:timestamp).hexdigest()`
 - `create_vm()` — full orchestration: image→rootfs copy, cloud-init, config, network, process, register
-- TAP naming: `fcm-{net[:3]}-{vm[:3]}-{rand3}` (15-char Linux IFNAMSIZ limit)
+- TAP naming: `mvm-{net[:3]}-{vm[:3]}-{rand3}` (15-char Linux IFNAMSIZ limit)
 
-### network_manager.py (487 lines)
+### network_manager.py (499 lines)
 - `NetworkConfig` + `NetworkLease` dataclasses; persisted as JSON under `$MVM_CACHE_DIR/networks/`
-- Bridge = `fcm-{network_name}` (e.g. `fcm-default`)
+- Bridge = `mvm-{network_name}` (e.g. `mvm-default`)
 - `ensure_default_network()` — idempotent; called at VM create and host init
 
-### kernel.py (712 lines)
+### kernel.py (805 lines)
 - `fetch_kernel_sha256(version)` — fetches `.sha256` sidecar before download
 - `build_kernel_pipeline()` — auto-fetches sha256, downloads tarball, patches config, builds
 - `download_firecracker_kernel()` — downloads prebuilt from Firecracker CI S3
 - `human_readable_time(iso)` — "5 minutes ago" format; imported by CLI asset.py
 - `parse_kernel_filename(name)` → `ParsedKernelFilename(base_name, version, arch)`
 
-### image.py (629 lines)
+### image.py (666 lines)
 - `fetch_image(spec, out, force)` — download + sha256 verify + optional QCOW2 convert
 - `import_image(spec, output_dir)` — local file conversion to ext4/btrfs
 - `_detect_and_rename_fs(path)` — uses `blkid` to detect FS, renames `.img` → `.ext4` etc.
-- `sha256_url` on `ImageSpec` — fetched before download for verification
 
-### metadata.py (282 lines)
+### metadata.py (508 lines)
 - `find_images_by_short_id(cache_dir, short_id)` → `list[tuple[str, dict]]` (full_key, meta)
 - `find_kernels_by_short_id(cache_dir, short_id)` → same
 - `update_kernel_entry()`, `update_image_entry()` — upsert by full key
 - `migrate_legacy_metadata()` — converts old name-keyed entries on first load
+- `MetadataCache` class with LRU cache and TTL for read performance

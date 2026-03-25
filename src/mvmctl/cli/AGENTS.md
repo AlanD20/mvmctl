@@ -7,11 +7,11 @@
 
 ```
 src/mvmctl/cli/
-├── vm.py          # VM subcommands: create, rm, ls, ps, ssh, logs, prune, snapshot (650 lines)
-├── asset.py       # kernel/image/bin subcommands — THREE Typer apps in one file (874 lines)
-├── configure.py   # Guided onboarding wizard: mvm configure (388 lines)
-├── host.py        # Host subcommands: init, reset, status, clean (250 lines)
-├── network.py     # Network subcommands: create, rm, ls, inspect, status (195 lines)
+├── vm.py          # VM subcommands: create, rm, ls, ps, ssh, logs, prune, snapshot, load (655 lines)
+├── asset.py       # kernel/image/bin subcommands — THREE Typer apps in one file (889 lines)
+├── configure.py   # Guided onboarding wizard: mvm configure (392 lines)
+├── host.py        # Host subcommands: init, ls, clean, reset (263 lines)
+├── network.py     # Network subcommands: create, rm, ls, inspect (195 lines)
 ├── key.py         # SSH key subcommands: add, create, ls, rm, inspect (190 lines)
 ├── config.py      # Config subcommands: get, set, show, validate, dump-vm (115 lines)
 └── _helpers.py    # Internal: check_name_arg() guard for positional name args
@@ -19,30 +19,31 @@ src/mvmctl/cli/
 
 ## SUBCOMMAND WIRING (main.py)
 
+Root app is `LazyMVMGroup` (custom `click.Group`), NOT `typer.Typer`. Sub-apps are lazy-loaded:
+
 ```python
-app.add_typer(vm.app,           name="vm",      rich_help_panel="VM Management")
-app.add_typer(host.app,         name="host",    rich_help_panel="Host Management")
-app.add_typer(network.app,      name="network", rich_help_panel="Networking")
-app.add_typer(key.app,          name="key",     rich_help_panel="Keys")
-app.add_typer(configure.app,    name="configure", ...)
-app.add_typer(config_cli.app,   name="config",  ...)
-# Assets — three apps from one file, all under "Assets" panel:
-app.add_typer(asset.kernel_app, name="kernel",  rich_help_panel="Assets")
-app.add_typer(asset.image_app,  name="image",   rich_help_panel="Assets")
-app.add_typer(asset.bin_app,    name="bin",     rich_help_panel="Assets")
+_COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
+    "vm": _LazyCommandSpec("mvmctl.cli.vm", "app", "VM lifecycle management"),
+    "host": _LazyCommandSpec("mvmctl.cli.host", "app", "Host configuration"),
+    ...
+    "kernel": _LazyCommandSpec("mvmctl.cli.asset", "kernel_app", "Kernel management"),
+    "image": _LazyCommandSpec("mvmctl.cli.asset", "image_app", "Image management"),
+    "bin": _LazyCommandSpec("mvmctl.cli.asset", "bin_app", "Binary management"),
+}
 ```
+
+`LazyMVMGroup.get_command()` imports the module on first access via `importlib.import_module()`. Root-level commands (`clear`, `version`, `help`) are plain `click.Command` instances defined directly in `main.py`.
 
 ## KEY PATTERNS
 
-### No-args shows help
+### Typer App Configuration (MANDATORY for all sub-apps)
 ```python
-app = typer.Typer(no_args_is_help=True)
-
-@app.callback(invoke_without_command=True)
-def callback(ctx: typer.Context) -> None:
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
+app = typer.Typer(
+    help="VM lifecycle management",
+    no_args_is_help=True,
+    rich_markup_mode=None,      # Plain Click help — no Rich panels
+    add_completion=False,        # No --install-completion/--show-completion
+)
 ```
 
 ### None-default + runtime resolution (MANDATORY for config-backed values)
@@ -102,3 +103,9 @@ matches = manager.get_by_name(name)           # → list[VMInstance], prompts if
 | Hardcode defaults in `typer.Option(N, ...)` | `typer.Option(None, ...)` + runtime resolution |
 | Business logic (subprocess, filesystem) | Raise to `api/`, never touch core directly |
 | `list[str] = []` as `typer.Argument` default | `Optional[List[str]] = None` |
+| `rich_markup_mode="rich"` or omitting it | Always `rich_markup_mode=None` |
+
+## KNOWN VIOLATIONS
+
+- `asset.py` — imports `mvmctl.core.metadata` directly (bypasses `api/`)
+- `configure.py` — imports `mvmctl.core.config_state` directly (bypasses `api/`)

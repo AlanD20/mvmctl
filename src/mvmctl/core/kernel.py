@@ -32,7 +32,7 @@ from mvmctl.core.metadata import (
     migrate_legacy_metadata,
     update_kernel_entry,
 )
-from mvmctl.exceptions import ChecksumMismatchError, MVMError, KernelError
+from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
 from mvmctl.utils.fs import get_cache_dir, get_images_dir
 from mvmctl.utils.http import download_file
 

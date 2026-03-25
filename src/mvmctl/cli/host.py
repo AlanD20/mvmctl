@@ -17,7 +17,7 @@ from mvmctl.api.host import (
     reset_host,
 )
 from mvmctl.constants import PROJECT_GROUP
-from mvmctl.exceptions import MVMError, HostError
+from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.console import console, print_error, print_info, print_success, print_warning
 from mvmctl.utils.fs import get_cache_dir
 

@@ -41,7 +41,7 @@ class TestHostInitResetWorkflow:
         mock_check_priv.return_value = None
 
         changes = [
-            _host_change("group:fcm", None, "fcm", "groupadd"),
+            _host_change("group:mvm", None, "mvm", "groupadd"),
             _host_change("net.ipv4.ip_forward", "0", "1", "sysctl"),
         ]
         mock_init.return_value = changes
@@ -64,7 +64,7 @@ class TestHostInitResetWorkflow:
         mock_check_priv.return_value = None
 
         init_changes = [
-            _host_change("group:fcm", None, "fcm", "groupadd"),
+            _host_change("group:mvm", None, "mvm", "groupadd"),
             _host_change("net.ipv4.ip_forward", "0", "1", "sysctl"),
         ]
         mock_init.return_value = init_changes
@@ -101,7 +101,7 @@ class TestHostInitResetWorkflow:
         """Test init followed by clean."""
         mock_check_priv.return_value = None
 
-        changes = [_host_change("group:fcm", None, "fcm", "groupadd")]
+        changes = [_host_change("group:mvm", None, "mvm", "groupadd")]
         mock_init.return_value = changes
         mock_clean.return_value = []
 
@@ -167,7 +167,9 @@ class TestHostWithSubprocessMocking:
                                     mock_kvm.return_value = []
                                     mock_create_group.return_value = True
                                     mock_add_user.return_value = True
-                                    with patch("mvmctl.core.host_setup._persist_sysctl", return_value=None):
+                                    with patch(
+                                        "mvmctl.core.host_setup._persist_sysctl", return_value=None
+                                    ):
                                         with patch("mvmctl.core.host_setup.setup_mvm_chains"):
                                             with patch("mvmctl.core.host_setup._save_state"):
                                                 result = init_host(Path("/tmp/cache"))
@@ -269,7 +271,7 @@ class TestHostStateManagement:
     def test_host_state_serialization(self):
         """Test HostState can be serialized and deserialized."""
         changes = [
-            _host_change("group:fcm", None, "fcm", "groupadd"),
+            _host_change("group:mvm", None, "mvm", "groupadd"),
             _host_change("net.ipv4.ip_forward", "0", "1", "sysctl"),
         ]
         state = _make_host_state(changes)

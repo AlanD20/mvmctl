@@ -1,24 +1,27 @@
 # mvmctl
 
-**Scope:** Production-grade Python CLI for managing Firecracker microVMs  
-**Stack:** Python 3.13, Typer, Rich, uv  
-**Entry:** `mvm` console script (defined in `pyproject.toml`)
+**Scope:** Production-grade Python CLI for managing Firecracker microVMs
+**Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
+**Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
+**Generated:** 2026-03-25T13:00Z  
+**Commit:** 0bf8543  
+**Branch:** main
 
 ## STRUCTURE
 
 ```
 mvmctl/
 ├── src/mvmctl/
-│   ├── main.py          # Root Typer app; registers all sub-apps via add_typer()
+│   ├── main.py          # LazyMVMGroup (click.Group) — lazy-loads sub-apps from _COMMAND_SPECS
 │   ├── constants.py     # Single source of truth — CLI name, env prefix, all defaults
-│   ├── exceptions.py    # Custom exception hierarchy (FCMError → domain subclasses)
+│   ├── exceptions.py    # Custom exception hierarchy (MVMError → domain subclasses)
 │   ├── cli/             # Thin Typer command definitions (no business logic)
 │   ├── api/             # Stable public Python API; adds privilege checks before core
 │   ├── core/            # All business logic, subprocess, Firecracker interaction
 │   ├── models/          # Pure dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
 │   ├── utils/           # Shared helpers: console, process, fs, http, audit, validation
 │   └── assets/          # Bundled YAML configs (images.yaml, kernel.yaml, defaults.yaml)
-├── tests/               # 38 unit + integration test files
+├── tests/               # 45 test_*.py (41 unit, 4 integration); see tests/AGENTS.md
 └── pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
 ```
 
@@ -37,7 +40,7 @@ mvmctl/
 | CLI commands | `cli/` — see `cli/AGENTS.md` |
 | API layer | `api/` — see `api/AGENTS.md` |
 | First-time setup | `cli/configure.py` — guided onboarding wizard (`mvm configure`) |
-| Tests | `tests/unit/conftest.py` (fixtures), `tests/unit/test_*.py` |
+| Tests | `tests/AGENTS.md` (fixtures, mocks, layout) |
 | CI/CD | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## DATA FLOW
@@ -46,7 +49,9 @@ mvmctl/
 User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + utils/
 ```
 
-- `main.py` registers sub-apps with `app.add_typer()`; `kernel`/`image`/`bin` are three separate Typer apps all defined in `cli/asset.py`, mounted at root with `rich_help_panel="Assets"`
+- `main.py` uses `LazyMVMGroup` (custom `click.Group`) — NOT `add_typer()`. Sub-apps defined in `_COMMAND_SPECS` dict, lazy-loaded via `importlib.import_module()` on first access
+- `kernel`/`image`/`bin` are three separate Typer apps all defined in `cli/asset.py`
+- All Typer sub-apps use `rich_markup_mode=None, add_completion=False` — plain Click help formatting
 - **CLI params default to `None`**; resolved at runtime via `_defaults = _get_vm_defaults()` pattern — never use Typer option defaults for config-backed values
 - API layer is the privilege boundary: `check_privileges(binary_path)` called here, not in CLI
 
@@ -95,14 +100,15 @@ Every downloaded/imported asset (image, kernel, VM) gets a **full 64-char SHA256
 | Inline default values | `FALLBACK_*` in `constants.py` |
 | Skip failing tests | Fix the test; coverage drop = CI failure |
 | `python -m mvmctl` | Not supported — no `__main__.py` |
+| `as any` / `type: ignore` | Strict mypy — no suppressions allowed |
 
 ## CODE QUALITY GATES
 
 All enforced in CI (`ci.yml`):
 
 ```bash
-uv run ruff check src/         # Must be clean
-uv run ruff format --check src/ # Must be clean
+uv run ruff check src/         # Must be clean (line-length=100, py313, import sorting)
+uv run ruff format --check src/ # Must be clean (double quotes, space indent)
 uv run mypy src/               # Strict mode — no type: ignore allowed
 uv run pytest tests/ -q        # 80% branch coverage minimum
 ```
@@ -129,11 +135,21 @@ pyinstaller --onefile --name mvm src/mvmctl/main.py
 - **Metadata:** `$MVM_CACHE_DIR/metadata.json` — single file for all images, kernels, binaries
 - **Network prefix:** bridge = `mvm-{network_name}` (e.g. `mvm-default`), TAP = `mvm-{net[:3]}-{vm[:3]}-{rand3}`
 - **Env var prefix:** `MVM_` (e.g. `MVM_CACHE_DIR`, `MVM_KERNEL`)
-- **known violation:** `core/kernel.py` uses `console.print` directly (should be in CLI layer)
+- **Known violations:**
+  - `core/kernel.py` — calls `console.print` / `print_warning` directly (CLI-layer output in core)
+  - `core/host_privilege.py:check_privileges_interactive()` — interactive messaging in core
+  - `cli/asset.py` — imports `mvmctl.core.metadata` directly (bypasses api/)
+  - `cli/configure.py` — imports `mvmctl.core.config_state` directly (bypasses api/)
+- **reconcile_networks():** called on every subcommand invocation in `main.py`; errors are swallowed (not user-visible)
+- **Privilege reality:** `api/vms.py` only calls `check_privileges` in `cleanup_vms`, NOT in `create_vm`; `api/network.py` checks in `create_network` + `remove_network`
 
 ## Related AGENTS.md
 
 - `src/mvmctl/core/AGENTS.md` — Core module inventory, state management, subprocess conventions
 - `src/mvmctl/cli/AGENTS.md` — CLI wiring, Typer patterns, command groups
 - `src/mvmctl/api/AGENTS.md` — API layer pattern, privilege boundary
+- `src/mvmctl/models/AGENTS.md` — Domain dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
+- `src/mvmctl/utils/AGENTS.md` — Shared helpers (console, fs, http, process, audit, validation)
 - `tests/AGENTS.md` — Test fixtures, mock conventions, coverage
+- `legacy/single-vm/AGENTS.md` — Archived bash single-VM reference
+- `legacy/multi-vm/AGENTS.md` — Archived bash multi-VM reference
