@@ -67,7 +67,7 @@ def get_config_dir() -> Path:
                 f"must be under $HOME ({home}) or /tmp"
             )
         return resolved
-    return Path.home() / ".config" / PROJECT_NAME
+    return _get_real_home() / ".config" / PROJECT_NAME
 
 
 def get_config_file() -> Path:
@@ -128,3 +128,43 @@ def get_logs_dir() -> Path:
 def get_assets_dir() -> Path:
     """Return the path to the bundled assets directory inside the package."""
     return Path(__file__).parent.parent / "assets"
+
+
+def get_real_user_ids() -> tuple[int, int] | None:
+    """Return (uid, gid) of the real invoking user when running under sudo.
+
+    Returns None if not running as root, or if SUDO_USER is not set / cannot
+    be resolved — in which case no chown is needed.
+    """
+    if os.getuid() != 0:
+        return None
+    sudo_user = os.environ.get("SUDO_USER")
+    if not sudo_user:
+        return None
+    import pwd
+
+    try:
+        pw = pwd.getpwnam(sudo_user)
+        return pw.pw_uid, pw.pw_gid
+    except KeyError:
+        return None
+
+
+def chown_to_real_user(path: Path) -> None:
+    """Recursively chown *path* to the real invoking user when running under sudo.
+
+    This corrects ownership of cache/config files created as root so the
+    non-root user can access them after ``sudo mvm host init``.
+    No-op when not running under sudo or when the path does not exist.
+    """
+    ids = get_real_user_ids()
+    if ids is None or not path.exists():
+        return
+    uid, gid = ids
+    try:
+        os.chown(path, uid, gid)
+        if path.is_dir():
+            for child in path.rglob("*"):
+                os.chown(child, uid, gid)
+    except OSError:
+        pass

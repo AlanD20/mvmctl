@@ -111,9 +111,11 @@ def init_cmd() -> None:
         print_info(f"Or run immediately: newgrp {PROJECT_GROUP}")
 
     from mvmctl.api.network import ensure_default_network
+    from mvmctl.utils.fs import chown_to_real_user, get_networks_dir
 
     try:
         ensure_default_network()
+        chown_to_real_user(get_networks_dir())
         print_success("Default network ready.")
     except MVMError as e:
         print_warning(f"Default network setup skipped: {e}")

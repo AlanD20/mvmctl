@@ -78,6 +78,8 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
         cache_dir: Root cache directory where the snapshot will be written.
         changes: List of host changes to record.
     """
+    from mvmctl.utils.fs import chown_to_real_user
+
     state_dir = _state_dir(cache_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     state = HostState(
@@ -91,6 +93,7 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
     sf = _state_file(cache_dir)
     sf.write_text(json.dumps(data, indent=2) + "\n")
     os.chmod(sf, 0o600)
+    chown_to_real_user(state_dir)
 
 
 def restore_host(cache_dir: Path) -> list[HostChange]:
