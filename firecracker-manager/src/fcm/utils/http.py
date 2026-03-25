@@ -13,7 +13,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from fcm.constants import HTTP_USER_AGENT
-from fcm.exceptions import FCMError, ChecksumMismatchError
+from fcm.exceptions import ChecksumMismatchError, FCMError
 
 logger = logging.getLogger(__name__)
 

@@ -2,12 +2,11 @@
 
 import json
 from pathlib import Path
+from typing import TypedDict
 
 from fcm.models.vm import VMConfig
 from fcm.utils.fs import get_vm_dir
 from fcm.utils.validation import validate_boot_arg_component
-
-from typing import TypedDict
 
 
 class BootSourceConfig(TypedDict):

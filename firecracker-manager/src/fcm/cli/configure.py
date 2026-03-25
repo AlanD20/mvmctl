@@ -7,20 +7,20 @@ from pathlib import Path
 import typer
 
 from fcm.api.assets import (
+    build_kernel_pipeline,
     fetch_binary,
+    fetch_image,
     list_local_versions,
     list_remote_versions,
-    fetch_image,
     load_images_config,
-    build_kernel_pipeline,
 )
+from fcm.api.host import check_kvm_access, get_host_state, init_host
+from fcm.api.keys import add_key, create_key, list_keys
 from fcm.constants import (
     DEFAULT_KERNEL_VERSION,
     KERNEL_TARBALL_URL_TEMPLATE,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
-from fcm.api.host import check_kvm_access, get_host_state, init_host
-from fcm.api.keys import add_key, create_key, list_keys
 from fcm.core.config_state import initialize_default_config
 from fcm.exceptions import BinaryError, FCMError, FCMKeyError, HostError, KernelError
 from fcm.utils.console import console, print_info, print_success, print_warning

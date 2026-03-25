@@ -6,14 +6,11 @@ import logging
 from pathlib import Path
 
 from fcm.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH
-from fcm.exceptions import HostError
-
-from fcm.core.host_state import HostState, HostChange, get_host_state, restore_host, _state_file
 from fcm.core.host_privilege import (
+    _remove_group,
+    _remove_sudoers,
     check_privileges,
     check_privileges_interactive,
-    _remove_sudoers,
-    _remove_group,
 )
 from fcm.core.host_setup import (
     check_kvm_access,
@@ -21,6 +18,8 @@ from fcm.core.host_setup import (
     get_ip_forward_status,
     init_host,
 )
+from fcm.core.host_state import HostChange, HostState, _state_file, get_host_state, restore_host
+from fcm.exceptions import HostError
 
 __all__ = [
     "clean_host",
@@ -81,9 +80,8 @@ def clean_host(cache_dir: Path) -> list[str]:
     Does NOT revert sysctl, remove sudoers, or remove project group.
     Returns list of summary strings.
     """
-    from fcm.core.network_manager import list_networks, remove_network
     from fcm.core.network import teardown_fcm_chains
-
+    from fcm.core.network_manager import list_networks, remove_network
     from fcm.exceptions import NetworkError
 
     summary: list[str] = []

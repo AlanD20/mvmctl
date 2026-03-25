@@ -5,7 +5,6 @@ import json
 import typer
 from rich.table import Table
 
-from fcm.constants import DEFAULT_NETWORK_NAME
 from fcm.api.network import (
     create_network,
     get_iptables_rules_for_bridge,
@@ -14,8 +13,9 @@ from fcm.api.network import (
     list_networks,
     remove_network,
 )
-from fcm.exceptions import NetworkError
 from fcm.cli._helpers import check_name_arg
+from fcm.constants import DEFAULT_NETWORK_NAME
+from fcm.exceptions import NetworkError
 from fcm.utils.console import console, print_error, print_info, print_success
 from fcm.utils.validation import validate_entity_name
 

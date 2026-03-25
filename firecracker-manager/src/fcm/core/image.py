@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 from fcm.constants import HTTP_USER_AGENT
 from fcm.exceptions import ConfigError, ImageError
-from fcm.models.image import ImageSpec, ImageImportSpec
+from fcm.models.image import ImageImportSpec, ImageSpec
 from fcm.utils.http import download_file as _download_file
 
 logger = logging.getLogger(__name__)

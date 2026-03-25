@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, IO
+from typing import IO, Any
 
 logger = logging.getLogger(__name__)
 

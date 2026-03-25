@@ -5,10 +5,10 @@ import typer
 
 from fcm.api.config import (
     dump_config,
-    load_config,
-    validate_config,
     get_config_value,
+    load_config,
     set_config_value,
+    validate_config,
 )
 from fcm.exceptions import FCMError
 from fcm.utils.console import print_error, print_info, print_success

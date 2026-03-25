@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fcm.core.config_gen import ConfigGenerator
 from fcm.constants import (
-    DEFAULT_NETWORK_NAME,
     DEFAULT_FIRECRACKER_BIN_NAME,
+    DEFAULT_NETWORK_NAME,
 )
+from fcm.core.config_gen import ConfigGenerator
 from fcm.models.vm_config_file import VMCreateConfigFile
 
 

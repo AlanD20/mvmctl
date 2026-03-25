@@ -10,21 +10,21 @@ from rich.table import Table
 
 from fcm.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from fcm.api.vms import (
-    list_vms,
+    cleanup_vms,
     create_vm,
+    get_logs,
+    list_vms,
+    load_snapshot,
     remove_vm,
     snapshot_vm,
-    load_snapshot,
     ssh_vm,
-    get_logs,
-    cleanup_vms,
 )
 from fcm.constants import (
     DEFAULT_NETWORK_NAME,
-    DEFAULT_VM_LOG_TYPE,
-    DEFAULT_VM_LOG_LINES,
-    DEFAULT_VM_LOG_FOLLOW,
     DEFAULT_SNAPSHOT_RESUME,
+    DEFAULT_VM_LOG_FOLLOW,
+    DEFAULT_VM_LOG_LINES,
+    DEFAULT_VM_LOG_TYPE,
     FALLBACK_FIRECRACKER_BIN,
 )
 from fcm.exceptions import FCMError

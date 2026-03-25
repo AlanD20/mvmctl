@@ -25,7 +25,6 @@ from fcm.constants import (
 )
 from fcm.exceptions import NetworkError
 
-
 logger = logging.getLogger(__name__)
 
 # Sudo credential cache with TTL (60 seconds)

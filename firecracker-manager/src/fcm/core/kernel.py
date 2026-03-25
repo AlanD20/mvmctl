@@ -378,8 +378,9 @@ def configure_kernel(
             all_present = False
 
     if not all_present:
-        from fcm.utils.console import print_warning, print_info
         import typer
+
+        from fcm.utils.console import print_info, print_warning
 
         print_warning(f"Required kernel settings missing: {', '.join(missing_settings)}")
         if not typer.confirm(
@@ -522,6 +523,7 @@ def build_kernel_pipeline(
 
     if build_dir is None:
         import tempfile
+
         from fcm.constants import PROJECT_NAME
 
         build_id = str(uuid.uuid4())[:8]

@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+from fcm.api.host import check_privileges
 from fcm.core.network import get_iptables_rules_for_bridge
 from fcm.core.network_manager import (
     NetworkConfig,
     NetworkLease,
     allocate_network_ip,
-    create_network as _create_network,
     ensure_default_network,
     get_network,
     get_network_leases,
     inspect_network,
     list_networks,
     release_network_ip,
+)
+from fcm.core.network_manager import (
+    create_network as _create_network,
+)
+from fcm.core.network_manager import (
     remove_network as _remove_network,
 )
-from fcm.api.host import check_privileges
 
 __all__ = [
     "NetworkConfig",

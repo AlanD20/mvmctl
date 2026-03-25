@@ -4,24 +4,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fcm.core.vm_manager import VMManager, get_vm_manager
-from fcm.models.vm import VMInstance, VMState
+from fcm.api.host import check_privileges
+from fcm.constants import (
+    DEFAULT_VM_LOG_FOLLOW,
+    DEFAULT_VM_LOG_LINES,
+    DEFAULT_VM_LOG_TYPE,
+    DEFAULT_VM_SSH_USER,
+    TAP_PREFIX,
+)
+from fcm.core.logs import show_logs
+from fcm.core.ssh import connect_to_vm
 from fcm.core.vm_lifecycle import (
     create_vm,
+    load_snapshot,
     remove_vm,
     snapshot_vm,
-    load_snapshot,
 )
-from fcm.core.ssh import connect_to_vm
-from fcm.core.logs import show_logs
-from fcm.constants import (
-    TAP_PREFIX,
-    DEFAULT_VM_SSH_USER,
-    DEFAULT_VM_LOG_TYPE,
-    DEFAULT_VM_LOG_LINES,
-    DEFAULT_VM_LOG_FOLLOW,
-)
-from fcm.api.host import check_privileges
+from fcm.core.vm_manager import VMManager, get_vm_manager
+from fcm.models.vm import VMInstance, VMState
 
 __all__ = [
     "list_vms",
@@ -107,9 +107,10 @@ def cleanup_vms(
     """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules."""
     check_privileges("/usr/sbin/ip")
     import os
-    import signal
     import shutil
-    from fcm.core.network import remove_iptables_forward_rules, delete_tap
+    import signal
+
+    from fcm.core.network import delete_tap, remove_iptables_forward_rules
     from fcm.exceptions import NetworkError
 
     manager = vm_manager or get_vm_manager()

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from fcm.constants import (
+    DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
-    DEFAULT_VM_VCPU_COUNT,
     DEFAULT_VM_MEM_MIB,
     DEFAULT_VM_SSH_USER,
-    DEFAULT_FIRECRACKER_BIN_NAME,
+    DEFAULT_VM_VCPU_COUNT,
 )
 
 

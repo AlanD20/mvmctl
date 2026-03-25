@@ -8,7 +8,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, IO
+from typing import IO, Any
 
 from fcm.models.vm import VMInstance, VMState
 from fcm.utils.fs import get_vms_dir

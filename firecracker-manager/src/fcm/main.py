@@ -13,7 +13,7 @@ import click
 import typer
 import typer.models
 
-from fcm.constants import CLI_NAME, _BOOTSTRAP_NAME, env_var
+from fcm.constants import _BOOTSTRAP_NAME, CLI_NAME, env_var
 
 
 def _get_version() -> str:

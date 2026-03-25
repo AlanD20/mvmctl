@@ -2,23 +2,23 @@
 
 import json
 import shutil
-
-import typer
 from pathlib import Path
 from typing import List, Optional
 
+import typer
+
 from fcm.api.assets import (
     BinaryVersion,
+    ImageImportSpec,
+    build_kernel_pipeline,
     fetch_binary,
     fetch_image,
     import_image,
-    ImageImportSpec,
     list_local_versions,
     list_remote_versions,
     load_images_config,
     remove_version,
     set_active_version,
-    build_kernel_pipeline,
 )
 from fcm.constants import (
     DEFAULT_FC_KERNEL_ARCH,
@@ -33,10 +33,10 @@ from fcm.constants import (
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from fcm.core.metadata import (
-    get_image_entry,
-    update_image_entry,
     find_images_by_short_id,
+    get_image_entry,
     remove_image_entry,
+    update_image_entry,
 )
 from fcm.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
 from fcm.utils.console import print_error, print_info, print_success, print_table, print_warning
@@ -350,8 +350,8 @@ def image_ls(
     default_img = _get_default_image()
     yaml_ids = {img.id for img in images}
 
-    from fcm.core.metadata import list_image_entries as _list_img_entries
     from fcm.core.kernel import human_readable_time as _hrt
+    from fcm.core.metadata import list_image_entries as _list_img_entries
     from fcm.utils.fs import get_cache_dir as _get_cache_dir
 
     _all_meta = _list_img_entries(_get_cache_dir())

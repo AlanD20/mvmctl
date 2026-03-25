@@ -1,25 +1,26 @@
 """Configuration loading and validation."""
 
-import yaml
-from pathlib import Path
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 from typing import Any
 
+import yaml
+
 from fcm.constants import (
-    DEFAULT_BRIDGE_NAME,
     CLI_NAME,
+    DEFAULT_BRIDGE_NAME,
+    DEFAULT_FIRECRACKER_BINARY_PATH,
+    DEFAULT_NETWORK_BRIDGE_IP,
     DEFAULT_NETWORK_CIDR,
-    DEFAULT_VM_VCPU_COUNT,
-    DEFAULT_VM_MEM_MIB,
-    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_BOOT_ARGS,
+    DEFAULT_VM_DISK_SIZE,
     DEFAULT_VM_ENABLE_API_SOCKET,
     DEFAULT_VM_ENABLE_PCI,
     DEFAULT_VM_LSM_FLAGS,
+    DEFAULT_VM_MEM_MIB,
     DEFAULT_VM_NETWORK_INTERFACE,
-    DEFAULT_VM_BOOT_ARGS,
-    DEFAULT_VM_DISK_SIZE,
-    DEFAULT_FIRECRACKER_BINARY_PATH,
-    DEFAULT_NETWORK_BRIDGE_IP,
+    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_VCPU_COUNT,
 )
 
 

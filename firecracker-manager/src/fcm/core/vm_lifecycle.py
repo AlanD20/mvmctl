@@ -2,8 +2,10 @@ import fcntl
 import hashlib
 import logging
 import os
+import random
 import shutil
 import signal
+import string
 import subprocess
 import threading
 import time
@@ -11,7 +13,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO
 
-from fcm.core.cloud_init import write_cloud_init, inject_cloud_init
+from fcm.constants import (
+    BRIDGE_NAME,
+    CLI_NAME,
+    DEFAULT_FIRECRACKER_BIN_NAME,
+    DEFAULT_NETWORK_NAME,
+    DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_PCI,
+    DEFAULT_VM_KERNEL_FILENAME,
+    DEFAULT_VM_MEM_MIB,
+    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_VCPU_COUNT,
+    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+    FIRECRACKER_SIGTERM_WAIT_S,
+    MAX_VMS,
+    SUPPORTED_IMAGE_EXTENSIONS,
+)
+from fcm.core.cloud_init import inject_cloud_init, write_cloud_init
 from fcm.core.config_gen import ConfigGenerator
 from fcm.core.firecracker import FirecrackerClient, get_vm_socket_path
 from fcm.core.network import (
@@ -33,28 +51,9 @@ from fcm.core.network_manager import (
 )
 from fcm.core.ssh import resolve_ssh_key
 from fcm.core.vm_manager import VMManager, get_vm_manager
-from fcm.exceptions import NetworkError, FCMError, VMNotFoundError
+from fcm.exceptions import FCMError, NetworkError, VMNotFoundError
 from fcm.models.vm import VMConfig, VMInstance, VMState
-from fcm.utils.fs import get_kernels_dir, get_images_dir, get_vm_dir
-import random
-import string
-
-from fcm.constants import (
-    BRIDGE_NAME,
-    DEFAULT_NETWORK_NAME,
-    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
-    FIRECRACKER_SIGTERM_WAIT_S,
-    MAX_VMS,
-    CLI_NAME,
-    DEFAULT_VM_VCPU_COUNT,
-    DEFAULT_VM_MEM_MIB,
-    DEFAULT_VM_SSH_USER,
-    DEFAULT_VM_ENABLE_API_SOCKET,
-    DEFAULT_VM_ENABLE_PCI,
-    DEFAULT_FIRECRACKER_BIN_NAME,
-    DEFAULT_VM_KERNEL_FILENAME,
-    SUPPORTED_IMAGE_EXTENSIONS,
-)
+from fcm.utils.fs import get_images_dir, get_kernels_dir, get_vm_dir
 
 
 def _resolve_image_path(image: str) -> Path:
@@ -272,8 +271,9 @@ def create_vm(
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
     vm_manager: VMManager | None = None,
 ) -> VMInstance:
-    import re
     import ipaddress as _ipaddress
+    import re
+
     from fcm.utils.validation import validate_entity_name
 
     validate_entity_name(name, "VM")
