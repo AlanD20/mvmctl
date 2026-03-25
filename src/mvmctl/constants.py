@@ -126,9 +126,14 @@ FIRECRACKER_CI_KERNEL_S3_BASE: Final[str] = _require_str(
     ("urls", "firecracker_ci_kernel", "s3_base")
 )
 
-# S3 listing URL template; fill in {ci_version} and {arch}.
+# S3 listing URL template for kernels; fill in {ci_version} and {arch}.
 FIRECRACKER_CI_KERNEL_LIST_URL: Final[str] = _require_str(
     ("urls", "firecracker_ci_kernel", "list_url_template")
+)
+
+# S3 listing URL template for Firecracker CI Ubuntu images; fill in {ci_version} and {arch}.
+FIRECRACKER_CI_IMAGE_LIST_URL: Final[str] = _require_str(
+    ("urls", "firecracker_ci_image", "list_url_template")
 )
 
 # Firecracker microvm kernel config URL template. The {major_minor} placeholder

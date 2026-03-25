@@ -17,7 +17,7 @@ from mvmctl.core.image import (
     _handle_raw,
     _handle_squashfs,
     _handle_tar_rootfs,
-    _resolve_ubuntu_fc_source,
+    _resolve_source_template,
     convert_qcow2_to_raw,
     create_ext4_from_tar,
     download_file,
@@ -317,7 +317,7 @@ def test_create_ext4_from_tar_failure(mock_run: MagicMock, tmp_path: Path):
     tar = tmp_path / "rootfs.tar"
     output = tmp_path / "rootfs.ext4"
     with pytest.raises(ImageError):
-        create_ext4_from_tar(tar, output)
+        create_ext4_from_tar(tar, output, size="2G")
 
 
 # ---------------------------------------------------------------------------
@@ -1035,8 +1035,14 @@ def test_fetch_image_raw_extract_fails(
     assert result is None
 
 
-def test_fetch_image_without_checksum_passes_none_to_download(
-    tmp_path: Path, mocker: MockerFixture
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_sha256_null_skips_verification(
+    mock_download: MagicMock,
+    mock_convert: MagicMock,
+    mock_extract: MagicMock,
+    tmp_path: Path,
 ):
     spec = ImageSpec(
         id="test-image",
@@ -1046,13 +1052,20 @@ def test_fetch_image_without_checksum_passes_none_to_download(
         convert_to="ext4",
         size_mib=2048,
         sha256=None,
+        sha256_url="https://example.com/image.sha256",
     )
-    mock_download = mocker.patch("mvmctl.core.image.download_file")
+    expected_output = tmp_path / "test-image.ext4"
+    mock_download.return_value = True
+    mock_convert.return_value = True
+    mock_extract.return_value = expected_output
 
-    with pytest.raises(ImageError, match="Checksum required"):
-        fetch_image(spec, tmp_path)
+    result = fetch_image(spec, tmp_path, force=True)
 
-    mock_download.assert_not_called()
+    assert result == expected_output
+    mock_download.assert_called_once()
+    call_kwargs = mock_download.call_args.kwargs
+    assert call_kwargs["expected_sha256"] is None
+    assert call_kwargs["allow_missing_checksum"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -1144,7 +1157,7 @@ def test_handle_qcow2_success(mock_convert: MagicMock, mock_extract: MagicMock, 
     mock_convert.return_value = True
     mock_extract.return_value = expected_output
 
-    result = _handle_qcow2(download_path, final_path)
+    result = _handle_qcow2(download_path, final_path, 4096)
 
     assert result == expected_output
     mock_convert.assert_called_once()
@@ -1160,7 +1173,7 @@ def test_handle_tar_rootfs(mock_run: MagicMock, tmp_path: Path):
     download_path.write_bytes(b"tar data")
     mock_run.return_value = MagicMock(returncode=0)
 
-    result = _handle_tar_rootfs(download_path, final_path)
+    result = _handle_tar_rootfs(download_path, final_path, 2048)
 
     assert result == final_path
 
@@ -1175,7 +1188,7 @@ def test_handle_raw(mock_extract: MagicMock, tmp_path: Path):
     download_path.write_bytes(b"raw data")
     mock_extract.return_value = expected_output
 
-    result = _handle_raw(download_path, final_path)
+    result = _handle_raw(download_path, final_path, 2048)
 
     assert result == expected_output
     mock_extract.assert_called_once()
@@ -1195,9 +1208,24 @@ def test_handle_squashfs_success(mock_run: MagicMock, tmp_path: Path):
     download_path.write_bytes(b"squashfs data")
     mock_run.return_value = MagicMock(returncode=0)
 
-    result = _handle_squashfs(download_path, final_path)
+    result = _handle_squashfs(download_path, final_path, 1024)
 
     assert result == final_path
+
+
+@patch("mvmctl.core.image.subprocess.run")
+def test_handle_squashfs_uses_size_mib(mock_run: MagicMock, tmp_path: Path):
+    download_path = tmp_path / "image.squashfs"
+    final_path = tmp_path / "image.ext4"
+    download_path.write_bytes(b"squashfs data")
+    mock_run.return_value = MagicMock(returncode=0)
+
+    _handle_squashfs(download_path, final_path, 2048)
+
+    truncate_call = next(
+        call for call in mock_run.call_args_list if call[0][0][0] == "truncate"
+    )
+    assert "2048M" in truncate_call[0][0]
 
 
 @patch("mvmctl.core.image.subprocess.run")
@@ -1218,7 +1246,7 @@ def test_handle_squashfs_unsquashfs_failure(mock_run: MagicMock, tmp_path: Path)
     mock_run.side_effect = side_effect
 
     with pytest.raises(ImageError, match="unsquashfs failed"):
-        _handle_squashfs(download_path, final_path)
+        _handle_squashfs(download_path, final_path, 1024)
 
 
 @patch("mvmctl.core.image.subprocess.run")
@@ -1239,7 +1267,7 @@ def test_handle_squashfs_unsquashfs_not_found(mock_run: MagicMock, tmp_path: Pat
     mock_run.side_effect = side_effect
 
     with pytest.raises(ImageError, match="unsquashfs not found"):
-        _handle_squashfs(download_path, final_path)
+        _handle_squashfs(download_path, final_path, 1024)
 
 
 @patch("mvmctl.core.image.subprocess.run")
@@ -1260,21 +1288,21 @@ def test_handle_squashfs_mkfs_failure(mock_run: MagicMock, tmp_path: Path):
     mock_run.side_effect = side_effect
 
     with pytest.raises(ImageError, match="Failed to create ext4 from squashfs"):
-        _handle_squashfs(download_path, final_path)
+        _handle_squashfs(download_path, final_path, 1024)
 
 
 # ---------------------------------------------------------------------------
-# _resolve_ubuntu_fc_source
+# _resolve_source_template
 # ---------------------------------------------------------------------------
 
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
 @patch("mvmctl.core.config_state.get_firecracker_config")
-def test_resolve_ubuntu_fc_source_success(
+def test_resolve_source_template_success(
     mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
-    """Test _resolve_ubuntu_fc_source successfully resolves S3 URL."""
+    """Test _resolve_source_template successfully resolves S3 URL."""
     mock_get_config.return_value = {"ci_version": "v1.15"}
 
     mock_response = MagicMock()
@@ -1300,7 +1328,7 @@ def test_resolve_ubuntu_fc_source_success(
         size_mib=2048,
     )
 
-    result = _resolve_ubuntu_fc_source(spec)
+    result = _resolve_source_template(spec)
 
     assert "ubuntu-24.04.squashfs" in result
     assert "s3.amazonaws.com" in result
@@ -1309,10 +1337,10 @@ def test_resolve_ubuntu_fc_source_success(
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
 @patch("mvmctl.core.config_state.get_firecracker_config")
-def test_resolve_ubuntu_fc_source_uses_default_version(
+def test_resolve_source_template_uses_default_version(
     mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
-    """Test _resolve_ubuntu_fc_source uses default version when config fails."""
+    """Test _resolve_source_template uses default version when config fails."""
     mock_get_config.side_effect = Exception("config error")
 
     mock_response = MagicMock()
@@ -1336,7 +1364,7 @@ def test_resolve_ubuntu_fc_source_uses_default_version(
         size_mib=2048,
     )
 
-    result = _resolve_ubuntu_fc_source(spec)
+    result = _resolve_source_template(spec)
 
     assert "ubuntu-22.04.squashfs" in result
 
@@ -1344,10 +1372,10 @@ def test_resolve_ubuntu_fc_source_uses_default_version(
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
 @patch("mvmctl.core.config_state.get_firecracker_config")
-def test_resolve_ubuntu_fc_source_network_error(
+def test_resolve_source_template_network_error(
     mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
-    """Test _resolve_ubuntu_fc_source raises ImageError on network failure."""
+    """Test _resolve_source_template raises ImageError on network failure."""
     mock_get_config.return_value = {"ci_version": "v1.15"}
     mock_urlopen.side_effect = URLError("Connection failed")
 
@@ -1361,7 +1389,7 @@ def test_resolve_ubuntu_fc_source_network_error(
     )
 
     with pytest.raises(ImageError, match="Failed to list Firecracker CI ubuntu images") as exc_info:
-        _resolve_ubuntu_fc_source(spec)
+        _resolve_source_template(spec)
 
     error_str = str(exc_info.value)
     assert "Connection failed" not in error_str
@@ -1370,10 +1398,10 @@ def test_resolve_ubuntu_fc_source_network_error(
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
 @patch("mvmctl.core.config_state.get_firecracker_config")
-def test_resolve_ubuntu_fc_source_no_matching_keys(
+def test_resolve_source_template_no_matching_keys(
     mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
-    """Test _resolve_ubuntu_fc_source raises ImageError when no images found."""
+    """Test _resolve_source_template raises ImageError when no images found."""
     mock_get_config.return_value = {"ci_version": "v1.15"}
 
     mock_response = MagicMock()
@@ -1397,7 +1425,7 @@ def test_resolve_ubuntu_fc_source_no_matching_keys(
     )
 
     with pytest.raises(ImageError, match="No ubuntu squashfs found"):
-        _resolve_ubuntu_fc_source(spec)
+        _resolve_source_template(spec)
 
 
 # ---------------------------------------------------------------------------
@@ -1408,15 +1436,12 @@ def test_resolve_ubuntu_fc_source_no_matching_keys(
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
 @patch("mvmctl.core.image.download_file")
-@patch("mvmctl.core.image.urlopen")
-def test_fetch_image_with_sha256_url(
-    mock_urlopen: MagicMock,
+def test_fetch_image_sha256_url_ignored_when_sha256_null(
     mock_download: MagicMock,
     mock_convert: MagicMock,
     mock_extract: MagicMock,
     tmp_path: Path,
 ):
-    """Test fetch_image resolves sha256 from sha256_url."""
     spec = ImageSpec(
         id="test-image",
         name="Test Image",
@@ -1427,13 +1452,7 @@ def test_fetch_image_with_sha256_url(
         sha256=None,
         sha256_url="https://example.com/image.qcow2.sha256",
     )
-
     expected_output = tmp_path / "test-image.ext4"
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = b"a" * 64 + b" *image.qcow2\n"
-    mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-    mock_resp.__exit__ = MagicMock(return_value=False)
-    mock_urlopen.return_value = mock_resp
     mock_download.return_value = True
     mock_convert.return_value = True
     mock_extract.return_value = expected_output
@@ -1442,87 +1461,14 @@ def test_fetch_image_with_sha256_url(
 
     assert result == expected_output
     mock_download.assert_called_once()
-    assert mock_download.call_args.kwargs["expected_sha256"] == "a" * 64
+    call_kwargs = mock_download.call_args.kwargs
+    assert call_kwargs["expected_sha256"] is None
+    assert call_kwargs["allow_missing_checksum"] is True
 
 
-@patch("mvmctl.core.image.extract_partition_from_raw")
-@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image._resolve_source_template")
 @patch("mvmctl.core.image.download_file")
-@patch("mvmctl.core.image.urlopen")
-def test_fetch_image_sha256_url_simple_format(
-    mock_urlopen: MagicMock,
-    mock_download: MagicMock,
-    mock_convert: MagicMock,
-    mock_extract: MagicMock,
-    tmp_path: Path,
-):
-    """Test fetch_image handles simple sha256 format (just hash)."""
-    spec = ImageSpec(
-        id="test-image",
-        name="Test Image",
-        source="https://example.com/image.qcow2",
-        format="qcow2",
-        convert_to="ext4",
-        size_mib=2048,
-        sha256=None,
-        sha256_url="https://example.com/checksum",
-    )
-
-    expected_output = tmp_path / "test-image.ext4"
-    full_hash = "a" * 64
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = full_hash.encode()
-    mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-    mock_resp.__exit__ = MagicMock(return_value=False)
-    mock_urlopen.return_value = mock_resp
-    mock_download.return_value = True
-    mock_convert.return_value = True
-    mock_extract.return_value = expected_output
-
-    result = fetch_image(spec, tmp_path, force=True)
-
-    assert result == expected_output
-    assert mock_download.call_args.kwargs["expected_sha256"] == full_hash
-
-
-@patch("mvmctl.core.image.extract_partition_from_raw")
-@patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
-@patch("mvmctl.core.image.urlopen")
-def test_fetch_image_sha256_url_download_fails(
-    mock_urlopen: MagicMock,
-    mock_download: MagicMock,
-    mock_convert: MagicMock,
-    mock_extract: MagicMock,
-    tmp_path: Path,
-):
-    """Test fetch_image handles sha256_url download failure gracefully."""
-    spec = ImageSpec(
-        id="test-image",
-        name="Test Image",
-        source="https://example.com/image.qcow2",
-        format="qcow2",
-        convert_to="ext4",
-        size_mib=2048,
-        sha256=None,
-        sha256_url="https://example.com/checksum",
-    )
-
-    mock_urlopen.side_effect = URLError("Checksum download failed")
-
-    with pytest.raises(ImageError, match="Failed to fetch checksum"):
-        fetch_image(spec, tmp_path, force=True)
-
-    mock_download.assert_not_called()
-    mock_convert.assert_not_called()
-    mock_extract.assert_not_called()
-
-
-@patch("mvmctl.core.image._resolve_ubuntu_fc_source")
-@patch("mvmctl.core.image.download_file")
-@patch("mvmctl.core.image.urlopen")
-def test_fetch_image_ubuntu_fc_fetches_sidecar_checksum(
-    mock_urlopen: MagicMock,
+def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
     mock_download: MagicMock,
     mock_resolve: MagicMock,
     tmp_path: Path,
@@ -1530,10 +1476,10 @@ def test_fetch_image_ubuntu_fc_fetches_sidecar_checksum(
     spec = ImageSpec(
         id="ubuntu-fc",
         name="Ubuntu FC",
-        source="",
+        source="https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu_version}.squashfs",
         format="squashfs",
         convert_to="ext4",
-        size_mib=2048,
+        size_mib=1024,
         sha256=None,
         sha256_url=None,
     )
@@ -1543,27 +1489,23 @@ def test_fetch_image_ubuntu_fc_fetches_sidecar_checksum(
         "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/x86_64/ubuntu-24.04.squashfs"
     )
     mock_resolve.return_value = resolved_url
-
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = b"b" * 64 + b"  ubuntu-24.04.squashfs\n"
-    mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-    mock_resp.__exit__ = MagicMock(return_value=False)
-    mock_urlopen.return_value = mock_resp
     mock_download.return_value = True
 
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s: expected_output
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
         assert result == expected_output
-        assert mock_download.call_args.kwargs["expected_sha256"] == "b" * 64
+        call_kwargs = mock_download.call_args.kwargs
+        assert call_kwargs["expected_sha256"] is None
+        assert call_kwargs["allow_missing_checksum"] is True
     finally:
         mvmctl.core.image._FORMAT_HANDLERS.clear()
         mvmctl.core.image._FORMAT_HANDLERS.update(original_handlers)
 
 
-@patch("mvmctl.core.image._resolve_ubuntu_fc_source")
+@patch("mvmctl.core.image._resolve_source_template")
 @patch("mvmctl.core.image.download_file")
 def test_fetch_image_ubuntu_fc_resolves_source(
     mock_download: MagicMock,
@@ -1574,7 +1516,7 @@ def test_fetch_image_ubuntu_fc_resolves_source(
     spec = ImageSpec(
         id="ubuntu-fc",
         name="Ubuntu FC",
-        source="",  # Empty source, should be resolved
+        source="https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu_version}.squashfs",
         format="squashfs",
         convert_to="ext4",
         size_mib=2048,
@@ -1591,14 +1533,13 @@ def test_fetch_image_ubuntu_fc_resolves_source(
 
     # Patch _FORMAT_HANDLERS to return our mock handler
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s: expected_output
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
         assert result == expected_output
         mock_resolve.assert_called_once()
         mock_download.assert_called_once()
-        # Verify download was called with resolved URL
         call_args = mock_download.call_args
         assert call_args[0][0] == resolved_url
     finally:
@@ -1920,9 +1861,8 @@ def test_fetch_image_squashfs_format(mock_download: MagicMock, tmp_path: Path):
     expected_output = tmp_path / "test-squashfs.ext4"
     mock_download.return_value = True
 
-    # Patch _FORMAT_HANDLERS to return our mock handler
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s: expected_output
 
     try:
         result = fetch_image(spec, tmp_path, force=True)

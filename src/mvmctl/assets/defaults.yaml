@@ -93,6 +93,8 @@ urls:
   firecracker_ci_kernel:
     s3_base: "https://s3.amazonaws.com/spec.ccfc.min"
     list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-&list-type=2"
+  firecracker_ci_image:
+    list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2"
   firecracker_kernel:
     config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-x86_64-{major_minor}.config"
   kernel:
