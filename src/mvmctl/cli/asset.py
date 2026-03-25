@@ -507,8 +507,14 @@ def _get_default_image() -> str | None:
 
 @image_app.command(name="fetch")
 def image_fetch(
-    image_id: str = typer.Argument(
-        ..., help="Image ID from 'mvm image ls --remote' (e.g. ubuntu-24.04)"
+    image_selector: str = typer.Argument(
+        ...,
+        help="Image ID or image type from 'mvm image ls --remote' (e.g. ubuntu-24.04 or ubuntu)",
+    ),
+    version: Optional[str] = typer.Option(
+        None,
+        "--version",
+        help="Image spec version from images.yaml (required if multiple images share the same type)",
     ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
@@ -522,11 +528,39 @@ def image_fetch(
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
 
-    spec = next((img for img in images if img.id == image_id), None)
+    spec = next((img for img in images if img.id == image_selector), None)
     if spec is None:
-        available = ", ".join(img.id for img in images)
-        print_error(f"Image '{image_id}' not found. Available: {available}")
-        raise typer.Exit(code=1)
+        type_matches = [img for img in images if img.image_type == image_selector]
+        if not type_matches:
+            available = ", ".join(img.id for img in images)
+            print_error(f"Image '{image_selector}' not found. Available: {available}")
+            raise typer.Exit(code=1)
+
+        if version is not None:
+            version_matches = [img for img in type_matches if img.version == version]
+            if len(version_matches) == 1:
+                spec = version_matches[0]
+            elif len(version_matches) > 1:
+                ids = ", ".join(img.id for img in version_matches)
+                print_error(
+                    f"Multiple '{image_selector}' images with version '{version}' found: {ids}"
+                )
+                raise typer.Exit(code=1)
+            else:
+                versions = ", ".join(sorted({img.version for img in type_matches}))
+                print_error(
+                    f"No '{image_selector}' image with version '{version}'. Available: {versions}"
+                )
+                raise typer.Exit(code=1)
+        else:
+            if len(type_matches) == 1:
+                spec = type_matches[0]
+            else:
+                versions = ", ".join(sorted({img.version for img in type_matches}))
+                print_error(
+                    f"Multiple '{image_selector}' images found. Provide --version. Available: {versions}"
+                )
+                raise typer.Exit(code=1)
 
     # Check if image already exists locally
     if not force:

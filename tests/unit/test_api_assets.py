@@ -9,13 +9,13 @@ from pytest_mock import MockerFixture
 
 from mvmctl.api.assets import (
     AssetInfo,
-    setup_assets,
-    pull_kernel,
-    pull_image,
     fetch_images_parallel,
-    pull_images,
     list_assets,
+    pull_image,
+    pull_images,
+    pull_kernel,
     remove_asset,
+    setup_assets,
 )
 from mvmctl.core.binary_manager import BinaryVersion
 from mvmctl.exceptions import AssetNotFoundError, ConfigError, ImageError
@@ -270,6 +270,8 @@ def test_fetch_images_parallel_success(tmp_path: Path, mocker: MockerFixture):
     specs = [
         ImageSpec(
             id="img1",
+            image_type="test",
+            version="test",
             name="Image 1",
             source="http://x/1.qcow2",
             format="qcow2",
@@ -278,6 +280,8 @@ def test_fetch_images_parallel_success(tmp_path: Path, mocker: MockerFixture):
         ),
         ImageSpec(
             id="img2",
+            image_type="test",
+            version="test",
             name="Image 2",
             source="http://x/2.qcow2",
             format="qcow2",
@@ -303,6 +307,8 @@ def test_fetch_images_parallel_with_force(tmp_path: Path, mocker: MockerFixture)
     specs = [
         ImageSpec(
             id="img1",
+            image_type="test",
+            version="test",
             name="Image 1",
             source="http://x/1.qcow2",
             format="qcow2",
@@ -329,6 +335,8 @@ def test_fetch_images_parallel_custom_workers(tmp_path: Path, mocker: MockerFixt
     specs = [
         ImageSpec(
             id=f"img{i}",
+            image_type="test",
+            version="test",
             name=f"Image {i}",
             source=f"http://x/{i}.qcow2",
             format="qcow2",
@@ -351,6 +359,8 @@ def test_fetch_images_parallel_failure(tmp_path: Path, mocker: MockerFixture):
     specs = [
         ImageSpec(
             id="img1",
+            image_type="test",
+            version="test",
             name="Image 1",
             source="http://x/1.qcow2",
             format="qcow2",
@@ -359,6 +369,8 @@ def test_fetch_images_parallel_failure(tmp_path: Path, mocker: MockerFixture):
         ),
         ImageSpec(
             id="img2",
+            image_type="test",
+            version="test",
             name="Image 2",
             source="http://x/2.qcow2",
             format="qcow2",
@@ -385,6 +397,8 @@ def test_fetch_images_parallel_multiple_failures(tmp_path: Path, mocker: MockerF
     specs = [
         ImageSpec(
             id="img1",
+            image_type="test",
+            version="test",
             name="Image 1",
             source="http://x/1.qcow2",
             format="qcow2",
@@ -393,6 +407,8 @@ def test_fetch_images_parallel_multiple_failures(tmp_path: Path, mocker: MockerF
         ),
         ImageSpec(
             id="img2",
+            image_type="test",
+            version="test",
             name="Image 2",
             source="http://x/2.qcow2",
             format="qcow2",
@@ -636,6 +652,8 @@ def test_list_assets_images(
 
     spec = ImageSpec(
         id="ubuntu-24.04",
+        image_type="test",
+        version="test",
         name="Ubuntu 24.04",
         source="http://x/qcow2",
         format="qcow2",
@@ -679,6 +697,8 @@ def test_list_assets_missing_image(
 
     spec = ImageSpec(
         id="missing-img",
+        image_type="test",
+        version="test",
         name="Missing Image",
         source="http://x/qcow2",
         format="qcow2",

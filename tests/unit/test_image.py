@@ -27,8 +27,7 @@ from mvmctl.core.image import (
     load_images_config,
 )
 from mvmctl.exceptions import ChecksumMismatchError, ConfigError, ImageError, MVMError
-from mvmctl.models.image import ImageSpec, ImageImportSpec
-
+from mvmctl.models.image import ImageImportSpec, ImageSpec
 
 # ---------------------------------------------------------------------------
 # load_images_config
@@ -328,6 +327,8 @@ def test_create_ext4_from_tar_failure(mock_run: MagicMock, tmp_path: Path):
 def test_fetch_image_already_exists(tmp_path: Path):
     spec = ImageSpec(
         id="ubuntu-24.04",
+        image_type="test",
+        version="test",
         name="Ubuntu 24.04",
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
@@ -355,6 +356,8 @@ def test_fetch_image_qcow2(
 ):
     spec = ImageSpec(
         id="ubuntu-24.04",
+        image_type="test",
+        version="test",
         name="Ubuntu 24.04",
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
@@ -808,6 +811,8 @@ def test_fetch_image_tar_rootfs(
 ):
     spec = ImageSpec(
         id="alpine",
+        image_type="test",
+        version="test",
         name="Alpine Linux",
         source="https://example.com/alpine.tar.gz",
         format="tar-rootfs",
@@ -836,6 +841,8 @@ def test_fetch_image_tar_rootfs_failure(
 ):
     spec = ImageSpec(
         id="alpine",
+        image_type="test",
+        version="test",
         name="Alpine Linux",
         source="https://example.com/alpine.tar.gz",
         format="tar-rootfs",
@@ -862,6 +869,8 @@ def test_fetch_image_force_re_download(
 ):
     spec = ImageSpec(
         id="ubuntu-24.04",
+        image_type="test",
+        version="test",
         name="Ubuntu 24.04",
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
@@ -891,6 +900,8 @@ def test_fetch_image_download_failure(
 ):
     spec = ImageSpec(
         id="ubuntu-24.04",
+        image_type="test",
+        version="test",
         name="Ubuntu 24.04",
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
@@ -914,6 +925,8 @@ def test_fetch_image_raw_format(
 ):
     spec = ImageSpec(
         id="custom-image",
+        image_type="test",
+        version="test",
         name="Custom Image",
         source="https://example.com/image.raw",
         format="raw",
@@ -940,6 +953,8 @@ def test_fetch_image_unknown_format(
 ):
     spec = ImageSpec(
         id="unknown",
+        image_type="test",
+        version="test",
         name="Unknown Format",
         source="https://example.com/image.xyz",
         format="xyz",
@@ -965,6 +980,8 @@ def test_fetch_image_qcow2_convert_fails(
 ):
     spec = ImageSpec(
         id="ubuntu-24.04",
+        image_type="test",
+        version="test",
         name="Ubuntu 24.04",
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
@@ -993,6 +1010,8 @@ def test_fetch_image_qcow2_extract_fails(
 ):
     spec = ImageSpec(
         id="ubuntu-24.04",
+        image_type="test",
+        version="test",
         name="Ubuntu 24.04",
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
@@ -1019,6 +1038,8 @@ def test_fetch_image_raw_extract_fails(
 ):
     spec = ImageSpec(
         id="custom-image",
+        image_type="test",
+        version="test",
         name="Custom Image",
         source="https://example.com/image.raw",
         format="raw",
@@ -1046,6 +1067,8 @@ def test_fetch_image_sha256_null_skips_verification(
 ):
     spec = ImageSpec(
         id="test-image",
+        image_type="test",
+        version="test",
         name="Test",
         source="https://example.com/image.qcow2",
         format="qcow2",
@@ -1321,6 +1344,8 @@ def test_resolve_source_template_success(
 
     spec = ImageSpec(
         id="ubuntu-fc",
+        image_type="test",
+        version="test",
         name="Ubuntu FC",
         source="",
         format="squashfs",
@@ -1357,6 +1382,8 @@ def test_resolve_source_template_uses_default_version(
 
     spec = ImageSpec(
         id="ubuntu-fc",
+        image_type="test",
+        version="test",
         name="Ubuntu FC",
         source="",
         format="squashfs",
@@ -1381,6 +1408,8 @@ def test_resolve_source_template_network_error(
 
     spec = ImageSpec(
         id="ubuntu-fc",
+        image_type="test",
+        version="test",
         name="Ubuntu FC",
         source="",
         format="squashfs",
@@ -1417,6 +1446,8 @@ def test_resolve_source_template_no_matching_keys(
 
     spec = ImageSpec(
         id="ubuntu-fc",
+        image_type="test",
+        version="test",
         name="Ubuntu FC",
         source="",
         format="squashfs",
@@ -1444,6 +1475,8 @@ def test_fetch_image_sha256_url_ignored_when_sha256_null(
 ):
     spec = ImageSpec(
         id="test-image",
+        image_type="test",
+        version="test",
         name="Test Image",
         source="https://example.com/image.qcow2",
         format="qcow2",
@@ -1475,6 +1508,8 @@ def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
 ):
     spec = ImageSpec(
         id="ubuntu-fc",
+        image_type="test",
+        version="test",
         name="Ubuntu FC",
         source="https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu_version}.squashfs",
         format="squashfs",
@@ -1515,6 +1550,8 @@ def test_fetch_image_ubuntu_fc_resolves_source(
     """Test fetch_image resolves ubuntu-fc source dynamically."""
     spec = ImageSpec(
         id="ubuntu-fc",
+        image_type="test",
+        version="test",
         name="Ubuntu FC",
         source="https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu_version}.squashfs",
         format="squashfs",
@@ -1850,6 +1887,8 @@ def test_fetch_image_squashfs_format(mock_download: MagicMock, tmp_path: Path):
     """Test fetch_image handles squashfs format."""
     spec = ImageSpec(
         id="test-squashfs",
+        image_type="test",
+        version="test",
         name="Test Squashfs",
         source="https://example.com/image.squashfs",
         format="squashfs",

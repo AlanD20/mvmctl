@@ -21,6 +21,8 @@ click_runner = ClickCliRunner()
 _FAKE_IMAGES = [
     ImageSpec(
         id="ubuntu-24.04",
+        image_type="ubuntu",
+        version="24.04",
         name="Ubuntu 24.04 LTS",
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
@@ -30,6 +32,8 @@ _FAKE_IMAGES = [
     ),
     ImageSpec(
         id="debian-12",
+        image_type="debian",
+        version="12",
         name="Debian 12",
         source="https://example.com/debian.qcow2",
         format="qcow2",
@@ -378,6 +382,78 @@ def test_image_fetch_success(mock_config: MagicMock, mock_fetch: MagicMock, tmp_
 def test_image_fetch_not_found(mock_config: MagicMock):
     result = click_runner.invoke(main_app, ["image", "fetch", "nonexistent"])
     assert result.exit_code == 1
+
+
+@patch("mvmctl.cli.asset.fetch_image")
+@patch("mvmctl.cli.asset.load_images_config")
+def test_image_fetch_by_type_and_version(
+    mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path
+):
+    mock_config.return_value = [
+        ImageSpec(
+            id="ubuntu-22.04",
+            image_type="ubuntu",
+            version="22.04",
+            name="Ubuntu 22.04 LTS",
+            source="https://example.com/ubuntu-22.04.qcow2",
+            format="qcow2",
+            convert_to="ext4",
+            size_mib=2048,
+            sha256=None,
+        ),
+        ImageSpec(
+            id="ubuntu-24.04",
+            image_type="ubuntu",
+            version="24.04",
+            name="Ubuntu 24.04 LTS",
+            source="https://example.com/ubuntu-24.04.qcow2",
+            format="qcow2",
+            convert_to="ext4",
+            size_mib=2048,
+            sha256=None,
+        ),
+    ]
+    mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
+
+    result = click_runner.invoke(
+        main_app,
+        ["image", "fetch", "ubuntu", "--version", "24.04", "--out", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+    called_spec = mock_fetch.call_args.args[0]
+    assert called_spec.id == "ubuntu-24.04"
+
+
+@patch("mvmctl.cli.asset.load_images_config")
+def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
+    mock_config.return_value = [
+        ImageSpec(
+            id="ubuntu-22.04",
+            image_type="ubuntu",
+            version="22.04",
+            name="Ubuntu 22.04 LTS",
+            source="https://example.com/ubuntu-22.04.qcow2",
+            format="qcow2",
+            convert_to="ext4",
+            size_mib=2048,
+            sha256=None,
+        ),
+        ImageSpec(
+            id="ubuntu-24.04",
+            image_type="ubuntu",
+            version="24.04",
+            name="Ubuntu 24.04 LTS",
+            source="https://example.com/ubuntu-24.04.qcow2",
+            format="qcow2",
+            convert_to="ext4",
+            size_mib=2048,
+            sha256=None,
+        ),
+    ]
+
+    result = click_runner.invoke(main_app, ["image", "fetch", "ubuntu"])
+    assert result.exit_code == 1
+    assert "Provide --version" in result.output
 
 
 @patch("mvmctl.cli.asset.fetch_image", return_value=None)
@@ -802,6 +878,8 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     mock_config.return_value = [
         ImageSpec(
             id="ubuntu-24.04",
+            image_type="ubuntu",
+            version="24.04",
             name="Ubuntu 24.04 LTS",
             source="https://example.com/ubuntu.qcow2",
             format="qcow2",
