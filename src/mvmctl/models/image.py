@@ -7,6 +7,8 @@ from pathlib import Path
 @dataclass
 class ImageSpec:
     id: str
+    image_type: str
+    version: str
     name: str
     source: str
     format: str  # noqa: N816

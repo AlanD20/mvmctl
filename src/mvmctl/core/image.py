@@ -457,7 +457,6 @@ _FORMAT_HANDLERS: dict[str, Callable[[Path, Path, int], Path]] = {
 }
 
 
-
 def fetch_image(
     spec: ImageSpec,
     output_dir: Path,
@@ -534,10 +533,13 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
 
     images = []
     for img in data.get("images", []):
+        image_id = img["id"]
         images.append(
             ImageSpec(
-                id=img["id"],
-                name=img.get("name", img["id"]),
+                id=image_id,
+                image_type=img.get("type", image_id),
+                version=str(img.get("version", image_id)),
+                name=img.get("name", image_id),
                 source=img["source"],
                 format=img["format"],
                 convert_to=img["convert_to"],

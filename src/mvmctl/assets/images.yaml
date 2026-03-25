@@ -2,6 +2,8 @@
 
 images:
   - id: ubuntu-24.04
+    type: ubuntu
+    version: "24.04"
     name: "Ubuntu 24.04 LTS (Noble)"
     source: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64-root.tar.xz
     format: tar-rootfs
@@ -11,6 +13,8 @@ images:
     sha256_url: https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
 
   - id: ubuntu-22.04
+    type: ubuntu
+    version: "22.04"
     name: "Ubuntu 22.04 LTS (Jammy)"
     source: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64-root.tar.xz
     format: tar-rootfs
@@ -20,6 +24,8 @@ images:
     sha256_url: https://cloud-images.ubuntu.com/jammy/current/SHA256SUMS
 
   - id: archlinux
+    type: archlinux
+    version: latest
     name: "Arch Linux"
     source: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
     format: qcow2
@@ -29,6 +35,8 @@ images:
     sha256_url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256
 
   - id: debian-bookworm
+    type: debian
+    version: "12"
     name: "Debian 12 (Bookworm)"
     source: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
     format: qcow2
@@ -38,6 +46,8 @@ images:
     sha256_url: https://cloud.debian.org/images/cloud/bookworm/latest/SHA256SUMS
 
   - id: ubuntu-fc
+    type: firecracker
+    version: "6.1"
     name: "Ubuntu (Firecracker CI)"
     source: "https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu_version}.squashfs"
     format: squashfs
