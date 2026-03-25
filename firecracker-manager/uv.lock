@@ -237,55 +237,6 @@ wheels = [
 ]
 
 [[package]]
-name = "firecracker-manager"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-build = [
-    { name = "pyinstaller" },
-]
-dev = [
-    { name = "mypy" },
-    { name = "pip-audit" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-mock" },
-    { name = "pytest-timeout" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-    { name = "wheel" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pyyaml", specifier = ">=6,<7" },
-    { name = "rich", specifier = ">=13,<15" },
-    { name = "typer", specifier = ">=0.12,<0.16" },
-]
-
-[package.metadata.requires-dev]
-build = [{ name = "pyinstaller", specifier = ">=6,<7" }]
-dev = [
-    { name = "mypy", specifier = ">=1.19,<2" },
-    { name = "pip-audit", specifier = ">=2.8" },
-    { name = "pytest", specifier = ">=9,<10" },
-    { name = "pytest-cov", specifier = ">=7,<8" },
-    { name = "pytest-mock", specifier = ">=3,<4" },
-    { name = "pytest-timeout", specifier = ">=0.5" },
-    { name = "pytest-xdist", specifier = ">=3,<4" },
-    { name = "ruff", specifier = ">=0.15,<1" },
-    { name = "types-pyyaml", specifier = ">=6.0,<7" },
-    { name = "wheel", specifier = ">=0.46.2" },
-]
-
-[[package]]
 name = "idna"
 version = "3.11"
 source = { registry = "https://pypi.org/simple" }
@@ -428,6 +379,55 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/03/42106dcded51f0a0b5284d3ce30a671e7bd3f7318d122b2ead66ad289fed/msgpack-1.1.2-cp314-cp314t-win32.whl", hash = "sha256:1d1418482b1ee984625d88aa9585db570180c286d942da463533b238b98b812b", size = 75197, upload-time = "2025-10-08T09:15:42.954Z" },
     { url = "https://files.pythonhosted.org/packages/15/86/d0071e94987f8db59d4eeb386ddc64d0bb9b10820a8d82bcd3e53eeb2da6/msgpack-1.1.2-cp314-cp314t-win_amd64.whl", hash = "sha256:5a46bf7e831d09470ad92dff02b8b1ac92175ca36b087f904a0519857c6be3ff", size = 85772, upload-time = "2025-10-08T09:15:43.954Z" },
     { url = "https://files.pythonhosted.org/packages/81/f2/08ace4142eb281c12701fc3b93a10795e4d4dc7f753911d836675050f886/msgpack-1.1.2-cp314-cp314t-win_arm64.whl", hash = "sha256:d99ef64f349d5ec3293688e91486c5fdb925ed03807f64d98d205d2713c60b46", size = 70868, upload-time = "2025-10-08T09:15:44.959Z" },
+]
+
+[[package]]
+name = "mvmctl"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+build = [
+    { name = "pyinstaller" },
+]
+dev = [
+    { name = "mypy" },
+    { name = "pip-audit" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+    { name = "wheel" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6,<7" },
+    { name = "rich", specifier = ">=13,<15" },
+    { name = "typer", specifier = ">=0.12,<0.16" },
+]
+
+[package.metadata.requires-dev]
+build = [{ name = "pyinstaller", specifier = ">=6,<7" }]
+dev = [
+    { name = "mypy", specifier = ">=1.19,<2" },
+    { name = "pip-audit", specifier = ">=2.8" },
+    { name = "pytest", specifier = ">=9,<10" },
+    { name = "pytest-cov", specifier = ">=7,<8" },
+    { name = "pytest-mock", specifier = ">=3,<4" },
+    { name = "pytest-timeout", specifier = ">=0.5" },
+    { name = "pytest-xdist", specifier = ">=3,<4" },
+    { name = "ruff", specifier = ">=0.15,<1" },
+    { name = "types-pyyaml", specifier = ">=6.0,<7" },
+    { name = "wheel", specifier = ">=0.46.2" },
 ]
 
 [[package]]
