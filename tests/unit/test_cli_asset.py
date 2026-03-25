@@ -5,15 +5,15 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from click.testing import CliRunner as ClickCliRunner
 from typer.testing import CliRunner
 
 from mvmctl.cli.asset import kernel_app
-from mvmctl.main import app as main_app
 from mvmctl.core.binary_manager import BinaryVersion
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, KernelError
+from mvmctl.main import app as main_app
 from mvmctl.models.image import ImageSpec
+from mvmctl.models.kernel import KernelSpec
 
 runner = CliRunner()
 click_runner = ClickCliRunner()
@@ -111,7 +111,18 @@ def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
 
 
 @patch("mvmctl.cli.asset.build_kernel_pipeline", return_value=None)
-def test_kernel_fetch_official_success(mock_build: MagicMock, tmp_path: Path):
+@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+def test_kernel_fetch_official_success(
+    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
     result = click_runner.invoke(
@@ -123,7 +134,18 @@ def test_kernel_fetch_official_success(mock_build: MagicMock, tmp_path: Path):
 
 
 @patch("mvmctl.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
-def test_kernel_fetch_official_failure(mock_build: MagicMock, tmp_path: Path):
+@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+def test_kernel_fetch_official_failure(
+    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
     out = tmp_path / "vmlinux-6.1.9"
     result = click_runner.invoke(
         main_app, ["kernel", "fetch", "--type", "official", "--version", "6.1.9", "--out", str(out)]
@@ -131,9 +153,21 @@ def test_kernel_fetch_official_failure(mock_build: MagicMock, tmp_path: Path):
     assert result.exit_code == 1
 
 
-@patch("mvmctl.core.kernel.download_firecracker_kernel")
+@patch("mvmctl.cli.asset.kernel_core.download_firecracker_kernel")
 @patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
-def test_kernel_fetch_firecracker_success(mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path):
+@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+def test_kernel_fetch_firecracker_success(
+    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
+):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-firecracker",
+        kernel_type="firecracker",
+        version="6.1",
+        source="https://example.com/fc/{ci_version}/{arch}/vmlinux-{version}",
+        output_name="vmlinux-fc",
+        build_dir="/tmp/build",
+        list_url_template="https://example.com/list?ci={ci_version}&arch={arch}",
+    )
     fc_kernel = tmp_path / "vmlinux-fc-1.12-amd64"
     fc_kernel.write_bytes(b"\x7fELF")
     mock_dl.return_value = fc_kernel
@@ -143,15 +177,70 @@ def test_kernel_fetch_firecracker_success(mock_ci: MagicMock, mock_dl: MagicMock
     )
     assert result.exit_code == 0
     assert "ready" in result.output.lower() or "kernel" in result.output.lower()
+    call_kwargs = mock_dl.call_args.kwargs
+    assert call_kwargs["output_name"] is None
 
 
-def test_kernel_fetch_missing_type(tmp_path: Path):
+@patch("mvmctl.cli.asset.kernel_core.download_firecracker_kernel")
+@patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
+@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+def test_kernel_fetch_firecracker_flag_shortcut(
+    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
+):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-firecracker",
+        kernel_type="firecracker",
+        version="6.1",
+        source="https://example.com/fc/{ci_version}/{arch}/vmlinux-{version}",
+        output_name="vmlinux-fc",
+        build_dir="/tmp/build",
+        list_url_template="https://example.com/list?ci={ci_version}&arch={arch}",
+    )
+    fc_kernel = tmp_path / "vmlinux-fc"
+    fc_kernel.write_bytes(b"\x7fELF")
+    mock_dl.return_value = fc_kernel
+
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--firecracker"])
+
+    assert result.exit_code == 0
+    mock_resolve.assert_called_once_with(kernel_type="firecracker", version=None)
+
+
+def test_kernel_fetch_requires_type_or_shortcut():
     result = click_runner.invoke(main_app, ["kernel", "fetch"])
-    assert result.exit_code != 0
+    assert result.exit_code == 1
+    assert "Provide --type" in result.output
+
+
+def test_kernel_fetch_firecracker_conflicting_type():
+    result = click_runner.invoke(
+        main_app,
+        ["kernel", "fetch", "--firecracker", "--type", "official"],
+    )
+    assert result.exit_code == 1
+    assert "cannot be combined" in result.output
+
+
+@patch(
+    "mvmctl.cli.asset.kernel_core.resolve_kernel_spec", side_effect=KernelError("ambiguous type")
+)
+def test_kernel_fetch_type_ambiguity_error(mock_resolve: MagicMock):
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--type", "firecracker"])
+    assert result.exit_code == 1
+    assert "ambiguous type" in result.output
 
 
 @patch("mvmctl.cli.asset.build_kernel_pipeline", return_value=None)
-def test_kernel_fetch_with_jobs(mock_build: MagicMock, tmp_path: Path):
+@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
     result = click_runner.invoke(
@@ -705,9 +794,10 @@ def test_kernel_ls_auto_creates_dir(tmp_path: Path):
 @patch("mvmctl.cli.asset.load_images_config")
 def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     """FIX-009: image fetch warns when image already exists."""
+    from click.testing import CliRunner as _ClickRunner
+
     from mvmctl.main import app
     from mvmctl.models.image import ImageSpec
-    from click.testing import CliRunner as _ClickRunner
 
     mock_config.return_value = [
         ImageSpec(

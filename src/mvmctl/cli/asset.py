@@ -29,9 +29,9 @@ from mvmctl.constants import (
     DEFAULT_REMOTE_VERSION_LIMIT,
     FALLBACK_FC_CI_VERSION,
     IMAGE_IMPORT_FORMAT_MAP,
-    KERNEL_TARBALL_URL_TEMPLATE,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
+from mvmctl.core import kernel as kernel_core
 from mvmctl.core.metadata import (
     find_images_by_short_id,
     get_image_entry,
@@ -158,11 +158,16 @@ def _get_ci_version() -> str:
 
 @kernel_app.command(name="fetch")
 def kernel_fetch(
-    kernel_type: str = typer.Option(..., "--type", help="Kernel type: firecracker or official"),
+    kernel_type: Optional[str] = typer.Option(
+        None, "--type", help="Kernel type from kernels.yaml (e.g. firecracker, official)"
+    ),
+    firecracker: bool = typer.Option(
+        False, "--firecracker", help="Shortcut for --type firecracker"
+    ),
     version: Optional[str] = typer.Option(
         None,
         "--version",
-        help="Kernel version (default: FIRECRACKER_CI_VERSION for firecracker, 6.19.9 for official)",
+        help="Kernel spec version from kernels.yaml (required if multiple specs share the same type)",
     ),
     arch: str = typer.Option(
         DEFAULT_FC_KERNEL_ARCH, "--arch", help="Architecture (for firecracker type)"
@@ -179,40 +184,54 @@ def kernel_fetch(
     ),
     set_default: bool = typer.Option(False, "--set-default", help="Set this kernel as default"),
 ) -> None:
-    """Fetch or build a kernel. --type firecracker|official is required."""
-    from mvmctl.core.kernel import download_firecracker_kernel
-
     kernels_dir = get_kernels_dir()
     kernels_dir.mkdir(parents=True, exist_ok=True)
 
-    if kernel_type == "firecracker":
-        ci_version = version or _get_ci_version()
-        output_name = f"vmlinux-fc-{ci_version}-{arch}" if out is None else out.name
+    if firecracker:
+        if kernel_type is not None and kernel_type != "firecracker":
+            print_error("--firecracker cannot be combined with a different --type value")
+            raise typer.Exit(code=1)
+        kernel_type = "firecracker"
+
+    if kernel_type is None:
+        print_error("Provide --type <kernel-type> or use --firecracker")
+        raise typer.Exit(code=1)
+
+    try:
+        spec = kernel_core.resolve_kernel_spec(kernel_type=kernel_type, version=version)
+    except KernelError as exc:
+        print_error(str(exc))
+        raise typer.Exit(code=1) from exc
+
+    if spec.kernel_type == "firecracker":
+        ci_version = _get_ci_version()
+        output_name = out.name if out is not None else None
         try:
-            result = download_firecracker_kernel(
+            result = kernel_core.download_firecracker_kernel(
                 ci_version=ci_version,
                 arch=arch,
                 kernels_dir=kernels_dir,
                 output_name=output_name,
+                kernel_spec=spec,
             )
         except KernelError as exc:
             print_error(f"Kernel fetch failed: {exc}")
             raise typer.Exit(code=1) from exc
-        print_success(f"Firecracker CI kernel ready: {result}")
+        print_success(f"Firecracker kernel ready: {result}")
 
-    elif kernel_type == "official":
+    elif spec.kernel_type == "official":
         import platform
 
-        effective_version = version or DEFAULT_KERNEL_VERSION
+        effective_version = spec.version or DEFAULT_KERNEL_VERSION
         effective_arch = arch if arch != DEFAULT_FC_KERNEL_ARCH else platform.machine() or "x86_64"
-        output_name_str = f"vmlinux-{effective_version}-{effective_arch}"
+        output_name_str = spec.output_name
         output_path = out if out is not None else kernels_dir / output_name_str
 
         if kernel_config and not kernel_config.exists():
             print_error(f"Kernel config file not found: {kernel_config}")
             raise typer.Exit(code=1)
 
-        source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=effective_version)
+        source_url = spec.source
         try:
             build_dir_path = build_kernel_pipeline(
                 version=effective_version,
@@ -223,6 +242,7 @@ def kernel_fetch(
                 keep_build_dir=keep_build_dir,
                 user_config_path=kernel_config,
                 arch=effective_arch,
+                kernel_spec=spec,
             )
         except KernelError as exc:
             print_error(f"Kernel build failed: {exc}")
@@ -235,7 +255,7 @@ def kernel_fetch(
         print_success(f"Kernel built: {result}")
 
     else:
-        print_error(f"Unknown kernel type: {kernel_type!r}. Use 'firecracker' or 'official'.")
+        print_error(f"Unsupported kernel type in spec '{spec.name}': {spec.kernel_type!r}")
         raise typer.Exit(code=1)
 
     if set_default:

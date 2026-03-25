@@ -1,9 +1,9 @@
 """Tests for kernel download and build utilities."""
 
-import tarfile
 import subprocess
+import tarfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 from urllib.error import URLError
 
 import pytest
@@ -197,6 +197,56 @@ def test_download_firecracker_config_success(mock_urlopen: MagicMock, tmp_path: 
     config_path = kernel_dir / ".config"
     assert config_path.exists()
     assert config_path.read_text() == config_content
+
+
+@patch("mvmctl.core.kernel.urlopen")
+def test_download_firecracker_config_uses_yaml_template(mock_urlopen: MagicMock, tmp_path: Path):
+    config_content = "CONFIG_TEST=y\n"
+    mock_response = MagicMock()
+    mock_response.read.return_value = config_content.encode("utf-8")
+    mock_response.__enter__ = lambda s: s
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+
+    download_firecracker_config(kernel_dir, version="6.1.102")
+
+    request = mock_urlopen.call_args[0][0]
+    assert request.full_url.endswith("microvm-kernel-ci-x86_64-6.1.config")
+
+
+@patch("mvmctl.core.kernel.urlopen")
+def test_download_firecracker_config_supports_version_placeholder(
+    mock_urlopen: MagicMock, tmp_path: Path
+):
+    from mvmctl.models.kernel import KernelSpec
+
+    config_content = "CONFIG_TEST=y\n"
+    mock_response = MagicMock()
+    mock_response.read.return_value = config_content.encode("utf-8")
+    mock_response.__enter__ = lambda s: s
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+
+    spec = KernelSpec(
+        name="kernel-firecracker-custom",
+        kernel_type="firecracker",
+        version="6.1",
+        source="https://example.invalid/vmlinux-{version}",
+        output_name="vmlinux",
+        build_dir="/tmp/build",
+        config_url_template="https://example.invalid/microvm-kernel-{version}.config",
+    )
+
+    download_firecracker_config(kernel_dir, version="6.1.102", kernel_spec=spec)
+
+    request = mock_urlopen.call_args[0][0]
+    assert request.full_url.endswith("microvm-kernel-6.1.config")
 
 
 @patch("mvmctl.core.kernel.urlopen")
