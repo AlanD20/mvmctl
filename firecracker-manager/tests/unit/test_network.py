@@ -889,6 +889,9 @@ def test_sudo_uses_sudo_n_for_non_interactive_check():
     """Sudo validation should use 'sudo -n true' for non-interactive check."""
     import fcm.core.network as network_module
 
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
     mock_result = MagicMock()
     mock_result.returncode = 0
 
@@ -898,6 +901,9 @@ def test_sudo_uses_sudo_n_for_non_interactive_check():
         calls = mock_run.call_args_list
         assert len(calls) == 1
         assert calls[0][0][0] == ["sudo", "-n", "true"]
+
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
 
 
 def test_sudo_uses_sudo_v_when_not_cached():
