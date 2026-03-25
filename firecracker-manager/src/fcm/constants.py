@@ -89,6 +89,8 @@ PRIVILEGED_BINARIES: Final[list[str]] = [
     "/usr/sbin/iptables-save",
     "/usr/sbin/sysctl",
 ]
+
+IPTABLES_RULES_V4: Final[str] = "/etc/iptables/rules.v4"
 REQUIRED_BINARIES: Final[list[str]] = ["ip", "iptables", "qemu-img"]
 ISO_BINARIES: Final[list[str]] = ["mkisofs", "genisoimage"]
 
