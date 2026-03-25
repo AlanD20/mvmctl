@@ -27,11 +27,9 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        working-directory: firecracker-manager
         run: uv sync --group dev
 
       - name: Run tests with coverage gate
-        working-directory: firecracker-manager
         run: uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=79
 
   build:
@@ -57,25 +55,21 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        working-directory: firecracker-manager
         run: uv sync --group dev && uv pip install pyinstaller
 
       - name: Run tests
-        working-directory: firecracker-manager
         run: uv run pytest tests/ -v --tb=short
 
       - name: Build binary
-        working-directory: firecracker-manager
         run: uv run pyinstaller --onefile --name mvm src/mvmctl/main.py
 
       - name: Smoke test binary
-        working-directory: firecracker-manager
         run: |
           ./dist/mvm --version
           ./dist/mvm --help
 
       - name: Generate SHA256 checksum
-        working-directory: firecracker-manager/dist
+        working-directory: dist
         run: |
           sha256sum mvm > mvm.sha256
           cat mvm.sha256
@@ -85,15 +79,15 @@ jobs:
         with:
           name: mvm-linux-${{ matrix.os }}
           path: |
-            firecracker-manager/dist/mvm
-            firecracker-manager/dist/mvm.sha256
+            dist/mvm
+            dist/mvm.sha256
 
       - name: Create GitHub release and upload asset
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            firecracker-manager/dist/mvm
-            firecracker-manager/dist/mvm.sha256
+            dist/mvm
+            dist/mvm.sha256
           name: Release ${{ github.ref_name }}
 
   publish-pypi:
@@ -116,14 +110,12 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        working-directory: firecracker-manager
         run: uv sync --group dev
 
       - name: Build wheel and sdist
-        working-directory: firecracker-manager
         run: uv build
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: firecracker-manager/dist/
+          packages-dir: dist/

@@ -34,11 +34,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        working-directory: firecracker-manager
         run: uv sync --group dev
 
       - name: Run pip-audit security scan
-        working-directory: firecracker-manager
         run: |
           uv run pip-audit --desc --format=json | tee pip-audit-results.json
           # Run audit to check for any vulnerabilities (excluding known issues without fixes)
@@ -49,28 +47,24 @@ jobs:
         if: always()
         with:
           name: pip-audit-results-${{ matrix.os }}
-          path: firecracker-manager/pip-audit-results.json
+          path: pip-audit-results.json
           retention-days: 30
 
       - name: Lint with ruff
-        working-directory: firecracker-manager
         run: uv run ruff check src/
 
       - name: Check formatting with ruff
-        working-directory: firecracker-manager
         run: uv run ruff format --check src/
 
       - name: Type check with mypy
-        working-directory: firecracker-manager
         run: uv run mypy src/
 
       - name: Run tests
-        working-directory: firecracker-manager
         run: uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-report=xml --cov-fail-under=80
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report-${{ matrix.os }}
-          path: firecracker-manager/coverage.xml
+          path: coverage.xml
           retention-days: 30
