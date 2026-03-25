@@ -511,6 +511,11 @@ def image_fetch(
         ...,
         help="Image ID or image type from 'mvm image ls --remote' (e.g. ubuntu-24.04 or ubuntu)",
     ),
+    image_type: Optional[str] = typer.Option(
+        None,
+        "--type",
+        help="Image type from images.yaml (e.g. ubuntu, debian, firecracker)",
+    ),
     version: Optional[str] = typer.Option(
         None,
         "--version",
@@ -528,12 +533,21 @@ def image_fetch(
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
 
-    spec = next((img for img in images if img.id == image_selector), None)
+    if image_type is not None and image_selector != image_type:
+        if any(img.id == image_selector for img in images):
+            print_error("--type cannot be used when selector is an image ID")
+            raise typer.Exit(code=1)
+        print_error("image selector and --type must match when both are provided")
+        raise typer.Exit(code=1)
+
+    effective_selector = image_type or image_selector
+
+    spec = next((img for img in images if img.id == effective_selector), None)
     if spec is None:
-        type_matches = [img for img in images if img.image_type == image_selector]
+        type_matches = [img for img in images if img.image_type == effective_selector]
         if not type_matches:
             available = ", ".join(img.id for img in images)
-            print_error(f"Image '{image_selector}' not found. Available: {available}")
+            print_error(f"Image '{effective_selector}' not found. Available: {available}")
             raise typer.Exit(code=1)
 
         if version is not None:
@@ -543,13 +557,13 @@ def image_fetch(
             elif len(version_matches) > 1:
                 ids = ", ".join(img.id for img in version_matches)
                 print_error(
-                    f"Multiple '{image_selector}' images with version '{version}' found: {ids}"
+                    f"Multiple '{effective_selector}' images with version '{version}' found: {ids}"
                 )
                 raise typer.Exit(code=1)
             else:
                 versions = ", ".join(sorted({img.version for img in type_matches}))
                 print_error(
-                    f"No '{image_selector}' image with version '{version}'. Available: {versions}"
+                    f"No '{effective_selector}' image with version '{version}'. Available: {versions}"
                 )
                 raise typer.Exit(code=1)
         else:
@@ -558,7 +572,7 @@ def image_fetch(
             else:
                 versions = ", ".join(sorted({img.version for img in type_matches}))
                 print_error(
-                    f"Multiple '{image_selector}' images found. Provide --version. Available: {versions}"
+                    f"Multiple '{effective_selector}' images found. Provide --version. Available: {versions}"
                 )
                 raise typer.Exit(code=1)
 

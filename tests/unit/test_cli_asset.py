@@ -456,6 +456,43 @@ def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
     assert "Provide --version" in result.output
 
 
+@patch("mvmctl.cli.asset.fetch_image")
+@patch("mvmctl.cli.asset.load_images_config")
+def test_image_fetch_with_type_option(
+    mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path
+):
+    mock_config.return_value = [
+        ImageSpec(
+            id="ubuntu-24.04",
+            image_type="ubuntu",
+            version="24.04",
+            name="Ubuntu 24.04 LTS",
+            source="https://example.com/ubuntu-24.04.qcow2",
+            format="qcow2",
+            convert_to="ext4",
+            size_mib=2048,
+            sha256=None,
+        )
+    ]
+    mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
+
+    result = click_runner.invoke(
+        main_app,
+        ["image", "fetch", "ubuntu", "--type", "ubuntu", "--version", "24.04"],
+    )
+    assert result.exit_code == 0
+
+
+@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+def test_image_fetch_type_option_conflicts_with_id(mock_config: MagicMock):
+    result = click_runner.invoke(
+        main_app,
+        ["image", "fetch", "ubuntu-24.04", "--type", "ubuntu"],
+    )
+    assert result.exit_code == 1
+    assert "cannot be used when selector is an image ID" in result.output
+
+
 @patch("mvmctl.cli.asset.fetch_image", return_value=None)
 @patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_failure(mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path):

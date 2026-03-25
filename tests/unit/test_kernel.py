@@ -524,6 +524,7 @@ def test_build_kernel_pipeline_requires_checksum(mock_fetch_sha256: MagicMock, t
 
 
 @patch("mvmctl.core.kernel.shutil.copy2")
+@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value=None)
 @patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
@@ -535,6 +536,7 @@ def test_build_kernel_pipeline_full_success(
     mock_configure: MagicMock,
     mock_build: MagicMock,
     mock_fetch_sha256: MagicMock,
+    mock_fetch_sha256_url: MagicMock,
     mock_copy2: MagicMock,
     tmp_path: Path,
 ):
@@ -560,6 +562,51 @@ def test_build_kernel_pipeline_full_success(
     mock_extract.assert_called_once()
     mock_configure.assert_called_once()
     mock_build.assert_called_once()
+
+
+@patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value=None)
+@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value="b" * 64)
+@patch("mvmctl.core.kernel.shutil.copy2")
+@patch("mvmctl.core.kernel.build_kernel")
+@patch("mvmctl.core.kernel.configure_kernel")
+@patch("mvmctl.core.kernel.extract_kernel_tarball")
+@patch("mvmctl.core.kernel.download_kernel_source")
+def test_build_kernel_pipeline_uses_templated_sha256_url(
+    mock_download: MagicMock,
+    mock_extract: MagicMock,
+    mock_configure: MagicMock,
+    mock_build: MagicMock,
+    mock_copy2: MagicMock,
+    mock_fetch_sha256_url: MagicMock,
+    mock_fetch_sha256: MagicMock,
+    tmp_path: Path,
+):
+    output_path = tmp_path / "vmlinux"
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    kernel_src_dir = build_dir / "linux-6.1.102"
+    kernel_src_dir.mkdir()
+
+    from mvmctl.core.kernel import load_kernel_spec
+
+    spec = load_kernel_spec("kernel-official")
+    spec.sha256_url = "https://example.com/linux-{version}.sha256"
+    spec.source = "https://example.com/linux-{version}.tar.xz"
+
+    build_kernel_pipeline(
+        version="6.1.102",
+        source_url=spec.source,
+        output_path=output_path,
+        build_dir=build_dir,
+        kernel_spec=spec,
+    )
+
+    called_sha_url = mock_fetch_sha256_url.call_args.args[0]
+    assert called_sha_url == "https://example.com/linux-6.1.102.sha256"
+    assert mock_download.call_args.args[0] == "https://example.com/linux-6.1.102.tar.xz"
+    assert mock_download.call_args.args[2] == ("b" * 64)
+    mock_fetch_sha256.assert_not_called()
 
 
 @patch("mvmctl.core.kernel.extract_kernel_tarball")

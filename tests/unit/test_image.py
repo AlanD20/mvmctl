@@ -1245,9 +1245,7 @@ def test_handle_squashfs_uses_size_mib(mock_run: MagicMock, tmp_path: Path):
 
     _handle_squashfs(download_path, final_path, 2048)
 
-    truncate_call = next(
-        call for call in mock_run.call_args_list if call[0][0][0] == "truncate"
-    )
+    truncate_call = next(call for call in mock_run.call_args_list if call[0][0][0] == "truncate")
     assert "2048M" in truncate_call[0][0]
 
 
@@ -1345,7 +1343,7 @@ def test_resolve_source_template_success(
     spec = ImageSpec(
         id="ubuntu-fc",
         image_type="test",
-        version="test",
+        version="24.04",
         name="Ubuntu FC",
         source="",
         format="squashfs",
@@ -1383,7 +1381,7 @@ def test_resolve_source_template_uses_default_version(
     spec = ImageSpec(
         id="ubuntu-fc",
         image_type="test",
-        version="test",
+        version="24.04",
         name="Ubuntu FC",
         source="",
         format="squashfs",
@@ -1409,7 +1407,7 @@ def test_resolve_source_template_network_error(
     spec = ImageSpec(
         id="ubuntu-fc",
         image_type="test",
-        version="test",
+        version="24.04",
         name="Ubuntu FC",
         source="",
         format="squashfs",
@@ -1497,6 +1495,43 @@ def test_fetch_image_sha256_url_ignored_when_sha256_null(
     call_kwargs = mock_download.call_args.kwargs
     assert call_kwargs["expected_sha256"] is None
     assert call_kwargs["allow_missing_checksum"] is True
+
+
+@patch("mvmctl.core.image._fetch_sha256_from_url", return_value="cafebabe" * 8)
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_uses_templated_sha256_url(
+    mock_download: MagicMock,
+    mock_convert: MagicMock,
+    mock_extract: MagicMock,
+    mock_fetch_sha: MagicMock,
+    tmp_path: Path,
+):
+    spec = ImageSpec(
+        id="test-image",
+        image_type="ubuntu",
+        version="24.04",
+        name="Test Image",
+        source="https://example.com/image.qcow2",
+        format="qcow2",
+        convert_to="ext4",
+        size_mib=2048,
+        sha256=None,
+        sha256_url="https://example.com/{image_type}/{version}.sha256",
+    )
+    expected_output = tmp_path / "test-image.ext4"
+    mock_download.return_value = True
+    mock_convert.return_value = True
+    mock_extract.return_value = expected_output
+
+    result = fetch_image(spec, tmp_path, force=True)
+
+    assert result == expected_output
+    called_sha_url = mock_fetch_sha.call_args.args[0]
+    assert called_sha_url == "https://example.com/ubuntu/24.04.sha256"
+    assert mock_download.call_args.kwargs["expected_sha256"] == ("cafebabe" * 8)
+    assert mock_download.call_args.kwargs["allow_missing_checksum"] is False
 
 
 @patch("mvmctl.core.image._resolve_source_template")

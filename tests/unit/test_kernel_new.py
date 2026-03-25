@@ -351,3 +351,50 @@ def test_download_firecracker_kernel_supports_version_placeholder_in_source(
         kernel_version="6.1.9",
     )
     assert called_download_url == expected_download_url
+
+
+@patch("mvmctl.core.kernel.download_file")
+@patch("mvmctl.core.kernel.urlopen")
+def test_download_firecracker_kernel_uses_templated_sha256_url(
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
+
+    xml_response = b"""<?xml version="1.0"?>
+<ListBucketResult>
+<Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
+</ListBucketResult>"""
+
+    list_resp = MagicMock()
+    list_resp.read.return_value = xml_response
+    list_resp.__enter__ = lambda s: s
+    list_resp.__exit__ = MagicMock(return_value=False)
+
+    sha_resp = MagicMock()
+    sha_resp.read.return_value = (
+        b"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  vmlinux"
+    )
+    sha_resp.__enter__ = lambda s: s
+    sha_resp.__exit__ = MagicMock(return_value=False)
+
+    mock_urlopen.side_effect = [list_resp, sha_resp]
+
+    def fake_download(url, dest, **kw):
+        dest.write_bytes(b"\x7fELF")
+        return True
+
+    mock_dl.side_effect = fake_download
+
+    from mvmctl.core.kernel import load_kernel_spec
+
+    firecracker_spec = load_kernel_spec("kernel-firecracker")
+    firecracker_spec.sha256_url = "https://example.com/{ci_version}/{arch}/vmlinux-{version}.sha256"
+
+    result = download_firecracker_kernel(
+        "1.12", "amd64", kernels_dir=tmp_path, kernel_spec=firecracker_spec
+    )
+
+    assert result.exists()
+    sha_request = mock_urlopen.call_args_list[1].args[0]
+    assert sha_request.full_url == "https://example.com/1.12/amd64/vmlinux-6.1.sha256"
