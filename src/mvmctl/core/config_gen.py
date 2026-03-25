@@ -75,7 +75,7 @@ class ConfigGenerator:
     def validate(self) -> None:
         """Validate vm_config before generation.
 
-        Raises FCMError if validation fails.
+        Raises MVMError if validation fails.
         """
         if self.vm_config.boot_args:
             for component in self.vm_config.boot_args.split():

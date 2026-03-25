@@ -168,7 +168,7 @@ class TestHostWithSubprocessMocking:
                                     mock_create_group.return_value = True
                                     mock_add_user.return_value = True
                                     with patch("mvmctl.core.host_setup._persist_sysctl", return_value=None):
-                                        with patch("mvmctl.core.host_setup.setup_fcm_chains"):
+                                        with patch("mvmctl.core.host_setup.setup_mvm_chains"):
                                             with patch("mvmctl.core.host_setup._save_state"):
                                                 result = init_host(Path("/tmp/cache"))
 

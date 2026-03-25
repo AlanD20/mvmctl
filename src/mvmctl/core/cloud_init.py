@@ -123,7 +123,7 @@ def write_cloud_init(
             "package_update": False,
             "package_upgrade": False,
             "runcmd": ["systemctl disable --now snapd.socket 2>/dev/null || true"],
-            "final_message": "fcm cloud-init done",
+            "final_message": "mvm cloud-init done",
         }
         if ssh_pub_key:
             ud["users"] = [
@@ -150,7 +150,7 @@ def inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
 
     seed_target = "/var/lib/cloud/seed/nocloud"
 
-    with tempfile.TemporaryDirectory(prefix="fcm-mount-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="mvm-mount-") as tmp_dir:
         mount_point = Path(tmp_dir)
         mount_point.chmod(0o700)
         mounted = False

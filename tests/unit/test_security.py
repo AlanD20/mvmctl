@@ -14,7 +14,7 @@ from pytest_mock import MockerFixture
 
 from mvmctl.core.host_privilege import _generate_sudoers_content, _validate_sudoers_binaries
 from mvmctl.core.vm_lifecycle import _resolve_image_path, create_vm
-from mvmctl.exceptions import FCMError, HostError, ImageError
+from mvmctl.exceptions import MVMError, HostError, ImageError
 from mvmctl.utils.http import download_file
 from mvmctl.utils.validation import validate_boot_arg_component, validate_entity_name
 
@@ -51,7 +51,7 @@ from mvmctl.utils.validation import validate_boot_arg_component, validate_entity
 )
 def test_validate_entity_name_rejects_path_traversal(malicious_name: str, attack_type: str):
     """VM names with path traversal or shell metacharacters must be rejected."""
-    with pytest.raises(FCMError, match="Invalid .* name"):
+    with pytest.raises(MVMError, match="Invalid .* name"):
         validate_entity_name(malicious_name, "VM")
 
 
@@ -65,7 +65,7 @@ def test_validate_entity_name_rejects_path_traversal(malicious_name: str, attack
 )
 def test_validate_entity_name_rejects_network_name_attacks(malicious_name: str, attack_type: str):
     """Network names with malicious patterns must be rejected."""
-    with pytest.raises(FCMError, match="Invalid .* name"):
+    with pytest.raises(MVMError, match="Invalid .* name"):
         validate_entity_name(malicious_name, "network")
 
 
@@ -108,8 +108,8 @@ def test_resolve_image_path_rejects_traversal(
 
     (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
 
-    # Attempt to resolve malicious image ID - should raise FCMError (not found)
-    with pytest.raises(FCMError):
+    # Attempt to resolve malicious image ID - should raise MVMError (not found)
+    with pytest.raises(MVMError):
         _resolve_image_path(malicious_image_id)
 
 
@@ -142,8 +142,8 @@ def test_download_file_rejects_malicious_urls(
     """URLs with shell metacharacters or non-HTTP protocols should fail safely."""
     dest = tmp_path / "download"
 
-    # Should raise FCMError for invalid/malformed URLs
-    with pytest.raises(FCMError):
+    # Should raise MVMError for invalid/malformed URLs
+    with pytest.raises(MVMError):
         download_file(malicious_url, dest, expected_sha256=None, allow_missing_checksum=True)
 
 
@@ -172,7 +172,7 @@ def test_download_file_rejects_malicious_urls(
 )
 def test_validate_boot_arg_rejects_injection(malicious_value: str, attack_type: str):
     """Boot arguments with shell metacharacters must be rejected."""
-    with pytest.raises(FCMError, match="must not contain spaces or shell metacharacters"):
+    with pytest.raises(MVMError, match="must not contain spaces or shell metacharacters"):
         validate_boot_arg_component(malicious_value, "guest_ip")
 
 
@@ -184,19 +184,19 @@ def test_validate_boot_arg_rejects_injection(malicious_value: str, attack_type: 
 @pytest.mark.parametrize(
     "malicious_group,attack_type",
     [
-        ("fcm; rm -rf /", "semicolon injection"),
-        ("fcm|cat /etc/passwd", "pipe injection"),
-        ("fcm`whoami`", "backtick substitution"),
-        ("fcm$(id)", "command substitution"),
-        ("fcm ../../etc", "path traversal"),
-        ("fcm*", "glob wildcard"),
-        ("fcm?", "glob single char"),
-        ("fcm[abc]", "glob character class"),
-        ("fcm group", "space in name"),
-        ("fcm\ttab", "tab in name"),
-        ("fcm\nnewline", "newline in name"),
-        ("../fcm", "relative path"),
-        ("/etc/fcm", "absolute path"),
+        ("mvm; rm -rf /", "semicolon injection"),
+        ("mvm|cat /etc/passwd", "pipe injection"),
+        ("mvm`whoami`", "backtick substitution"),
+        ("mvm$(id)", "command substitution"),
+        ("mvm ../../etc", "path traversal"),
+        ("mvm*", "glob wildcard"),
+        ("mvm?", "glob single char"),
+        ("mvm[abc]", "glob character class"),
+        ("mvm group", "space in name"),
+        ("mvm\ttab", "tab in name"),
+        ("mvm\nnewline", "newline in name"),
+        ("../mvm", "relative path"),
+        ("/etc/mvm", "absolute path"),
     ],
 )
 def test_generate_sudoers_rejects_malicious_group(malicious_group: str, attack_type: str):
@@ -207,21 +207,21 @@ def test_generate_sudoers_rejects_malicious_group(malicious_group: str, attack_t
 
 def test_generate_sudoers_valid_group():
     """Valid group names should produce proper sudoers content."""
-    content = _generate_sudoers_content("fcm")
-    assert "%fcm ALL=(root) NOPASSWD:" in content
+    content = _generate_sudoers_content("mvm")
+    assert "%mvm ALL=(root) NOPASSWD:" in content
     assert "# Managed by" in content
 
 
 def test_generate_sudoers_valid_group_with_dash():
     """Group names with dashes should be accepted."""
-    content = _generate_sudoers_content("fcm-users")
-    assert "%fcm-users ALL=(root) NOPASSWD:" in content
+    content = _generate_sudoers_content("mvm-users")
+    assert "%mvm-users ALL=(root) NOPASSWD:" in content
 
 
 def test_generate_sudoers_valid_group_with_underscore():
     """Group names with underscores should be accepted."""
-    content = _generate_sudoers_content("fcm_users")
-    assert "%fcm_users ALL=(root) NOPASSWD:" in content
+    content = _generate_sudoers_content("mvm_users")
+    assert "%mvm_users ALL=(root) NOPASSWD:" in content
 
 
 # -----------------------------------------------------------------------------
@@ -246,10 +246,10 @@ def test_create_vm_rejects_malicious_names(
     """VM creation must reject malicious names before any filesystem operations."""
     mocker.patch("mvmctl.core.vm_lifecycle.get_vm_manager")
     mocker.patch(
-        "mvmctl.utils.validation.validate_entity_name", side_effect=FCMError("Invalid VM name")
+        "mvmctl.utils.validation.validate_entity_name", side_effect=MVMError("Invalid VM name")
     )
 
-    with pytest.raises(FCMError, match="Invalid VM name"):
+    with pytest.raises(MVMError, match="Invalid VM name"):
         create_vm(
             name=malicious_name,
             image="ubuntu-24.04",
@@ -279,7 +279,7 @@ def test_secure_mkdir_vm_rejects_symlink(tmp_path: Path, monkeypatch: pytest.Mon
     vm_dir.symlink_to(secret_file)
 
     # Attempt to create VM directory at symlink location
-    with pytest.raises(FCMError, match="symlink"):
+    with pytest.raises(MVMError, match="symlink"):
         _secure_mkdir_vm(vm_dir, "test-vm")
 
 
@@ -292,14 +292,14 @@ def test_secure_mkdir_vm_rejects_symlink(tmp_path: Path, monkeypatch: pytest.Mon
     "input_value,context,expected_error",
     [
         # Path traversal in various contexts
-        ("../../../etc/passwd", "VM name", FCMError),
-        ("../../etc/shadow", "network name", FCMError),
-        ("../config", "key name", FCMError),
+        ("../../../etc/passwd", "VM name", MVMError),
+        ("../../etc/shadow", "network name", MVMError),
+        ("../config", "key name", MVMError),
         # Command injection
-        ("; rm -rf /", "boot arg", FCMError),
-        ("| cat /etc/passwd", "boot arg", FCMError),
-        ("`id`", "boot arg", FCMError),
-        ("$(whoami)", "boot arg", FCMError),
+        ("; rm -rf /", "boot arg", MVMError),
+        ("| cat /etc/passwd", "boot arg", MVMError),
+        ("`id`", "boot arg", MVMError),
+        ("$(whoami)", "boot arg", MVMError),
     ],
 )
 def test_security_boundaries_enforced(input_value: str, context: str, expected_error: type):
@@ -332,5 +332,5 @@ def test_security_boundaries_enforced(input_value: str, context: str, expected_e
 def test_security_edge_cases_rejected(bypass_attempt: str, attack_type: str):
     """Edge case bypass attempts must still be rejected."""
     # These should all fail validation due to invalid characters
-    with pytest.raises(FCMError):
+    with pytest.raises(MVMError):
         validate_entity_name(bypass_attempt, "VM")

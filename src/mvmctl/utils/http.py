@@ -13,7 +13,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from mvmctl.constants import HTTP_USER_AGENT
-from mvmctl.exceptions import ChecksumMismatchError, FCMError
+from mvmctl.exceptions import ChecksumMismatchError, MVMError
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def download_file(
         show_progress: Show progress via logging
         timeout: Request timeout in seconds
         allow_missing_checksum: If True, allow download without checksum verification
-            after interactive confirmation. If False (default), raises FCMError
+            after interactive confirmation. If False (default), raises MVMError
             when no checksum is provided.
         resume: If True, resume partial downloads using HTTP Range requests.
             If the destination file exists, the download will continue from
@@ -115,14 +115,14 @@ def download_file(
         True if successful
 
     Raises:
-        FCMError: On download or I/O failure, or when checksum is required but missing
+        MVMError: On download or I/O failure, or when checksum is required but missing
         ChecksumMismatchError: On checksum mismatch
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     if expected_sha256 is None:
         if not allow_missing_checksum:
-            raise FCMError(
+            raise MVMError(
                 f"No checksum provided for download: {url}. "
                 "Checksum verification is mandatory for security. "
                 "Provide expected_sha256 or use allow_missing_checksum=True with confirmation."
@@ -137,7 +137,7 @@ def download_file(
             "[yellow]Integrity cannot be verified. This is a potential security risk.[/yellow]"
         )
         if not sys.stdin.isatty():
-            raise FCMError(
+            raise MVMError(
                 f"No checksum provided for download: {url}. "
                 "Cannot prompt for confirmation in non-interactive mode. "
                 "Provide expected_sha256 or run in an interactive terminal."
@@ -145,7 +145,7 @@ def download_file(
         import typer
 
         if not typer.confirm("Proceed with download anyway?", default=False):
-            raise FCMError(f"Download cancelled: {url} (no checksum provided)")
+            raise MVMError(f"Download cancelled: {url} (no checksum provided)")
 
     partial_path = _partial_download_path(dest)
     temp_path: Path | None = None
@@ -226,7 +226,7 @@ def download_file(
             logger.info("Checksum verified")
 
         if working_path is None:
-            raise FCMError(f"Download failed: no working file created for {url}")
+            raise MVMError(f"Download failed: no working file created for {url}")
 
         os.replace(working_path, dest)
         temp_path = None
@@ -234,9 +234,9 @@ def download_file(
         return True
 
     except URLError as e:
-        raise FCMError(f"Download failed: {e}") from e
+        raise MVMError(f"Download failed: {e}") from e
     except IOError as e:
-        raise FCMError(f"I/O error: {e}") from e
+        raise MVMError(f"I/O error: {e}") from e
     finally:
         if temp_path is not None:
             try:

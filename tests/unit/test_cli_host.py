@@ -200,7 +200,7 @@ def test_clean_success(mocker: MockerFixture, tmp_path):
     mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[])
     mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mock_clean = mocker.patch("mvmctl.cli.host.clean_host")
-    mock_clean.return_value = ["Removed network 'default' (bridge: fcm-br0)"]
+    mock_clean.return_value = ["Removed network 'default' (bridge: mvm-br0)"]
     result = runner.invoke(app, ["clean", "--force"])
     assert result.exit_code == 0
     assert "cleaned successfully" in result.output
@@ -229,10 +229,10 @@ def test_reset_success(mocker: MockerFixture, tmp_path):
     mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mock_reset = mocker.patch("mvmctl.cli.host.reset_host")
     mock_reset.return_value = [
-        "Removed network 'default' (bridge: fcm-br0)",
+        "Removed network 'default' (bridge: mvm-br0)",
         "Reverted net.ipv4.ip_forward",
-        "Removed sudoers file /etc/sudoers.d/fcm",
-        "Removed group 'fcm'",
+        "Removed sudoers file /etc/sudoers.d/mvm",
+        "Removed group 'mvm'",
     ]
     result = runner.invoke(app, ["reset", "--force"])
     assert result.exit_code == 0
@@ -260,7 +260,7 @@ def test_init_anti_recursion_protection(mocker: MockerFixture, tmp_path, monkeyp
     )
     mock_subprocess = mocker.patch("subprocess.run")
 
-    monkeypatch.setenv("FCM_SUDO_RESTART", "1")
+    monkeypatch.setenv("MVM_SUDO_RESTART", "1")
     result = runner.invoke(app, ["init"], input="y\n")
 
     assert result.exit_code == 1
@@ -269,7 +269,7 @@ def test_init_anti_recursion_protection(mocker: MockerFixture, tmp_path, monkeyp
 
 
 def test_init_sudo_restart_sets_env(mocker: MockerFixture, tmp_path):
-    """Test that sudo restart sets FCM_SUDO_RESTART environment variable."""
+    """Test that sudo restart sets MVM_SUDO_RESTART environment variable."""
     mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mocker.patch(
         "mvmctl.cli.host.init_host",
@@ -282,4 +282,4 @@ def test_init_sudo_restart_sets_env(mocker: MockerFixture, tmp_path):
     assert result.exit_code == 1
     mock_subprocess.assert_called_once()
     call_args = mock_subprocess.call_args
-    assert "FCM_SUDO_RESTART" in call_args.kwargs.get("env", {})
+    assert "MVM_SUDO_RESTART" in call_args.kwargs.get("env", {})

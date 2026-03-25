@@ -2,7 +2,7 @@
 
 import pytest
 
-from mvmctl.exceptions import FCMError
+from mvmctl.exceptions import MVMError
 from mvmctl.utils.validation import (
     validate_boot_arg_component,
     validate_entity_name,
@@ -58,15 +58,15 @@ def test_validate_entity_name_accepts_valid(name: str):
     ],
 )
 def test_validate_entity_name_rejects_invalid(name: str, reason: str):
-    with pytest.raises(FCMError, match="Invalid .* name"):
+    with pytest.raises(MVMError, match="Invalid .* name"):
         validate_entity_name(name, "test")
 
 
 def test_validate_entity_name_includes_entity_type_in_error():
-    with pytest.raises(FCMError, match="Invalid VM name"):
+    with pytest.raises(MVMError, match="Invalid VM name"):
         validate_entity_name("INVALID", "VM")
 
-    with pytest.raises(FCMError, match="Invalid network name"):
+    with pytest.raises(MVMError, match="Invalid network name"):
         validate_entity_name("BAD!", "network")
 
 
@@ -111,12 +111,12 @@ def test_validate_boot_arg_accepts_valid(value: str):
     ],
 )
 def test_validate_boot_arg_rejects_metacharacters(value: str, reason: str):
-    with pytest.raises(FCMError, match="must not contain spaces or shell metacharacters"):
+    with pytest.raises(MVMError, match="must not contain spaces or shell metacharacters"):
         validate_boot_arg_component(value, "test_field")
 
 
 def test_validate_boot_arg_includes_component_name_in_error():
-    with pytest.raises(FCMError, match="Invalid guest_ip"):
+    with pytest.raises(MVMError, match="Invalid guest_ip"):
         validate_boot_arg_component("10.0.0.1;evil", "guest_ip")
 
 

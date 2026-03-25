@@ -32,7 +32,7 @@ from mvmctl.core.metadata import (
     migrate_legacy_metadata,
     update_kernel_entry,
 )
-from mvmctl.exceptions import ChecksumMismatchError, FCMError, KernelError
+from mvmctl.exceptions import ChecksumMismatchError, MVMError, KernelError
 from mvmctl.utils.fs import get_cache_dir, get_images_dir
 from mvmctl.utils.http import download_file
 
@@ -182,7 +182,7 @@ def download_kernel_source(
         )
     except ChecksumMismatchError:
         raise
-    except FCMError as e:
+    except MVMError as e:
         raise KernelError(f"Download failed: {e}") from e
 
 
@@ -789,7 +789,7 @@ def download_firecracker_kernel(
             expected_sha256=expected_sha256,
             timeout=300,
         )
-    except FCMError as exc:
+    except MVMError as exc:
         raise KernelError(f"Failed to download Firecracker CI kernel: {exc}") from exc
 
     output_path.chmod(0o755)

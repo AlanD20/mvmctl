@@ -22,11 +22,15 @@ from mvmctl.constants import (
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.core.config_state import initialize_default_config
-from mvmctl.exceptions import BinaryError, FCMError, FCMKeyError, HostError, KernelError
+from mvmctl.exceptions import BinaryError, MVMError, MVMKeyError, HostError, KernelError
 from mvmctl.utils.console import console, print_info, print_success, print_warning
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
-app = typer.Typer(help="Guided onboarding")
+app = typer.Typer(
+    help="Guided onboarding",
+    rich_markup_mode=None,
+    add_completion=False,
+)
 
 
 @app.command(name="help", hidden=True)
@@ -48,7 +52,7 @@ def _run_host_init_noninteractive(cache_dir: Path) -> None:
 
         ensure_default_network()
         print_success("  Default network ready")
-    except FCMError:
+    except MVMError:
         pass
 
 
@@ -219,7 +223,7 @@ def _step_image(non_interactive: bool) -> None:
     config_path = get_assets_dir() / "images.yaml"
     try:
         images = load_images_config(config_path)
-    except FCMError:
+    except MVMError:
         print_warning("  Could not load images config.")
         print_info("  Run 'mvm image fetch <id>' manually.")
         return
@@ -276,7 +280,7 @@ def _step_ssh_key(non_interactive: bool) -> None:
         try:
             info, priv_path = create_key("mvm-default")
             print_success(f"  Key created: {info.name} ({priv_path})")
-        except FCMKeyError as e:
+        except MVMKeyError as e:
             print_warning(f"  Key creation failed: {e}")
         return
 
@@ -293,7 +297,7 @@ def _step_ssh_key(non_interactive: bool) -> None:
             info, priv_path = create_key(name)
             print_success(f"  Key created: {info.name}")
             print_info(f"  Private key: {priv_path}")
-        except FCMKeyError as e:
+        except MVMKeyError as e:
             print_warning(f"  Key creation failed: {e}")
     elif choice == "2":
         path_str = typer.prompt("  Path to public key")
@@ -301,7 +305,7 @@ def _step_ssh_key(non_interactive: bool) -> None:
         try:
             info = add_key(name, path_str)
             print_success(f"  Key added: {info.name}")
-        except FCMKeyError as e:
+        except MVMKeyError as e:
             print_warning(f"  Key import failed: {e}")
     else:
         print_info("  Skipped. Run 'mvm key add' or 'mvm key create' manually.")
@@ -375,7 +379,7 @@ def configure(
         mvm configure --non-interactive
         mvm configure --skip-host --non-interactive
     """
-    print_info("Firecracker Manager — Setup Wizard")
+    print_info("mvm — Setup Wizard")
     print_info("=" * 40)
 
     initialize_default_config()

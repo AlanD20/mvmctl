@@ -26,7 +26,7 @@ from mvmctl.core.image import (
     import_image,
     load_images_config,
 )
-from mvmctl.exceptions import ChecksumMismatchError, ConfigError, ImageError, FCMError
+from mvmctl.exceptions import ChecksumMismatchError, ConfigError, ImageError, MVMError
 from mvmctl.models.image import ImageSpec, ImageImportSpec
 
 
@@ -112,13 +112,13 @@ def _mock_urlopen_response(data: bytes, content_length: str | None = None):
 
 @patch("mvmctl.utils.http.urlopen")
 def test_download_file_raises_error_no_checksum(mock_urlopen: MagicMock, tmp_path: Path):
-    """S-H10: download_file should raise FCMError when expected_sha256 is None and allow_missing_checksum=False."""
+    """S-H10: download_file should raise MVMError when expected_sha256 is None and allow_missing_checksum=False."""
 
     data = b"hello world binary content"
     mock_urlopen.return_value = _mock_urlopen_response(data)
 
     dest = tmp_path / "warn_output.bin"
-    with pytest.raises(FCMError, match="No checksum provided"):
+    with pytest.raises(MVMError, match="No checksum provided"):
         download_file(
             "https://example.com/file.bin", dest, expected_sha256=None, show_progress=False
         )
@@ -155,7 +155,7 @@ def test_download_file_allows_missing_checksum_with_param(
 def test_download_file_missing_checksum_rejected_in_non_interactive(
     mock_urlopen: MagicMock, tmp_path: Path, mocker: MockerFixture
 ):
-    """download_file should raise FCMError in non-interactive mode when checksum is missing."""
+    """download_file should raise MVMError in non-interactive mode when checksum is missing."""
 
     data = b"hello world binary content"
     mock_urlopen.return_value = _mock_urlopen_response(data)
@@ -163,7 +163,7 @@ def test_download_file_missing_checksum_rejected_in_non_interactive(
     dest = tmp_path / "output.bin"
     mocker.patch("sys.stdin.isatty", return_value=False)
 
-    with pytest.raises(FCMError, match="Cannot prompt for confirmation in non-interactive mode"):
+    with pytest.raises(MVMError, match="Cannot prompt for confirmation in non-interactive mode"):
         download_file(
             "https://example.com/file.bin",
             dest,
@@ -233,7 +233,7 @@ def test_download_file_url_error(mock_urlopen: MagicMock, tmp_path: Path):
     mock_urlopen.side_effect = URLError("Connection refused")
 
     dest = tmp_path / "output.bin"
-    with pytest.raises(FCMError):
+    with pytest.raises(MVMError):
         download_file("https://example.com/file.bin", dest, show_progress=False)
 
 

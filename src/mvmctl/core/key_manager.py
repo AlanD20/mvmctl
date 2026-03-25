@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 
-from mvmctl.exceptions import FCMKeyError
+from mvmctl.exceptions import MVMKeyError
 from mvmctl.utils.fs import get_keys_dir
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ def _compute_fingerprint(pub_key_content: str) -> str:
     """Compute SHA256 fingerprint from public key content."""
     parts = pub_key_content.strip().split()
     if len(parts) < 2:
-        raise FCMKeyError("Invalid public key format")
+        raise MVMKeyError("Invalid public key format")
     key_bytes = base64.b64decode(parts[1])
     digest = hashlib.sha256(key_bytes).digest()
     fp = base64.b64encode(digest).rstrip(b"=").decode()
@@ -75,7 +75,7 @@ def _parse_algorithm(pub_key_content: str) -> str:
     """Extract algorithm from public key content."""
     parts = pub_key_content.strip().split()
     if not parts:
-        raise FCMKeyError("Invalid public key format")
+        raise MVMKeyError("Invalid public key format")
     return parts[0]
 
 
@@ -109,22 +109,22 @@ def _looks_like_private_key(content: str) -> bool:
 def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> KeyInfo:
     pub_key_path = Path(pub_key_path)
     if not pub_key_path.exists():
-        raise FCMKeyError(f"Public key file not found: {pub_key_path}")
+        raise MVMKeyError(f"Public key file not found: {pub_key_path}")
 
     content = pub_key_path.read_text().strip()
     if not content:
-        raise FCMKeyError(f"Public key file is empty: {pub_key_path}")
+        raise MVMKeyError(f"Public key file is empty: {pub_key_path}")
 
     if _looks_like_private_key(content):
         pub_path = Path(str(pub_key_path) + ".pub")
         if pub_path.exists():
-            raise FCMKeyError(
+            raise MVMKeyError(
                 f"'{pub_key_path}' looks like a private key.\n"
-                f"Use the public key instead: fcm key add {name} {pub_path}"
+                f"Use the public key instead: mvm key add {name} {pub_path}"
             )
-        raise FCMKeyError(
+        raise MVMKeyError(
             f"'{pub_key_path}' looks like a private key.\n"
-            f"Pass the corresponding .pub file instead: fcm key add {name} <path>.pub"
+            f"Pass the corresponding .pub file instead: mvm key add {name} <path>.pub"
         )
 
     registry = _load_registry()
@@ -136,7 +136,7 @@ def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> Key
                 old_pub.unlink()
             del registry[name]
         else:
-            raise FCMKeyError(f"Key '{name}' already exists. Remove it first to replace.")
+            raise MVMKeyError(f"Key '{name}' already exists. Remove it first to replace.")
 
     keys_dir = get_keys_dir()
     keys_dir.mkdir(parents=True, exist_ok=True)
@@ -169,7 +169,7 @@ def _generate_keypair(private_key_path: Path, pub_key_path: Path, comment: str) 
         The public key content as a stripped string.
 
     Raises:
-        FCMKeyError: If ssh-keygen exits with a non-zero return code.
+        MVMKeyError: If ssh-keygen exits with a non-zero return code.
     """
     cmd = [
         "ssh-keygen",
@@ -185,7 +185,7 @@ def _generate_keypair(private_key_path: Path, pub_key_path: Path, comment: str) 
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise FCMKeyError(f"ssh-keygen failed: {result.stderr.strip()}")
+        raise MVMKeyError(f"ssh-keygen failed: {result.stderr.strip()}")
 
     return pub_key_path.read_text().strip()
 
@@ -242,7 +242,7 @@ def create_key(
 
     if not overwrite and (private_key_path.exists() or pub_key_path.exists()):
         existing = private_key_path if private_key_path.exists() else pub_key_path
-        raise FCMKeyError(f"Key file already exists: {existing}. Use --overwrite to replace.")
+        raise MVMKeyError(f"Key file already exists: {existing}. Use --overwrite to replace.")
 
     registry = _load_registry()
     if name in registry:
@@ -251,7 +251,7 @@ def create_key(
             del registry[name]
             _save_registry(registry)
         else:
-            raise FCMKeyError(f"Key '{name}' already exists in cache. Remove it first.")
+            raise MVMKeyError(f"Key '{name}' already exists in cache. Remove it first.")
 
     if comment is None:
         comment = f"{name}@{socket.gethostname()}"
@@ -277,7 +277,7 @@ def remove_key(name: str) -> None:
     """Remove a key from the cache (does not delete key files from disk)."""
     registry = _load_registry()
     if name not in registry:
-        raise FCMKeyError(f"Key '{name}' not found in cache")
+        raise MVMKeyError(f"Key '{name}' not found in cache")
 
     del registry[name]
     _save_registry(registry)
@@ -303,7 +303,7 @@ def inspect_key(name: str) -> KeyInspect:
     """Return detailed info about a named key."""
     registry = _load_registry()
     if name not in registry:
-        raise FCMKeyError(f"Key '{name}' not found in cache")
+        raise MVMKeyError(f"Key '{name}' not found in cache")
 
     entry = registry[name]
     pub_file = get_keys_dir() / f"{name}.pub"

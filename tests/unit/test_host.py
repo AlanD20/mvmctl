@@ -368,12 +368,12 @@ def test_persist_sysctl_file_does_not_exist(mock_conf):
     """_persist_sysctl should create the conf file and return a HostChange when it does not exist."""
     mock_conf.exists.return_value = False
     mock_conf.parent = MagicMock()
-    mock_conf.__str__ = lambda self: "/etc/sysctl.d/firecracker-manager.conf"
+    mock_conf.__str__ = lambda self: "/etc/sysctl.d/mvmctl.conf"
     result = _persist_sysctl()
     assert result is not None
     assert result.setting == "sysctl_persist_file"
     assert result.original_value is None
-    assert result.applied_value == "/etc/sysctl.d/firecracker-manager.conf"
+    assert result.applied_value == "/etc/sysctl.d/mvmctl.conf"
     assert result.mechanism == "file_create"
     mock_conf.write_text.assert_called_once_with("net.ipv4.ip_forward = 1\n")
 
@@ -384,7 +384,7 @@ def test_persist_sysctl_file_has_wrong_content(mock_conf):
     mock_conf.exists.return_value = True
     mock_conf.read_text.return_value = "net.ipv4.ip_forward = 0\n"
     mock_conf.parent = MagicMock()
-    mock_conf.__str__ = lambda self: "/etc/sysctl.d/firecracker-manager.conf"
+    mock_conf.__str__ = lambda self: "/etc/sysctl.d/mvmctl.conf"
     result = _persist_sysctl()
     assert result is not None
     assert result.original_value == "net.ipv4.ip_forward = 0\n"
@@ -672,7 +672,7 @@ def test_init_host_enables_ip_forward(
         # SYSCTL_CONF doesn't exist yet
         mock_sysctl_conf.exists.return_value = False
         mock_sysctl_conf.parent = MagicMock()
-        mock_sysctl_conf.__str__ = lambda self: "/etc/sysctl.d/firecracker-manager.conf"
+        mock_sysctl_conf.__str__ = lambda self: "/etc/sysctl.d/mvmctl.conf"
 
         changes = init_host(tmp_path)
 
@@ -774,7 +774,7 @@ def test_init_host_idempotent(
 
         mock_sysctl_conf.exists.return_value = False
         mock_sysctl_conf.parent = MagicMock()
-        mock_sysctl_conf.__str__ = lambda self: "/etc/sysctl.d/firecracker-manager.conf"
+        mock_sysctl_conf.__str__ = lambda self: "/etc/sysctl.d/mvmctl.conf"
 
         changes_first = init_host(tmp_path)
 
@@ -1473,15 +1473,15 @@ class TestHostHelpers:
 
 
 class TestCleanHost:
-    @patch("mvmctl.core.network.teardown_fcm_chains")
+    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_no_networks(self, mock_list, mock_teardown_chains):
         summary = clean_host(MagicMock())
-        # Even with no networks, FCM chains are still removed
+        # Even with no networks, MVM chains are still removed
         assert len(summary) == 1
-        assert "Removed FCM iptables chains" in summary[0]
+        assert "Removed MVM iptables chains" in summary[0]
 
-    @patch("mvmctl.core.network.teardown_fcm_chains")
+    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.remove_network")
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_removes_networks(self, mock_list, mock_remove, mock_teardown_chains):
@@ -1493,14 +1493,14 @@ class TestCleanHost:
         summary = clean_host(MagicMock())
         assert len(summary) == 2
         assert any("Removed network 'default'" in s for s in summary)
-        assert any("Removed FCM iptables chains" in s for s in summary)
+        assert any("Removed MVM iptables chains" in s for s in summary)
 
     @patch(
         "mvmctl.core.network_manager.remove_network",
         side_effect=NetworkError("bridge teardown failed"),
     )
     @patch("mvmctl.core.network_manager.list_networks")
-    @patch("mvmctl.core.network.teardown_fcm_chains")
+    @patch("mvmctl.core.network.teardown_mvm_chains")
     def test_clean_host_handles_network_failure(self, mock_teardown_chains, mock_list, mock_remove):
         net = MagicMock()
         net.name = "default"
@@ -1509,18 +1509,18 @@ class TestCleanHost:
 
         summary = clean_host(MagicMock())
         assert any("Warning" in s for s in summary)
-        assert any("Removed FCM iptables chains" in s for s in summary)
+        assert any("Removed MVM iptables chains" in s for s in summary)
 
-    @patch("mvmctl.core.network.teardown_fcm_chains")
+    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch(
         "mvmctl.core.network_manager.list_networks",
         side_effect=NetworkError("list failed"),
     )
     def test_clean_host_handles_list_failure(self, mock_list, mock_teardown_chains):
         summary = clean_host(MagicMock())
-        # Even when listing networks fails, FCM chains are still removed
+        # Even when listing networks fails, MVM chains are still removed
         assert len(summary) == 1
-        assert "Removed FCM iptables chains" in summary[0]
+        assert "Removed MVM iptables chains" in summary[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1533,7 +1533,9 @@ class TestResetHost:
     @patch("mvmctl.core.host._remove_group", return_value=True)
     @patch("mvmctl.core.host._remove_sudoers", return_value=True)
     @patch("mvmctl.core.host.restore_host", return_value=[])
-    @patch("mvmctl.core.host.clean_host", return_value=["Removed network 'default' (bridge: fcm-br0)"])
+    @patch(
+        "mvmctl.core.host.clean_host", return_value=["Removed network 'default' (bridge: mvm-br0)"]
+    )
     def test_reset_host_full(
         self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file
     ):
@@ -1625,16 +1627,16 @@ class TestInitHostErrorPaths:
 class TestCleanHostErrorPaths:
     """Error-path tests for clean_host."""
 
-    @patch("mvmctl.core.network.teardown_fcm_chains")
+    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_bridge_doesnt_exist(self, mock_list, mock_teardown_chains):
-        """clean_host removes FCM chains even when no bridges/networks exist."""
+        """clean_host removes MVM chains even when no bridges/networks exist."""
         summary = clean_host(MagicMock())
         assert len(summary) == 1
-        assert "Removed FCM iptables chains" in summary[0]
+        assert "Removed MVM iptables chains" in summary[0]
         mock_list.assert_called_once()
 
-    @patch("mvmctl.core.network.teardown_fcm_chains")
+    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.remove_network")
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_remove_network_subprocess_error(
@@ -1650,7 +1652,7 @@ class TestCleanHostErrorPaths:
         assert len(summary) == 2
         assert any("Warning" in s for s in summary)
         assert any("stale-net" in s for s in summary)
-        assert any("Removed FCM iptables chains" in s for s in summary)
+        assert any("Removed MVM iptables chains" in s for s in summary)
 
 
 class TestRestoreHostErrorPaths:

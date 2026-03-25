@@ -89,7 +89,7 @@ def test_get_network_leases_delegates(mock_get_leases):
 @patch("mvmctl.api.network.inspect_network")
 def test_inspect_network_delegates(mock_inspect):
     """Test inspect_network delegates to core."""
-    mock_info = {"name": "test-net", "bridge": "fcm-test-net"}
+    mock_info = {"name": "test-net", "bridge": "mvm-test-net"}
     mock_inspect.return_value = mock_info
 
     result = network_api.inspect_network("test-net")
@@ -130,10 +130,10 @@ def test_ensure_default_network_delegates(mock_ensure):
 @patch("mvmctl.api.network.get_iptables_rules_for_bridge")
 def test_get_iptables_rules_for_bridge_delegates(mock_get_rules):
     """Test get_iptables_rules_for_bridge delegates to core."""
-    mock_rules = ["-A FORWARD -i fcm-br0 -j ACCEPT"]
+    mock_rules = ["-A FORWARD -i mvm-br0 -j ACCEPT"]
     mock_get_rules.return_value = mock_rules
 
-    result = network_api.get_iptables_rules_for_bridge("fcm-br0")
+    result = network_api.get_iptables_rules_for_bridge("mvm-br0")
 
-    mock_get_rules.assert_called_once_with("fcm-br0")
+    mock_get_rules.assert_called_once_with("mvm-br0")
     assert result == mock_rules

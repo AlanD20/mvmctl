@@ -157,7 +157,7 @@ def test_vm_manager_migration(tmp_path: Path):
                         "ip": "10.0.0.2",
                         "mac": "02:FC:00:00:00:01",
                         "network_name": "default",
-                        "tap_device": "fcm-tap0",
+                        "tap_device": "mvm-tap0",
                         "created_at": datetime.now(tz=timezone.utc).isoformat(),
                         "status": "running",
                     }

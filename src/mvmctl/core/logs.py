@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 
 from mvmctl.constants import DEFAULT_VM_LOG_LINES, DEFAULT_VM_LOG_TYPE
-from mvmctl.exceptions import ConfigError, FCMError, VMNotFoundError
+from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
 from mvmctl.utils.fs import get_vm_dir
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def get_log_path(
 
     Raises:
         VMNotFoundError: If VM directory does not exist
-        FCMError: If log type is unknown or log file not found
+        MVMError: If log type is unknown or log file not found
     """
     vm_dir = get_vm_dir(vm_name)
 
@@ -66,14 +66,14 @@ def read_log_lines(
         List of line strings (including newlines).
 
     Raises:
-        FCMError: If the log file cannot be read.
+        MVMError: If the log file cannot be read.
     """
     try:
         with open(log_file, "r") as f:
             last_lines = deque(f, maxlen=lines)
             return list(last_lines)
     except IOError as e:
-        raise FCMError(f"Error reading log file: {e}") from e
+        raise MVMError(f"Error reading log file: {e}") from e
 
 
 def follow_log(
@@ -84,7 +84,7 @@ def follow_log(
     Yields new lines as they are written.
 
     Raises:
-        FCMError: If the log file cannot be read
+        MVMError: If the log file cannot be read
     """
     try:
         with open(log_file, "r") as f:
@@ -97,7 +97,7 @@ def follow_log(
                     continue
                 yield line.rstrip("\n")
     except IOError as e:
-        raise FCMError(f"Error following log: {e}") from e
+        raise MVMError(f"Error following log: {e}") from e
 
 
 def show_logs(
@@ -125,7 +125,7 @@ def show_logs(
 
     Raises:
         VMNotFoundError: If VM not found
-        FCMError: On log access errors
+        MVMError: On log access errors
     """
     log_file = get_log_path(vm_name, log_type)
 

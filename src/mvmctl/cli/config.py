@@ -10,11 +10,15 @@ from mvmctl.api.config import (
     set_config_value,
     validate_config,
 )
-from mvmctl.exceptions import FCMError
+from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.fs import get_assets_dir, get_vm_dir
 
-app = typer.Typer(help="Configuration commands")
+app = typer.Typer(
+    help="Configuration commands",
+    rich_markup_mode=None,
+    add_completion=False,
+)
 
 
 @app.callback(invoke_without_command=True)
@@ -38,7 +42,7 @@ def show(
         config = load_config(config_dir)
         data = dump_config(config, section)
         typer.echo(json.dumps(data, indent=2))
-    except FCMError as e:
+    except MVMError as e:
         print_error(f"Failed to load config: {e}")
         raise typer.Exit(code=1)
 
@@ -63,7 +67,7 @@ def validate(
             raise typer.Exit(code=1)
         else:
             print_success("Configuration is valid")
-    except FCMError as e:
+    except MVMError as e:
         print_error(f"Validation error: {e}")
         raise typer.Exit(code=1)
 

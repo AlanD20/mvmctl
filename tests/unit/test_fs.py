@@ -65,17 +65,17 @@ def test_get_assets_dir_points_to_package():
 
 
 # ---------------------------------------------------------------------------
-# S-H4: FCM_CACHE_DIR path validation
+# S-H4: MVM_CACHE_DIR path validation
 # ---------------------------------------------------------------------------
 
 
 def test_get_cache_dir_rejects_path_outside_home_and_tmp():
     """MVM_CACHE_DIR pointing to /etc should be rejected."""
-    from mvmctl.exceptions import FCMError
+    from mvmctl.exceptions import MVMError
 
     os.environ["MVM_CACHE_DIR"] = "/etc/shadow"
     try:
-        with pytest.raises(FCMError, match="Unsafe"):
+        with pytest.raises(MVMError, match="Unsafe"):
             get_cache_dir()
     finally:
         del os.environ["MVM_CACHE_DIR"]
@@ -83,11 +83,11 @@ def test_get_cache_dir_rejects_path_outside_home_and_tmp():
 
 def test_get_cache_dir_rejects_traversal_path():
     """MVM_CACHE_DIR with traversal to /etc should be rejected."""
-    from mvmctl.exceptions import FCMError
+    from mvmctl.exceptions import MVMError
 
     os.environ["MVM_CACHE_DIR"] = "/tmp/../../etc"
     try:
-        with pytest.raises(FCMError, match="Unsafe"):
+        with pytest.raises(MVMError, match="Unsafe"):
             get_cache_dir()
     finally:
         del os.environ["MVM_CACHE_DIR"]

@@ -7,14 +7,14 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from mvmctl.cli.config import app
-from mvmctl.core.config import FCMConfig
+from mvmctl.core.config import MVMConfig
 
 runner = CliRunner()
 
 
-def _default_config() -> FCMConfig:
-    """Return a default FCMConfig for mocking."""
-    return FCMConfig()
+def _default_config() -> MVMConfig:
+    """Return a default MVMConfig for mocking."""
+    return MVMConfig()
 
 
 def test_show_config():

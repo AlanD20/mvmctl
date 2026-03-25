@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from mvmctl.exceptions import FCMError, HostError, PrivilegeError
+from mvmctl.exceptions import MVMError, HostError, PrivilegeError
 
 runner = CliRunner()
 
@@ -22,8 +22,8 @@ class TestPrivilegeError:
     def test_is_host_error(self):
         assert issubclass(PrivilegeError, HostError)
 
-    def test_is_fcm_error(self):
-        assert issubclass(PrivilegeError, FCMError)
+    def test_is_mvm_error(self):
+        assert issubclass(PrivilegeError, MVMError)
 
     def test_can_be_raised(self):
         with pytest.raises(PrivilegeError, match="not allowed"):
@@ -47,7 +47,7 @@ class TestCliClean:
         from mvmctl.cli.host import app
 
         mock_cache.return_value = tmp_path
-        mock_clean.return_value = ["Removed network 'default' (bridge: fcm-br0)"]
+        mock_clean.return_value = ["Removed network 'default' (bridge: mvm-br0)"]
         result = runner.invoke(app, ["clean", "--force"])
         assert result.exit_code == 0
         assert "cleaned successfully" in result.output
@@ -111,7 +111,7 @@ class TestHelpCommand:
         click_runner = CliRunner()
         result = click_runner.invoke(app, ["help"])
         assert result.exit_code == 0
-        assert "Firecracker Manager" in result.output or "fcm" in result.output
+        assert "MicroVM Manager" in result.output or "mvm" in result.output
 
     def test_help_vm(self):
         from click.testing import CliRunner

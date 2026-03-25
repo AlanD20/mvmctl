@@ -21,11 +21,11 @@ from mvmctl.core.network import (
     get_tap_devices,
     remove_iptables_forward_rules,
     setup_bridge,
-    setup_fcm_chains,
+    setup_mvm_chains,
     setup_nat,
     tap_exists,
     teardown_bridge,
-    teardown_fcm_chains,
+    teardown_mvm_chains,
     teardown_nat,
 )
 from mvmctl.exceptions import NetworkError
@@ -282,7 +282,7 @@ def test_setup_nat_all_rules_exist():
     mock_result.returncode = 0
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
-            with patch("mvmctl.core.network.setup_fcm_chains"):
+            with patch("mvmctl.core.network.setup_mvm_chains"):
                 setup_nat("fc-br0", "eth0")
                 # Single iptables-restore call for all rules
                 assert mock_run.call_count == 1
@@ -299,7 +299,7 @@ def test_setup_nat_no_rules_exist():
         return_value=mock_result,
     ) as mock_run:
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
-            with patch("mvmctl.core.network.setup_fcm_chains"):
+            with patch("mvmctl.core.network.setup_mvm_chains"):
                 setup_nat("fc-br0", "eth0")
                 # Single iptables-restore call for all rules
                 assert mock_run.call_count == 1
@@ -314,7 +314,7 @@ def test_setup_nat_masquerade_add_fails():
         side_effect=subprocess.CalledProcessError(1, ["iptables-restore", "--noflush"]),
     ):
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
-            with patch("mvmctl.core.network.setup_fcm_chains"):
+            with patch("mvmctl.core.network.setup_mvm_chains"):
                 with pytest.raises(NetworkError, match="Failed to setup NAT"):
                     setup_nat("fc-br0", "eth0")
 
@@ -324,7 +324,9 @@ def test_setup_nat_auto_detect_interface():
     mock_check = MagicMock()
     mock_check.returncode = 0
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_check):
-        with patch("mvmctl.core.network.get_default_interface", return_value="eth0") as mock_get_iface:
+        with patch(
+            "mvmctl.core.network.get_default_interface", return_value="eth0"
+        ) as mock_get_iface:
             setup_nat("fc-br0")
             mock_get_iface.assert_called_once()
 
@@ -522,7 +524,7 @@ def test_add_iptables_forward_rules_already_exist():
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-        with patch("mvmctl.core.network.setup_fcm_chains"):
+        with patch("mvmctl.core.network.setup_mvm_chains"):
             add_iptables_forward_rules("fc-vm1-0", "fc-br0")
             # Single iptables-restore call for all rules
             assert mock_run.call_count == 1
@@ -538,7 +540,7 @@ def test_add_iptables_forward_rules_add_success():
         "mvmctl.core.network.subprocess.run",
         return_value=mock_result,
     ) as mock_run:
-        with patch("mvmctl.core.network.setup_fcm_chains"):
+        with patch("mvmctl.core.network.setup_mvm_chains"):
             add_iptables_forward_rules("fc-vm1-0", "fc-br0")
             # Single iptables-restore call for all rules
             assert mock_run.call_count == 1
@@ -552,7 +554,7 @@ def test_add_iptables_forward_rules_bridge_to_tap_fails():
         "mvmctl.core.network.subprocess.run",
         side_effect=subprocess.CalledProcessError(1, ["iptables-restore", "--noflush"]),
     ):
-        with patch("mvmctl.core.network.setup_fcm_chains"):
+        with patch("mvmctl.core.network.setup_mvm_chains"):
             with pytest.raises(NetworkError, match="Failed to add FORWARD rules"):
                 add_iptables_forward_rules("fc-vm1-0", "fc-br0")
 
@@ -623,80 +625,80 @@ def test_chain_exists_nat_table():
 
 
 # ---------------------------------------------------------------------------
-# setup_fcm_chains
+# setup_mvm_chains
 # ---------------------------------------------------------------------------
 
 
-def test_setup_fcm_chains_creates_both_chains():
-    """setup_fcm_chains should create both FORWARD and POSTROUTING chains."""
+def test_setup_mvm_chains_creates_both_chains():
+    """setup_mvm_chains should create both FORWARD and POSTROUTING chains."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("mvmctl.core.network.chain_exists", return_value=False):
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
-                setup_fcm_chains()
+                setup_mvm_chains()
                 # 2 chain creations + 2 jump rule additions = 4 calls
                 assert mock_run.call_count == 4
 
 
-def test_setup_fcm_chains_idempotent():
-    """setup_fcm_chains should not recreate chains that already exist."""
+def test_setup_mvm_chains_idempotent():
+    """setup_mvm_chains should not recreate chains that already exist."""
     with patch("mvmctl.core.network.chain_exists", return_value=True):
         with patch("mvmctl.core.network._iptables_rule_exists", return_value=True):
             with patch("mvmctl.core.network.subprocess.run") as mock_run:
-                setup_fcm_chains()
+                setup_mvm_chains()
                 mock_run.assert_not_called()
 
 
-def test_setup_fcm_chains_adds_jump_rules():
-    """setup_fcm_chains should add jump rules from built-in chains to FCM chains."""
+def test_setup_mvm_chains_adds_jump_rules():
+    """setup_mvm_chains should add jump rules from built-in chains to MVM chains."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("mvmctl.core.network.chain_exists", return_value=True):
         with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
             with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-                setup_fcm_chains()
-                # 2 jump rules (FORWARD -> FCM-FORWARD, POSTROUTING -> FCM-POSTROUTING)
+                setup_mvm_chains()
+                # 2 jump rules (FORWARD -> MVM-FORWARD, POSTROUTING -> MVM-POSTROUTING)
                 assert mock_run.call_count == 2
 
 
-def test_setup_fcm_chains_raises_on_failure():
-    """setup_fcm_chains should raise NetworkError when chain creation fails."""
+def test_setup_mvm_chains_raises_on_failure():
+    """setup_mvm_chains should raise NetworkError when chain creation fails."""
     with patch("mvmctl.core.network.chain_exists", return_value=False):
         with patch(
             "mvmctl.core.network.subprocess.run",
             side_effect=subprocess.CalledProcessError(1, ["iptables", "-N"]),
         ):
             with pytest.raises(NetworkError, match="Failed to create MVM-FORWARD chain"):
-                setup_fcm_chains()
+                setup_mvm_chains()
 
 
 # ---------------------------------------------------------------------------
-# teardown_fcm_chains
+# teardown_mvm_chains
 # ---------------------------------------------------------------------------
 
 
-def test_teardown_fcm_chains_removes_both_chains():
-    """teardown_fcm_chains should remove both FORWARD and POSTROUTING chains."""
+def test_teardown_mvm_chains_removes_both_chains():
+    """teardown_mvm_chains should remove both FORWARD and POSTROUTING chains."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("mvmctl.core.network.chain_exists", return_value=True):
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-            teardown_fcm_chains()
+            teardown_mvm_chains()
             # 2 jump removals + 2 flushes + 2 deletions = 6 calls
             assert mock_run.call_count == 6
 
 
-def test_teardown_fcm_chains_safe_when_missing():
-    """teardown_fcm_chains should be safe when chains don't exist."""
+def test_teardown_mvm_chains_safe_when_missing():
+    """teardown_mvm_chains should be safe when chains don't exist."""
     with patch("mvmctl.core.network.chain_exists", return_value=False):
         with patch("mvmctl.core.network.subprocess.run") as mock_run:
-            teardown_fcm_chains()
+            teardown_mvm_chains()
             mock_run.assert_not_called()
 
 
-def test_teardown_fcm_chains_raises_on_flush_failure():
-    """teardown_fcm_chains should raise NetworkError when chain flush fails."""
+def test_teardown_mvm_chains_raises_on_flush_failure():
+    """teardown_mvm_chains should raise NetworkError when chain flush fails."""
     with patch("mvmctl.core.network.chain_exists", return_value=True):
         mock_success = MagicMock()
         mock_success.returncode = 0
@@ -705,24 +707,24 @@ def test_teardown_fcm_chains_raises_on_flush_failure():
             side_effect=[
                 # Jump removal from FORWARD (check=False, ignored)
                 mock_success,
-                # Flush FCM-FORWARD chain - fails
+                # Flush MVM-FORWARD chain - fails
                 subprocess.CalledProcessError(1, ["iptables", "-F"]),
             ],
         ):
             with pytest.raises(NetworkError, match="Failed to remove MVM-FORWARD chain"):
-                teardown_fcm_chains()
+                teardown_mvm_chains()
 
 
 # ---------------------------------------------------------------------------
-# setup_nat with FCM chains
+# setup_nat with MVM chains
 # ---------------------------------------------------------------------------
 
 
-def test_setup_nat_calls_setup_fcm_chains():
-    """setup_nat should call setup_fcm_chains to ensure chains exist."""
+def test_setup_nat_calls_setup_mvm_chains():
+    """setup_nat should call setup_mvm_chains to ensure chains exist."""
     mock_result = MagicMock()
     mock_result.returncode = 0
-    with patch("mvmctl.core.network.setup_fcm_chains") as mock_setup_chains:
+    with patch("mvmctl.core.network.setup_mvm_chains") as mock_setup_chains:
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
             with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
                 with patch("mvmctl.core.network._iptables_rule_exists", return_value=True):
@@ -730,28 +732,28 @@ def test_setup_nat_calls_setup_fcm_chains():
                     mock_setup_chains.assert_called_once()
 
 
-def test_setup_nat_adds_rules_to_fcm_chains():
-    """setup_nat should add rules to FCM chains, not built-in chains."""
+def test_setup_nat_adds_rules_to_mvm_chains():
+    """setup_nat should add rules to MVM chains, not built-in chains."""
     mock_result = MagicMock()
     mock_result.returncode = 0
-    with patch("mvmctl.core.network.setup_fcm_chains"):
+    with patch("mvmctl.core.network.setup_mvm_chains"):
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
                 with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
                     setup_nat("fc-br0", "eth0")
-                    # Check that rules are added to FCM chains
+                    # Check that rules are added to MVM chains
                     calls = [str(c) for c in mock_run.call_args_list]
                     assert any("MVM-POSTROUTING" in c for c in calls)
                     assert any("MVM-FORWARD" in c for c in calls)
 
 
 # ---------------------------------------------------------------------------
-# teardown_nat with FCM chains
+# teardown_nat with MVM chains
 # ---------------------------------------------------------------------------
 
 
 def test_teardown_nat_skips_when_chains_missing():
-    """teardown_nat should skip when FCM chains don't exist."""
+    """teardown_nat should skip when MVM chains don't exist."""
     with patch("mvmctl.core.network.get_tap_devices", return_value=[]):
         with patch("mvmctl.core.network.chain_exists", return_value=False):
             with patch("mvmctl.core.network.subprocess.run") as mock_run:
@@ -760,8 +762,8 @@ def test_teardown_nat_skips_when_chains_missing():
                     mock_run.assert_not_called()
 
 
-def test_teardown_nat_removes_rules_from_fcm_chains():
-    """teardown_nat should remove rules from FCM chains."""
+def test_teardown_nat_removes_rules_from_mvm_chains():
+    """teardown_nat should remove rules from MVM chains."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("mvmctl.core.network.get_tap_devices", return_value=[]):
@@ -775,26 +777,26 @@ def test_teardown_nat_removes_rules_from_fcm_chains():
 
 
 # ---------------------------------------------------------------------------
-# add_iptables_forward_rules with FCM chains
+# add_iptables_forward_rules with MVM chains
 # ---------------------------------------------------------------------------
 
 
 def test_add_iptables_forward_rules_calls_setup_chains():
-    """add_iptables_forward_rules should call setup_fcm_chains."""
+    """add_iptables_forward_rules should call setup_mvm_chains."""
     mock_result = MagicMock()
     mock_result.returncode = 0
-    with patch("mvmctl.core.network.setup_fcm_chains") as mock_setup_chains:
+    with patch("mvmctl.core.network.setup_mvm_chains") as mock_setup_chains:
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
             with patch("mvmctl.core.network._iptables_rule_exists", return_value=True):
                 add_iptables_forward_rules("fc-vm1-0", "fc-br0")
                 mock_setup_chains.assert_called_once()
 
 
-def test_add_iptables_forward_rules_uses_fcm_chain():
+def test_add_iptables_forward_rules_uses_mvm_chain():
     """add_iptables_forward_rules should add rules to MVM-FORWARD chain."""
     mock_result = MagicMock()
     mock_result.returncode = 0
-    with patch("mvmctl.core.network.setup_fcm_chains"):
+    with patch("mvmctl.core.network.setup_mvm_chains"):
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
                 add_iptables_forward_rules("fc-vm1-0", "fc-br0")
@@ -803,19 +805,19 @@ def test_add_iptables_forward_rules_uses_fcm_chain():
 
 
 # ---------------------------------------------------------------------------
-# remove_iptables_forward_rules with FCM chains
+# remove_iptables_forward_rules with MVM chains
 # ---------------------------------------------------------------------------
 
 
 def test_remove_iptables_forward_rules_skips_when_chain_missing():
-    """remove_iptables_forward_rules should skip when FCM chain doesn't exist."""
+    """remove_iptables_forward_rules should skip when MVM chain doesn't exist."""
     with patch("mvmctl.core.network.chain_exists", return_value=False):
         with patch("mvmctl.core.network.subprocess.run") as mock_run:
             remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
             mock_run.assert_not_called()
 
 
-def test_remove_iptables_forward_rules_uses_fcm_chain():
+def test_remove_iptables_forward_rules_uses_mvm_chain():
     """remove_iptables_forward_rules should remove rules from MVM-FORWARD chain."""
     mock_result = MagicMock()
     mock_result.returncode = 0
@@ -1074,7 +1076,7 @@ def test_setup_nat_uses_batch_mode():
 
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
-            with patch("mvmctl.core.network.setup_fcm_chains"):
+            with patch("mvmctl.core.network.setup_mvm_chains"):
                 setup_nat("fc-br0", "eth0")
 
                 # Should be exactly 1 call to iptables-restore
@@ -1097,7 +1099,7 @@ def test_add_iptables_forward_rules_uses_batch_mode():
     mock_result.returncode = 0
 
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-        with patch("mvmctl.core.network.setup_fcm_chains"):
+        with patch("mvmctl.core.network.setup_mvm_chains"):
             add_iptables_forward_rules("fc-vm1-0", "fc-br0")
 
             # Should be exactly 1 call to iptables-restore

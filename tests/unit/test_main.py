@@ -15,7 +15,7 @@ def invoke_cli(args: list[str]):
 def test_help():
     result = invoke_cli(["--help"])
     assert result.exit_code == 0
-    assert "Firecracker Manager" in result.output
+    assert "MicroVM Manager" in result.output
 
 
 def test_vm_subcommand_registered():

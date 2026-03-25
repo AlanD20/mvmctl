@@ -27,12 +27,17 @@ from mvmctl.constants import (
     DEFAULT_VM_LOG_TYPE,
     FALLBACK_FIRECRACKER_BIN,
 )
-from mvmctl.exceptions import FCMError
+from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMInstance, VMState
 from mvmctl.utils.console import console, print_error, print_info, print_success
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
-app = typer.Typer(help="VM lifecycle management", no_args_is_help=True)
+app = typer.Typer(
+    help="VM lifecycle management",
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    add_completion=False,
+)
 
 
 @app.command(name="help", hidden=True)
@@ -99,7 +104,7 @@ def create(
     kernel: Optional[str] = typer.Option(
         None,
         "--kernel",
-        help="Path to vmlinux kernel (default: active default kernel or FCM_KERNEL env var)",
+        help="Path to vmlinux kernel (default: active default kernel or MVM_KERNEL env var)",
     ),
     vcpus: Optional[int] = typer.Option(
         None, "--vcpus", "--cpus", help="Number of vCPUs (default: from user config)"
@@ -136,8 +141,8 @@ def create(
     firecracker_bin: Optional[str] = typer.Option(
         None,
         "--firecracker-bin",
-        envvar="FCM_FIRECRACKER_BIN",
-        help="Path to firecracker binary (default: active version from fcm bin use)",
+        envvar="MVM_FIRECRACKER_BIN",
+        help="Path to firecracker binary (default: active version from mvm bin use)",
     ),
     output_config: Optional[Path] = typer.Option(
         None,
@@ -154,19 +159,19 @@ def create(
 
     Examples:
         # Create a VM with defaults:
-        fcm vm create --name myvm --image ubuntu-24.04
+        mvm vm create --name myvm --image ubuntu-24.04
 
         # Create with custom resources and SSH key:
-        fcm vm create --name myvm --image ubuntu-24.04 --vcpus 4 --mem 4096 --ssh-key mykey
+        mvm vm create --name myvm --image ubuntu-24.04 --vcpus 4 --mem 4096 --ssh-key mykey
 
         # Create with static IP:
-        fcm vm create --name myvm --image ubuntu-24.04 --ip 10.20.0.10
+        mvm vm create --name myvm --image ubuntu-24.04 --ip 10.20.0.10
 
         # Create with API socket for snapshot support:
-        fcm vm create --name myvm --image ubuntu-24.04 --enable-api-socket
+        mvm vm create --name myvm --image ubuntu-24.04 --enable-api-socket
 
         # Import from config file with CLI overrides:
-        fcm vm create --import-config myvm.json --name newname
+        mvm vm create --import-config myvm.json --name newname
     """
     if import_config is not None:
         try:
@@ -219,7 +224,7 @@ def create(
         if image is None:
             print_error(
                 "No --image specified and no default image set. "
-                "Use 'fcm image fetch <name>' then 'fcm image set-default <name>', or pass --image."
+                "Use 'mvm image fetch <name>' then 'mvm image set-default <name>', or pass --image."
             )
             raise typer.Exit(code=1)
 
@@ -285,9 +290,9 @@ def create(
 
         log_audit("vm.create", f"name={name}")
         print_success(f"VM '{name}' started (PID {vm.pid})")
-        print_info(f"  SSH ready in ~30-60s: fcm vm ssh --name {name}")
-        print_info(f"  Logs: fcm vm logs --name {name} --type os --follow")
-    except FCMError as e:
+        print_info(f"  SSH ready in ~30-60s: mvm vm ssh --name {name}")
+        print_info(f"  Logs: mvm vm logs --name {name} --type os --follow")
+    except MVMError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 
@@ -304,10 +309,10 @@ def rm(
 
     Examples:
         # Remove by short ID:
-        fcm vm rm abc123 def456
+        mvm vm rm abc123 def456
 
         # Remove by name (prompts if multiple with same name):
-        fcm vm rm --name runner1 --name runner2
+        mvm vm rm --name runner1 --name runner2
     """
     from mvmctl.core.vm_manager import get_vm_manager
 
@@ -382,7 +387,7 @@ def rm(
             log_audit("vm.remove", f"name={vm.name}")
             print_success(f"VM '{vm.name}' removed")
             removed_count += 1
-        except FCMError as e:
+        except MVMError as e:
             print_error(f"Failed to remove VM '{vm.name}': {e}")
 
     if removed_count == 0 and targets:
@@ -484,11 +489,11 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
     if key is not None:
         resolved = _find_ssh_key_from_path(key)
         if resolved is None:
-            raise FCMError(f"No SSH key found at: {key}")
+            raise MVMError(f"No SSH key found at: {key}")
         return resolved
-    fcm_keys_dir = Path.home() / ".cache" / "firecracker-manager" / "keys"
-    if fcm_keys_dir.exists():
-        for f in sorted(fcm_keys_dir.iterdir()):
+    mvm_keys_dir = Path.home() / ".cache" / "mvmctl" / "keys"
+    if mvm_keys_dir.exists():
+        for f in sorted(mvm_keys_dir.iterdir()):
             if f.is_file() and f.suffix != ".pub" and not f.name.startswith("."):
                 return f
     ssh_dir = Path.home() / ".ssh"
@@ -523,7 +528,7 @@ def ssh(
         effective_user = user if user is not None else _get_vm_defaults().ssh_user
         exit_code = ssh_vm(name=name, user=effective_user, key=resolved_key, cmd=cmd)
         raise typer.Exit(code=exit_code)
-    except FCMError as e:
+    except MVMError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 
@@ -552,7 +557,7 @@ def logs(
         for line in log_lines:
             print(line, end="" if line.endswith("\n") else "\n")
         raise typer.Exit(code=0)
-    except FCMError as e:
+    except MVMError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 
@@ -606,7 +611,7 @@ def snapshot(
     try:
         snapshot_vm(name=name, mem_out=mem_out, state_out=state_out)
         raise typer.Exit(code=0)
-    except FCMError as exc:
+    except MVMError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)
 
@@ -627,7 +632,7 @@ def load(
     try:
         load_snapshot(name=name, mem_in=mem_in, state_in=state_in, resume_after=resume_after)
         raise typer.Exit(code=0)
-    except FCMError as exc:
+    except MVMError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)
 

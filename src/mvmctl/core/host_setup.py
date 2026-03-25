@@ -23,7 +23,7 @@ from mvmctl.core.host_privilege import (
     _write_sudoers,
 )
 from mvmctl.core.host_state import SYSCTL_CONF, SYSCTL_KEY, HostChange, _save_state
-from mvmctl.core.network import setup_fcm_chains
+from mvmctl.core.network import setup_mvm_chains
 from mvmctl.exceptions import HostError
 
 logger = logging.getLogger(__name__)
@@ -324,7 +324,7 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     module_changes = _ensure_kvm_modules()
     changes.extend(module_changes)
 
-    setup_fcm_chains()
+    setup_mvm_chains()
 
     iptables_change = save_iptables_rules()
     if iptables_change:

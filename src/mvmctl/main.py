@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Firecracker Manager CLI - Main entry point."""
+"""mvm CLI - Main entry point."""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def _reconcile_networks() -> None:
         pass
 
 
-class LazyFCMGroup(click.Group):
+class LazyMVMGroup(click.Group):
     _add_completion: bool = False
     registered_callback: typer.models.TyperInfo | None = None
     registered_commands: list[typer.models.CommandInfo] | None = None
@@ -152,9 +152,9 @@ class LazyFCMGroup(click.Group):
 
 
 @click.group(
-    cls=LazyFCMGroup,
+    cls=LazyMVMGroup,
     invoke_without_command=True,
-    help="Firecracker Manager - Manage microVMs",
+    help="MicroVM Manager - Manage microVMs",
 )
 @click.option("--verbose", "verbose", is_flag=True, help="Enable verbose output")
 @click.option("--debug", is_flag=True, help="Enable debug mode")
@@ -211,7 +211,7 @@ def help_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
 
         command = subcommand
         command_path.append(arg)
-        current_ctx = click.Context(command, info_name=" ".join(command_path), parent=current_ctx)
+        current_ctx = click.Context(command, info_name=arg, parent=current_ctx)
 
     click.echo(command.get_help(current_ctx))
     ctx.exit()

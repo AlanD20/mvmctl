@@ -5,7 +5,7 @@ from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
 from mvmctl.cli.vm import app
-from mvmctl.exceptions import FCMError
+from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMInstance, VMState
 
 runner = CliRunner()
@@ -98,7 +98,7 @@ def test_create_vm_success(mocker: MockerFixture):
 
 
 def test_create_vm_fail(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.create_vm", side_effect=FCMError("Kernel not found"))
+    mocker.patch("mvmctl.cli.vm.create_vm", side_effect=MVMError("Kernel not found"))
     result = runner.invoke(app, ["create", "--name", "newvm", "--image", "ubuntu-24.04"])
     assert result.exit_code == 1
     assert "Kernel not found" in result.output
@@ -123,7 +123,7 @@ def test_logs_success(mocker: MockerFixture):
 
 
 def test_logs_failure(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.get_logs", side_effect=FCMError("Log error"))
+    mocker.patch("mvmctl.cli.vm.get_logs", side_effect=MVMError("Log error"))
     result = runner.invoke(app, ["logs", "--name", "badvm"])
     assert result.exit_code == 1
 
@@ -146,7 +146,7 @@ def test_snapshot_success(mocker: MockerFixture):
 
 
 def test_snapshot_failure(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.snapshot_vm", side_effect=FCMError("Failed to create snapshot"))
+    mocker.patch("mvmctl.cli.vm.snapshot_vm", side_effect=MVMError("Failed to create snapshot"))
     result = runner.invoke(
         app,
         [
@@ -180,7 +180,7 @@ def test_load_success(mocker: MockerFixture):
 
 
 def test_load_failure(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.load_snapshot", side_effect=FCMError("Failed to load snapshot"))
+    mocker.patch("mvmctl.cli.vm.load_snapshot", side_effect=MVMError("Failed to load snapshot"))
     result = runner.invoke(
         app,
         [
@@ -217,7 +217,7 @@ def test_create_invalid_image_not_found(mocker: MockerFixture):
     """Image that doesn't exist should result in exit code 1."""
     mocker.patch(
         "mvmctl.cli.vm.create_vm",
-        side_effect=FCMError("Image not found: 'no-such-image'"),
+        side_effect=MVMError("Image not found: 'no-such-image'"),
     )
     result = runner.invoke(app, ["create", "--name", "myvm", "--image", "no-such-image"])
     assert result.exit_code == 1
@@ -228,7 +228,7 @@ def test_create_duplicate_vm_name(mocker: MockerFixture):
     """Creating a VM whose name already exists should fail with exit code 1."""
     mocker.patch(
         "mvmctl.cli.vm.create_vm",
-        side_effect=FCMError("VM 'myvm' already exists"),
+        side_effect=MVMError("VM 'myvm' already exists"),
     )
     result = runner.invoke(app, ["create", "--name", "myvm", "--image", "ubuntu-24.04"])
     assert result.exit_code == 1
@@ -261,7 +261,7 @@ def test_main_app_create_invalid_image(mocker: MockerFixture):
     """Invalid image via the top-level app should exit 1."""
     mocker.patch(
         "mvmctl.cli.vm.create_vm",
-        side_effect=FCMError("Image not found: 'bogus'"),
+        side_effect=MVMError("Image not found: 'bogus'"),
     )
     result = main_runner.invoke(main_app, ["vm", "create", "--name", "myvm", "--image", "bogus"])
     assert result.exit_code == 1
@@ -272,7 +272,7 @@ def test_main_app_create_duplicate(mocker: MockerFixture):
     """Duplicate VM name via the top-level app should exit 1."""
     mocker.patch(
         "mvmctl.cli.vm.create_vm",
-        side_effect=FCMError("VM 'myvm' already exists at /some/path"),
+        side_effect=MVMError("VM 'myvm' already exists at /some/path"),
     )
     result = main_runner.invoke(
         main_app, ["vm", "create", "--name", "myvm", "--image", "ubuntu-24.04"]
@@ -290,7 +290,7 @@ def test_snapshot_vm_not_found(mocker: MockerFixture):
     """Snapshot on a non-existent VM should exit 1."""
     mocker.patch(
         "mvmctl.cli.vm.snapshot_vm",
-        side_effect=FCMError(
+        side_effect=MVMError(
             "Socket not found for VM 'ghost'. Must be running with --enable-api-socket"
         ),
     )
@@ -314,7 +314,7 @@ def test_snapshot_no_api_socket(mocker: MockerFixture):
     """Snapshot without API socket enabled should exit 1."""
     mocker.patch(
         "mvmctl.cli.vm.snapshot_vm",
-        side_effect=FCMError(
+        side_effect=MVMError(
             "Socket not found for VM 'myvm'. Must be running with --enable-api-socket"
         ),
     )
@@ -344,7 +344,7 @@ def test_load_vm_not_found(mocker: MockerFixture):
     """Load snapshot on a non-existent VM should exit 1."""
     mocker.patch(
         "mvmctl.cli.vm.load_snapshot",
-        side_effect=FCMError(
+        side_effect=MVMError(
             "Socket not found for VM 'ghost'. Must be running with --enable-api-socket"
         ),
     )
@@ -368,7 +368,7 @@ def test_load_no_api_socket(mocker: MockerFixture):
     """Load without API socket enabled should exit 1."""
     mocker.patch(
         "mvmctl.cli.vm.load_snapshot",
-        side_effect=FCMError(
+        side_effect=MVMError(
             "Socket not found for VM 'myvm'. Must be running with --enable-api-socket"
         ),
     )
@@ -392,7 +392,7 @@ def test_load_missing_snapshot_files(mocker: MockerFixture):
     """Load with non-existent snapshot files should exit 1."""
     mocker.patch(
         "mvmctl.cli.vm.load_snapshot",
-        side_effect=FCMError("Snapshot file not found: /nonexistent/mem.snap"),
+        side_effect=MVMError("Snapshot file not found: /nonexistent/mem.snap"),
     )
     result = runner.invoke(
         app,

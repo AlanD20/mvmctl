@@ -246,10 +246,10 @@ class TestVMLifecycleEdgeCases:
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_duplicate_vm_name(self, mock_create, mock_check_priv):
         """Test attempting to create a VM with a duplicate name."""
-        from mvmctl.exceptions import FCMError
+        from mvmctl.exceptions import MVMError
 
         mock_check_priv.return_value = None
-        mock_create.side_effect = FCMError("VM 'duplicate-vm' already exists")
+        mock_create.side_effect = MVMError("VM 'duplicate-vm' already exists")
 
         result = runner.invoke(
             vm_app, ["create", "--name", "duplicate-vm", "--image", "ubuntu-24.04"]

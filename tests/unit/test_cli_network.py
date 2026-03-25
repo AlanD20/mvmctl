@@ -14,7 +14,7 @@ _FAKE_NET = NetworkConfig(
     name="testnet",
     cidr="192.168.100.0/24",
     gateway="192.168.100.1",
-    bridge="fcm-testnet",
+    bridge="mvm-testnet",
     nat_enabled=True,
     created_at="2024-01-01T00:00:00+00:00",
 )
@@ -114,7 +114,7 @@ _FAKE_INSPECT = {
     "name": "testnet",
     "cidr": "192.168.100.0/24",
     "gateway": "192.168.100.1",
-    "bridge": "fcm-testnet",
+    "bridge": "mvm-testnet",
     "nat_enabled": True,
     "bridge_exists": False,
     "created_at": "2024-01-01T00:00:00+00:00",

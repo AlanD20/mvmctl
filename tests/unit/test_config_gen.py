@@ -71,8 +71,8 @@ def test_config_generator_no_network():
 
 
 def test_boot_args_rejects_shell_injection_in_guest_ip():
-    """guest_ip with shell metacharacters should raise FCMError."""
-    from mvmctl.exceptions import FCMError
+    """guest_ip with shell metacharacters should raise MVMError."""
+    from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
         name="test-vm",
@@ -83,13 +83,13 @@ def test_boot_args_rejects_shell_injection_in_guest_ip():
         guest_mac="02:FC:00:00:00:01",
     )
     generator = ConfigGenerator(vm_config)
-    with pytest.raises(FCMError, match="guest_ip"):
+    with pytest.raises(MVMError, match="guest_ip"):
         generator.validate()
 
 
 def test_boot_args_rejects_shell_injection_in_gateway():
-    """gateway with pipe character should raise FCMError."""
-    from mvmctl.exceptions import FCMError
+    """gateway with pipe character should raise MVMError."""
+    from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
         name="test-vm",
@@ -101,7 +101,7 @@ def test_boot_args_rejects_shell_injection_in_gateway():
         guest_mac="02:FC:00:00:00:01",
     )
     generator = ConfigGenerator(vm_config)
-    with pytest.raises(FCMError, match="gateway"):
+    with pytest.raises(MVMError, match="gateway"):
         generator.validate()
 
 
@@ -176,7 +176,7 @@ def test_config_gen_missing_rootfs_path_default():
 
 
 def test_config_gen_invalid_ip_with_shell_chars():
-    from mvmctl.exceptions import FCMError
+    from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
         name="bad-ip",
@@ -187,7 +187,7 @@ def test_config_gen_invalid_ip_with_shell_chars():
         guest_mac="02:FC:00:00:00:01",
     )
     generator = ConfigGenerator(vm_config)
-    with pytest.raises(FCMError, match="guest_ip"):
+    with pytest.raises(MVMError, match="guest_ip"):
         generator.validate()
 
 

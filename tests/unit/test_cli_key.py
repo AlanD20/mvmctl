@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.key import app
 from mvmctl.core.key_manager import KeyInfo
-from mvmctl.exceptions import FCMKeyError
+from mvmctl.exceptions import MVMKeyError
 
 runner = CliRunner()
 
@@ -60,7 +60,7 @@ def test_add_success(mock_add):
     mock_add.assert_called_once_with("testkey", "/tmp/id.pub", overwrite=False)
 
 
-@patch("mvmctl.cli.key.add_key", side_effect=FCMKeyError("not found"))
+@patch("mvmctl.cli.key.add_key", side_effect=MVMKeyError("not found"))
 def test_add_error(mock_add):
     result = runner.invoke(app, ["add", "testkey", "/tmp/bad.pub"])
     assert result.exit_code == 1
@@ -99,7 +99,7 @@ def test_create_with_options(mock_create):
     )
 
 
-@patch("mvmctl.cli.key.create_key", side_effect=FCMKeyError("already exists"))
+@patch("mvmctl.cli.key.create_key", side_effect=MVMKeyError("already exists"))
 def test_create_error(mock_create):
     result = runner.invoke(app, ["create", "testkey"])
     assert result.exit_code == 1
@@ -119,7 +119,7 @@ def test_remove_success(mock_remove):
     mock_remove.assert_called_once_with("testkey")
 
 
-@patch("mvmctl.cli.key.remove_key", side_effect=FCMKeyError("not found"))
+@patch("mvmctl.cli.key.remove_key", side_effect=MVMKeyError("not found"))
 def test_remove_error(mock_remove):
     result = runner.invoke(app, ["remove", "testkey", "--force"])
     assert result.exit_code == 1
@@ -163,7 +163,7 @@ def test_inspect_json(mock_inspect):
     assert '"testkey"' in result.output
 
 
-@patch("mvmctl.cli.key.inspect_key", side_effect=FCMKeyError("not found"))
+@patch("mvmctl.cli.key.inspect_key", side_effect=MVMKeyError("not found"))
 def test_inspect_error(mock_inspect):
     result = runner.invoke(app, ["inspect", "testkey"])
     assert result.exit_code == 1

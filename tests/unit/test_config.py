@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from mvmctl.core.config import (
-    FCMConfig,
+    MVMConfig,
     FirecrackerConfig,
     VMNetworkConfig,
     NetworkTopologyConfig,
@@ -76,7 +76,7 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
 
 
 def test_validate_config_valid() -> None:
-    config = FCMConfig()
+    config = MVMConfig()
     errors = validate_config(config)
 
     binary_errors = [e for e in errors if "firecracker.binary" in e]
@@ -88,7 +88,7 @@ def test_validate_config_valid() -> None:
 
 @pytest.mark.parametrize("vcpu_count", [0, -1, -100])
 def test_validate_config_invalid_vcpu(vcpu_count: int) -> None:
-    config = FCMConfig(vm_defaults=VMDefaultsConfig(vcpu_count=vcpu_count))
+    config = MVMConfig(vm_defaults=VMDefaultsConfig(vcpu_count=vcpu_count))
     errors = validate_config(config)
 
     vcpu_errors = [e for e in errors if "vcpu_count" in e]
@@ -98,7 +98,7 @@ def test_validate_config_invalid_vcpu(vcpu_count: int) -> None:
 
 @pytest.mark.parametrize("mem_size_mib", [32, 63, 0])
 def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
-    config = FCMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=mem_size_mib))
+    config = MVMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=mem_size_mib))
     errors = validate_config(config)
 
     mem_errors = [e for e in errors if "mem_size_mib" in e]
@@ -107,7 +107,7 @@ def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
 
 
 def test_validate_config_invalid_cidr() -> None:
-    config = FCMConfig(
+    config = MVMConfig(
         network=NetworkTopologyConfig(
             vm_network=VMNetworkConfig(bridge_ip="not-a-cidr"),
         ),
@@ -120,7 +120,7 @@ def test_validate_config_invalid_cidr() -> None:
 
 
 def test_dump_config_all_sections() -> None:
-    config = FCMConfig()
+    config = MVMConfig()
     result = dump_config(config)
 
     assert "firecracker" in result
@@ -134,7 +134,7 @@ def test_dump_config_all_sections() -> None:
 
 
 def test_dump_config_specific_section() -> None:
-    config = FCMConfig(
+    config = MVMConfig(
         firecracker=FirecrackerConfig(binary="/custom/bin"),
     )
     result = dump_config(config, section="firecracker")
@@ -235,7 +235,7 @@ def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
 
 def test_validate_config_empty_binary_path() -> None:
     """Empty binary path should be caught by validation."""
-    config = FCMConfig(firecracker=FirecrackerConfig(binary=""))
+    config = MVMConfig(firecracker=FirecrackerConfig(binary=""))
     errors = validate_config(config)
 
     binary_errors = [e for e in errors if "firecracker.binary" in e and "empty" in e.lower()]
@@ -244,7 +244,7 @@ def test_validate_config_empty_binary_path() -> None:
 
 def test_validate_config_negative_memory() -> None:
     """Negative memory should be caught by validation."""
-    config = FCMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=-100))
+    config = MVMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=-100))
     errors = validate_config(config)
 
     mem_errors = [e for e in errors if "mem_size_mib" in e]

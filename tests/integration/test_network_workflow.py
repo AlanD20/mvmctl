@@ -24,7 +24,7 @@ def _make_network(name: str = "testnet", cidr: str = "192.168.100.0/24") -> Netw
         name=name,
         cidr=cidr,
         gateway="192.168.100.1",
-        bridge=f"fcm-{name}",
+        bridge=f"mvm-{name}",
         nat_enabled=True,
         created_at="2024-01-01T00:00:00+00:00",
     )
@@ -74,7 +74,7 @@ class TestNetworkLifecycleWorkflow:
             "name": "inspect-net",
             "cidr": "172.16.0.0/24",
             "gateway": "172.16.0.1",
-            "bridge": "fcm-inspect-net",
+            "bridge": "mvm-inspect-net",
             "nat_enabled": True,
             "bridge_exists": True,
             "created_at": "2024-01-01T00:00:00+00:00",

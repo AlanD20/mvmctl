@@ -51,7 +51,7 @@ from mvmctl.core.network_manager import (
 )
 from mvmctl.core.ssh import resolve_ssh_key
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
-from mvmctl.exceptions import FCMError, NetworkError, VMNotFoundError
+from mvmctl.exceptions import MVMError, NetworkError, VMNotFoundError
 from mvmctl.models.vm import VMConfig, VMInstance, VMState
 from mvmctl.utils.fs import get_images_dir, get_kernels_dir, get_vm_dir
 
@@ -87,7 +87,7 @@ def _resolve_image_path(image: str) -> Path:
     if direct.exists():
         return direct
 
-    raise FCMError(f"Image not found: {image!r}")
+    raise MVMError(f"Image not found: {image!r}")
 
 
 def generate_vm_id(name: str) -> str:
@@ -172,7 +172,7 @@ def _secure_mkdir_vm(vm_dir: Path, name: str) -> None:
         name: VM name for error messages
 
     Raises:
-        FCMError: If directory exists, is a symlink, or race condition detected
+        MVMError: If directory exists, is a symlink, or race condition detected
     """
     # SECURITY: Use os.lstat() to detect symlinks before attempting creation
     # This prevents the TOCTOU race between check and mkdir
@@ -180,8 +180,8 @@ def _secure_mkdir_vm(vm_dir: Path, name: str) -> None:
         # Check if path exists and is a symlink BEFORE attempting creation
         os.lstat(vm_dir)  # Raises FileNotFoundError if path doesn't exist
         if os.path.islink(vm_dir):
-            raise FCMError(f"VM '{name}' path is a symlink (possible attack): {vm_dir}")
-        raise FCMError(f"VM '{name}' already exists at {vm_dir}")
+            raise MVMError(f"VM '{name}' path is a symlink (possible attack): {vm_dir}")
+        raise MVMError(f"VM '{name}' already exists at {vm_dir}")
     except FileNotFoundError:
         # Expected - path doesn't exist, safe to proceed with atomic mkdir
         pass
@@ -194,15 +194,15 @@ def _secure_mkdir_vm(vm_dir: Path, name: str) -> None:
         # Race condition: path created between our check and mkdir
         # Re-verify to detect symlinks
         if os.path.islink(vm_dir):
-            raise FCMError(f"VM '{name}' path is a symlink (race condition detected): {vm_dir}")
-        raise FCMError(f"VM '{name}' already exists at {vm_dir}")
+            raise MVMError(f"VM '{name}' path is a symlink (race condition detected): {vm_dir}")
+        raise MVMError(f"VM '{name}' already exists at {vm_dir}")
 
     # SECURITY: Verify the created directory is not a symlink
     # This catches cases where mkdir followed a symlink to a different parent
     if os.path.islink(vm_dir):
         # Attempt cleanup - but the symlink attack may have already succeeded
         # We can't safely clean up, just report the security issue
-        raise FCMError(f"VM '{name}' directory is a symlink (security violation): {vm_dir}")
+        raise MVMError(f"VM '{name}' directory is a symlink (security violation): {vm_dir}")
 
 
 def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
@@ -280,19 +280,19 @@ def create_vm(
 
     manager = vm_manager or get_vm_manager()
     if manager.count_vms() >= MAX_VMS:
-        raise FCMError(
+        raise MVMError(
             f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
         )
 
     if not (1 <= vcpus <= 32):
-        raise FCMError(f"Invalid vcpus={vcpus}: must be between 1 and 32")
+        raise MVMError(f"Invalid vcpus={vcpus}: must be between 1 and 32")
     if not (128 <= mem <= 65536):
-        raise FCMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
+        raise MVMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
 
     if mac is not None:
         mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
         if not mac_re.match(mac):
-            raise FCMError(
+            raise MVMError(
                 f"Invalid MAC address format: {mac!r}. Expected format: XX:XX:XX:XX:XX:XX"
             )
 
@@ -303,26 +303,26 @@ def create_vm(
     if kernel:
         kernel_path = Path(kernel)
     else:
-        env_kernel = os.environ.get("FCM_KERNEL")
+        env_kernel = os.environ.get("MVM_KERNEL")
         if env_kernel:
             kernel_path = Path(env_kernel)
         else:
             kernel_path = get_kernels_dir() / DEFAULT_VM_KERNEL_FILENAME
 
     if not kernel_path.exists():
-        raise FCMError(f"Kernel not found: {kernel_path}")
+        raise MVMError(f"Kernel not found: {kernel_path}")
 
     fc_bin_path = Path(firecracker_bin)
     if fc_bin_path.is_absolute() or "/" in firecracker_bin:
         if not fc_bin_path.exists():
-            raise FCMError(f"Firecracker binary not found: {firecracker_bin}")
+            raise MVMError(f"Firecracker binary not found: {firecracker_bin}")
         if not os.access(fc_bin_path, os.X_OK):
-            raise FCMError(f"Firecracker binary is not executable: {firecracker_bin}")
+            raise MVMError(f"Firecracker binary is not executable: {firecracker_bin}")
 
     image_path = _resolve_image_path(image)
 
     if user_data is not None and not user_data.exists():
-        raise FCMError(f"User-data file not found: {user_data}")
+        raise MVMError(f"User-data file not found: {user_data}")
 
     net_config = get_network(network_name)
     if net_config is None:
@@ -355,7 +355,7 @@ def create_vm(
         shutil.copy2(image_path, rootfs_path)
     except OSError as e:
         shutil.rmtree(vm_dir, ignore_errors=True)
-        raise FCMError(f"Failed to copy image: {e}")
+        raise MVMError(f"Failed to copy image: {e}")
 
     cloud_init_dir = vm_dir / "cloud-init"
     cloud_init_dir.mkdir(mode=0o700, exist_ok=True)
@@ -451,11 +451,11 @@ def create_vm(
     except FileNotFoundError:
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)
-        raise FCMError(f"Firecracker binary not found: {firecracker_bin!r}")
+        raise MVMError(f"Firecracker binary not found: {firecracker_bin!r}")
     except OSError as e:
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)
-        raise FCMError(f"Failed to start Firecracker: {e}")
+        raise MVMError(f"Failed to start Firecracker: {e}")
 
     _write_pid_file(pid_file, proc.pid)
 
@@ -531,7 +531,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
 def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
     socket_path = get_vm_socket_path(name)
     if not socket_path:
-        raise FCMError(
+        raise MVMError(
             f"Socket not found for VM '{name}'. Must be running with --enable-api-socket"
         )
 
@@ -545,7 +545,7 @@ def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
 def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = True) -> None:
     socket_path = get_vm_socket_path(name)
     if not socket_path:
-        raise FCMError(
+        raise MVMError(
             f"Socket not found for VM '{name}'. Must be running with --enable-api-socket"
         )
 

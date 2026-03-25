@@ -75,12 +75,12 @@ def prune_host(cache_dir: Path) -> list[str]:
 
 
 def clean_host(cache_dir: Path) -> list[str]:
-    """Remove all networking config (bridges, TAP devices, iptables rules, FCM chains).
+    """Remove all networking config (bridges, TAP devices, iptables rules, MVM chains).
 
     Does NOT revert sysctl, remove sudoers, or remove project group.
     Returns list of summary strings.
     """
-    from mvmctl.core.network import teardown_fcm_chains
+    from mvmctl.core.network import teardown_mvm_chains
     from mvmctl.core.network_manager import list_networks, remove_network
     from mvmctl.exceptions import NetworkError
 
@@ -96,12 +96,12 @@ def clean_host(cache_dir: Path) -> list[str]:
         except NetworkError as e:
             summary.append(f"Warning: failed to remove network '{net.name}': {e}")
 
-    # Remove FCM iptables chains after networks are removed
+    # Remove MVM iptables chains after networks are removed
     try:
-        teardown_fcm_chains()
-        summary.append("Removed FCM iptables chains")
+        teardown_mvm_chains()
+        summary.append("Removed MVM iptables chains")
     except NetworkError as e:
-        summary.append(f"Warning: failed to remove FCM chains: {e}")
+        summary.append(f"Warning: failed to remove MVM chains: {e}")
 
     return summary
 

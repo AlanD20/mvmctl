@@ -1,10 +1,10 @@
-"""Filesystem path helpers for FCM cache directories."""
+"""Filesystem path helpers for MVM cache directories."""
 
 import os
 from pathlib import Path
 
 from mvmctl.constants import PROJECT_NAME, env_var
-from mvmctl.exceptions import FCMError
+from mvmctl.exceptions import MVMError
 
 
 def _get_real_home() -> Path:
@@ -26,9 +26,9 @@ def _get_real_home() -> Path:
 
 
 def get_cache_dir() -> Path:
-    """Return the FCM cache root directory.
+    """Return the MVM cache root directory.
 
-    Checks FCM_CACHE_DIR env var first, then falls back to
+    Checks MVM_CACHE_DIR env var first, then falls back to
     ~/.cache/<project-name>.  When running under sudo, uses the invoking
     user's home directory so state is shared with the non-root user.
     """
@@ -40,7 +40,7 @@ def get_cache_dir() -> Path:
         under_home = resolved.is_relative_to(home)
         under_tmp = (os.getuid() != 0) and resolved.is_relative_to(tmp)
         if not (under_home or under_tmp):
-            raise FCMError(
+            raise MVMError(
                 f"Unsafe {env_var('CACHE_DIR')} path '{override}': "
                 f"must be under $HOME ({home}) or /tmp"
             )
@@ -49,9 +49,9 @@ def get_cache_dir() -> Path:
 
 
 def get_config_dir() -> Path:
-    """Return the FCM config directory.
+    """Return the MVM config directory.
 
-    Checks FCM_CONFIG_DIR env var first, then falls back to
+    Checks MVM_CONFIG_DIR env var first, then falls back to
     ~/.config/<project-name>.
     """
     override = os.environ.get(env_var("CONFIG_DIR"))
@@ -62,7 +62,7 @@ def get_config_dir() -> Path:
         under_home = resolved.is_relative_to(home)
         under_tmp = (os.getuid() != 0) and resolved.is_relative_to(tmp)
         if not (under_home or under_tmp):
-            raise FCMError(
+            raise MVMError(
                 f"Unsafe {env_var('CONFIG_DIR')} path '{override}': "
                 f"must be under $HOME ({home}) or /tmp"
             )
@@ -71,7 +71,7 @@ def get_config_dir() -> Path:
 
 
 def get_config_file() -> Path:
-    """Return the path to the FCM config file (config.json)."""
+    """Return the path to the MVM config file (config.json)."""
     return get_config_dir() / "config.json"
 
 

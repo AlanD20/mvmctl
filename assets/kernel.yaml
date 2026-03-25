@@ -7,5 +7,5 @@ kernel:
   config_fragments:
     - assets/kernel-configs/firecracker-base.config
   output_name: vmlinux
-  build_dir: /tmp/fcm/kernel-build
+  build_dir: /tmp/mvm/kernel-build
   parallel_jobs: null  # Defaults to os.cpu_count()

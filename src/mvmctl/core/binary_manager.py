@@ -18,7 +18,7 @@ from mvmctl.constants import (
     FIRECRACKER_GITHUB_RELEASES_API_URL,
     HTTP_USER_AGENT,
 )
-from mvmctl.exceptions import AssetNotFoundError, BinaryError, FCMError
+from mvmctl.exceptions import AssetNotFoundError, BinaryError, MVMError
 from mvmctl.utils.fs import get_bin_dir
 from mvmctl.utils.http import download_file
 
@@ -178,7 +178,7 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
             expected_sha256=expected_sha256,
             timeout=300,
         )
-    except FCMError as exc:
+    except MVMError as exc:
         tgz_path.unlink(missing_ok=True)
         raise BinaryError(f"Failed to download Firecracker v{version}: {exc}") from exc
 
@@ -236,7 +236,7 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
 
     if not fc_src.exists() or not jl_src.exists():
         raise AssetNotFoundError(
-            f"Version {version} not downloaded — run 'fcm bin fetch {version}' first"
+            f"Version {version} not downloaded — run 'mvm bin fetch {version}' first"
         )
 
     for link_name, target in [("firecracker", fc_src.name), ("jailer", jl_src.name)]:

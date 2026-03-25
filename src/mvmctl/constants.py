@@ -18,7 +18,7 @@ def _resolve_project_name() -> str:
 
 @functools.lru_cache(maxsize=1)
 def _resolve_cli_name() -> str:
-    """Resolve CLI name from entry points, falling back to 'fcm'."""
+    """Resolve CLI name from entry points, falling back to 'mvm'."""
     try:
         eps = importlib.metadata.entry_points(group="console_scripts")
         for ep in eps:
@@ -37,7 +37,7 @@ CLI_NAME: Final[str] = _resolve_cli_name()
 
 
 def env_var(suffix: str) -> str:
-    """Return the environment variable name for the given suffix (e.g. FCM_SUFFIX).
+    """Return the environment variable name for the given suffix.
 
     Args:
         suffix: The variable suffix to append after the CLI name prefix.
@@ -59,7 +59,7 @@ def device_prefix() -> str:
 
 
 def config_filename() -> str:
-    """Return the config file name for the CLI (e.g. fcm.yaml)."""
+    """Return the config file name for the CLI."""
     return f"{CLI_NAME}.yaml"
 
 
@@ -68,10 +68,10 @@ BRIDGE_NAME: Final[str] = f"{device_prefix()}-br0"
 TAP_PREFIX: Final[str] = f"{CLI_NAME}-tap"
 
 # iptables chain names for MVM rules
-FCM_FORWARD_CHAIN: Final[str] = f"{CLI_NAME.upper()}-FORWARD"
-FCM_POSTROUTING_CHAIN: Final[str] = f"{CLI_NAME.upper()}-POSTROUTING"
+MVM_FORWARD_CHAIN: Final[str] = f"{CLI_NAME.upper()}-FORWARD"
+MVM_POSTROUTING_CHAIN: Final[str] = f"{CLI_NAME.upper()}-POSTROUTING"
 
-PROJECT_GROUP: Final[str] = CLI_NAME  # "fcm"
+PROJECT_GROUP: Final[str] = CLI_NAME
 SUDOERS_DROP_IN_PATH: Final[str] = f"/etc/sudoers.d/{CLI_NAME}"
 DEFAULT_NETWORK_NAME: Final[str] = "default"
 # Phase 5 spec proposed 10.10.0.0/24 but Phase 6 (more recent) validated 172.35.0.0/24.

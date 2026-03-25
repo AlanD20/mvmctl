@@ -1,1 +1,1 @@
-"""Bundled asset files for firecracker-manager."""
+"""Bundled asset files for mvmctl."""

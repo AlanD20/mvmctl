@@ -1,3 +1,3 @@
-"""Firecracker Manager - Python CLI for Firecracker microVMs."""
+"""mvmctl - Python CLI for Firecracker microVMs."""
 
 __version__ = "0.1.0"

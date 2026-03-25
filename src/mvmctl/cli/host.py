@@ -17,11 +17,16 @@ from mvmctl.api.host import (
     reset_host,
 )
 from mvmctl.constants import PROJECT_GROUP
-from mvmctl.exceptions import FCMError, HostError
+from mvmctl.exceptions import MVMError, HostError
 from mvmctl.utils.console import console, print_error, print_info, print_success, print_warning
 from mvmctl.utils.fs import get_cache_dir
 
-app = typer.Typer(help="Host configuration", no_args_is_help=True)
+app = typer.Typer(
+    help="Host configuration",
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    add_completion=False,
+)
 
 
 def _abort_if_vms_running(action: str) -> None:
@@ -37,7 +42,7 @@ def _abort_if_vms_running(action: str) -> None:
     if running:
         names = ", ".join(v.name for v in running)
         print_error(f"Cannot {action}: {len(running)} VM(s) still running: {names}")
-        print_error("Stop all VMs first with: fcm vm remove --name <name>")
+        print_error("Stop all VMs first with: mvm vm remove --name <name>")
         raise typer.Exit(code=1)
 
 
@@ -55,37 +60,37 @@ def init_cmd() -> None:
     This command must be run with sudo the first time. It performs the
     following steps:
 
-    - Creates the 'fcm' system group and adds the current user to it.
+    - Creates the 'mvm' system group and adds the current user to it.
     - Installs a sudoers drop-in so group members can manage TAP devices,
       bridges, and iptables rules without a password.
     - Enables IP forwarding (net.ipv4.ip_forward=1).
-    - Snapshots the pre-change host state so 'fcm host reset' can roll back.
+    - Snapshots the pre-change host state so 'mvm host reset' can roll back.
     - Creates the default network bridge.
 
-    After running, log out and back in (or run ``newgrp fcm``) for group
+    After running, log out and back in (or run ``newgrp mvm``) for group
     membership to take effect.
 
     Examples:
-        sudo fcm host init
+        sudo mvm host init
     """
     cache_dir = get_cache_dir()
     try:
         changes = init_host(cache_dir)
     except HostError as e:
         if "Root privileges" in str(e):
-            print_error("Root privileges required for: fcm host init")
-            print_info("Run with sudo: sudo fcm host init")
-            if typer.confirm("Run 'sudo fcm host init' now?", default=False):
+            print_error("Root privileges required for: mvm host init")
+            print_info("Run with sudo: sudo mvm host init")
+            if typer.confirm("Run 'sudo mvm host init' now?", default=False):
                 import subprocess
 
-                if os.environ.get("FCM_SUDO_RESTART"):
+                if os.environ.get("MVM_SUDO_RESTART"):
                     print_error("Recursive sudo restart detected. Aborting to prevent lockout.")
-                    print_info("Please run 'sudo fcm host init' manually.")
+                    print_info("Please run 'sudo mvm host init' manually.")
                     raise typer.Exit(code=1)
 
                 try:
                     env = os.environ.copy()
-                    env["FCM_SUDO_RESTART"] = "1"
+                    env["MVM_SUDO_RESTART"] = "1"
                     subprocess.run(["sudo"] + sys.argv, check=False, env=env)
                 except FileNotFoundError:
                     print_error("sudo command not found")
@@ -111,7 +116,7 @@ def init_cmd() -> None:
     try:
         ensure_default_network()
         print_success("Default network ready.")
-    except FCMError as e:
+    except MVMError as e:
         print_warning(f"Default network setup skipped: {e}")
 
 
@@ -201,7 +206,7 @@ def clean_cmd(
     cache_dir = get_cache_dir()
     try:
         summary = clean_host(cache_dir)
-    except FCMError as e:
+    except MVMError as e:
         print_error(f"Clean failed: {e}")
         raise typer.Exit(code=1)
 
@@ -218,17 +223,17 @@ def reset_cmd(
 ) -> None:
     """Full rollback: remove networking, revert sysctl, remove sudoers and group.
 
-    Reverts every change made by 'fcm host init':
+    Reverts every change made by 'mvm host init':
 
     - Tears down all network bridges, TAP devices, and iptables rules.
     - Restores the original sysctl ip_forward value.
     - Removes the sudoers drop-in file.
-    - Removes the 'fcm' system group.
+    - Removes the 'mvm' system group.
 
     All running VMs must be stopped before running this command.
 
     Examples:
-        sudo fcm host reset --force
+        sudo mvm host reset --force
     """
     _abort_if_vms_running("reset")
 
@@ -243,7 +248,7 @@ def reset_cmd(
     cache_dir = get_cache_dir()
     try:
         summary = reset_host(cache_dir)
-    except FCMError as e:
+    except MVMError as e:
         print_error(f"Reset failed: {e}")
         raise typer.Exit(code=1)
 

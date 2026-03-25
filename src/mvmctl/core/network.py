@@ -20,8 +20,8 @@ from mvmctl.constants import (
     BRIDGE_NAME,
     DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_GATEWAY,
-    FCM_FORWARD_CHAIN,
-    FCM_POSTROUTING_CHAIN,
+    MVM_FORWARD_CHAIN,
+    MVM_POSTROUTING_CHAIN,
 )
 from mvmctl.exceptions import NetworkError
 
@@ -356,21 +356,21 @@ def chain_exists(chain: str, table: str = "filter") -> bool:
     return result.returncode == 0
 
 
-def setup_fcm_chains() -> None:
-    """Create FCM iptables chains and link them to built-in chains.
+def setup_mvm_chains() -> None:
+    """Create MVM iptables chains and link them to built-in chains.
 
     Creates:
-    - FCM-FORWARD chain in filter table
-    - FCM-POSTROUTING chain in nat table
-    - Jumps from built-in chains to FCM chains
+    - MVM-FORWARD chain in filter table
+    - MVM-POSTROUTING chain in nat table
+    - Jumps from built-in chains to MVM chains
 
     Idempotent: checks if chains exist before creating.
     Raises NetworkError on failure.
     """
-    forward_chain = FCM_FORWARD_CHAIN
-    postrouting_chain = FCM_POSTROUTING_CHAIN
+    forward_chain = MVM_FORWARD_CHAIN
+    postrouting_chain = MVM_POSTROUTING_CHAIN
 
-    # Create FCM-FORWARD chain in filter table
+    # Create MVM-FORWARD chain in filter table
     if not chain_exists(forward_chain, "filter"):
         try:
             subprocess.run(
@@ -382,7 +382,7 @@ def setup_fcm_chains() -> None:
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to create {forward_chain} chain") from e
 
-    # Create FCM-POSTROUTING chain in nat table
+    # Create MVM-POSTROUTING chain in nat table
     if not chain_exists(postrouting_chain, "nat"):
         try:
             subprocess.run(
@@ -394,7 +394,7 @@ def setup_fcm_chains() -> None:
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to create {postrouting_chain} chain") from e
 
-    # Add jump from FORWARD to FCM-FORWARD
+    # Add jump from FORWARD to MVM-FORWARD
     jump_rule = ["iptables", "-C", "FORWARD", "-j", forward_chain]
     if not _iptables_rule_exists(jump_rule):
         try:
@@ -407,7 +407,7 @@ def setup_fcm_chains() -> None:
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to add jump to {forward_chain}") from e
 
-    # Add jump from POSTROUTING to FCM-POSTROUTING
+    # Add jump from POSTROUTING to MVM-POSTROUTING
     jump_rule_nat = ["iptables", "-t", "nat", "-C", "POSTROUTING", "-j", postrouting_chain]
     if not _iptables_rule_exists(jump_rule_nat):
         try:
@@ -422,24 +422,24 @@ def setup_fcm_chains() -> None:
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to add jump to {postrouting_chain}") from e
 
-    logger.info("FCM iptables chains configured")
+    logger.info("MVM iptables chains configured")
 
 
-def teardown_fcm_chains() -> None:
-    """Remove FCM iptables chains and their jumps from built-in chains.
+def teardown_mvm_chains() -> None:
+    """Remove MVM iptables chains and their jumps from built-in chains.
 
     Removes:
     - Jump rules from FORWARD and POSTROUTING
-    - All rules in FCM chains (flush)
-    - The FCM chains themselves
+    - All rules in MVM chains (flush)
+    - The MVM chains themselves
 
     Safe to call even if chains don't exist.
     Raises NetworkError on failure.
     """
-    forward_chain = FCM_FORWARD_CHAIN
-    postrouting_chain = FCM_POSTROUTING_CHAIN
+    forward_chain = MVM_FORWARD_CHAIN
+    postrouting_chain = MVM_POSTROUTING_CHAIN
 
-    # Remove jump from FORWARD to FCM-FORWARD
+    # Remove jump from FORWARD to MVM-FORWARD
     if chain_exists(forward_chain, "filter"):
         subprocess.run(
             _privileged_cmd(["iptables", "-D", "FORWARD", "-j", forward_chain]),
@@ -447,7 +447,7 @@ def teardown_fcm_chains() -> None:
             check=False,
         )
 
-        # Flush and delete FCM-FORWARD chain
+        # Flush and delete MVM-FORWARD chain
         try:
             subprocess.run(
                 _privileged_cmd(["iptables", "-F", forward_chain]),
@@ -463,7 +463,7 @@ def teardown_fcm_chains() -> None:
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to remove {forward_chain} chain") from e
 
-    # Remove jump from POSTROUTING to FCM-POSTROUTING
+    # Remove jump from POSTROUTING to MVM-POSTROUTING
     if chain_exists(postrouting_chain, "nat"):
         subprocess.run(
             _privileged_cmd(
@@ -473,7 +473,7 @@ def teardown_fcm_chains() -> None:
             check=False,
         )
 
-        # Flush and delete FCM-POSTROUTING chain
+        # Flush and delete MVM-POSTROUTING chain
         try:
             subprocess.run(
                 _privileged_cmd(["iptables", "-t", "nat", "-F", postrouting_chain]),
@@ -489,26 +489,26 @@ def teardown_fcm_chains() -> None:
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to remove {postrouting_chain} chain") from e
 
-    logger.info("FCM iptables chains removed")
+    logger.info("MVM iptables chains removed")
 
 
 def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
-    """Set up NAT (MASQUERADE) for the bridge subnet using FCM chains.
+    """Set up NAT (MASQUERADE) for the bridge subnet using MVM chains.
 
     - Gets host_iface via get_default_interface() if not provided
-    - Adds MASQUERADE rule to FCM-POSTROUTING chain
-    - Adds FORWARD rules to FCM-FORWARD chain
+    - Adds MASQUERADE rule to MVM-POSTROUTING chain
+    - Adds FORWARD rules to MVM-FORWARD chain
     - Is idempotent: uses iptables-restore --noflush for atomic rule application
     - Raises NetworkError on failure.
     """
     if host_iface is None:
         host_iface = get_default_interface()
 
-    forward_chain = FCM_FORWARD_CHAIN
-    postrouting_chain = FCM_POSTROUTING_CHAIN
+    forward_chain = MVM_FORWARD_CHAIN
+    postrouting_chain = MVM_POSTROUTING_CHAIN
 
-    # Ensure FCM chains exist before adding rules
-    setup_fcm_chains()
+    # Ensure MVM chains exist before adding rules
+    setup_mvm_chains()
 
     # Build rules for batch application via iptables-restore
     rules: list[dict[str, str]] = [
@@ -541,15 +541,15 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
 
 
 def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
-    """Remove NAT (MASQUERADE + FORWARD) rules for the bridge from FCM chains.
+    """Remove NAT (MASQUERADE + FORWARD) rules for the bridge from MVM chains.
 
     IMPORTANT: Only removes rules if `force=True` OR no VMs are currently
     using the bridge (i.e., no TAP devices attached to it).
     This fixes the bash PoC bug where deleting one VM removed the shared rule.
 
-    Removes rules from FCM chains:
-    - MASQUERADE rule from FCM-POSTROUTING chain
-    - FORWARD rules from FCM-FORWARD chain
+    Removes rules from MVM chains:
+    - MASQUERADE rule from MVM-POSTROUTING chain
+    - FORWARD rules from MVM-FORWARD chain
 
     Raises NetworkError if the MASQUERADE deletion fails.
     FORWARD rule deletions are best-effort (ignored if missing).
@@ -570,12 +570,12 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
         logger.warning("Could not detect default interface, skipping NAT teardown")
         return
 
-    forward_chain = FCM_FORWARD_CHAIN
-    postrouting_chain = FCM_POSTROUTING_CHAIN
+    forward_chain = MVM_FORWARD_CHAIN
+    postrouting_chain = MVM_POSTROUTING_CHAIN
 
-    # Only try to remove rules if FCM chains exist
+    # Only try to remove rules if MVM chains exist
     if not chain_exists(forward_chain, "filter") or not chain_exists(postrouting_chain, "nat"):
-        logger.debug("FCM chains do not exist, skipping NAT teardown")
+        logger.debug("MVM chains do not exist, skipping NAT teardown")
         return
 
     try:
@@ -667,15 +667,15 @@ def delete_tap(tap_name: str) -> None:
 
 
 def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
-    """Add iptables FORWARD rules for a specific TAP device to FCM chain.
+    """Add iptables FORWARD rules for a specific TAP device to MVM chain.
 
-    Rules to add in FCM-FORWARD chain (idempotent via iptables-restore --noflush):
-    - `iptables -A FCM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
-    - `iptables -A FCM-FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
+    Rules to add in MVM-FORWARD chain (idempotent via iptables-restore --noflush):
+    - `iptables -A MVM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
+    - `iptables -A MVM-FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     """
-    forward_chain = FCM_FORWARD_CHAIN
+    forward_chain = MVM_FORWARD_CHAIN
 
-    setup_fcm_chains()
+    setup_mvm_chains()
 
     rules: list[dict[str, str]] = [
         {
@@ -702,15 +702,15 @@ def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None
 
 
 def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
-    """Remove iptables FORWARD rules for a specific TAP device from FCM chain.
+    """Remove iptables FORWARD rules for a specific TAP device from MVM chain.
 
-    - `iptables -D FCM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
-    - `iptables -D FCM-FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
+    - `iptables -D MVM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
+    - `iptables -D MVM-FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     - Safe to call even if rules don't exist (ignore errors).
     """
-    forward_chain = FCM_FORWARD_CHAIN
+    forward_chain = MVM_FORWARD_CHAIN
 
-    # Only try to remove rules if FCM chain exists
+    # Only try to remove rules if MVM chain exists
     if not chain_exists(forward_chain, "filter"):
         return
 

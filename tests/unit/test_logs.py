@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from mvmctl.core.logs import get_log_path, read_log_lines, show_logs
-from mvmctl.exceptions import ConfigError, FCMError, VMNotFoundError
+from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
 
 
 def test_get_log_path_boot(tmp_path: Path) -> None:
@@ -101,7 +101,7 @@ def test_show_logs_not_found() -> None:
 
 def test_read_log_lines_io_error(tmp_path: Path) -> None:
     log_file = tmp_path / "missing.log"
-    with pytest.raises(FCMError, match="Error reading log file"):
+    with pytest.raises(MVMError, match="Error reading log file"):
         read_log_lines(log_file, lines=10)
 
 
@@ -157,5 +157,5 @@ def test_follow_log_io_error(tmp_path: Path) -> None:
 
     log_file = tmp_path / "nonexistent.log"
     gen = follow_log(log_file)
-    with pytest.raises(FCMError, match="Error following log"):
+    with pytest.raises(MVMError, match="Error following log"):
         list(gen)

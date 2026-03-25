@@ -1,23 +1,23 @@
-"""FCM exception hierarchy."""
+"""MVM exception hierarchy."""
 
 
-class FCMError(Exception):
-    """Base exception for all FCM errors."""
+class MVMError(Exception):
+    """Base exception for all MVM errors."""
 
 
-class VMNotFoundError(FCMError):
+class VMNotFoundError(MVMError):
     """VM does not exist in state."""
 
 
-class VMAlreadyExistsError(FCMError):
+class VMAlreadyExistsError(MVMError):
     """VM name already registered."""
 
 
-class NetworkError(FCMError):
+class NetworkError(MVMError):
     """Network setup/teardown failure."""
 
 
-class ImageError(FCMError):
+class ImageError(MVMError):
     """Image download or conversion failure."""
 
 
@@ -25,15 +25,15 @@ class ChecksumMismatchError(ImageError):
     """Downloaded file checksum does not match expected."""
 
 
-class KernelError(FCMError):
+class KernelError(MVMError):
     """Kernel build or configuration failure."""
 
 
-class FirecrackerError(FCMError):
+class FirecrackerError(MVMError):
     """Firecracker process or API failure."""
 
 
-class ConfigError(FCMError):
+class ConfigError(MVMError):
     """Configuration loading or validation failure."""
 
 
@@ -41,7 +41,7 @@ class SocketNotFoundError(FirecrackerError):
     """Unix socket for VM API not found."""
 
 
-class HostError(FCMError):
+class HostError(MVMError):
     """Host configuration or prerequisite failure."""
 
 
@@ -49,17 +49,17 @@ class PrivilegeError(HostError):
     """Insufficient privileges for an operation."""
 
 
-class ProcessError(FCMError):
+class ProcessError(MVMError):
     """Subprocess execution failure."""
 
 
-class AssetNotFoundError(FCMError):
+class AssetNotFoundError(MVMError):
     """Requested asset (binary, kernel, image) not found locally or remotely."""
 
 
-class BinaryError(FCMError):
+class BinaryError(MVMError):
     """Firecracker/jailer binary management failure."""
 
 
-class FCMKeyError(FCMError):
+class MVMKeyError(MVMError):
     """SSH key management failure."""

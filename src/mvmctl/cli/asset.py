@@ -42,9 +42,24 @@ from mvmctl.exceptions import AssetNotFoundError, BinaryError, ImageError, Kerne
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
-kernel_app = typer.Typer(help="Kernel management", no_args_is_help=False)
-image_app = typer.Typer(help="Image management", no_args_is_help=False)
-bin_app = typer.Typer(help="Binary management", no_args_is_help=False)
+kernel_app = typer.Typer(
+    help="Kernel management",
+    no_args_is_help=False,
+    rich_markup_mode=None,
+    add_completion=False,
+)
+image_app = typer.Typer(
+    help="Image management",
+    no_args_is_help=False,
+    rich_markup_mode=None,
+    add_completion=False,
+)
+bin_app = typer.Typer(
+    help="Binary management",
+    no_args_is_help=False,
+    rich_markup_mode=None,
+    add_completion=False,
+)
 
 
 @kernel_app.callback(invoke_without_command=True)
@@ -97,7 +112,7 @@ def kernel_ls(
     if not kernels:
         from mvmctl.utils.console import print_info
 
-        print_info("No kernels found. Use 'fcm kernel fetch --type firecracker' to download one.")
+        print_info("No kernels found. Use 'mvm kernel fetch --type firecracker' to download one.")
         return
 
     from mvmctl.core.kernel import human_readable_time
@@ -447,7 +462,7 @@ def image_ls(
         rows_local.append([default_marker, display_id, os_name, fs_type, added])
 
     if not rows_local:
-        print_info("No images downloaded. Use 'fcm image fetch <id>' to download one.")
+        print_info("No images downloaded. Use 'mvm image fetch <id>' to download one.")
         return
     print_table(
         title="Downloaded Images",
@@ -469,7 +484,7 @@ def _get_default_image() -> str | None:
 @image_app.command(name="fetch")
 def image_fetch(
     image_id: str = typer.Argument(
-        ..., help="Image ID from 'fcm image ls --remote' (e.g. ubuntu-24.04)"
+        ..., help="Image ID from 'mvm image ls --remote' (e.g. ubuntu-24.04)"
     ),
     out: Path = typer.Option(get_images_dir(), "--out", help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
@@ -477,7 +492,7 @@ def image_fetch(
         False, "--set-default", help="Set as default image after download"
     ),
 ) -> None:
-    """Download an image by its ID. Run 'fcm image ls -r' to list available image IDs."""
+    """Download an image by its ID. Run 'mvm image ls -r' to list available image IDs."""
     out.mkdir(parents=True, exist_ok=True)
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
@@ -597,8 +612,8 @@ def image_rm(
     """Remove cached images by short ID.
 
     Examples:
-        fcm image rm abc123
-        fcm image rm abc123 def456
+        mvm image rm abc123
+        mvm image rm abc123 def456
     """
     effective_ids: list[str] = list(short_ids) if short_ids else []
     if not effective_ids:

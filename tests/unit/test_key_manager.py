@@ -14,7 +14,7 @@ from mvmctl.core.key_manager import (
     list_keys,
     remove_key,
 )
-from mvmctl.exceptions import FCMKeyError
+from mvmctl.exceptions import MVMKeyError
 
 SAMPLE_PUB_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtestkeycontent testuser@testhost"
 
@@ -106,7 +106,7 @@ def test_add_key_success(keys_dir, tmp_path):
 
 
 def test_add_key_file_not_found(keys_dir, tmp_path):
-    with pytest.raises(FCMKeyError, match="not found"):
+    with pytest.raises(MVMKeyError, match="not found"):
         add_key("testkey", tmp_path / "nonexistent.pub")
 
 
@@ -114,7 +114,7 @@ def test_add_key_empty_file(keys_dir, tmp_path):
     pub_file = tmp_path / "empty.pub"
     pub_file.write_text("")
 
-    with pytest.raises(FCMKeyError, match="empty"):
+    with pytest.raises(MVMKeyError, match="empty"):
         add_key("testkey", pub_file)
 
 
@@ -124,7 +124,7 @@ def test_add_key_already_exists(keys_dir, tmp_path):
 
     add_key("testkey", pub_file)
 
-    with pytest.raises(FCMKeyError, match="already exists"):
+    with pytest.raises(MVMKeyError, match="already exists"):
         add_key("testkey", pub_file)
 
 
@@ -168,7 +168,7 @@ def test_create_key_file_exists_no_overwrite(keys_dir, tmp_path):
     output_dir.mkdir()
     (output_dir / "existingkey").write_text("existing private key")
 
-    with pytest.raises(FCMKeyError, match="already exists"):
+    with pytest.raises(MVMKeyError, match="already exists"):
         create_key("existingkey", output_dir=output_dir)
 
 
@@ -187,7 +187,7 @@ def test_create_key_name_exists_in_registry(keys_dir, tmp_path):
     output_dir = tmp_path / "ssh"
     output_dir.mkdir()
 
-    with pytest.raises(FCMKeyError, match="already exists in cache"):
+    with pytest.raises(MVMKeyError, match="already exists in cache"):
         create_key("dupkey", output_dir=output_dir)
 
 
@@ -200,7 +200,7 @@ def test_create_key_ssh_keygen_fails(keys_dir, tmp_path):
     mock_result.stderr = "keygen error"
 
     with patch("mvmctl.core.key_manager.subprocess.run", return_value=mock_result):
-        with pytest.raises(FCMKeyError, match="ssh-keygen failed"):
+        with pytest.raises(MVMKeyError, match="ssh-keygen failed"):
             create_key("failkey", output_dir=output_dir)
 
 
@@ -226,7 +226,7 @@ def test_remove_key_success(keys_dir, tmp_path):
 
 @pytest.mark.parametrize("key_name", ["nonexistent", "ghost-key", "never-added"])
 def test_remove_key_not_found(keys_dir, key_name: str):
-    with pytest.raises(FCMKeyError, match="not found"):
+    with pytest.raises(MVMKeyError, match="not found"):
         remove_key(key_name)
 
 
@@ -250,7 +250,7 @@ def test_inspect_key_success(keys_dir, tmp_path):
 
 
 def test_inspect_key_not_found(keys_dir):
-    with pytest.raises(FCMKeyError, match="not found"):
+    with pytest.raises(MVMKeyError, match="not found"):
         inspect_key("nonexistent")
 
 
@@ -292,12 +292,12 @@ def test_add_key_with_path_traversal_name(keys_dir, tmp_path, bad_name):
     pub_file.write_text(SAMPLE_PUB_KEY)
     try:
         add_key(bad_name, pub_file)
-    except (FCMKeyError, OSError, ValueError):
+    except (MVMKeyError, OSError, ValueError):
         pass
 
 
 def test_add_key_from_nonexistent_path(keys_dir):
-    with pytest.raises(FCMKeyError, match="not found"):
+    with pytest.raises(MVMKeyError, match="not found"):
         add_key("mykey", Path("/nonexistent/path/to/key.pub"))
 
 
@@ -314,7 +314,7 @@ def test_add_key_overwrite_existing(keys_dir, tmp_path):
 
 
 def test_remove_key_not_in_registry(keys_dir):
-    with pytest.raises(FCMKeyError, match="not found"):
+    with pytest.raises(MVMKeyError, match="not found"):
         remove_key("never-added-key")
 
 
@@ -375,14 +375,14 @@ def test_create_key_overwrite_removes_old_files(keys_dir, tmp_path):
 def test_compute_fingerprint_invalid_key():
     from mvmctl.core.key_manager import _compute_fingerprint
 
-    with pytest.raises(FCMKeyError, match="Invalid public key format"):
+    with pytest.raises(MVMKeyError, match="Invalid public key format"):
         _compute_fingerprint("not-a-valid-key")
 
 
 def test_parse_algorithm_empty_key():
     from mvmctl.core.key_manager import _parse_algorithm
 
-    with pytest.raises(FCMKeyError, match="Invalid public key format"):
+    with pytest.raises(MVMKeyError, match="Invalid public key format"):
         _parse_algorithm("")
 
 

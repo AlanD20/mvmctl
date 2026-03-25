@@ -70,7 +70,7 @@ class PathsConfig:
 
 
 @dataclass
-class FCMConfig:
+class MVMConfig:
     """Main configuration."""
 
     firecracker: FirecrackerConfig = field(default_factory=FirecrackerConfig)
@@ -79,7 +79,7 @@ class FCMConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
 
 
-_config_cache: dict[Path, FCMConfig] = {}
+_config_cache: dict[Path, MVMConfig] = {}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -95,7 +95,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
         return {}
 
 
-def load_config(config_dir: Path) -> FCMConfig:
+def load_config(config_dir: Path) -> MVMConfig:
     """Load configuration from YAML files.
 
     Loads defaults.yaml, images.yaml, and kernel.yaml from config_dir.
@@ -138,7 +138,7 @@ def load_config(config_dir: Path) -> FCMConfig:
         k: v for k, v in vm_network_data.items() if k in valid_vm_network_fields
     }
 
-    result = FCMConfig(
+    result = MVMConfig(
         firecracker=FirecrackerConfig(**firecracker_data_filtered),
         vm_defaults=VMDefaultsConfig(**vm_defaults_data_filtered),
         network=NetworkTopologyConfig(
@@ -150,7 +150,7 @@ def load_config(config_dir: Path) -> FCMConfig:
     return result
 
 
-def validate_config(config: FCMConfig) -> list[str]:
+def validate_config(config: MVMConfig) -> list[str]:
     """Validate configuration and return list of errors."""
     errors = []
 
@@ -179,7 +179,7 @@ def validate_config(config: FCMConfig) -> list[str]:
     return errors
 
 
-def dump_config(config: FCMConfig, section: str | None = None) -> dict[str, object]:
+def dump_config(config: MVMConfig, section: str | None = None) -> dict[str, object]:
     """Dump configuration as dictionary.
 
     Args:

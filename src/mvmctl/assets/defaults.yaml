@@ -1,11 +1,11 @@
-# Firecracker Manager Default Configuration
+# mvm Default Configuration
 # CLI flags override these values
 
 firecracker:
   binary: /usr/local/bin/firecracker
-  socket_dir: /tmp/fcm/sockets
-  run_dir: /tmp/fcm/run
-  log_dir: /tmp/fcm/logs
+  socket_dir: /tmp/mvm/sockets
+  run_dir: /tmp/mvm/run
+  log_dir: /tmp/mvm/logs
 
 vm_defaults:
   vcpu_count: 2
@@ -19,17 +19,17 @@ vm_defaults:
 
 network:
   single_vm:
-    tap_dev: "fcm-tap0"
+    tap_dev: "mvm-tap0"
     guest_ip: "10.10.0.2"
     host_ip: "10.10.0.1"
     mask: "255.255.255.252"
     mac: "02:FC:00:00:00:01"
   multi_vm:
-    bridge_name: "fcm-br0"
+    bridge_name: "mvm-br0"
     bridge_ip: "10.10.0.1/24"
     guest_ip_start: "10.10.0.2"
     guest_ip_end: "10.10.0.254"
-    tap_prefix: "fcm"
+    tap_prefix: "mvm"
 
 paths:
   assets_dir: "../assets"

@@ -1,4 +1,4 @@
-"""Public Python API for firecracker-manager.
+"""Public Python API for mvmctl.
 
 Every CLI command maps 1:1 to a function in this package.  The CLI is a thin
 presentation layer on top of these modules.  Import directly for scripting or

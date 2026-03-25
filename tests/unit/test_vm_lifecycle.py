@@ -15,7 +15,7 @@ from mvmctl.core.vm_lifecycle import (
     _resolve_image_path,
     _secure_mkdir_vm,
 )
-from mvmctl.exceptions import FCMError
+from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMInstance, VMState
 
 
@@ -172,12 +172,12 @@ def test_create_vm_core_success(
 
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 def test_create_vm_limit_reached(mock_get_vm_mgr):
-    """create_vm raises FCMError if max VMs reached."""
+    """create_vm raises MVMError if max VMs reached."""
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 100  # assuming MAX_VMS=50 or similar
     mock_get_vm_mgr.return_value = mock_manager
 
-    with pytest.raises(FCMError, match="VM limit reached"):
+    with pytest.raises(MVMError, match="VM limit reached"):
         create_vm(name="myvm", image="img")
 
 
@@ -297,7 +297,7 @@ def test_snapshot_vm(mock_client, mock_socket_path):
 def test_snapshot_vm_no_socket(mock_socket_path):
     """snapshot_vm errors if no socket."""
     mock_socket_path.return_value = None
-    with pytest.raises(FCMError, match="Socket not found for VM"):
+    with pytest.raises(MVMError, match="Socket not found for VM"):
         snapshot_vm("myvm", Path("mem"), Path("state"))
 
 
@@ -375,7 +375,7 @@ def test_resolve_image_path_not_found(tmp_path, monkeypatch):
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
-        with pytest.raises(FCMError, match="Image not found"):
+        with pytest.raises(MVMError, match="Image not found"):
             _resolve_image_path("nonexistent")
 
 
@@ -388,10 +388,10 @@ def test_secure_mkdir_vm_success(tmp_path):
 
 
 def test_secure_mkdir_vm_already_exists(tmp_path):
-    """_secure_mkdir_vm raises FCMError if directory already exists."""
+    """_secure_mkdir_vm raises MVMError if directory already exists."""
     vm_dir = tmp_path / "existingvm"
     vm_dir.mkdir()
-    with pytest.raises(FCMError, match="already exists"):
+    with pytest.raises(MVMError, match="already exists"):
         _secure_mkdir_vm(vm_dir, "existingvm")
 
 
@@ -406,7 +406,7 @@ def test_secure_mkdir_vm_rejects_symlink(tmp_path):
     vm_dir.symlink_to(target_dir)
 
     # Should raise error due to symlink
-    with pytest.raises(FCMError, match="symlink"):
+    with pytest.raises(MVMError, match="symlink"):
         _secure_mkdir_vm(vm_dir, "symlinkedvm")
 
 
@@ -460,5 +460,5 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
         mock_manager.count_vms.return_value = 0
         mock_mgr.return_value = mock_manager
 
-        with pytest.raises(FCMError, match="symlink"):
+        with pytest.raises(MVMError, match="symlink"):
             create_vm(name="attackvm", image="ubuntu-24.04")

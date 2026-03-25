@@ -14,11 +14,16 @@ from mvmctl.api.keys import (
     remove_key,
 )
 from mvmctl.cli._helpers import check_name_arg
-from mvmctl.exceptions import FCMKeyError
+from mvmctl.exceptions import MVMKeyError
 from mvmctl.utils.console import console, print_error, print_info, print_success
 from mvmctl.utils.validation import validate_entity_name
 
-app = typer.Typer(help="SSH key management", no_args_is_help=True)
+app = typer.Typer(
+    help="SSH key management",
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    add_completion=False,
+)
 
 
 @app.command(name="help", hidden=True)
@@ -48,7 +53,7 @@ def ls(
         return
 
     if not keys:
-        print_info("No keys found. Add one with: fcm key add <name> <path>")
+        print_info("No keys found. Add one with: mvm key add <name> <path>")
         return
 
     # M-22: Direct Table usage acceptable for complex layouts
@@ -84,7 +89,7 @@ def add(
         raise typer.Exit(code=1)
     try:
         info = add_key(name, public_key_path, overwrite=overwrite)
-    except FCMKeyError as e:
+    except MVMKeyError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 
@@ -115,7 +120,7 @@ def create(
             comment=comment,
             overwrite=overwrite,
         )
-    except FCMKeyError as e:
+    except MVMKeyError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 
@@ -143,7 +148,7 @@ def remove(
 
     try:
         remove_key(name)
-    except FCMKeyError as e:
+    except MVMKeyError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 
@@ -174,7 +179,7 @@ def inspect(
     validate_entity_name(name, "key")
     try:
         info = inspect_key(name)
-    except FCMKeyError as e:
+    except MVMKeyError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 

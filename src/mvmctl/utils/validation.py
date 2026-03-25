@@ -3,7 +3,7 @@
 import ipaddress
 import re
 
-from mvmctl.exceptions import FCMError
+from mvmctl.exceptions import MVMError
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,30}$")
 
@@ -19,10 +19,10 @@ def validate_entity_name(name: str, entity_type: str = "entity") -> str:
         The validated name.
 
     Raises:
-        FCMError: If the name doesn't match the allowed pattern.
+        MVMError: If the name doesn't match the allowed pattern.
     """
     if not _NAME_PATTERN.match(name):
-        raise FCMError(
+        raise MVMError(
             f"Invalid {entity_type} name '{name}': must match [a-z0-9][a-z0-9._-]{{0,30}}"
         )
     return name
@@ -39,10 +39,10 @@ def validate_boot_arg_component(value: str, component_name: str) -> str:
         The validated value.
 
     Raises:
-        FCMError: If the value contains spaces or shell metacharacters.
+        MVMError: If the value contains spaces or shell metacharacters.
     """
     if re.search(r"[\s;|&$`\\\"']", value):
-        raise FCMError(
+        raise MVMError(
             f"Invalid {component_name} '{value}': must not contain spaces or shell metacharacters"
         )
     return value

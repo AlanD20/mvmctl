@@ -8,7 +8,7 @@ from pathlib import Path
 
 from mvmctl.constants import DEFAULT_VM_SSH_USER
 from mvmctl.core.vm_manager import VMManager
-from mvmctl.exceptions import FCMError, FCMKeyError, VMNotFoundError
+from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.validation import is_ip_address
 
@@ -24,10 +24,10 @@ def _validate_ssh_username(user: str) -> None:
         user: The username string to validate.
 
     Raises:
-        FCMError: If the username contains invalid characters.
+        MVMError: If the username contains invalid characters.
     """
     if not _VALID_SSH_USERNAME.match(user):
-        raise FCMError(f"Invalid SSH username '{user}': must match ^[a-z_][a-z0-9_-]*$")
+        raise MVMError(f"Invalid SSH username '{user}': must match ^[a-z_][a-z0-9_-]*$")
 
 
 def find_ssh_keys(keys_dir: Path | None = None) -> list[Path]:
@@ -138,8 +138,8 @@ def connect_to_vm(
 
     Raises:
         VMNotFoundError: If VM name not found in state
-        FCMKeyError: If no SSH keys found or specified key not found
-        FCMError: If VM has no IP address
+        MVMKeyError: If no SSH keys found or specified key not found
+        MVMError: If VM has no IP address
     """
     is_ip = is_ip_address(vm_name_or_ip)
 
@@ -152,17 +152,17 @@ def connect_to_vm(
         if not vm:
             raise VMNotFoundError(f"VM '{vm_name_or_ip}' not found")
         if not vm.ip:
-            raise FCMError(f"VM '{vm_name_or_ip}' has no IP address")
+            raise MVMError(f"VM '{vm_name_or_ip}' has no IP address")
         ip = vm.ip
 
     if not key_path:
         keys = find_ssh_keys()
         if not keys:
-            raise FCMKeyError("No SSH keys found in cache keys directory")
+            raise MVMKeyError("No SSH keys found in cache keys directory")
         key_path = keys[0]
 
     if not key_path.exists():
-        raise FCMKeyError(f"SSH key not found: {key_path}")
+        raise MVMKeyError(f"SSH key not found: {key_path}")
 
     key_path.chmod(0o600)
     logger.info("Connecting to %s as %s...", ip, user)
@@ -178,7 +178,7 @@ def resolve_ssh_key(ssh_key: str | None) -> str | None:
     """Resolve an SSH key from name (key cache) or file path.
 
     Returns the public key content string, or None.
-    When ssh_key is explicitly named but not found, raises FCMKeyError.
+    When ssh_key is explicitly named but not found, raises MVMKeyError.
     """
     if ssh_key is None:
         # Fall back to any key in cache
@@ -204,8 +204,8 @@ def resolve_ssh_key(ssh_key: str | None) -> str | None:
     available = list_keys()
     if available:
         names = ", ".join(k.name for k in available)
-        raise FCMKeyError(f"SSH key '{ssh_key}' not found.\\nAvailable keys: {names}")
+        raise MVMKeyError(f"SSH key '{ssh_key}' not found.\\nAvailable keys: {names}")
     else:
-        raise FCMKeyError(
-            f"SSH key '{ssh_key}' not found.\\nNo keys in cache. Add one with: fcm key add <name> <path>"
+        raise MVMKeyError(
+            f"SSH key '{ssh_key}' not found.\\nNo keys in cache. Add one with: mvm key add <name> <path>"
         )

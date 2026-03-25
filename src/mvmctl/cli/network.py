@@ -19,7 +19,12 @@ from mvmctl.exceptions import NetworkError
 from mvmctl.utils.console import console, print_error, print_info, print_success
 from mvmctl.utils.validation import validate_entity_name
 
-app = typer.Typer(help="Network management", no_args_is_help=True)
+app = typer.Typer(
+    help="Network management",
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    add_completion=False,
+)
 
 
 @app.command(name="help", hidden=True)
@@ -53,7 +58,7 @@ def ls(
         return
 
     if not networks:
-        print_info("No networks found. Create one with: fcm network create <name>")
+        print_info("No networks found. Create one with: mvm network create <name>")
         return
 
     # M-22: Direct Table usage acceptable for complex layouts

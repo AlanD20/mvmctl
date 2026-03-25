@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mvmctl.utils.http import download_file
-from mvmctl.exceptions import ChecksumMismatchError, FCMError
+from mvmctl.exceptions import ChecksumMismatchError, MVMError
 
 
 def _mock_urlopen_response(
@@ -345,7 +345,7 @@ def test_download_file_cleans_up_temp_on_error(mock_urlopen: MagicMock, tmp_path
 
     mock_urlopen.side_effect = URLError("Network error")
 
-    with pytest.raises(FCMError, match="Download failed"):
+    with pytest.raises(MVMError, match="Download failed"):
         download_file(
             "https://example.com/file.bin",
             dest,
@@ -399,7 +399,7 @@ def test_download_file_missing_checksum_non_interactive(mock_urlopen: MagicMock,
         content_length=str(len(full_data)),
     )
 
-    with pytest.raises(FCMError, match="No checksum provided"):
+    with pytest.raises(MVMError, match="No checksum provided"):
         download_file(
             "https://example.com/file.bin",
             dest,

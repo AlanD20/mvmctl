@@ -11,7 +11,7 @@ from mvmctl.core.ssh import (
     connect_to_vm,
     _validate_ssh_username,
 )
-from mvmctl.exceptions import VMNotFoundError, FCMKeyError, FCMError
+from mvmctl.exceptions import VMNotFoundError, MVMKeyError, MVMError
 from mvmctl.models.vm import VMInstance, VMState
 
 
@@ -186,8 +186,8 @@ def test_connect_to_vm_name_not_found(mock_vm_manager_cls: MagicMock):
 
 @patch("mvmctl.core.ssh.find_ssh_keys", return_value=[])
 def test_connect_to_vm_no_keys(mock_find_keys: MagicMock):
-    """Raises FCMKeyError when no SSH keys found."""
-    with pytest.raises(FCMKeyError, match="No SSH keys found"):
+    """Raises MVMKeyError when no SSH keys found."""
+    with pytest.raises(MVMKeyError, match="No SSH keys found"):
         connect_to_vm("10.20.0.5", exec_mode=False)
 
     mock_find_keys.assert_called_once()
@@ -205,15 +205,15 @@ def test_validate_ssh_username_valid():
 
 
 def test_validate_ssh_username_invalid():
-    """Invalid usernames should raise FCMError."""
+    """Invalid usernames should raise MVMError."""
     for name in ("Root", "user name", "1start", "user@host", "$(whoami)", "a;b", ""):
-        with pytest.raises(FCMError, match="Invalid SSH username"):
+        with pytest.raises(MVMError, match="Invalid SSH username"):
             _validate_ssh_username(name)
 
 
 def test_build_ssh_command_rejects_bad_username():
     """build_ssh_command should reject invalid usernames."""
-    with pytest.raises(FCMError, match="Invalid SSH username"):
+    with pytest.raises(MVMError, match="Invalid SSH username"):
         build_ssh_command("10.20.0.2", user="$(whoami)")
 
 

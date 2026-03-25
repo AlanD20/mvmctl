@@ -21,7 +21,7 @@ def check_privileges(binary: str) -> None:
     """Verify the current user has the required privileges to run a binary.
 
     Checks that the binary exists and either the process is root or the current
-    user is a member of the project group configured by ``fcm host init``.
+    user is a member of the project group configured by ``mvm host init``.
 
     Args:
         binary: Absolute path or name of the binary to check.
@@ -31,7 +31,7 @@ def check_privileges(binary: str) -> None:
     """
     if not shutil.which(binary) and not Path(binary).exists():
         raise PrivilegeError(
-            f"Binary not found: {binary}. Run 'fcm host init' to set up required dependencies."
+            f"Binary not found: {binary}. Run 'mvm host init' to set up required dependencies."
         )
 
     if os.getuid() == 0:
