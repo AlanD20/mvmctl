@@ -1,9 +1,9 @@
 kernel-official:
   type: official
   version: "6.19.9"
-  source: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz
+  source: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz
   sha256: null
-  sha256_url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz.sha256
+  sha256_url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz.sha256
   config_fragments:
     - assets/kernel-configs/firecracker-base.config
   output_name: vmlinux-official
