@@ -1,4 +1,4 @@
-kernel:
+kernel-firecracker:
   version: "6.1.102"
   source: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz
   sha256: null

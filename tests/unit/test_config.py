@@ -4,9 +4,9 @@ import pytest
 import yaml
 
 from mvmctl.core.config import (
-    MVMConfig,
     FirecrackerConfig,
-    VMNetworkConfig,
+    MVMConfig,
+    NetworkDefaultsConfig,
     NetworkTopologyConfig,
     VMDefaultsConfig,
     dump_config,
@@ -48,8 +48,9 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.enable_api_socket is False
     assert config.vm_defaults.enable_pci is False
 
-    assert config.network.vm_network.bridge_name == "mvm-bridge"
-    assert config.network.vm_network.bridge_ip == "172.35.0.1/24"
+    assert config.network.defaults.name == "default"
+    assert config.network.defaults.cidr == "172.35.0.0/24"
+    assert config.network.defaults.gateway == "172.35.0.1"
 
     assert config.paths.assets_dir != ""
 
@@ -59,7 +60,11 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
         "firecracker": {"binary": "/opt/firecracker"},
         "vm_defaults": {"vcpu_count": 8, "mem_size_mib": 4096},
         "network": {
-            "vm_network": {"bridge_name": "custom-br0", "bridge_ip": "172.16.0.1/16"},
+            "defaults": {
+                "name": "custom",
+                "cidr": "172.16.0.0/16",
+                "gateway": "172.16.0.1",
+            },
         },
         "paths": {"assets_dir": "/tmp/assets"},
     }
@@ -70,8 +75,9 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
     assert config.firecracker.binary == "/opt/firecracker"
     assert config.vm_defaults.vcpu_count == 8
     assert config.vm_defaults.mem_size_mib == 4096
-    assert config.network.vm_network.bridge_name == "custom-br0"
-    assert config.network.vm_network.bridge_ip == "172.16.0.1/16"
+    assert config.network.defaults.name == "custom"
+    assert config.network.defaults.cidr == "172.16.0.0/16"
+    assert config.network.defaults.gateway == "172.16.0.1"
     assert config.paths.assets_dir == "/tmp/assets"
 
 
@@ -109,12 +115,12 @@ def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
 def test_validate_config_invalid_cidr() -> None:
     config = MVMConfig(
         network=NetworkTopologyConfig(
-            vm_network=VMNetworkConfig(bridge_ip="not-a-cidr"),
+            defaults=NetworkDefaultsConfig(cidr="not-a-cidr"),
         ),
     )
     errors = validate_config(config)
 
-    cidr_errors = [e for e in errors if "bridge_ip" in e]
+    cidr_errors = [e for e in errors if "network.defaults.cidr" in e]
     assert len(cidr_errors) == 1
     assert "Invalid CIDR" in cidr_errors[0]
 
@@ -130,7 +136,7 @@ def test_dump_config_all_sections() -> None:
 
     network = result["network"]
     assert isinstance(network, dict)
-    assert "vm_network" in network
+    assert "defaults" in network
 
 
 def test_dump_config_specific_section() -> None:
@@ -222,7 +228,7 @@ def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
     """Nested type mismatches should be handled gracefully."""
     data = {
         "network": {
-            "multi_vm": {"bridge_ip": 99999}  # Should be string
+            "defaults": {"cidr": 99999}  # Should be string
         }
     }
     (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
@@ -230,7 +236,7 @@ def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
     # Should not crash
     config = load_config(tmp_path)
     # The invalid value may remain or use default
-    assert config.network.vm_network.bridge_ip is not None
+    assert config.network.defaults.cidr is not None
 
 
 def test_validate_config_empty_binary_path() -> None:

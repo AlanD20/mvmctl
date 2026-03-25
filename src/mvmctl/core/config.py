@@ -7,11 +7,10 @@ from typing import Any
 import yaml
 
 from mvmctl.constants import (
-    CLI_NAME,
-    DEFAULT_BRIDGE_NAME,
     DEFAULT_FIRECRACKER_BINARY_PATH,
-    DEFAULT_NETWORK_BRIDGE_IP,
     DEFAULT_NETWORK_CIDR,
+    DEFAULT_NETWORK_GATEWAY,
+    DEFAULT_NETWORK_NAME,
     DEFAULT_VM_BOOT_ARGS,
     DEFAULT_VM_DISK_SIZE,
     DEFAULT_VM_ENABLE_API_SOCKET,
@@ -52,16 +51,15 @@ class VMDefaultsConfig:
 
 
 @dataclass
-class VMNetworkConfig:
-    bridge_name: str = DEFAULT_BRIDGE_NAME
-    bridge_ip: str = DEFAULT_NETWORK_BRIDGE_IP
-    bridge_subnet: str = DEFAULT_NETWORK_CIDR
-    tap_prefix: str = CLI_NAME
+class NetworkDefaultsConfig:
+    name: str = DEFAULT_NETWORK_NAME
+    cidr: str = DEFAULT_NETWORK_CIDR
+    gateway: str = DEFAULT_NETWORK_GATEWAY
 
 
 @dataclass
 class NetworkTopologyConfig:
-    vm_network: VMNetworkConfig = field(default_factory=VMNetworkConfig)
+    defaults: NetworkDefaultsConfig = field(default_factory=NetworkDefaultsConfig)
 
 
 @dataclass
@@ -98,7 +96,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 def load_config(config_dir: Path) -> MVMConfig:
     """Load configuration from YAML files.
 
-    Loads defaults.yaml, images.yaml, and kernel.yaml from config_dir.
+    Loads defaults.yaml from config_dir.
 
     Args:
         config_dir: Directory containing config files
@@ -106,10 +104,11 @@ def load_config(config_dir: Path) -> MVMConfig:
     Returns:
         Parsed configuration
     """
-    if config_dir in _config_cache:
-        return _config_cache[config_dir]
+    config_key = config_dir.resolve(strict=False)
+    if config_key in _config_cache:
+        return _config_cache[config_key]
 
-    defaults_path = config_dir / "defaults.yaml"
+    defaults_path = config_key / "defaults.yaml"
     data = load_yaml(defaults_path)
 
     firecracker_data = data.get("firecracker", {})
@@ -131,22 +130,22 @@ def load_config(config_dir: Path) -> MVMConfig:
     valid_path_fields = {f.name for f in fields(PathsConfig)}
     paths_data_filtered = {k: v for k, v in paths_data.items() if k in valid_path_fields}
 
-    # Filter vm_network data to only known VMNetworkConfig fields
-    vm_network_data = network_data.get("vm_network") or network_data.get("multi_vm", {})
-    valid_vm_network_fields = {f.name for f in fields(VMNetworkConfig)}
-    vm_network_data_filtered = {
-        k: v for k, v in vm_network_data.items() if k in valid_vm_network_fields
+    # Filter network defaults to only known NetworkDefaultsConfig fields
+    network_defaults_data = network_data.get("defaults", {})
+    valid_network_defaults_fields = {f.name for f in fields(NetworkDefaultsConfig)}
+    network_defaults_data_filtered = {
+        k: v for k, v in network_defaults_data.items() if k in valid_network_defaults_fields
     }
 
     result = MVMConfig(
         firecracker=FirecrackerConfig(**firecracker_data_filtered),
         vm_defaults=VMDefaultsConfig(**vm_defaults_data_filtered),
         network=NetworkTopologyConfig(
-            vm_network=VMNetworkConfig(**vm_network_data_filtered),
+            defaults=NetworkDefaultsConfig(**network_defaults_data_filtered),
         ),
         paths=PathsConfig(**paths_data_filtered),
     )
-    _config_cache[config_dir] = result
+    _config_cache[config_key] = result
     return result
 
 
@@ -172,9 +171,16 @@ def validate_config(config: MVMConfig) -> list[str]:
     try:
         import ipaddress
 
-        ipaddress.ip_network(config.network.vm_network.bridge_ip, strict=False)
+        ipaddress.ip_network(config.network.defaults.cidr, strict=False)
     except ValueError as e:
-        errors.append(f"network.vm_network.bridge_ip: Invalid CIDR: {e}")
+        errors.append(f"network.defaults.cidr: Invalid CIDR: {e}")
+
+    try:
+        import ipaddress
+
+        ipaddress.ip_address(config.network.defaults.gateway)
+    except ValueError as e:
+        errors.append(f"network.defaults.gateway: Invalid IP: {e}")
 
     return errors
 
@@ -193,7 +199,7 @@ def dump_config(config: MVMConfig, section: str | None = None) -> dict[str, obje
         "firecracker": config.firecracker.__dict__,
         "vm_defaults": config.vm_defaults.__dict__,
         "network": {
-            "vm_network": config.network.vm_network.__dict__,
+            "defaults": config.network.defaults.__dict__,
         },
         "paths": config.paths.__dict__,
     }

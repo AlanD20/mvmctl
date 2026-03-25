@@ -20,7 +20,7 @@ mvmctl/
 │   ├── core/            # All business logic, subprocess, Firecracker interaction
 │   ├── models/          # Pure dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
 │   ├── utils/           # Shared helpers: console, process, fs, http, audit, validation
-│   └── assets/          # Bundled YAML configs (images.yaml, kernel.yaml, defaults.yaml)
+│   └── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
 ├── tests/               # 45 test_*.py (41 unit, 4 integration); see tests/AGENTS.md
 └── pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
 ```

@@ -1,16 +1,21 @@
-# mvm Default Configuration
-# CLI flags override these values
+# mvm default configuration
+# CLI flags override these values.
 
 firecracker:
   binary: /usr/local/bin/firecracker
   socket_dir: /tmp/mvm/sockets
   run_dir: /tmp/mvm/run
   log_dir: /tmp/mvm/logs
+  versions:
+    full: "v1.15.0"
+    ci: "v1.15"
 
 vm_defaults:
   vcpu_count: 2
   mem_size_mib: 2048
+  ssh_user: root
   network_interface: eth0
+  subnet_mask: "255.255.255.0"
   boot_args: "console=ttyS0 reboot=k panic=1 pci=off"
   disk_size: "2G"
   enable_api_socket: false
@@ -18,20 +23,78 @@ vm_defaults:
   lsm_flags: "landlock,lockdown,yama,integrity,selinux,bpf"
 
 network:
-  single_vm:
-    tap_dev: "mvm-tap0"
-    guest_ip: "10.10.0.2"
-    host_ip: "10.10.0.1"
-    mask: "255.255.255.252"
-    mac: "02:FC:00:00:00:01"
-  multi_vm:
-    bridge_name: "mvm-br0"
-    bridge_ip: "10.10.0.1/24"
-    guest_ip_start: "10.10.0.2"
-    guest_ip_end: "10.10.0.254"
-    tap_prefix: "mvm"
+  defaults:
+    name: default
+    cidr: "172.35.0.0/24"
+    gateway: "172.35.0.1"
 
-paths:
-  assets_dir: "../assets"
-  single_vm_dir: "../single-vm"
-  multi_vm_dir: "../multi-vm"
+vm:
+  files:
+    kernel_filename: "vmlinux"
+    rootfs_filename: "rootfs.ext4"
+  firecracker_bin_name: "firecracker"
+  logging:
+    type: "os"
+    lines: 50
+    follow: false
+  snapshot:
+    resume: true
+  limits:
+    max_vms: 50
+
+image:
+  defaults:
+    convert_to: "ext4"
+    import_format: "auto"
+    import_size_mib: 2048
+    supported_extensions: [".ext4", ".btrfs", ".img", ".raw"]
+    import_format_map:
+      ".qcow2": "qcow2"
+      ".raw": "raw"
+      ".img": "raw"
+      ".tar": "tar-rootfs"
+      ".tar.gz": "tar-rootfs"
+      ".tar.xz": "tar-rootfs"
+      ".tgz": "tar-rootfs"
+  remote:
+    version_limit: 5
+    max_parallel_downloads: 4
+
+host:
+  privileged_binaries:
+    - "/usr/sbin/ip"
+    - "/usr/sbin/iptables"
+    - "/usr/sbin/iptables-restore"
+    - "/usr/sbin/iptables-save"
+    - "/usr/sbin/sysctl"
+  required_binaries: ["ip", "iptables", "qemu-img"]
+  iso_binaries: ["mkisofs", "genisoimage"]
+  system_files:
+    sudoers_drop_in_template: "/etc/sudoers.d/{cli_name}"
+    iptables_rules_v4: "/etc/iptables/rules.v4"
+
+kernel:
+  defaults:
+    version: "6.19.9"
+    arch: "x86_64"
+    build_jobs: 1
+
+fallbacks:
+  fc_ci_version: "1.15"
+  firecracker_bin: "firecracker"
+  kernel_build_jobs: 1
+  max_parallel_downloads: 4
+
+urls:
+  firecracker:
+    github_releases_api: "https://api.github.com/repos/firecracker-microvm/firecracker/releases"
+    github_download_base: "https://github.com/firecracker-microvm/firecracker/releases/download"
+    github_raw_base: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main"
+  firecracker_ci_kernel:
+    s3_base: "https://s3.amazonaws.com/spec.ccfc.min"
+    list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-&list-type=2"
+  firecracker_kernel:
+    config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-x86_64-{major_minor}.config"
+  kernel:
+    tarball_template: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
+    sha256_template: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz.sha256"

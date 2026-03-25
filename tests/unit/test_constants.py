@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 from mvmctl.constants import (
     BRIDGE_NAME,
-    BRIDGE_PREFIX,
     CLI_NAME,
     DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_GATEWAY,
@@ -98,10 +97,6 @@ def test_default_network_cidr():
 
 def test_default_network_gateway():
     assert DEFAULT_NETWORK_GATEWAY == "172.35.0.1"
-
-
-def test_bridge_prefix():
-    assert BRIDGE_PREFIX == "mvm-br"
 
 
 def test_firecracker_graceful_shutdown_timeout():
