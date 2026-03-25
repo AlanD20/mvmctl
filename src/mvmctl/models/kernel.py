@@ -7,10 +7,14 @@ from dataclasses import dataclass, field
 class KernelSpec:
     """Specification for building or fetching a kernel, loaded from kernels.yaml."""
 
+    name: str
+    kernel_type: str
     version: str
     source: str
     output_name: str
     build_dir: str
+    list_url_template: str | None = None
+    config_url_template: str | None = None
     sha256: str | None = None
     sha256_url: str | None = None
     config_fragments: list[str] = field(default_factory=list)

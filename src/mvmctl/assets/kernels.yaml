@@ -1,11 +1,12 @@
 kernel-official:
+  type: official
   version: "6.19.9"
   source: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz
   sha256: null
   sha256_url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz.sha256
   config_fragments:
     - assets/kernel-configs/firecracker-base.config
-  output_name: vmlinux
+  output_name: vmlinux-official
   build_dir: /tmp/mvm/kernel-build
   parallel_jobs: null
   enabled_configs:
@@ -53,3 +54,20 @@ kernel-official:
     - CONFIG_VIRTIO_NET=y
     - CONFIG_SERIAL_8250_CONSOLE=y
     - CONFIG_KVM_GUEST=y
+
+kernel-firecracker:
+  type: firecracker
+  version: "6.1"
+  source: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/vmlinux-{version}"
+  list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-{version}&list-type=2"
+  config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-{version}.config"
+  output_name: vmlinux-fc
+  build_dir: /tmp/mvm/kernel-build
+  sha256: null
+  sha256_url: null
+  config_fragments: []
+  parallel_jobs: null
+  enabled_configs: []
+  disabled_configs: []
+  set_val_configs: []
+  required_settings: []

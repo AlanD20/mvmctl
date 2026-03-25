@@ -21,9 +21,6 @@ import yaml
 from mvmctl.constants import (
     DEFAULT_FC_KERNEL_ARCH,
     FALLBACK_KERNEL_BUILD_JOBS,
-    FIRECRACKER_CI_KERNEL_LIST_URL,
-    FIRECRACKER_CI_KERNEL_S3_BASE,
-    FIRECRACKER_KERNEL_CONFIG_URL,
     HTTP_USER_AGENT,
     KERNEL_SHA256_URL_TEMPLATE,
 )
@@ -49,8 +46,88 @@ logger = logging.getLogger(__name__)
 _KERNELS_YAML_PATH = Path(__file__).parent.parent / "assets" / "kernels.yaml"
 
 
+@functools.lru_cache(maxsize=1)
+def list_kernel_specs() -> dict[str, KernelSpec]:
+    try:
+        with _KERNELS_YAML_PATH.open("r", encoding="utf-8") as fh:
+            data: Any = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise KernelError(f"Failed to load kernels.yaml: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise KernelError("Invalid kernels.yaml: expected mapping at root")
+
+    specs: dict[str, KernelSpec] = {}
+    for spec_name, raw_any in data.items():
+        if not isinstance(spec_name, str) or not isinstance(raw_any, dict):
+            raise KernelError("Invalid kernels.yaml entry format")
+        raw: dict[str, Any] = raw_any
+        try:
+            specs[spec_name] = KernelSpec(
+                name=spec_name,
+                kernel_type=require_str(raw, "type"),
+                version=require_str(raw, "version"),
+                source=require_str(raw, "source"),
+                output_name=require_str(raw, "output_name"),
+                build_dir=require_str(raw, "build_dir"),
+                list_url_template=optional_str(raw, "list_url_template"),
+                config_url_template=optional_str(raw, "config_url_template"),
+                sha256=optional_str(raw, "sha256"),
+                sha256_url=optional_str(raw, "sha256_url"),
+                parallel_jobs=optional_int(raw, "parallel_jobs"),
+                config_fragments=require_str_list(raw, "config_fragments"),
+                enabled_configs=require_str_list(raw, "enabled_configs"),
+                disabled_configs=require_str_list(raw, "disabled_configs"),
+                required_settings=require_str_list(raw, "required_settings"),
+                set_val_configs=parse_set_val_list(raw, "set_val_configs"),
+            )
+        except ValueError as exc:
+            raise KernelError(f"Invalid kernels.yaml entry '{spec_name}': {exc}") from exc
+    return specs
+
+
+def select_kernel_specs(
+    kernel_type: str | None = None,
+    version: str | None = None,
+) -> list[KernelSpec]:
+    specs = list(list_kernel_specs().values())
+    if kernel_type is not None:
+        specs = [spec for spec in specs if spec.kernel_type == kernel_type]
+    if version is not None:
+        specs = [spec for spec in specs if spec.version == version]
+    return specs
+
+
+def resolve_kernel_spec(kernel_type: str, version: str | None = None) -> KernelSpec:
+    specs = select_kernel_specs(kernel_type=kernel_type)
+    if not specs:
+        raise KernelError(f"No kernel specs found for type '{kernel_type}'")
+
+    if version is not None:
+        version_matches = [spec for spec in specs if spec.version == version]
+        if len(version_matches) == 1:
+            return version_matches[0]
+        if len(version_matches) > 1:
+            names = ", ".join(spec.name for spec in version_matches)
+            raise KernelError(
+                f"Multiple '{kernel_type}' kernel specs with version '{version}': {names}"
+            )
+        versions = ", ".join(sorted({spec.version for spec in specs}))
+        raise KernelError(
+            f"No '{kernel_type}' kernel spec with version '{version}'. Available: {versions}"
+        )
+
+    if len(specs) == 1:
+        return specs[0]
+
+    versions = ", ".join(sorted({spec.version for spec in specs}))
+    raise KernelError(
+        f"Multiple '{kernel_type}' kernel specs found. Provide --version. Available: {versions}"
+    )
+
+
 @functools.lru_cache(maxsize=None)
-def load_kernel_spec(kernel_name: str = "kernel-official") -> KernelSpec:
+def load_kernel_spec(kernel_name: str) -> KernelSpec:
     """Load a kernel specification from the bundled kernels.yaml.
 
     All fields are read strictly from the YAML; missing required fields raise
@@ -66,34 +143,10 @@ def load_kernel_spec(kernel_name: str = "kernel-official") -> KernelSpec:
         KernelError: If the file cannot be read, the key is absent, or a
             required field is missing or wrong-typed.
     """
-    try:
-        with _KERNELS_YAML_PATH.open("r", encoding="utf-8") as fh:
-            data: Any = yaml.safe_load(fh) or {}
-    except (OSError, yaml.YAMLError) as exc:
-        raise KernelError(f"Failed to load kernels.yaml: {exc}") from exc
-
-    if not isinstance(data, dict) or kernel_name not in data:
+    specs = list_kernel_specs()
+    if kernel_name not in specs:
         raise KernelError(f"Kernel spec '{kernel_name}' not found in kernels.yaml")
-
-    raw: dict[str, Any] = data[kernel_name]
-
-    try:
-        return KernelSpec(
-            version=require_str(raw, "version"),
-            source=require_str(raw, "source"),
-            output_name=require_str(raw, "output_name"),
-            build_dir=require_str(raw, "build_dir"),
-            sha256=optional_str(raw, "sha256"),
-            sha256_url=optional_str(raw, "sha256_url"),
-            parallel_jobs=optional_int(raw, "parallel_jobs"),
-            config_fragments=require_str_list(raw, "config_fragments"),
-            enabled_configs=require_str_list(raw, "enabled_configs"),
-            disabled_configs=require_str_list(raw, "disabled_configs"),
-            required_settings=require_str_list(raw, "required_settings"),
-            set_val_configs=parse_set_val_list(raw, "set_val_configs"),
-        )
-    except ValueError as exc:
-        raise KernelError(f"Invalid kernels.yaml entry '{kernel_name}': {exc}") from exc
+    return specs[kernel_name]
 
 
 _BUILD_LOG_PATTERNS = re.compile(
@@ -281,6 +334,8 @@ def extract_kernel_tarball(
 def download_firecracker_config(
     kernel_dir: Path,
     version: str,
+    arch: str = DEFAULT_FC_KERNEL_ARCH,
+    kernel_spec: KernelSpec | None = None,
 ) -> None:
     """Download Firecracker microvm kernel config.
 
@@ -292,8 +347,20 @@ def download_firecracker_config(
     Raises:
         KernelError: If download fails
     """
+    if kernel_spec is None:
+        kernel_spec = resolve_kernel_spec(kernel_type="firecracker")
+
+    config_url_template = kernel_spec.config_url_template
+    if not config_url_template:
+        raise KernelError(f"Missing 'config_url_template' in kernels.yaml for {kernel_spec.name}")
+
     major_minor = ".".join(version.split(".")[:2])
-    config_url = FIRECRACKER_KERNEL_CONFIG_URL.format(major_minor=major_minor)
+    template_vars = {
+        "major_minor": major_minor,
+        "version": major_minor,
+        "arch": arch,
+    }
+    config_url = config_url_template.format(**template_vars)
 
     try:
         logger.info("Downloading Firecracker kernel config...")
@@ -387,11 +454,11 @@ def configure_kernel(
         KernelError: If configuration fails
     """
     if kernel_spec is None:
-        kernel_spec = load_kernel_spec("kernel-official")
+        kernel_spec = resolve_kernel_spec(kernel_type="official")
 
     # Download Firecracker config
     try:
-        download_firecracker_config(kernel_dir, version)
+        download_firecracker_config(kernel_dir, version, kernel_spec=kernel_spec)
     except KernelError:
         logger.info("Using defconfig instead...")
         returncode, _, _ = run_make(kernel_dir, "defconfig")
@@ -562,7 +629,7 @@ def _compute_config_hash(
         Short hash string for cache key
     """
     if kernel_spec is None:
-        kernel_spec = load_kernel_spec("kernel-official")
+        kernel_spec = resolve_kernel_spec(kernel_type="official")
 
     hasher = hashlib.sha256()
     hasher.update(version.encode())
@@ -588,7 +655,7 @@ def build_kernel_pipeline(
     kernel_spec: KernelSpec | None = None,
 ) -> Path:
     if kernel_spec is None:
-        kernel_spec = load_kernel_spec("kernel-official")
+        kernel_spec = resolve_kernel_spec(kernel_type="official")
 
     if jobs is None:
         jobs = os.cpu_count() or 1
@@ -643,7 +710,9 @@ def build_kernel_pipeline(
     else:
         logger.info("Using existing source: %s", kernel_src_dir)
 
-    configure_kernel(kernel_src_dir, version, user_config_path=user_config_path, kernel_spec=kernel_spec)
+    configure_kernel(
+        kernel_src_dir, version, user_config_path=user_config_path, kernel_spec=kernel_spec
+    )
 
     build_kernel(kernel_src_dir, output_path, jobs)
 
@@ -802,6 +871,7 @@ def download_firecracker_kernel(
     arch: str = DEFAULT_FC_KERNEL_ARCH,
     kernels_dir: Path | None = None,
     output_name: str | None = None,
+    kernel_spec: KernelSpec | None = None,
 ) -> Path:
     if kernels_dir is None:
         from mvmctl.utils.fs import get_kernels_dir
@@ -809,7 +879,18 @@ def download_firecracker_kernel(
         kernels_dir = get_kernels_dir()
     kernels_dir.mkdir(parents=True, exist_ok=True)
 
-    list_url = FIRECRACKER_CI_KERNEL_LIST_URL.format(ci_version=ci_version, arch=arch)
+    if kernel_spec is None:
+        kernel_spec = resolve_kernel_spec(kernel_type="firecracker")
+    list_url_template = kernel_spec.list_url_template
+    if not list_url_template:
+        raise KernelError(f"Missing 'list_url_template' in kernels.yaml for {kernel_spec.name}")
+
+    template_version = kernel_spec.version
+    list_url = list_url_template.format(
+        ci_version=ci_version,
+        arch=arch,
+        version=template_version,
+    )
     try:
         req = Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
         with urlopen(req, timeout=30) as resp:
@@ -829,7 +910,7 @@ def download_firecracker_kernel(
     kernel_version = chosen_key.split("/vmlinux-")[-1]
 
     if output_name is None:
-        output_name = f"vmlinux-fc-{ci_version}-{arch}"
+        output_name = kernel_spec.output_name
 
     output_path = kernels_dir / output_name
 
@@ -837,7 +918,12 @@ def download_firecracker_kernel(
         logger.info("Firecracker CI kernel already cached: %s", output_path)
         return output_path
 
-    download_url = f"{FIRECRACKER_CI_KERNEL_S3_BASE}/{chosen_key}"
+    download_url = kernel_spec.source.format(
+        ci_version=ci_version,
+        arch=arch,
+        version=template_version,
+        kernel_version=kernel_version,
+    )
     sha256_url = f"{download_url}.sha256"
     expected_sha256: str | None = None
     try:
