@@ -1,14 +1,14 @@
-# firecracker-manager
+# mvmctl
 
 **Scope:** Production-grade Python CLI for managing Firecracker microVMs  
 **Stack:** Python 3.13, Typer, Rich, uv  
-**Entry:** `fcm` console script (defined in `pyproject.toml`)
+**Entry:** `mvm` console script (defined in `pyproject.toml`)
 
 ## STRUCTURE
 
 ```
-firecracker-manager/
-├── src/fcm/
+mvmctl/
+├── src/mvmctl/
 │   ├── main.py          # Root Typer app; registers all sub-apps via add_typer()
 │   ├── constants.py     # Single source of truth — CLI name, env prefix, all defaults
 │   ├── exceptions.py    # Custom exception hierarchy (FCMError → domain subclasses)
@@ -36,14 +36,14 @@ firecracker-manager/
 | Firecracker HTTP API | `core/firecracker.py` — `FirecrackerClient` |
 | CLI commands | `cli/` — see `cli/AGENTS.md` |
 | API layer | `api/` — see `api/AGENTS.md` |
-| First-time setup | `cli/configure.py` — guided onboarding wizard (`fcm configure`) |
+| First-time setup | `cli/configure.py` — guided onboarding wizard (`mvm configure`) |
 | Tests | `tests/unit/conftest.py` (fixtures), `tests/unit/test_*.py` |
 | CI/CD | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## DATA FLOW
 
 ```
-User → fcm → main.py → cli/*.py → api/*.py → core/*.py → models/ + utils/
+User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + utils/
 ```
 
 - `main.py` registers sub-apps with `app.add_typer()`; `kernel`/`image`/`bin` are three separate Typer apps all defined in `cli/asset.py`, mounted at root with `rich_help_panel="Assets"`
@@ -70,31 +70,31 @@ Every downloaded/imported asset (image, kernel, VM) gets a **full 64-char SHA256
 
 ### Default Values Rule
 - Fallback defaults → `constants.py` with `FALLBACK_` prefix: `FALLBACK_FC_CI_VERSION`, `FALLBACK_FIRECRACKER_BIN`, `FALLBACK_KERNEL_BUILD_JOBS`
-- User-facing defaults → `~/.config/firecracker-manager/config.json` (`FCM_CONFIG_DIR`)
+- User-facing defaults → `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`)
 - NEVER hardcode defaults in function parameters or as inline variables
 
 ### Configuration Priority (lowest → highest)
 1. `constants.py` fallbacks
-2. `~/.config/firecracker-manager/config.json` (`FCM_CONFIG_DIR`)
-3. `FCM_*` environment variables
+2. `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`)
+3. `MVM_*` environment variables
 4. CLI flags
 
 ### Privilege Model
-- `sudo fcm host init` — one-time: creates `fcm` group, sudoers drop-in, bridges
+- `sudo mvm host init` — one-time: creates `mvm` group, sudoers drop-in, bridges
 - After init: NO sudo needed; `check_privileges()` validates group membership (not just root)
-- After `sudo fcm host init`, created files are chowned back to invoking user
+- After `sudo mvm host init`, created files are chowned back to invoking user
 
 ## ANTI-PATTERNS
 
 | Forbidden | Correct |
 |-----------|---------|
-| Hardcode paths/names | `constants.py` or `FCM_*` env vars |
+| Hardcode paths/names | `constants.py` or `MVM_*` env vars |
 | Business logic in `cli/` | Move to `core/`, expose via `api/` |
-| `print()` in `core/` | `from fcm.utils.console import print_info` — only in CLI |
+| `print()` in `core/` | `from mvmctl.utils.console import print_info` — only in CLI |
 | Bare `except:` | Catch specific types from `exceptions.py` |
 | Inline default values | `FALLBACK_*` in `constants.py` |
 | Skip failing tests | Fix the test; coverage drop = CI failure |
-| `python -m fcm` | Not supported — no `__main__.py` |
+| `python -m mvmctl` | Not supported — no `__main__.py` |
 
 ## CODE QUALITY GATES
 
@@ -118,22 +118,22 @@ uv run ruff check src/ && uv run mypy src/  # Lint + types
 
 # Build standalone binary
 pip install -e ".[dev]" pyinstaller
-pyinstaller --onefile --name fcm src/fcm/main.py
-# Output: dist/fcm
+pyinstaller --onefile --name mvm src/mvmctl/main.py
+# Output: dist/mvm
 ```
 
 ## NOTES
 
-- **Cache:** `~/.cache/firecracker-manager/` (`FCM_CACHE_DIR`)
-- **Config:** `~/.config/firecracker-manager/config.json` (`FCM_CONFIG_DIR`) — JSON, not YAML
-- **Metadata:** `$FCM_CACHE_DIR/metadata.json` — single file for all images, kernels, binaries
-- **Network prefix:** bridge = `fcm-{network_name}` (e.g. `fcm-default`), TAP = `fcm-{net[:3]}-{vm[:3]}-{rand3}`
-- **Env var prefix:** `FCM_` (e.g. `FCM_CACHE_DIR`, `FCM_KERNEL`)
+- **Cache:** `~/.cache/mvmctl/` (`MVM_CACHE_DIR`)
+- **Config:** `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`) — JSON, not YAML
+- **Metadata:** `$MVM_CACHE_DIR/metadata.json` — single file for all images, kernels, binaries
+- **Network prefix:** bridge = `mvm-{network_name}` (e.g. `mvm-default`), TAP = `mvm-{net[:3]}-{vm[:3]}-{rand3}`
+- **Env var prefix:** `MVM_` (e.g. `MVM_CACHE_DIR`, `MVM_KERNEL`)
 - **known violation:** `core/kernel.py` uses `console.print` directly (should be in CLI layer)
 
 ## Related AGENTS.md
 
-- `src/fcm/core/AGENTS.md` — Core module inventory, state management, subprocess conventions
-- `src/fcm/cli/AGENTS.md` — CLI wiring, Typer patterns, command groups
-- `src/fcm/api/AGENTS.md` — API layer pattern, privilege boundary
+- `src/mvmctl/core/AGENTS.md` — Core module inventory, state management, subprocess conventions
+- `src/mvmctl/cli/AGENTS.md` — CLI wiring, Typer patterns, command groups
+- `src/mvmctl/api/AGENTS.md` — API layer pattern, privilege boundary
 - `tests/AGENTS.md` — Test fixtures, mock conventions, coverage

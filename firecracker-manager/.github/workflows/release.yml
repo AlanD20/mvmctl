@@ -32,7 +32,7 @@ jobs:
 
       - name: Run tests with coverage gate
         working-directory: firecracker-manager
-        run: uv run pytest tests/ -v --tb=short --cov=src/fcm --cov-report=term-missing --cov-fail-under=79
+        run: uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=79
 
   build:
     name: Build (${{ matrix.os }})
@@ -66,34 +66,34 @@ jobs:
 
       - name: Build binary
         working-directory: firecracker-manager
-        run: uv run pyinstaller --onefile --name fcm src/fcm/main.py
+        run: uv run pyinstaller --onefile --name mvm src/mvmctl/main.py
 
       - name: Smoke test binary
         working-directory: firecracker-manager
         run: |
-          ./dist/fcm --version
-          ./dist/fcm --help
+          ./dist/mvm --version
+          ./dist/mvm --help
 
       - name: Generate SHA256 checksum
         working-directory: firecracker-manager/dist
         run: |
-          sha256sum fcm > fcm.sha256
-          cat fcm.sha256
+          sha256sum mvm > mvm.sha256
+          cat mvm.sha256
 
       - name: Upload binary as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fcm-linux-${{ matrix.os }}
+          name: mvm-linux-${{ matrix.os }}
           path: |
-            firecracker-manager/dist/fcm
-            firecracker-manager/dist/fcm.sha256
+            firecracker-manager/dist/mvm
+            firecracker-manager/dist/mvm.sha256
 
       - name: Create GitHub release and upload asset
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            firecracker-manager/dist/fcm
-            firecracker-manager/dist/fcm.sha256
+            firecracker-manager/dist/mvm
+            firecracker-manager/dist/mvm.sha256
           name: Release ${{ github.ref_name }}
 
   publish-pypi:
