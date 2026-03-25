@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Replaced bash proof-of-concept scripts with production-grade Python CLI
+- `fcm host init` now persists FCM iptables chains via `iptables-save` to `/etc/iptables/rules.v4`; requires `iptables-persistent` (Debian/Ubuntu) or `iptables-services` (RHEL) for automatic boot-time restore
+
+### Breaking Changes
 
 ### Security
 - NAT teardown is guarded: MASQUERADE rule only removed when no VMs are attached to the bridge
