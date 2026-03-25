@@ -10,6 +10,16 @@ from fcm.models.vm import VMConfig, VMInstance, VMState
 
 
 @pytest.fixture(autouse=True)
+def _reset_sudo_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+    import fcm.core.network as _net
+
+    monkeypatch.setattr(_net, "_SUDO_CREDENTIALS_VALID", True)
+    monkeypatch.setattr(_net, "_SUDO_CACHE_TIMESTAMP", time.monotonic())
+    monkeypatch.setattr(_net, "_SUDO_VALIDATION_IN_PROGRESS", False)
+
+
+@pytest.fixture(autouse=True)
 def isolate_config_and_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure tests never write to real config or cache directories.
 
