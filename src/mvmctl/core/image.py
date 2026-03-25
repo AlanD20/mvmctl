@@ -4,10 +4,14 @@ import logging
 import shutil
 import subprocess
 import tempfile
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+from urllib.error import URLError
 
 from mvmctl.constants import (
+    DEFAULT_FC_KERNEL_ARCH,
+    DEFAULT_FIRECRACKER_CI_VERSION,
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
     FIRECRACKER_CI_IMAGE_LIST_URL,
     FIRECRACKER_CI_KERNEL_S3_BASE,
@@ -16,6 +20,7 @@ from mvmctl.constants import (
 from mvmctl.exceptions import ConfigError, ImageError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.http import download_file as _download_file
+from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
 
@@ -377,12 +382,8 @@ def _handle_raw(download_path: Path, final_path: Path, size_mib: int) -> Path:
     return extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
 
 
-def _resolve_source_template(spec: ImageSpec) -> str:
+def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
     import platform
-    import re
-    from urllib.request import Request, urlopen
-
-    from mvmctl.constants import DEFAULT_FC_KERNEL_ARCH, DEFAULT_FIRECRACKER_CI_VERSION
 
     try:
         from mvmctl.core.config_state import get_firecracker_config
@@ -395,17 +396,37 @@ def _resolve_source_template(spec: ImageSpec) -> str:
         ci_version = DEFAULT_FIRECRACKER_CI_VERSION
 
     arch = platform.machine() or DEFAULT_FC_KERNEL_ARCH
-    list_url = FIRECRACKER_CI_IMAGE_LIST_URL.format(ci_version=ci_version, arch=arch)
+    variables = {
+        "ci_version": ci_version,
+        "arch": arch,
+        "image_type": spec.image_type,
+        "version": spec.version,
+        "image_version": spec.version,
+        "ubuntu_version": spec.version,
+    }
+    return {k: str(v) for k, v in variables.items()}
+
+
+def _resolve_source_template(spec: ImageSpec) -> str:
+    import re
+
+    template_vars = _get_template_variables(spec)
+    list_url = render_template(FIRECRACKER_CI_IMAGE_LIST_URL, template_vars)
 
     try:
-        req = Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req, timeout=30) as resp:
+        req = urllib.request.Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as resp:
             xml_content = resp.read().decode("utf-8")
     except Exception as e:
         logger.debug("Failed to list Firecracker CI ubuntu images from %s", list_url, exc_info=True)
         raise ImageError("Failed to list Firecracker CI ubuntu images") from e
 
-    pattern = rf"<Key>(firecracker-ci/{re.escape(ci_version)}/{re.escape(arch)}/ubuntu-[0-9.]+\.squashfs)</Key>"
+    ci_version = template_vars["ci_version"]
+    arch = template_vars["arch"]
+    pattern = (
+        rf"<Key>(firecracker-ci/{re.escape(ci_version)}/{re.escape(arch)}/"
+        rf"ubuntu-[0-9.]+\.squashfs)</Key>"
+    )
     keys = re.findall(pattern, xml_content)
     if not keys:
         raise ImageError(f"No ubuntu squashfs found for CI version {ci_version} / arch {arch}")
@@ -413,6 +434,20 @@ def _resolve_source_template(spec: ImageSpec) -> str:
     keys.sort()
     chosen_key = keys[-1]
     return f"{FIRECRACKER_CI_KERNEL_S3_BASE}/{chosen_key}"
+
+
+def _fetch_sha256_from_url(sha256_url: str) -> str | None:
+    try:
+        req = urllib.request.Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            content = resp.read().decode().strip()
+    except (URLError, OSError):
+        return None
+
+    parts = content.split()
+    if not parts:
+        return None
+    return str(parts[0]).lower()
 
 
 def _handle_squashfs(download_path: Path, final_path: Path, size_mib: int) -> Path:
@@ -484,12 +519,17 @@ def fetch_image(
         logger.info("Image already exists: %s", final_path)
         return final_path
 
+    template_vars = _get_template_variables(spec)
     source = spec.source
     if "{" in spec.source:
         source = _resolve_source_template(spec)
 
-    no_checksum = spec.sha256 is None
     resolved_sha256 = spec.sha256.lower() if spec.sha256 is not None else None
+    sha256_url = render_optional_template(spec.sha256_url, template_vars)
+    if resolved_sha256 is None and sha256_url is not None:
+        resolved_sha256 = _fetch_sha256_from_url(sha256_url)
+
+    no_checksum = resolved_sha256 is None
 
     download_path = output_dir / f"{spec.id}.download"
     download_file(

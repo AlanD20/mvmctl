@@ -33,6 +33,7 @@ from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
 from mvmctl.models.kernel import KernelSpec
 from mvmctl.utils.fs import get_cache_dir, get_images_dir
 from mvmctl.utils.http import download_file
+from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
     optional_int,
     optional_str,
@@ -612,6 +613,17 @@ def fetch_kernel_sha256(version: str) -> str | None:
         return None
 
 
+def fetch_kernel_sha256_from_url(sha256_url: str) -> str | None:
+    try:
+        req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urlopen(req, timeout=30) as resp:
+            content = resp.read().decode().strip()
+        parts = content.split()
+        return str(parts[0]).lower() if parts else None
+    except (URLError, OSError):
+        return None
+
+
 def _compute_config_hash(
     version: str,
     user_config_path: Path | None = None,
@@ -691,17 +703,31 @@ def build_kernel_pipeline(
         logger.info("Kernel exists but config changed, rebuilding: %s", output_path)
         output_path.unlink(missing_ok=True)
 
-    if sha256 is None:
-        sha256 = fetch_kernel_sha256(version)
+    template_vars = {
+        "version": version,
+        "kernel_version": version,
+        "ci_version": version,
+        "arch": str(arch or DEFAULT_FC_KERNEL_ARCH),
+    }
+    resolved_source_url = (
+        render_template(source_url, template_vars) if "{" in source_url else source_url
+    )
 
     if sha256 is None:
-        raise KernelError(f"Checksum required for kernel source download: {source_url}")
+        resolved_sha256_url = render_optional_template(kernel_spec.sha256_url, template_vars)
+        if resolved_sha256_url is not None:
+            sha256 = fetch_kernel_sha256_from_url(resolved_sha256_url)
+        if sha256 is None:
+            sha256 = fetch_kernel_sha256(version)
+
+    if sha256 is None:
+        raise KernelError(f"Checksum required for kernel source download: {resolved_source_url}")
 
     tarball = build_dir / f"linux-{version}.tar.xz"
     kernel_src_dir = build_dir / f"linux-{version}"
 
     if not tarball.exists():
-        download_kernel_source(source_url, tarball, sha256)
+        download_kernel_source(resolved_source_url, tarball, sha256)
     else:
         logger.info("Using cached tarball: %s", tarball)
 
@@ -886,11 +912,12 @@ def download_firecracker_kernel(
         raise KernelError(f"Missing 'list_url_template' in kernels.yaml for {kernel_spec.name}")
 
     template_version = kernel_spec.version
-    list_url = list_url_template.format(
-        ci_version=ci_version,
-        arch=arch,
-        version=template_version,
-    )
+    template_vars = {
+        "ci_version": ci_version,
+        "arch": arch,
+        "version": template_version,
+    }
+    list_url = render_template(list_url_template, template_vars)
     try:
         req = Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
         with urlopen(req, timeout=30) as resp:
@@ -918,13 +945,11 @@ def download_firecracker_kernel(
         logger.info("Firecracker CI kernel already cached: %s", output_path)
         return output_path
 
-    download_url = kernel_spec.source.format(
-        ci_version=ci_version,
-        arch=arch,
-        version=template_version,
-        kernel_version=kernel_version,
-    )
-    sha256_url = f"{download_url}.sha256"
+    template_vars["kernel_version"] = kernel_version
+    download_url = render_template(kernel_spec.source, template_vars)
+    sha256_url = render_optional_template(kernel_spec.sha256_url, template_vars)
+    if sha256_url is None:
+        sha256_url = f"{download_url}.sha256"
     expected_sha256: str | None = None
     try:
         req_sha = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
