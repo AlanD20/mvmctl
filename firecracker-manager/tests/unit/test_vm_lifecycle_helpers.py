@@ -3,8 +3,8 @@
 from unittest.mock import ANY, patch
 
 
-from fcm.core.vm_lifecycle import cleanup_tap, graceful_shutdown
-from fcm.exceptions import NetworkError
+from mvmctl.core.vm_lifecycle import cleanup_tap, graceful_shutdown
+from mvmctl.exceptions import NetworkError
 
 
 def test_graceful_shutdown_no_pid() -> None:
@@ -41,8 +41,8 @@ def test_graceful_shutdown_via_sigterm_then_sigkill() -> None:
 def test_cleanup_tap_success() -> None:
     """cleanup_tap calls remove rules and delete tap."""
     with (
-        patch("fcm.core.vm_lifecycle.remove_iptables_forward_rules") as mock_rules,
-        patch("fcm.core.vm_lifecycle.delete_tap") as mock_del,
+        patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules") as mock_rules,
+        patch("mvmctl.core.vm_lifecycle.delete_tap") as mock_del,
     ):
         cleanup_tap("fc-vm1-0")
         mock_rules.assert_called_once_with("fc-vm1-0", bridge=ANY)
@@ -52,8 +52,8 @@ def test_cleanup_tap_success() -> None:
 def test_cleanup_tap_network_error_swallowed() -> None:
     """cleanup_tap swallows NetworkError from delete_tap."""
     with (
-        patch("fcm.core.vm_lifecycle.remove_iptables_forward_rules"),
-        patch("fcm.core.vm_lifecycle.delete_tap", side_effect=NetworkError("no tap")),
+        patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules"),
+        patch("mvmctl.core.vm_lifecycle.delete_tap", side_effect=NetworkError("no tap")),
     ):
         # Should not raise
         cleanup_tap("fc-vm1-0")

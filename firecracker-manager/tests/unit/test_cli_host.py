@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from fcm.cli.host import app
-from fcm.core.host import HostChange, HostState
-from fcm.exceptions import HostError
+from mvmctl.cli.host import app
+from mvmctl.core.host import HostChange, HostState
+from mvmctl.exceptions import HostError
 
 runner = CliRunner()
 
@@ -18,8 +18,8 @@ runner = CliRunner()
 
 
 def test_init_success_with_changes(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mock_init = mocker.patch("fcm.cli.host.init_host")
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mock_init = mocker.patch("mvmctl.cli.host.init_host")
     mock_init.return_value = [
         HostChange(
             setting="net.ipv4.ip_forward",
@@ -28,7 +28,7 @@ def test_init_success_with_changes(mocker: MockerFixture, tmp_path):
             mechanism="sysctl",
         ),
     ]
-    mocker.patch("fcm.api.network.ensure_default_network")
+    mocker.patch("mvmctl.api.network.ensure_default_network")
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0
     assert "ip_forward" in result.output
@@ -36,8 +36,8 @@ def test_init_success_with_changes(mocker: MockerFixture, tmp_path):
 
 
 def test_init_success_multiple_changes(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mock_init = mocker.patch("fcm.cli.host.init_host")
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mock_init = mocker.patch("mvmctl.cli.host.init_host")
     mock_init.return_value = [
         HostChange(
             setting="net.ipv4.ip_forward",
@@ -52,7 +52,7 @@ def test_init_success_multiple_changes(mocker: MockerFixture, tmp_path):
             mechanism="file_create",
         ),
     ]
-    mocker.patch("fcm.api.network.ensure_default_network")
+    mocker.patch("mvmctl.api.network.ensure_default_network")
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0
     assert "ip_forward" in result.output
@@ -61,26 +61,26 @@ def test_init_success_multiple_changes(mocker: MockerFixture, tmp_path):
 
 
 def test_init_no_changes(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.init_host", return_value=[])
-    mocker.patch("fcm.api.network.ensure_default_network")
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.init_host", return_value=[])
+    mocker.patch("mvmctl.api.network.ensure_default_network")
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0
     assert "already configured" in result.output
 
 
 def test_init_host_error(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.init_host", side_effect=HostError("/dev/kvm is not accessible"))
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.init_host", side_effect=HostError("/dev/kvm is not accessible"))
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 1
     assert "not accessible" in result.output
 
 
 def test_init_host_error_missing_binaries(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mocker.patch(
-        "fcm.cli.host.init_host",
+        "mvmctl.cli.host.init_host",
         side_effect=HostError("Missing required binaries: iptables"),
     )
     result = runner.invoke(app, ["init"])
@@ -94,12 +94,12 @@ def test_init_host_error_missing_binaries(mocker: MockerFixture, tmp_path):
 
 
 def test_ls_all_ok(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.check_kvm_access", return_value=True)
-    mocker.patch("fcm.cli.host.check_required_binaries", return_value=[])
-    mocker.patch("fcm.cli.host.get_ip_forward_status", return_value="1")
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.check_kvm_access", return_value=True)
+    mocker.patch("mvmctl.cli.host.check_required_binaries", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_ip_forward_status", return_value="1")
     mocker.patch(
-        "fcm.cli.host.get_host_state",
+        "mvmctl.cli.host.get_host_state",
         return_value=HostState(
             init_timestamp="2025-01-01T00:00:00+00:00",
             changes=[],
@@ -113,11 +113,11 @@ def test_ls_all_ok(mocker: MockerFixture, tmp_path):
 
 
 def test_ls_failures(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.check_kvm_access", return_value=False)
-    mocker.patch("fcm.cli.host.check_required_binaries", return_value=["iptables"])
-    mocker.patch("fcm.cli.host.get_ip_forward_status", return_value="0")
-    mocker.patch("fcm.cli.host.get_host_state", return_value=None)
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.check_kvm_access", return_value=False)
+    mocker.patch("mvmctl.cli.host.check_required_binaries", return_value=["iptables"])
+    mocker.patch("mvmctl.cli.host.get_ip_forward_status", return_value="0")
+    mocker.patch("mvmctl.cli.host.get_host_state", return_value=None)
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "FAIL" in result.output
@@ -126,23 +126,23 @@ def test_ls_failures(mocker: MockerFixture, tmp_path):
 
 
 def test_ls_ip_forward_error(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.check_kvm_access", return_value=True)
-    mocker.patch("fcm.cli.host.check_required_binaries", return_value=[])
-    mocker.patch("fcm.cli.host.get_ip_forward_status", side_effect=HostError("sysctl not found"))
-    mocker.patch("fcm.cli.host.get_host_state", return_value=None)
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.check_kvm_access", return_value=True)
+    mocker.patch("mvmctl.cli.host.check_required_binaries", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_ip_forward_status", side_effect=HostError("sysctl not found"))
+    mocker.patch("mvmctl.cli.host.get_host_state", return_value=None)
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "unknown" in result.output
 
 
 def test_ls_state_exists_with_timestamp(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.check_kvm_access", return_value=True)
-    mocker.patch("fcm.cli.host.check_required_binaries", return_value=[])
-    mocker.patch("fcm.cli.host.get_ip_forward_status", return_value="1")
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.check_kvm_access", return_value=True)
+    mocker.patch("mvmctl.cli.host.check_required_binaries", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_ip_forward_status", return_value="1")
     mocker.patch(
-        "fcm.cli.host.get_host_state",
+        "mvmctl.cli.host.get_host_state",
         return_value=HostState(
             init_timestamp="2025-06-15T10:30:00+00:00",
             changes=[
@@ -157,11 +157,11 @@ def test_ls_state_exists_with_timestamp(mocker: MockerFixture, tmp_path):
 
 
 def test_ls_ip_forward_off(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.check_kvm_access", return_value=True)
-    mocker.patch("fcm.cli.host.check_required_binaries", return_value=[])
-    mocker.patch("fcm.cli.host.get_ip_forward_status", return_value="0")
-    mocker.patch("fcm.cli.host.get_host_state", return_value=None)
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.check_kvm_access", return_value=True)
+    mocker.patch("mvmctl.cli.host.check_required_binaries", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_ip_forward_status", return_value="0")
+    mocker.patch("mvmctl.cli.host.get_host_state", return_value=None)
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "off" in result.output
@@ -169,11 +169,11 @@ def test_ls_ip_forward_off(mocker: MockerFixture, tmp_path):
 
 
 def test_ls_multiple_missing_binaries(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.check_kvm_access", return_value=True)
-    mocker.patch("fcm.cli.host.check_required_binaries", return_value=["ip", "iptables"])
-    mocker.patch("fcm.cli.host.get_ip_forward_status", return_value="1")
-    mocker.patch("fcm.cli.host.get_host_state", return_value=None)
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.check_kvm_access", return_value=True)
+    mocker.patch("mvmctl.cli.host.check_required_binaries", return_value=["ip", "iptables"])
+    mocker.patch("mvmctl.cli.host.get_ip_forward_status", return_value="1")
+    mocker.patch("mvmctl.cli.host.get_host_state", return_value=None)
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "ip" in result.output
@@ -181,11 +181,11 @@ def test_ls_multiple_missing_binaries(mocker: MockerFixture, tmp_path):
 
 
 def test_ls_state_error_handled(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mocker.patch("fcm.cli.host.check_kvm_access", return_value=True)
-    mocker.patch("fcm.cli.host.check_required_binaries", return_value=[])
-    mocker.patch("fcm.cli.host.get_ip_forward_status", return_value="1")
-    mocker.patch("fcm.cli.host.get_host_state", side_effect=HostError("Corrupt state file"))
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.check_kvm_access", return_value=True)
+    mocker.patch("mvmctl.cli.host.check_required_binaries", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_ip_forward_status", return_value="1")
+    mocker.patch("mvmctl.cli.host.get_host_state", side_effect=HostError("Corrupt state file"))
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "none" in result.output
@@ -197,9 +197,9 @@ def test_ls_state_error_handled(mocker: MockerFixture, tmp_path):
 
 
 def test_clean_success(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.core.vm_manager.VMManager.list_all", return_value=[])
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mock_clean = mocker.patch("fcm.cli.host.clean_host")
+    mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mock_clean = mocker.patch("mvmctl.cli.host.clean_host")
     mock_clean.return_value = ["Removed network 'default' (bridge: fcm-br0)"]
     result = runner.invoke(app, ["clean", "--force"])
     assert result.exit_code == 0
@@ -208,12 +208,12 @@ def test_clean_success(mocker: MockerFixture, tmp_path):
 
 
 def test_clean_refuses_running_vms(mocker: MockerFixture):
-    from fcm.models.vm import VMState
+    from mvmctl.models.vm import VMState
 
     vm = MagicMock()
     vm.name = "myvm"
     vm.status = VMState.RUNNING
-    mocker.patch("fcm.core.vm_manager.VMManager.list_all", return_value=[vm])
+    mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[vm])
     result = runner.invoke(app, ["clean", "--force"])
     assert result.exit_code == 1
     assert "Cannot clean" in result.output
@@ -225,9 +225,9 @@ def test_clean_refuses_running_vms(mocker: MockerFixture):
 
 
 def test_reset_success(mocker: MockerFixture, tmp_path):
-    mocker.patch("fcm.core.vm_manager.VMManager.list_all", return_value=[])
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
-    mock_reset = mocker.patch("fcm.cli.host.reset_host")
+    mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mock_reset = mocker.patch("mvmctl.cli.host.reset_host")
     mock_reset.return_value = [
         "Removed network 'default' (bridge: fcm-br0)",
         "Reverted net.ipv4.ip_forward",
@@ -240,12 +240,12 @@ def test_reset_success(mocker: MockerFixture, tmp_path):
 
 
 def test_reset_refuses_running_vms(mocker: MockerFixture):
-    from fcm.models.vm import VMState
+    from mvmctl.models.vm import VMState
 
     vm = MagicMock()
     vm.name = "myvm"
     vm.status = VMState.RUNNING
-    mocker.patch("fcm.core.vm_manager.VMManager.list_all", return_value=[vm])
+    mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[vm])
     result = runner.invoke(app, ["reset", "--force"])
     assert result.exit_code == 1
     assert "Cannot reset" in result.output
@@ -253,9 +253,9 @@ def test_reset_refuses_running_vms(mocker: MockerFixture):
 
 def test_init_anti_recursion_protection(mocker: MockerFixture, tmp_path, monkeypatch):
     """Test that sudo restart has anti-recursion protection."""
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mocker.patch(
-        "fcm.cli.host.init_host",
+        "mvmctl.cli.host.init_host",
         side_effect=HostError("Root privileges required"),
     )
     mock_subprocess = mocker.patch("subprocess.run")
@@ -270,9 +270,9 @@ def test_init_anti_recursion_protection(mocker: MockerFixture, tmp_path, monkeyp
 
 def test_init_sudo_restart_sets_env(mocker: MockerFixture, tmp_path):
     """Test that sudo restart sets FCM_SUDO_RESTART environment variable."""
-    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mocker.patch(
-        "fcm.cli.host.init_host",
+        "mvmctl.cli.host.init_host",
         side_effect=HostError("Root privileges required"),
     )
     mock_subprocess = mocker.patch("subprocess.run")

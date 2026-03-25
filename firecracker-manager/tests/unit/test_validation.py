@@ -2,8 +2,8 @@
 
 import pytest
 
-from fcm.exceptions import FCMError
-from fcm.utils.validation import (
+from mvmctl.exceptions import FCMError
+from mvmctl.utils.validation import (
     validate_boot_arg_component,
     validate_entity_name,
     is_ip_address,

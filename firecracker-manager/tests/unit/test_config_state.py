@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from fcm.core.config_state import (
+from mvmctl.core.config_state import (
     get_assets_config,
     get_config,
     get_config_value,
@@ -13,7 +13,7 @@ from fcm.core.config_state import (
     update_assets_config,
     update_firecracker_config,
 )
-from fcm.utils.fs import get_cache_dir, get_config_dir
+from mvmctl.utils.fs import get_cache_dir, get_config_dir
 
 
 @pytest.fixture()
@@ -70,10 +70,10 @@ def test_config_directory_has_restricted_permissions(tmp_path: Path, monkeypatch
     """Test that config directory is created with 0o700 permissions (issue #27)."""
     # Use a fresh directory that doesn't exist yet
     fresh_config_dir = tmp_path / "fresh_config"
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(fresh_config_dir))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(fresh_config_dir))
     # Reload module to pick up new env var
     import importlib
-    from fcm.core import config_state
+    from mvmctl.core import config_state
 
     importlib.reload(config_state)
 

@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
-from fcm.api.vms import (
+from mvmctl.api.vms import (
     list_vms,
     get_vm,
     deregister_vm,
@@ -11,10 +11,10 @@ from fcm.api.vms import (
     get_logs,
     cleanup_vms,
 )
-from fcm.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMState
 
 
-@patch("fcm.api.vms.get_vm_manager")
+@patch("mvmctl.api.vms.get_vm_manager")
 def test_list_vms(mock_get_manager):
     """list_vms retrieves VMs from manager."""
     mock_manager = MagicMock()
@@ -28,7 +28,7 @@ def test_list_vms(mock_get_manager):
     assert list_vms(include_stopped=False)[0].name == "vm1"
 
 
-@patch("fcm.api.vms.get_vm_manager")
+@patch("mvmctl.api.vms.get_vm_manager")
 def test_get_vm_and_deregister(mock_get_manager):
     """get_vm and deregister_vm interact with manager correctly."""
     mock_manager = MagicMock()
@@ -41,14 +41,14 @@ def test_get_vm_and_deregister(mock_get_manager):
     mock_manager.deregister.assert_called_once()
 
 
-@patch("fcm.utils.fs.get_vms_dir")
+@patch("mvmctl.utils.fs.get_vms_dir")
 def test_vm_cache_dir(mock_get_vms_dir):
     """vm_cache_dir returns the vm path."""
     mock_get_vms_dir.return_value = Path("/tmp/vms")
     assert vm_cache_dir("testvm") == Path("/tmp/vms/testvm")
 
 
-@patch("fcm.api.vms.connect_to_vm")
+@patch("mvmctl.api.vms.connect_to_vm")
 def test_ssh_vm(mock_connect):
     """ssh_vm forwards to connect_to_vm."""
     mock_connect.return_value = 0
@@ -63,7 +63,7 @@ def test_ssh_vm(mock_connect):
     )
 
 
-@patch("fcm.api.vms.show_logs")
+@patch("mvmctl.api.vms.show_logs")
 def test_get_logs(mock_show_logs):
     """get_logs forwards to show_logs."""
     mock_show_logs.return_value = ["log1"]
@@ -73,11 +73,11 @@ def test_get_logs(mock_show_logs):
 
 
 @patch("shutil.rmtree")
-@patch("fcm.core.network.delete_tap")
-@patch("fcm.core.network.remove_iptables_forward_rules")
+@patch("mvmctl.core.network.delete_tap")
+@patch("mvmctl.core.network.remove_iptables_forward_rules")
 @patch("os.kill")
-@patch("fcm.api.vms.check_privileges")
-@patch("fcm.api.vms.get_vm_manager")
+@patch("mvmctl.api.vms.check_privileges")
+@patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms(
     mock_get_manager, mock_check_privs, mock_kill, mock_rm_iptables, mock_del_tap, mock_rmtree
 ):
@@ -89,7 +89,7 @@ def test_cleanup_vms(
     mock_get_manager.return_value = mock_manager
 
     # cleanup only stopped VMs
-    with patch("fcm.api.vms.vm_cache_dir") as mock_cache_dir:
+    with patch("mvmctl.api.vms.vm_cache_dir") as mock_cache_dir:
         mock_dir = MagicMock()
         mock_dir.exists.return_value = True
         mock_cache_dir.return_value = mock_dir
@@ -100,7 +100,7 @@ def test_cleanup_vms(
 
         mock_check_privs.assert_called_once_with("/usr/sbin/ip")
         mock_kill.assert_called_once_with(123, 9)
-        mock_rm_iptables.assert_called_with("fcm-tap-vm1-0")
-        mock_del_tap.assert_called_with("fcm-tap-vm1-0")
+        mock_rm_iptables.assert_called_with("mvm-tap-vm1-0")
+        mock_del_tap.assert_called_with("mvm-tap-vm1-0")
         mock_manager.deregister.assert_called_once()
         mock_rmtree.assert_called_once()

@@ -10,8 +10,8 @@ import pytest
 import yaml
 from pytest_mock import MockerFixture
 
-import fcm.core.image
-from fcm.core.image import (
+import mvmctl.core.image
+from mvmctl.core.image import (
     _copy_bytes,
     _handle_qcow2,
     _handle_raw,
@@ -26,8 +26,8 @@ from fcm.core.image import (
     import_image,
     load_images_config,
 )
-from fcm.exceptions import ChecksumMismatchError, ConfigError, ImageError, FCMError
-from fcm.models.image import ImageSpec, ImageImportSpec
+from mvmctl.exceptions import ChecksumMismatchError, ConfigError, ImageError, FCMError
+from mvmctl.models.image import ImageSpec, ImageImportSpec
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ def _mock_urlopen_response(data: bytes, content_length: str | None = None):
     return mock_response
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_raises_error_no_checksum(mock_urlopen: MagicMock, tmp_path: Path):
     """S-H10: download_file should raise FCMError when expected_sha256 is None and allow_missing_checksum=False."""
 
@@ -124,7 +124,7 @@ def test_download_file_raises_error_no_checksum(mock_urlopen: MagicMock, tmp_pat
         )
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_allows_missing_checksum_with_param(
     mock_urlopen: MagicMock, tmp_path: Path, mocker: MockerFixture
 ):
@@ -151,7 +151,7 @@ def test_download_file_allows_missing_checksum_with_param(
     assert dest.read_bytes() == data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_missing_checksum_rejected_in_non_interactive(
     mock_urlopen: MagicMock, tmp_path: Path, mocker: MockerFixture
 ):
@@ -173,7 +173,7 @@ def test_download_file_missing_checksum_rejected_in_non_interactive(
         )
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_success(mock_urlopen: MagicMock, tmp_path: Path):
     data = b"hello world binary content"
     expected_sha = hashlib.sha256(data).hexdigest()
@@ -192,7 +192,7 @@ def test_download_file_success(mock_urlopen: MagicMock, tmp_path: Path):
     assert dest.read_bytes() == data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_checksum_match(mock_urlopen: MagicMock, tmp_path: Path):
     data = b"checksum test data"
     expected_sha = hashlib.sha256(data).hexdigest()
@@ -211,7 +211,7 @@ def test_download_file_checksum_match(mock_urlopen: MagicMock, tmp_path: Path):
     assert dest.read_bytes() == data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_checksum_mismatch(mock_urlopen: MagicMock, tmp_path: Path):
     data = b"checksum test data"
     mock_urlopen.return_value = _mock_urlopen_response(data)
@@ -228,7 +228,7 @@ def test_download_file_checksum_mismatch(mock_urlopen: MagicMock, tmp_path: Path
     assert not dest.exists()  # file deleted on mismatch
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_url_error(mock_urlopen: MagicMock, tmp_path: Path):
     mock_urlopen.side_effect = URLError("Connection refused")
 
@@ -242,7 +242,7 @@ def test_download_file_url_error(mock_urlopen: MagicMock, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_convert_qcow2_to_raw_success(mock_run: MagicMock, tmp_path: Path):
     mock_run.return_value = MagicMock(returncode=0)
 
@@ -259,7 +259,7 @@ def test_convert_qcow2_to_raw_success(mock_run: MagicMock, tmp_path: Path):
     )
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_convert_qcow2_to_raw_failure(mock_run: MagicMock, tmp_path: Path):
     mock_run.side_effect = subprocess.CalledProcessError(1, "qemu-img", stderr="error")
 
@@ -267,7 +267,7 @@ def test_convert_qcow2_to_raw_failure(mock_run: MagicMock, tmp_path: Path):
         convert_qcow2_to_raw(tmp_path / "image.qcow2", tmp_path / "image.raw")
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_convert_qcow2_to_raw_missing_tool(mock_run: MagicMock, tmp_path: Path):
     mock_run.side_effect = FileNotFoundError("qemu-img not found")
 
@@ -275,7 +275,7 @@ def test_convert_qcow2_to_raw_missing_tool(mock_run: MagicMock, tmp_path: Path):
         convert_qcow2_to_raw(tmp_path / "image.qcow2", tmp_path / "image.raw")
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_convert_qcow2_to_raw_memory_limited(mock_run: MagicMock, tmp_path: Path):
     """Test that qemu-img convert uses memory limit to prevent OOM on large images."""
     mock_run.return_value = MagicMock(returncode=0)
@@ -297,7 +297,7 @@ def test_convert_qcow2_to_raw_memory_limited(mock_run: MagicMock, tmp_path: Path
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_create_ext4_from_tar_success(mock_run: MagicMock, tmp_path: Path):
     mock_run.return_value = MagicMock(returncode=0)
 
@@ -310,7 +310,7 @@ def test_create_ext4_from_tar_success(mock_run: MagicMock, tmp_path: Path):
     assert mock_run.call_count >= 4
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_create_ext4_from_tar_failure(mock_run: MagicMock, tmp_path: Path):
     mock_run.side_effect = subprocess.CalledProcessError(1, "truncate", stderr="error")
 
@@ -344,9 +344,9 @@ def test_fetch_image_already_exists(tmp_path: Path):
     assert result == final
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_qcow2(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -376,8 +376,8 @@ def test_fetch_image_qcow2(
     mock_extract.assert_called_once()
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_success_sfdisk(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -418,8 +418,8 @@ def test_extract_partition_from_raw_success_sfdisk(
     mock_copy.assert_called_once()
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_success_fdisk(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -453,7 +453,7 @@ def test_extract_partition_from_raw_success_fdisk(
     mock_copy.assert_called_once()
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_no_partitions(mock_run: MagicMock, tmp_path: Path):
     def mock_run_side_effect(cmd, **kwargs):
         mock_result = MagicMock()
@@ -476,8 +476,8 @@ def test_extract_partition_from_raw_no_partitions(mock_run: MagicMock, tmp_path:
     assert output_path.exists()
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_copy_failure(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -511,8 +511,8 @@ def test_extract_partition_from_raw_copy_failure(
     assert str(raw_path) not in error_str
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_sfdisk_multi_partition(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -560,8 +560,8 @@ def test_extract_partition_from_raw_sfdisk_multi_partition(
     assert result.suffix == ".btrfs"
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_sfdisk_explicit_partition(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -608,7 +608,7 @@ def test_extract_partition_from_raw_sfdisk_explicit_partition(
     assert result.suffix == ".xfs"
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_fdisk_no_partitions(mock_run: MagicMock, tmp_path: Path):
     def mock_run_side_effect(cmd, **kwargs):
         mock_result = MagicMock()
@@ -633,8 +633,8 @@ def test_extract_partition_from_raw_fdisk_no_partitions(mock_run: MagicMock, tmp
     assert output_path.exists()
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_fdisk_multi_partition(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -670,7 +670,7 @@ def test_extract_partition_from_raw_fdisk_multi_partition(
     assert result.suffix == ".img"
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_fdisk_parse_failure(mock_run: MagicMock, tmp_path: Path):
     raw_path = tmp_path / "image.raw"
     raw_path.write_bytes(b"\x00" * 1024)
@@ -695,8 +695,8 @@ def test_extract_partition_from_raw_fdisk_parse_failure(mock_run: MagicMock, tmp
         extract_partition_from_raw(raw_path, output_path)
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_blkid_not_found(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -729,8 +729,8 @@ def test_extract_partition_from_raw_blkid_not_found(
     assert result.suffix == ".img"
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_sfdisk_json_error(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -764,8 +764,8 @@ def test_extract_partition_from_raw_sfdisk_json_error(
     assert result.suffix == ".img"
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_unknown_fs_type(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -799,8 +799,8 @@ def test_extract_partition_from_raw_unknown_fs_type(
     assert result.suffix == ".img"
 
 
-@patch("fcm.core.image.create_ext4_from_tar")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.create_ext4_from_tar")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_tar_rootfs(
     mock_download: MagicMock,
     mock_create: MagicMock,
@@ -827,8 +827,8 @@ def test_fetch_image_tar_rootfs(
     mock_create.assert_called_once()
 
 
-@patch("fcm.core.image.create_ext4_from_tar")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.create_ext4_from_tar")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_tar_rootfs_failure(
     mock_download: MagicMock,
     mock_create: MagicMock,
@@ -851,9 +851,9 @@ def test_fetch_image_tar_rootfs_failure(
         fetch_image(spec, tmp_path)
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_force_re_download(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -884,7 +884,7 @@ def test_fetch_image_force_re_download(
     mock_download.assert_called_once()
 
 
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_download_failure(
     mock_download: MagicMock,
     tmp_path: Path,
@@ -905,8 +905,8 @@ def test_fetch_image_download_failure(
         fetch_image(spec, tmp_path)
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_raw_format(
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -933,7 +933,7 @@ def test_fetch_image_raw_format(
     mock_extract.assert_called_once()
 
 
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_unknown_format(
     mock_download: MagicMock,
     tmp_path: Path,
@@ -954,9 +954,9 @@ def test_fetch_image_unknown_format(
         fetch_image(spec, tmp_path)
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_qcow2_convert_fails(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -982,9 +982,9 @@ def test_fetch_image_qcow2_convert_fails(
     mock_extract.assert_not_called()
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_qcow2_extract_fails(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -1010,8 +1010,8 @@ def test_fetch_image_qcow2_extract_fails(
     assert result is None
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_raw_extract_fails(
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -1047,7 +1047,7 @@ def test_fetch_image_without_checksum_passes_none_to_download(
         size_mib=2048,
         sha256=None,
     )
-    mock_download = mocker.patch("fcm.core.image.download_file")
+    mock_download = mocker.patch("mvmctl.core.image.download_file")
 
     with pytest.raises(ImageError, match="Checksum required"):
         fetch_image(spec, tmp_path)
@@ -1132,8 +1132,8 @@ def test_copy_bytes_partial_chunk(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
 def test_handle_qcow2_success(mock_convert: MagicMock, mock_extract: MagicMock, tmp_path: Path):
     """Test _handle_qcow2 successfully converts and extracts."""
     download_path = tmp_path / "image.qcow2"
@@ -1151,7 +1151,7 @@ def test_handle_qcow2_success(mock_convert: MagicMock, mock_extract: MagicMock, 
     mock_extract.assert_called_once()
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_handle_tar_rootfs(mock_run: MagicMock, tmp_path: Path):
     """Test _handle_tar_rootfs creates ext4 from tar."""
     download_path = tmp_path / "rootfs.tar"
@@ -1165,7 +1165,7 @@ def test_handle_tar_rootfs(mock_run: MagicMock, tmp_path: Path):
     assert result == final_path
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.extract_partition_from_raw")
 def test_handle_raw(mock_extract: MagicMock, tmp_path: Path):
     """Test _handle_raw extracts partition from raw image."""
     download_path = tmp_path / "image.raw"
@@ -1186,7 +1186,7 @@ def test_handle_raw(mock_extract: MagicMock, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_handle_squashfs_success(mock_run: MagicMock, tmp_path: Path):
     """Test _handle_squashfs extracts squashfs and creates ext4."""
     download_path = tmp_path / "image.squashfs"
@@ -1200,7 +1200,7 @@ def test_handle_squashfs_success(mock_run: MagicMock, tmp_path: Path):
     assert result == final_path
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_handle_squashfs_unsquashfs_failure(mock_run: MagicMock, tmp_path: Path):
     """Test _handle_squashfs raises ImageError when unsquashfs fails."""
     download_path = tmp_path / "image.squashfs"
@@ -1221,7 +1221,7 @@ def test_handle_squashfs_unsquashfs_failure(mock_run: MagicMock, tmp_path: Path)
         _handle_squashfs(download_path, final_path)
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_handle_squashfs_unsquashfs_not_found(mock_run: MagicMock, tmp_path: Path):
     """Test _handle_squashfs raises ImageError when unsquashfs is not found."""
     download_path = tmp_path / "image.squashfs"
@@ -1242,7 +1242,7 @@ def test_handle_squashfs_unsquashfs_not_found(mock_run: MagicMock, tmp_path: Pat
         _handle_squashfs(download_path, final_path)
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_handle_squashfs_mkfs_failure(mock_run: MagicMock, tmp_path: Path):
     """Test _handle_squashfs raises ImageError when mkfs.ext4 fails."""
     download_path = tmp_path / "image.squashfs"
@@ -1270,7 +1270,7 @@ def test_handle_squashfs_mkfs_failure(mock_run: MagicMock, tmp_path: Path):
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("fcm.core.config_state.get_firecracker_config")
+@patch("mvmctl.core.config_state.get_firecracker_config")
 def test_resolve_ubuntu_fc_source_success(
     mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
@@ -1308,7 +1308,7 @@ def test_resolve_ubuntu_fc_source_success(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("fcm.core.config_state.get_firecracker_config")
+@patch("mvmctl.core.config_state.get_firecracker_config")
 def test_resolve_ubuntu_fc_source_uses_default_version(
     mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
@@ -1343,7 +1343,7 @@ def test_resolve_ubuntu_fc_source_uses_default_version(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("fcm.core.config_state.get_firecracker_config")
+@patch("mvmctl.core.config_state.get_firecracker_config")
 def test_resolve_ubuntu_fc_source_network_error(
     mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
@@ -1369,7 +1369,7 @@ def test_resolve_ubuntu_fc_source_network_error(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("fcm.core.config_state.get_firecracker_config")
+@patch("mvmctl.core.config_state.get_firecracker_config")
 def test_resolve_ubuntu_fc_source_no_matching_keys(
     mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
@@ -1405,10 +1405,10 @@ def test_resolve_ubuntu_fc_source_no_matching_keys(
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
-@patch("fcm.core.image.download_file")
-@patch("fcm.core.image.urlopen")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.urlopen")
 def test_fetch_image_with_sha256_url(
     mock_urlopen: MagicMock,
     mock_download: MagicMock,
@@ -1445,10 +1445,10 @@ def test_fetch_image_with_sha256_url(
     assert mock_download.call_args.kwargs["expected_sha256"] == "a" * 64
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
-@patch("fcm.core.image.download_file")
-@patch("fcm.core.image.urlopen")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.urlopen")
 def test_fetch_image_sha256_url_simple_format(
     mock_urlopen: MagicMock,
     mock_download: MagicMock,
@@ -1485,10 +1485,10 @@ def test_fetch_image_sha256_url_simple_format(
     assert mock_download.call_args.kwargs["expected_sha256"] == full_hash
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
-@patch("fcm.core.image.download_file")
-@patch("fcm.core.image.urlopen")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.urlopen")
 def test_fetch_image_sha256_url_download_fails(
     mock_urlopen: MagicMock,
     mock_download: MagicMock,
@@ -1518,9 +1518,9 @@ def test_fetch_image_sha256_url_download_fails(
     mock_extract.assert_not_called()
 
 
-@patch("fcm.core.image._resolve_ubuntu_fc_source")
-@patch("fcm.core.image.download_file")
-@patch("fcm.core.image.urlopen")
+@patch("mvmctl.core.image._resolve_ubuntu_fc_source")
+@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.urlopen")
 def test_fetch_image_ubuntu_fc_fetches_sidecar_checksum(
     mock_urlopen: MagicMock,
     mock_download: MagicMock,
@@ -1551,20 +1551,20 @@ def test_fetch_image_ubuntu_fc_fetches_sidecar_checksum(
     mock_urlopen.return_value = mock_resp
     mock_download.return_value = True
 
-    original_handlers = fcm.core.image._FORMAT_HANDLERS.copy()
-    fcm.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
+    original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
         assert result == expected_output
         assert mock_download.call_args.kwargs["expected_sha256"] == "b" * 64
     finally:
-        fcm.core.image._FORMAT_HANDLERS.clear()
-        fcm.core.image._FORMAT_HANDLERS.update(original_handlers)
+        mvmctl.core.image._FORMAT_HANDLERS.clear()
+        mvmctl.core.image._FORMAT_HANDLERS.update(original_handlers)
 
 
-@patch("fcm.core.image._resolve_ubuntu_fc_source")
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image._resolve_ubuntu_fc_source")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_ubuntu_fc_resolves_source(
     mock_download: MagicMock,
     mock_resolve: MagicMock,
@@ -1590,8 +1590,8 @@ def test_fetch_image_ubuntu_fc_resolves_source(
     mock_download.return_value = True
 
     # Patch _FORMAT_HANDLERS to return our mock handler
-    original_handlers = fcm.core.image._FORMAT_HANDLERS.copy()
-    fcm.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
+    original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
@@ -1602,8 +1602,8 @@ def test_fetch_image_ubuntu_fc_resolves_source(
         call_args = mock_download.call_args
         assert call_args[0][0] == resolved_url
     finally:
-        fcm.core.image._FORMAT_HANDLERS.clear()
-        fcm.core.image._FORMAT_HANDLERS.update(original_handlers)
+        mvmctl.core.image._FORMAT_HANDLERS.clear()
+        mvmctl.core.image._FORMAT_HANDLERS.update(original_handlers)
 
 
 # ---------------------------------------------------------------------------
@@ -1649,7 +1649,7 @@ def test_import_image_source_not_found(tmp_path: Path):
         import_image(spec, output_dir)
 
 
-@patch("fcm.core.image.shutil.copy2")
+@patch("mvmctl.core.image.shutil.copy2")
 def test_import_image_raw_format(mock_copy: MagicMock, tmp_path: Path):
     """Test import_image handles raw format by copying file."""
     source = tmp_path / "source.raw"
@@ -1672,9 +1672,9 @@ def test_import_image_raw_format(mock_copy: MagicMock, tmp_path: Path):
     mock_copy.assert_called_once()
 
 
-@patch("fcm.core.image.shutil.move")
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.shutil.move")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
 def test_import_image_qcow2_format(
     mock_convert: MagicMock, mock_extract: MagicMock, mock_move: MagicMock, tmp_path: Path
 ):
@@ -1705,9 +1705,9 @@ def test_import_image_qcow2_format(
     mock_move.assert_called_once()
 
 
-@patch("fcm.core.image.shutil.move")
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.shutil.move")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
 def test_import_image_qcow2_cleans_up_raw(
     mock_convert: MagicMock, mock_extract: MagicMock, mock_move: MagicMock, tmp_path: Path
 ):
@@ -1736,8 +1736,8 @@ def test_import_image_qcow2_cleans_up_raw(
     mock_move.assert_called_once()
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
 def test_import_image_qcow2_convert_fails(
     mock_convert: MagicMock, mock_extract: MagicMock, tmp_path: Path
 ):
@@ -1762,7 +1762,7 @@ def test_import_image_qcow2_convert_fails(
         import_image(spec, output_dir)
 
 
-@patch("fcm.core.image.create_ext4_from_tar")
+@patch("mvmctl.core.image.create_ext4_from_tar")
 def test_import_image_tar_rootfs_format(mock_create: MagicMock, tmp_path: Path):
     """Test import_image handles tar-rootfs format."""
     source = tmp_path / "rootfs.tar.gz"
@@ -1808,7 +1808,7 @@ def test_import_image_unsupported_format(tmp_path: Path):
         import_image(spec, output_dir)
 
 
-@patch("fcm.core.image.shutil.copy2")
+@patch("mvmctl.core.image.shutil.copy2")
 def test_import_image_force_overwrite(mock_copy: MagicMock, tmp_path: Path):
     """Test import_image overwrites existing image when force=True."""
     source = tmp_path / "source.raw"
@@ -1839,8 +1839,8 @@ def test_import_image_force_overwrite(mock_copy: MagicMock, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_unexpected_parse_result(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -1868,8 +1868,8 @@ def test_extract_partition_from_raw_unexpected_parse_result(
     assert result == output_path
 
 
-@patch("fcm.core.image._copy_bytes")
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image._copy_bytes")
+@patch("mvmctl.core.image.subprocess.run")
 def test_extract_partition_from_raw_value_error(
     mock_run: MagicMock, mock_copy: MagicMock, tmp_path: Path
 ):
@@ -1904,7 +1904,7 @@ def test_extract_partition_from_raw_value_error(
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image.download_file")
+@patch("mvmctl.core.image.download_file")
 def test_fetch_image_squashfs_format(mock_download: MagicMock, tmp_path: Path):
     """Test fetch_image handles squashfs format."""
     spec = ImageSpec(
@@ -1921,16 +1921,16 @@ def test_fetch_image_squashfs_format(mock_download: MagicMock, tmp_path: Path):
     mock_download.return_value = True
 
     # Patch _FORMAT_HANDLERS to return our mock handler
-    original_handlers = fcm.core.image._FORMAT_HANDLERS.copy()
-    fcm.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
+    original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f: expected_output
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
         assert result == expected_output
         mock_download.assert_called_once()
     finally:
-        fcm.core.image._FORMAT_HANDLERS.clear()
-        fcm.core.image._FORMAT_HANDLERS.update(original_handlers)
+        mvmctl.core.image._FORMAT_HANDLERS.clear()
+        mvmctl.core.image._FORMAT_HANDLERS.update(original_handlers)
 
 
 # ---------------------------------------------------------------------------
@@ -1938,7 +1938,7 @@ def test_fetch_image_squashfs_format(mock_download: MagicMock, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image.subprocess.run")
+@patch("mvmctl.core.image.subprocess.run")
 def test_convert_qcow2_to_raw_called_process_error_with_stderr(mock_run: MagicMock, tmp_path: Path):
     """Test convert_qcow2_to_raw raises ImageError on conversion failure."""
     mock_run.side_effect = subprocess.CalledProcessError(
@@ -1954,9 +1954,9 @@ def test_convert_qcow2_to_raw_called_process_error_with_stderr(mock_run: MagicMo
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.core.image.shutil.move")
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.shutil.move")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
 def test_import_image_qcow2_uses_tempfile_context_manager(
     mock_convert: MagicMock, mock_extract: MagicMock, mock_move: MagicMock, tmp_path: Path
 ):
@@ -1998,8 +1998,8 @@ def test_import_image_qcow2_uses_tempfile_context_manager(
     assert len(temp_dirs_created) > 0
 
 
-@patch("fcm.core.image.extract_partition_from_raw")
-@patch("fcm.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
 def test_import_image_qcow2_cleans_up_on_exception(
     mock_convert: MagicMock, mock_extract: MagicMock, tmp_path: Path
 ):

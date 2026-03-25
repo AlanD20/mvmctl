@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fcm.core.metadata import (
+from mvmctl.core.metadata import (
     MetadataCache,
     _metadata_cache,
     get_binary_entry,
@@ -270,7 +270,7 @@ def test_migrate_legacy_metadata_skips_if_already_populated(tmp_path: Path):
 def test_migrate_legacy_metadata_handles_default_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     kernels_dir = tmp_path / "kernels"
     images_dir = tmp_path / "images"
     kernels_dir.mkdir()

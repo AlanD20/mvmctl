@@ -4,9 +4,9 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from fcm.cli.network import app
-from fcm.core.network_manager import NetworkConfig
-from fcm.exceptions import NetworkError
+from mvmctl.cli.network import app
+from mvmctl.core.network_manager import NetworkConfig
+from mvmctl.exceptions import NetworkError
 
 runner = CliRunner()
 
@@ -25,23 +25,23 @@ _FAKE_NET = NetworkConfig(
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.cli.network.list_networks", return_value=[])
+@patch("mvmctl.cli.network.list_networks", return_value=[])
 def test_ls_empty(mock_list):
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "No networks found" in result.output
 
 
-@patch("fcm.cli.network.list_networks", return_value=[_FAKE_NET])
-@patch("fcm.cli.network.get_network_leases", return_value=[])
+@patch("mvmctl.cli.network.list_networks", return_value=[_FAKE_NET])
+@patch("mvmctl.cli.network.get_network_leases", return_value=[])
 def test_ls_with_networks(mock_leases, mock_list):
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "testnet" in result.output
 
 
-@patch("fcm.cli.network.list_networks", return_value=[_FAKE_NET])
-@patch("fcm.cli.network.get_network_leases", return_value=[])
+@patch("mvmctl.cli.network.list_networks", return_value=[_FAKE_NET])
+@patch("mvmctl.cli.network.get_network_leases", return_value=[])
 def test_ls_json(mock_leases, mock_list):
     result = runner.invoke(app, ["ls", "--json"])
     assert result.exit_code == 0
@@ -53,7 +53,7 @@ def test_ls_json(mock_leases, mock_list):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.cli.network.create_network", return_value=_FAKE_NET)
+@patch("mvmctl.cli.network.create_network", return_value=_FAKE_NET)
 def test_create_success(mock_create):
     result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
     assert result.exit_code == 0
@@ -66,7 +66,7 @@ def test_create_success(mock_create):
     )
 
 
-@patch("fcm.cli.network.create_network", side_effect=NetworkError("already exists"))
+@patch("mvmctl.cli.network.create_network", side_effect=NetworkError("already exists"))
 def test_create_error(mock_create):
     result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
     assert result.exit_code == 1
@@ -84,7 +84,7 @@ def test_create_missing_cidr():
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.cli.network.remove_network")
+@patch("mvmctl.cli.network.remove_network")
 def test_remove_success(mock_remove):
     result = runner.invoke(app, ["remove", "testnet", "--force"])
     assert result.exit_code == 0
@@ -92,14 +92,14 @@ def test_remove_success(mock_remove):
     mock_remove.assert_called_once_with("testnet")
 
 
-@patch("fcm.cli.network.remove_network", side_effect=NetworkError("not found"))
+@patch("mvmctl.cli.network.remove_network", side_effect=NetworkError("not found"))
 def test_remove_error(mock_remove):
     result = runner.invoke(app, ["remove", "testnet", "--force"])
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
 
 
-@patch("fcm.cli.network.remove_network")
+@patch("mvmctl.cli.network.remove_network")
 def test_rm_alias(mock_remove):
     result = runner.invoke(app, ["rm", "testnet", "--force"])
     assert result.exit_code == 0
@@ -122,24 +122,24 @@ _FAKE_INSPECT = {
 }
 
 
-@patch("fcm.cli.network.inspect_network", return_value=_FAKE_INSPECT)
-@patch("fcm.cli.network.get_iptables_rules_for_bridge", return_value=[])
+@patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT)
+@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
 def test_inspect_success(mock_rules, mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet"])
     assert result.exit_code == 0
     assert "testnet" in result.output
 
 
-@patch("fcm.cli.network.inspect_network", return_value=_FAKE_INSPECT)
-@patch("fcm.cli.network.get_iptables_rules_for_bridge", return_value=[])
+@patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT)
+@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
 def test_inspect_json(mock_rules, mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet", "--json"])
     assert result.exit_code == 0
     assert '"testnet"' in result.output
 
 
-@patch("fcm.cli.network.inspect_network", side_effect=NetworkError("not found"))
-@patch("fcm.cli.network.get_iptables_rules_for_bridge", return_value=[])
+@patch("mvmctl.cli.network.inspect_network", side_effect=NetworkError("not found"))
+@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
 def test_inspect_error(mock_rules, mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet"])
     assert result.exit_code == 1

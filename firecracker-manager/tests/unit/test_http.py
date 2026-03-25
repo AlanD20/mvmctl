@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fcm.utils.http import download_file
-from fcm.exceptions import ChecksumMismatchError, FCMError
+from mvmctl.utils.http import download_file
+from mvmctl.exceptions import ChecksumMismatchError, FCMError
 
 
 def _mock_urlopen_response(
@@ -39,7 +39,7 @@ def _mock_urlopen_response(
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_with_206_partial_content(mock_urlopen: MagicMock, tmp_path: Path):
     """Test successful resume when server returns 206 Partial Content."""
     # First part of file already exists
@@ -73,7 +73,7 @@ def test_download_file_resume_with_206_partial_content(mock_urlopen: MagicMock, 
     assert request.headers.get("Range") == f"bytes={len(existing_data)}-"
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_fallback_to_200(mock_urlopen: MagicMock, tmp_path: Path):
     """Test fallback to full download when server doesn't support resume (returns 200)."""
     # First part of file already exists
@@ -102,7 +102,7 @@ def test_download_file_resume_fallback_to_200(mock_urlopen: MagicMock, tmp_path:
     assert dest.read_bytes() == full_data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_no_existing_file(mock_urlopen: MagicMock, tmp_path: Path):
     """Test resume when no partial file exists (starts fresh download)."""
     dest = tmp_path / "new_file.bin"
@@ -134,7 +134,7 @@ def test_download_file_resume_no_existing_file(mock_urlopen: MagicMock, tmp_path
     assert request.headers.get("Range") is None
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_disabled(mock_urlopen: MagicMock, tmp_path: Path):
     """Test that resume=False ignores existing partial file."""
     dest = tmp_path / "partial_file.bin"
@@ -162,7 +162,7 @@ def test_download_file_resume_disabled(mock_urlopen: MagicMock, tmp_path: Path):
     assert dest.read_bytes() == new_data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_checksum_verification(mock_urlopen: MagicMock, tmp_path: Path):
     """Test checksum verification works correctly with resumed downloads."""
     dest = tmp_path / "partial_file.bin"
@@ -189,7 +189,7 @@ def test_download_file_resume_checksum_verification(mock_urlopen: MagicMock, tmp
     assert dest.read_bytes() == full_data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_checksum_mismatch(mock_urlopen: MagicMock, tmp_path: Path):
     """Test checksum mismatch is detected with resumed downloads."""
     dest = tmp_path / "partial_file.bin"
@@ -221,7 +221,7 @@ def test_download_file_resume_checksum_mismatch(mock_urlopen: MagicMock, tmp_pat
     assert len(temp_files) == 0
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_empty_existing_file(mock_urlopen: MagicMock, tmp_path: Path):
     """Test resume with empty existing file (starts from beginning)."""
     dest = tmp_path / "empty_file.bin"
@@ -246,7 +246,7 @@ def test_download_file_resume_empty_existing_file(mock_urlopen: MagicMock, tmp_p
     assert dest.read_bytes() == full_data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_with_content_length(mock_urlopen: MagicMock, tmp_path: Path):
     """Test resume with Content-Length header from 200 response."""
     dest = tmp_path / "partial_file.bin"
@@ -275,7 +275,7 @@ def test_download_file_resume_with_content_length(mock_urlopen: MagicMock, tmp_p
     assert dest.read_bytes() == full_data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_progress_counting(mock_urlopen: MagicMock, tmp_path: Path):
     """Test that progress calculation includes already downloaded bytes."""
     dest = tmp_path / "partial_file.bin"
@@ -308,7 +308,7 @@ def test_download_file_resume_progress_counting(mock_urlopen: MagicMock, tmp_pat
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_uses_atomic_rename(mock_urlopen: MagicMock, tmp_path: Path):
     """Test that download uses temp file and atomic rename."""
     dest = tmp_path / "target_file.bin"
@@ -336,7 +336,7 @@ def test_download_file_uses_atomic_rename(mock_urlopen: MagicMock, tmp_path: Pat
     assert len(temp_files) == 0
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_cleans_up_temp_on_error(mock_urlopen: MagicMock, tmp_path: Path):
     """Test that temp file is cleaned up on download error."""
     from urllib.error import URLError
@@ -361,7 +361,7 @@ def test_download_file_cleans_up_temp_on_error(mock_urlopen: MagicMock, tmp_path
     assert len(temp_files) == 0
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_cleans_up_temp_on_checksum_mismatch(mock_urlopen: MagicMock, tmp_path: Path):
     """Test that temp file is cleaned up on checksum mismatch."""
     dest = tmp_path / "target_file.bin"
@@ -388,7 +388,7 @@ def test_download_file_cleans_up_temp_on_checksum_mismatch(mock_urlopen: MagicMo
     assert len(temp_files) == 0
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_missing_checksum_non_interactive(mock_urlopen: MagicMock, tmp_path: Path):
     dest = tmp_path / "target_file.bin"
     full_data = b"Complete file content"
@@ -409,7 +409,7 @@ def test_download_file_missing_checksum_non_interactive(mock_urlopen: MagicMock,
         )
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_no_content_length(mock_urlopen: MagicMock, tmp_path: Path):
     dest = tmp_path / "target_file.bin"
     full_data = b"Complete file content"
@@ -431,7 +431,7 @@ def test_download_file_no_content_length(mock_urlopen: MagicMock, tmp_path: Path
     assert dest.read_bytes() == full_data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_200_with_existing_file(mock_urlopen: MagicMock, tmp_path: Path):
     dest = tmp_path / "existing_file.bin"
     old_data = b"Old content that should be replaced"
@@ -456,7 +456,7 @@ def test_download_file_resume_200_with_existing_file(mock_urlopen: MagicMock, tm
     assert dest.read_bytes() == new_data
 
 
-@patch("fcm.utils.http.urlopen")
+@patch("mvmctl.utils.http.urlopen")
 def test_download_file_resume_partial_file_cleanup(mock_urlopen: MagicMock, tmp_path: Path):
     dest = tmp_path / "target_file.bin"
     partial_path = tmp_path / ".target_file.bin.part"

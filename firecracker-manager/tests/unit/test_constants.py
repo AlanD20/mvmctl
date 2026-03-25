@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from fcm.constants import (
+from mvmctl.constants import (
     BRIDGE_NAME,
     BRIDGE_PREFIX,
     CLI_NAME,
@@ -26,19 +26,19 @@ from fcm.constants import (
 
 
 def test_resolve_project_name_package_found():
-    with patch("fcm.constants.importlib.metadata.metadata") as mock_meta:
-        mock_meta.return_value = {"Name": "firecracker-manager"}
-        assert _resolve_project_name() == "firecracker-manager"
+    with patch("mvmctl.constants.importlib.metadata.metadata") as mock_meta:
+        mock_meta.return_value = {"Name": "mvmctl"}
+        assert _resolve_project_name() == "mvmctl"
 
 
 def test_resolve_project_name_package_not_found():
     import importlib.metadata
 
     with patch(
-        "fcm.constants.importlib.metadata.metadata",
+        "mvmctl.constants.importlib.metadata.metadata",
         side_effect=importlib.metadata.PackageNotFoundError("not installed"),
     ):
-        assert _resolve_project_name() == "firecracker-manager"
+        assert _resolve_project_name() == "mvmctl"
 
 
 def test_project_name_is_string():
@@ -51,12 +51,12 @@ def test_project_name_upper():
 
 
 def test_cli_name():
-    assert CLI_NAME == "fcm"
+    assert CLI_NAME == "mvm"
 
 
 def test_env_var():
-    assert env_var("CACHE_DIR") == "FCM_CACHE_DIR"
-    assert env_var("LOG_LEVEL") == "FCM_LOG_LEVEL"
+    assert env_var("CACHE_DIR") == "MVM_CACHE_DIR"
+    assert env_var("LOG_LEVEL") == "MVM_LOG_LEVEL"
 
 
 def test_cache_dir_name():
@@ -64,28 +64,28 @@ def test_cache_dir_name():
 
 
 def test_device_prefix():
-    assert device_prefix() == "fcm"
+    assert device_prefix() == "mvm"
 
 
 def test_config_filename():
-    assert config_filename() == "fcm.yaml"
+    assert config_filename() == "mvm.yaml"
 
 
 def test_bridge_name():
-    assert BRIDGE_NAME == "fcm-br0"
+    assert BRIDGE_NAME == "mvm-br0"
 
 
 def test_tap_prefix():
-    assert TAP_PREFIX == "fcm-tap"
+    assert TAP_PREFIX == "mvm-tap"
 
 
 def test_project_group():
     assert PROJECT_GROUP == CLI_NAME
-    assert PROJECT_GROUP == "fcm"
+    assert PROJECT_GROUP == "mvm"
 
 
 def test_sudoers_drop_in_path():
-    assert SUDOERS_DROP_IN_PATH == "/etc/sudoers.d/fcm"
+    assert SUDOERS_DROP_IN_PATH == "/etc/sudoers.d/mvm"
 
 
 def test_default_network_name():
@@ -101,7 +101,7 @@ def test_default_network_gateway():
 
 
 def test_bridge_prefix():
-    assert BRIDGE_PREFIX == "fcm-br"
+    assert BRIDGE_PREFIX == "mvm-br"
 
 
 def test_firecracker_graceful_shutdown_timeout():

@@ -2,7 +2,7 @@
 
 from click.testing import CliRunner
 
-from fcm.main import app
+from mvmctl.main import app
 
 runner = CliRunner()
 
@@ -20,7 +20,7 @@ def test_help_returns_zero() -> None:
 def test_version_returns_zero() -> None:
     result = invoke_cli(["--version"])
     assert result.exit_code == 0
-    assert "fcm" in result.output
+    assert "mvm" in result.output
 
 
 def test_unknown_command_returns_nonzero() -> None:

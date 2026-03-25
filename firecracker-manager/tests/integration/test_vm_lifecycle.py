@@ -11,9 +11,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from fcm.cli.vm import app as vm_app
-from fcm.core.vm_manager import VMManager
-from fcm.models.vm import VMInstance, VMState
+from mvmctl.cli.vm import app as vm_app
+from mvmctl.core.vm_manager import VMManager
+from mvmctl.models.vm import VMInstance, VMState
 
 runner = CliRunner()
 
@@ -41,9 +41,9 @@ def _make_vm(
 class TestVMLifecycleWorkflow:
     """Test complete VM lifecycle workflow end-to-end."""
 
-    @patch("fcm.api.vms.check_privileges")
-    @patch("fcm.cli.vm.create_vm")
-    @patch("fcm.cli.vm.list_vms")
+    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.create_vm")
+    @patch("mvmctl.cli.vm.list_vms")
     def test_create_and_list_vm(self, mock_list_vms, mock_create_vm, mock_check_priv, tmp_path):
         """Test creating a VM and then listing it."""
         mock_check_priv.return_value = None
@@ -65,9 +65,9 @@ class TestVMLifecycleWorkflow:
         assert len(data) == 1
         assert data[0]["name"] == "lifecycle-vm"
 
-    @patch("fcm.api.vms.check_privileges")
-    @patch("fcm.cli.vm.create_vm")
-    @patch("fcm.cli.vm.ssh_vm")
+    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.create_vm")
+    @patch("mvmctl.cli.vm.ssh_vm")
     def test_create_and_ssh_vm(self, mock_ssh, mock_create_vm, mock_check_priv):
         """Test creating a VM and then SSHing into it."""
         mock_check_priv.return_value = None
@@ -85,9 +85,9 @@ class TestVMLifecycleWorkflow:
         assert result.exit_code == 0
         mock_ssh.assert_called_once()
 
-    @patch("fcm.api.vms.check_privileges")
-    @patch("fcm.cli.vm.create_vm")
-    @patch("fcm.cli.vm.snapshot_vm")
+    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.create_vm")
+    @patch("mvmctl.cli.vm.snapshot_vm")
     def test_create_snapshot_and_remove(
         self, mock_snapshot, mock_create_vm, mock_check_priv, tmp_path
     ):
@@ -122,10 +122,10 @@ class TestVMLifecycleWorkflow:
             name="snapshot-vm", mem_out=mem_path, state_out=state_path
         )
 
-    @patch("fcm.cli.vm.create_vm")
-    @patch("fcm.core.vm_manager.get_vm_manager")
-    @patch("fcm.cli.vm.remove_vm")
-    @patch("fcm.cli.vm.list_vms")
+    @patch("mvmctl.cli.vm.create_vm")
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.cli.vm.remove_vm")
+    @patch("mvmctl.cli.vm.list_vms")
     def test_full_lifecycle_create_remove(self, mock_list, mock_remove, mock_manager, mock_create):
         """Test full lifecycle: create VM, verify it exists, then remove it."""
         vm = _make_vm("full-lifecycle-vm")
@@ -150,9 +150,9 @@ class TestVMLifecycleWorkflow:
         assert result.exit_code == 0
         mock_remove.assert_called_once_with("full-lifecycle-vm")
 
-    @patch("fcm.api.vms.check_privileges")
-    @patch("fcm.cli.vm.create_vm")
-    @patch("fcm.cli.vm.get_logs")
+    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.create_vm")
+    @patch("mvmctl.cli.vm.get_logs")
     def test_create_and_check_logs(self, mock_logs, mock_create, mock_check_priv):
         """Test creating a VM and checking its logs."""
         mock_check_priv.return_value = None
@@ -169,11 +169,11 @@ class TestVMLifecycleWorkflow:
         assert "Boot log line 1" in result.output
         mock_logs.assert_called_once()
 
-    @patch("fcm.cli.vm.create_vm")
-    @patch("fcm.cli.vm.snapshot_vm")
-    @patch("fcm.cli.vm.load_snapshot")
-    @patch("fcm.core.vm_manager.get_vm_manager")
-    @patch("fcm.cli.vm.remove_vm")
+    @patch("mvmctl.cli.vm.create_vm")
+    @patch("mvmctl.cli.vm.snapshot_vm")
+    @patch("mvmctl.cli.vm.load_snapshot")
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.cli.vm.remove_vm")
     def test_snapshot_restore_workflow(
         self, mock_remove, mock_manager, mock_load, mock_snapshot, mock_create, tmp_path
     ):
@@ -229,9 +229,9 @@ class TestVMLifecycleWorkflow:
 class TestVMLifecycleEdgeCases:
     """Test edge cases in VM lifecycle workflows."""
 
-    @patch("fcm.api.vms.check_privileges")
-    @patch("fcm.core.vm_manager.get_vm_manager")
-    @patch("fcm.cli.vm.remove_vm")
+    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.cli.vm.remove_vm")
     def test_remove_nonexistent_vm(self, mock_remove, mock_manager, mock_check_priv):
         """Test attempting to remove a VM that doesn't exist."""
         mock_check_priv.return_value = None
@@ -242,11 +242,11 @@ class TestVMLifecycleEdgeCases:
         assert result.exit_code == 1
         assert "no vm found" in result.output.lower()
 
-    @patch("fcm.api.vms.check_privileges")
-    @patch("fcm.cli.vm.create_vm")
+    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.create_vm")
     def test_create_duplicate_vm_name(self, mock_create, mock_check_priv):
         """Test attempting to create a VM with a duplicate name."""
-        from fcm.exceptions import FCMError
+        from mvmctl.exceptions import FCMError
 
         mock_check_priv.return_value = None
         mock_create.side_effect = FCMError("VM 'duplicate-vm' already exists")
@@ -257,10 +257,10 @@ class TestVMLifecycleEdgeCases:
         assert result.exit_code == 1
         assert "already exists" in result.output.lower()
 
-    @patch("fcm.api.vms.check_privileges")
-    @patch("fcm.cli.vm.create_vm")
-    @patch("fcm.cli.vm.cleanup_vms")
-    @patch("fcm.cli.vm.list_vms")
+    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.create_vm")
+    @patch("mvmctl.cli.vm.cleanup_vms")
+    @patch("mvmctl.cli.vm.list_vms")
     def test_cleanup_workflow(self, mock_list, mock_cleanup, mock_create, mock_check_priv):
         """Test cleanup workflow for stopped VMs."""
         mock_check_priv.return_value = None

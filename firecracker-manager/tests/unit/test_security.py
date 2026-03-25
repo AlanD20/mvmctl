@@ -12,11 +12,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pytest_mock import MockerFixture
 
-from fcm.core.host_privilege import _generate_sudoers_content, _validate_sudoers_binaries
-from fcm.core.vm_lifecycle import _resolve_image_path, create_vm
-from fcm.exceptions import FCMError, HostError, ImageError
-from fcm.utils.http import download_file
-from fcm.utils.validation import validate_boot_arg_component, validate_entity_name
+from mvmctl.core.host_privilege import _generate_sudoers_content, _validate_sudoers_binaries
+from mvmctl.core.vm_lifecycle import _resolve_image_path, create_vm
+from mvmctl.exceptions import FCMError, HostError, ImageError
+from mvmctl.utils.http import download_file
+from mvmctl.utils.validation import validate_boot_arg_component, validate_entity_name
 
 
 # -----------------------------------------------------------------------------
@@ -97,7 +97,7 @@ def test_resolve_image_path_rejects_traversal(
     attack_type: str,
 ):
     """Image IDs with path traversal must be rejected or not resolve."""
-    from fcm.utils import fs
+    from mvmctl.utils import fs
 
     cache_dir = tmp_path / "cache"
     images_dir = cache_dir / "images"
@@ -244,9 +244,9 @@ def test_create_vm_rejects_malicious_names(
     malicious_name: str,
 ):
     """VM creation must reject malicious names before any filesystem operations."""
-    mocker.patch("fcm.core.vm_lifecycle.get_vm_manager")
+    mocker.patch("mvmctl.core.vm_lifecycle.get_vm_manager")
     mocker.patch(
-        "fcm.utils.validation.validate_entity_name", side_effect=FCMError("Invalid VM name")
+        "mvmctl.utils.validation.validate_entity_name", side_effect=FCMError("Invalid VM name")
     )
 
     with pytest.raises(FCMError, match="Invalid VM name"):
@@ -263,8 +263,8 @@ def test_create_vm_rejects_malicious_names(
 
 def test_secure_mkdir_vm_rejects_symlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """VM directory creation must detect and reject symlinks (TOCTOU protection)."""
-    from fcm.core.vm_lifecycle import _secure_mkdir_vm
-    from fcm.utils import fs
+    from mvmctl.core.vm_lifecycle import _secure_mkdir_vm
+    from mvmctl.utils import fs
 
     # Set up isolated VM directory
     vms_dir = tmp_path / "vms"

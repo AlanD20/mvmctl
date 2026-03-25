@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from fcm.exceptions import FCMError, HostError, PrivilegeError
+from mvmctl.exceptions import FCMError, HostError, PrivilegeError
 
 runner = CliRunner()
 
@@ -40,11 +40,11 @@ class TestPrivilegeError:
 
 
 class TestCliClean:
-    @patch("fcm.core.vm_manager.VMManager.list_all", return_value=[])
-    @patch("fcm.cli.host.get_cache_dir")
-    @patch("fcm.cli.host.clean_host")
+    @patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[])
+    @patch("mvmctl.cli.host.get_cache_dir")
+    @patch("mvmctl.cli.host.clean_host")
     def test_clean_success(self, mock_clean, mock_cache, mock_list_all, tmp_path):
-        from fcm.cli.host import app
+        from mvmctl.cli.host import app
 
         mock_cache.return_value = tmp_path
         mock_clean.return_value = ["Removed network 'default' (bridge: fcm-br0)"]
@@ -52,10 +52,10 @@ class TestCliClean:
         assert result.exit_code == 0
         assert "cleaned successfully" in result.output
 
-    @patch("fcm.core.vm_manager.VMManager.list_all")
+    @patch("mvmctl.core.vm_manager.VMManager.list_all")
     def test_clean_refuses_running_vms(self, mock_list_all):
-        from fcm.cli.host import app
-        from fcm.models.vm import VMState
+        from mvmctl.cli.host import app
+        from mvmctl.models.vm import VMState
 
         vm = MagicMock()
         vm.name = "myvm"
@@ -72,11 +72,11 @@ class TestCliClean:
 
 
 class TestCliReset:
-    @patch("fcm.core.vm_manager.VMManager.list_all", return_value=[])
-    @patch("fcm.cli.host.get_cache_dir")
-    @patch("fcm.cli.host.reset_host")
+    @patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[])
+    @patch("mvmctl.cli.host.get_cache_dir")
+    @patch("mvmctl.cli.host.reset_host")
     def test_reset_success(self, mock_reset, mock_cache, mock_list_all, tmp_path):
-        from fcm.cli.host import app
+        from mvmctl.cli.host import app
 
         mock_cache.return_value = tmp_path
         mock_reset.return_value = ["Removed network 'default'"]
@@ -84,10 +84,10 @@ class TestCliReset:
         assert result.exit_code == 0
         assert "reset successfully" in result.output
 
-    @patch("fcm.core.vm_manager.VMManager.list_all")
+    @patch("mvmctl.core.vm_manager.VMManager.list_all")
     def test_reset_refuses_running_vms(self, mock_list_all):
-        from fcm.cli.host import app
-        from fcm.models.vm import VMState
+        from mvmctl.cli.host import app
+        from mvmctl.models.vm import VMState
 
         vm = MagicMock()
         vm.name = "myvm"
@@ -106,7 +106,7 @@ class TestCliReset:
 class TestHelpCommand:
     def test_help_no_args(self):
         from click.testing import CliRunner
-        from fcm.main import app
+        from mvmctl.main import app
 
         click_runner = CliRunner()
         result = click_runner.invoke(app, ["help"])
@@ -115,7 +115,7 @@ class TestHelpCommand:
 
     def test_help_vm(self):
         from click.testing import CliRunner
-        from fcm.main import app
+        from mvmctl.main import app
 
         click_runner = CliRunner()
         result = click_runner.invoke(app, ["help", "vm"])
@@ -124,7 +124,7 @@ class TestHelpCommand:
 
     def test_help_host(self):
         from click.testing import CliRunner
-        from fcm.main import app
+        from mvmctl.main import app
 
         click_runner = CliRunner()
         result = click_runner.invoke(app, ["help", "host"])
@@ -133,7 +133,7 @@ class TestHelpCommand:
 
     def test_help_unknown_command(self):
         from click.testing import CliRunner
-        from fcm.main import app
+        from mvmctl.main import app
 
         click_runner = CliRunner()
         result = click_runner.invoke(app, ["help", "nonexistent"])
@@ -144,11 +144,11 @@ class TestHelpCommand:
 def test_check_privileges_interactive_prints_guidance():
     """FIX-008: check_privileges_interactive prints helpful options when privileges lacking."""
     import pytest
-    from fcm.core.host_privilege import check_privileges_interactive
-    from fcm.exceptions import PrivilegeError
+    from mvmctl.core.host_privilege import check_privileges_interactive
+    from mvmctl.exceptions import PrivilegeError
     from unittest.mock import patch
 
-    with patch("fcm.core.host_privilege.check_privileges") as mock_check:
+    with patch("mvmctl.core.host_privilege.check_privileges") as mock_check:
         mock_check.side_effect = PrivilegeError("not in group")
         with pytest.raises(PrivilegeError):
             check_privileges_interactive("/usr/sbin/ip", "network create")

@@ -4,8 +4,8 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from fcm.core.cloud_init import write_cloud_init, inject_cloud_init, _validate_user_data
-from fcm.exceptions import ConfigError
+from mvmctl.core.cloud_init import write_cloud_init, inject_cloud_init, _validate_user_data
+from mvmctl.exceptions import ConfigError
 
 
 def test_write_cloud_init_basic(tmp_path):
@@ -65,7 +65,7 @@ def test_write_cloud_init_custom_user_data(tmp_path):
     assert "ssh-rsa CUSTOM" in ud["users"][0]["ssh-authorized-keys"]
 
 
-@patch("fcm.core.cloud_init.subprocess.run")
+@patch("mvmctl.core.cloud_init.subprocess.run")
 def test_inject_cloud_init_success(mock_run, tmp_path):
     """inject_cloud_init loop-mounts and copies files."""
     cloud_init_dir = tmp_path / "cloud-init"
@@ -75,7 +75,7 @@ def test_inject_cloud_init_success(mock_run, tmp_path):
     rootfs = tmp_path / "rootfs.ext4"
     rootfs.write_text("fake")
 
-    with patch("fcm.core.cloud_init.shutil.copy2") as mock_copy:
+    with patch("mvmctl.core.cloud_init.shutil.copy2") as mock_copy:
         inject_cloud_init(rootfs, cloud_init_dir)
 
     assert mock_run.call_count == 2
@@ -89,8 +89,8 @@ def test_inject_cloud_init_success(mock_run, tmp_path):
     mock_copy.assert_called_once()
 
 
-@patch("fcm.core.cloud_init.subprocess.run")
-@patch("fcm.core.cloud_init.logger")
+@patch("mvmctl.core.cloud_init.subprocess.run")
+@patch("mvmctl.core.cloud_init.logger")
 def test_inject_cloud_init_mount_error(mock_logger, mock_run, tmp_path):
     """inject_cloud_init gracefully handles mount errors."""
     mock_run.side_effect = subprocess.CalledProcessError(1, "mount")

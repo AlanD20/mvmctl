@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import fcm.api.network as network_api
-from fcm.api.network import create_network, remove_network
-from fcm.core.network_manager import NetworkConfig, NetworkLease
+import mvmctl.api.network as network_api
+from mvmctl.api.network import create_network, remove_network
+from mvmctl.core.network_manager import NetworkConfig, NetworkLease
 
 
-@patch("fcm.api.network.check_privileges")
-@patch("fcm.api.network._create_network")
+@patch("mvmctl.api.network.check_privileges")
+@patch("mvmctl.api.network._create_network")
 def test_create_network_with_privileges(mock_create, mock_check_priv):
     """Test create_network calls privilege check and delegates."""
     mock_config = MagicMock(spec=NetworkConfig)
@@ -25,8 +25,8 @@ def test_create_network_with_privileges(mock_create, mock_check_priv):
     assert result == mock_config
 
 
-@patch("fcm.api.network.check_privileges")
-@patch("fcm.api.network._create_network")
+@patch("mvmctl.api.network.check_privileges")
+@patch("mvmctl.api.network._create_network")
 def test_create_network_with_subnet(mock_create, mock_check_priv):
     """Test create_network with subnet parameter."""
     mock_config = MagicMock(spec=NetworkConfig)
@@ -41,8 +41,8 @@ def test_create_network_with_subnet(mock_create, mock_check_priv):
     assert result == mock_config
 
 
-@patch("fcm.api.network.check_privileges")
-@patch("fcm.api.network._remove_network")
+@patch("mvmctl.api.network.check_privileges")
+@patch("mvmctl.api.network._remove_network")
 def test_remove_network_with_privileges(mock_remove, mock_check_priv):
     """Test remove_network calls privilege check and delegates."""
     remove_network("test-net")
@@ -51,7 +51,7 @@ def test_remove_network_with_privileges(mock_remove, mock_check_priv):
     mock_remove.assert_called_once_with("test-net")
 
 
-@patch("fcm.api.network.list_networks")
+@patch("mvmctl.api.network.list_networks")
 def test_list_networks_delegates(mock_list):
     """Test list_networks delegates to core."""
     mock_networks = [MagicMock(spec=NetworkConfig), MagicMock(spec=NetworkConfig)]
@@ -62,7 +62,7 @@ def test_list_networks_delegates(mock_list):
     assert result == mock_networks
 
 
-@patch("fcm.api.network.get_network")
+@patch("mvmctl.api.network.get_network")
 def test_get_network_delegates(mock_get):
     """Test get_network delegates to core."""
     mock_config = MagicMock(spec=NetworkConfig)
@@ -74,7 +74,7 @@ def test_get_network_delegates(mock_get):
     assert result == mock_config
 
 
-@patch("fcm.api.network.get_network_leases")
+@patch("mvmctl.api.network.get_network_leases")
 def test_get_network_leases_delegates(mock_get_leases):
     """Test get_network_leases delegates to core."""
     mock_leases = [MagicMock(spec=NetworkLease), MagicMock(spec=NetworkLease)]
@@ -86,7 +86,7 @@ def test_get_network_leases_delegates(mock_get_leases):
     assert result == mock_leases
 
 
-@patch("fcm.api.network.inspect_network")
+@patch("mvmctl.api.network.inspect_network")
 def test_inspect_network_delegates(mock_inspect):
     """Test inspect_network delegates to core."""
     mock_info = {"name": "test-net", "bridge": "fcm-test-net"}
@@ -98,7 +98,7 @@ def test_inspect_network_delegates(mock_inspect):
     assert result == mock_info
 
 
-@patch("fcm.api.network.allocate_network_ip")
+@patch("mvmctl.api.network.allocate_network_ip")
 def test_allocate_network_ip_delegates(mock_allocate):
     """Test allocate_network_ip delegates to core."""
     mock_allocate.return_value = "10.0.0.5"
@@ -109,7 +109,7 @@ def test_allocate_network_ip_delegates(mock_allocate):
     assert result == "10.0.0.5"
 
 
-@patch("fcm.api.network.release_network_ip")
+@patch("mvmctl.api.network.release_network_ip")
 def test_release_network_ip_delegates(mock_release):
     """Test release_network_ip delegates to core."""
     network_api.release_network_ip("test-net", "10.0.0.5")
@@ -117,7 +117,7 @@ def test_release_network_ip_delegates(mock_release):
     mock_release.assert_called_once_with("test-net", "10.0.0.5")
 
 
-@patch("fcm.api.network.ensure_default_network")
+@patch("mvmctl.api.network.ensure_default_network")
 def test_ensure_default_network_delegates(mock_ensure):
     """Test ensure_default_network delegates to core."""
     mock_ensure.return_value = MagicMock(spec=NetworkConfig)
@@ -127,7 +127,7 @@ def test_ensure_default_network_delegates(mock_ensure):
     assert result == mock_ensure.return_value
 
 
-@patch("fcm.api.network.get_iptables_rules_for_bridge")
+@patch("mvmctl.api.network.get_iptables_rules_for_bridge")
 def test_get_iptables_rules_for_bridge_delegates(mock_get_rules):
     """Test get_iptables_rules_for_bridge delegates to core."""
     mock_rules = ["-A FORWARD -i fcm-br0 -j ACCEPT"]

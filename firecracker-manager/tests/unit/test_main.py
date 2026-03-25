@@ -3,7 +3,7 @@ import sys
 
 from click.testing import CliRunner
 
-import fcm.main as main_module
+import mvmctl.main as main_module
 
 runner = CliRunner()
 
@@ -52,58 +52,58 @@ def test_debug_flag():
 def test_version_flag():
     result = invoke_cli(["--version"])
     assert result.exit_code == 0
-    assert "fcm" in result.output
+    assert "mvm" in result.output
 
 
 def test_version_command():
     result = invoke_cli(["version"])
     assert result.exit_code == 0
-    assert "fcm" in result.output
+    assert "mvm" in result.output
 
 
 def test_main_import_is_lazy(monkeypatch):
-    monkeypatch.delitem(sys.modules, "fcm.cli.vm", raising=False)
-    monkeypatch.delitem(sys.modules, "fcm.cli.asset", raising=False)
-    monkeypatch.delitem(sys.modules, "fcm.cli.host", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.vm", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.asset", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.host", raising=False)
 
     importlib.reload(main_module)
 
-    assert "fcm.cli.vm" not in sys.modules
-    assert "fcm.cli.asset" not in sys.modules
-    assert "fcm.cli.host" not in sys.modules
+    assert "mvmctl.cli.vm" not in sys.modules
+    assert "mvmctl.cli.asset" not in sys.modules
+    assert "mvmctl.cli.host" not in sys.modules
 
 
 def test_root_help_does_not_import_cli_modules(monkeypatch):
-    monkeypatch.delitem(sys.modules, "fcm.cli.vm", raising=False)
-    monkeypatch.delitem(sys.modules, "fcm.cli.asset", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.vm", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.asset", raising=False)
 
     importlib.reload(main_module)
     result = invoke_cli(["--help"])
 
     assert result.exit_code == 0
-    assert "fcm.cli.vm" not in sys.modules
-    assert "fcm.cli.asset" not in sys.modules
+    assert "mvmctl.cli.vm" not in sys.modules
+    assert "mvmctl.cli.asset" not in sys.modules
 
 
 def test_version_flag_does_not_import_cli_modules(monkeypatch):
-    monkeypatch.delitem(sys.modules, "fcm.cli.vm", raising=False)
-    monkeypatch.delitem(sys.modules, "fcm.cli.asset", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.vm", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.asset", raising=False)
 
     importlib.reload(main_module)
     result = invoke_cli(["--version"])
 
     assert result.exit_code == 0
-    assert "fcm.cli.vm" not in sys.modules
-    assert "fcm.cli.asset" not in sys.modules
+    assert "mvmctl.cli.vm" not in sys.modules
+    assert "mvmctl.cli.asset" not in sys.modules
 
 
 def test_vm_help_imports_only_requested_module(monkeypatch):
-    monkeypatch.delitem(sys.modules, "fcm.cli.vm", raising=False)
-    monkeypatch.delitem(sys.modules, "fcm.cli.asset", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.vm", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.asset", raising=False)
 
     importlib.reload(main_module)
     result = invoke_cli(["vm", "--help"])
 
     assert result.exit_code == 0
-    assert "fcm.cli.vm" in sys.modules
-    assert "fcm.cli.asset" not in sys.modules
+    assert "mvmctl.cli.vm" in sys.modules
+    assert "mvmctl.cli.asset" not in sys.modules

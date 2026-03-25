@@ -14,7 +14,7 @@ tests/
 │   ├── test_*.py         # Core/API unit tests (38 files total)
 │   └── test_vm_lifecycle.py, test_vm_manager.py, test_host.py, test_image.py, ...
 └── integration/
-    └── test_cli_smoke.py # Invokes real `fcm --help`, `fcm --version`
+    └── test_cli_smoke.py # Invokes real `mvm --help`, `mvm --version`
 ```
 
 ## KEY FIXTURES (conftest.py)
@@ -23,10 +23,10 @@ tests/
 ```python
 @pytest.fixture(autouse=True)
 def isolate_config_and_cache(tmp_path, monkeypatch):
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path / "config"))
-    monkeypatch.setenv("FCM_CACHE_DIR",  str(tmp_path / "cache"))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("MVM_CACHE_DIR",  str(tmp_path / "cache"))
 ```
-Guarantees no test touches `~/.config/firecracker-manager/` or `~/.cache/`.
+Guarantees no test touches `~/.config/mvmctl/` or `~/.cache/`.
 
 **Other fixtures:** `vm_manager`, `sample_vm`, `stopped_vm`, `running_vm`, `sample_network_config`, `mock_cache_dir`
 
@@ -35,12 +35,12 @@ Guarantees no test touches `~/.config/firecracker-manager/` or `~/.cache/`.
 **pytest-mock** (preferred for simple patches):
 ```python
 def test_foo(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[])
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[])
 ```
 
 **unittest.mock.patch** (for subprocess/OS calls):
 ```python
-@patch("fcm.core.host_setup.subprocess.run")
+@patch("mvmctl.core.host_setup.subprocess.run")
 def test_bar(mock_run):
     mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
 ```
@@ -58,10 +58,10 @@ assert result.exit_code == 0
 mock_mgr = mocker.MagicMock()
 mock_mgr.get_by_name.return_value = [vm]
 mock_mgr.find_by_short_id.return_value = []
-mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
+mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
 ```
 
-**image_rm / metadata tests** — set `FCM_CACHE_DIR` via `monkeypatch.setenv`, write `metadata.json` manually in `tmp_path`.
+**image_rm / metadata tests** — set `MVM_CACHE_DIR` via `monkeypatch.setenv`, write `metadata.json` manually in `tmp_path`.
 
 ## ANTI-PATTERNS
 
@@ -70,7 +70,7 @@ mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
 | Real subprocess calls | `@patch("...subprocess.run")` |
 | `tempfile.mkdtemp()` | `tmp_path` pytest fixture |
 | Skip test for coverage | Fix it; coverage drop fails CI |
-| Hardcoded `~/.cache/` paths | `monkeypatch.setenv("FCM_CACHE_DIR", ...)` |
+| Hardcoded `~/.cache/` paths | `monkeypatch.setenv("MVM_CACHE_DIR", ...)` |
 
 ## COMMANDS
 

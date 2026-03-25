@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from fcm.core.config_gen import ConfigGenerator
-from fcm.models.vm import VMConfig
+from mvmctl.core.config_gen import ConfigGenerator
+from mvmctl.models.vm import VMConfig
 
 
 def test_config_generator_basic():
@@ -72,7 +72,7 @@ def test_config_generator_no_network():
 
 def test_boot_args_rejects_shell_injection_in_guest_ip():
     """guest_ip with shell metacharacters should raise FCMError."""
-    from fcm.exceptions import FCMError
+    from mvmctl.exceptions import FCMError
 
     vm_config = VMConfig(
         name="test-vm",
@@ -89,7 +89,7 @@ def test_boot_args_rejects_shell_injection_in_guest_ip():
 
 def test_boot_args_rejects_shell_injection_in_gateway():
     """gateway with pipe character should raise FCMError."""
-    from fcm.exceptions import FCMError
+    from mvmctl.exceptions import FCMError
 
     vm_config = VMConfig(
         name="test-vm",
@@ -176,7 +176,7 @@ def test_config_gen_missing_rootfs_path_default():
 
 
 def test_config_gen_invalid_ip_with_shell_chars():
-    from fcm.exceptions import FCMError
+    from mvmctl.exceptions import FCMError
 
     vm_config = VMConfig(
         name="bad-ip",

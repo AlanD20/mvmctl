@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fcm.models.vm_config_file import VMCreateConfigFile
-from fcm.api.vm_config import (
+from mvmctl.models.vm_config_file import VMCreateConfigFile
+from mvmctl.api.vm_config import (
     build_vm_config_file,
     load_vm_config_file,
     merge_cli_overrides,
@@ -146,10 +146,10 @@ def test_merge_cli_overrides_all_fields():
 def test_build_vm_config_file_includes_firecracker_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
 
-    with patch("fcm.api.vm_config.ConfigGenerator") as mock_gen_cls:
+    with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen_cls:
         mock_gen = MagicMock()
         mock_gen.generate.return_value = {
             "boot-source": {"kernel_image_path": "/k", "boot_args": "console=ttyS0"},
@@ -173,10 +173,10 @@ def test_build_vm_config_file_includes_firecracker_config(
 def test_build_vm_config_file_with_firecracker_config_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
 
-    with patch("fcm.api.vm_config.ConfigGenerator", side_effect=Exception("fail")):
+    with patch("mvmctl.api.vm_config.ConfigGenerator", side_effect=Exception("fail")):
         cfg = build_vm_config_file(name="vm", image="img")
 
     assert cfg.firecracker_config == {}

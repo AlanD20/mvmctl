@@ -7,7 +7,7 @@ import pytest
 import yaml
 from pytest_mock import MockerFixture
 
-from fcm.api.assets import (
+from mvmctl.api.assets import (
     AssetInfo,
     setup_assets,
     pull_kernel,
@@ -17,13 +17,13 @@ from fcm.api.assets import (
     list_assets,
     remove_asset,
 )
-from fcm.core.binary_manager import BinaryVersion
-from fcm.exceptions import AssetNotFoundError, ConfigError, ImageError
-from fcm.models.image import ImageSpec
+from mvmctl.core.binary_manager import BinaryVersion
+from mvmctl.exceptions import AssetNotFoundError, ConfigError, ImageError
+from mvmctl.models.image import ImageSpec
 
 
-@patch("fcm.api.assets.set_active_version")
-@patch("fcm.api.assets.fetch_binary")
+@patch("mvmctl.api.assets.set_active_version")
+@patch("mvmctl.api.assets.fetch_binary")
 def test_setup_assets_default_bin_dir(
     mock_fetch: MagicMock, mock_set_active: MagicMock, tmp_path: Path, mocker: MockerFixture
 ):
@@ -36,8 +36,8 @@ def test_setup_assets_default_bin_dir(
     mock_fetch.assert_called_once_with("1.5.0", bin_dir=None)
 
 
-@patch("fcm.api.assets.build_kernel_pipeline")
-@patch("fcm.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.build_kernel_pipeline")
+@patch("mvmctl.api.assets.get_kernels_dir")
 def test_pull_kernel_success(
     mock_get_kernels_dir: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -56,10 +56,10 @@ def test_pull_kernel_success(
     assert result == kernels_dir / "vmlinux"
 
 
-@patch("fcm.api.assets.build_kernel_pipeline")
+@patch("mvmctl.api.assets.build_kernel_pipeline")
 def test_pull_kernel_custom_url(mock_build: MagicMock, tmp_path: Path, mocker: MockerFixture):
     """pull_kernel uses custom remote_tar_url when provided."""
-    mocker.patch("fcm.api.assets.get_kernels_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.api.assets.get_kernels_dir", return_value=tmp_path)
     custom_url = "https://custom.example.com/kernel.tar.xz"
 
     pull_kernel(version="6.1.0", remote_tar_url=custom_url)
@@ -68,12 +68,12 @@ def test_pull_kernel_custom_url(mock_build: MagicMock, tmp_path: Path, mocker: M
     assert call_kwargs["source_url"] == custom_url
 
 
-@patch("fcm.api.assets.build_kernel_pipeline")
+@patch("mvmctl.api.assets.build_kernel_pipeline")
 def test_pull_kernel_custom_output_path(
     mock_build: MagicMock, tmp_path: Path, mocker: MockerFixture
 ):
     """pull_kernel uses custom output_path when provided."""
-    mocker.patch("fcm.api.assets.get_kernels_dir", return_value=tmp_path / "unused")
+    mocker.patch("mvmctl.api.assets.get_kernels_dir", return_value=tmp_path / "unused")
     custom_output = tmp_path / "custom" / "kernel"
 
     pull_kernel(version="6.1.0", output_path=custom_output)
@@ -82,10 +82,10 @@ def test_pull_kernel_custom_output_path(
     assert call_kwargs["output_path"] == custom_output
 
 
-@patch("fcm.api.assets.build_kernel_pipeline")
+@patch("mvmctl.api.assets.build_kernel_pipeline")
 def test_pull_kernel_custom_build_dir(mock_build: MagicMock, tmp_path: Path, mocker: MockerFixture):
     """pull_kernel uses custom build_dir when provided."""
-    mocker.patch("fcm.api.assets.get_kernels_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.api.assets.get_kernels_dir", return_value=tmp_path)
     custom_build = tmp_path / "build"
 
     pull_kernel(version="6.1.0", build_dir=custom_build)
@@ -94,10 +94,10 @@ def test_pull_kernel_custom_build_dir(mock_build: MagicMock, tmp_path: Path, moc
     assert call_kwargs["build_dir"] == custom_build
 
 
-@patch("fcm.api.assets.build_kernel_pipeline")
+@patch("mvmctl.api.assets.build_kernel_pipeline")
 def test_pull_kernel_jobs_parameter(mock_build: MagicMock, tmp_path: Path, mocker: MockerFixture):
     """pull_kernel passes jobs parameter to build_kernel_pipeline."""
-    mocker.patch("fcm.api.assets.get_kernels_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.api.assets.get_kernels_dir", return_value=tmp_path)
 
     pull_kernel(version="6.1.0", jobs=8)
 
@@ -105,14 +105,14 @@ def test_pull_kernel_jobs_parameter(mock_build: MagicMock, tmp_path: Path, mocke
     assert call_kwargs["jobs"] == 8
 
 
-@patch("fcm.api.assets.build_kernel_pipeline")
-@patch("fcm.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.build_kernel_pipeline")
+@patch("mvmctl.api.assets.get_kernels_dir")
 def test_pull_kernel_build_failure(
     mock_get_kernels_dir: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
     """pull_kernel propagates KernelError from build_kernel_pipeline."""
     mock_get_kernels_dir.return_value = tmp_path
-    from fcm.exceptions import KernelError
+    from mvmctl.exceptions import KernelError
 
     mock_build.side_effect = KernelError("Build failed")
 
@@ -120,14 +120,14 @@ def test_pull_kernel_build_failure(
         pull_kernel(version="6.1.102")
 
 
-@patch("fcm.api.assets.build_kernel_pipeline")
-@patch("fcm.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.build_kernel_pipeline")
+@patch("mvmctl.api.assets.get_kernels_dir")
 def test_pull_kernel_default_build_dir(
     mock_get_kernels: MagicMock, mock_build: MagicMock, tmp_path: Path, mocker: MockerFixture
 ):
     """pull_kernel creates default build_dir under cache when not provided."""
     mock_get_kernels.return_value = tmp_path / "kernels"
-    mocker.patch("fcm.utils.fs.get_cache_dir", return_value=tmp_path / "cache")
+    mocker.patch("mvmctl.utils.fs.get_cache_dir", return_value=tmp_path / "cache")
 
     pull_kernel(version="6.1.0")
 
@@ -157,9 +157,9 @@ def test_pull_image_success(tmp_path: Path, mocker: MockerFixture):
     output_dir.mkdir()
 
     expected_path = output_dir / "ubuntu-24.04.ext4"
-    mock_fetch = mocker.patch("fcm.api.assets.fetch_image", return_value=expected_path)
-    mocker.patch("fcm.api.assets.get_assets_dir", return_value=tmp_path)
-    mocker.patch("fcm.api.assets.get_images_dir", return_value=output_dir)
+    mock_fetch = mocker.patch("mvmctl.api.assets.fetch_image", return_value=expected_path)
+    mocker.patch("mvmctl.api.assets.get_assets_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.api.assets.get_images_dir", return_value=output_dir)
 
     result = pull_image("ubuntu-24.04", images_yaml=images_yaml, output_dir=output_dir)
 
@@ -177,7 +177,7 @@ def test_pull_image_not_found(tmp_path: Path, mocker: MockerFixture):
     images_yaml = tmp_path / "images.yaml"
     images_yaml.write_text(yaml.dump(config))
 
-    mocker.patch("fcm.api.assets.get_assets_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.api.assets.get_assets_dir", return_value=tmp_path)
 
     with pytest.raises(ImageError, match="Image ID 'unknown-image' not found"):
         pull_image("unknown-image", images_yaml=images_yaml)
@@ -203,7 +203,7 @@ def test_pull_image_force_re_download(tmp_path: Path, mocker: MockerFixture):
     output_dir = tmp_path / "images"
     output_dir.mkdir()
 
-    mock_fetch = mocker.patch("fcm.api.assets.fetch_image", return_value=output_dir / "alpine.ext4")
+    mock_fetch = mocker.patch("mvmctl.api.assets.fetch_image", return_value=output_dir / "alpine.ext4")
 
     pull_image("alpine", force=True, images_yaml=images_yaml, output_dir=output_dir)
 
@@ -228,7 +228,7 @@ def test_pull_image_fetch_failure(tmp_path: Path, mocker: MockerFixture):
     images_yaml = tmp_path / "images.yaml"
     images_yaml.write_text(yaml.dump(config))
 
-    mocker.patch("fcm.api.assets.fetch_image", side_effect=ImageError("Download failed"))
+    mocker.patch("mvmctl.api.assets.fetch_image", side_effect=ImageError("Download failed"))
 
     with pytest.raises(ImageError, match="Download failed"):
         pull_image("test-image", images_yaml=images_yaml, output_dir=tmp_path)
@@ -256,9 +256,9 @@ def test_pull_image_uses_default_paths(tmp_path: Path, mocker: MockerFixture):
     images_dir.mkdir()
     (assets_dir / "images.yaml").write_text(yaml.dump(config))
 
-    mocker.patch("fcm.api.assets.get_assets_dir", return_value=assets_dir)
-    mocker.patch("fcm.api.assets.get_images_dir", return_value=images_dir)
-    mock_fetch = mocker.patch("fcm.api.assets.fetch_image", return_value=images_dir / "test.ext4")
+    mocker.patch("mvmctl.api.assets.get_assets_dir", return_value=assets_dir)
+    mocker.patch("mvmctl.api.assets.get_images_dir", return_value=images_dir)
+    mock_fetch = mocker.patch("mvmctl.api.assets.fetch_image", return_value=images_dir / "test.ext4")
 
     pull_image("test")
 
@@ -289,7 +289,7 @@ def test_fetch_images_parallel_success(tmp_path: Path, mocker: MockerFixture):
     def mock_fetch(spec: ImageSpec, output_dir: Path, force: bool = False) -> Path:
         return output_dir / f"{spec.id}.ext4"
 
-    mocker.patch("fcm.api.assets.fetch_image", side_effect=mock_fetch)
+    mocker.patch("mvmctl.api.assets.fetch_image", side_effect=mock_fetch)
 
     results = fetch_images_parallel(specs, tmp_path)
 
@@ -317,7 +317,7 @@ def test_fetch_images_parallel_with_force(tmp_path: Path, mocker: MockerFixture)
         captured_force.append(force)
         return output_dir / f"{spec.id}.ext4"
 
-    mocker.patch("fcm.api.assets.fetch_image", side_effect=mock_fetch_with_capture)
+    mocker.patch("mvmctl.api.assets.fetch_image", side_effect=mock_fetch_with_capture)
 
     fetch_images_parallel(specs, tmp_path, force=True)
 
@@ -338,7 +338,7 @@ def test_fetch_images_parallel_custom_workers(tmp_path: Path, mocker: MockerFixt
         for i in range(3)
     ]
 
-    mock_fetch = mocker.patch("fcm.api.assets.fetch_image", return_value=tmp_path / "test.ext4")
+    mock_fetch = mocker.patch("mvmctl.api.assets.fetch_image", return_value=tmp_path / "test.ext4")
 
     results = fetch_images_parallel(specs, tmp_path, max_workers=2)
 
@@ -372,7 +372,7 @@ def test_fetch_images_parallel_failure(tmp_path: Path, mocker: MockerFixture):
             raise Exception("Network error for img1")
         return output_dir / f"{spec.id}.ext4"
 
-    mocker.patch("fcm.api.assets.fetch_image", side_effect=mock_fetch)
+    mocker.patch("mvmctl.api.assets.fetch_image", side_effect=mock_fetch)
 
     with pytest.raises(ImageError, match="Failed to fetch the following images") as exc_info:
         fetch_images_parallel(specs, tmp_path)
@@ -401,7 +401,7 @@ def test_fetch_images_parallel_multiple_failures(tmp_path: Path, mocker: MockerF
         ),
     ]
 
-    mocker.patch("fcm.api.assets.fetch_image", side_effect=Exception("Download failed"))
+    mocker.patch("mvmctl.api.assets.fetch_image", side_effect=Exception("Download failed"))
 
     with pytest.raises(ImageError) as exc_info:
         fetch_images_parallel(specs, tmp_path)
@@ -446,7 +446,7 @@ def test_pull_images_success(tmp_path: Path, mocker: MockerFixture):
     output_dir.mkdir()
 
     mock_fetch_parallel = mocker.patch(
-        "fcm.api.assets.fetch_images_parallel",
+        "mvmctl.api.assets.fetch_images_parallel",
         return_value=[output_dir / "img1.ext4", output_dir / "img2.ext4"],
     )
 
@@ -476,7 +476,7 @@ def test_pull_images_missing_ids(tmp_path: Path, mocker: MockerFixture):
     images_yaml = tmp_path / "images.yaml"
     images_yaml.write_text(yaml.dump(config))
 
-    mocker.patch("fcm.api.assets.get_assets_dir", return_value=tmp_path)
+    mocker.patch("mvmctl.api.assets.get_assets_dir", return_value=tmp_path)
 
     with pytest.raises(ImageError, match="Image IDs not found") as exc_info:
         pull_images(["img1", "missing-img"], images_yaml=images_yaml)
@@ -486,7 +486,7 @@ def test_pull_images_missing_ids(tmp_path: Path, mocker: MockerFixture):
 
 def test_pull_images_empty_list(tmp_path: Path, mocker: MockerFixture):
     """pull_images returns empty list for empty image_ids."""
-    mocker.patch("fcm.api.assets.load_images_config", return_value=[])
+    mocker.patch("mvmctl.api.assets.load_images_config", return_value=[])
 
     results = pull_images([], images_yaml=tmp_path / "images.yaml")
     assert results == []
@@ -510,7 +510,7 @@ def test_pull_images_with_force(tmp_path: Path, mocker: MockerFixture):
     images_yaml.write_text(yaml.dump(config))
 
     mock_fetch_parallel = mocker.patch(
-        "fcm.api.assets.fetch_images_parallel", return_value=[tmp_path / "img1.ext4"]
+        "mvmctl.api.assets.fetch_images_parallel", return_value=[tmp_path / "img1.ext4"]
     )
 
     pull_images(["img1"], force=True, images_yaml=images_yaml, output_dir=tmp_path)
@@ -537,7 +537,7 @@ def test_pull_images_with_max_workers(tmp_path: Path, mocker: MockerFixture):
     images_yaml.write_text(yaml.dump(config))
 
     mock_fetch_parallel = mocker.patch(
-        "fcm.api.assets.fetch_images_parallel", return_value=[tmp_path / "img1.ext4"]
+        "mvmctl.api.assets.fetch_images_parallel", return_value=[tmp_path / "img1.ext4"]
     )
 
     pull_images(["img1"], max_workers=8, images_yaml=images_yaml, output_dir=tmp_path)
@@ -546,11 +546,11 @@ def test_pull_images_with_max_workers(tmp_path: Path, mocker: MockerFixture):
     assert call_kwargs["max_workers"] == 8
 
 
-@patch("fcm.api.assets.list_local_versions")
-@patch("fcm.api.assets.get_kernels_dir")
-@patch("fcm.api.assets.get_images_dir")
-@patch("fcm.api.assets.get_assets_dir")
-@patch("fcm.api.assets.load_images_config")
+@patch("mvmctl.api.assets.list_local_versions")
+@patch("mvmctl.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.get_assets_dir")
+@patch("mvmctl.api.assets.load_images_config")
 def test_list_assets_binaries(
     mock_load_config: MagicMock,
     mock_get_assets_dir: MagicMock,
@@ -580,8 +580,8 @@ def test_list_assets_binaries(
     assert binary_assets[0]["details"] == str(tmp_path / "firecracker-v1.5.0")
 
 
-@patch("fcm.api.assets.list_local_versions")
-@patch("fcm.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.list_local_versions")
+@patch("mvmctl.api.assets.get_kernels_dir")
 def test_list_assets_kernels(
     mock_get_kernels_dir: MagicMock,
     mock_list_local: MagicMock,
@@ -597,9 +597,9 @@ def test_list_assets_kernels(
 
     mock_get_kernels_dir.return_value = kernels_dir
 
-    with patch("fcm.api.assets.get_images_dir", return_value=tmp_path / "images"):
-        with patch("fcm.api.assets.get_assets_dir", return_value=tmp_path / "assets"):
-            with patch("fcm.api.assets.load_images_config", return_value=[]):
+    with patch("mvmctl.api.assets.get_images_dir", return_value=tmp_path / "images"):
+        with patch("mvmctl.api.assets.get_assets_dir", return_value=tmp_path / "assets"):
+            with patch("mvmctl.api.assets.load_images_config", return_value=[]):
                 assets = list_assets()
 
     kernel_assets = [a for a in assets if a["type"] == "kernel"]
@@ -610,11 +610,11 @@ def test_list_assets_kernels(
     assert kernel_assets[0]["size_mib"] > 0
 
 
-@patch("fcm.api.assets.list_local_versions")
-@patch("fcm.api.assets.get_kernels_dir")
-@patch("fcm.api.assets.get_images_dir")
-@patch("fcm.api.assets.get_assets_dir")
-@patch("fcm.api.assets.load_images_config")
+@patch("mvmctl.api.assets.list_local_versions")
+@patch("mvmctl.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.get_assets_dir")
+@patch("mvmctl.api.assets.load_images_config")
 def test_list_assets_images(
     mock_load_config: MagicMock,
     mock_get_assets_dir: MagicMock,
@@ -654,11 +654,11 @@ def test_list_assets_images(
     assert image_assets[0]["details"] == "Format: qcow2"
 
 
-@patch("fcm.api.assets.list_local_versions")
-@patch("fcm.api.assets.get_kernels_dir")
-@patch("fcm.api.assets.get_images_dir")
-@patch("fcm.api.assets.get_assets_dir")
-@patch("fcm.api.assets.load_images_config")
+@patch("mvmctl.api.assets.list_local_versions")
+@patch("mvmctl.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.get_assets_dir")
+@patch("mvmctl.api.assets.load_images_config")
 def test_list_assets_missing_image(
     mock_load_config: MagicMock,
     mock_get_assets_dir: MagicMock,
@@ -696,11 +696,11 @@ def test_list_assets_missing_image(
     assert image_assets[0]["size_mib"] is None
 
 
-@patch("fcm.api.assets.list_local_versions")
-@patch("fcm.api.assets.get_kernels_dir")
-@patch("fcm.api.assets.get_images_dir")
-@patch("fcm.api.assets.get_assets_dir")
-@patch("fcm.api.assets.load_images_config")
+@patch("mvmctl.api.assets.list_local_versions")
+@patch("mvmctl.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.get_assets_dir")
+@patch("mvmctl.api.assets.load_images_config")
 def test_list_assets_yaml_parse_error(
     mock_load_config: MagicMock,
     mock_get_assets_dir: MagicMock,
@@ -721,8 +721,8 @@ def test_list_assets_yaml_parse_error(
     assert isinstance(assets, list)
 
 
-@patch("fcm.api.assets.list_local_versions")
-@patch("fcm.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.list_local_versions")
+@patch("mvmctl.api.assets.get_kernels_dir")
 def test_list_assets_kernels_dir_missing(
     mock_get_kernels_dir: MagicMock,
     mock_list_local: MagicMock,
@@ -734,23 +734,23 @@ def test_list_assets_kernels_dir_missing(
     kernels_dir = tmp_path / "kernels"
     mock_get_kernels_dir.return_value = kernels_dir
 
-    with patch("fcm.api.assets.get_images_dir", return_value=tmp_path / "images"):
-        with patch("fcm.api.assets.get_assets_dir", return_value=tmp_path / "assets"):
-            with patch("fcm.api.assets.load_images_config", return_value=[]):
+    with patch("mvmctl.api.assets.get_images_dir", return_value=tmp_path / "images"):
+        with patch("mvmctl.api.assets.get_assets_dir", return_value=tmp_path / "assets"):
+            with patch("mvmctl.api.assets.load_images_config", return_value=[]):
                 assets = list_assets()
 
     kernel_assets = [a for a in assets if a["type"] == "kernel"]
     assert len(kernel_assets) == 0
 
 
-@patch("fcm.api.assets.remove_version")
+@patch("mvmctl.api.assets.remove_version")
 def test_remove_asset_binary(mock_remove_version: MagicMock):
     """remove_asset calls remove_version for binary type."""
     remove_asset("binary", "1.5.0")
     mock_remove_version.assert_called_once_with("1.5.0")
 
 
-@patch("fcm.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.get_kernels_dir")
 def test_remove_asset_kernel_success(mock_get_kernels_dir: MagicMock, tmp_path: Path):
     """remove_asset deletes kernel file when it exists."""
     kernels_dir = tmp_path / "kernels"
@@ -765,7 +765,7 @@ def test_remove_asset_kernel_success(mock_get_kernels_dir: MagicMock, tmp_path: 
     assert not kernel_file.exists()
 
 
-@patch("fcm.api.assets.get_kernels_dir")
+@patch("mvmctl.api.assets.get_kernels_dir")
 def test_remove_asset_kernel_not_found(mock_get_kernels_dir: MagicMock, tmp_path: Path):
     """remove_asset raises FileNotFoundError for missing kernel."""
     kernels_dir = tmp_path / "kernels"
@@ -776,7 +776,7 @@ def test_remove_asset_kernel_not_found(mock_get_kernels_dir: MagicMock, tmp_path
         remove_asset("kernel", "vmlinux-missing")
 
 
-@patch("fcm.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.get_images_dir")
 def test_remove_asset_image_success(mock_get_images_dir: MagicMock, tmp_path: Path):
     """remove_asset deletes image files."""
     images_dir = tmp_path / "images"
@@ -791,7 +791,7 @@ def test_remove_asset_image_success(mock_get_images_dir: MagicMock, tmp_path: Pa
     assert not image_file.exists()
 
 
-@patch("fcm.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.get_images_dir")
 def test_remove_asset_image_multiple_extensions(mock_get_images_dir: MagicMock, tmp_path: Path):
     """remove_asset deletes image files with any supported extension."""
     images_dir = tmp_path / "images"
@@ -807,7 +807,7 @@ def test_remove_asset_image_multiple_extensions(mock_get_images_dir: MagicMock, 
     assert not (images_dir / "myimage.btrfs").exists()
 
 
-@patch("fcm.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.get_images_dir")
 def test_remove_asset_image_not_found(mock_get_images_dir: MagicMock, tmp_path: Path):
     """remove_asset raises FileNotFoundError for missing image."""
     images_dir = tmp_path / "images"
@@ -818,8 +818,8 @@ def test_remove_asset_image_not_found(mock_get_images_dir: MagicMock, tmp_path: 
         remove_asset("image", "missing")
 
 
-@patch("fcm.api.assets.get_images_dir")
-@patch("fcm.api.assets.shutil.rmtree")
+@patch("mvmctl.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.shutil.rmtree")
 def test_remove_asset_image_directory(
     mock_rmtree: MagicMock, mock_get_images_dir: MagicMock, tmp_path: Path
 ):
@@ -843,7 +843,7 @@ def test_remove_asset_unknown_type():
         remove_asset("unknown", "test")  # type: ignore[arg-type]
 
 
-@patch("fcm.api.assets.remove_version")
+@patch("mvmctl.api.assets.remove_version")
 def test_remove_asset_binary_not_found(mock_remove_version: MagicMock):
     """remove_asset propagates AssetNotFoundError from remove_version."""
     mock_remove_version.side_effect = AssetNotFoundError("Version not found")
@@ -852,7 +852,7 @@ def test_remove_asset_binary_not_found(mock_remove_version: MagicMock):
         remove_asset("binary", "9.9.9")
 
 
-@patch("fcm.api.assets.get_images_dir")
+@patch("mvmctl.api.assets.get_images_dir")
 def test_remove_asset_image_single_file(mock_get_images_dir: MagicMock, tmp_path: Path):
     """remove_asset handles single image file correctly."""
     images_dir = tmp_path / "images"

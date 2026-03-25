@@ -10,9 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from fcm.cli.host import app as host_app
-from fcm.core.host_state import HostChange, HostState
-from fcm.exceptions import HostError
+from mvmctl.cli.host import app as host_app
+from mvmctl.core.host_state import HostChange, HostState
+from mvmctl.exceptions import HostError
 
 runner = CliRunner()
 
@@ -33,9 +33,9 @@ def _host_change(setting: str, original: str | None, applied: str, mechanism: st
 class TestHostInitResetWorkflow:
     """Test host init/reset roundtrip workflow."""
 
-    @patch("fcm.api.host.check_privileges")
-    @patch("fcm.cli.host.init_host")
-    @patch("fcm.cli.host.get_host_state")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.cli.host.init_host")
+    @patch("mvmctl.cli.host.get_host_state")
     def test_init_and_check_state(self, mock_get_state, mock_init, mock_check_priv):
         """Test host init and verifying state afterwards."""
         mock_check_priv.return_value = None
@@ -55,10 +55,10 @@ class TestHostInitResetWorkflow:
         result = runner.invoke(host_app, ["ls"])
         assert result.exit_code == 0
 
-    @patch("fcm.api.host.check_privileges")
-    @patch("fcm.cli.host.init_host")
-    @patch("fcm.cli.host.reset_host")
-    @patch("fcm.cli.host.get_host_state")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.cli.host.init_host")
+    @patch("mvmctl.cli.host.reset_host")
+    @patch("mvmctl.cli.host.get_host_state")
     def test_init_reset_roundtrip(self, mock_get_state, mock_reset, mock_init, mock_check_priv):
         """Test full init -> reset roundtrip."""
         mock_check_priv.return_value = None
@@ -83,8 +83,8 @@ class TestHostInitResetWorkflow:
         assert result.exit_code == 0
         mock_reset.assert_called_once()
 
-    @patch("fcm.api.host.check_privileges")
-    @patch("fcm.cli.host.clean_host")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.cli.host.clean_host")
     def test_clean_host(self, mock_clean, mock_check_priv):
         """Test host clean operation."""
         mock_check_priv.return_value = None
@@ -94,9 +94,9 @@ class TestHostInitResetWorkflow:
         assert result.exit_code == 0
         mock_clean.assert_called_once()
 
-    @patch("fcm.api.host.check_privileges")
-    @patch("fcm.cli.host.init_host")
-    @patch("fcm.cli.host.clean_host")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.cli.host.init_host")
+    @patch("mvmctl.cli.host.clean_host")
     def test_init_clean_workflow(self, mock_clean, mock_init, mock_check_priv):
         """Test init followed by clean."""
         mock_check_priv.return_value = None
@@ -116,14 +116,14 @@ class TestHostInitResetWorkflow:
 class TestHostWithSubprocessMocking:
     """Test host workflows with mocked subprocess calls."""
 
-    @patch("fcm.core.host_setup.subprocess.run")
-    @patch("fcm.core.host_setup.Path.exists")
-    @patch("fcm.core.host_setup.os.access")
-    @patch("fcm.core.host_privilege._get_current_user")
-    @patch("fcm.core.host_privilege._group_exists")
-    @patch("fcm.core.host_privilege._user_in_group")
-    @patch("fcm.core.host_state._state_dir")
-    @patch("fcm.api.host.check_privileges")
+    @patch("mvmctl.core.host_setup.subprocess.run")
+    @patch("mvmctl.core.host_setup.Path.exists")
+    @patch("mvmctl.core.host_setup.os.access")
+    @patch("mvmctl.core.host_privilege._get_current_user")
+    @patch("mvmctl.core.host_privilege._group_exists")
+    @patch("mvmctl.core.host_privilege._user_in_group")
+    @patch("mvmctl.core.host_state._state_dir")
+    @patch("mvmctl.api.host.check_privileges")
     def test_init_with_subprocess_mocking(
         self,
         mock_check_priv,
@@ -136,7 +136,7 @@ class TestHostWithSubprocessMocking:
         mock_run,
     ):
         """Test host init with all system calls mocked."""
-        from fcm.core.host_setup import init_host
+        from mvmctl.core.host_setup import init_host
 
         mock_check_priv.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -150,16 +150,16 @@ class TestHostWithSubprocessMocking:
         state_dir.exists.return_value = True
         mock_state_dir.return_value = state_dir
 
-        with patch("fcm.core.host_setup.os.getuid", return_value=0):
-            with patch("fcm.core.host_setup.check_kvm_access", return_value=True):
-                with patch("fcm.core.host_setup.check_required_binaries", return_value=[]):
-                    with patch("fcm.core.host_setup._enable_ip_forward") as mock_ip_forward:
-                        with patch("fcm.core.host_setup._ensure_kvm_modules") as mock_kvm:
+        with patch("mvmctl.core.host_setup.os.getuid", return_value=0):
+            with patch("mvmctl.core.host_setup.check_kvm_access", return_value=True):
+                with patch("mvmctl.core.host_setup.check_required_binaries", return_value=[]):
+                    with patch("mvmctl.core.host_setup._enable_ip_forward") as mock_ip_forward:
+                        with patch("mvmctl.core.host_setup._ensure_kvm_modules") as mock_kvm:
                             with patch(
-                                "fcm.core.host_privilege._create_group"
+                                "mvmctl.core.host_privilege._create_group"
                             ) as mock_create_group:
                                 with patch(
-                                    "fcm.core.host_privilege._add_user_to_group"
+                                    "mvmctl.core.host_privilege._add_user_to_group"
                                 ) as mock_add_user:
                                     mock_ip_forward.return_value = _host_change(
                                         "net.ipv4.ip_forward", "0", "1", "sysctl"
@@ -167,17 +167,18 @@ class TestHostWithSubprocessMocking:
                                     mock_kvm.return_value = []
                                     mock_create_group.return_value = True
                                     mock_add_user.return_value = True
-                                    with patch("fcm.core.host_setup.setup_fcm_chains"):
-                                        with patch("fcm.core.host_setup._save_state"):
-                                            result = init_host(Path("/tmp/cache"))
+                                    with patch("mvmctl.core.host_setup._persist_sysctl", return_value=None):
+                                        with patch("mvmctl.core.host_setup.setup_fcm_chains"):
+                                            with patch("mvmctl.core.host_setup._save_state"):
+                                                result = init_host(Path("/tmp/cache"))
 
                             assert len(result) > 0
 
-    @patch("fcm.core.host.restore_host")
-    @patch("fcm.core.host_state._state_file")
-    @patch("fcm.api.host.check_privileges")
+    @patch("mvmctl.core.host.restore_host")
+    @patch("mvmctl.core.host_state._state_file")
+    @patch("mvmctl.api.host.check_privileges")
     def test_reset_with_subprocess_mocking(self, mock_check_priv, mock_state_file, mock_restore):
-        from fcm.core.host import reset_host
+        from mvmctl.core.host import reset_host
 
         mock_check_priv.return_value = None
         mock_restore.return_value = []
@@ -186,9 +187,9 @@ class TestHostWithSubprocessMocking:
         state_file.exists.return_value = True
         mock_state_file.return_value = state_file
 
-        with patch("fcm.core.host.clean_host", return_value=[]):
-            with patch("fcm.core.host._remove_sudoers", return_value=False):
-                with patch("fcm.core.host._remove_group", return_value=False):
+        with patch("mvmctl.core.host.clean_host", return_value=[]):
+            with patch("mvmctl.core.host._remove_sudoers", return_value=False):
+                with patch("mvmctl.core.host._remove_group", return_value=False):
                     reset_host(Path("/tmp/cache"))
 
         mock_restore.assert_called_once()
@@ -197,9 +198,9 @@ class TestHostWithSubprocessMocking:
 class TestHostEdgeCases:
     """Test edge cases in host workflows."""
 
-    @patch("fcm.api.host.check_privileges")
-    @patch("fcm.cli.host.reset_host")
-    @patch("fcm.cli.host.get_host_state")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.cli.host.reset_host")
+    @patch("mvmctl.cli.host.get_host_state")
     def test_reset_without_prior_init(self, mock_get_state, mock_reset, mock_check_priv):
         """Test reset when init has never been run."""
         mock_check_priv.return_value = None
@@ -210,8 +211,8 @@ class TestHostEdgeCases:
         assert result.exit_code == 1
         assert "init" in result.output.lower()
 
-    @patch("fcm.api.host.check_privileges")
-    @patch("fcm.cli.host.init_host")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.cli.host.init_host")
     def test_init_idempotent(self, mock_init, mock_check_priv):
         """Test that init is idempotent."""
         mock_check_priv.return_value = None
@@ -221,8 +222,8 @@ class TestHostEdgeCases:
         assert result.exit_code == 0
         assert "No changes" in result.output or result.exit_code == 0
 
-    @patch("fcm.api.host.check_privileges")
-    @patch("fcm.cli.host.init_host")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.cli.host.init_host")
     def test_init_partial_failure(self, mock_init, mock_check_priv):
         """Test init when some operations fail."""
         mock_check_priv.return_value = None
@@ -232,9 +233,9 @@ class TestHostEdgeCases:
         assert result.exit_code == 1
         assert "permission" in result.output.lower() or "failed" in result.output.lower()
 
-    @patch("fcm.api.host.check_privileges")
-    @patch("fcm.cli.host.clean_host")
-    @patch("fcm.cli.host.get_vm_manager")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.cli.host.clean_host")
+    @patch("mvmctl.cli.host.get_vm_manager")
     def test_clean_with_no_networks(self, mock_get_vm_manager, mock_clean, mock_check_priv):
         """Test clean when no networks exist."""
         mock_check_priv.return_value = None
@@ -291,10 +292,10 @@ class TestHostStateManagement:
         assert len(deserialized["changes"]) == 2
         assert deserialized["init_timestamp"] == "2024-01-01T00:00:00+00:00"
 
-    @patch("fcm.core.host_state._state_file")
+    @patch("mvmctl.core.host_state._state_file")
     def test_save_and_load_state(self, mock_state_file, tmp_path):
         """Test saving and loading host state."""
-        from fcm.core.host_state import _save_state, get_host_state
+        from mvmctl.core.host_state import _save_state, get_host_state
 
         changes = [_host_change("test", "a", "b", "manual")]
 

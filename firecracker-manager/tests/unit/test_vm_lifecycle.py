@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from fcm.core.vm_lifecycle import (
+from mvmctl.core.vm_lifecycle import (
     graceful_shutdown,
     create_vm,
     remove_vm,
@@ -15,15 +15,15 @@ from fcm.core.vm_lifecycle import (
     _resolve_image_path,
     _secure_mkdir_vm,
 )
-from fcm.exceptions import FCMError
-from fcm.models.vm import VMInstance, VMState
+from mvmctl.exceptions import FCMError
+from mvmctl.models.vm import VMInstance, VMState
 
 
 def test_write_read_pid_file(tmp_path):
     """_write_pid_file and _read_pid_file write and parse integers."""
     pid_file = tmp_path / "firecracker.pid"
     # Actually finding a process that exists without mocking is tricky, but let's mock os.kill
-    with patch("fcm.core.vm_lifecycle.os.kill"):
+    with patch("mvmctl.core.vm_lifecycle.os.kill"):
         _write_pid_file(pid_file, 99999)
         val = _read_pid_file(pid_file)
         assert val == 99999
@@ -31,7 +31,7 @@ def test_write_read_pid_file(tmp_path):
 
 def test_write_pid_file_has_restricted_permissions(tmp_path):
     pid_file = tmp_path / "firecracker.pid"
-    with patch("fcm.core.vm_lifecycle.os.kill"):
+    with patch("mvmctl.core.vm_lifecycle.os.kill"):
         _write_pid_file(pid_file, 99999)
     mode = pid_file.stat().st_mode & 0o777
     assert mode == 0o600
@@ -55,7 +55,7 @@ def test_read_pid_file_missing(tmp_path):
     assert _read_pid_file(pid_file) is None
 
 
-@patch("fcm.core.vm_lifecycle.os.kill")
+@patch("mvmctl.core.vm_lifecycle.os.kill")
 def test_graceful_shutdown(mock_kill):
     """graceful_shutdown sends SIGTERM and SIGKILL if still alive."""
     # Simulate process is alive
@@ -70,9 +70,9 @@ def test_graceful_shutdown(mock_kill):
     mock_kill.assert_any_call(99999, signal.SIGKILL)
 
 
-@patch("fcm.core.vm_lifecycle.FirecrackerClient")
-@patch("fcm.core.vm_lifecycle.Path.exists")
-@patch("fcm.core.vm_lifecycle.os.kill")
+@patch("mvmctl.core.vm_lifecycle.FirecrackerClient")
+@patch("mvmctl.core.vm_lifecycle.Path.exists")
+@patch("mvmctl.core.vm_lifecycle.os.kill")
 def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
     """graceful_shutdown sends ctrl_alt_del if socket exists."""
     mock_exists.return_value = True
@@ -90,22 +90,22 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
     mock_client.return_value.send_ctrl_alt_del.assert_called_once()
 
 
-@patch("fcm.core.vm_lifecycle.get_vm_manager")
-@patch("fcm.core.vm_lifecycle.get_vm_dir")
-@patch("fcm.core.vm_lifecycle.get_images_dir")
-@patch("fcm.core.vm_lifecycle.get_kernels_dir")
-@patch("fcm.core.vm_lifecycle.get_network")
-@patch("fcm.core.vm_lifecycle.allocate_network_ip")
-@patch("fcm.core.vm_lifecycle.generate_mac")
-@patch("fcm.core.vm_lifecycle.shutil.copy2")
-@patch("fcm.core.vm_lifecycle.write_cloud_init")
-@patch("fcm.core.vm_lifecycle.inject_cloud_init")
-@patch("fcm.core.vm_lifecycle.ConfigGenerator")
-@patch("fcm.core.vm_lifecycle.create_tap")
-@patch("fcm.core.vm_lifecycle.add_iptables_forward_rules")
-@patch("fcm.core.vm_lifecycle.subprocess.Popen")
-@patch("fcm.core.vm_lifecycle._write_pid_file")
-@patch("fcm.core.vm_lifecycle.bridge_exists")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.inject_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
 def test_create_vm_core_success(
     mock_open,
@@ -151,7 +151,7 @@ def test_create_vm_core_success(
     mock_net = MagicMock()
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
-    mock_net.bridge = "fcm-br0"
+    mock_net.bridge = "mvm-br0"
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -170,7 +170,7 @@ def test_create_vm_core_success(
     mock_write_pid.assert_called_once()
 
 
-@patch("fcm.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 def test_create_vm_limit_reached(mock_get_vm_mgr):
     """create_vm raises FCMError if max VMs reached."""
     mock_manager = MagicMock()
@@ -181,17 +181,17 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
         create_vm(name="myvm", image="img")
 
 
-@patch("fcm.core.vm_lifecycle.get_vm_manager")
-@patch("fcm.core.vm_lifecycle.graceful_shutdown")
-@patch("fcm.core.vm_lifecycle.teardown_nat")
-@patch("fcm.core.vm_lifecycle.get_network")
-@patch("fcm.core.vm_lifecycle.remove_iptables_forward_rules")
-@patch("fcm.core.vm_lifecycle.delete_tap")
-@patch("fcm.core.vm_lifecycle.release_network_ip")
-@patch("fcm.core.vm_lifecycle.subprocess.run")
-@patch("fcm.core.vm_lifecycle.shutil.rmtree")
-@patch("fcm.core.vm_lifecycle.get_vm_dir")
-@patch("fcm.core.vm_lifecycle._read_pid_file")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+@patch("mvmctl.core.vm_lifecycle.teardown_nat")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.delete_tap")
+@patch("mvmctl.core.vm_lifecycle.release_network_ip")
+@patch("mvmctl.core.vm_lifecycle.subprocess.run")
+@patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle._read_pid_file")
 def test_remove_vm_success(
     mock_read_pid,
     mock_get_vm_dir,
@@ -214,7 +214,7 @@ def test_remove_vm_success(
     mock_mgr.return_value = mock_manager
 
     net_cfg = MagicMock()
-    net_cfg.bridge = "fcm-default"
+    net_cfg.bridge = "mvm-default"
     net_cfg.nat_enabled = True
     mock_get_net.return_value = net_cfg
 
@@ -228,25 +228,25 @@ def test_remove_vm_success(
 
     mock_graceful.assert_called_once_with(123, None)
     _, rm_kwargs = mock_rm_rules.call_args
-    assert rm_kwargs.get("bridge") == "fcm-default"
+    assert rm_kwargs.get("bridge") == "mvm-default"
     mock_del_tap.assert_called_once()
-    mock_teardown_nat.assert_called_once_with(bridge="fcm-default", force=False)
+    mock_teardown_nat.assert_called_once_with(bridge="mvm-default", force=False)
     mock_rel_ip.assert_called_once()
     mock_manager.deregister.assert_called_once()
     mock_rmtree.assert_called_once_with(mock_vm_dir_ret)
 
 
-@patch("fcm.core.vm_lifecycle.get_vm_manager")
-@patch("fcm.core.vm_lifecycle.graceful_shutdown")
-@patch("fcm.core.vm_lifecycle.teardown_nat")
-@patch("fcm.core.vm_lifecycle.get_network")
-@patch("fcm.core.vm_lifecycle.remove_iptables_forward_rules")
-@patch("fcm.core.vm_lifecycle.delete_tap")
-@patch("fcm.core.vm_lifecycle.release_network_ip")
-@patch("fcm.core.vm_lifecycle.subprocess.run")
-@patch("fcm.core.vm_lifecycle.shutil.rmtree")
-@patch("fcm.core.vm_lifecycle.get_vm_dir")
-@patch("fcm.core.vm_lifecycle._read_pid_file")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+@patch("mvmctl.core.vm_lifecycle.teardown_nat")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.delete_tap")
+@patch("mvmctl.core.vm_lifecycle.release_network_ip")
+@patch("mvmctl.core.vm_lifecycle.subprocess.run")
+@patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle._read_pid_file")
 def test_remove_vm_no_nat_skips_teardown(
     mock_read_pid,
     mock_get_vm_dir,
@@ -268,7 +268,7 @@ def test_remove_vm_no_nat_skips_teardown(
     mock_mgr.return_value = mock_manager
 
     net_cfg = MagicMock()
-    net_cfg.bridge = "fcm-isolated"
+    net_cfg.bridge = "mvm-isolated"
     net_cfg.nat_enabled = False
     mock_get_net.return_value = net_cfg
 
@@ -280,12 +280,12 @@ def test_remove_vm_no_nat_skips_teardown(
     remove_vm("vm2")
 
     _, rm_kwargs = mock_rm_rules.call_args
-    assert rm_kwargs.get("bridge") == "fcm-isolated"
+    assert rm_kwargs.get("bridge") == "mvm-isolated"
     mock_teardown_nat.assert_not_called()
 
 
-@patch("fcm.core.vm_lifecycle.get_vm_socket_path")
-@patch("fcm.core.vm_lifecycle.FirecrackerClient")
+@patch("mvmctl.core.vm_lifecycle.get_vm_socket_path")
+@patch("mvmctl.core.vm_lifecycle.FirecrackerClient")
 def test_snapshot_vm(mock_client, mock_socket_path):
     """snapshot_vm calls FirecrackerClient create_snapshot."""
     mock_socket_path.return_value = Path("fake.sock")
@@ -293,7 +293,7 @@ def test_snapshot_vm(mock_client, mock_socket_path):
     mock_client.return_value.create_snapshot.assert_called_once_with(Path("mem"), Path("state"))
 
 
-@patch("fcm.core.vm_lifecycle.get_vm_socket_path")
+@patch("mvmctl.core.vm_lifecycle.get_vm_socket_path")
 def test_snapshot_vm_no_socket(mock_socket_path):
     """snapshot_vm errors if no socket."""
     mock_socket_path.return_value = None
@@ -301,8 +301,8 @@ def test_snapshot_vm_no_socket(mock_socket_path):
         snapshot_vm("myvm", Path("mem"), Path("state"))
 
 
-@patch("fcm.core.vm_lifecycle.get_vm_socket_path")
-@patch("fcm.core.vm_lifecycle.FirecrackerClient")
+@patch("mvmctl.core.vm_lifecycle.get_vm_socket_path")
+@patch("mvmctl.core.vm_lifecycle.FirecrackerClient")
 def test_load_snapshot(mock_client, mock_socket_path):
     """load_snapshot checks socket and forwards to client."""
     mock_socket_path.return_value = Path("fake.sock")
@@ -311,23 +311,23 @@ def test_load_snapshot(mock_client, mock_socket_path):
 
 
 def test_resolve_image_path_by_ext4(tmp_path, monkeypatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     img = images_dir / "ubuntu-24.04.ext4"
     img.write_bytes(b"\x00" * 64)
-    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
         result = _resolve_image_path("ubuntu-24.04")
     assert result == img
 
 
 def test_resolve_image_path_by_btrfs(tmp_path, monkeypatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     img = images_dir / "archlinux.btrfs"
     img.write_bytes(b"\x00" * 64)
-    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
         result = _resolve_image_path("archlinux")
     assert result == img
 
@@ -335,7 +335,7 @@ def test_resolve_image_path_by_btrfs(tmp_path, monkeypatch):
 def test_resolve_image_path_by_absolute(tmp_path):
     img = tmp_path / "custom.img"
     img.write_bytes(b"\x00")
-    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=tmp_path / "images"):
+    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=tmp_path / "images"):
         result = _resolve_image_path(str(img))
     assert result == img
 
@@ -343,7 +343,7 @@ def test_resolve_image_path_by_absolute(tmp_path):
 def test_resolve_image_path_by_short_hash(tmp_path, monkeypatch):
     import json
 
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     full_hash = "f" * 64
@@ -365,16 +365,16 @@ def test_resolve_image_path_by_short_hash(tmp_path, monkeypatch):
             }
         )
     )
-    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
         result = _resolve_image_path(full_hash[:6])
     assert result == img
 
 
 def test_resolve_image_path_not_found(tmp_path, monkeypatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
         with pytest.raises(FCMError, match="Image not found"):
             _resolve_image_path("nonexistent")
 
@@ -428,7 +428,7 @@ def test_secure_mkdir_vm_rejects_symlink_in_parent(tmp_path):
 
 def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
     """create_vm uses _secure_mkdir_vm to prevent TOCTOU attacks."""
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
 
     # Create minimal required files/directories
     images_dir = tmp_path / "images"
@@ -451,10 +451,10 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 
     # create_vm should detect the symlink and fail
     with (
-        patch("fcm.core.vm_lifecycle.get_vm_manager") as mock_mgr,
-        patch("fcm.core.vm_lifecycle.get_vm_dir", return_value=vm_dir),
-        patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir),
-        patch("fcm.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir),
+        patch("mvmctl.core.vm_lifecycle.get_vm_manager") as mock_mgr,
+        patch("mvmctl.core.vm_lifecycle.get_vm_dir", return_value=vm_dir),
+        patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir),
+        patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir),
     ):
         mock_manager = MagicMock()
         mock_manager.count_vms.return_value = 0

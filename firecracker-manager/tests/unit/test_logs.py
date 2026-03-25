@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
-from fcm.core.logs import get_log_path, read_log_lines, show_logs
-from fcm.exceptions import ConfigError, FCMError, VMNotFoundError
+from mvmctl.core.logs import get_log_path, read_log_lines, show_logs
+from mvmctl.exceptions import ConfigError, FCMError, VMNotFoundError
 
 
 def test_get_log_path_boot(tmp_path: Path) -> None:
@@ -13,7 +13,7 @@ def test_get_log_path_boot(tmp_path: Path) -> None:
     log_file = vm_dir / "firecracker.console.log"
     log_file.write_text("boot output\n")
 
-    with patch("fcm.core.logs.get_vm_dir", return_value=vm_dir):
+    with patch("mvmctl.core.logs.get_vm_dir", return_value=vm_dir):
         result = get_log_path("test-vm", log_type="boot")
 
     assert result == log_file
@@ -25,7 +25,7 @@ def test_get_log_path_os(tmp_path: Path) -> None:
     log_file = vm_dir / "firecracker.log"
     log_file.write_text("os log\n")
 
-    with patch("fcm.core.logs.get_vm_dir", return_value=vm_dir):
+    with patch("mvmctl.core.logs.get_vm_dir", return_value=vm_dir):
         result = get_log_path("test-vm", log_type="os")
 
     assert result == log_file
@@ -35,7 +35,7 @@ def test_get_log_path_unknown_type(tmp_path: Path) -> None:
     vm_dir = tmp_path / "test-vm"
     vm_dir.mkdir()
 
-    with patch("fcm.core.logs.get_vm_dir", return_value=vm_dir):
+    with patch("mvmctl.core.logs.get_vm_dir", return_value=vm_dir):
         with pytest.raises(ConfigError, match="Unknown log type"):
             get_log_path("test-vm", log_type="unknown")
 
@@ -43,7 +43,7 @@ def test_get_log_path_unknown_type(tmp_path: Path) -> None:
 def test_get_log_path_missing_vm(tmp_path: Path) -> None:
     nonexistent = tmp_path / "no-such-vm"
 
-    with patch("fcm.core.logs.get_vm_dir", return_value=nonexistent):
+    with patch("mvmctl.core.logs.get_vm_dir", return_value=nonexistent):
         with pytest.raises(VMNotFoundError, match="not found"):
             get_log_path("no-such-vm")
 
@@ -52,7 +52,7 @@ def test_get_log_path_missing_file(tmp_path: Path) -> None:
     vm_dir = tmp_path / "test-vm"
     vm_dir.mkdir()
 
-    with patch("fcm.core.logs.get_vm_dir", return_value=vm_dir):
+    with patch("mvmctl.core.logs.get_vm_dir", return_value=vm_dir):
         with pytest.raises(VMNotFoundError, match="Log file not found"):
             get_log_path("test-vm", log_type="boot")
 
@@ -83,7 +83,7 @@ def test_show_logs_success(tmp_path: Path) -> None:
     log_file = tmp_path / "firecracker.console.log"
     log_file.write_text("boot line 1\nboot line 2\n")
 
-    with patch("fcm.core.logs.get_log_path", return_value=log_file):
+    with patch("mvmctl.core.logs.get_log_path", return_value=log_file):
         result = show_logs("test-vm", log_type="boot", lines=50)
 
     assert isinstance(result, list)
@@ -93,7 +93,7 @@ def test_show_logs_success(tmp_path: Path) -> None:
 
 def test_show_logs_not_found() -> None:
     with patch(
-        "fcm.core.logs.get_log_path", side_effect=VMNotFoundError("VM 'nonexistent-vm' not found")
+        "mvmctl.core.logs.get_log_path", side_effect=VMNotFoundError("VM 'nonexistent-vm' not found")
     ):
         with pytest.raises(VMNotFoundError, match="not found"):
             show_logs("nonexistent-vm", log_type="boot")
@@ -109,7 +109,7 @@ def test_show_logs_os_type(tmp_path: Path) -> None:
     log_file = tmp_path / "firecracker.log"
     log_file.write_text("os line 1\nos line 2\n")
 
-    with patch("fcm.core.logs.get_log_path", return_value=log_file):
+    with patch("mvmctl.core.logs.get_log_path", return_value=log_file):
         result = show_logs("test-vm", log_type="os", lines=50)
 
     assert isinstance(result, list)
@@ -117,7 +117,7 @@ def test_show_logs_os_type(tmp_path: Path) -> None:
 
 
 def test_show_logs_follow(tmp_path: Path) -> None:
-    from fcm.core.logs import follow_log
+    from mvmctl.core.logs import follow_log
 
     log_file = tmp_path / "test.log"
     log_file.write_text("line 1\nline 2\n")
@@ -143,8 +143,8 @@ def test_show_logs_follow_keyboard_interrupt(tmp_path: Path) -> None:
         raise KeyboardInterrupt
 
     with (
-        patch("fcm.core.logs.get_log_path", return_value=log_file),
-        patch("fcm.core.logs.follow_log", side_effect=fake_follow),
+        patch("mvmctl.core.logs.get_log_path", return_value=log_file),
+        patch("mvmctl.core.logs.follow_log", side_effect=fake_follow),
     ):
         result = show_logs("test-vm", log_type="boot", follow=True)
 
@@ -153,7 +153,7 @@ def test_show_logs_follow_keyboard_interrupt(tmp_path: Path) -> None:
 
 
 def test_follow_log_io_error(tmp_path: Path) -> None:
-    from fcm.core.logs import follow_log
+    from mvmctl.core.logs import follow_log
 
     log_file = tmp_path / "nonexistent.log"
     gen = follow_log(log_file)

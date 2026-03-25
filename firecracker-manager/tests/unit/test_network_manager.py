@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fcm.core.network_manager import (
+from mvmctl.core.network_manager import (
     NetworkConfig,
     NetworkLease,
     _bridge_name_for,
@@ -25,12 +25,12 @@ from fcm.core.network_manager import (
     _auto_allocate_subnet,
     _validate_subnet_no_overlap,
 )
-from fcm.exceptions import NetworkError
+from mvmctl.exceptions import NetworkError
 
 
 def test_bridge_name_for():
-    assert _bridge_name_for("default") == "fcm-default"
-    assert _bridge_name_for("custom_net_name") == "fcm-custom_net"
+    assert _bridge_name_for("default") == "mvm-default"
+    assert _bridge_name_for("custom_net_name") == "mvm-custom_net"
 
 
 def test_gateway_for_subnet():
@@ -46,7 +46,7 @@ def test_save_and_load_config(mock_cache_dir: Path):
         name="testnet",
         cidr="10.20.1.0/24",
         gateway="10.20.1.1",
-        bridge="fcm-testnet",
+        bridge="mvm-testnet",
         nat_enabled=True,
     )
 
@@ -68,7 +68,7 @@ def test_load_config_migration(mock_cache_dir: Path):
                 "name": "testnet",
                 "subnet": "10.20.2.0/24",
                 "gateway": "10.20.2.1",
-                "bridge": "fcm-testnet",
+                "bridge": "mvm-testnet",
                 "nat_enabled": True,
                 "created_at": "2026-01-01T00:00:00Z",
             }
@@ -106,11 +106,11 @@ def test_list_networks(mock_cache_dir: Path):
 
     net_dir1 = mock_cache_dir / "networks" / "net1"
     net_dir1.mkdir(parents=True)
-    _save_config(net_dir1, NetworkConfig("net1", "10.20.1.0/24", "10.20.1.1", "fcm-net1"))
+    _save_config(net_dir1, NetworkConfig("net1", "10.20.1.0/24", "10.20.1.1", "mvm-net1"))
 
     net_dir2 = mock_cache_dir / "networks" / "net2"
     net_dir2.mkdir(parents=True)
-    _save_config(net_dir2, NetworkConfig("net2", "10.20.2.0/24", "10.20.2.1", "fcm-net2"))
+    _save_config(net_dir2, NetworkConfig("net2", "10.20.2.0/24", "10.20.2.1", "mvm-net2"))
 
     networks = list_networks()
     assert len(networks) == 2
@@ -128,8 +128,8 @@ def test_get_network_leases(mock_cache_dir: Path):
     assert leases[0].vm_name == "vm1"
 
 
-@patch("fcm.core.network_manager.setup_bridge")
-@patch("fcm.core.network_manager.setup_nat")
+@patch("mvmctl.core.network_manager.setup_bridge")
+@patch("mvmctl.core.network_manager.setup_nat")
 def test_create_network_success(mock_setup_nat, mock_setup_bridge, mock_cache_dir: Path):
     config = create_network(name="mynet")
     assert config.name == "mynet"
@@ -138,12 +138,12 @@ def test_create_network_success(mock_setup_nat, mock_setup_bridge, mock_cache_di
 
     # Verify persistence
     assert get_network("mynet") is not None
-    mock_setup_bridge.assert_called_once_with("fcm-mynet", gateway_cidr="10.20.0.1/24")
-    mock_setup_nat.assert_called_once_with("fcm-mynet")
+    mock_setup_bridge.assert_called_once_with("mvm-mynet", gateway_cidr="10.20.0.1/24")
+    mock_setup_nat.assert_called_once_with("mvm-mynet")
 
 
-@patch("fcm.core.network_manager.setup_bridge")
-@patch("fcm.core.network_manager.setup_nat")
+@patch("mvmctl.core.network_manager.setup_bridge")
+@patch("mvmctl.core.network_manager.setup_nat")
 def test_create_network_with_legacy_subnet(mock_setup_nat, mock_setup_bridge, mock_cache_dir: Path):
     config = create_network(name="legacynet", subnet="10.20.5.0/24")
     assert config.cidr == "10.20.5.0/24"
@@ -152,14 +152,14 @@ def test_create_network_with_legacy_subnet(mock_setup_nat, mock_setup_bridge, mo
 def test_create_network_already_exists(mock_cache_dir: Path):
     net_dir = mock_cache_dir / "networks" / "mynet"
     net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "fcm-mynet"))
+    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
 
     with pytest.raises(NetworkError, match="already exists"):
         create_network(name="mynet")
 
 
-@patch("fcm.core.network_manager.setup_bridge")
-@patch("fcm.core.network_manager.teardown_bridge")
+@patch("mvmctl.core.network_manager.setup_bridge")
+@patch("mvmctl.core.network_manager.teardown_bridge")
 def test_create_network_setup_failure(
     mock_teardown_bridge, mock_setup_bridge, mock_cache_dir: Path
 ):
@@ -172,18 +172,18 @@ def test_create_network_setup_failure(
     assert get_network("mynet") is None
 
 
-@patch("fcm.core.network_manager.teardown_bridge")
-@patch("fcm.core.network_manager.teardown_nat")
+@patch("mvmctl.core.network_manager.teardown_bridge")
+@patch("mvmctl.core.network_manager.teardown_nat")
 def test_remove_network(mock_teardown_nat, mock_teardown_bridge, mock_cache_dir: Path):
     net_dir = mock_cache_dir / "networks" / "mynet"
     net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "fcm-mynet"))
+    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
     _save_leases(net_dir, [])
 
     remove_network("mynet")
 
-    mock_teardown_nat.assert_called_once_with(bridge="fcm-mynet", force=True)
-    mock_teardown_bridge.assert_called_once_with("fcm-mynet")
+    mock_teardown_nat.assert_called_once_with(bridge="mvm-mynet", force=True)
+    mock_teardown_bridge.assert_called_once_with("mvm-mynet")
     assert get_network("mynet") is None
 
 
@@ -195,21 +195,21 @@ def test_remove_network_not_found():
 def test_remove_network_with_vms(mock_cache_dir: Path):
     net_dir = mock_cache_dir / "networks" / "mynet"
     net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "fcm-mynet"))
+    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
     _save_leases(net_dir, [NetworkLease("vm1", "10.20.1.2")])
 
     with pytest.raises(NetworkError, match="still has VMs attached"):
         remove_network("mynet")
 
 
-@patch("fcm.core.network_manager.teardown_bridge")
-@patch("fcm.core.network_manager.teardown_nat")
+@patch("mvmctl.core.network_manager.teardown_bridge")
+@patch("mvmctl.core.network_manager.teardown_nat")
 def test_remove_network_partial_failure(
     mock_teardown_nat, mock_teardown_bridge, mock_cache_dir: Path
 ):
     net_dir = mock_cache_dir / "networks" / "mynet"
     net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "fcm-mynet"))
+    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
     _save_leases(net_dir, [])
 
     mock_teardown_nat.side_effect = NetworkError("NAT cleanup failed")
@@ -219,11 +219,11 @@ def test_remove_network_partial_failure(
     assert get_network("mynet") is None
 
 
-@patch("fcm.core.network_manager.bridge_exists", return_value=True)
+@patch("mvmctl.core.network_manager.bridge_exists", return_value=True)
 def test_inspect_network(mock_bridge_exists, mock_cache_dir: Path):
     net_dir = mock_cache_dir / "networks" / "mynet"
     net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "fcm-mynet"))
+    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
     _save_leases(net_dir, [NetworkLease("vm1", "10.20.1.2")])
 
     info = inspect_network("mynet")
@@ -244,11 +244,11 @@ def test_inspect_network_not_found():
         inspect_network("nonexistent")
 
 
-@patch("fcm.core.network_manager.allocate_ip")
+@patch("mvmctl.core.network_manager.allocate_ip")
 def test_allocate_network_ip(mock_allocate_ip, mock_cache_dir: Path):
     net_dir = mock_cache_dir / "networks" / "mynet"
     net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "fcm-mynet"))
+    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
     _save_leases(net_dir, [])
 
     mock_allocate_ip.return_value = "10.20.1.2"
@@ -273,7 +273,7 @@ def test_allocate_network_ip_not_found():
 def test_release_network_ip(mock_cache_dir: Path):
     net_dir = mock_cache_dir / "networks" / "mynet"
     net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "fcm-mynet"))
+    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
     _save_leases(net_dir, [NetworkLease("vm1", "10.20.1.2"), NetworkLease("vm2", "10.20.1.3")])
 
     release_network_ip("mynet", "vm1")
@@ -283,11 +283,11 @@ def test_release_network_ip(mock_cache_dir: Path):
     assert leases[0].vm_name == "vm2"
 
 
-@patch("fcm.core.network_manager.create_network")
+@patch("mvmctl.core.network_manager.create_network")
 def test_ensure_default_network(mock_create_network, mock_cache_dir: Path):
     # Doesn't exist, will be created
     mock_create_network.return_value = NetworkConfig(
-        "default", "172.35.0.0/24", "172.35.0.1", "fcm-default"
+        "default", "172.35.0.0/24", "172.35.0.1", "mvm-default"
     )
     config = ensure_default_network()
     assert config is not None
@@ -308,7 +308,7 @@ def test_auto_allocate_subnet(mock_cache_dir: Path):
 
     net_dir1 = mock_cache_dir / "networks" / "net1"
     net_dir1.mkdir(parents=True)
-    _save_config(net_dir1, NetworkConfig("net1", "10.20.0.0/24", "10.20.0.1", "fcm-net1"))
+    _save_config(net_dir1, NetworkConfig("net1", "10.20.0.0/24", "10.20.0.1", "mvm-net1"))
 
     assert _auto_allocate_subnet() == "10.20.1.0/24"
 
@@ -319,7 +319,7 @@ def test_auto_allocate_subnet_exhausted(mock_cache_dir: Path):
         net_dir = mock_cache_dir / "networks" / f"net{i}"
         net_dir.mkdir(parents=True)
         _save_config(
-            net_dir, NetworkConfig(f"net{i}", f"10.20.{i}.0/24", f"10.20.{i}.1", f"fcm-net{i}")
+            net_dir, NetworkConfig(f"net{i}", f"10.20.{i}.0/24", f"10.20.{i}.1", f"mvm-net{i}")
         )
 
     with pytest.raises(NetworkError, match="No available"):
@@ -329,7 +329,7 @@ def test_auto_allocate_subnet_exhausted(mock_cache_dir: Path):
 def test_validate_subnet_no_overlap(mock_cache_dir: Path):
     net_dir1 = mock_cache_dir / "networks" / "net1"
     net_dir1.mkdir(parents=True)
-    _save_config(net_dir1, NetworkConfig("net1", "10.20.0.0/24", "10.20.0.1", "fcm-net1"))
+    _save_config(net_dir1, NetworkConfig("net1", "10.20.0.0/24", "10.20.0.1", "mvm-net1"))
 
     # Should raise error on overlap
     with pytest.raises(NetworkError, match="overlaps with network"):

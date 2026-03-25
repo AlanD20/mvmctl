@@ -9,11 +9,11 @@ import pytest
 from click.testing import CliRunner as ClickCliRunner
 from typer.testing import CliRunner
 
-from fcm.cli.asset import kernel_app
-from fcm.main import app as main_app
-from fcm.core.binary_manager import BinaryVersion
-from fcm.exceptions import AssetNotFoundError, BinaryError, KernelError
-from fcm.models.image import ImageSpec
+from mvmctl.cli.asset import kernel_app
+from mvmctl.main import app as main_app
+from mvmctl.core.binary_manager import BinaryVersion
+from mvmctl.exceptions import AssetNotFoundError, BinaryError, KernelError
+from mvmctl.models.image import ImageSpec
 
 runner = CliRunner()
 click_runner = ClickCliRunner()
@@ -110,7 +110,7 @@ def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.cli.asset.build_kernel_pipeline", return_value=None)
+@patch("mvmctl.cli.asset.build_kernel_pipeline", return_value=None)
 def test_kernel_fetch_official_success(mock_build: MagicMock, tmp_path: Path):
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
@@ -122,7 +122,7 @@ def test_kernel_fetch_official_success(mock_build: MagicMock, tmp_path: Path):
     mock_build.assert_called_once()
 
 
-@patch("fcm.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
+@patch("mvmctl.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
 def test_kernel_fetch_official_failure(mock_build: MagicMock, tmp_path: Path):
     out = tmp_path / "vmlinux-6.1.9"
     result = click_runner.invoke(
@@ -131,8 +131,8 @@ def test_kernel_fetch_official_failure(mock_build: MagicMock, tmp_path: Path):
     assert result.exit_code == 1
 
 
-@patch("fcm.core.kernel.download_firecracker_kernel")
-@patch("fcm.cli.asset._get_ci_version", return_value="1.12")
+@patch("mvmctl.core.kernel.download_firecracker_kernel")
+@patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
 def test_kernel_fetch_firecracker_success(mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path):
     fc_kernel = tmp_path / "vmlinux-fc-1.12-amd64"
     fc_kernel.write_bytes(b"\x7fELF")
@@ -150,7 +150,7 @@ def test_kernel_fetch_missing_type(tmp_path: Path):
     assert result.exit_code != 0
 
 
-@patch("fcm.cli.asset.build_kernel_pipeline", return_value=None)
+@patch("mvmctl.cli.asset.build_kernel_pipeline", return_value=None)
 def test_kernel_fetch_with_jobs(mock_build: MagicMock, tmp_path: Path):
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
@@ -231,8 +231,8 @@ def test_image_ls_normal(tmp_path: Path):
     (tmp_path / "ubuntu-24.04.ext4").write_bytes(b"\x00" * 1024)
     (tmp_path / "debian-12.ext4").write_bytes(b"\x00" * 1024)
     with (
-        patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
-        patch("fcm.cli.asset.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.asset.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -241,7 +241,7 @@ def test_image_ls_normal(tmp_path: Path):
 
 
 def test_image_ls_json():
-    with patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -251,7 +251,7 @@ def test_image_ls_json():
 
 
 def test_image_ls_empty():
-    with patch("fcm.cli.asset.load_images_config", return_value=[]):
+    with patch("mvmctl.cli.asset.load_images_config", return_value=[]):
         result = click_runner.invoke(main_app, ["image", "ls", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -261,8 +261,8 @@ def test_image_ls_empty():
 def test_image_ls_shows_cached_marker(tmp_path: Path):
     (tmp_path / "ubuntu-24.04.ext4").touch()
     with (
-        patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
-        patch("fcm.cli.asset.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.asset.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -273,8 +273,8 @@ def test_image_ls_shows_cached_marker(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("fcm.cli.asset.fetch_image")
-@patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.asset.fetch_image")
+@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_success(mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path):
     mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
     result = click_runner.invoke(
@@ -285,14 +285,14 @@ def test_image_fetch_success(mock_config: MagicMock, mock_fetch: MagicMock, tmp_
     mock_fetch.assert_called_once()
 
 
-@patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_not_found(mock_config: MagicMock):
     result = click_runner.invoke(main_app, ["image", "fetch", "nonexistent"])
     assert result.exit_code == 1
 
 
-@patch("fcm.cli.asset.fetch_image", return_value=None)
-@patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.asset.fetch_image", return_value=None)
+@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_failure(mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path):
     result = click_runner.invoke(
         main_app, ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path)]
@@ -300,8 +300,8 @@ def test_image_fetch_failure(mock_config: MagicMock, mock_fetch: MagicMock, tmp_
     assert result.exit_code == 1
 
 
-@patch("fcm.cli.asset.fetch_image")
-@patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.asset.fetch_image")
+@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_with_force(mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path):
     mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
     result = click_runner.invoke(
@@ -342,7 +342,7 @@ def _write_image_meta(
 
 
 def test_image_rm_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "a" * 64
     (tmp_path / "images").mkdir(exist_ok=True)
     img_file = tmp_path / "images" / f"{full_hash}.ext4"
@@ -358,7 +358,7 @@ def test_image_rm_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_image_rm_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     result = click_runner.invoke(
         main_app,
         ["image", "rm", "abcdef", "--images-dir", str(tmp_path), "--force"],
@@ -367,7 +367,7 @@ def test_image_rm_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_image_rm_with_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "b" * 64
     (tmp_path / "images").mkdir(exist_ok=True)
     img_file = tmp_path / "images" / f"{full_hash}.ext4"
@@ -383,7 +383,7 @@ def test_image_rm_with_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 
 def test_image_rm_abort_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "c" * 64
     (tmp_path / "images").mkdir(exist_ok=True)
     img_file = tmp_path / "images" / f"{full_hash}.ext4"
@@ -399,7 +399,7 @@ def test_image_rm_abort_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_image_rm_multiple_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     (tmp_path / "images").mkdir(exist_ok=True)
     hashes = ["d" * 64, "e" * 64]
     for h in hashes:
@@ -437,14 +437,14 @@ def test_bin_ls_with_local():
             is_active=True,
         ),
     ]
-    with patch("fcm.cli.asset.list_local_versions", return_value=fake_versions):
+    with patch("mvmctl.cli.asset.list_local_versions", return_value=fake_versions):
         result = click_runner.invoke(main_app, ["bin", "ls"])
     assert result.exit_code == 0
     assert "1.5.0" in result.output
 
 
 def test_bin_ls_empty():
-    with patch("fcm.cli.asset.list_local_versions", return_value=[]):
+    with patch("mvmctl.cli.asset.list_local_versions", return_value=[]):
         result = click_runner.invoke(main_app, ["bin", "ls"])
     assert result.exit_code == 0
     assert "No local binaries" in result.output
@@ -461,8 +461,8 @@ def test_bin_ls_with_remote():
     ]
     remote = ["1.6.0", "1.5.0", "1.4.0"]
     with (
-        patch("fcm.cli.asset.list_local_versions", return_value=local),
-        patch("fcm.cli.asset.list_remote_versions", return_value=remote),
+        patch("mvmctl.cli.asset.list_local_versions", return_value=local),
+        patch("mvmctl.cli.asset.list_remote_versions", return_value=remote),
     ):
         result = click_runner.invoke(main_app, ["bin", "ls", "--remote"])
     assert result.exit_code == 0
@@ -472,8 +472,8 @@ def test_bin_ls_with_remote():
 
 def test_bin_ls_remote_error():
     with (
-        patch("fcm.cli.asset.list_local_versions", return_value=[]),
-        patch("fcm.cli.asset.list_remote_versions", side_effect=BinaryError("network fail")),
+        patch("mvmctl.cli.asset.list_local_versions", return_value=[]),
+        patch("mvmctl.cli.asset.list_remote_versions", side_effect=BinaryError("network fail")),
     ):
         result = click_runner.invoke(main_app, ["bin", "ls", "--remote"])
     assert result.exit_code == 1
@@ -481,8 +481,8 @@ def test_bin_ls_remote_error():
 
 def test_bin_ls_with_limit():
     with (
-        patch("fcm.cli.asset.list_local_versions", return_value=[]),
-        patch("fcm.cli.asset.list_remote_versions", return_value=["1.6.0"]) as mock_remote,
+        patch("mvmctl.cli.asset.list_local_versions", return_value=[]),
+        patch("mvmctl.cli.asset.list_remote_versions", return_value=["1.6.0"]) as mock_remote,
     ):
         result = click_runner.invoke(main_app, ["bin", "ls", "--remote", "--limit", "5"])
     assert result.exit_code == 0
@@ -501,7 +501,7 @@ def test_bin_fetch_success():
         jailer_path=Path("/cache/bin/jailer-v1.5.0"),
         is_active=False,
     )
-    with patch("fcm.cli.asset.fetch_binary", return_value=bv):
+    with patch("mvmctl.cli.asset.fetch_binary", return_value=bv):
         result = click_runner.invoke(main_app, ["bin", "fetch", "1.5.0"])
     assert result.exit_code == 0
     assert "Downloaded" in result.output
@@ -509,7 +509,7 @@ def test_bin_fetch_success():
 
 
 def test_bin_fetch_error():
-    with patch("fcm.cli.asset.fetch_binary", side_effect=BinaryError("download failed")):
+    with patch("mvmctl.cli.asset.fetch_binary", side_effect=BinaryError("download failed")):
         result = click_runner.invoke(main_app, ["bin", "fetch", "1.5.0"])
     assert result.exit_code == 1
 
@@ -520,7 +520,7 @@ def test_bin_fetch_error():
 
 
 def test_bin_set_default_success():
-    with patch("fcm.cli.asset.set_active_version") as mock_set:
+    with patch("mvmctl.cli.asset.set_active_version") as mock_set:
         result = click_runner.invoke(main_app, ["bin", "set-default", "1.5.0"])
     assert result.exit_code == 0
     assert "Active version set" in result.output
@@ -529,7 +529,7 @@ def test_bin_set_default_success():
 
 def test_bin_set_default_not_found():
     with patch(
-        "fcm.cli.asset.set_active_version",
+        "mvmctl.cli.asset.set_active_version",
         side_effect=AssetNotFoundError("not downloaded"),
     ):
         result = click_runner.invoke(main_app, ["bin", "set-default", "9.9.9"])
@@ -542,7 +542,7 @@ def test_bin_set_default_not_found():
 
 
 def test_bin_rm_success():
-    with patch("fcm.cli.asset.remove_version") as mock_rm:
+    with patch("mvmctl.cli.asset.remove_version") as mock_rm:
         result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0", "--force"])
     assert result.exit_code == 0
     assert "Removed" in result.output
@@ -551,7 +551,7 @@ def test_bin_rm_success():
 
 def test_bin_rm_not_found():
     with patch(
-        "fcm.cli.asset.remove_version",
+        "mvmctl.cli.asset.remove_version",
         side_effect=AssetNotFoundError("not found"),
     ):
         result = click_runner.invoke(main_app, ["bin", "rm", "9.9.9", "--force"])
@@ -559,14 +559,14 @@ def test_bin_rm_not_found():
 
 
 def test_bin_rm_with_confirmation():
-    with patch("fcm.cli.asset.remove_version") as mock_rm:
+    with patch("mvmctl.cli.asset.remove_version") as mock_rm:
         result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0"], input="y\n")
     assert result.exit_code == 0
     mock_rm.assert_called_once()
 
 
 def test_bin_rm_abort_confirmation():
-    with patch("fcm.cli.asset.remove_version") as mock_rm:
+    with patch("mvmctl.cli.asset.remove_version") as mock_rm:
         result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0"], input="n\n")
     assert result.exit_code != 0
     mock_rm.assert_not_called()
@@ -583,7 +583,7 @@ def test_cache_clear_dirs_exist(tmp_path: Path):
     (tmp_path / "images").mkdir()
     (tmp_path / "bin" / "firecracker-v1.0.0").touch()
 
-    with patch("fcm.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert "Removed" in result.output
@@ -593,7 +593,7 @@ def test_cache_clear_dirs_exist(tmp_path: Path):
 
 
 def test_cache_clear_nothing_to_clear(tmp_path: Path):
-    with patch("fcm.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert "Nothing to clear" in result.output
@@ -601,7 +601,7 @@ def test_cache_clear_nothing_to_clear(tmp_path: Path):
 
 def test_cache_clear_partial_dirs(tmp_path: Path):
     (tmp_path / "bin").mkdir()
-    with patch("fcm.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert not (tmp_path / "bin").exists()
@@ -610,7 +610,7 @@ def test_cache_clear_partial_dirs(tmp_path: Path):
 def test_cache_clear_with_confirmation(tmp_path: Path):
     (tmp_path / "bin").mkdir()
     (tmp_path / "kernels").mkdir()
-    with patch("fcm.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear"], input="y\n")
     assert result.exit_code == 0
     assert not (tmp_path / "bin").exists()
@@ -618,7 +618,7 @@ def test_cache_clear_with_confirmation(tmp_path: Path):
 
 def test_cache_clear_abort_confirmation(tmp_path: Path):
     (tmp_path / "bin").mkdir()
-    with patch("fcm.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear"], input="n\n")
     assert result.exit_code != 0
     assert (tmp_path / "bin").exists()
@@ -628,14 +628,14 @@ def test_cache_clear_preserves_vms_dir(tmp_path: Path):
     (tmp_path / "bin").mkdir()
     (tmp_path / "vms").mkdir()
     (tmp_path / "vms" / "state.json").write_text("{}")
-    with patch("fcm.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert (tmp_path / "vms").exists()
 
 
 def test_image_set_default(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     (tmp_path / "images").mkdir()
     (tmp_path / "images" / "ubuntu-24.04.ext4").write_bytes(b"\x00" * 1024)
     result = click_runner.invoke(
@@ -647,7 +647,7 @@ def test_image_set_default(tmp_path: Path, monkeypatch):
 
 
 def test_image_set_default_not_found(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     (tmp_path / "images").mkdir()
     result = click_runner.invoke(
         main_app,
@@ -658,8 +658,8 @@ def test_image_set_default_not_found(tmp_path: Path, monkeypatch):
 
 def test_image_ls_remote(tmp_path: Path):
     with (
-        patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
-        patch("fcm.cli.asset.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.asset.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--remote", "--images-dir", str(tmp_path)]
@@ -688,7 +688,7 @@ def test_kernel_set_default_not_found(tmp_path: Path):
 
 
 def test_bin_ls_default_limit():
-    from fcm.cli.asset import bin_app
+    from mvmctl.cli.asset import bin_app
 
     result = runner.invoke(bin_app, ["ls", "--help"])
     assert "5" in result.output
@@ -701,12 +701,12 @@ def test_kernel_ls_auto_creates_dir(tmp_path: Path):
     assert missing.exists()
 
 
-@patch("fcm.cli.asset.fetch_image")
-@patch("fcm.cli.asset.load_images_config")
+@patch("mvmctl.cli.asset.fetch_image")
+@patch("mvmctl.cli.asset.load_images_config")
 def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     """FIX-009: image fetch warns when image already exists."""
-    from fcm.main import app
-    from fcm.models.image import ImageSpec
+    from mvmctl.main import app
+    from mvmctl.models.image import ImageSpec
     from click.testing import CliRunner as _ClickRunner
 
     mock_config.return_value = [
@@ -735,7 +735,7 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
 
 
 def test_bin_rm_multiple_versions():
-    with patch("fcm.cli.asset.remove_version") as mock_rm:
+    with patch("mvmctl.cli.asset.remove_version") as mock_rm:
         result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0", "1.6.0", "--force"])
     assert result.exit_code == 0
     assert mock_rm.call_count == 2
@@ -763,7 +763,7 @@ def test_kernel_rm_no_args(tmp_path: Path):
 
 
 def test_image_rm_no_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     result = click_runner.invoke(
         main_app, ["image", "rm", "--images-dir", str(tmp_path), "--force"]
     )
@@ -771,7 +771,7 @@ def test_image_rm_no_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_image_rm_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     import json
 
     (tmp_path / "images").mkdir(exist_ok=True)
@@ -808,7 +808,7 @@ def test_image_rm_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_image_rm_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "9" * 64
     _write_image_meta(tmp_path, full_hash, f"{full_hash}.ext4")
     result = click_runner.invoke(
@@ -820,7 +820,7 @@ def test_image_rm_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "1" * 64
     (tmp_path / "images").mkdir(exist_ok=True)
     img_file = tmp_path / "images" / "ubuntu-24.04.ext4"
@@ -840,7 +840,7 @@ def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         }
     }
     (tmp_path / "metadata.json").write_text(json.dumps(meta))
-    with patch("fcm.cli.asset.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--images-dir", str(tmp_path / "images")]
         )

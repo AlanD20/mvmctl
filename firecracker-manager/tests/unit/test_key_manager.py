@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fcm.core.key_manager import (
+from mvmctl.core.key_manager import (
     add_key,
     create_key,
     get_key,
@@ -14,7 +14,7 @@ from fcm.core.key_manager import (
     list_keys,
     remove_key,
 )
-from fcm.exceptions import FCMKeyError
+from mvmctl.exceptions import FCMKeyError
 
 SAMPLE_PUB_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtestkeycontent testuser@testhost"
 
@@ -24,7 +24,7 @@ def keys_dir(tmp_path, monkeypatch):
     """Set up a temporary keys directory."""
     kd = tmp_path / "keys"
     kd.mkdir()
-    monkeypatch.setattr("fcm.core.key_manager.get_keys_dir", lambda: kd)
+    monkeypatch.setattr("mvmctl.core.key_manager.get_keys_dir", lambda: kd)
     return kd
 
 
@@ -154,7 +154,7 @@ def test_create_key_success(keys_dir, tmp_path):
             pub_path.write_text(SAMPLE_PUB_KEY)
         return mock_result
 
-    with patch("fcm.core.key_manager.subprocess.run", side_effect=fake_keygen):
+    with patch("mvmctl.core.key_manager.subprocess.run", side_effect=fake_keygen):
         info, private_path = create_key("newkey", output_dir=output_dir)
 
     assert info.name == "newkey"
@@ -199,7 +199,7 @@ def test_create_key_ssh_keygen_fails(keys_dir, tmp_path):
     mock_result.returncode = 1
     mock_result.stderr = "keygen error"
 
-    with patch("fcm.core.key_manager.subprocess.run", return_value=mock_result):
+    with patch("mvmctl.core.key_manager.subprocess.run", return_value=mock_result):
         with pytest.raises(FCMKeyError, match="ssh-keygen failed"):
             create_key("failkey", output_dir=output_dir)
 
@@ -365,7 +365,7 @@ def test_create_key_overwrite_removes_old_files(keys_dir, tmp_path):
                 key_path.with_suffix(".pub").write_text(SAMPLE_PUB_KEY)
         return mock_result
 
-    with patch("fcm.core.key_manager.subprocess.run", side_effect=fake_keygen):
+    with patch("mvmctl.core.key_manager.subprocess.run", side_effect=fake_keygen):
         info, private_path = create_key("overkey", output_dir=output_dir, overwrite=True)
 
     assert info.name == "overkey"
@@ -373,21 +373,21 @@ def test_create_key_overwrite_removes_old_files(keys_dir, tmp_path):
 
 
 def test_compute_fingerprint_invalid_key():
-    from fcm.core.key_manager import _compute_fingerprint
+    from mvmctl.core.key_manager import _compute_fingerprint
 
     with pytest.raises(FCMKeyError, match="Invalid public key format"):
         _compute_fingerprint("not-a-valid-key")
 
 
 def test_parse_algorithm_empty_key():
-    from fcm.core.key_manager import _parse_algorithm
+    from mvmctl.core.key_manager import _parse_algorithm
 
     with pytest.raises(FCMKeyError, match="Invalid public key format"):
         _parse_algorithm("")
 
 
 def test_parse_comment_no_comment():
-    from fcm.core.key_manager import _parse_comment
+    from mvmctl.core.key_manager import _parse_comment
 
     result = _parse_comment("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI")
     assert result == ""

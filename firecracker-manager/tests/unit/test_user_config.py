@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fcm.core.user_config import (
+from mvmctl.core.user_config import (
     get_config_value,
     get_full_user_config,
     set_config_value,
@@ -13,7 +13,7 @@ from fcm.core.user_config import (
 
 def test_set_and_get_simple(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "config.yaml"
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("network_interface", "wlo0")
     val = get_config_value("network_interface")
@@ -22,7 +22,7 @@ def test_set_and_get_simple(tmp_path: Path, monkeypatch):
 
 def test_set_and_get_nested(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "config.yaml"
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("network.bridge_cidr", "192.168.0.0/24")
     val = get_config_value("network.bridge_cidr")
@@ -31,7 +31,7 @@ def test_set_and_get_nested(tmp_path: Path, monkeypatch):
 
 def test_get_missing_key(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "config.yaml"
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     val = get_config_value("nonexistent.key")
     assert val is None
@@ -39,7 +39,7 @@ def test_get_missing_key(tmp_path: Path, monkeypatch):
 
 def test_get_full_config_empty(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "missing.yaml"
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     config = get_full_user_config()
     assert config == {}
@@ -47,7 +47,7 @@ def test_get_full_config_empty(tmp_path: Path, monkeypatch):
 
 def test_get_full_config_with_data(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "config.yaml"
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("foo", "bar")
     config = get_full_user_config()
@@ -56,7 +56,7 @@ def test_get_full_config_with_data(tmp_path: Path, monkeypatch):
 
 def test_set_overwrites_existing(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "config.yaml"
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("key", "first")
     set_config_value("key", "second")
@@ -87,7 +87,7 @@ def test_coerce_value_string():
 
 def test_config_persists_to_file(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "config.yaml"
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("test_key", "test_value")
     assert config_file.exists()
@@ -98,7 +98,7 @@ def test_config_persists_to_file(tmp_path: Path, monkeypatch):
 def test_corrupt_config_returns_empty(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "config.yaml"
     config_file.write_text("{invalid: yaml: [}")
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     config = get_full_user_config()
     assert config == {}
@@ -107,7 +107,7 @@ def test_corrupt_config_returns_empty(tmp_path: Path, monkeypatch):
 def test_non_dict_config_returns_empty(tmp_path: Path, monkeypatch):
     config_file = tmp_path / "config.yaml"
     config_file.write_text("- item1\n- item2\n")
-    monkeypatch.setenv("FCM_CONFIG", str(config_file))
+    monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     config = get_full_user_config()
     assert config == {}

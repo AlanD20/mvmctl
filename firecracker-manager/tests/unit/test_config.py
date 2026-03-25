@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from fcm.core.config import (
+from mvmctl.core.config import (
     FCMConfig,
     FirecrackerConfig,
     VMNetworkConfig,
@@ -48,7 +48,7 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.enable_api_socket is False
     assert config.vm_defaults.enable_pci is False
 
-    assert config.network.vm_network.bridge_name == "fcm-bridge"
+    assert config.network.vm_network.bridge_name == "mvm-bridge"
     assert config.network.vm_network.bridge_ip == "172.35.0.1/24"
 
     assert config.paths.assets_dir != ""

@@ -4,15 +4,15 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from fcm.core.ssh import (
+from mvmctl.core.ssh import (
     find_ssh_keys,
     extract_ip_from_config,
     build_ssh_command,
     connect_to_vm,
     _validate_ssh_username,
 )
-from fcm.exceptions import VMNotFoundError, FCMKeyError, FCMError
-from fcm.models.vm import VMInstance, VMState
+from mvmctl.exceptions import VMNotFoundError, FCMKeyError, FCMError
+from mvmctl.models.vm import VMInstance, VMState
 
 
 def test_find_ssh_keys_empty_dir(tmp_path: Path):
@@ -130,8 +130,8 @@ def test_build_ssh_command_custom_user():
     assert "ubuntu@10.20.0.2" in cmd
 
 
-@patch("fcm.core.ssh.run_ssh", return_value=0)
-@patch("fcm.core.ssh.find_ssh_keys")
+@patch("mvmctl.core.ssh.run_ssh", return_value=0)
+@patch("mvmctl.core.ssh.find_ssh_keys")
 def test_connect_to_vm_by_ip(mock_find_keys: MagicMock, mock_run_ssh: MagicMock, tmp_path: Path):
     """Connect by IP: uses find_ssh_keys and calls run_ssh."""
     key = tmp_path / "id_rsa"
@@ -146,9 +146,9 @@ def test_connect_to_vm_by_ip(mock_find_keys: MagicMock, mock_run_ssh: MagicMock,
     mock_run_ssh.assert_called_once_with("10.20.0.5", "root", key, "echo hi")
 
 
-@patch("fcm.core.ssh.run_ssh", return_value=0)
-@patch("fcm.core.ssh.find_ssh_keys")
-@patch("fcm.core.ssh.VMManager")
+@patch("mvmctl.core.ssh.run_ssh", return_value=0)
+@patch("mvmctl.core.ssh.find_ssh_keys")
+@patch("mvmctl.core.ssh.VMManager")
 def test_connect_to_vm_by_name(
     mock_vm_manager_cls: MagicMock,
     mock_find_keys: MagicMock,
@@ -173,7 +173,7 @@ def test_connect_to_vm_by_name(
     mock_run_ssh.assert_called_once_with("10.20.0.3", "root", key, "echo hi")
 
 
-@patch("fcm.core.ssh.VMManager")
+@patch("mvmctl.core.ssh.VMManager")
 def test_connect_to_vm_name_not_found(mock_vm_manager_cls: MagicMock):
     """Raises VMNotFoundError when VM name not found."""
     mock_manager = MagicMock()
@@ -184,7 +184,7 @@ def test_connect_to_vm_name_not_found(mock_vm_manager_cls: MagicMock):
         connect_to_vm("nonexistent", exec_mode=False)
 
 
-@patch("fcm.core.ssh.find_ssh_keys", return_value=[])
+@patch("mvmctl.core.ssh.find_ssh_keys", return_value=[])
 def test_connect_to_vm_no_keys(mock_find_keys: MagicMock):
     """Raises FCMKeyError when no SSH keys found."""
     with pytest.raises(FCMKeyError, match="No SSH keys found"):
@@ -221,10 +221,10 @@ def test_build_ssh_command_rejects_bad_username():
 # run_ssh and exec_ssh coverage (3e)
 # ---------------------------------------------------------------------------
 
-from fcm.core.ssh import run_ssh, exec_ssh  # noqa: E402
+from mvmctl.core.ssh import run_ssh, exec_ssh  # noqa: E402
 
 
-@patch("fcm.core.ssh.subprocess.run")
+@patch("mvmctl.core.ssh.subprocess.run")
 def test_run_ssh_success(mock_run):
     """run_ssh calls subprocess.run successfully."""
     mock_run.return_value = MagicMock(returncode=0)
@@ -234,14 +234,14 @@ def test_run_ssh_success(mock_run):
     assert mock_run.call_args[0][0][0] == "ssh"
 
 
-@patch("fcm.core.ssh.subprocess.run")
+@patch("mvmctl.core.ssh.subprocess.run")
 def test_run_ssh_failure(mock_run):
     """run_ssh returns exit code on failure."""
     mock_run.return_value = MagicMock(returncode=1)
     assert run_ssh("10.0.0.1", "root", Path("key"), "bad_cmd") == 1
 
 
-@patch("fcm.core.ssh.os.execvp")
+@patch("mvmctl.core.ssh.os.execvp")
 def test_exec_ssh(mock_execvp):
     """exec_ssh calls os.execvp with the correct arguments."""
     exec_ssh("10.0.0.1", "root", Path("key"))
@@ -250,7 +250,7 @@ def test_exec_ssh(mock_execvp):
     assert "root@10.0.0.1" in mock_execvp.call_args[0][1]
 
 
-@patch("fcm.core.ssh.os.execvp")
+@patch("mvmctl.core.ssh.os.execvp")
 def test_exec_ssh_oserror(mock_execvp):
     """exec_ssh raises OSError if os.execvp throws OSError."""
     mock_execvp.side_effect = OSError("No such file or directory")

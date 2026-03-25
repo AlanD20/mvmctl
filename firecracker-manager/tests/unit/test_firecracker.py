@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from fcm.core.firecracker import FirecrackerClient, get_vm_socket_path
+from mvmctl.core.firecracker import FirecrackerClient, get_vm_socket_path
 
 
 def test_get_vm_socket_path_not_found(mock_cache_dir: Path) -> None:
@@ -23,7 +23,7 @@ def test_get_vm_socket_path_found(mock_cache_dir: Path) -> None:
 
 def test_request_raises_socket_not_found_when_no_socket(tmp_path: Path) -> None:
     """_request raises SocketNotFoundError when socket file doesn't exist."""
-    from fcm.exceptions import SocketNotFoundError
+    from mvmctl.exceptions import SocketNotFoundError
 
     client = FirecrackerClient(tmp_path / "nonexistent.socket")
     with pytest.raises(SocketNotFoundError):
@@ -32,7 +32,7 @@ def test_request_raises_socket_not_found_when_no_socket(tmp_path: Path) -> None:
 
 def test_request_raises_firecracker_error_on_oserror(tmp_path: Path) -> None:
     """_request raises FirecrackerError on OSError during request."""
-    from fcm.exceptions import FirecrackerError
+    from mvmctl.exceptions import FirecrackerError
 
     socket_path = tmp_path / "test.socket"
     socket_path.touch()
@@ -97,7 +97,7 @@ def test_create_snapshot_sends_correct_body() -> None:
 
 def test_send_ctrl_alt_del_returns_false_on_error() -> None:
     """send_ctrl_alt_del returns False when FirecrackerError is raised."""
-    from fcm.exceptions import FirecrackerError
+    from mvmctl.exceptions import FirecrackerError
 
     client = FirecrackerClient(Path("/fake.socket"))
     with patch.object(client, "_request", side_effect=FirecrackerError("no vm")):

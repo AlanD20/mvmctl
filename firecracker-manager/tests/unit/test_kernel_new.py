@@ -4,7 +4,7 @@ from urllib.error import URLError
 
 import pytest
 
-from fcm.core.kernel import (
+from mvmctl.core.kernel import (
     download_firecracker_kernel,
     fetch_kernel_sha256,
     get_default_kernel_path,
@@ -13,7 +13,7 @@ from fcm.core.kernel import (
     save_kernel_metadata,
     set_default_kernel,
 )
-from fcm.exceptions import KernelError
+from mvmctl.exceptions import KernelError
 
 
 def test_parse_kernel_filename_fc_with_v_prefix():
@@ -59,8 +59,8 @@ def test_parse_kernel_filename_with_aarch64():
 
 
 def test_save_kernel_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     kernel_file = tmp_path / "vmlinux"
     kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
     save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
@@ -78,8 +78,8 @@ def test_save_kernel_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_save_kernel_metadata_parses_filename(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     kernel_file = tmp_path / "vmlinux-fc-v1.15-x86_64"
     kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
     save_kernel_metadata(tmp_path, "vmlinux-fc-v1.15-x86_64", kernel_type="firecracker")
@@ -98,15 +98,15 @@ def test_save_kernel_metadata_parses_filename(tmp_path: Path, monkeypatch: pytes
 
 
 def test_list_kernels_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     result = list_kernels(tmp_path)
     assert result == []
 
 
 def test_list_kernels_with_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF" + b"\x00" * 100)
     result = list_kernels(tmp_path)
     assert len(result) == 1
@@ -115,8 +115,8 @@ def test_list_kernels_with_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 def test_list_kernels_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF" + b"\x00" * 100)
     save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
     result = list_kernels(tmp_path)
@@ -126,16 +126,16 @@ def test_list_kernels_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 
 def test_list_kernels_skips_json_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
     result = list_kernels(tmp_path)
     assert len(result) == 1
 
 
 def test_set_default_kernel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
     set_default_kernel(tmp_path, "vmlinux")
     import json
@@ -147,15 +147,15 @@ def test_set_default_kernel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_set_default_kernel_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     with pytest.raises(KernelError):
         set_default_kernel(tmp_path, "nonexistent")
 
 
 def test_get_default_kernel_path_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     vmlinux = tmp_path / "vmlinux"
     vmlinux.write_bytes(b"\x7fELF")
     set_default_kernel(tmp_path, "vmlinux")
@@ -164,8 +164,8 @@ def test_get_default_kernel_path_set(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_get_default_kernel_path_no_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     vmlinux = tmp_path / "vmlinux"
     vmlinux.write_bytes(b"\x7fELF")
     result = get_default_kernel_path(tmp_path)
@@ -173,22 +173,22 @@ def test_get_default_kernel_path_no_fallback(tmp_path: Path, monkeypatch: pytest
 
 
 def test_get_default_kernel_path_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     result = get_default_kernel_path(tmp_path)
     assert result is None
 
 
 def test_list_kernels_shows_default_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
     set_default_kernel(tmp_path, "vmlinux")
     result = list_kernels(tmp_path)
     assert result[0]["is_default"] == "true"
 
 
-@patch("fcm.core.kernel.urlopen")
+@patch("mvmctl.core.kernel.urlopen")
 def test_fetch_kernel_sha256_success(mock_urlopen: MagicMock):
     mock_resp = MagicMock()
     mock_resp.read.return_value = b"abcdef0123456789  linux-6.1.9.tar.xz\n"
@@ -200,19 +200,19 @@ def test_fetch_kernel_sha256_success(mock_urlopen: MagicMock):
     assert result == "abcdef0123456789"
 
 
-@patch("fcm.core.kernel.urlopen", side_effect=URLError("no network"))
+@patch("mvmctl.core.kernel.urlopen", side_effect=URLError("no network"))
 def test_fetch_kernel_sha256_failure(mock_urlopen: MagicMock):
     result = fetch_kernel_sha256("6.1.9")
     assert result is None
 
 
-@patch("fcm.core.kernel.download_file")
-@patch("fcm.core.kernel.urlopen")
+@patch("mvmctl.core.kernel.download_file")
+@patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_success(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     xml_response = b"""<?xml version="1.0"?>
 <ListBucketResult>
 <Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
@@ -235,13 +235,13 @@ def test_download_firecracker_kernel_success(
     assert mock_dl.call_args.kwargs["expected_sha256"] is not None
 
 
-@patch("fcm.core.kernel.urlopen", side_effect=URLError("network error"))
+@patch("mvmctl.core.kernel.urlopen", side_effect=URLError("network error"))
 def test_download_firecracker_kernel_list_failure(mock_urlopen: MagicMock, tmp_path: Path):
     with pytest.raises(KernelError):
         download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path)
 
 
-@patch("fcm.core.kernel.urlopen")
+@patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_no_keys(mock_urlopen: MagicMock, tmp_path: Path):
     mock_resp = MagicMock()
     mock_resp.read.return_value = (
@@ -255,8 +255,8 @@ def test_download_firecracker_kernel_no_keys(mock_urlopen: MagicMock, tmp_path: 
         download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path)
 
 
-@patch("fcm.core.kernel.download_file")
-@patch("fcm.core.kernel.urlopen")
+@patch("mvmctl.core.kernel.download_file")
+@patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_requires_checksum(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):

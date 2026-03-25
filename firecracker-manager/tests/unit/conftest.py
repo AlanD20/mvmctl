@@ -4,15 +4,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fcm.core.key_manager import KeyInfo
-from fcm.core.vm_manager import VMManager
-from fcm.models.vm import VMConfig, VMInstance, VMState
+from mvmctl.core.key_manager import KeyInfo
+from mvmctl.core.vm_manager import VMManager
+from mvmctl.models.vm import VMConfig, VMInstance, VMState
 
 
 @pytest.fixture(autouse=True)
 def _reset_sudo_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
-    import fcm.core.network as _net
+    import mvmctl.core.network as _net
 
     monkeypatch.setattr(_net, "_SUDO_CREDENTIALS_VALID", True)
     monkeypatch.setattr(_net, "_SUDO_CACHE_TIMESTAMP", time.monotonic())
@@ -30,8 +30,8 @@ def isolate_config_and_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     cache_dir = tmp_path / "cache"
     config_dir.mkdir(parents=True, exist_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("FCM_CONFIG_DIR", str(config_dir))
-    monkeypatch.setenv("FCM_CACHE_DIR", str(cache_dir))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def mock_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     images_dir.mkdir(parents=True)
     (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
 
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     return tmp_path
 
 
@@ -54,7 +54,7 @@ def mock_keys_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Creates a mock keys directory."""
     keys_dir = tmp_path / "keys"
     keys_dir.mkdir(parents=True)
-    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     return keys_dir
 
 

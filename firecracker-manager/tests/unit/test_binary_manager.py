@@ -13,7 +13,7 @@ from urllib.error import URLError
 import pytest
 from pytest_mock import MockerFixture
 
-from fcm.core.binary_manager import (
+from mvmctl.core.binary_manager import (
     _normalize_version,
     fetch_binary,
     get_bin_dir,
@@ -22,7 +22,7 @@ from fcm.core.binary_manager import (
     remove_version,
     set_active_version,
 )
-from fcm.exceptions import AssetNotFoundError, BinaryError
+from mvmctl.exceptions import AssetNotFoundError, BinaryError
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ def test_normalize_version_empty_string():
 
 
 def test_get_bin_dir_returns_path_under_cache(tmp_path: Path, mocker: MockerFixture):
-    mocker.patch.dict(os.environ, {"FCM_CACHE_DIR": str(tmp_path)})
+    mocker.patch.dict(os.environ, {"MVM_CACHE_DIR": str(tmp_path)})
     result = get_bin_dir()
     assert result == tmp_path / "bin"
 
@@ -153,7 +153,7 @@ def test_list_remote_versions_success(mocker: MockerFixture):
         {"tag_name": "v1.4.0"},
     ]
     mock_resp = _mock_github_response(releases)
-    mocker.patch("fcm.core.binary_manager.urlopen", return_value=mock_resp)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=mock_resp)
     result = list_remote_versions(limit=5)
     assert result == ["1.5.0", "1.4.0"]
 
@@ -161,7 +161,7 @@ def test_list_remote_versions_success(mocker: MockerFixture):
 def test_list_remote_versions_strips_v_prefix(mocker: MockerFixture):
     releases = [{"tag_name": "v2.0.0"}]
     mock_resp = _mock_github_response(releases)
-    mocker.patch("fcm.core.binary_manager.urlopen", return_value=mock_resp)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=mock_resp)
     result = list_remote_versions()
     assert result == ["2.0.0"]
 
@@ -173,19 +173,19 @@ def test_list_remote_versions_skips_non_string_tags(mocker: MockerFixture):
         {"other_key": "v2.0.0"},
     ]
     mock_resp = _mock_github_response(releases)
-    mocker.patch("fcm.core.binary_manager.urlopen", return_value=mock_resp)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=mock_resp)
     result = list_remote_versions()
     assert result == ["1.0.0"]
 
 
 def test_list_remote_versions_network_error(mocker: MockerFixture):
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=URLError("timeout"))
+    mocker.patch("mvmctl.core.binary_manager.urlopen", side_effect=URLError("timeout"))
     with pytest.raises(BinaryError, match="Failed to fetch releases"):
         list_remote_versions()
 
 
 def test_list_remote_versions_os_error(mocker: MockerFixture):
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=OSError("connection reset"))
+    mocker.patch("mvmctl.core.binary_manager.urlopen", side_effect=OSError("connection reset"))
     with pytest.raises(BinaryError, match="Failed to fetch releases"):
         list_remote_versions()
 
@@ -244,8 +244,8 @@ def test_fetch_binary_downloads_and_extracts(tmp_path: Path, mocker: MockerFixtu
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
-    mocker.patch("fcm.core.binary_manager.urlopen", return_value=sha_resp)
+    mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
     result = fetch_binary("1.5.0", bin_dir=tmp_path)
 
     assert result.version == "1.5.0"
@@ -258,7 +258,7 @@ def test_fetch_binary_downloads_and_extracts(tmp_path: Path, mocker: MockerFixtu
 
 
 def test_fetch_binary_download_failure_cleans_up(tmp_path: Path, mocker: MockerFixture):
-    mocker.patch("fcm.utils.http.urlopen", side_effect=URLError("network error"))
+    mocker.patch("mvmctl.utils.http.urlopen", side_effect=URLError("network error"))
     with pytest.raises(BinaryError, match="Failed to download"):
         fetch_binary("1.5.0", bin_dir=tmp_path)
     # No partial tgz left behind
@@ -286,8 +286,8 @@ def test_fetch_binary_missing_binaries_in_archive(tmp_path: Path, mocker: Mocker
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
-    mocker.patch("fcm.core.binary_manager.urlopen", return_value=sha_resp)
+    mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
     with pytest.raises(BinaryError, match="missing expected binaries"):
         fetch_binary("1.5.0", bin_dir=tmp_path)
 
@@ -306,8 +306,8 @@ def test_fetch_binary_corrupt_archive(tmp_path: Path, mocker: MockerFixture):
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
-    mocker.patch("fcm.core.binary_manager.urlopen", return_value=sha_resp)
+    mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
     with pytest.raises(BinaryError):
         fetch_binary("1.5.0", bin_dir=tmp_path)
     # Partial files cleaned up
@@ -427,7 +427,7 @@ def test_remove_version_partial_files(tmp_path: Path):
 
 def test_extract_member_none_reader():
     """extractfile returns None for directories/links --- should raise BinaryError."""
-    from fcm.core.binary_manager import _extract_member
+    from mvmctl.core.binary_manager import _extract_member
 
     mock_tar = MagicMock(spec=tarfile.TarFile)
     mock_member = MagicMock(spec=tarfile.TarInfo)
@@ -445,9 +445,9 @@ def test_extract_member_none_reader():
 
 def test_resolve_bin_dir_with_none_uses_default(tmp_path: Path, mocker: MockerFixture):
     """When bin_dir is None, _resolve_bin_dir uses get_bin_dir()."""
-    from fcm.core.binary_manager import _resolve_bin_dir
+    from mvmctl.core.binary_manager import _resolve_bin_dir
 
-    mocker.patch("fcm.core.binary_manager.get_bin_dir", return_value=tmp_path / "bins")
+    mocker.patch("mvmctl.core.binary_manager.get_bin_dir", return_value=tmp_path / "bins")
     result = _resolve_bin_dir(None)
     assert result == tmp_path / "bins"
     assert result.exists()
@@ -455,7 +455,7 @@ def test_resolve_bin_dir_with_none_uses_default(tmp_path: Path, mocker: MockerFi
 
 def test_resolve_bin_dir_with_explicit_path(tmp_path: Path):
     """When bin_dir is provided, use it directly and ensure it exists."""
-    from fcm.core.binary_manager import _resolve_bin_dir
+    from mvmctl.core.binary_manager import _resolve_bin_dir
 
     custom = tmp_path / "custom" / "bin"
     result = _resolve_bin_dir(custom)
@@ -470,7 +470,7 @@ def test_resolve_bin_dir_with_explicit_path(tmp_path: Path):
 
 def test_active_target_symlink_exists(tmp_path: Path):
     """_active_target returns the symlink target when it's a symlink."""
-    from fcm.core.binary_manager import _active_target
+    from mvmctl.core.binary_manager import _active_target
 
     (tmp_path / "firecracker-v1.0.0").touch()
     link = tmp_path / "firecracker"
@@ -480,7 +480,7 @@ def test_active_target_symlink_exists(tmp_path: Path):
 
 def test_active_target_not_a_symlink(tmp_path: Path):
     """_active_target returns None when the path is not a symlink."""
-    from fcm.core.binary_manager import _active_target
+    from mvmctl.core.binary_manager import _active_target
 
     regular_file = tmp_path / "firecracker"
     regular_file.touch()
@@ -489,7 +489,7 @@ def test_active_target_not_a_symlink(tmp_path: Path):
 
 def test_active_target_path_does_not_exist(tmp_path: Path):
     """_active_target returns None when the path doesn't exist."""
-    from fcm.core.binary_manager import _active_target
+    from mvmctl.core.binary_manager import _active_target
 
     assert _active_target(tmp_path / "nonexistent") is None
 
@@ -516,8 +516,8 @@ def test_fetch_binary_sha256_mismatch(tmp_path: Path, mocker: MockerFixture):
         mock_resp.__exit__ = MagicMock(return_value=False)
         return mock_resp
 
-    mocker.patch("fcm.utils.http.urlopen", side_effect=mock_urlopen)
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=mock_urlopen)
+    mocker.patch("mvmctl.utils.http.urlopen", side_effect=mock_urlopen)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", side_effect=mock_urlopen)
     with pytest.raises(BinaryError, match="Checksum mismatch"):
         fetch_binary("1.5.0", bin_dir=tmp_path)
 
@@ -529,8 +529,8 @@ def test_fetch_binary_sha256_sidecar_unavailable(tmp_path: Path, mocker: MockerF
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
 
-    mock_download = mocker.patch("fcm.core.binary_manager.download_file", return_value=True)
-    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=URLError("404"))
+    mock_download = mocker.patch("mvmctl.core.binary_manager.download_file", return_value=True)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", side_effect=URLError("404"))
     with pytest.raises(BinaryError, match="Checksum required"):
         fetch_binary("1.6.0", bin_dir=tmp_path)
     mock_download.assert_not_called()

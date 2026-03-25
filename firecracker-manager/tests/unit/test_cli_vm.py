@@ -4,9 +4,9 @@ from datetime import datetime
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from fcm.cli.vm import app
-from fcm.exceptions import FCMError
-from fcm.models.vm import VMInstance, VMState
+from mvmctl.cli.vm import app
+from mvmctl.exceptions import FCMError
+from mvmctl.models.vm import VMInstance, VMState
 
 runner = CliRunner()
 
@@ -23,7 +23,7 @@ def _make_vm(name: str, status: VMState = VMState.RUNNING, ip: str = "10.20.0.2"
 
 
 def test_list_vms_empty(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[])
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[])
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "No VMs found" in result.output
@@ -31,7 +31,7 @@ def test_list_vms_empty(mocker: MockerFixture):
 
 def test_list_vms_json(mocker: MockerFixture):
     vm = _make_vm("myvm")
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[vm])
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
     result = runner.invoke(app, ["ls", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -42,7 +42,7 @@ def test_list_vms_json(mocker: MockerFixture):
 def test_list_vms_all_flag(mocker: MockerFixture):
     running_vm = _make_vm("vm-running", VMState.RUNNING, "10.20.0.2")
     stopped_vm = _make_vm("vm-stopped", VMState.STOPPED, "10.20.0.3")
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[running_vm, stopped_vm])
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[running_vm, stopped_vm])
     result = runner.invoke(app, ["ls", "--all", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -55,8 +55,8 @@ def test_rm_vm_not_found(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_name.return_value = []
     mock_mgr.find_by_short_id.return_value = []
-    mocker.patch("fcm.core.vm_manager.get_vm_manager", return_value=mock_mgr)
-    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
+    mocker.patch("mvmctl.core.vm_manager.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm", "--name", "nonexistent", "--force"])
     assert result.exit_code == 1
 
@@ -66,15 +66,15 @@ def test_rm_force_running_vm(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_name.return_value = [vm]
     mock_mgr.find_by_short_id.return_value = []
-    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
-    mocker.patch("fcm.cli.vm.remove_vm")
+    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
+    mocker.patch("mvmctl.cli.vm.remove_vm")
     result = runner.invoke(app, ["rm", "--name", "delvm", "--force"])
     assert result.exit_code == 0
     assert "removed" in result.output.lower()
 
 
 def test_prune_nothing_to_do(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[])
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[])
     result = runner.invoke(app, ["prune"])
     assert result.exit_code == 0
     assert "Nothing to clean up" in result.output
@@ -82,8 +82,8 @@ def test_prune_nothing_to_do(mocker: MockerFixture):
 
 def test_prune_with_vms(mocker: MockerFixture):
     stopped_vm = _make_vm("vm-stopped", VMState.STOPPED, "10.20.0.3")
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[stopped_vm])
-    mocker.patch("fcm.cli.vm.cleanup_vms")
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[stopped_vm])
+    mocker.patch("mvmctl.cli.vm.cleanup_vms")
     result = runner.invoke(app, ["prune", "--force"])
     assert result.exit_code == 0
     assert "Removed" in result.output
@@ -91,45 +91,45 @@ def test_prune_with_vms(mocker: MockerFixture):
 
 def test_create_vm_success(mocker: MockerFixture):
     vm = _make_vm("newvm")
-    mocker.patch("fcm.cli.vm.create_vm", return_value=vm)
+    mocker.patch("mvmctl.cli.vm.create_vm", return_value=vm)
     result = runner.invoke(app, ["create", "--name", "newvm", "--image", "ubuntu-24.04"])
     assert result.exit_code == 0
     assert "newvm" in result.output
 
 
 def test_create_vm_fail(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.create_vm", side_effect=FCMError("Kernel not found"))
+    mocker.patch("mvmctl.cli.vm.create_vm", side_effect=FCMError("Kernel not found"))
     result = runner.invoke(app, ["create", "--name", "newvm", "--image", "ubuntu-24.04"])
     assert result.exit_code == 1
     assert "Kernel not found" in result.output
 
 
 def test_ssh_success(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.ssh_vm", return_value=0)
+    mocker.patch("mvmctl.cli.vm.ssh_vm", return_value=0)
     result = runner.invoke(app, ["ssh", "--name", "myvm"])
     assert result.exit_code == 0
 
 
 def test_ssh_failure(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.ssh_vm", return_value=1)
+    mocker.patch("mvmctl.cli.vm.ssh_vm", return_value=1)
     result = runner.invoke(app, ["ssh", "--name", "badvm"])
     assert result.exit_code == 1
 
 
 def test_logs_success(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.get_logs", return_value=["line 1\n", "line 2\n"])
+    mocker.patch("mvmctl.cli.vm.get_logs", return_value=["line 1\n", "line 2\n"])
     result = runner.invoke(app, ["logs", "--name", "myvm"])
     assert result.exit_code == 0
 
 
 def test_logs_failure(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.get_logs", side_effect=FCMError("Log error"))
+    mocker.patch("mvmctl.cli.vm.get_logs", side_effect=FCMError("Log error"))
     result = runner.invoke(app, ["logs", "--name", "badvm"])
     assert result.exit_code == 1
 
 
 def test_snapshot_success(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.snapshot_vm")
+    mocker.patch("mvmctl.cli.vm.snapshot_vm")
     result = runner.invoke(
         app,
         [
@@ -146,7 +146,7 @@ def test_snapshot_success(mocker: MockerFixture):
 
 
 def test_snapshot_failure(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.snapshot_vm", side_effect=FCMError("Failed to create snapshot"))
+    mocker.patch("mvmctl.cli.vm.snapshot_vm", side_effect=FCMError("Failed to create snapshot"))
     result = runner.invoke(
         app,
         [
@@ -163,7 +163,7 @@ def test_snapshot_failure(mocker: MockerFixture):
 
 
 def test_load_success(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.load_snapshot")
+    mocker.patch("mvmctl.cli.vm.load_snapshot")
     result = runner.invoke(
         app,
         [
@@ -180,7 +180,7 @@ def test_load_success(mocker: MockerFixture):
 
 
 def test_load_failure(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.load_snapshot", side_effect=FCMError("Failed to load snapshot"))
+    mocker.patch("mvmctl.cli.vm.load_snapshot", side_effect=FCMError("Failed to load snapshot"))
     result = runner.invoke(
         app,
         [
@@ -216,7 +216,7 @@ def test_create_missing_image_flag():
 def test_create_invalid_image_not_found(mocker: MockerFixture):
     """Image that doesn't exist should result in exit code 1."""
     mocker.patch(
-        "fcm.cli.vm.create_vm",
+        "mvmctl.cli.vm.create_vm",
         side_effect=FCMError("Image not found: 'no-such-image'"),
     )
     result = runner.invoke(app, ["create", "--name", "myvm", "--image", "no-such-image"])
@@ -227,7 +227,7 @@ def test_create_invalid_image_not_found(mocker: MockerFixture):
 def test_create_duplicate_vm_name(mocker: MockerFixture):
     """Creating a VM whose name already exists should fail with exit code 1."""
     mocker.patch(
-        "fcm.cli.vm.create_vm",
+        "mvmctl.cli.vm.create_vm",
         side_effect=FCMError("VM 'myvm' already exists"),
     )
     result = runner.invoke(app, ["create", "--name", "myvm", "--image", "ubuntu-24.04"])
@@ -239,7 +239,7 @@ def test_create_duplicate_vm_name(mocker: MockerFixture):
 # T-H3 (via main app): vm create error-path tests through the top-level CLI
 # ---------------------------------------------------------------------------
 
-from fcm.main import app as main_app  # noqa: E402
+from mvmctl.main import app as main_app  # noqa: E402
 from click.testing import CliRunner as ClickCliRunner
 
 main_runner = ClickCliRunner()
@@ -260,7 +260,7 @@ def test_main_app_create_missing_image():
 def test_main_app_create_invalid_image(mocker: MockerFixture):
     """Invalid image via the top-level app should exit 1."""
     mocker.patch(
-        "fcm.cli.vm.create_vm",
+        "mvmctl.cli.vm.create_vm",
         side_effect=FCMError("Image not found: 'bogus'"),
     )
     result = main_runner.invoke(main_app, ["vm", "create", "--name", "myvm", "--image", "bogus"])
@@ -271,7 +271,7 @@ def test_main_app_create_invalid_image(mocker: MockerFixture):
 def test_main_app_create_duplicate(mocker: MockerFixture):
     """Duplicate VM name via the top-level app should exit 1."""
     mocker.patch(
-        "fcm.cli.vm.create_vm",
+        "mvmctl.cli.vm.create_vm",
         side_effect=FCMError("VM 'myvm' already exists at /some/path"),
     )
     result = main_runner.invoke(
@@ -289,7 +289,7 @@ def test_main_app_create_duplicate(mocker: MockerFixture):
 def test_snapshot_vm_not_found(mocker: MockerFixture):
     """Snapshot on a non-existent VM should exit 1."""
     mocker.patch(
-        "fcm.cli.vm.snapshot_vm",
+        "mvmctl.cli.vm.snapshot_vm",
         side_effect=FCMError(
             "Socket not found for VM 'ghost'. Must be running with --enable-api-socket"
         ),
@@ -313,7 +313,7 @@ def test_snapshot_vm_not_found(mocker: MockerFixture):
 def test_snapshot_no_api_socket(mocker: MockerFixture):
     """Snapshot without API socket enabled should exit 1."""
     mocker.patch(
-        "fcm.cli.vm.snapshot_vm",
+        "mvmctl.cli.vm.snapshot_vm",
         side_effect=FCMError(
             "Socket not found for VM 'myvm'. Must be running with --enable-api-socket"
         ),
@@ -343,7 +343,7 @@ def test_snapshot_missing_required_flags():
 def test_load_vm_not_found(mocker: MockerFixture):
     """Load snapshot on a non-existent VM should exit 1."""
     mocker.patch(
-        "fcm.cli.vm.load_snapshot",
+        "mvmctl.cli.vm.load_snapshot",
         side_effect=FCMError(
             "Socket not found for VM 'ghost'. Must be running with --enable-api-socket"
         ),
@@ -367,7 +367,7 @@ def test_load_vm_not_found(mocker: MockerFixture):
 def test_load_no_api_socket(mocker: MockerFixture):
     """Load without API socket enabled should exit 1."""
     mocker.patch(
-        "fcm.cli.vm.load_snapshot",
+        "mvmctl.cli.vm.load_snapshot",
         side_effect=FCMError(
             "Socket not found for VM 'myvm'. Must be running with --enable-api-socket"
         ),
@@ -391,7 +391,7 @@ def test_load_no_api_socket(mocker: MockerFixture):
 def test_load_missing_snapshot_files(mocker: MockerFixture):
     """Load with non-existent snapshot files should exit 1."""
     mocker.patch(
-        "fcm.cli.vm.load_snapshot",
+        "mvmctl.cli.vm.load_snapshot",
         side_effect=FCMError("Snapshot file not found: /nonexistent/mem.snap"),
     )
     result = runner.invoke(
@@ -418,7 +418,7 @@ def test_load_missing_required_flags():
 
 def test_load_no_resume_flag(mocker: MockerFixture):
     """Load with --no-resume flag should invoke load_snapshot with resume_after=False."""
-    mock_load = mocker.patch("fcm.cli.vm.load_snapshot")
+    mock_load = mocker.patch("mvmctl.cli.vm.load_snapshot")
     result = runner.invoke(
         app,
         [
@@ -441,7 +441,7 @@ def test_load_no_resume_flag(mocker: MockerFixture):
 
 
 def test_ps_alias(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[_make_vm("myvm")])
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[_make_vm("myvm")])
     result = runner.invoke(app, ["ps"])
     assert result.exit_code == 0
     assert "myvm" in result.output
@@ -449,7 +449,7 @@ def test_ps_alias(mocker: MockerFixture):
 
 def test_ps_all_flag(mocker: MockerFixture):
     mocker.patch(
-        "fcm.cli.vm.list_vms",
+        "mvmctl.cli.vm.list_vms",
         return_value=[
             _make_vm("running", VMState.RUNNING),
             _make_vm("stopped", VMState.STOPPED),
@@ -466,8 +466,8 @@ def test_rm_by_short_id(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.find_by_short_id.return_value = [vm]
     mock_mgr.get_by_name.return_value = []
-    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
-    mocker.patch("fcm.cli.vm.remove_vm")
+    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
+    mocker.patch("mvmctl.cli.vm.remove_vm")
     result = runner.invoke(app, ["rm", "abc123", "--force"])
     assert result.exit_code == 0
     assert "myvm" in result.output
@@ -479,8 +479,8 @@ def test_rm_multiple_names(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.find_by_short_id.return_value = []
     mock_mgr.get_by_name.side_effect = lambda n: [vm1] if n == "vm1" else [vm2]
-    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
-    mocker.patch("fcm.cli.vm.remove_vm")
+    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
+    mocker.patch("mvmctl.cli.vm.remove_vm")
     result = runner.invoke(app, ["rm", "--name", "vm1", "--name", "vm2", "--force"])
     assert result.exit_code == 0
 
@@ -489,20 +489,20 @@ def test_rm_no_targets(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.find_by_short_id.return_value = []
     mock_mgr.get_by_name.return_value = []
-    mocker.patch("fcm.core.vm_manager.VMManager", return_value=mock_mgr)
+    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm", "--force"])
     assert result.exit_code == 1
 
 
 def test_prune_no_stopped(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[_make_vm("myvm")])
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[_make_vm("myvm")])
     result = runner.invoke(app, ["prune"])
     assert result.exit_code == 0
     assert "Nothing" in result.output
 
 
 def test_prune_dry_run(mocker: MockerFixture):
-    mocker.patch("fcm.cli.vm.list_vms", return_value=[_make_vm("stopped", VMState.STOPPED)])
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[_make_vm("stopped", VMState.STOPPED)])
     result = runner.invoke(app, ["prune", "--dry-run"])
     assert result.exit_code == 0
     assert "Dry run" in result.output

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from fcm.core.vm_manager import VMManager
-from fcm.models.vm import VMInstance, VMState
+from mvmctl.core.vm_manager import VMManager
+from mvmctl.models.vm import VMInstance, VMState
 
 
 @pytest.mark.parametrize(
@@ -89,7 +89,7 @@ def test_vm_manager_update_status_not_found(
     vm_manager: VMManager, vm_name: str, new_status: VMState
 ):
     """update_status should raise VMNotFoundError when the named VM does not exist."""
-    from fcm.exceptions import VMNotFoundError
+    from mvmctl.exceptions import VMNotFoundError
 
     with pytest.raises(VMNotFoundError):
         vm_manager.update_status(vm_name, new_status)

@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fcm.exceptions import ProcessError
-from fcm.utils.process import run_cmd, stream_cmd
+from mvmctl.exceptions import ProcessError
+from mvmctl.utils.process import run_cmd, stream_cmd
 
 
 # ---------------------------------------------------------------------------
@@ -74,14 +74,14 @@ def test_run_cmd_captures_stderr_on_failure():
     assert "/nonexistent_path_xyz_12345" not in error_str.split("\n")[0]
 
 
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_file_not_found_mocked(mock_run):
     mock_run.side_effect = FileNotFoundError("no such binary")
     with pytest.raises(ProcessError, match="Command not found: badcmd"):
         run_cmd(["badcmd", "--arg"])
 
 
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_called_process_error_mocked(mock_run):
     err = subprocess.CalledProcessError(2, "mycmd")
     err.stderr = "some error detail"
@@ -91,7 +91,7 @@ def test_run_cmd_called_process_error_mocked(mock_run):
         run_cmd(["mycmd"])
 
 
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_called_process_error_no_stderr(mock_run):
     err = subprocess.CalledProcessError(1, "mycmd")
     err.stderr = ""
@@ -100,7 +100,7 @@ def test_run_cmd_called_process_error_no_stderr(mock_run):
         run_cmd(["mycmd"])
 
 
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_called_process_error_none_stderr(mock_run):
     err = subprocess.CalledProcessError(1, "mycmd")
     err.stderr = None
@@ -109,7 +109,7 @@ def test_run_cmd_called_process_error_none_stderr(mock_run):
         run_cmd(["mycmd"])
 
 
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_sanitized_error_message(mock_run):
     """Test that error messages only show command name, not full arguments."""
     err = subprocess.CalledProcessError(1, "mycmd")
@@ -125,7 +125,7 @@ def test_run_cmd_sanitized_error_message(mock_run):
     assert "password123" not in error_str
 
 
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_sanitized_stderr_truncated(mock_run):
     """Test that stderr is limited to 100 characters in error messages."""
     err = subprocess.CalledProcessError(1, "mycmd")
@@ -140,8 +140,8 @@ def test_run_cmd_sanitized_stderr_truncated(mock_run):
     assert len(error_str) < 250
 
 
-@patch("fcm.utils.process.logger")
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.logger")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_logs_full_failure_details(mock_run, mock_logger):
     full_stderr = "sensitive stderr details " + "x" * 200
     err = subprocess.CalledProcessError(1, ["mycmd", "--secret-arg", "password123"])
@@ -164,7 +164,7 @@ def test_run_cmd_logs_full_failure_details(mock_run, mock_logger):
     assert failure_log.kwargs["exc_info"] is True
 
 
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_passes_cwd(mock_run):
     mock_run.return_value = MagicMock(returncode=0)
     run_cmd(["ls"], cwd="/tmp")
@@ -177,7 +177,7 @@ def test_run_cmd_passes_cwd(mock_run):
     )
 
 
-@patch("fcm.utils.process.subprocess.run")
+@patch("mvmctl.utils.process.subprocess.run")
 def test_run_cmd_capture_false(mock_run):
     mock_run.return_value = MagicMock(returncode=0)
     run_cmd(["ls"], capture=False)
@@ -232,7 +232,7 @@ def test_stream_cmd_stderr_merged_to_stdout():
     assert "err" in lines
 
 
-@patch("fcm.utils.process.subprocess.Popen")
+@patch("mvmctl.utils.process.subprocess.Popen")
 def test_stream_cmd_file_not_found_mocked(mock_popen):
     mock_popen.side_effect = FileNotFoundError("no such binary")
     with pytest.raises(ProcessError, match="Command not found: badcmd"):
@@ -245,7 +245,7 @@ def _make_mock_stdout(lines):
     return mock_stdout
 
 
-@patch("fcm.utils.process.subprocess.Popen")
+@patch("mvmctl.utils.process.subprocess.Popen")
 def test_stream_cmd_non_zero_exit_mocked(mock_popen):
     mock_proc = MagicMock()
     mock_proc.stdout = _make_mock_stdout(["line1\n", "line2\n"])
@@ -255,7 +255,7 @@ def test_stream_cmd_non_zero_exit_mocked(mock_popen):
         list(stream_cmd(["failcmd"]))
 
 
-@patch("fcm.utils.process.subprocess.Popen")
+@patch("mvmctl.utils.process.subprocess.Popen")
 def test_stream_cmd_success_mocked(mock_popen):
     mock_proc = MagicMock()
     mock_proc.stdout = _make_mock_stdout(["hello\n", "world\n"])
@@ -265,7 +265,7 @@ def test_stream_cmd_success_mocked(mock_popen):
     assert lines == ["hello", "world"]
 
 
-@patch("fcm.utils.process.subprocess.Popen")
+@patch("mvmctl.utils.process.subprocess.Popen")
 def test_stream_cmd_passes_cwd_mocked(mock_popen):
     mock_proc = MagicMock()
     mock_proc.stdout = _make_mock_stdout([])
