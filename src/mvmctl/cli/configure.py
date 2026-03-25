@@ -23,7 +23,7 @@ from mvmctl.constants import (
 )
 from mvmctl.core.config_state import initialize_default_config
 from mvmctl.exceptions import BinaryError, HostError, KernelError, MVMError, MVMKeyError
-from mvmctl.utils.console import console, print_info, print_success, print_warning
+from mvmctl.utils.console import print_info, print_success, print_warning
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
 app = typer.Typer(
@@ -344,8 +344,8 @@ def _step_summary() -> None:
 
     all_ok = True
     for label, ok in checks:
-        status = "[green]ready[/green]" if ok else "[yellow]missing[/yellow]"
-        console.print(f"  {label}: {status}")
+        status = "ready" if ok else "missing"
+        print_info(f"{label}: {status}")
         if not ok:
             all_ok = False
 

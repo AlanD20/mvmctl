@@ -130,12 +130,10 @@ def download_file(
         # Interactive confirmation when checksum is missing
         import sys
 
-        from mvmctl.utils.console import console
+        from mvmctl.utils.console import print_warning
 
-        console.print(f"[yellow]Warning: No checksum available for {url}[/yellow]")
-        console.print(
-            "[yellow]Integrity cannot be verified. This is a potential security risk.[/yellow]"
-        )
+        print_warning(f"Warning: No checksum available for {url}")
+        print_warning("Integrity cannot be verified. This is a potential security risk.")
         if not sys.stdin.isatty():
             raise MVMError(
                 f"No checksum provided for download: {url}. "

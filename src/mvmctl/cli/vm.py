@@ -6,7 +6,6 @@ import typer
 
 if TYPE_CHECKING:
     from mvmctl.core.config import VMDefaultsConfig
-from rich.table import Table
 
 from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from mvmctl.api.vms import (
@@ -29,7 +28,7 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMInstance, VMState
-from mvmctl.utils.console import console, print_error, print_info, print_success
+from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 app = typer.Typer(
@@ -424,42 +423,23 @@ def ls_vms(
         print_info("No VMs found." + (" Use --all to include stopped VMs." if not all_vms else ""))
         return
 
-    console.print(_build_vm_table(vms))
-
-
-def _build_vm_table(vms: list[VMInstance]) -> Table:
-    """Build a Rich Table displaying VM information."""
-    table = Table(title="Firecracker VMs")
-    table.add_column("ID", style="magenta", no_wrap=True)
-    table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("IP", style="green")
-    table.add_column("Status", style="bold")
-    table.add_column("PID")
-    table.add_column("API", no_wrap=True)
-    table.add_column("Created")
-
-    status_colors = {
-        VMState.RUNNING: "[green]running[/green]",
-        VMState.STOPPED: "[dim]stopped[/dim]",
-        VMState.ERROR: "[red]error[/red]",
-    }
-
-    for v in vms:
-        status_str = status_colors.get(v.status, v.status.value)
-        created = v.created_at.strftime("%Y-%m-%d %H:%M") if v.created_at else "-"
-        api_str = "[green]on[/green]" if v.socket_path else "[dim]off[/dim]"
-        short_id = v.id[:6] if v.id else "-"
-        table.add_row(
-            short_id,
+    rows = [
+        [
+            v.id[:6] if v.id else "-",
             v.name,
             v.ip or "-",
-            status_str,
+            v.status.value,
             str(v.pid) if v.pid else "-",
-            api_str,
-            created,
-        )
-
-    return table
+            "on" if v.socket_path else "off",
+            v.created_at.strftime("%Y-%m-%d %H:%M") if v.created_at else "-",
+        ]
+        for v in vms
+    ]
+    print_table(
+        title="Firecracker VMs",
+        columns=["ID", "Name", "IP", "Status", "PID", "API", "Created"],
+        rows=rows,
+    )
 
 
 @app.command(name="ps")

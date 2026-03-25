@@ -93,11 +93,11 @@ def _warn_if_running_as_root() -> None:
     if os.getuid() != 0:
         return
 
-    from mvmctl.utils.console import console
+    from mvmctl.utils.console import print_warning
 
-    console.print(
-        "[yellow]Warning: running as root. Consider using the 'mvm' group instead "
-        "(set up via 'sudo mvm host init').[/yellow]"
+    print_warning(
+        "Warning: running as root. Consider using the 'mvm' group instead "
+        "(set up via 'sudo mvm host init')."
     )
 
 

@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import typer
-from rich.table import Table
 
 from mvmctl.api.keys import (
     add_key,
@@ -15,7 +14,7 @@ from mvmctl.api.keys import (
 )
 from mvmctl.cli._helpers import check_name_arg
 from mvmctl.exceptions import MVMKeyError
-from mvmctl.utils.console import console, print_error, print_info, print_success
+from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.validation import validate_entity_name
 
 app = typer.Typer(
@@ -56,22 +55,22 @@ def ls(
         print_info("No keys found. Add one with: mvm key add <name> <path>")
         return
 
-    # M-22: Direct Table usage acceptable for complex layouts
-    table = Table(title="SSH Keys")
-    table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("Fingerprint")
-    table.add_column("Algorithm", style="green")
-    table.add_column("Comment")
-    table.add_column("Private Key")
-    table.add_column("Date Added")
-
-    for k in keys:
-        added = k.added_at[:19] if k.added_at else "-"
-        private_key_path = Path.home() / ".ssh" / k.name
-        has_private = "✓" if private_key_path.exists() else "-"
-        table.add_row(k.name, k.fingerprint, k.algorithm, k.comment, has_private, added)
-
-    console.print(table)
+    rows = [
+        [
+            k.name,
+            k.fingerprint,
+            k.algorithm,
+            k.comment,
+            "yes" if (Path.home() / ".ssh" / k.name).exists() else "no",
+            k.added_at[:19] if k.added_at else "-",
+        ]
+        for k in keys
+    ]
+    print_table(
+        title="SSH Keys",
+        columns=["Name", "Fingerprint", "Algorithm", "Comment", "Private Key", "Date Added"],
+        rows=rows,
+    )
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

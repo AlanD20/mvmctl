@@ -412,9 +412,9 @@ def build_kernel(
     logger.info("Building vmlinux with %d parallel jobs...", jobs)
     logger.info("This may take 10-30 minutes...")
 
-    from mvmctl.utils.console import console
+    from mvmctl.utils.console import print_warning
 
-    console.print("[yellow]Building kernel... (this may take 10-30 minutes)[/yellow]")
+    print_warning("Building kernel... (this may take 10-30 minutes)")
 
     cmd = ["make", "vmlinux", f"-j{jobs}"]
     temp_log_path: Path | None = None
@@ -441,7 +441,7 @@ def build_kernel(
                 line = line.rstrip("\n")
                 logger.debug("%s", line)
                 if _BUILD_LOG_PATTERNS.search(line):
-                    console.print(f"[dim]{line}[/dim]")
+                    print(line)
 
         if returncode != 0:
             raise KernelError(f"Kernel build failed: Command failed (exit {returncode}): make")

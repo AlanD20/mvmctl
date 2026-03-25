@@ -4,7 +4,6 @@ import os
 import sys
 
 import typer
-from rich.table import Table
 
 from mvmctl.api.host import (
     check_kvm_access,
@@ -18,7 +17,7 @@ from mvmctl.api.host import (
 )
 from mvmctl.constants import PROJECT_GROUP
 from mvmctl.exceptions import HostError, MVMError
-from mvmctl.utils.console import console, print_error, print_info, print_success, print_warning
+from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.fs import get_cache_dir
 
 app = typer.Typer(
@@ -156,37 +155,21 @@ def ls_cmd(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    # M-22: Direct Table usage acceptable for complex layouts
-    table = Table(title="Host Configuration")
-    table.add_column("Check", style="cyan", no_wrap=True)
-    table.add_column("Status", style="bold")
-    table.add_column("Detail")
-
-    table.add_row(
-        "/dev/kvm",
-        "[green]ok[/green]" if kvm_ok else "[red]FAIL[/red]",
-        "accessible" if kvm_ok else "not accessible",
-    )
-
-    table.add_row(
-        "required binaries",
-        "[green]ok[/green]" if not missing else "[red]FAIL[/red]",
-        "all found" if not missing else f"missing: {', '.join(missing)}",
-    )
-
-    table.add_row(
-        "ip_forward",
-        "[green]ok[/green]" if fwd_ok else "[yellow]off[/yellow]",
-        f"value={ip_fwd}",
-    )
-
-    table.add_row(
-        "state snapshot",
-        "[green]saved[/green]" if state else "[dim]none[/dim]",
-        state.init_timestamp if state else "no snapshot",
-    )
-
-    console.print(table)
+    rows = [
+        ["/dev/kvm", "ok" if kvm_ok else "FAIL", "accessible" if kvm_ok else "not accessible"],
+        [
+            "required binaries",
+            "ok" if not missing else "FAIL",
+            "all found" if not missing else f"missing: {', '.join(missing)}",
+        ],
+        ["ip_forward", "ok" if fwd_ok else "off", f"value={ip_fwd}"],
+        [
+            "state snapshot",
+            "saved" if state else "none",
+            state.init_timestamp if state else "no snapshot",
+        ],
+    ]
+    print_table(title="Host Configuration", columns=["Check", "Status", "Detail"], rows=rows)
 
 
 @app.command(name="clean")

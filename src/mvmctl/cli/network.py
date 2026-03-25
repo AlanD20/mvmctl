@@ -3,7 +3,6 @@
 import json
 
 import typer
-from rich.table import Table
 
 from mvmctl.api.network import (
     create_network,
@@ -16,7 +15,7 @@ from mvmctl.api.network import (
 from mvmctl.cli._helpers import check_name_arg
 from mvmctl.constants import DEFAULT_NETWORK_NAME
 from mvmctl.exceptions import NetworkError
-from mvmctl.utils.console import console, print_error, print_info, print_success
+from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.validation import validate_entity_name
 
 app = typer.Typer(
@@ -61,24 +60,23 @@ def ls(
         print_info("No networks found. Create one with: mvm network create <name>")
         return
 
-    # M-22: Direct Table usage acceptable for complex layouts
-    table = Table(title="Networks")
-    table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("CIDR", style="green")
-    table.add_column("Gateway")
-    table.add_column("Bridge")
-    table.add_column("NAT")
-    table.add_column("VM Count")
-    table.add_column("Created")
-
-    for n in networks:
-        nat_str = "[green]yes[/green]" if n.nat_enabled else "[dim]no[/dim]"
-        created = n.created_at[:19] if n.created_at else "-"
-        vm_count = str(len(get_network_leases(n.name)))
-        name_str = f"{n.name} (default)" if n.name == DEFAULT_NETWORK_NAME else n.name
-        table.add_row(name_str, n.cidr, n.gateway, n.bridge, nat_str, vm_count, created)
-
-    console.print(table)
+    rows = [
+        [
+            f"{n.name} (default)" if n.name == DEFAULT_NETWORK_NAME else n.name,
+            n.cidr,
+            n.gateway,
+            n.bridge,
+            "yes" if n.nat_enabled else "no",
+            str(len(get_network_leases(n.name))),
+            n.created_at[:19] if n.created_at else "-",
+        ]
+        for n in networks
+    ]
+    print_table(
+        title="Networks",
+        columns=["Name", "CIDR", "Gateway", "Bridge", "NAT", "VM Count", "Created"],
+        rows=rows,
+    )
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
