@@ -1,5 +1,6 @@
 """Kernel download and build utilities."""
 
+import functools
 import hashlib
 import logging
 import os
@@ -11,8 +12,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
+
+import yaml
 
 from mvmctl.constants import (
     DEFAULT_FC_KERNEL_ARCH,
@@ -21,10 +25,6 @@ from mvmctl.constants import (
     FIRECRACKER_CI_KERNEL_S3_BASE,
     FIRECRACKER_KERNEL_CONFIG_URL,
     HTTP_USER_AGENT,
-    KERNEL_DISABLED_CONFIGS,
-    KERNEL_ENABLED_CONFIGS,
-    KERNEL_REQUIRED_SETTINGS,
-    KERNEL_SET_VAL_CONFIGS,
     KERNEL_SHA256_URL_TEMPLATE,
 )
 from mvmctl.core.metadata import (
@@ -33,10 +33,68 @@ from mvmctl.core.metadata import (
     update_kernel_entry,
 )
 from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
+from mvmctl.models.kernel import KernelSpec
 from mvmctl.utils.fs import get_cache_dir, get_images_dir
 from mvmctl.utils.http import download_file
+from mvmctl.utils.yaml import (
+    optional_int,
+    optional_str,
+    parse_set_val_list,
+    require_str,
+    require_str_list,
+)
 
 logger = logging.getLogger(__name__)
+
+_KERNELS_YAML_PATH = Path(__file__).parent.parent / "assets" / "kernels.yaml"
+
+
+@functools.lru_cache(maxsize=None)
+def load_kernel_spec(kernel_name: str = "kernel-official") -> KernelSpec:
+    """Load a kernel specification from the bundled kernels.yaml.
+
+    All fields are read strictly from the YAML; missing required fields raise
+    :class:`KernelError` rather than silently substituting hardcoded values.
+
+    Args:
+        kernel_name: Top-level key in kernels.yaml (e.g. ``"kernel-official"``).
+
+    Returns:
+        Populated :class:`KernelSpec` for the requested entry.
+
+    Raises:
+        KernelError: If the file cannot be read, the key is absent, or a
+            required field is missing or wrong-typed.
+    """
+    try:
+        with _KERNELS_YAML_PATH.open("r", encoding="utf-8") as fh:
+            data: Any = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise KernelError(f"Failed to load kernels.yaml: {exc}") from exc
+
+    if not isinstance(data, dict) or kernel_name not in data:
+        raise KernelError(f"Kernel spec '{kernel_name}' not found in kernels.yaml")
+
+    raw: dict[str, Any] = data[kernel_name]
+
+    try:
+        return KernelSpec(
+            version=require_str(raw, "version"),
+            source=require_str(raw, "source"),
+            output_name=require_str(raw, "output_name"),
+            build_dir=require_str(raw, "build_dir"),
+            sha256=optional_str(raw, "sha256"),
+            sha256_url=optional_str(raw, "sha256_url"),
+            parallel_jobs=optional_int(raw, "parallel_jobs"),
+            config_fragments=require_str_list(raw, "config_fragments"),
+            enabled_configs=require_str_list(raw, "enabled_configs"),
+            disabled_configs=require_str_list(raw, "disabled_configs"),
+            required_settings=require_str_list(raw, "required_settings"),
+            set_val_configs=parse_set_val_list(raw, "set_val_configs"),
+        )
+    except ValueError as exc:
+        raise KernelError(f"Invalid kernels.yaml entry '{kernel_name}': {exc}") from exc
+
 
 _BUILD_LOG_PATTERNS = re.compile(
     r"(?i)(warning|error|cannot find|undefined reference|fatal|note:)",
@@ -313,6 +371,7 @@ def configure_kernel(
     kernel_dir: Path,
     version: str,
     user_config_path: Path | None = None,
+    kernel_spec: KernelSpec | None = None,
 ) -> None:
     """Configure kernel with Firecracker settings.
 
@@ -320,10 +379,15 @@ def configure_kernel(
         kernel_dir: Kernel source directory
         version: Kernel version string (e.g. ``"6.1.102"``) used to select the
             matching Firecracker config file.
+        user_config_path: Optional path to a user-supplied ``.config`` overlay.
+        kernel_spec: Kernel specification with config lists. Defaults to the
+            ``kernel-official`` entry from ``kernels.yaml``.
 
     Raises:
         KernelError: If configuration fails
     """
+    if kernel_spec is None:
+        kernel_spec = load_kernel_spec("kernel-official")
 
     # Download Firecracker config
     try:
@@ -342,14 +406,14 @@ def configure_kernel(
 
     config_script = kernel_dir / "scripts" / "config"
 
-    logger.info("Applying default kernel options from constants...")
-    for option in KERNEL_ENABLED_CONFIGS:
+    logger.info("Applying kernel options from kernels.yaml...")
+    for option in kernel_spec.enabled_configs:
         _run_config_script(config_script, ["--enable", option], kernel_dir)
 
-    for option in KERNEL_DISABLED_CONFIGS:
+    for option in kernel_spec.disabled_configs:
         _run_config_script(config_script, ["--disable", option], kernel_dir)
 
-    for option, value in KERNEL_SET_VAL_CONFIGS:
+    for option, value in kernel_spec.set_val_configs:
         _run_config_script(config_script, ["--set-val", option, value], kernel_dir)
 
     if user_config_path is not None:
@@ -369,7 +433,7 @@ def configure_kernel(
     all_present = True
     missing_settings: list[str] = []
 
-    for setting in KERNEL_REQUIRED_SETTINGS:
+    for setting in kernel_spec.required_settings:
         if setting in config_content:
             logger.info("  %s", setting)
         else:
@@ -387,8 +451,6 @@ def configure_kernel(
             "Proceed with build anyway? (missing settings may affect VM stability)", default=False
         ):
             raise KernelError("Required kernel settings are missing from configuration")
-        print_info("Proceeding with build despite missing settings...")
-
         print_info("Proceeding with build despite missing settings...")
 
 
@@ -486,22 +548,28 @@ def fetch_kernel_sha256(version: str) -> str | None:
 def _compute_config_hash(
     version: str,
     user_config_path: Path | None = None,
+    kernel_spec: KernelSpec | None = None,
 ) -> str:
     """Compute a hash of kernel configuration parameters for caching.
 
     Args:
         version: Kernel version
         user_config_path: Optional path to user config overlay
+        kernel_spec: Kernel specification with config lists. Defaults to the
+            ``kernel-official`` entry from ``kernels.yaml``.
 
     Returns:
         Short hash string for cache key
     """
+    if kernel_spec is None:
+        kernel_spec = load_kernel_spec("kernel-official")
+
     hasher = hashlib.sha256()
     hasher.update(version.encode())
-    hasher.update(str(KERNEL_ENABLED_CONFIGS).encode())
-    hasher.update(str(KERNEL_DISABLED_CONFIGS).encode())
-    hasher.update(str(KERNEL_SET_VAL_CONFIGS).encode())
-    hasher.update(str(KERNEL_REQUIRED_SETTINGS).encode())
+    hasher.update(str(kernel_spec.enabled_configs).encode())
+    hasher.update(str(kernel_spec.disabled_configs).encode())
+    hasher.update(str(kernel_spec.set_val_configs).encode())
+    hasher.update(str(kernel_spec.required_settings).encode())
     if user_config_path and user_config_path.exists():
         hasher.update(user_config_path.read_bytes())
     return hasher.hexdigest()[:16]
@@ -517,7 +585,11 @@ def build_kernel_pipeline(
     keep_build_dir: bool = False,
     user_config_path: Path | None = None,
     arch: str | None = None,
+    kernel_spec: KernelSpec | None = None,
 ) -> Path:
+    if kernel_spec is None:
+        kernel_spec = load_kernel_spec("kernel-official")
+
     if jobs is None:
         jobs = os.cpu_count() or 1
 
@@ -532,7 +604,7 @@ def build_kernel_pipeline(
     build_dir.mkdir(parents=True, exist_ok=True)
 
     # Compute config hash for caching
-    config_hash = _compute_config_hash(version, user_config_path)
+    config_hash = _compute_config_hash(version, user_config_path, kernel_spec)
     cache_key = f"{version}-{config_hash}"
     cache_marker = build_dir.parent / f"kernel-cache-{cache_key}.marker"
     cached_kernel_path = build_dir.parent / f"kernel-cache-{cache_key}.vmlinux"
@@ -571,7 +643,7 @@ def build_kernel_pipeline(
     else:
         logger.info("Using existing source: %s", kernel_src_dir)
 
-    configure_kernel(kernel_src_dir, version, user_config_path=user_config_path)
+    configure_kernel(kernel_src_dir, version, user_config_path=user_config_path, kernel_spec=kernel_spec)
 
     build_kernel(kernel_src_dir, output_path, jobs)
 

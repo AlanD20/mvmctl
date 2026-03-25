@@ -146,66 +146,6 @@ FIRECRACKER_KERNEL_CONFIG_URL: Final[str] = _require_str(
 KERNEL_TARBALL_URL_TEMPLATE: Final[str] = _require_str(("urls", "kernel", "tarball_template"))
 KERNEL_SHA256_URL_TEMPLATE: Final[str] = _require_str(("urls", "kernel", "sha256_template"))
 
-# Kernel options to enable (--enable) when building an official kernel.
-# Applied BEFORE any user-supplied --kernel-config override so users can
-# reverse individual items if they know what they are doing.
-KERNEL_ENABLED_CONFIGS: Final[list[str]] = [
-    # Filesystems
-    "CONFIG_BTRFS_FS",
-    "CONFIG_BTRFS_FS_POSIX_ACL",
-    "CONFIG_EXT4_FS",
-    "CONFIG_EXT4_FS_POSIX_ACL",
-    "CONFIG_XFS_FS",
-    "CONFIG_SQUASHFS",
-    # VirtIO (all must be built-in for Firecracker)
-    "CONFIG_VIRTIO",
-    "CONFIG_VIRTIO_MENU",
-    "CONFIG_VIRTIO_PCI",
-    "CONFIG_VIRTIO_BLK",
-    "CONFIG_VIRTIO_NET",
-    "CONFIG_VIRTIO_CONSOLE",
-    # Serial console
-    "CONFIG_SERIAL_8250",
-    "CONFIG_SERIAL_8250_CONSOLE",
-    # Network
-    "CONFIG_NET",
-    "CONFIG_INET",
-    "CONFIG_IPV6",
-    # KVM guest optimisations
-    "CONFIG_KVM_GUEST",
-    "CONFIG_PARAVIRT",
-    # Security / BPF / cgroups
-    "CONFIG_SECURITY_LANDLOCK",
-    "CONFIG_BPF_SYSCALL",
-    "CONFIG_CGROUPS",
-    "CONFIG_MEMCG",
-    # PCI (required for some upstream kernels)
-    "CONFIG_PCI",
-]
-
-# Integer-valued kernel options (--set-val). Each entry is (option, value).
-KERNEL_SET_VAL_CONFIGS: Final[list[tuple[str, str]]] = [
-    ("CONFIG_SERIAL_8250_NR_UARTS", "4"),
-]
-
-# Kernel options to disable (--disable) when building an official kernel.
-KERNEL_DISABLED_CONFIGS: Final[list[str]] = [
-    "CONFIG_BLK_DEV_ZONED",
-    "CONFIG_VIRTIO_BLK_F_SECURE_ERASE",
-    "CONFIG_VIRTIO_BLK_SCSI",
-]
-
-# Critical settings that MUST be =y for Firecracker to boot. If any is
-# missing after configuration, the build is aborted with an error.
-KERNEL_REQUIRED_SETTINGS: Final[list[str]] = [
-    "CONFIG_BTRFS_FS=y",
-    "CONFIG_VIRTIO_BLK=y",
-    "CONFIG_VIRTIO_NET=y",
-    "CONFIG_SERIAL_8250_CONSOLE=y",
-    "CONFIG_KVM_GUEST=y",
-]
-
-
 PROJECT_NAME: Final[str] = _resolve_project_name()
 
 PROJECT_NAME_UPPER: Final[str] = PROJECT_NAME.replace("-", "_").upper()

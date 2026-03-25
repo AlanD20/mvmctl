@@ -1,5 +1,5 @@
-kernel-firecracker:
-  version: "6.1.102"
+kernel-official:
+  version: "6.19.9"
   source: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz
   sha256: null
   sha256_url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz.sha256
@@ -8,3 +8,48 @@ kernel-firecracker:
   output_name: vmlinux
   build_dir: /tmp/mvm/kernel-build
   parallel_jobs: null
+  enabled_configs:
+    # Filesystems
+    - CONFIG_BTRFS_FS
+    - CONFIG_BTRFS_FS_POSIX_ACL
+    - CONFIG_EXT4_FS
+    - CONFIG_EXT4_FS_POSIX_ACL
+    - CONFIG_XFS_FS
+    - CONFIG_SQUASHFS
+    # VirtIO (all must be built-in for Firecracker)
+    - CONFIG_VIRTIO
+    - CONFIG_VIRTIO_MENU
+    - CONFIG_VIRTIO_PCI
+    - CONFIG_VIRTIO_BLK
+    - CONFIG_VIRTIO_NET
+    - CONFIG_VIRTIO_CONSOLE
+    # Serial console
+    - CONFIG_SERIAL_8250
+    - CONFIG_SERIAL_8250_CONSOLE
+    # Network
+    - CONFIG_NET
+    - CONFIG_INET
+    - CONFIG_IPV6
+    # KVM guest optimisations
+    - CONFIG_KVM_GUEST
+    - CONFIG_PARAVIRT
+    # Security / BPF / cgroups
+    - CONFIG_SECURITY_LANDLOCK
+    - CONFIG_BPF_SYSCALL
+    - CONFIG_CGROUPS
+    - CONFIG_MEMCG
+    # PCI (required for some upstream kernels)
+    - CONFIG_PCI
+  disabled_configs:
+    - CONFIG_BLK_DEV_ZONED
+    - CONFIG_VIRTIO_BLK_F_SECURE_ERASE
+    - CONFIG_VIRTIO_BLK_SCSI
+  set_val_configs:
+    - option: CONFIG_SERIAL_8250_NR_UARTS
+      value: "4"
+  required_settings:
+    - CONFIG_BTRFS_FS=y
+    - CONFIG_VIRTIO_BLK=y
+    - CONFIG_VIRTIO_NET=y
+    - CONFIG_SERIAL_8250_CONSOLE=y
+    - CONFIG_KVM_GUEST=y

@@ -124,7 +124,7 @@ These values are used when the corresponding CLI flag is omitted.
 ### Structure
 
 ```yaml
-kernel-firecracker:
+kernel-official:
   version: <string>          # kernel version to fetch (e.g. "6.1.102")
   source: <url>              # tarball URL (can reference {version})
   sha256: <hex|null>         # expected digest of the tarball, or null
@@ -134,6 +134,15 @@ kernel-firecracker:
   output_name: <string>      # filename for the built vmlinux
   build_dir: <path>          # temporary directory used during compilation
   parallel_jobs: <int|null>  # build parallelism; null = use FALLBACK_KERNEL_BUILD_JOBS
+  enabled_configs:           # kernel options to enable (--enable)
+    - <CONFIG_OPTION>
+  disabled_configs:          # kernel options to disable (--disable)
+    - <CONFIG_OPTION>
+  set_val_configs:           # kernel options to set to a specific value (--set-val)
+    - option: <CONFIG_OPTION>
+      value: <string>
+  required_settings:         # settings that MUST be =y after build; missing ones trigger a prompt
+    - <CONFIG_OPTION=y>
 ```
 
 ### Field reference
@@ -147,6 +156,10 @@ kernel-firecracker:
 | `output_name` | Base filename for the compiled `vmlinux` binary in the kernels cache. |
 | `build_dir` | Working directory for the kernel compilation. Cleaned up automatically unless `--keep-build-dir` is passed. |
 | `parallel_jobs` | `make -j` value. `null` defers to `FALLBACK_KERNEL_BUILD_JOBS` (defaults to 1). |
+| `enabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --enable`. Applied before any user-supplied `--kernel-config` override. |
+| `disabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --disable`. |
+| `set_val_configs` | List of `{option, value}` pairs passed to `scripts/config --set-val`. Each entry sets an integer-valued config option. |
+| `required_settings` | List of `CONFIG_OPTION=y` strings that must be present in `.config` after the build. If any are missing the build prompts the user before continuing. |
 
 ---
 
@@ -310,6 +323,11 @@ uv run mvm image fetch <your-new-id>
 | `FALLBACK_KERNEL_BUILD_JOBS` | `fallbacks.kernel_build_jobs` | Default `make -j` value when not specified |
 | `KERNEL_TARBALL_URL_TEMPLATE` | `urls.kernel.tarball_template` | kernel.org tarball URL; fill `{version}` |
 | `KERNEL_SHA256_URL_TEMPLATE` | `urls.kernel.sha256_template` | kernel.org SHA-256 URL; fill `{version}` |
+
+> **Note:** The kernel config lists (`enabled_configs`, `disabled_configs`, `set_val_configs`,
+> `required_settings`) are defined per-kernel in `kernels.yaml`, not as module-level constants.
+> Load them at runtime via `core.kernel.load_kernel_spec("kernel-official")`, which returns a
+> fully typed `KernelSpec` dataclass.
 | `FIRECRACKER_CI_KERNEL_S3_BASE` | `urls.firecracker_ci_kernel.s3_base` | S3 base URL for all Firecracker CI artifacts |
 | `FIRECRACKER_CI_KERNEL_LIST_URL` | `urls.firecracker_ci_kernel.list_url_template` | S3 listing template for CI kernels; fill `{ci_version}`, `{arch}` |
 | `FIRECRACKER_CI_IMAGE_LIST_URL` | `urls.firecracker_ci_image.list_url_template` | S3 listing template for CI images; fill `{ci_version}`, `{arch}` |

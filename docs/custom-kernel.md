@@ -173,7 +173,7 @@ fcm kernel fetch --type official \
 ## Verifying Required Settings
 
 After building, `fcm` verifies that all required kernel settings are present. The required
-settings are defined in `fcm/constants.py` under `KERNEL_REQUIRED_SETTINGS`.
+settings are defined under `required_settings` in `src/mvmctl/assets/kernels.yaml` for the `kernel-official` entry.
 
 If a required setting is missing, you will be prompted:
 
@@ -282,17 +282,25 @@ Then update the `FIRECRACKER_KERNEL_CONFIG_URL` constant in `src/fcm/constants.p
 | 6.9.x | ✅ Supported | Short-term, use LTS for production |
 | < 4.14 | ❌ Not supported | Missing required Firecracker features |
 
-### Relevant constants (src/fcm/constants.py)
+### Relevant constants (src/mvmctl/constants.py)
 
 | Constant | Description |
 |----------|-------------|
-| `DEFAULT_KERNEL_VERSION` | Default kernel version for `fcm kernel fetch --type official` |
+| `DEFAULT_KERNEL_VERSION` | Default kernel version for `mvm kernel fetch --type official` |
 | `KERNEL_TARBALL_URL_TEMPLATE` | URL template for downloading kernel source from kernel.org |
 | `FIRECRACKER_KERNEL_CONFIG_URL` | URL for Firecracker's recommended `.config` file |
-| `KERNEL_REQUIRED_SETTINGS` | List of config options verified after build |
-| `KERNEL_ENABLED_CONFIGS` | Config options always enabled by fcm |
-| `KERNEL_DISABLED_CONFIGS` | Config options always disabled by fcm |
-| `KERNEL_SET_VAL_CONFIGS` | Config options set to specific values by fcm |
+
+### Per-kernel config lists (src/mvmctl/assets/kernels.yaml — `kernel-official`)
+
+The kernel config lists are defined per-kernel in `kernels.yaml` and loaded at runtime via
+`core.kernel.load_kernel_spec("kernel-official")`. They are no longer module-level constants.
+
+| YAML field | Description |
+|------------|-------------|
+| `required_settings` | Config options that must be `=y` after build; missing ones trigger a confirmation prompt |
+| `enabled_configs` | Config options always enabled (`--enable`) during the build |
+| `disabled_configs` | Config options always disabled (`--disable`) during the build |
+| `set_val_configs` | Config options set to a specific integer value (`--set-val`) during the build |
 
 ---
 
