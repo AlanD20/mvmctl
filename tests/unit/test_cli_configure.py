@@ -120,8 +120,11 @@ def test_step_host_already_done(mock_cache, mock_state, mock_kvm, tmp_path):
 @patch("mvmctl.cli.configure.check_kvm_access", return_value=False)
 @patch("mvmctl.cli.configure.get_host_state", return_value=None)
 @patch("mvmctl.cli.configure.init_host")
+@patch("mvmctl.api.network.ensure_default_network")
 @patch("mvmctl.cli.configure.get_cache_dir")
-def test_step_host_non_interactive(mock_cache, mock_init, mock_state, mock_kvm, tmp_path):
+def test_step_host_non_interactive(
+    mock_cache, mock_ensure_net, mock_init, mock_state, mock_kvm, tmp_path
+):
     mock_cache.return_value = tmp_path
     from mvmctl.cli.configure import _step_host
 
