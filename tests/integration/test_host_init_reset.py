@@ -17,6 +17,12 @@ from mvmctl.exceptions import HostError
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _mock_default_network_setup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep host integration tests isolated from privileged network setup."""
+    monkeypatch.setattr("mvmctl.api.network.ensure_default_network", lambda: None)
+
+
 def _make_host_state(changes: list | None = None) -> HostState:
     return HostState(init_timestamp="2024-01-01T00:00:00+00:00", changes=changes or [])
 

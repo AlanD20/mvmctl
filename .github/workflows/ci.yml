@@ -60,6 +60,8 @@ jobs:
         run: uv run mypy src/
 
       - name: Run tests
+        env:
+          MVM_TEST_ENFORCE_NO_SUDO: "1"
         run: uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-report=xml --cov-fail-under=80
 
       - name: Upload coverage report
