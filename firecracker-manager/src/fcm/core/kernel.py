@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tarfile
 import uuid
@@ -31,10 +32,9 @@ from fcm.core.metadata import (
     migrate_legacy_metadata,
     update_kernel_entry,
 )
-from fcm.exceptions import ChecksumMismatchError, FCMError, KernelError, ProcessError
+from fcm.exceptions import ChecksumMismatchError, FCMError, KernelError
 from fcm.utils.fs import get_cache_dir, get_images_dir
 from fcm.utils.http import download_file
-from fcm.utils.process import stream_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +157,7 @@ def download_kernel_source(
     url: str,
     dest: Path,
     expected_sha256: str | None = None,
+    allow_missing_checksum: bool = False,
 ) -> None:
     """Download kernel source tarball.
 
@@ -164,6 +165,7 @@ def download_kernel_source(
         url: URL to download from
         dest: Destination path
         expected_sha256: Optional SHA-256 checksum
+        allow_missing_checksum: If True, allow download without checksum
 
     Raises:
         KernelError: If download fails
@@ -171,7 +173,13 @@ def download_kernel_source(
     """
     logger.info("Downloading kernel from %s", url)
     try:
-        download_file(url, dest, expected_sha256, timeout=600)
+        download_file(
+            url,
+            dest,
+            expected_sha256,
+            timeout=600,
+            allow_missing_checksum=allow_missing_checksum,
+        )
     except ChecksumMismatchError:
         raise
     except FCMError as e:
@@ -387,6 +395,7 @@ def build_kernel(
     kernel_dir: Path,
     output_path: Path,
     jobs: int = FALLBACK_KERNEL_BUILD_JOBS,
+    build_log_path: Path | None = None,
 ) -> None:
     """Build the kernel.
 
@@ -394,6 +403,7 @@ def build_kernel(
         kernel_dir: Kernel source directory
         output_path: Where to copy vmlinux
         jobs: Number of parallel jobs
+        build_log_path: Optional path to write build log (for caching)
 
     Raises:
         KernelError: If build fails
@@ -406,13 +416,43 @@ def build_kernel(
     console.print("[yellow]Building kernel... (this may take 10-30 minutes)[/yellow]")
 
     cmd = ["make", "vmlinux", f"-j{jobs}"]
+    temp_log_path: Path | None = None
+
+    if build_log_path is None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as tmp_log:
+            build_log_path = Path(tmp_log.name)
+        temp_log_path = build_log_path
+
     try:
-        for line in stream_cmd(cmd, cwd=str(kernel_dir)):
-            logger.debug("%s", line)
-            if _BUILD_LOG_PATTERNS.search(line):
-                console.print(f"[dim]{line}[/dim]")
-    except ProcessError as e:
-        raise KernelError(f"Kernel build failed: {e}") from e
+        with open(build_log_path, "w", encoding="utf-8") as log_file:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=kernel_dir,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+            returncode = proc.wait()
+
+        with open(build_log_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\n")
+                logger.debug("%s", line)
+                if _BUILD_LOG_PATTERNS.search(line):
+                    console.print(f"[dim]{line}[/dim]")
+
+        if returncode != 0:
+            raise KernelError(f"Kernel build failed: Command failed (exit {returncode}): make")
+
+    except OSError as e:
+        raise KernelError("Kernel build failed: unable to execute make") from e
+    finally:
+        if temp_log_path and temp_log_path.exists():
+            try:
+                temp_log_path.unlink()
+            except OSError:
+                pass
 
     # Copy vmlinux to output
     vmlinux_path = kernel_dir / "vmlinux"
@@ -420,8 +460,6 @@ def build_kernel(
         raise KernelError("Build succeeded but vmlinux not found")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    import shutil
 
     shutil.copy2(vmlinux_path, output_path)
     output_path.chmod(0o755)
@@ -442,6 +480,30 @@ def fetch_kernel_sha256(version: str) -> str | None:
     except (URLError, OSError):
         logger.debug("Could not fetch SHA-256 for kernel %s", version)
         return None
+
+
+def _compute_config_hash(
+    version: str,
+    user_config_path: Path | None = None,
+) -> str:
+    """Compute a hash of kernel configuration parameters for caching.
+
+    Args:
+        version: Kernel version
+        user_config_path: Optional path to user config overlay
+
+    Returns:
+        Short hash string for cache key
+    """
+    hasher = hashlib.sha256()
+    hasher.update(version.encode())
+    hasher.update(str(KERNEL_ENABLED_CONFIGS).encode())
+    hasher.update(str(KERNEL_DISABLED_CONFIGS).encode())
+    hasher.update(str(KERNEL_SET_VAL_CONFIGS).encode())
+    hasher.update(str(KERNEL_REQUIRED_SETTINGS).encode())
+    if user_config_path and user_config_path.exists():
+        hasher.update(user_config_path.read_bytes())
+    return hasher.hexdigest()[:16]
 
 
 def build_kernel_pipeline(
@@ -467,12 +529,32 @@ def build_kernel_pipeline(
 
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    if output_path.exists():
-        logger.info("Using cached kernel: %s", output_path)
+    # Compute config hash for caching
+    config_hash = _compute_config_hash(version, user_config_path)
+    cache_key = f"{version}-{config_hash}"
+    cache_marker = build_dir.parent / f"kernel-cache-{cache_key}.marker"
+    cached_kernel_path = build_dir.parent / f"kernel-cache-{cache_key}.vmlinux"
+
+    if cache_marker.exists() and cached_kernel_path.exists():
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cached_kernel_path, output_path)
+        output_path.chmod(0o755)
+        logger.info("Using cached kernel build (config hash match): %s", output_path)
         return build_dir
+
+    if output_path.exists() and cache_marker.exists():
+        logger.info("Using cached kernel (config hash match): %s", output_path)
+        return build_dir
+
+    if output_path.exists():
+        logger.info("Kernel exists but config changed, rebuilding: %s", output_path)
+        output_path.unlink(missing_ok=True)
 
     if sha256 is None:
         sha256 = fetch_kernel_sha256(version)
+
+    if sha256 is None:
+        raise KernelError(f"Checksum required for kernel source download: {source_url}")
 
     tarball = build_dir / f"linux-{version}.tar.xz"
     kernel_src_dir = build_dir / f"linux-{version}"
@@ -491,6 +573,9 @@ def build_kernel_pipeline(
 
     build_kernel(kernel_src_dir, output_path, jobs)
 
+    shutil.copy2(output_path, cached_kernel_path)
+    cache_marker.write_text(cache_key)
+
     save_kernel_metadata(
         output_path.parent,
         output_path.name,
@@ -500,8 +585,6 @@ def build_kernel_pipeline(
     )
 
     if not keep_build_dir:
-        import shutil
-
         shutil.rmtree(build_dir, ignore_errors=True)
         logger.info("Build directory cleaned up")
     else:
@@ -567,7 +650,7 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
     migrate_legacy_metadata(cache_dir, kernels_dir, images_dir)
 
     default_name = _load_default_kernel(kernels_dir)
-    entries = list_kernel_entries(cache_dir)
+    entries = list_kernel_entries(cache_dir, kernels_dir)
 
     results: list[dict[str, str]] = []
 
@@ -693,9 +776,17 @@ def download_firecracker_kernel(
     except (URLError, OSError):
         logger.debug("No sha256 sidecar for CI kernel %s — proceeding without checksum", chosen_key)
 
+    if expected_sha256 is None:
+        raise KernelError(f"Checksum required for Firecracker CI kernel download: {download_url}")
+
     logger.info("Downloading Firecracker CI kernel from %s", download_url)
     try:
-        download_file(download_url, output_path, expected_sha256=expected_sha256, timeout=300)
+        download_file(
+            download_url,
+            output_path,
+            expected_sha256=expected_sha256,
+            timeout=300,
+        )
     except FCMError as exc:
         raise KernelError(f"Failed to download Firecracker CI kernel: {exc}") from exc
 

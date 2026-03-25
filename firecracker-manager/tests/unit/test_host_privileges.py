@@ -105,32 +105,41 @@ class TestCliReset:
 
 class TestHelpCommand:
     def test_help_no_args(self):
+        from click.testing import CliRunner
         from fcm.main import app
 
-        result = runner.invoke(app, ["help"])
+        click_runner = CliRunner()
+        result = click_runner.invoke(app, ["help"])
         assert result.exit_code == 0
         assert "Firecracker Manager" in result.output or "fcm" in result.output
 
     def test_help_vm(self):
+        from click.testing import CliRunner
         from fcm.main import app
 
-        result = runner.invoke(app, ["help", "vm"])
+        click_runner = CliRunner()
+        result = click_runner.invoke(app, ["help", "vm"])
         assert result.exit_code == 0
         assert "vm" in result.output.lower()
 
     def test_help_host(self):
+        from click.testing import CliRunner
         from fcm.main import app
 
-        result = runner.invoke(app, ["help", "host"])
+        click_runner = CliRunner()
+        result = click_runner.invoke(app, ["help", "host"])
         assert result.exit_code == 0
         assert "host" in result.output.lower()
 
     def test_help_unknown_command(self):
+        from click.testing import CliRunner
         from fcm.main import app
 
-        result = runner.invoke(app, ["help", "nonexistent"])
+        click_runner = CliRunner()
+        result = click_runner.invoke(app, ["help", "nonexistent"])
         assert result.exit_code == 1
         assert "Unknown command" in result.output
+
 
 def test_check_privileges_interactive_prints_guidance():
     """FIX-008: check_privileges_interactive prints helpful options when privileges lacking."""

@@ -37,6 +37,7 @@ def test_run_cmd_command_fails():
 
 
 def test_run_cmd_failure_includes_stderr():
+    # Error message should only show command name, not full path
     with pytest.raises(ProcessError, match="(?i)no such file"):
         run_cmd(["ls", "/nonexistent_path_xyz_12345"])
 
@@ -65,7 +66,12 @@ def test_run_cmd_captures_stdout():
 def test_run_cmd_captures_stderr_on_failure():
     with pytest.raises(ProcessError) as exc_info:
         run_cmd(["ls", "/nonexistent_path_xyz_12345"])
-    assert "nonexistent_path_xyz_12345" in str(exc_info.value)
+    error_str = str(exc_info.value)
+    # Error message should only show command name (ls), not full arguments
+    assert "ls" in error_str
+    assert "exit" in error_str
+    # Command arguments should NOT be exposed in error message
+    assert "/nonexistent_path_xyz_12345" not in error_str.split("\n")[0]
 
 
 @patch("fcm.utils.process.subprocess.run")
@@ -80,6 +86,7 @@ def test_run_cmd_called_process_error_mocked(mock_run):
     err = subprocess.CalledProcessError(2, "mycmd")
     err.stderr = "some error detail"
     mock_run.side_effect = err
+    # Error message should only show command name, not full arguments
     with pytest.raises(ProcessError, match="exit 2.*mycmd"):
         run_cmd(["mycmd"])
 
@@ -100,6 +107,61 @@ def test_run_cmd_called_process_error_none_stderr(mock_run):
     mock_run.side_effect = err
     with pytest.raises(ProcessError, match="exit 1"):
         run_cmd(["mycmd"])
+
+
+@patch("fcm.utils.process.subprocess.run")
+def test_run_cmd_sanitized_error_message(mock_run):
+    """Test that error messages only show command name, not full arguments."""
+    err = subprocess.CalledProcessError(1, "mycmd")
+    err.stderr = "sensitive error details"
+    mock_run.side_effect = err
+    with pytest.raises(ProcessError) as exc_info:
+        run_cmd(["mycmd", "--secret-arg", "password123"])
+    error_str = str(exc_info.value)
+    # Should show command name
+    assert "mycmd" in error_str
+    # Should NOT show full arguments
+    assert "--secret-arg" not in error_str
+    assert "password123" not in error_str
+
+
+@patch("fcm.utils.process.subprocess.run")
+def test_run_cmd_sanitized_stderr_truncated(mock_run):
+    """Test that stderr is limited to 100 characters in error messages."""
+    err = subprocess.CalledProcessError(1, "mycmd")
+    err.stderr = "x" * 200
+    mock_run.side_effect = err
+    with pytest.raises(ProcessError) as exc_info:
+        run_cmd(["mycmd"])
+    error_str = str(exc_info.value)
+    # Should be truncated with ...
+    assert "..." in error_str
+    # Should not contain the full 200 characters
+    assert len(error_str) < 250
+
+
+@patch("fcm.utils.process.logger")
+@patch("fcm.utils.process.subprocess.run")
+def test_run_cmd_logs_full_failure_details(mock_run, mock_logger):
+    full_stderr = "sensitive stderr details " + "x" * 200
+    err = subprocess.CalledProcessError(1, ["mycmd", "--secret-arg", "password123"])
+    err.stderr = full_stderr
+    mock_run.side_effect = err
+
+    with pytest.raises(ProcessError):
+        run_cmd(["mycmd", "--secret-arg", "password123"])
+
+    failure_logs = [
+        call
+        for call in mock_logger.debug.call_args_list
+        if call.args[0].startswith("Command failed")
+    ]
+    assert len(failure_logs) == 1
+    failure_log = failure_logs[0]
+    assert failure_log.args[1] == 1
+    assert failure_log.args[2] == "mycmd --secret-arg password123"
+    assert failure_log.args[3] == full_stderr
+    assert failure_log.kwargs["exc_info"] is True
 
 
 @patch("fcm.utils.process.subprocess.run")

@@ -66,6 +66,23 @@ def test_config_file_has_restricted_permissions(config_dir: Path) -> None:
     assert mode == 0o600
 
 
+def test_config_directory_has_restricted_permissions(tmp_path: Path, monkeypatch) -> None:
+    """Test that config directory is created with 0o700 permissions (issue #27)."""
+    # Use a fresh directory that doesn't exist yet
+    fresh_config_dir = tmp_path / "fresh_config"
+    monkeypatch.setenv("FCM_CONFIG_DIR", str(fresh_config_dir))
+    # Reload module to pick up new env var
+    import importlib
+    from fcm.core import config_state
+
+    importlib.reload(config_state)
+
+    set_config_value("test", "value")
+    # Directory should have restrictive permissions
+    mode = fresh_config_dir.stat().st_mode & 0o777
+    assert mode == 0o700
+
+
 def test_config_written_as_json(config_dir: Path) -> None:
     set_config_value("test", "value")
     content = (config_dir / "config.json").read_text()

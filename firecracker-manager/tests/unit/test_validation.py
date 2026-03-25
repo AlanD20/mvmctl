@@ -3,7 +3,11 @@
 import pytest
 
 from fcm.exceptions import FCMError
-from fcm.utils.validation import validate_boot_arg_component, validate_entity_name
+from fcm.utils.validation import (
+    validate_boot_arg_component,
+    validate_entity_name,
+    is_ip_address,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -114,3 +118,46 @@ def test_validate_boot_arg_rejects_metacharacters(value: str, reason: str):
 def test_validate_boot_arg_includes_component_name_in_error():
     with pytest.raises(FCMError, match="Invalid guest_ip"):
         validate_boot_arg_component("10.0.0.1;evil", "guest_ip")
+
+
+# ---------------------------------------------------------------------------
+# is_ip_address — IPv4 and IPv6 validation (issue #25)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "192.168.1.1",
+        "10.0.0.1",
+        "255.255.255.255",
+        "0.0.0.0",
+        "1.2.3.4",
+        "::1",
+        "fe80::1",
+        "2001:db8::1",
+    ],
+)
+def test_is_ip_address_accepts_valid_ips(ip: str):
+    """Valid IPs should return True."""
+    assert is_ip_address(ip) is True
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "999.999.999.999",  # Out of range octets
+        "256.1.1.1",  # Octet too large
+        "192.168.1",  # Missing octet
+        "192.168.1.1.1",  # Extra octet
+        "192.168.1.",  # Trailing dot
+        "192.168.1.a",  # Non-numeric
+        "abc.def.ghi.jkl",  # All non-numeric
+        "",  # Empty string
+        "...",  # Just dots
+        ":::",  # Invalid IPv6
+    ],
+)
+def test_is_ip_address_rejects_invalid_ips(ip: str):
+    """Invalid IPs should return False."""
+    assert is_ip_address(ip) is False

@@ -3,16 +3,22 @@
 import logging
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
-from fcm.exceptions import ImageError, ConfigError
+from fcm.constants import HTTP_USER_AGENT
+from fcm.exceptions import ConfigError, ImageError
 from fcm.models.image import ImageSpec, ImageImportSpec
-from fcm.utils.http import download_file  # re-exported for backward compatibility
+from fcm.utils.http import download_file as _download_file
 
 logger = logging.getLogger(__name__)
 
 _SECTOR_SIZE = 512
+
+download_file = _download_file
 
 
 class _NoPartitionTable:
@@ -45,6 +51,8 @@ def convert_qcow2_to_raw(
             [
                 "qemu-img",
                 "convert",
+                "-m",
+                "512",
                 "-f",
                 "qcow2",
                 "-O",
@@ -61,7 +69,8 @@ def convert_qcow2_to_raw(
         return True
 
     except subprocess.CalledProcessError as e:
-        raise ImageError(f"qemu-img failed: {e.stderr}") from e
+        # Sanitize: don't expose full command details in error message
+        raise ImageError("qemu-img conversion failed") from e
     except FileNotFoundError as e:
         raise ImageError("qemu-img not found. Install qemu-utils.") from e
 
@@ -283,9 +292,10 @@ def extract_partition_from_raw(
         return output_path
 
     except OSError as e:
-        raise ImageError(f"Extraction failed: {e}") from e
+        # Sanitize: don't expose file paths in error message
+        raise ImageError("Extraction failed") from e
     except (IndexError, ValueError) as e:
-        raise ImageError(f"Failed to parse partition table: {e}") from e
+        raise ImageError("Failed to parse partition table") from e
 
 
 def create_ext4_from_tar(
@@ -306,7 +316,6 @@ def create_ext4_from_tar(
     Raises:
         ImageError: On failure to create image or missing tools
     """
-    import tempfile
 
     try:
         logger.info("Creating ext4 image from %s...", tar_path.name)
@@ -341,9 +350,11 @@ def create_ext4_from_tar(
         return True
 
     except subprocess.CalledProcessError as e:
-        raise ImageError(f"Failed to create image: {e}") from e
+        # Sanitize: don't expose command details in error message
+        raise ImageError("Failed to create image") from e
     except FileNotFoundError as e:
-        raise ImageError(f"Required tool not found: {e}") from e
+        # Sanitize: don't expose tool path in error message
+        raise ImageError("Required tool not found") from e
 
 
 def _handle_qcow2(download_path: Path, final_path: Path) -> Path:
@@ -393,7 +404,8 @@ def _resolve_ubuntu_fc_source(spec: ImageSpec) -> str:
         with urlopen(req, timeout=30) as resp:
             xml_content = resp.read().decode("utf-8")
     except Exception as e:
-        raise ImageError(f"Failed to list Firecracker CI ubuntu images: {e}") from e
+        logger.debug("Failed to list Firecracker CI ubuntu images from %s", list_url, exc_info=True)
+        raise ImageError("Failed to list Firecracker CI ubuntu images") from e
 
     import re
 
@@ -409,7 +421,6 @@ def _resolve_ubuntu_fc_source(spec: ImageSpec) -> str:
 
 def _handle_squashfs(download_path: Path, final_path: Path) -> Path:
     """Extract squashfs to ext4 image."""
-    import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -422,7 +433,8 @@ def _handle_squashfs(download_path: Path, final_path: Path) -> Path:
                 check=True,
             )
         except subprocess.CalledProcessError as e:
-            raise ImageError(f"unsquashfs failed: {e.stderr}") from e
+            # Sanitize: don't expose stderr in error message
+            raise ImageError("unsquashfs failed") from e
         except FileNotFoundError as e:
             raise ImageError("unsquashfs not found. Install squashfs-tools.") from e
 
@@ -438,7 +450,8 @@ def _handle_squashfs(download_path: Path, final_path: Path) -> Path:
                 check=True,
             )
         except subprocess.CalledProcessError as e:
-            raise ImageError(f"Failed to create ext4 from squashfs: {e}") from e
+            # Sanitize: don't expose command details in error message
+            raise ImageError("Failed to create ext4 from squashfs") from e
 
     logger.info("Created ext4 from squashfs: %s", final_path)
     return final_path
@@ -450,6 +463,33 @@ _FORMAT_HANDLERS: dict[str, Callable[[Path, Path], Path]] = {
     "raw": _handle_raw,
     "squashfs": _handle_squashfs,
 }
+
+
+def _fetch_checksum_text(url: str) -> str:
+    try:
+        req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urlopen(req, timeout=30) as response:
+            raw: bytes = response.read()
+            return raw.decode("utf-8").strip()
+    except (OSError, URLError, UnicodeDecodeError) as e:
+        raise ImageError(f"Failed to fetch checksum from {url}") from e
+
+
+def _parse_checksum_text(checksum_text: str, source: str) -> str | None:
+    source_basename = source.rstrip("/").split("/")[-1]
+    for line in checksum_text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].lstrip("*") == source_basename:
+            return parts[0].lower()
+
+    if checksum_text:
+        first_line_parts = checksum_text.splitlines()[0].split()
+        if first_line_parts:
+            first_token = first_line_parts[0]
+            if len(first_token) == 64:
+                return first_token.lower()
+
+    return None
 
 
 def fetch_image(
@@ -484,41 +524,28 @@ def fetch_image(
     if spec.id == "ubuntu-fc" and spec.format == "squashfs":
         source = _resolve_ubuntu_fc_source(spec)
 
-    resolved_sha256 = spec.sha256
+    resolved_sha256 = spec.sha256.lower() if spec.sha256 else None
+    checksum_url = spec.sha256_url
+    if not checksum_url and spec.id == "ubuntu-fc":
+        checksum_url = f"{source}.sha256"
 
-    if not resolved_sha256 and spec.sha256_url:
-        import tempfile
-
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".sha256", delete=False) as tmp:
-                tmp_path = Path(tmp.name)
-            download_file(spec.sha256_url, tmp_path, expected_sha256=None)
-            checksum_text = tmp_path.read_text().strip()
-            source_basename = source.rstrip("/").split("/")[-1]
-            for line in checksum_text.splitlines():
-                parts = line.split()
-                if len(parts) >= 2 and parts[1].lstrip("*") == source_basename:
-                    resolved_sha256 = parts[0]
-                    break
-            if not resolved_sha256 and checksum_text:
-                first_token = checksum_text.splitlines()[0].split()[0]
-                if len(first_token) in (64, 128):
-                    resolved_sha256 = first_token
-            tmp_path.unlink(missing_ok=True)
-        except Exception as e:
-            logger.warning("Failed to fetch checksum from %s: %s", spec.sha256_url, e)
+    if not resolved_sha256 and checksum_url:
+        checksum_text = _fetch_checksum_text(checksum_url)
+        resolved_sha256 = _parse_checksum_text(checksum_text, source)
+        if not resolved_sha256:
+            raise ImageError(f"Failed to parse checksum from {checksum_url}")
 
     if not resolved_sha256:
-        from fcm.utils.console import print_warning
+        raise ImageError(f"Checksum required for remote image '{spec.id}'")
 
-        print_warning(
-            f"No checksum available for '{spec.id}'. "
-            "Integrity cannot be verified — set sha256 or sha256_url in images.yaml to enable verification."
-        )
-
-    # Download
+    # Download with checksum verification
     download_path = output_dir / f"{spec.id}.download"
-    download_file(source, download_path, resolved_sha256)
+    download_file(
+        source,
+        download_path,
+        expected_sha256=resolved_sha256,
+        allow_missing_checksum=False,
+    )
 
     # Convert based on format
     handler = _FORMAT_HANDLERS.get(spec.format)
@@ -548,7 +575,7 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
     import yaml
 
     if not config_path.exists():
-        raise ConfigError(f"Config not found: {config_path}")
+        raise ConfigError("Config not found")
 
     with open(config_path) as f:
         data = yaml.safe_load(f)
@@ -595,10 +622,10 @@ def import_image(
     final_path = output_dir / f"{spec.id}.{spec.convert_to}"
 
     if final_path.exists() and not force:
-        raise ImageError(f"Image already exists: {final_path}. Use --force to overwrite.")
+        raise ImageError(f"Image '{spec.id}' already exists. Use --force to overwrite.")
 
     if not spec.source_path.exists():
-        raise ImageError(f"Source file not found: {spec.source_path}")
+        raise ImageError("Source file not found")
 
     logger.info(
         "Importing %s as '%s' (format: %s)...",
@@ -608,13 +635,23 @@ def import_image(
     )
 
     if spec.format == "qcow2":
-        raw_path = output_dir / f"{spec.id}.raw"
-        convert_qcow2_to_raw(spec.source_path, raw_path)
-        try:
-            actual_path = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
-        finally:
-            raw_path.unlink(missing_ok=True)
-        return actual_path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            raw_path = tmpdir_path / f"{spec.id}.raw"
+            extracted_path = tmpdir_path / f"{spec.id}.img"
+            convert_qcow2_to_raw(spec.source_path, raw_path)
+            actual_path = extract_partition_from_raw(raw_path, extracted_path)
+
+            destination_path = output_dir / f"{spec.id}{actual_path.suffix}"
+            if destination_path.exists() and not force:
+                raise ImageError(f"Image '{spec.id}' already exists. Use --force to overwrite.")
+            if destination_path.exists():
+                destination_path.unlink()
+
+            shutil.move(str(actual_path), destination_path)
+            return destination_path
 
     elif spec.format == "raw":
         shutil.copy2(spec.source_path, final_path)

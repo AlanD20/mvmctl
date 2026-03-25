@@ -39,7 +39,8 @@ def _read_raw() -> dict[str, Any]:
 
 def _write_raw(state: dict[str, Any]) -> None:
     path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.chmod(0o700)
     path.write_text(json.dumps(state, indent=2))
     path.chmod(0o600)
 

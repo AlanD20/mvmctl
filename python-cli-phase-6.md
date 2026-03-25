@@ -125,3 +125,7 @@ Additional requirements to not miss!
 - go through all the commands, any command that shows date/time, it must be relative, if greater than a week, then show the date and time in a friendly standard format. This must be applied to every command!
 - [!IMPORTANT] when sudo is being used, the cli is making too many attempts and causing the user to get locked and unable to use sudo, this needs to be addressed! this is happening with any sudo commands such as network create, host init.
 - Ensure every file is created in cache or config directory are under the current user! sudo is being used in the entire project for escalation which the application is prone to mistakenly create files with root permission only causing breaking behaviors.
+
+- do not use sudo in the tests, they shouldnt require suo privileges to run tests!!!
+- ensure that when runnnig `fcm host init` the FCM chains are persisted!! it's important that after reboot the networks that are created by the CLI are persisted.
+- Do not persist VM tap devices, they must be temporary

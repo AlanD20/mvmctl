@@ -1,9 +1,11 @@
 import subprocess
 from unittest.mock import patch
 
+import pytest
 import yaml
 
-from fcm.core.cloud_init import write_cloud_init, inject_cloud_init
+from fcm.core.cloud_init import write_cloud_init, inject_cloud_init, _validate_user_data
+from fcm.exceptions import ConfigError
 
 
 def test_write_cloud_init_basic(tmp_path):
@@ -101,3 +103,42 @@ def test_inject_cloud_init_mount_error(mock_logger, mock_run, tmp_path):
     inject_cloud_init(rootfs, cloud_init_dir)
 
     mock_logger.warning.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Cloud-init security validation (issue #26)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_user_data_rejects_dangerous_directives(tmp_path):
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    custom_ud = tmp_path / "dangerous.yaml"
+    custom_ud.write_text("#cloud-config\nwrite_files:\n  - path: /etc/test\n")
+
+    with pytest.raises(ConfigError, match="write_files"):
+        write_cloud_init(
+            cloud_init_dir=cloud_init_dir,
+            vm_name="testvm",
+            guest_ip="10.20.0.10",
+            user="myuser",
+            custom_user_data=custom_ud,
+        )
+
+
+def test_validate_user_data_rejects_runcmd(tmp_path):
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    custom_ud = tmp_path / "runcmd.yaml"
+    custom_ud.write_text("#cloud-config\nruncmd:\n  - echo hello\n")
+
+    with pytest.raises(ConfigError, match="runcmd"):
+        write_cloud_init(
+            cloud_init_dir=cloud_init_dir,
+            vm_name="testvm",
+            guest_ip="10.20.0.10",
+            user="myuser",
+            custom_user_data=custom_ud,
+        )

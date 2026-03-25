@@ -1,78 +1,86 @@
 """Smoke tests — verify the CLI app assembles and responds to basic commands."""
 
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from fcm.main import app
 
 runner = CliRunner()
 
 
+def invoke_cli(args: list[str]):
+    return runner.invoke(app, args)
+
+
 def test_help_returns_zero() -> None:
-    result = runner.invoke(app, ["--help"])
+    result = invoke_cli(["--help"])
     assert result.exit_code == 0
     assert "Firecracker Manager" in result.output
 
 
 def test_version_returns_zero() -> None:
-    result = runner.invoke(app, ["--version"])
+    result = invoke_cli(["--version"])
     assert result.exit_code == 0
     assert "fcm" in result.output
 
 
 def test_unknown_command_returns_nonzero() -> None:
-    result = runner.invoke(app, ["nonexistent-command"])
+    result = invoke_cli(["nonexistent-command"])
     assert result.exit_code != 0
 
 
 def test_subcommand_help_vm() -> None:
-    result = runner.invoke(app, ["vm", "--help"])
+    result = invoke_cli(["vm", "--help"])
     assert result.exit_code == 0
     assert "create" in result.output
 
 
 def test_subcommand_help_kernel() -> None:
-    result = runner.invoke(app, ["kernel", "--help"])
+    result = invoke_cli(["kernel", "--help"])
     assert result.exit_code == 0
     assert "ls" in result.output
 
 
 def test_subcommand_help_image() -> None:
-    result = runner.invoke(app, ["image", "--help"])
+    result = invoke_cli(["image", "--help"])
     assert result.exit_code == 0
     assert "ls" in result.output
 
 
 def test_subcommand_help_bin() -> None:
-    result = runner.invoke(app, ["bin", "--help"])
+    result = invoke_cli(["bin", "--help"])
     assert result.exit_code == 0
     assert "ls" in result.output
 
 
 def test_subcommand_help_network() -> None:
-    result = runner.invoke(app, ["network", "--help"])
+    result = invoke_cli(["network", "--help"])
     assert result.exit_code == 0
     assert "create" in result.output
 
 
 def test_subcommand_help_key() -> None:
-    result = runner.invoke(app, ["key", "--help"])
+    result = invoke_cli(["key", "--help"])
     assert result.exit_code == 0
     assert "create" in result.output
 
 
 def test_subcommand_help_config() -> None:
-    result = runner.invoke(app, ["config", "--help"])
+    result = invoke_cli(["config", "--help"])
     assert result.exit_code == 0
     assert "show" in result.output
 
 
 def test_subcommand_help_host() -> None:
-    result = runner.invoke(app, ["host", "--help"])
+    result = invoke_cli(["host", "--help"])
     assert result.exit_code == 0
     assert "init" in result.output
 
 
 def test_subcommand_help_configure() -> None:
-    result = runner.invoke(app, ["configure", "--help"])
+    result = invoke_cli(["configure", "--help"])
     assert result.exit_code == 0
-    assert "wizard" in result.output.lower() or "setup" in result.output.lower()
+    assert (
+        "onboarding" in result.output.lower()
+        or "setup" in result.output.lower()
+        or "wizard" in result.output.lower()
+    )

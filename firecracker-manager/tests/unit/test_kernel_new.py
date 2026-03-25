@@ -232,6 +232,7 @@ def test_download_firecracker_kernel_success(
     result = download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path)
     assert result.name.startswith("vmlinux")
     assert result.exists()
+    assert mock_dl.call_args.kwargs["expected_sha256"] is not None
 
 
 @patch("fcm.core.kernel.urlopen", side_effect=URLError("network error"))
@@ -252,3 +253,26 @@ def test_download_firecracker_kernel_no_keys(mock_urlopen: MagicMock, tmp_path: 
 
     with pytest.raises(KernelError):
         download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path)
+
+
+@patch("fcm.core.kernel.download_file")
+@patch("fcm.core.kernel.urlopen")
+def test_download_firecracker_kernel_requires_checksum(
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
+):
+    xml_response = b"""<?xml version="1.0"?>
+<ListBucketResult>
+<Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
+</ListBucketResult>"""
+
+    list_resp = MagicMock()
+    list_resp.read.return_value = xml_response
+    list_resp.__enter__ = lambda s: s
+    list_resp.__exit__ = MagicMock(return_value=False)
+
+    mock_urlopen.side_effect = [list_resp, URLError("missing sidecar")]
+
+    with pytest.raises(KernelError, match="Checksum required"):
+        download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path)
+
+    mock_dl.assert_not_called()

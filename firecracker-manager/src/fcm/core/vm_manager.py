@@ -154,6 +154,25 @@ class VMManager:
         self.state_file.chmod(0o600)
         self._cache = state
 
+    def _count_vms_from_file(self) -> int:
+        if not self.state_file.exists():
+            return 0
+        try:
+            with open(self.state_file, "r") as f:
+                loaded = json.load(f)
+        except (json.JSONDecodeError, OSError, ValueError):
+            logger.warning("Corrupt state file at %s — resetting VM count to zero", self.state_file)
+            return 0
+
+        if not isinstance(loaded, dict):
+            return 0
+
+        vms = loaded.get("vms", {})
+        if not isinstance(vms, dict):
+            return 0
+
+        return len(vms)
+
     def register(self, vm: VMInstance) -> None:
         """Register a new VM in the shared ``state.json`` registry.
 
@@ -263,6 +282,16 @@ class VMManager:
             for vm_id, vm_data in state["vms"].items():
                 vms.append(self._vm_from_data(vm_id, vm_data))
             return vms
+
+    def count_vms(self) -> int:
+        """Return the number of VMs without loading full metadata."""
+        with self._locked(exclusive=False):
+            if self._cache is not None:
+                vms = self._cache.get("vms", {})
+                if isinstance(vms, dict):
+                    return len(vms)
+                return 0
+            return self._count_vms_from_file()
 
     def deregister(self, vm_id: str) -> None:
         """Remove VM from state by full hash ID."""

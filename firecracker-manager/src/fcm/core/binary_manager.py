@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -135,25 +134,6 @@ def list_remote_versions(limit: int = DEFAULT_REMOTE_VERSION_LIMIT) -> list[str]
     return versions
 
 
-def _verify_sha256(version: str, tgz_path: Path, actual_hex: str) -> None:
-    """Verify downloaded tarball against GitHub SHA-256 sidecar file."""
-    sha_url = f"{GITHUB_DOWNLOAD_URL}/v{version}/firecracker-v{version}-x86_64.tgz.sha256.txt"
-    try:
-        req = Request(sha_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req, timeout=30) as resp:
-            content = resp.read().decode().strip()
-        expected = content.split()[0].lower()
-        if actual_hex.lower() != expected:
-            tgz_path.unlink(missing_ok=True)
-            raise BinaryError(
-                f"SHA-256 mismatch for Firecracker v{version}: "
-                f"expected {expected}, got {actual_hex}"
-            )
-        logger.info("SHA-256 verified for Firecracker v%s", version)
-    except URLError:
-        logger.warning("Could not fetch SHA-256 sidecar for v%s — skipping verification", version)
-
-
 def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     """Download Firecracker and jailer binaries for *version*."""
     version = _normalize_version(version)
@@ -172,19 +152,35 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
         )
 
     tgz_url = f"{GITHUB_DOWNLOAD_URL}/v{version}/firecracker-v{version}-x86_64.tgz"
+    sha256_url = f"{tgz_url}.sha256.txt"
+
+    # Fetch checksum first
+    expected_sha256: str | None = None
+    try:
+        req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urlopen(req, timeout=30) as resp:
+            content = resp.read().decode().strip()
+        parts = content.split()
+        if parts:
+            expected_sha256 = parts[0].lower()
+            logger.info("Fetched checksum for Firecracker v%s: %s", version, expected_sha256)
+    except (URLError, OSError):
+        logger.debug("Could not fetch SHA-256 sidecar for v%s", version)
+
+    if expected_sha256 is None:
+        raise BinaryError(f"Checksum required for Firecracker v{version} download")
 
     tgz_path = d / f"firecracker-v{version}-x86_64.tgz"
     try:
-        download_file(tgz_url, tgz_path, expected_sha256=None, timeout=300)
+        download_file(
+            tgz_url,
+            tgz_path,
+            expected_sha256=expected_sha256,
+            timeout=300,
+        )
     except FCMError as exc:
         tgz_path.unlink(missing_ok=True)
         raise BinaryError(f"Failed to download Firecracker v{version}: {exc}") from exc
-
-    sha256_hash = hashlib.sha256()
-    with open(tgz_path, "rb") as f:
-        for chunk in iter(lambda: f.read(_CHUNK_SIZE), b""):
-            sha256_hash.update(chunk)
-    _verify_sha256(version, tgz_path, sha256_hash.hexdigest())
 
     try:
         with tarfile.open(tgz_path, "r:gz") as tar:

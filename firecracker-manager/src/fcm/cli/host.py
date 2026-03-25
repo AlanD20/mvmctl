@@ -1,5 +1,6 @@
 """Host configuration CLI commands."""
 
+import os
 import sys
 
 import typer
@@ -77,8 +78,15 @@ def init_cmd() -> None:
             if typer.confirm("Run 'sudo fcm host init' now?", default=False):
                 import subprocess
 
+                if os.environ.get("FCM_SUDO_RESTART"):
+                    print_error("Recursive sudo restart detected. Aborting to prevent lockout.")
+                    print_info("Please run 'sudo fcm host init' manually.")
+                    raise typer.Exit(code=1)
+
                 try:
-                    subprocess.run(["sudo"] + sys.argv, check=False)
+                    env = os.environ.copy()
+                    env["FCM_SUDO_RESTART"] = "1"
+                    subprocess.run(["sudo"] + sys.argv, check=False, env=env)
                 except FileNotFoundError:
                     print_error("sudo command not found")
         else:

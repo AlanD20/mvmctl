@@ -1,11 +1,11 @@
 """Input validation utilities for entity names and paths."""
 
+import ipaddress
 import re
 
 from fcm.exceptions import FCMError
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,30}$")
-_IP_PATTERN = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
 
 
 def validate_entity_name(name: str, entity_type: str = "entity") -> str:
@@ -49,4 +49,19 @@ def validate_boot_arg_component(value: str, component_name: str) -> str:
 
 
 def is_ip_address(value: str) -> bool:
-    return bool(_IP_PATTERN.match(value))
+    """Validate that the given string is a valid IPv4 or IPv6 address.
+
+    Uses the ipaddress module for proper validation instead of regex,
+    which can accept invalid IPs like "999.999.999.999".
+
+    Args:
+        value: The string to validate as an IP address.
+
+    Returns:
+        True if the value is a valid IP address, False otherwise.
+    """
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False

@@ -6,15 +6,131 @@ This module provides functions to read, write, and migrate metadata.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
+import threading
+import time
+from collections import OrderedDict
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, IO
 
 logger = logging.getLogger(__name__)
 
 _METADATA_FILENAME = "metadata.json"
+_METADATA_LOCK_FILENAME = "metadata.json.lock"
+
+# Default TTL for metadata cache in seconds
+DEFAULT_CACHE_TTL = 5.0
+DEFAULT_CACHE_MAX_ENTRIES = 32
+
+
+@dataclass
+class _CacheEntry:
+    """Internal cache entry with data, mtime, and timestamp."""
+
+    data: dict[str, Any]
+    mtime: float
+    timestamp: float = field(default_factory=time.time)
+
+
+class MetadataCache:
+    """Thread-safe LRU cache for metadata reads with TTL and mtime-based invalidation.
+
+    The cache stores metadata entries keyed by cache directory path. Each entry
+    tracks the file's modification time (mtime) to invalidate stale data.
+
+    Attributes:
+        ttl: Time-to-live in seconds for cached entries (default: 5.0)
+    """
+
+    def __init__(
+        self,
+        ttl: float = DEFAULT_CACHE_TTL,
+        max_entries: int = DEFAULT_CACHE_MAX_ENTRIES,
+    ) -> None:
+        """Initialize the cache with specified TTL.
+
+        Args:
+            ttl: Time-to-live in seconds for cached entries
+        """
+        self._ttl = ttl
+        self._max_entries = max_entries
+        self._cache: OrderedDict[Path, _CacheEntry] = OrderedDict()
+        self._lock = threading.RLock()
+
+    def get(self, cache_dir: Path) -> dict[str, Any] | None:
+        """Get cached metadata if valid (not expired and mtime matches).
+
+        Args:
+            cache_dir: Directory containing metadata.json
+
+        Returns:
+            Cached data dict if valid, None otherwise
+        """
+        with self._lock:
+            entry = self._cache.get(cache_dir)
+            if entry is None:
+                return None
+
+            meta_path = _metadata_path(cache_dir)
+            try:
+                current_mtime = meta_path.stat().st_mtime
+            except OSError:
+                del self._cache[cache_dir]
+                return None
+
+            if current_mtime != entry.mtime:
+                del self._cache[cache_dir]
+                return None
+
+            now = time.time()
+            if now - entry.timestamp <= self._ttl:
+                self._cache.move_to_end(cache_dir)
+                return entry.data
+
+            entry.timestamp = now
+            self._cache.move_to_end(cache_dir)
+            return entry.data
+
+    def set(self, cache_dir: Path, data: dict[str, Any]) -> None:
+        """Cache metadata with current file mtime.
+
+        Args:
+            cache_dir: Directory containing metadata.json
+            data: Metadata dict to cache
+        """
+        with self._lock:
+            meta_path = _metadata_path(cache_dir)
+            try:
+                mtime = meta_path.stat().st_mtime
+            except OSError:
+                mtime = time.time()
+
+            self._cache[cache_dir] = _CacheEntry(data=data, mtime=mtime)
+            self._cache.move_to_end(cache_dir)
+            while len(self._cache) > self._max_entries:
+                self._cache.popitem(last=False)
+
+    def invalidate(self, cache_dir: Path | None = None) -> None:
+        """Invalidate cache entries.
+
+        Args:
+            cache_dir: Specific cache directory to invalidate, or None to clear all
+        """
+        with self._lock:
+            if cache_dir is None:
+                self._cache.clear()
+            else:
+                self._cache.pop(cache_dir, None)
+
+
+# Global cache instance
+_metadata_cache = MetadataCache()
 
 
 def _metadata_path(cache_dir: Path) -> Path:
@@ -22,27 +138,72 @@ def _metadata_path(cache_dir: Path) -> Path:
     return cache_dir / _METADATA_FILENAME
 
 
-def read_metadata(cache_dir: Path) -> dict[str, Any]:
-    """Read metadata.json; return {} if not found or invalid JSON."""
-    path = _metadata_path(cache_dir)
-    if not path.exists():
-        return {}
+def _lock_path(cache_dir: Path) -> Path:
+    """Return path to metadata.json.lock in cache_dir."""
+    return cache_dir / _METADATA_LOCK_FILENAME
+
+
+@contextmanager
+def _locked_metadata(cache_dir: Path, exclusive: bool = True) -> Generator[None, None, None]:
+    """Context manager for file locking metadata operations.
+
+    Uses a separate .lock file (not metadata.json itself) to avoid
+    interfering with atomic writes.
+
+    Args:
+        cache_dir: Directory containing metadata.json
+        exclusive: If True, use LOCK_EX for writes; if False, use LOCK_SH for reads
+    """
+    lock_file_path = _lock_path(cache_dir)
+    lock_file_path.parent.mkdir(parents=True, exist_ok=True)
+    f: IO[str] = open(lock_file_path, "a+")
     try:
-        data: dict[str, Any] = json.loads(path.read_text())
-        if not isinstance(data, dict):
+        fcntl.flock(f, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        yield None
+    finally:
+        fcntl.flock(f, fcntl.LOCK_UN)
+        f.close()
+
+
+def read_metadata(cache_dir: Path) -> dict[str, Any]:
+    """Read metadata.json; return {} if not found or invalid JSON.
+
+    Uses shared file locking (LOCK_SH) for concurrent read safety.
+    Results are cached with TTL to reduce I/O for repeated reads.
+    """
+    cached = _metadata_cache.get(cache_dir)
+    if cached is not None:
+        return cached
+
+    with _locked_metadata(cache_dir, exclusive=False):
+        path = _metadata_path(cache_dir)
+        if not path.exists():
             return {}
-        return data
-    except (json.JSONDecodeError, OSError):
-        logger.warning("Corrupt metadata at %s — returning empty state", path)
-        return {}
+        try:
+            data: dict[str, Any] = json.loads(path.read_text())
+            if not isinstance(data, dict):
+                return {}
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Corrupt metadata at %s — returning empty state", path)
+            return {}
+
+    _metadata_cache.set(cache_dir, data)
+    return data
 
 
 def write_metadata(cache_dir: Path, data: dict[str, Any]) -> None:
-    """Write metadata.json atomically (chmod 0o600)."""
-    path = _metadata_path(cache_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
-    path.chmod(0o600)
+    """Write metadata.json atomically (chmod 0o600).
+
+    Uses exclusive file locking (LOCK_EX) to prevent concurrent write corruption.
+    Invalidates the read cache after writing.
+    """
+    with _locked_metadata(cache_dir, exclusive=True):
+        path = _metadata_path(cache_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2))
+        path.chmod(0o600)
+        # Invalidate cache since file has been modified
+        _metadata_cache.invalidate(cache_dir)
 
 
 def _now_utc() -> str:
@@ -76,13 +237,45 @@ def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
     return {}
 
 
-def list_kernel_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
-    """Return all kernel entries dict keyed by filename."""
+def list_kernel_entries(
+    cache_dir: Path, kernels_dir: Path | None = None
+) -> dict[str, dict[str, Any]]:
+    """Return all kernel entries dict keyed by filename.
+
+    Validates that entries correspond to actual files and removes orphaned entries.
+
+    Args:
+        cache_dir: Directory containing metadata.json
+        kernels_dir: Optional directory to validate kernel files exist
+    """
     data = read_metadata(cache_dir)
     kernels = data.get("kernels", {})
-    if isinstance(kernels, dict):
-        return {k: dict(v) for k, v in kernels.items() if isinstance(v, dict)}
-    return {}
+    if not isinstance(kernels, dict):
+        return {}
+
+    # Validate entries against actual files
+    if kernels_dir is not None and kernels_dir.exists():
+        valid_kernels: dict[str, dict[str, Any]] = {}
+        orphaned: list[str] = []
+
+        for kernel_name, kernel_data in kernels.items():
+            if isinstance(kernel_data, dict):
+                kernel_path = kernels_dir / kernel_name
+                if kernel_path.exists():
+                    valid_kernels[kernel_name] = dict(kernel_data)
+                else:
+                    orphaned.append(kernel_name)
+
+        # Remove orphaned entries
+        if orphaned:
+            logger.debug("Removing %d orphaned kernel entries: %s", len(orphaned), orphaned)
+            for kernel_name in orphaned:
+                del data["kernels"][kernel_name]
+            write_metadata(cache_dir, data)
+
+        return valid_kernels
+
+    return {k: dict(v) for k, v in kernels.items() if isinstance(v, dict)}
 
 
 def remove_kernel_entry(cache_dir: Path, kernel_name: str) -> None:
@@ -120,13 +313,46 @@ def get_image_entry(cache_dir: Path, image_id: str) -> dict[str, Any]:
     return {}
 
 
-def list_image_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
-    """Return all image entries dict keyed by image ID."""
+def list_image_entries(
+    cache_dir: Path, images_dir: Path | None = None
+) -> dict[str, dict[str, Any]]:
+    """Return all image entries dict keyed by image ID.
+
+    Validates that entries correspond to actual files and removes orphaned entries.
+
+    Args:
+        cache_dir: Directory containing metadata.json
+        images_dir: Optional directory to validate image files exist
+    """
     data = read_metadata(cache_dir)
     images = data.get("images", {})
-    if isinstance(images, dict):
-        return {k: dict(v) for k, v in images.items() if isinstance(v, dict)}
-    return {}
+    if not isinstance(images, dict):
+        return {}
+
+    # Validate entries against actual files
+    if images_dir is not None and images_dir.exists():
+        valid_images: dict[str, dict[str, Any]] = {}
+        orphaned: list[str] = []
+
+        for image_id, image_data in images.items():
+            if isinstance(image_data, dict):
+                filename = image_data.get("filename", f"{image_id}.ext4")
+                image_path = images_dir / filename
+                if image_path.exists():
+                    valid_images[image_id] = dict(image_data)
+                else:
+                    orphaned.append(image_id)
+
+        # Remove orphaned entries
+        if orphaned:
+            logger.debug("Removing %d orphaned image entries: %s", len(orphaned), orphaned)
+            for image_id in orphaned:
+                del data["images"][image_id]
+            write_metadata(cache_dir, data)
+
+        return valid_images
+
+    return {k: dict(v) for k, v in images.items() if isinstance(v, dict)}
 
 
 def remove_image_entry(cache_dir: Path, image_id: str) -> None:

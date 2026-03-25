@@ -44,6 +44,22 @@ def test_vm_manager_list(vm_manager: VMManager):
     assert len(vms) == 2
 
 
+def test_vm_manager_count_vms(vm_manager: VMManager):
+    """count_vms should return the number of VMs without loading full metadata."""
+    assert vm_manager.count_vms() == 0
+
+    vm_manager.register(VMInstance(name="vm1", pid=1, status=VMState.RUNNING))
+    assert vm_manager.count_vms() == 1
+
+    vm_manager.register(VMInstance(name="vm2", pid=2, status=VMState.STOPPED))
+    assert vm_manager.count_vms() == 2
+
+    registered = vm_manager.get("vm1")
+    assert registered is not None
+    vm_manager.deregister(registered.id)
+    assert vm_manager.count_vms() == 1
+
+
 def test_vm_manager_deregister(vm_manager: VMManager):
     vm = VMInstance(name="test-vm", pid=1234, status=VMState.RUNNING)
     vm_manager.register(vm)

@@ -240,8 +240,9 @@ def test_create_duplicate_vm_name(mocker: MockerFixture):
 # ---------------------------------------------------------------------------
 
 from fcm.main import app as main_app  # noqa: E402
+from click.testing import CliRunner as ClickCliRunner
 
-main_runner = CliRunner()
+main_runner = ClickCliRunner()
 
 
 def test_main_app_create_missing_name():

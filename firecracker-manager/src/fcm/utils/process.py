@@ -11,6 +11,15 @@ from fcm.exceptions import ProcessError
 
 logger = logging.getLogger(__name__)
 
+_STDERR_PREVIEW_LIMIT = 100
+
+
+def _sanitize_stderr(stderr: str | None) -> str:
+    cleaned = (stderr or "").strip()
+    if len(cleaned) > _STDERR_PREVIEW_LIMIT:
+        return f"{cleaned[:_STDERR_PREVIEW_LIMIT]}..."
+    return cleaned
+
 
 def run_cmd(
     args: list[str],
@@ -46,9 +55,17 @@ def run_cmd(
         raise ProcessError(f"Command not found: {args[0]}") from e
     except subprocess.CalledProcessError as e:
         stderr = (e.stderr or "").strip()
+        logger.debug(
+            "Command failed (exit %s): %s\nstderr=%s",
+            e.returncode,
+            shlex.join(args),
+            stderr,
+            exc_info=True,
+        )
+        sanitized_stderr = _sanitize_stderr(stderr)
         raise ProcessError(
-            f"Command failed (exit {e.returncode}): {' '.join(args)}"
-            + (f"\n{stderr}" if stderr else "")
+            f"Command failed (exit {e.returncode}): {args[0]}"
+            + (f"\n{sanitized_stderr}" if sanitized_stderr else "")
         ) from e
     return result
 
@@ -91,4 +108,5 @@ def stream_cmd(
         proc.stdout.close()
         returncode = proc.wait()
         if returncode != 0:
-            raise ProcessError(f"Command failed (exit {returncode}): {' '.join(args)}")
+            # Sanitize error message: only show command name
+            raise ProcessError(f"Command failed (exit {returncode}): {args[0]}")

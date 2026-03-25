@@ -2,12 +2,49 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from fcm.exceptions import ConfigError
 
 logger = logging.getLogger(__name__)
+
+# Cloud-init directives that could be security risks if misused
+_DANGEROUS_CLOUD_INIT_DIRECTIVES = {
+    "write_files": "Can write arbitrary files to the system",
+    "runcmd": "Can execute arbitrary commands",
+    "bootcmd": "Can execute commands at boot",
+    "snap": "Can install snap packages",
+    "apt": "Can install packages (use with caution)",
+    "yum": "Can install packages (use with caution)",
+    "packages": "Can install packages (use with caution)",
+}
+
+
+def _validate_user_data(user_data: dict[str, Any]) -> None:
+    """Validate user-data for dangerous cloud-init directives.
+
+    Args:
+        user_data: The parsed user-data dictionary.
+
+    Raises:
+        ConfigError: If dangerous directives are found without proper safeguards.
+    """
+    dangerous_directives = [
+        directive for directive in _DANGEROUS_CLOUD_INIT_DIRECTIVES if directive in user_data
+    ]
+    if not dangerous_directives:
+        return
+
+    details = "; ".join(
+        f"{directive}: {_DANGEROUS_CLOUD_INIT_DIRECTIVES[directive]}"
+        for directive in dangerous_directives
+    )
+    raise ConfigError(
+        "Custom cloud-init user-data contains blocked directive(s): "
+        f"{', '.join(dangerous_directives)}. {details}"
+    )
 
 
 def write_cloud_init(
@@ -45,8 +82,6 @@ def write_cloud_init(
         yaml.dump(network_config, default_flow_style=False)
     )
 
-    from typing import Any
-
     if custom_user_data is not None:
         ud: dict[str, Any] = {}
         content = custom_user_data.read_text()
@@ -58,6 +93,9 @@ def write_cloud_init(
             loaded = yaml.safe_load(content)
             if isinstance(loaded, dict):
                 ud = loaded
+                _validate_user_data(ud)
+            elif loaded is not None:
+                raise ConfigError("Custom user-data must parse to a YAML mapping/object")
         except yaml.YAMLError as exc:
             raise ConfigError(f"Invalid YAML in user-data file: {exc}") from exc
         if ssh_pub_key:

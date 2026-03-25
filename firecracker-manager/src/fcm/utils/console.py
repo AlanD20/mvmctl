@@ -1,12 +1,34 @@
 """Rich console utilities."""
 
-from rich.console import Console
-from rich.table import Table
+from __future__ import annotations
 
-console = Console()
+from typing import Any
+
+
+class _LazyConsoleProxy:
+    def __init__(self) -> None:
+        self._console: Any | None = None
+
+    def _get_console(self) -> Any:
+        if self._console is None:
+            from rich.console import Console
+
+            self._console = Console()
+        return self._console
+
+    def print(self, *args: Any, **kwargs: Any) -> None:
+        self._get_console().print(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get_console(), name)
+
+
+console = _LazyConsoleProxy()
 
 
 def print_table(title: str, columns: list[str], rows: list[list[str]]) -> None:
+    from rich.table import Table
+
     table = Table(title=title)
     for col in columns:
         table.add_column(col)

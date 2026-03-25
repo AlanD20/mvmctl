@@ -17,6 +17,7 @@ from fcm.core.network import (
     delete_tap,
     generate_mac,
     get_default_interface,
+    _run_ip_batch,
     get_tap_devices,
     remove_iptables_forward_rules,
     setup_bridge,
@@ -162,6 +163,24 @@ def test_get_default_interface_not_found():
             get_default_interface()
 
 
+def test_get_default_interface_error_message_sanitized():
+    with patch(
+        "fcm.core.network.subprocess.run",
+        side_effect=subprocess.CalledProcessError(
+            1,
+            ["ip", "route", "show", "default"],
+            stderr="sensitive details for /etc/iproute2/rt_tables",
+        ),
+    ):
+        with pytest.raises(NetworkError) as exc_info:
+            get_default_interface()
+
+    error_str = str(exc_info.value)
+    assert error_str == "Failed to determine default network interface"
+    assert "route show default" not in error_str
+    assert "/etc/iproute2/rt_tables" not in error_str
+
+
 # ---------------------------------------------------------------------------
 # setup_bridge
 # ---------------------------------------------------------------------------
@@ -182,9 +201,18 @@ def test_setup_bridge_success():
         mock_result.returncode = 0
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch.object(Path, "write_text") as mock_write:
-                setup_bridge("fc-br0", "10.20.0.1/24")
-                assert mock_run.call_count == 1
-                mock_write.assert_called_once_with("1\n")
+                with patch(
+                    "fcm.core.network.os.getuid", return_value=0
+                ):  # Run as root to skip sudo
+                    setup_bridge("fc-br0", "10.20.0.1/24")
+                    # 1 call for ip -batch (bridge setup)
+                    assert mock_run.call_count == 1
+                    mock_write.assert_called_once_with("1\n")
+                    assert mock_run.call_args_list[0].kwargs["input"] == (
+                        "link add name fc-br0 type bridge\n"
+                        "addr add 10.20.0.1/24 dev fc-br0\n"
+                        "link set fc-br0 up\n"
+                    )
 
 
 def test_setup_bridge_create_fails():
@@ -216,8 +244,12 @@ def test_setup_bridge_ip_forward_fails():
 
         with patch("fcm.core.network.subprocess.run", side_effect=_run_side_effect):
             with patch.object(Path, "write_text", side_effect=OSError("Permission denied")):
-                with pytest.raises(NetworkError, match="Failed to enable IP forwarding"):
+                with pytest.raises(
+                    NetworkError, match="Failed to enable IP forwarding"
+                ) as exc_info:
                     setup_bridge("fc-br0", "10.20.0.1/24")
+
+    assert "/proc/sys/net/ipv4/ip_forward" not in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -245,22 +277,23 @@ def test_teardown_bridge_down_fails():
 
 
 def test_setup_nat_all_rules_exist():
-    """setup_nat should not add rules when all iptables rules already exist."""
-    mock_check = MagicMock()
-    mock_check.returncode = 0
-    with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
+    """setup_nat should apply rules via iptables-restore (idempotent via --noflush)."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
             with patch("fcm.core.network.setup_fcm_chains"):
-                with patch("fcm.core.network._iptables_rule_exists", return_value=True):
-                    setup_nat("fc-br0", "eth0")
-                    # Rules already exist, no subprocess calls needed
-                    mock_run.assert_not_called()
+                setup_nat("fc-br0", "eth0")
+                # Single iptables-restore call for all rules
+                assert mock_run.call_count == 1
+                args = mock_run.call_args[0][0]
+                assert "iptables-restore" in args
 
 
 def test_setup_nat_no_rules_exist():
-    """setup_nat should add iptables rules when none currently exist."""
+    """setup_nat should apply all rules in a single iptables-restore call."""
     mock_result = MagicMock()
-    mock_result.returncode = 1  # check says rule doesn't exist
+    mock_result.returncode = 0
     with patch(
         "fcm.core.network.subprocess.run",
         return_value=mock_result,
@@ -268,22 +301,17 @@ def test_setup_nat_no_rules_exist():
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
             with patch("fcm.core.network.setup_fcm_chains"):
                 setup_nat("fc-br0", "eth0")
-                # 3 checks (don't exist) + 3 adds = 6 calls
-                assert mock_run.call_count == 6
+                # Single iptables-restore call for all rules
+                assert mock_run.call_count == 1
+                args = mock_run.call_args[0][0]
+                assert "iptables-restore" in args
 
 
 def test_setup_nat_masquerade_add_fails():
-    """setup_nat should raise NetworkError when the iptables MASQUERADE rule cannot be added."""
-    check_result = MagicMock()
-    check_result.returncode = 1
+    """setup_nat should raise NetworkError when iptables-restore fails."""
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=[
-            # setup_nat: check MASQUERADE
-            check_result,
-            # setup_nat: add MASQUERADE - fails
-            subprocess.CalledProcessError(1, ["iptables", "-t", "nat", "-A"]),
-        ],
+        side_effect=subprocess.CalledProcessError(1, ["iptables-restore", "--noflush"]),
     ):
         with patch("fcm.core.network.get_default_interface", return_value="eth0"):
             with patch("fcm.core.network.setup_fcm_chains"):
@@ -423,6 +451,11 @@ def test_create_tap_success():
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             create_tap("fc-vm1-0", "fc-br0")
             assert mock_run.call_count == 1
+            assert mock_run.call_args.kwargs["input"] == (
+                "tuntap add dev fc-vm1-0 mode tap\n"
+                "link set fc-vm1-0 master fc-br0\n"
+                "link set fc-vm1-0 up\n"
+            )
 
 
 def test_create_tap_create_fails():
@@ -452,6 +485,25 @@ def test_delete_tap_success():
         with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
             delete_tap("fc-vm1-0")
             assert mock_run.call_count == 1
+            assert mock_run.call_args.kwargs["input"] == (
+                "link set fc-vm1-0 down\nlink delete fc-vm1-0\n"
+            )
+
+
+def test_run_ip_batch_uses_ip_batch_mode():
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("fcm.core.network.os.getuid", return_value=0):
+            _run_ip_batch(["link set tap0 up", "link delete tap0"])
+
+    mock_run.assert_called_once_with(
+        ["ip", "-batch", "-"],
+        input="link set tap0 up\nlink delete tap0\n",
+        text=True,
+        check=True,
+        capture_output=True,
+    )
 
 
 def test_delete_tap_down_fails():
@@ -466,43 +518,39 @@ def test_delete_tap_down_fails():
 
 
 def test_add_iptables_forward_rules_already_exist():
-    """add_iptables_forward_rules should not add rules when they already exist."""
-    mock_check = MagicMock()
-    mock_check.returncode = 0
-    with patch("fcm.core.network.subprocess.run", return_value=mock_check) as mock_run:
+    """add_iptables_forward_rules should apply rules via iptables-restore (idempotent)."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
         with patch("fcm.core.network.setup_fcm_chains"):
-            with patch("fcm.core.network._iptables_rule_exists", return_value=True):
-                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-                # Rules already exist, no subprocess calls needed
-                mock_run.assert_not_called()
+            add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+            # Single iptables-restore call for all rules
+            assert mock_run.call_count == 1
+            args = mock_run.call_args[0][0]
+            assert "iptables-restore" in args
 
 
 def test_add_iptables_forward_rules_add_success():
-    """add_iptables_forward_rules should add rules when they are absent."""
+    """add_iptables_forward_rules should apply all rules in a single iptables-restore call."""
     mock_result = MagicMock()
-    mock_result.returncode = 1  # check says rule doesn't exist
+    mock_result.returncode = 0
     with patch(
         "fcm.core.network.subprocess.run",
         return_value=mock_result,
     ) as mock_run:
         with patch("fcm.core.network.setup_fcm_chains"):
             add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-            # 2 checks (don't exist) + 2 adds = 4 calls
-            assert mock_run.call_count == 4
+            # Single iptables-restore call for all rules
+            assert mock_run.call_count == 1
+            args = mock_run.call_args[0][0]
+            assert "iptables-restore" in args
 
 
 def test_add_iptables_forward_rules_bridge_to_tap_fails():
-    """add_iptables_forward_rules should raise NetworkError when the iptables command fails."""
-    check_result = MagicMock()
-    check_result.returncode = 1
+    """add_iptables_forward_rules should raise NetworkError when iptables-restore fails."""
     with patch(
         "fcm.core.network.subprocess.run",
-        side_effect=[
-            # check bridge->tap rule
-            check_result,
-            # add bridge->tap rule - fails
-            subprocess.CalledProcessError(1, ["iptables", "-A", "FORWARD"]),
-        ],
+        side_effect=subprocess.CalledProcessError(1, ["iptables-restore", "--noflush"]),
     ):
         with patch("fcm.core.network.setup_fcm_chains"):
             with pytest.raises(NetworkError, match="Failed to add FORWARD rules"):
@@ -776,3 +824,402 @@ def test_remove_iptables_forward_rules_uses_fcm_chain():
             remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
             calls = [str(c) for c in mock_run.call_args_list]
             assert all("FCM-FORWARD" in c for c in calls)
+
+
+# ---------------------------------------------------------------------------
+# Sudo credential caching (Issue #10)
+# ---------------------------------------------------------------------------
+
+
+def test_sudo_credentials_cached_after_validation():
+    """Sudo credentials should be cached after successful validation."""
+    import fcm.core.network as network_module
+
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result):
+        result = network_module._validate_sudo_credentials()
+        assert result is True
+        assert network_module._is_sudo_cached() is True
+
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
+
+def test_sudo_cache_reduces_validation_calls():
+    """Multiple calls should only trigger one sudo validation."""
+    import fcm.core.network as network_module
+
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        network_module._validate_sudo_credentials()
+        assert mock_run.call_count == 1
+
+        mock_run.reset_mock()
+        network_module._validate_sudo_credentials()
+        assert mock_run.call_count == 0
+
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
+
+def test_sudo_cache_expires_after_ttl():
+    """Sudo credentials should expire after TTL period."""
+    import fcm.core.network as network_module
+
+    network_module._SUDO_CREDENTIALS_VALID = True
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
+    assert network_module._is_sudo_cached() is False
+
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
+
+def test_sudo_uses_sudo_n_for_non_interactive_check():
+    """Sudo validation should use 'sudo -n true' for non-interactive check."""
+    import fcm.core.network as network_module
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        network_module._validate_sudo_credentials()
+
+        calls = mock_run.call_args_list
+        assert len(calls) == 1
+        assert calls[0][0][0] == ["sudo", "-n", "true"]
+
+
+def test_sudo_uses_sudo_v_when_not_cached():
+    """Sudo validation should use 'sudo -v' when credentials are not cached."""
+    import fcm.core.network as network_module
+
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
+    not_cached_result = MagicMock(returncode=1)
+    cached_result = MagicMock(returncode=0)
+
+    with patch(
+        "fcm.core.network.subprocess.run",
+        side_effect=[not_cached_result, cached_result],
+    ) as mock_run:
+        network_module._validate_sudo_credentials()
+
+        calls = mock_run.call_args_list
+        assert len(calls) == 2
+        assert calls[0][0][0] == ["sudo", "-n", "true"]
+        assert calls[1][0][0] == ["sudo", "-v"]
+
+    network_module._SUDO_CREDENTIALS_VALID = False
+    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+
+
+def test_sudo_anti_recursion_protection():
+    """Sudo validation should have anti-recursion protection."""
+    import fcm.core.network as network_module
+
+    original_state = network_module._SUDO_VALIDATION_IN_PROGRESS
+    network_module._SUDO_VALIDATION_IN_PROGRESS = True
+
+    try:
+        result = network_module._validate_sudo_credentials()
+        assert result is False
+    finally:
+        network_module._SUDO_VALIDATION_IN_PROGRESS = original_state
+
+
+def test_privileged_cmd_triggers_validation():
+    """_privileged_cmd should trigger credential validation when not root."""
+    import fcm.core.network as network_module
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.os.getuid", return_value=1000):
+        with patch("fcm.core.network.subprocess.run", return_value=mock_result):
+            result = network_module._privileged_cmd(["ip", "link", "show"])
+            assert result == ["sudo", "ip", "link", "show"]
+
+
+def test_privileged_cmd_skips_sudo_when_root():
+    """_privileged_cmd should not add sudo when running as root."""
+    import fcm.core.network as network_module
+
+    with patch("fcm.core.network.os.getuid", return_value=0):
+        with patch("fcm.core.network.subprocess.run") as mock_run:
+            result = network_module._privileged_cmd(["ip", "link", "show"])
+            assert result == ["ip", "link", "show"]
+            mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# iptables-restore batching (Issue #8)
+# ---------------------------------------------------------------------------
+
+
+def test_build_iptables_restore_input_single_table():
+    """_build_iptables_restore_input should format single table rules correctly."""
+    from fcm.core.network import _build_iptables_restore_input
+
+    rules = [
+        {"table": "filter", "chain": "FCM-FORWARD", "rule": "-i eth0 -j ACCEPT"},
+        {"table": "filter", "chain": "FCM-FORWARD", "rule": "-o eth0 -j ACCEPT"},
+    ]
+    result = _build_iptables_restore_input(rules)
+
+    assert "*filter" in result
+    assert ":FCM-FORWARD - [0:0]" in result
+    assert "-A FCM-FORWARD -i eth0 -j ACCEPT" in result
+    assert "-A FCM-FORWARD -o eth0 -j ACCEPT" in result
+    assert "COMMIT" in result
+
+
+def test_build_iptables_restore_input_multiple_tables():
+    """_build_iptables_restore_input should group rules by table."""
+    from fcm.core.network import _build_iptables_restore_input
+
+    rules = [
+        {"table": "nat", "chain": "FCM-POSTROUTING", "rule": "-o eth0 -j MASQUERADE"},
+        {"table": "filter", "chain": "FCM-FORWARD", "rule": "-i eth0 -j ACCEPT"},
+    ]
+    result = _build_iptables_restore_input(rules)
+
+    assert "*nat" in result
+    assert "*filter" in result
+    assert ":FCM-POSTROUTING - [0:0]" in result
+    assert ":FCM-FORWARD - [0:0]" in result
+    assert result.count("COMMIT") == 2
+
+
+def test_build_iptables_restore_input_default_table():
+    """_build_iptables_restore_input should default to filter table."""
+    from fcm.core.network import _build_iptables_restore_input
+
+    rules = [{"chain": "FCM-FORWARD", "rule": "-i eth0 -j ACCEPT"}]
+    result = _build_iptables_restore_input(rules)
+
+    assert "*filter" in result
+
+
+def test_build_iptables_restore_input_empty_rules():
+    """_build_iptables_restore_input should return empty string for empty rules."""
+    from fcm.core.network import _build_iptables_restore_input
+
+    result = _build_iptables_restore_input([])
+    assert result == "\n"
+
+
+def test_apply_iptables_rules_batch_success():
+    """_apply_iptables_rules_batch should call iptables-restore with correct input."""
+    from fcm.core.network import _apply_iptables_rules_batch
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        rules = [
+            {"table": "filter", "chain": "FCM-FORWARD", "rule": "-i eth0 -j ACCEPT"},
+        ]
+        _apply_iptables_rules_batch(rules)
+
+        assert mock_run.call_count == 1
+        args = mock_run.call_args[0][0]
+        assert "iptables-restore" in args
+        assert "--noflush" in args
+
+
+def test_apply_iptables_rules_batch_empty_rules():
+    """_apply_iptables_rules_batch should be a no-op for empty rules list."""
+    from fcm.core.network import _apply_iptables_rules_batch
+
+    with patch("fcm.core.network.subprocess.run") as mock_run:
+        _apply_iptables_rules_batch([])
+        mock_run.assert_not_called()
+
+
+def test_apply_iptables_rules_batch_failure():
+    """_apply_iptables_rules_batch should raise NetworkError on failure."""
+    from fcm.core.network import _apply_iptables_rules_batch
+
+    with patch(
+        "fcm.core.network.subprocess.run",
+        side_effect=subprocess.CalledProcessError(1, ["iptables-restore"]),
+    ):
+        rules = [{"table": "filter", "chain": "FCM-FORWARD", "rule": "-i eth0 -j ACCEPT"}]
+        with pytest.raises(NetworkError, match="Failed to apply iptables rules"):
+            _apply_iptables_rules_batch(rules)
+
+
+def test_setup_nat_uses_batch_mode():
+    """setup_nat should use iptables-restore for atomic rule application."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("fcm.core.network.get_default_interface", return_value="eth0"):
+            with patch("fcm.core.network.setup_fcm_chains"):
+                setup_nat("fc-br0", "eth0")
+
+                # Should be exactly 1 call to iptables-restore
+                assert mock_run.call_count == 1
+                args = mock_run.call_args[0][0]
+                assert "iptables-restore" in args
+                assert "--noflush" in args
+
+                # Verify the input contains all 3 rules
+                call_kwargs = mock_run.call_args[1]
+                input_data = call_kwargs.get("input", "")
+                assert "MASQUERADE" in input_data
+                assert "FCM-FORWARD" in input_data
+                assert "FCM-POSTROUTING" in input_data
+
+
+def test_add_iptables_forward_rules_uses_batch_mode():
+    """add_iptables_forward_rules should use iptables-restore for atomic application."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("fcm.core.network.setup_fcm_chains"):
+            add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+
+            # Should be exactly 1 call to iptables-restore
+            assert mock_run.call_count == 1
+            args = mock_run.call_args[0][0]
+            assert "iptables-restore" in args
+
+            # Verify the input contains both rules
+            call_kwargs = mock_run.call_args[1]
+            input_data = call_kwargs.get("input", "")
+            assert "fc-vm1-0" in input_data
+            assert "fc-br0" in input_data
+            assert input_data.count("ACCEPT") == 2
+
+
+# ---------------------------------------------------------------------------
+# Issue #20: Subprocess Buffering - Standardize ip -batch usage
+# ---------------------------------------------------------------------------
+
+
+def test_setup_bridge_uses_ip_batch_mode():
+    """setup_bridge should use ip -batch for atomic bridge creation."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("fcm.core.network.bridge_exists", return_value=False):
+            setup_bridge("fc-br0", "10.20.0.1/24")
+
+            batch_call = mock_run.call_args_list[0]
+
+            # Should use ip -batch
+            args = batch_call[0][0]
+            assert "ip" in args
+            assert "-batch" in args
+            assert "-" in args
+
+            # Verify batch input contains bridge commands
+            call_kwargs = batch_call[1]
+            input_data = call_kwargs.get("input", "")
+            assert "link add name fc-br0 type bridge" in input_data
+            assert "addr add" in input_data
+            assert "link set fc-br0 up" in input_data
+
+
+def test_teardown_bridge_uses_ip_batch_mode():
+    """teardown_bridge should use ip -batch for atomic bridge removal."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        teardown_bridge("fc-br0")
+
+        # Should use ip -batch
+        args = mock_run.call_args[0][0]
+        assert "ip" in args
+        assert "-batch" in args
+        assert "-" in args
+
+        # Verify batch input contains bridge commands
+        call_kwargs = mock_run.call_args[1]
+        input_data = call_kwargs.get("input", "")
+        assert "link set fc-br0 down" in input_data
+        assert "link delete fc-br0 type bridge" in input_data
+
+
+def test_create_tap_uses_ip_batch_mode():
+    """create_tap should use ip -batch for atomic TAP creation."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("fcm.core.network.tap_exists", return_value=False):
+            create_tap("fc-tap0", "fc-br0")
+
+            # Should use ip -batch
+            args = mock_run.call_args[0][0]
+            assert "ip" in args
+            assert "-batch" in args
+            assert "-" in args
+
+            # Verify batch input contains TAP commands
+            call_kwargs = mock_run.call_args[1]
+            input_data = call_kwargs.get("input", "")
+            assert "tuntap add dev fc-tap0 mode tap" in input_data
+            assert "link set fc-tap0 master fc-br0" in input_data
+            assert "link set fc-tap0 up" in input_data
+
+
+def test_delete_tap_uses_ip_batch_mode():
+    """delete_tap should use ip -batch for atomic TAP removal."""
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("fcm.core.network.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("fcm.core.network.tap_exists", return_value=True):
+            delete_tap("fc-tap0")
+
+            # Should use ip -batch
+            args = mock_run.call_args[0][0]
+            assert "ip" in args
+            assert "-batch" in args
+            assert "-" in args
+
+            # Verify batch input contains TAP commands
+            call_kwargs = mock_run.call_args[1]
+            input_data = call_kwargs.get("input", "")
+            assert "link set fc-tap0 down" in input_data
+            assert "link delete fc-tap0" in input_data
+
+
+def test_ip_batch_mode_is_standardized():
+    """Verify that all bridge/TAP operations use ip -batch consistently."""
+    # This test documents the standardization requirement from Issue #20
+    # All network operations that modify state should use ip -batch
+    import inspect
+    from fcm.core.network import (
+        setup_bridge,
+        teardown_bridge,
+        create_tap,
+        delete_tap,
+        _run_ip_batch,
+    )
+
+    # Get source code of each function
+    for func in [setup_bridge, teardown_bridge, create_tap, delete_tap]:
+        source = inspect.getsource(func)
+        # Each function should use ip -batch directly or via _run_ip_batch helper
+        assert "-batch" in source or "_run_ip_batch" in source, (
+            f"{func.__name__} should use ip -batch or _run_ip_batch"
+        )

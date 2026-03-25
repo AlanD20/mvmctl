@@ -249,3 +249,37 @@ def test_reset_refuses_running_vms(mocker: MockerFixture):
     result = runner.invoke(app, ["reset", "--force"])
     assert result.exit_code == 1
     assert "Cannot reset" in result.output
+
+
+def test_init_anti_recursion_protection(mocker: MockerFixture, tmp_path, monkeypatch):
+    """Test that sudo restart has anti-recursion protection."""
+    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch(
+        "fcm.cli.host.init_host",
+        side_effect=HostError("Root privileges required"),
+    )
+    mock_subprocess = mocker.patch("subprocess.run")
+
+    monkeypatch.setenv("FCM_SUDO_RESTART", "1")
+    result = runner.invoke(app, ["init"], input="y\n")
+
+    assert result.exit_code == 1
+    assert "Recursive sudo restart detected" in result.output
+    mock_subprocess.assert_not_called()
+
+
+def test_init_sudo_restart_sets_env(mocker: MockerFixture, tmp_path):
+    """Test that sudo restart sets FCM_SUDO_RESTART environment variable."""
+    mocker.patch("fcm.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch(
+        "fcm.cli.host.init_host",
+        side_effect=HostError("Root privileges required"),
+    )
+    mock_subprocess = mocker.patch("subprocess.run")
+
+    result = runner.invoke(app, ["init"], input="y\n")
+
+    assert result.exit_code == 1
+    mock_subprocess.assert_called_once()
+    call_args = mock_subprocess.call_args
+    assert "FCM_SUDO_RESTART" in call_args.kwargs.get("env", {})

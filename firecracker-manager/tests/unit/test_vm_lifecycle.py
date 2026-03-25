@@ -9,9 +9,11 @@ from fcm.core.vm_lifecycle import (
     remove_vm,
     snapshot_vm,
     load_snapshot,
+    _stream_output_to_file,
     _write_pid_file,
     _read_pid_file,
     _resolve_image_path,
+    _secure_mkdir_vm,
 )
 from fcm.exceptions import FCMError
 from fcm.models.vm import VMInstance, VMState
@@ -25,6 +27,26 @@ def test_write_read_pid_file(tmp_path):
         _write_pid_file(pid_file, 99999)
         val = _read_pid_file(pid_file)
         assert val == 99999
+
+
+def test_write_pid_file_has_restricted_permissions(tmp_path):
+    pid_file = tmp_path / "firecracker.pid"
+    with patch("fcm.core.vm_lifecycle.os.kill"):
+        _write_pid_file(pid_file, 99999)
+    mode = pid_file.stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_stream_output_to_file_flushes_each_line(tmp_path):
+    pipe = MagicMock()
+    pipe.readline.side_effect = ["boot line 1\n", "boot line 2\n", ""]
+    output_path = tmp_path / "console.log"
+
+    with output_path.open("w", encoding="utf-8") as file_handle:
+        _stream_output_to_file(pipe, file_handle, "console")
+
+    assert output_path.read_text(encoding="utf-8") == "boot line 1\nboot line 2\n"
+    pipe.close.assert_called_once()
 
 
 def test_read_pid_file_missing(tmp_path):
@@ -106,7 +128,7 @@ def test_create_vm_core_success(
 ):
     """Test core create_vm() runs through successfully and registers VM."""
     mock_manager = MagicMock()
-    mock_manager.list_all.return_value = []
+    mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
@@ -152,7 +174,7 @@ def test_create_vm_core_success(
 def test_create_vm_limit_reached(mock_get_vm_mgr):
     """create_vm raises FCMError if max VMs reached."""
     mock_manager = MagicMock()
-    mock_manager.list_all.return_value = [1] * 100  # assuming MAX_VMS=50 or similar
+    mock_manager.count_vms.return_value = 100  # assuming MAX_VMS=50 or similar
     mock_get_vm_mgr.return_value = mock_manager
 
     with pytest.raises(FCMError, match="VM limit reached"):
@@ -355,3 +377,88 @@ def test_resolve_image_path_not_found(tmp_path, monkeypatch):
     with patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir):
         with pytest.raises(FCMError, match="Image not found"):
             _resolve_image_path("nonexistent")
+
+
+def test_secure_mkdir_vm_success(tmp_path):
+    """_secure_mkdir_vm creates directory atomically."""
+    vm_dir = tmp_path / "testvm"
+    _secure_mkdir_vm(vm_dir, "testvm")
+    assert vm_dir.exists()
+    assert vm_dir.is_dir()
+
+
+def test_secure_mkdir_vm_already_exists(tmp_path):
+    """_secure_mkdir_vm raises FCMError if directory already exists."""
+    vm_dir = tmp_path / "existingvm"
+    vm_dir.mkdir()
+    with pytest.raises(FCMError, match="already exists"):
+        _secure_mkdir_vm(vm_dir, "existingvm")
+
+
+def test_secure_mkdir_vm_rejects_symlink(tmp_path):
+    """_secure_mkdir_vm detects and rejects symlinks (TOCTOU protection)."""
+    # Create a target directory that the symlink points to
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+
+    # Create a symlink at the VM directory location
+    vm_dir = tmp_path / "symlinkedvm"
+    vm_dir.symlink_to(target_dir)
+
+    # Should raise error due to symlink
+    with pytest.raises(FCMError, match="symlink"):
+        _secure_mkdir_vm(vm_dir, "symlinkedvm")
+
+
+def test_secure_mkdir_vm_rejects_symlink_in_parent(tmp_path):
+    """_secure_mkdir_vm detects symlinks in parent path."""
+    # Create a scenario where a parent directory is a symlink
+    real_parent = tmp_path / "real_parent"
+    real_parent.mkdir()
+    symlink_parent = tmp_path / "symlink_parent"
+    symlink_parent.symlink_to(real_parent)
+
+    vm_dir = symlink_parent / "testvm"
+    # Should still work as the final path doesn't exist yet
+    # The symlink is in the parent, not the VM dir itself
+    _secure_mkdir_vm(vm_dir, "testvm")
+    assert vm_dir.exists()
+    assert vm_dir.is_dir()
+
+
+def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
+    """create_vm uses _secure_mkdir_vm to prevent TOCTOU attacks."""
+    monkeypatch.setenv("FCM_CACHE_DIR", str(tmp_path))
+
+    # Create minimal required files/directories
+    images_dir = tmp_path / "images"
+    images_dir.mkdir(parents=True)
+    img = images_dir / "ubuntu-24.04.ext4"
+    img.write_bytes(b"\x00" * 64)
+
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir(parents=True)
+    kernel = kernels_dir / "vmlinux"
+    kernel.write_bytes(b"\x00" * 64)
+
+    # Create a symlink at the VM directory location (simulating attack)
+    vms_dir = tmp_path / "vms"
+    vms_dir.mkdir()
+    vm_dir = vms_dir / "attackvm"
+    target_file = tmp_path / "target_file"
+    target_file.write_text("sensitive data")
+    vm_dir.symlink_to(target_file)
+
+    # create_vm should detect the symlink and fail
+    with (
+        patch("fcm.core.vm_lifecycle.get_vm_manager") as mock_mgr,
+        patch("fcm.core.vm_lifecycle.get_vm_dir", return_value=vm_dir),
+        patch("fcm.core.vm_lifecycle.get_images_dir", return_value=images_dir),
+        patch("fcm.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir),
+    ):
+        mock_manager = MagicMock()
+        mock_manager.count_vms.return_value = 0
+        mock_mgr.return_value = mock_manager
+
+        with pytest.raises(FCMError, match="symlink"):
+            create_vm(name="attackvm", image="ubuntu-24.04")

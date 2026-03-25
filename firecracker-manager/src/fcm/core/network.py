@@ -12,6 +12,8 @@ import logging
 import os
 import secrets
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from fcm.constants import (
@@ -26,12 +28,118 @@ from fcm.exceptions import NetworkError
 
 logger = logging.getLogger(__name__)
 
+# Sudo credential cache with TTL (60 seconds)
+_SUDO_CACHE_LOCK = threading.Lock()
+_SUDO_CREDENTIALS_VALID = False
+_SUDO_CACHE_TIMESTAMP: float = 0.0
+_SUDO_CACHE_TTL_SECONDS = 60
+_SUDO_VALIDATION_IN_PROGRESS = False
+
+
+def _is_sudo_cached() -> bool:
+    """Check if sudo credentials are currently cached and valid.
+
+    Returns True if credentials are cached and haven't expired.
+    """
+    global _SUDO_CREDENTIALS_VALID, _SUDO_CACHE_TIMESTAMP
+
+    with _SUDO_CACHE_LOCK:
+        if not _SUDO_CREDENTIALS_VALID:
+            return False
+
+        elapsed = time.monotonic() - _SUDO_CACHE_TIMESTAMP
+        if elapsed > _SUDO_CACHE_TTL_SECONDS:
+            _SUDO_CREDENTIALS_VALID = False
+            return False
+
+        return True
+
+
+def _validate_sudo_credentials() -> bool:
+    """Validate sudo credentials are cached and refresh if needed.
+
+    Uses sudo -n (non-interactive) to check if credentials are cached.
+    If not cached, uses sudo -v to validate (which may prompt for password).
+
+    Includes anti-recursion protection to prevent infinite loops.
+
+    Returns:
+        True if sudo credentials are valid and cached.
+    """
+    global _SUDO_CREDENTIALS_VALID, _SUDO_CACHE_TIMESTAMP, _SUDO_VALIDATION_IN_PROGRESS
+
+    # Anti-recursion protection
+    if _SUDO_VALIDATION_IN_PROGRESS:
+        return False
+
+    # Fast path: check if already cached and not expired
+    if _is_sudo_cached():
+        return True
+
+    try:
+        _SUDO_VALIDATION_IN_PROGRESS = True
+
+        # First, try non-interactive check (sudo -n true)
+        # This succeeds if credentials are cached without requiring password
+        result = subprocess.run(
+            ["sudo", "-n", "true"],
+            capture_output=True,
+            check=False,
+        )
+
+        if result.returncode == 0:
+            with _SUDO_CACHE_LOCK:
+                _SUDO_CREDENTIALS_VALID = True
+                _SUDO_CACHE_TIMESTAMP = time.monotonic()
+            logger.debug("Sudo credentials validated (cached)")
+            return True
+
+        # Credentials not cached - try to validate with sudo -v
+        # This may prompt for password if required
+        result = subprocess.run(
+            ["sudo", "-v"],
+            capture_output=True,
+            check=False,
+        )
+
+        if result.returncode == 0:
+            with _SUDO_CACHE_LOCK:
+                _SUDO_CREDENTIALS_VALID = True
+                _SUDO_CACHE_TIMESTAMP = time.monotonic()
+            logger.debug("Sudo credentials validated (refreshed)")
+            return True
+
+        logger.debug("Sudo credential validation failed")
+        return False
+
+    finally:
+        _SUDO_VALIDATION_IN_PROGRESS = False
+
 
 def _privileged_cmd(cmd: list[str]) -> list[str]:
-    """Prepend sudo if not running as root."""
+    """Prepend sudo if not running as root.
+
+    Validates and caches sudo credentials to prevent excessive authentication
+    attempts that could trigger account lockout mechanisms (faillock, PAM policy).
+    Credentials are cached for 60 seconds.
+    """
     if os.getuid() != 0:
+        # Validate credentials before returning the sudo command
+        # This ensures credentials are cached and reduces repeated prompts
+        _validate_sudo_credentials()
         return ["sudo"] + cmd
     return cmd
+
+
+def _run_ip_batch(commands: list[str]) -> None:
+    batch = "\n".join(commands) + "\n"
+    subprocess.run(
+        _privileged_cmd(["ip", "-batch", "-"]),
+        input=batch,
+        text=True,
+        check=True,
+        capture_output=True,
+    )
 
 
 # Derived defaults from constants — kept as module-level aliases so existing
@@ -59,7 +167,8 @@ def get_default_interface() -> str:
             check=True,
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to run 'ip route show default': {e}") from e
+        logger.debug("Failed to detect default network interface", exc_info=True)
+        raise NetworkError("Failed to determine default network interface") from e
 
     for line in result.stdout.splitlines():
         parts = line.split()
@@ -114,16 +223,16 @@ def setup_bridge(
         return
 
     try:
-        batch = f"link add name {bridge} type bridge\naddr add {effective_cidr} dev {bridge}\nlink set {bridge} up\n"
-        subprocess.run(
-            _privileged_cmd(["ip", "-batch", "-"]),
-            input=batch,
-            text=True,
-            check=True,
-            capture_output=True,
+        _run_ip_batch(
+            [
+                f"link add name {bridge} type bridge",
+                f"addr add {effective_cidr} dev {bridge}",
+                f"link set {bridge} up",
+            ]
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to setup bridge {bridge}: {e}\n{e.stderr}") from e
+        # Sanitize: don't expose batch commands in error message
+        raise NetworkError(f"Failed to setup bridge {bridge}") from e
 
     try:
         Path("/proc/sys/net/ipv4/ip_forward").write_text("1\n")
@@ -135,7 +244,8 @@ def setup_bridge(
                 check=True,
             )
         except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to enable IP forwarding: {e}") from e
+            logger.debug("Failed to enable IP forwarding", exc_info=True)
+            raise NetworkError("Failed to enable IP forwarding") from e
 
     logger.info("Bridge %s created with CIDR %s", bridge, cidr)
 
@@ -148,16 +258,10 @@ def teardown_bridge(bridge: str = BRIDGE_NAME) -> None:
     - Raises NetworkError on failure.
     """
     try:
-        batch = f"link set {bridge} down\nlink delete {bridge} type bridge\n"
-        subprocess.run(
-            _privileged_cmd(["ip", "-batch", "-"]),
-            input=batch,
-            text=True,
-            check=True,
-            capture_output=True,
-        )
+        _run_ip_batch([f"link set {bridge} down", f"link delete {bridge} type bridge"])
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to teardown bridge {bridge}: {e}\n{e.stderr}") from e
+        # Sanitize: don't expose batch commands in error message
+        raise NetworkError(f"Failed to teardown bridge {bridge}") from e
 
     logger.info("Bridge %s removed", bridge)
 
@@ -181,7 +285,55 @@ def _ensure_iptables_rule(
     try:
         subprocess.run(_privileged_cmd(add_args), check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"{error_label}: {e}") from e
+        raise NetworkError(f"{error_label}") from e
+
+
+def _build_iptables_restore_input(rules: list[dict[str, str]]) -> str:
+    tables: dict[str, list[dict[str, str]]] = {}
+    for rule in rules:
+        table = rule.get("table", "filter")
+        if table not in tables:
+            tables[table] = []
+        tables[table].append(rule)
+
+    lines: list[str] = []
+    for table, table_rules in tables.items():
+        lines.append(f"*{table}")
+
+        chains: set[str] = set()
+        for rule in table_rules:
+            chains.add(rule["chain"])
+
+        for chain in chains:
+            lines.append(f":{chain} - [0:0]")
+
+        for rule in table_rules:
+            lines.append(f"-A {rule['chain']} {rule['rule']}")
+
+        lines.append("COMMIT")
+
+    return "\n".join(lines) + "\n"
+
+
+def _apply_iptables_rules_batch(
+    rules: list[dict[str, str]],
+    error_label: str = "Failed to apply iptables rules",
+) -> None:
+    if not rules:
+        return
+
+    restore_input = _build_iptables_restore_input(rules)
+
+    try:
+        subprocess.run(
+            _privileged_cmd(["iptables-restore", "--noflush"]),
+            input=restore_input,
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise NetworkError(error_label) from e
 
 
 def chain_exists(chain: str, table: str = "filter") -> bool:
@@ -229,7 +381,7 @@ def setup_fcm_chains() -> None:
             )
             logger.debug("Created iptables chain %s", forward_chain)
         except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to create {forward_chain} chain: {e}") from e
+            raise NetworkError(f"Failed to create {forward_chain} chain") from e
 
     # Create FCM-POSTROUTING chain in nat table
     if not chain_exists(postrouting_chain, "nat"):
@@ -241,7 +393,7 @@ def setup_fcm_chains() -> None:
             )
             logger.debug("Created iptables chain %s in nat table", postrouting_chain)
         except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to create {postrouting_chain} chain: {e}") from e
+            raise NetworkError(f"Failed to create {postrouting_chain} chain") from e
 
     # Add jump from FORWARD to FCM-FORWARD
     jump_rule = ["iptables", "-C", "FORWARD", "-j", forward_chain]
@@ -254,7 +406,7 @@ def setup_fcm_chains() -> None:
             )
             logger.debug("Added jump from FORWARD to %s", forward_chain)
         except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to add jump to {forward_chain}: {e}") from e
+            raise NetworkError(f"Failed to add jump to {forward_chain}") from e
 
     # Add jump from POSTROUTING to FCM-POSTROUTING
     jump_rule_nat = ["iptables", "-t", "nat", "-C", "POSTROUTING", "-j", postrouting_chain]
@@ -269,7 +421,7 @@ def setup_fcm_chains() -> None:
             )
             logger.debug("Added jump from POSTROUTING to %s", postrouting_chain)
         except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to add jump to {postrouting_chain}: {e}") from e
+            raise NetworkError(f"Failed to add jump to {postrouting_chain}") from e
 
     logger.info("FCM iptables chains configured")
 
@@ -310,7 +462,7 @@ def teardown_fcm_chains() -> None:
             )
             logger.debug("Removed iptables chain %s", forward_chain)
         except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to remove {forward_chain} chain: {e}") from e
+            raise NetworkError(f"Failed to remove {forward_chain} chain") from e
 
     # Remove jump from POSTROUTING to FCM-POSTROUTING
     if chain_exists(postrouting_chain, "nat"):
@@ -336,7 +488,7 @@ def teardown_fcm_chains() -> None:
             )
             logger.debug("Removed iptables chain %s from nat table", postrouting_chain)
         except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to remove {postrouting_chain} chain: {e}") from e
+            raise NetworkError(f"Failed to remove {postrouting_chain} chain") from e
 
     logger.info("FCM iptables chains removed")
 
@@ -347,7 +499,7 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
     - Gets host_iface via get_default_interface() if not provided
     - Adds MASQUERADE rule to FCM-POSTROUTING chain
     - Adds FORWARD rules to FCM-FORWARD chain
-    - Is idempotent: checks if rule exists before adding (use -C to check)
+    - Is idempotent: uses iptables-restore --noflush for atomic rule application
     - Raises NetworkError on failure.
     """
     if host_iface is None:
@@ -359,44 +511,32 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
     # Ensure FCM chains exist before adding rules
     setup_fcm_chains()
 
+    # Build rules for batch application via iptables-restore
+    rules: list[dict[str, str]] = [
+        {
+            "table": "nat",
+            "chain": postrouting_chain,
+            "rule": f"-o {host_iface} -j MASQUERADE",
+        },
+        {
+            "table": "filter",
+            "chain": forward_chain,
+            "rule": f"-i {bridge} -o {host_iface} -j ACCEPT",
+        },
+        {
+            "table": "filter",
+            "chain": forward_chain,
+            "rule": f"-i {host_iface} -o {bridge} -j ACCEPT",
+        },
+    ]
+
     try:
-        _ensure_iptables_rule(
-            [
-                "iptables",
-                "-t",
-                "nat",
-                "-C",
-                postrouting_chain,
-                "-o",
-                host_iface,
-                "-j",
-                "MASQUERADE",
-            ],
-            [
-                "iptables",
-                "-t",
-                "nat",
-                "-A",
-                postrouting_chain,
-                "-o",
-                host_iface,
-                "-j",
-                "MASQUERADE",
-            ],
-            f"Failed to add MASQUERADE rule for {host_iface}",
+        _apply_iptables_rules_batch(
+            rules,
+            f"Failed to setup NAT for {bridge} via {host_iface}",
         )
-        _ensure_iptables_rule(
-            ["iptables", "-C", forward_chain, "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-            ["iptables", "-A", forward_chain, "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-            f"Failed to add FORWARD rule for {bridge} -> {host_iface}",
-        )
-        _ensure_iptables_rule(
-            ["iptables", "-C", forward_chain, "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
-            ["iptables", "-A", forward_chain, "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
-            f"Failed to add FORWARD rule for {host_iface} -> {bridge}",
-        )
-    except NetworkError as e:
-        raise NetworkError(f"Failed to setup NAT for {bridge} via {host_iface}: {e}") from e
+    except NetworkError:
+        raise
 
     logger.info("NAT rules configured for bridge %s via %s", bridge, host_iface)
 
@@ -458,7 +598,7 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to remove MASQUERADE rule for {host_iface}: {e}") from e
+        raise NetworkError("Failed to remove MASQUERADE rule") from e
 
     for rule in [
         ["iptables", "-D", forward_chain, "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
@@ -492,16 +632,16 @@ def create_tap(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
         raise NetworkError(f"TAP device {tap_name} already exists")
 
     try:
-        batch = f"tuntap add dev {tap_name} mode tap\nlink set {tap_name} master {bridge}\nlink set {tap_name} up\n"
-        subprocess.run(
-            _privileged_cmd(["ip", "-batch", "-"]),
-            input=batch,
-            text=True,
-            check=True,
-            capture_output=True,
+        _run_ip_batch(
+            [
+                f"tuntap add dev {tap_name} mode tap",
+                f"link set {tap_name} master {bridge}",
+                f"link set {tap_name} up",
+            ]
         )
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to create TAP {tap_name}: {e}\n{e.stderr}") from e
+        # Sanitize: don't expose batch commands in error message
+        raise NetworkError(f"Failed to create TAP {tap_name}") from e
 
     logger.info("TAP device %s created and attached to bridge %s", tap_name, bridge)
 
@@ -519,16 +659,10 @@ def delete_tap(tap_name: str) -> None:
         return
 
     try:
-        batch = f"link set {tap_name} down\nlink delete {tap_name}\n"
-        subprocess.run(
-            _privileged_cmd(["ip", "-batch", "-"]),
-            input=batch,
-            text=True,
-            check=True,
-            capture_output=True,
-        )
+        _run_ip_batch([f"link set {tap_name} down", f"link delete {tap_name}"])
     except subprocess.CalledProcessError as e:
-        raise NetworkError(f"Failed to delete TAP {tap_name}: {e}\n{e.stderr}") from e
+        # Sanitize: don't expose batch commands in error message
+        raise NetworkError(f"Failed to delete TAP {tap_name}") from e
 
     logger.info("TAP device %s deleted", tap_name)
 
@@ -536,28 +670,34 @@ def delete_tap(tap_name: str) -> None:
 def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
     """Add iptables FORWARD rules for a specific TAP device to FCM chain.
 
-    Rules to add in FCM-FORWARD chain (idempotent — check with -C before adding with -A):
+    Rules to add in FCM-FORWARD chain (idempotent via iptables-restore --noflush):
     - `iptables -A FCM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
     - `iptables -A FCM-FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
     """
     forward_chain = FCM_FORWARD_CHAIN
 
-    # Ensure FCM chains exist before adding rules
     setup_fcm_chains()
 
+    rules: list[dict[str, str]] = [
+        {
+            "table": "filter",
+            "chain": forward_chain,
+            "rule": f"-i {bridge} -o {tap_name} -j ACCEPT",
+        },
+        {
+            "table": "filter",
+            "chain": forward_chain,
+            "rule": f"-i {tap_name} -o {bridge} -j ACCEPT",
+        },
+    ]
+
     try:
-        _ensure_iptables_rule(
-            ["iptables", "-C", forward_chain, "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
-            ["iptables", "-A", forward_chain, "-i", bridge, "-o", tap_name, "-j", "ACCEPT"],
-            f"Failed to add FORWARD rule for {bridge} -> {tap_name}",
+        _apply_iptables_rules_batch(
+            rules,
+            f"Failed to add FORWARD rules for {tap_name}",
         )
-        _ensure_iptables_rule(
-            ["iptables", "-C", forward_chain, "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
-            ["iptables", "-A", forward_chain, "-i", tap_name, "-o", bridge, "-j", "ACCEPT"],
-            f"Failed to add FORWARD rule for {tap_name} -> {bridge}",
-        )
-    except NetworkError as e:
-        raise NetworkError(f"Failed to add FORWARD rules for {tap_name}: {e}") from e
+    except NetworkError:
+        raise
 
     logger.debug("FORWARD rules added for TAP %s ↔ bridge %s", tap_name, bridge)
 

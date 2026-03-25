@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """Firecracker Manager CLI - Main entry point."""
 
+from __future__ import annotations
+
+import importlib
 import importlib.metadata
 import logging
 import os
+from dataclasses import dataclass
 
+import click
 import typer
-from fcm.cli import (
-    vm,
-    config,
-    asset,
-    host,
-    network,
-    key,
-    configure,
-)  # TODO: P-M8 — lazy-load CLI modules when startup time matters
+import typer.models
+
 from fcm.constants import CLI_NAME, _BOOTSTRAP_NAME, env_var
 
 
 def _get_version() -> str:
-    """Read the version from package metadata, falling back to __version__."""
     try:
         return importlib.metadata.version(_BOOTSTRAP_NAME)
     except importlib.metadata.PackageNotFoundError:
@@ -28,60 +25,58 @@ def _get_version() -> str:
         return __version__
 
 
-app = typer.Typer(
-    name=CLI_NAME,
-    help="Firecracker Manager - Manage microVMs",
-    rich_markup_mode="rich",
-    pretty_exceptions_short=True,
-    pretty_exceptions_show_locals=False,
-)
-
-app.add_typer(vm.app, name="vm", help="VM lifecycle management", rich_help_panel="VM Management")
-app.add_typer(host.app, name="host", help="Host configuration", rich_help_panel="Host Management")
-app.add_typer(network.app, name="network", help="Network management", rich_help_panel="Networking")
-app.add_typer(key.app, name="key", help="SSH key management", rich_help_panel="Keys")
-app.add_typer(
-    config.app, name="config", help="Configuration commands", rich_help_panel="Configuration"
-)
-app.add_typer(
-    configure.app, name="configure", help="Guided setup wizard", rich_help_panel="Configuration"
-)
-app.add_typer(asset.kernel_app, name="kernel", help="Kernel management", rich_help_panel="Assets")
-app.add_typer(asset.image_app, name="image", help="Image management", rich_help_panel="Assets")
-app.add_typer(asset.bin_app, name="bin", help="Binary management", rich_help_panel="Assets")
-app.command("clear")(asset.clear_assets)
+@dataclass(frozen=True)
+class _LazyCommandSpec:
+    module: str
+    attribute: str
+    help_text: str
 
 
-@app.callback(invoke_without_command=True)
-def callback(
-    ctx: typer.Context,
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
-    version: bool = typer.Option(False, "--version", is_eager=True, help="Show version and exit"),
-) -> None:
-    """Firecracker Manager CLI."""
-    if version:
-        typer.echo(f"{CLI_NAME} {_get_version()}")
-        raise typer.Exit()
+_COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
+    "vm": _LazyCommandSpec("fcm.cli.vm", "app", "VM lifecycle management"),
+    "host": _LazyCommandSpec("fcm.cli.host", "app", "Host configuration"),
+    "network": _LazyCommandSpec("fcm.cli.network", "app", "Network management"),
+    "key": _LazyCommandSpec("fcm.cli.key", "app", "SSH key management"),
+    "config": _LazyCommandSpec("fcm.cli.config", "app", "Configuration commands"),
+    "configure": _LazyCommandSpec("fcm.cli.configure", "app", "Guided setup wizard"),
+    "kernel": _LazyCommandSpec("fcm.cli.asset", "kernel_app", "Kernel management"),
+    "image": _LazyCommandSpec("fcm.cli.asset", "image_app", "Image management"),
+    "bin": _LazyCommandSpec("fcm.cli.asset", "bin_app", "Binary management"),
+}
 
-    # If no subcommand was given, show help
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
+_STATIC_COMMAND_HELP: dict[str, str] = {
+    **{name: spec.help_text for name, spec in _COMMAND_SPECS.items()},
+    "clear": "Clear cached assets",
+    "version": "Show the version and exit",
+    "help": "Show help for fcm or a subcommand",
+}
 
-    if os.getuid() == 0:
-        from fcm.utils.console import console as _console
+_COMMAND_ORDER = [
+    "vm",
+    "host",
+    "network",
+    "key",
+    "config",
+    "configure",
+    "kernel",
+    "image",
+    "bin",
+    "clear",
+    "version",
+    "help",
+]
 
-        _console.print(
-            "[yellow]Warning: running as root. Consider using the 'fcm' group instead "
-            "(set up via 'sudo fcm host init').[/yellow]"
-        )
 
-    # Determine log level: --debug > --verbose > FCM_LOG_LEVEL env var > WARNING
+def _version_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo(f"{CLI_NAME} {_get_version()}")
+    ctx.exit()
+
+
+def _configure_logging(*, verbose: bool, debug: bool) -> None:
     if debug:
         level = logging.DEBUG
-        # Show locals in tracebacks when debug mode is active
-        app.pretty_exceptions_show_locals = True
     elif verbose:
         level = logging.INFO
     else:
@@ -93,52 +88,141 @@ def callback(
         format="%(levelname)s: %(name)s: %(message)s",
     )
 
-    # Silently reconcile networks (no-op if host not initialized)
+
+def _warn_if_running_as_root() -> None:
+    if os.getuid() != 0:
+        return
+
+    from fcm.utils.console import console
+
+    console.print(
+        "[yellow]Warning: running as root. Consider using the 'fcm' group instead "
+        "(set up via 'sudo fcm host init').[/yellow]"
+    )
+
+
+def _reconcile_networks() -> None:
     try:
         from fcm.core.network_manager import reconcile_networks
 
         reconcile_networks()
     except Exception:
-        pass  # Never fail startup
+        pass
 
 
-@app.command(name="version")
-def version_cmd(ctx: typer.Context) -> None:
-    """Show the version and exit."""
-    typer.echo(f"{CLI_NAME} {_get_version()}")
-    raise typer.Exit()
+class LazyFCMGroup(click.Group):
+    _add_completion: bool = False
+    registered_callback: typer.models.TyperInfo | None = None
+    registered_commands: list[typer.models.CommandInfo] | None = None
+    registered_groups: list[typer.models.TyperInfo] | None = None
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return list(_COMMAND_ORDER)
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        if cmd_name == "clear":
+            return clear_cmd
+        if cmd_name == "version":
+            return version_cmd
+        if cmd_name == "help":
+            return help_cmd
+
+        spec = _COMMAND_SPECS.get(cmd_name)
+        if spec is None:
+            return None
+
+        module = importlib.import_module(spec.module)
+        command = getattr(module, spec.attribute)
+        if isinstance(command, click.Command):
+            return command
+
+        from typer.main import get_command as get_typer_command
+
+        return get_typer_command(command)
+
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        rows = [
+            (command_name, _STATIC_COMMAND_HELP[command_name])
+            for command_name in self.list_commands(ctx)
+            if command_name in _STATIC_COMMAND_HELP
+        ]
+        if rows:
+            with formatter.section("Commands"):
+                formatter.write_dl(rows)
 
 
-@app.command(name="help")
-def help_cmd(
-    ctx: typer.Context,
-    args: list[str] = typer.Argument(default=None),
-) -> None:
-    """Show help for fcm or a subcommand."""
-    import click
+@click.group(
+    cls=LazyFCMGroup,
+    invoke_without_command=True,
+    help="Firecracker Manager - Manage microVMs",
+)
+@click.option("--verbose", "verbose", is_flag=True, help="Enable verbose output")
+@click.option("--debug", is_flag=True, help="Enable debug mode")
+@click.option(
+    "--version",
+    "show_version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_version_callback,
+    help="Show version and exit",
+)
+@click.pass_context
+def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+        ctx.exit()
 
+    if ctx.invoked_subcommand in {"help", "version"}:
+        return
+
+    _warn_if_running_as_root()
+    _configure_logging(verbose=verbose, debug=debug)
+    _reconcile_networks()
+
+
+@click.command(name="version", help="Show the version and exit")
+def version_cmd() -> None:
+    click.echo(f"{CLI_NAME} {_get_version()}")
+
+
+@click.command(name="help", help="Show help for fcm or a subcommand")
+@click.argument("args", nargs=-1)
+@click.pass_context
+def help_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
     if not args:
-        typer.echo(ctx.parent.get_help() if ctx.parent else "")
-        raise typer.Exit()
+        click.echo(ctx.find_root().get_help())
+        ctx.exit()
 
-    # Navigate the click group hierarchy to find the subcommand
     root = ctx.find_root()
-    cmd = root.command
-    for arg in args:
-        if hasattr(cmd, "get_command"):
-            sub = cmd.get_command(root, arg)
-            if sub is None:
-                typer.echo(f"Unknown command: {' '.join(args)}", err=True)
-                raise typer.Exit(code=1)
-            cmd = sub
-        else:
-            typer.echo(f"'{arg}' has no subcommands", err=True)
-            raise typer.Exit(code=1)
+    command: click.Command = root.command
+    current_ctx = root
+    command_path = [root.info_name or CLI_NAME]
 
-    # Print help for the found command
-    with click.Context(cmd, info_name=" ".join([root.info_name or CLI_NAME] + args)) as sub_ctx:
-        typer.echo(cmd.get_help(sub_ctx))
-    raise typer.Exit()
+    for arg in args:
+        if not isinstance(command, click.MultiCommand):
+            click.echo(f"'{arg}' has no subcommands", err=True)
+            ctx.exit(1)
+
+        subcommand = command.get_command(current_ctx, arg)
+        if subcommand is None:
+            click.echo(f"Unknown command: {' '.join(args)}", err=True)
+            ctx.exit(1)
+
+        command = subcommand
+        command_path.append(arg)
+        current_ctx = click.Context(command, info_name=" ".join(command_path), parent=current_ctx)
+
+    click.echo(command.get_help(current_ctx))
+    ctx.exit()
+
+
+@click.command(name="clear", help="Clear cached assets")
+@click.option("--force", "force", is_flag=True, help="Skip confirmation")
+def clear_cmd(force: bool) -> None:
+    from fcm.cli.asset import clear_assets
+
+    clear_assets(force=force)
 
 
 if __name__ == "__main__":

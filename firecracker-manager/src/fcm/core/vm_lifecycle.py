@@ -5,9 +5,11 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import IO
 
 from fcm.core.cloud_init import write_cloud_init, inject_cloud_init
 from fcm.core.config_gen import ConfigGenerator
@@ -107,13 +109,40 @@ def _generate_tap_name(network_name: str, vm_name: str) -> str:
 
 def _write_pid_file(pid_file: Path, pid: int) -> None:
     """Write PID to file with an exclusive advisory lock."""
-    fd = os.open(str(pid_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    fd = os.open(str(pid_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         os.write(fd, str(pid).encode())
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+
+
+def _stream_output_to_file(pipe: IO[str] | None, file_handle: IO[str], name: str) -> None:
+    if pipe is None:
+        file_handle.close()
+        return
+    try:
+        for line in iter(pipe.readline, ""):
+            file_handle.write(line)
+            file_handle.flush()
+    except Exception as exc:
+        logger.debug("Stream %s ended: %s", name, exc)
+    finally:
+        try:
+            file_handle.close()
+        finally:
+            pipe.close()
+
+
+def _start_stream_thread(pipe: IO[str] | None, file_handle: IO[str], name: str) -> threading.Thread:
+    thread = threading.Thread(
+        target=_stream_output_to_file,
+        args=(pipe, file_handle, name),
+        daemon=True,
+    )
+    thread.start()
+    return thread
 
 
 def _read_pid_file(pid_file: Path) -> int | None:
@@ -131,6 +160,50 @@ def _read_pid_file(pid_file: Path) -> int | None:
     except PermissionError:
         pass  # process exists but we can't signal it
     return pid
+
+
+def _secure_mkdir_vm(vm_dir: Path, name: str) -> None:
+    """Atomically create VM directory with TOCTOU protection.
+
+    Uses atomic mkdir with symlink detection to prevent race conditions
+    where an attacker creates a symlink between check and create.
+
+    Args:
+        vm_dir: Path to the VM directory to create
+        name: VM name for error messages
+
+    Raises:
+        FCMError: If directory exists, is a symlink, or race condition detected
+    """
+    # SECURITY: Use os.lstat() to detect symlinks before attempting creation
+    # This prevents the TOCTOU race between check and mkdir
+    try:
+        # Check if path exists and is a symlink BEFORE attempting creation
+        os.lstat(vm_dir)  # Raises FileNotFoundError if path doesn't exist
+        if os.path.islink(vm_dir):
+            raise FCMError(f"VM '{name}' path is a symlink (possible attack): {vm_dir}")
+        raise FCMError(f"VM '{name}' already exists at {vm_dir}")
+    except FileNotFoundError:
+        # Expected - path doesn't exist, safe to proceed with atomic mkdir
+        pass
+
+    # SECURITY: Attempt atomic directory creation
+    # exist_ok=False ensures we fail if path was created between check and mkdir
+    try:
+        vm_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        # Race condition: path created between our check and mkdir
+        # Re-verify to detect symlinks
+        if os.path.islink(vm_dir):
+            raise FCMError(f"VM '{name}' path is a symlink (race condition detected): {vm_dir}")
+        raise FCMError(f"VM '{name}' already exists at {vm_dir}")
+
+    # SECURITY: Verify the created directory is not a symlink
+    # This catches cases where mkdir followed a symlink to a different parent
+    if os.path.islink(vm_dir):
+        # Attempt cleanup - but the symlink attack may have already succeeded
+        # We can't safely clean up, just report the security issue
+        raise FCMError(f"VM '{name}' directory is a symlink (security violation): {vm_dir}")
 
 
 def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
@@ -206,8 +279,7 @@ def create_vm(
     validate_entity_name(name, "VM")
 
     manager = vm_manager or get_vm_manager()
-    existing_vms = manager.list_all()
-    if len(existing_vms) >= MAX_VMS:
+    if manager.count_vms() >= MAX_VMS:
         raise FCMError(
             f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
         )
@@ -225,8 +297,7 @@ def create_vm(
             )
 
     vm_dir = get_vm_dir(name)
-    if vm_dir.exists():
-        raise FCMError(f"VM '{name}' already exists at {vm_dir}")
+    _secure_mkdir_vm(vm_dir, name)
 
     kernel_path: Path
     if kernel:
@@ -278,8 +349,6 @@ def create_vm(
     guest_mac = mac if mac else generate_mac()
     tap_name = _generate_tap_name(network_name, name)
     bridge = net_config.bridge
-
-    vm_dir.mkdir(parents=True, exist_ok=False)
 
     rootfs_path = vm_dir / "rootfs.ext4"
     try:
@@ -365,13 +434,20 @@ def create_vm(
         ]
 
     try:
-        with open(log_file, "w") as log_fp, open(console_log_file, "w") as console_fp:
-            proc = subprocess.Popen(
-                fc_cmd,
-                stdout=console_fp,
-                stderr=log_fp,
-                start_new_session=True,
-            )
+        log_fp = open(log_file, "w", buffering=1, encoding="utf-8")
+        console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
+        proc = subprocess.Popen(
+            fc_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        _start_stream_thread(proc.stdout, console_fp, "console")
+        _start_stream_thread(proc.stderr, log_fp, "log")
     except FileNotFoundError:
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)

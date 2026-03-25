@@ -502,36 +502,35 @@ def test_active_target_path_does_not_exist(tmp_path: Path):
 def test_fetch_binary_sha256_mismatch(tmp_path: Path, mocker: MockerFixture):
     """SHA-256 mismatch with sidecar should raise BinaryError."""
     tarball_data = _make_tarball(tmp_path, "1.5.0")
-    mock_resp = MagicMock()
-    mock_resp.read.side_effect = [tarball_data, b""]
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
 
-    sha_resp = MagicMock()
-    sha_resp.read.return_value = (
-        b"0000000000000000000000000000000000000000000000000000000000000000  file.tgz\n"
-    )
-    sha_resp.__enter__ = lambda s: s
-    sha_resp.__exit__ = MagicMock(return_value=False)
+    def mock_urlopen(req, **kwargs):
+        url = str(req.full_url if hasattr(req, "full_url") else req)
+        mock_resp = MagicMock()
+        if ".sha256.txt" in url:
+            mock_resp.read.return_value = (
+                b"0000000000000000000000000000000000000000000000000000000000000000  file.tgz\n"
+            )
+        else:
+            mock_resp.read.side_effect = [tarball_data, b""]
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
 
-    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
-    mocker.patch("fcm.core.binary_manager.urlopen", return_value=sha_resp)
-    with pytest.raises(BinaryError, match="SHA-256 mismatch"):
+    mocker.patch("fcm.utils.http.urlopen", side_effect=mock_urlopen)
+    mocker.patch("fcm.core.binary_manager.urlopen", side_effect=mock_urlopen)
+    with pytest.raises(BinaryError, match="Checksum mismatch"):
         fetch_binary("1.5.0", bin_dir=tmp_path)
 
 
 def test_fetch_binary_sha256_sidecar_unavailable(tmp_path: Path, mocker: MockerFixture):
-    """When SHA sidecar is unavailable, fetch should continue with a warning."""
     tarball_data = _make_tarball(tmp_path, "1.6.0")
     mock_resp = MagicMock()
     mock_resp.read.side_effect = [tarball_data, b""]
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
 
-    mocker.patch("fcm.utils.http.urlopen", return_value=mock_resp)
+    mock_download = mocker.patch("fcm.core.binary_manager.download_file", return_value=True)
     mocker.patch("fcm.core.binary_manager.urlopen", side_effect=URLError("404"))
-    result = fetch_binary("1.6.0", bin_dir=tmp_path)
-
-    assert result.version == "1.6.0"
-    assert result.firecracker_path.exists()
-    assert result.jailer_path.exists()
+    with pytest.raises(BinaryError, match="Checksum required"):
+        fetch_binary("1.6.0", bin_dir=tmp_path)
+    mock_download.assert_not_called()

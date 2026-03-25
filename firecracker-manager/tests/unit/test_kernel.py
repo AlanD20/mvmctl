@@ -1,6 +1,7 @@
 """Tests for kernel download and build utilities."""
 
 import tarfile
+import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from urllib.error import URLError
@@ -19,8 +20,11 @@ from fcm.core.kernel import (
 from fcm.exceptions import ChecksumMismatchError, KernelError
 
 
-def test_download_kernel_source_success(tmp_path: Path):
+def test_download_kernel_source_success(tmp_path: Path, mocker):
+    import hashlib
+
     fake_body = b"kernel-data-here"
+    expected_sha256 = hashlib.sha256(fake_body).hexdigest()
     mock_response = MagicMock()
     mock_response.read.side_effect = [fake_body, b""]
     mock_response.headers = {"Content-Length": None}
@@ -29,7 +33,9 @@ def test_download_kernel_source_success(tmp_path: Path):
 
     dest = tmp_path / "linux.tar.xz"
     with patch("fcm.utils.http.urlopen", return_value=mock_response):
-        download_kernel_source("https://example.com/kernel.tar.xz", dest)
+        download_kernel_source(
+            "https://example.com/kernel.tar.xz", dest, expected_sha256=expected_sha256
+        )
 
     assert dest.exists()
     assert dest.read_bytes() == fake_body
@@ -75,7 +81,9 @@ def test_download_kernel_source_url_error(tmp_path: Path):
     dest = tmp_path / "linux.tar.xz"
     with patch("fcm.utils.http.urlopen", side_effect=URLError("no network")):
         with pytest.raises(KernelError):
-            download_kernel_source("https://example.com/k.tar.xz", dest)
+            download_kernel_source(
+                "https://example.com/k.tar.xz", dest, expected_sha256="abcd1234" * 8
+            )
 
 
 def test_extract_kernel_tarball_success(tmp_path: Path):
@@ -361,15 +369,14 @@ def test_build_kernel_success(tmp_path: Path):
 
     output_path = tmp_path / "out" / "vmlinux"
 
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = ""
-    mock_result.stderr = ""
+    mock_proc = MagicMock()
+    mock_proc.wait.return_value = 0
 
-    with patch("fcm.core.kernel.subprocess.run", return_value=mock_result):
+    with patch("fcm.core.kernel.subprocess.Popen", return_value=mock_proc) as mock_popen:
         build_kernel(kernel_dir, output_path, jobs=2)
 
     assert output_path.exists()
+    assert mock_popen.call_args.kwargs["stdout"] is not None
 
 
 def test_build_kernel_failure(tmp_path: Path):
@@ -378,12 +385,10 @@ def test_build_kernel_failure(tmp_path: Path):
 
     output_path = tmp_path / "out" / "vmlinux"
 
-    mock_result = MagicMock()
-    mock_result.returncode = 2
-    mock_result.stdout = ""
-    mock_result.stderr = "error: something broke\n"
+    mock_proc = MagicMock()
+    mock_proc.wait.return_value = 2
 
-    with patch("fcm.core.kernel.subprocess.run", return_value=mock_result):
+    with patch("fcm.core.kernel.subprocess.Popen", return_value=mock_proc):
         with pytest.raises(KernelError):
             build_kernel(kernel_dir, output_path, jobs=1)
 
@@ -394,12 +399,10 @@ def test_build_kernel_failure_with_error_lines(tmp_path: Path):
 
     output_path = tmp_path / "out" / "vmlinux"
 
-    mock_result = MagicMock()
-    mock_result.returncode = 2
-    mock_result.stdout = ""
-    mock_result.stderr = "CC some/file.o\nerror: undefined reference to 'foo'\nLD vmlinux\n"
+    mock_proc = MagicMock()
+    mock_proc.wait.return_value = 2
 
-    with patch("fcm.core.kernel.subprocess.run", return_value=mock_result):
+    with patch("fcm.core.kernel.subprocess.Popen", return_value=mock_proc):
         with pytest.raises(KernelError):
             build_kernel(kernel_dir, output_path, jobs=1)
 
@@ -410,12 +413,10 @@ def test_build_kernel_vmlinux_not_found(tmp_path: Path):
 
     output_path = tmp_path / "out" / "vmlinux"
 
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = ""
-    mock_result.stderr = ""
+    mock_proc = MagicMock()
+    mock_proc.wait.return_value = 0
 
-    with patch("fcm.core.kernel.subprocess.run", return_value=mock_result):
+    with patch("fcm.core.kernel.subprocess.Popen", return_value=mock_proc):
         with pytest.raises(KernelError):
             build_kernel(kernel_dir, output_path, jobs=2)
 
@@ -423,6 +424,13 @@ def test_build_kernel_vmlinux_not_found(tmp_path: Path):
 def test_build_kernel_pipeline_cached(tmp_path: Path):
     output_path = tmp_path / "vmlinux"
     output_path.write_bytes(b"cached-kernel")
+
+    from fcm.core.kernel import _compute_config_hash
+
+    config_hash = _compute_config_hash("6.1.102", None)
+    cache_key = f"6.1.102-{config_hash}"
+    cache_marker = tmp_path / f"kernel-cache-{cache_key}.marker"
+    cache_marker.write_text(cache_key)
 
     build_kernel_pipeline(
         version="6.1.102",
@@ -450,6 +458,23 @@ def test_build_kernel_pipeline_download_fails(tmp_path: Path):
             )
 
 
+@patch("fcm.core.kernel.fetch_kernel_sha256", return_value=None)
+def test_build_kernel_pipeline_requires_checksum(mock_fetch_sha256: MagicMock, tmp_path: Path):
+    output_path = tmp_path / "vmlinux"
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    with pytest.raises(KernelError, match="Checksum required"):
+        build_kernel_pipeline(
+            version="6.1.102",
+            source_url="https://example.com/linux.tar.xz",
+            output_path=output_path,
+            build_dir=build_dir,
+        )
+
+
+@patch("fcm.core.kernel.shutil.copy2")
+@patch("fcm.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
 @patch("fcm.core.kernel.build_kernel")
 @patch("fcm.core.kernel.configure_kernel")
 @patch("fcm.core.kernel.extract_kernel_tarball")
@@ -459,6 +484,8 @@ def test_build_kernel_pipeline_full_success(
     mock_extract: MagicMock,
     mock_configure: MagicMock,
     mock_build: MagicMock,
+    mock_fetch_sha256: MagicMock,
+    mock_copy2: MagicMock,
     tmp_path: Path,
 ):
     output_path = tmp_path / "vmlinux"
@@ -570,6 +597,8 @@ def test_build_kernel_pipeline_build_fails(
         )
 
 
+@patch("fcm.core.kernel.shutil.copy2")
+@patch("fcm.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
 @patch("fcm.core.kernel.build_kernel")
 @patch("fcm.core.kernel.configure_kernel")
 @patch("fcm.core.kernel.extract_kernel_tarball")
@@ -579,6 +608,8 @@ def test_build_kernel_pipeline_cached_tarball(
     mock_extract: MagicMock,
     mock_configure: MagicMock,
     mock_build: MagicMock,
+    mock_fetch_sha256: MagicMock,
+    mock_copy2: MagicMock,
     tmp_path: Path,
 ):
     output_path = tmp_path / "vmlinux"
@@ -606,6 +637,8 @@ def test_build_kernel_pipeline_cached_tarball(
     mock_extract.assert_not_called()
 
 
+@patch("fcm.core.kernel.shutil.copy2")
+@patch("fcm.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
 @patch("fcm.core.kernel.build_kernel")
 @patch("fcm.core.kernel.configure_kernel")
 @patch("fcm.core.kernel.extract_kernel_tarball")
@@ -615,6 +648,8 @@ def test_build_kernel_pipeline_cached_tarball_needs_extract(
     mock_extract: MagicMock,
     mock_configure: MagicMock,
     mock_build: MagicMock,
+    mock_fetch_sha256: MagicMock,
+    mock_copy2: MagicMock,
     tmp_path: Path,
 ):
     output_path = tmp_path / "vmlinux"
@@ -686,3 +721,184 @@ def test_configure_kernel_missing_settings_proceed(tmp_path: Path):
         # Should not raise when user confirms
         configure_kernel(kernel_dir, "6.1.102")
         mock_confirm.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Issue #16: Kernel Build Log Accumulation - File-based logging
+# ---------------------------------------------------------------------------
+
+
+@patch("fcm.core.kernel.subprocess.Popen")
+def test_build_kernel_uses_file_based_logging(mock_popen: MagicMock, tmp_path: Path):
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+    vmlinux = kernel_dir / "vmlinux"
+    vmlinux.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    output_path = tmp_path / "out" / "vmlinux"
+    log_path = tmp_path / "build.log"
+
+    mock_proc = MagicMock()
+    mock_proc.wait.return_value = 0
+    mock_popen.return_value = mock_proc
+
+    build_kernel(kernel_dir, output_path, jobs=2, build_log_path=log_path)
+
+    mock_popen.assert_called_once()
+    call_kwargs = mock_popen.call_args[1]
+    assert hasattr(call_kwargs.get("stdout"), "write")
+    assert call_kwargs.get("stderr") == subprocess.STDOUT
+
+
+@patch("fcm.core.kernel.subprocess.Popen")
+def test_build_kernel_post_processes_log_file(mock_popen: MagicMock, tmp_path: Path):
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+    vmlinux = kernel_dir / "vmlinux"
+    vmlinux.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    output_path = tmp_path / "out" / "vmlinux"
+    log_path = tmp_path / "build.log"
+
+    log_content = "CC init/main.o\nWARNING: something\nERROR: undefined\nLD vmlinux\n"
+
+    mock_proc = MagicMock()
+    mock_proc.wait.return_value = 0
+
+    def fake_popen(cmd, cwd=None, stdout=None, stderr=None, **kwargs):
+        if stdout and hasattr(stdout, "write"):
+            stdout.write(log_content)
+            stdout.flush()
+        return mock_proc
+
+    mock_popen.side_effect = fake_popen
+
+    with patch("fcm.core.kernel.logger.debug") as mock_debug:
+        build_kernel(kernel_dir, output_path, jobs=2, build_log_path=log_path)
+
+    assert log_path.exists()
+    assert mock_debug.call_count >= 1
+
+
+# ---------------------------------------------------------------------------
+# Issue #18: Kernel Build Cache - Config hash
+# ---------------------------------------------------------------------------
+
+
+def test_compute_config_hash_consistent():
+    """Test that _compute_config_hash returns consistent hash for same inputs."""
+    from fcm.core.kernel import _compute_config_hash
+
+    hash1 = _compute_config_hash("6.1.102", None)
+    hash2 = _compute_config_hash("6.1.102", None)
+
+    assert hash1 == hash2
+    assert len(hash1) == 16  # First 16 chars of SHA256
+
+
+def test_compute_config_hash_different_versions():
+    """Test that _compute_config_hash returns different hashes for different versions."""
+    from fcm.core.kernel import _compute_config_hash
+
+    hash1 = _compute_config_hash("6.1.102", None)
+    hash2 = _compute_config_hash("6.2.0", None)
+
+    assert hash1 != hash2
+
+
+def test_compute_config_hash_with_user_config(tmp_path: Path):
+    """Test that _compute_config_hash includes user config content."""
+    from fcm.core.kernel import _compute_config_hash
+
+    user_config = tmp_path / "user.config"
+    user_config.write_text("CONFIG_CUSTOM=y\n")
+
+    hash1 = _compute_config_hash("6.1.102", None)
+    hash2 = _compute_config_hash("6.1.102", user_config)
+
+    assert hash1 != hash2
+
+
+@patch("fcm.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
+@patch("fcm.core.kernel.build_kernel")
+@patch("fcm.core.kernel.configure_kernel")
+@patch("fcm.core.kernel.extract_kernel_tarball")
+@patch("fcm.core.kernel.download_kernel_source")
+def test_build_kernel_pipeline_uses_cache_marker(
+    mock_download: MagicMock,
+    mock_extract: MagicMock,
+    mock_configure: MagicMock,
+    mock_build: MagicMock,
+    mock_fetch_sha256: MagicMock,
+    tmp_path: Path,
+):
+    """Test that build_kernel_pipeline creates cache marker with config hash."""
+    output_path = tmp_path / "vmlinux"
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    kernel_src_dir = build_dir / "linux-6.1.102"
+    kernel_src_dir.mkdir()
+
+    mock_download.return_value = True
+    mock_extract.return_value = kernel_src_dir
+    mock_configure.return_value = True
+
+    def create_vmlinux(src_dir: Path, out_path: Path, jobs: int) -> None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"\x7fELF")
+
+    mock_build.side_effect = create_vmlinux
+
+    build_kernel_pipeline(
+        version="6.1.102",
+        source_url="https://example.com/linux.tar.xz",
+        output_path=output_path,
+        build_dir=build_dir,
+    )
+
+    markers = list(tmp_path.glob("kernel-cache-*.marker"))
+    assert len(markers) == 1
+    cached_kernels = list(tmp_path.glob("kernel-cache-*.vmlinux"))
+    assert len(cached_kernels) == 1
+
+
+@patch("fcm.core.kernel.build_kernel")
+@patch("fcm.core.kernel.configure_kernel")
+@patch("fcm.core.kernel.extract_kernel_tarball")
+@patch("fcm.core.kernel.download_kernel_source")
+def test_build_kernel_pipeline_skips_build_if_cache_matches(
+    mock_download: MagicMock,
+    mock_extract: MagicMock,
+    mock_configure: MagicMock,
+    mock_build: MagicMock,
+    tmp_path: Path,
+):
+    """Test that build_kernel_pipeline skips build if cache marker exists."""
+    output_path = tmp_path / "vmlinux"
+    output_path.write_bytes(b"\x7fELF")  # Pre-create kernel
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    from fcm.core.kernel import _compute_config_hash
+
+    config_hash = _compute_config_hash("6.1.102", None)
+    cache_marker = tmp_path / f"kernel-cache-6.1.102-{config_hash}.marker"
+    cache_marker.write_text(f"6.1.102-{config_hash}")
+    cached_kernel = tmp_path / f"kernel-cache-6.1.102-{config_hash}.vmlinux"
+    cached_kernel.write_bytes(b"cached artifact")
+
+    output_path.unlink()
+
+    build_kernel_pipeline(
+        version="6.1.102",
+        source_url="https://example.com/linux.tar.xz",
+        output_path=output_path,
+        build_dir=build_dir,
+    )
+
+    mock_build.assert_not_called()
+    mock_configure.assert_not_called()
+    mock_extract.assert_not_called()
+    mock_download.assert_not_called()
+    assert output_path.read_bytes() == b"cached artifact"
