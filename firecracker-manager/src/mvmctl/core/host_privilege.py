@@ -43,13 +43,13 @@ def check_privileges(binary: str) -> None:
         if username not in g.gr_mem:
             raise PrivilegeError(
                 f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
-                f"Run 'sudo fcm host init' to configure privileges, "
+                f"Run 'sudo mvm host init' to configure privileges, "
                 f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
             )
     except KeyError as e:
         raise PrivilegeError(
             f"Group '{PROJECT_GROUP}' does not exist. "
-            f"Run 'sudo fcm host init' to set up privilege management."
+            f"Run 'sudo mvm host init' to set up privilege management."
         ) from e
 
 
@@ -78,8 +78,8 @@ def check_privileges_interactive(binary: str, operation_description: str = "") -
         print_warning(f"Details: {exc}")
         print_info("")
         print_info("Options:")
-        print_info("  1. Run with sudo:              sudo fcm ...")
-        print_info("  2. Configure persistent access: sudo fcm host init")
+        print_info(f"  1. Run with sudo:              sudo {CLI_NAME} ...")
+        print_info("  2. Configure persistent access: sudo mvm host init")
         print_info(f"     (then log out and back in, or run: newgrp {PROJECT_GROUP})")
         raise
 
