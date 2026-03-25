@@ -92,6 +92,10 @@ def _configure_logging(*, verbose: bool, debug: bool) -> None:
 def _warn_if_running_as_root() -> None:
     if os.getuid() != 0:
         return
+    # Suppress when configure already prompted the user and escalated on their
+    # behalf — they accepted, so the warning is noise.
+    if os.environ.get("MVM_ESCALATED"):
+        return
 
     from mvmctl.utils.console import print_warning
 

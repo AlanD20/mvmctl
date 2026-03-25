@@ -93,7 +93,9 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
     sf = _state_file(cache_dir)
     sf.write_text(json.dumps(data, indent=2) + "\n")
     os.chmod(sf, 0o600)
-    chown_to_real_user(state_dir)
+    # Chown the entire cache root so the real user can write to all subdirs
+    # (bin/, kernels/, images/, …) after a sudo-elevated init run.
+    chown_to_real_user(cache_dir)
 
 
 def restore_host(cache_dir: Path) -> list[HostChange]:

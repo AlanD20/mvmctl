@@ -61,21 +61,20 @@ def _run_host_init_noninteractive(cache_dir: Path) -> None:
 def _run_host_init_interactive() -> None:
     """Prompt the user and run host initialisation interactively."""
     if typer.confirm("  Run 'sudo mvm host init' now?", default=True):
+        import os
         import shutil
         import subprocess
         import sys
 
         mvm_bin = shutil.which("mvm") or sys.argv[0]
-        result = subprocess.run(["sudo", mvm_bin, "host", "init"])
-        if result.returncode == 0:
-            print_success("  Host initialized.")
-            print_warning(
-                "  ACTION REQUIRED: Log out and back in for group membership to take effect."
-            )
-            print_info("  Or run immediately: newgrp mvm")
-            print_info("  Then re-run: mvm configure")
-        else:
+        env = os.environ.copy()
+        # Signal to the subprocess that this escalation was user-prompted so
+        # the "running as root" warning is suppressed.
+        env["MVM_ESCALATED"] = "1"
+        result = subprocess.run(["sudo", "-E", mvm_bin, "host", "init"], env=env)
+        if result.returncode != 0:
             print_warning("  Host init failed. Run 'sudo mvm host init' manually.")
+        # The subprocess already printed all status lines — no duplicate output here.
     else:
         print_info("  Skipped. Run 'sudo mvm host init' manually when ready.")
 

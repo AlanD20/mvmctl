@@ -219,4 +219,4 @@ def test_step_host_uses_shutil_which_for_mvm(mock_cache, mock_state, mock_kvm, t
     mock_which.assert_called_once_with("mvm")
     mock_run.assert_called_once()
     cmd = mock_run.call_args[0][0]
-    assert cmd == ["sudo", "/usr/local/bin/mvm", "host", "init"]
+    assert cmd == ["sudo", "-E", "/usr/local/bin/mvm", "host", "init"]

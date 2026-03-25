@@ -86,7 +86,7 @@ def bin_callback(ctx: typer.Context) -> None:
 @kernel_app.command(name="ls")
 def kernel_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
+    kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
     firecracker_only: bool = typer.Option(
         False, "--firecracker", help="Show only firecracker kernels"
     ),
@@ -97,6 +97,7 @@ def kernel_ls(
     """List cached kernels (both Firecracker CI and official upstream)."""
     from mvmctl.core.kernel import list_kernels
 
+    kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
     kernels_dir.mkdir(parents=True, exist_ok=True)
     kernels = list_kernels(kernels_dir)
 
@@ -249,11 +250,12 @@ def kernel_fetch(
 @kernel_app.command(name="set-default")
 def kernel_set_default(
     name: str = typer.Argument(..., help="Kernel file name to set as default"),
-    kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
+    kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
 ) -> None:
     """Set a kernel as the default for VM creation."""
     from mvmctl.core.kernel import set_default_kernel
 
+    kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
     try:
         set_default_kernel(kernels_dir, name)
     except KernelError as exc:
@@ -265,10 +267,11 @@ def kernel_set_default(
 @kernel_app.command(name="rm")
 def kernel_rm(
     names: Optional[List[str]] = typer.Argument(None, help="Kernel file name(s) to remove"),
-    kernels_dir: Path = typer.Option(get_kernels_dir(), "--kernels-dir", help="Kernels directory"),
+    kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove one or more cached kernels by filename."""
+    kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
     effective_names: list[str] = list(names) if names else []
     if not effective_names:
         print_error("Provide at least one kernel file name to remove")
@@ -310,11 +313,12 @@ def _save_image_meta(
 @image_app.command(name="ls")
 def image_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+    images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
     remote: bool = typer.Option(False, "--remote", "-r", help="Show available remote images"),
     name_filter: Optional[str] = typer.Option(None, "--name", help="Filter by image name"),
 ) -> None:
     """List cached images (or available remote images with --remote)."""
+    images_dir = images_dir if images_dir is not None else get_images_dir()
     images_dir.mkdir(parents=True, exist_ok=True)
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
@@ -486,13 +490,14 @@ def image_fetch(
     image_id: str = typer.Argument(
         ..., help="Image ID from 'mvm image ls --remote' (e.g. ubuntu-24.04)"
     ),
-    out: Path = typer.Option(get_images_dir(), "--out", help="Output directory"),
+    out: Optional[Path] = typer.Option(None, "--out", help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
     set_default: bool = typer.Option(
         False, "--set-default", help="Set as default image after download"
     ),
 ) -> None:
     """Download an image by its ID. Run 'mvm image ls -r' to list available image IDs."""
+    out = out if out is not None else get_images_dir()
     out.mkdir(parents=True, exist_ok=True)
     config_path = get_assets_dir() / "images.yaml"
     images = load_images_config(config_path)
@@ -568,9 +573,10 @@ def image_fetch(
 @image_app.command(name="set-default")
 def image_set_default(
     image_id: str = typer.Argument(..., help="Image short ID or YAML image ID to set as default"),
-    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+    images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
 ) -> None:
     """Set the default image for VM creation."""
+    images_dir = images_dir if images_dir is not None else get_images_dir()
     images_dir.mkdir(parents=True, exist_ok=True)
 
     found = any((images_dir / f"{image_id}{ext}").exists() for ext in SUPPORTED_IMAGE_EXTENSIONS)
@@ -606,7 +612,7 @@ def image_rm(
     short_ids: Optional[List[str]] = typer.Argument(
         None, help="Image short IDs (6 chars) to remove"
     ),
-    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Images directory"),
+    images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove cached images by short ID.
@@ -615,6 +621,7 @@ def image_rm(
         mvm image rm abc123
         mvm image rm abc123 def456
     """
+    images_dir = images_dir if images_dir is not None else get_images_dir()
     effective_ids: list[str] = list(short_ids) if short_ids else []
     if not effective_ids:
         print_error("Provide at least one image short ID")
@@ -695,11 +702,13 @@ def image_import(
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing"),
     set_default: bool = typer.Option(False, "--set-default", help="Set as default after import"),
-    images_dir: Path = typer.Option(get_images_dir(), "--images-dir", help="Output directory"),
+    images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Output directory"),
 ) -> None:
     """Import a local image file (qcow2, raw, tar-rootfs). The first argument is a display name."""
     import hashlib
     import time
+
+    images_dir = images_dir if images_dir is not None else get_images_dir()
 
     if not source_path.exists():
         print_error(f"Source file not found: {source_path}")

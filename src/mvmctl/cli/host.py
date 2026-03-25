@@ -16,9 +16,37 @@ from mvmctl.api.host import (
     reset_host,
 )
 from mvmctl.constants import PROJECT_GROUP
+from mvmctl.core.host import HostChange
 from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.fs import get_cache_dir
+
+
+def _format_change(change: HostChange) -> str:
+    """Return a concise one-line description of a host change for display."""
+
+    m = change.mechanism
+    s = change.setting
+    v = change.applied_value
+
+    if m == "iptables_save":
+        return f"iptables rules saved → {v}"
+    if m in ("file_create", "file_remove"):
+        return f"{s}: created {v}"
+    if m == "groupadd":
+        return f"group '{v}' created"
+    if m == "usermod":
+        parts = v.split(":")
+        user, group = (parts[0], parts[1]) if len(parts) == 2 else (v, v)
+        return f"user '{user}' added to group '{group}'"
+    if m == "sysctl":
+        orig = change.original_value or "0"
+        return f"{s}: {orig} → {v}"
+    # Fallback: truncate long values
+    orig = change.original_value or ""
+    orig_display = (orig[:50] + "…") if len(orig) > 50 else orig
+    return f"{s}: {orig_display!r} → {v!r}"
+
 
 app = typer.Typer(
     help="Host configuration",
@@ -105,20 +133,23 @@ def init_cmd() -> None:
         print_info("Host already configured — nothing to do.")
     else:
         for change in changes:
-            print_success(f"{change.setting}: {change.original_value!r} → {change.applied_value!r}")
+            print_success(_format_change(change))
         print_success(f"Host initialized ({len(changes)} change(s) applied).")
         print_warning("ACTION REQUIRED: Log out and back in for group membership to take effect.")
         print_info(f"Or run immediately: newgrp {PROJECT_GROUP}")
 
     from mvmctl.api.network import ensure_default_network
-    from mvmctl.utils.fs import chown_to_real_user, get_networks_dir
+    from mvmctl.utils.fs import chown_to_real_user
 
     try:
         ensure_default_network()
-        chown_to_real_user(get_networks_dir())
         print_success("Default network ready.")
     except MVMError as e:
         print_warning(f"Default network setup skipped: {e}")
+
+    # Ensure everything under cache_dir is owned by the invoking user,
+    # not root — covers bin/, networks/, host/, and any dir created above.
+    chown_to_real_user(get_cache_dir())
 
 
 @app.command(name="ls")
