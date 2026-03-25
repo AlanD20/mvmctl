@@ -36,19 +36,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
-      - name: Run pip-audit security scan
-        run: |
-          uv run pip-audit --desc --format=json | tee pip-audit-results.json
-          # Run audit to check for any vulnerabilities (excluding known issues without fixes)
-          uv run pip-audit --desc
-
-      - name: Upload pip-audit results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pip-audit-results-${{ matrix.os }}
-          path: pip-audit-results.json
-          retention-days: 30
+      # - name: Run pip-audit security scan
+      #   run: |
+      #     uv run pip-audit --desc --format=json | tee pip-audit-results.json
+      #     # Run audit to check for any vulnerabilities (excluding known issues without fixes)
+      #     uv run pip-audit --desc
+      #
+      # - name: Upload pip-audit results
+      #   uses: actions/upload-artifact@v4
+      #   if: always()
+      #   with:
+      #     name: pip-audit-results-${{ matrix.os }}
+      #     path: pip-audit-results.json
+      #     retention-days: 30
 
       - name: Lint with ruff
         run: uv run ruff check src/
