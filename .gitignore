@@ -1,35 +1,96 @@
-# Firecracker VM Setup - Generated Files
-# This file ignores all generated artifacts
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
 
-# Centralized asset downloads
-assets/bin/
-assets/kernels/
-assets/images/
-assets/keys/*
-!assets/keys/.gitkeep
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
 
-# Single VM generated environment
-single-vm/env/
+# Test & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+coverage.xml
+*.cover
 
-# Multi VM generated environments and VMs
-multi-vm/env/
-multi-vm/vms/
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# Generated temporary files
-**/*.iso
-**/*.img
-**/*.img
-**/*.ext4
-**/*.log
-**/*.metrics
-**/*.pid
-**/*.socket
+# Ruff
+.ruff_cache/
 
-# Editor and OS files
-.DS_Store
-Thumbs.db
+# uv
+uv.lock
+
+# IDE
+.idea/
+.vscode/
 *.swp
 *.swo
 *~
-.idea/
-.vscode/
+.DS_Store
+Thumbs.db
+
+# FCM runtime data (user cache dir)
+# Note: actual files go to ~/.cache/firecracker-manager/ not in project
+*.pid
+*.socket
+*.log
+
+# Build artifacts
+*.tar.xz
+*.ext4
+*.raw
+*.img
+vmlinux
+vmlinux-*
+
+# Kernel build dir
+kernel-build/
+linux-*/
+
+# VM runtime dirs (env/ used by PoC bash scripts)
+env/
+
+# Misc binary/image artifacts
+*.iso
+*.metrics
+
+# ========== LEGACY BASH SCRIPTS (moved to legacy/) ==========
+# Legacy centralized asset downloads
+legacy/assets/bin/
+legacy/assets/kernels/
+legacy/assets/images/
+legacy/assets/keys/*
+!legacy/assets/keys/.gitkeep
+
+# Legacy Single VM generated environment
+legacy/single-vm/env/
+
+# Legacy Multi VM generated environments and VMs
+legacy/multi-vm/env/
+legacy/multi-vm/vms/
+
+# Legacy generated temporary files
+legacy/**/*.iso
+legacy/**/*.img
+legacy/**/*.ext4
+legacy/**/*.log
+legacy/**/*.metrics
+legacy/**/*.pid
+legacy/**/*.socket
