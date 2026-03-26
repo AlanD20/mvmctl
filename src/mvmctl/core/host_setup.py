@@ -29,6 +29,8 @@ from mvmctl.exceptions import HostError
 
 logger = logging.getLogger(__name__)
 
+_CHAIN_EXISTS_MARKER = "MVM chains already exist"
+
 KVM_MODULES = ["kvm"]
 KVM_VENDOR_MODULES = ["kvm_intel", "kvm_amd"]
 
@@ -325,7 +327,17 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     module_changes = _ensure_kvm_modules()
     changes.extend(module_changes)
 
-    setup_mvm_chains()
+    chains_already_exist = setup_mvm_chains()
+    if chains_already_exist:
+        logger.warning("MVM iptables chains already exist; keeping existing chain state")
+        changes.append(
+            HostChange(
+                setting="iptables_chains",
+                original_value=None,
+                applied_value=_CHAIN_EXISTS_MARKER,
+                mechanism="noop",
+            )
+        )
 
     iptables_change = save_iptables_rules()
     if iptables_change:

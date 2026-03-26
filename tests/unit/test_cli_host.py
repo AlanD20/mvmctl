@@ -69,6 +69,27 @@ def test_init_no_changes(mocker: MockerFixture, tmp_path):
     assert "already configured" in result.output
 
 
+def test_init_warns_when_chains_already_exist(mocker: MockerFixture, tmp_path):
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch(
+        "mvmctl.cli.host.init_host",
+        return_value=[
+            HostChange(
+                setting="iptables_chains",
+                original_value=None,
+                applied_value="MVM chains already exist",
+                mechanism="noop",
+            )
+        ],
+    )
+    mocker.patch("mvmctl.api.network.ensure_default_network")
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0
+    assert "already exist" in result.output.lower()
+
+
 def test_init_host_error(mocker: MockerFixture, tmp_path):
     mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mocker.patch("mvmctl.cli.host.init_host", side_effect=HostError("/dev/kvm is not accessible"))

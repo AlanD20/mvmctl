@@ -21,6 +21,8 @@ from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.fs import get_cache_dir
 
+_CHAIN_EXISTS_MARKER = "MVM chains already exist"
+
 
 def _format_change(change: HostChange) -> str:
     """Return a concise one-line description of a host change for display."""
@@ -42,6 +44,8 @@ def _format_change(change: HostChange) -> str:
     if m == "sysctl":
         orig = change.original_value or "0"
         return f"{s}: {orig} → {v}"
+    if m == "noop" and s == "iptables_chains" and v == _CHAIN_EXISTS_MARKER:
+        return "iptables chains already exist — keeping existing chain state"
     # Fallback: truncate long values
     orig = change.original_value or ""
     orig_display = (orig[:50] + "…") if len(orig) > 50 else orig
@@ -132,11 +136,21 @@ def init_cmd() -> None:
     if not changes:
         print_info("Host already configured — nothing to do.")
     else:
+        applied_changes = 0
         for change in changes:
+            if change.mechanism == "noop" and change.setting == "iptables_chains":
+                print_warning(_format_change(change))
+                continue
+            applied_changes += 1
             print_success(_format_change(change))
-        print_success(f"Host initialized ({len(changes)} change(s) applied).")
-        print_warning("ACTION REQUIRED: Log out and back in for group membership to take effect.")
-        print_info(f"Or run immediately: newgrp {PROJECT_GROUP}")
+        if applied_changes == 0:
+            print_info("Host already configured — nothing to do.")
+        else:
+            print_success(f"Host initialized ({applied_changes} change(s) applied).")
+            print_warning(
+                "ACTION REQUIRED: Log out and back in for group membership to take effect."
+            )
+            print_info(f"Or run immediately: newgrp {PROJECT_GROUP}")
 
     from mvmctl.api.network import ensure_default_network
     from mvmctl.utils.fs import chown_to_real_user

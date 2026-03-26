@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from mvmctl.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH
+from mvmctl.constants import BRIDGE_NAME, PROJECT_GROUP, SUDOERS_DROP_IN_PATH
 from mvmctl.core.host_privilege import (
     _remove_group,
     _remove_sudoers,
@@ -80,11 +80,30 @@ def clean_host(cache_dir: Path) -> list[str]:
     Does NOT revert sysctl, remove sudoers, or remove project group.
     Returns list of summary strings.
     """
-    from mvmctl.core.network import teardown_mvm_chains
+    from mvmctl.constants import TAP_PREFIX
+    from mvmctl.core.network import (
+        delete_tap,
+        list_tuntap_devices,
+        setup_mvm_chains,
+        teardown_bridge,
+        teardown_mvm_chains,
+    )
     from mvmctl.core.network_manager import list_networks, remove_network
     from mvmctl.exceptions import NetworkError
 
     summary: list[str] = []
+
+    tap_names = list_tuntap_devices()
+    fallback_tap_candidates = sorted(
+        {tap for tap in tap_names if tap.startswith(TAP_PREFIX) or tap.startswith("mvm-")}
+    )
+    for tap_name in fallback_tap_candidates:
+        try:
+            delete_tap(tap_name)
+            summary.append(f"Removed TAP device '{tap_name}'")
+        except NetworkError as e:
+            summary.append(f"Warning: failed to remove TAP '{tap_name}': {e}")
+
     try:
         networks = list_networks()
     except NetworkError:
@@ -96,8 +115,15 @@ def clean_host(cache_dir: Path) -> list[str]:
         except NetworkError as e:
             summary.append(f"Warning: failed to remove network '{net.name}': {e}")
 
+    try:
+        teardown_bridge(BRIDGE_NAME)
+        summary.append(f"Removed legacy bridge '{BRIDGE_NAME}'")
+    except NetworkError:
+        pass
+
     # Remove MVM iptables chains after networks are removed
     try:
+        setup_mvm_chains()
         teardown_mvm_chains()
         summary.append("Removed MVM iptables chains")
     except NetworkError as e:

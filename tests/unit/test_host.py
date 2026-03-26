@@ -7,15 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mvmctl.core.host import clean_host, reset_host
-from mvmctl.core.host_state import (
-    HostChange,
-    HostState,
-    _save_state,
-    _state_dir,
-    _state_file,
-    get_host_state,
-    restore_host,
-)
 from mvmctl.core.host_privilege import (
     _add_user_to_group,
     _create_group,
@@ -38,8 +29,16 @@ from mvmctl.core.host_setup import (
     get_ip_forward_status,
     init_host,
 )
+from mvmctl.core.host_state import (
+    HostChange,
+    HostState,
+    _save_state,
+    _state_dir,
+    _state_file,
+    get_host_state,
+    restore_host,
+)
 from mvmctl.exceptions import HostError, NetworkError, PrivilegeError
-
 
 # ---------------------------------------------------------------------------
 # _state_dir / _state_file helpers
@@ -593,6 +592,7 @@ def test_init_host_missing_binaries(
 @patch("mvmctl.core.host_setup._create_group", return_value=False)
 @patch("mvmctl.core.host_setup._validate_sudoers_binaries")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
+@patch("mvmctl.core.host_setup.setup_mvm_chains", return_value=True)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -600,6 +600,7 @@ def test_init_host_ip_forward_already_enabled(
     mock_access,
     mock_which,
     mock_run,
+    mock_setup_chains,
     mock_sysctl_conf,
     mock_validate,
     mock_create_grp,
@@ -628,7 +629,10 @@ def test_init_host_ip_forward_already_enabled(
         changes = init_host(tmp_path)
 
     # ip_forward already "1" and sysctl conf already correct and modules loaded
-    assert changes == []
+    assert len(changes) == 1
+    assert changes[0].setting == "iptables_chains"
+    assert changes[0].mechanism == "noop"
+    assert "already exist" in changes[0].applied_value
     # State file should be written
     state_file = tmp_path / "host" / "state.json"
     assert state_file.exists()
@@ -640,6 +644,7 @@ def test_init_host_ip_forward_already_enabled(
 @patch("mvmctl.core.host_setup._create_group", return_value=False)
 @patch("mvmctl.core.host_setup._validate_sudoers_binaries")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
+@patch("mvmctl.core.host_setup.setup_mvm_chains", return_value=False)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -647,6 +652,7 @@ def test_init_host_enables_ip_forward(
     mock_access,
     mock_which,
     mock_run,
+    mock_setup_chains,
     mock_sysctl_conf,
     mock_validate,
     mock_create_grp,
@@ -693,6 +699,7 @@ def test_init_host_enables_ip_forward(
 @patch("mvmctl.core.host_setup._create_group", return_value=False)
 @patch("mvmctl.core.host_setup._validate_sudoers_binaries")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
+@patch("mvmctl.core.host_setup.setup_mvm_chains", return_value=False)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -700,6 +707,7 @@ def test_init_host_writes_state_file(
     mock_access,
     mock_which,
     mock_run,
+    mock_setup_chains,
     mock_sysctl_conf,
     mock_validate,
     mock_create_grp,
@@ -738,6 +746,7 @@ def test_init_host_writes_state_file(
 @patch("mvmctl.core.host_setup._create_group", return_value=False)
 @patch("mvmctl.core.host_setup._validate_sudoers_binaries")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
+@patch("mvmctl.core.host_setup.setup_mvm_chains", side_effect=[False, True])
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -745,6 +754,7 @@ def test_init_host_idempotent(
     mock_access,
     mock_which,
     mock_run,
+    mock_setup_chains,
     mock_sysctl_conf,
     mock_validate,
     mock_create_grp,
@@ -784,7 +794,8 @@ def test_init_host_idempotent(
 
         changes_second = init_host(tmp_path)
 
-    assert len(changes_second) < len(changes_first)
+    assert len(changes_second) <= len(changes_first)
+    assert any(c.mechanism == "noop" and c.setting == "iptables_chains" for c in changes_second)
 
 
 @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
@@ -793,6 +804,7 @@ def test_init_host_idempotent(
 @patch("mvmctl.core.host_setup._create_group", return_value=False)
 @patch("mvmctl.core.host_setup._validate_sudoers_binaries")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
+@patch("mvmctl.core.host_setup.setup_mvm_chains", return_value=False)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -800,6 +812,7 @@ def test_init_host_with_module_loading(
     mock_access,
     mock_which,
     mock_run,
+    mock_setup_chains,
     mock_sysctl_conf,
     mock_validate,
     mock_create_grp,
@@ -1473,35 +1486,73 @@ class TestHostHelpers:
 
 
 class TestCleanHost:
+    @patch("mvmctl.core.network.setup_mvm_chains")
+    @patch("mvmctl.core.network.teardown_bridge")
+    @patch("mvmctl.core.network.delete_tap")
+    @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-def-vm0-aaa", "eth0"])
     @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
-    def test_clean_host_no_networks(self, mock_list, mock_teardown_chains):
+    def test_clean_host_no_networks(
+        self,
+        mock_list,
+        mock_teardown_chains,
+        mock_get_taps,
+        mock_delete_tap,
+        mock_teardown_bridge,
+        mock_setup_chains,
+    ):
         summary = clean_host(MagicMock())
-        # Even with no networks, MVM chains are still removed
-        assert len(summary) == 1
-        assert "Removed MVM iptables chains" in summary[0]
+        assert any("Removed TAP device 'mvm-def-vm0-aaa'" in s for s in summary)
+        assert any("Removed MVM iptables chains" in s for s in summary)
 
+    @patch("mvmctl.core.network.setup_mvm_chains")
+    @patch("mvmctl.core.network.teardown_bridge")
+    @patch("mvmctl.core.network.delete_tap")
+    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.remove_network")
     @patch("mvmctl.core.network_manager.list_networks")
-    def test_clean_host_removes_networks(self, mock_list, mock_remove, mock_teardown_chains):
+    def test_clean_host_removes_networks(
+        self,
+        mock_list,
+        mock_remove,
+        mock_teardown_chains,
+        mock_get_taps,
+        mock_delete_tap,
+        mock_teardown_bridge,
+        mock_setup_chains,
+    ):
         net = MagicMock()
         net.name = "default"
         net.bridge = "mvm-br0"
         mock_list.return_value = [net]
 
         summary = clean_host(MagicMock())
-        assert len(summary) == 2
+        assert len(summary) == 3
         assert any("Removed network 'default'" in s for s in summary)
+        assert any("Removed legacy bridge 'mvm-br0'" in s for s in summary)
         assert any("Removed MVM iptables chains" in s for s in summary)
 
     @patch(
         "mvmctl.core.network_manager.remove_network",
         side_effect=NetworkError("bridge teardown failed"),
     )
+    @patch("mvmctl.core.network.setup_mvm_chains")
+    @patch("mvmctl.core.network.teardown_bridge")
+    @patch("mvmctl.core.network.delete_tap")
+    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network_manager.list_networks")
     @patch("mvmctl.core.network.teardown_mvm_chains")
-    def test_clean_host_handles_network_failure(self, mock_teardown_chains, mock_list, mock_remove):
+    def test_clean_host_handles_network_failure(
+        self,
+        mock_teardown_chains,
+        mock_list,
+        mock_get_taps,
+        mock_delete_tap,
+        mock_teardown_bridge,
+        mock_setup_chains,
+        mock_remove,
+    ):
         net = MagicMock()
         net.name = "default"
         net.bridge = "mvm-br0"
@@ -1511,16 +1562,46 @@ class TestCleanHost:
         assert any("Warning" in s for s in summary)
         assert any("Removed MVM iptables chains" in s for s in summary)
 
+    @patch("mvmctl.core.network.setup_mvm_chains")
+    @patch("mvmctl.core.network.teardown_bridge")
+    @patch("mvmctl.core.network.delete_tap")
+    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch(
         "mvmctl.core.network_manager.list_networks",
         side_effect=NetworkError("list failed"),
     )
-    def test_clean_host_handles_list_failure(self, mock_list, mock_teardown_chains):
+    def test_clean_host_handles_list_failure(
+        self,
+        mock_list,
+        mock_teardown_chains,
+        mock_get_taps,
+        mock_delete_tap,
+        mock_teardown_bridge,
+        mock_setup_chains,
+    ):
         summary = clean_host(MagicMock())
-        # Even when listing networks fails, MVM chains are still removed
-        assert len(summary) == 1
-        assert "Removed MVM iptables chains" in summary[0]
+        assert any("Removed MVM iptables chains" in s for s in summary)
+
+    @patch("mvmctl.core.network.setup_mvm_chains")
+    @patch("mvmctl.core.network.teardown_bridge")
+    @patch("mvmctl.core.network.delete_tap")
+    @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-abc-vm1-xyz", "mvm-stale"])
+    @patch("mvmctl.core.network.teardown_mvm_chains")
+    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    def test_clean_host_removes_stale_taps_without_metadata(
+        self,
+        mock_list,
+        mock_teardown_chains,
+        mock_get_taps,
+        mock_delete_tap,
+        mock_teardown_bridge,
+        mock_setup_chains,
+    ):
+        summary = clean_host(MagicMock())
+        assert any("Removed TAP device 'mvm-abc-vm1-xyz'" in s for s in summary)
+        assert any("Removed TAP device 'mvm-stale'" in s for s in summary)
+        assert any("Removed MVM iptables chains" in s for s in summary)
 
 
 # ---------------------------------------------------------------------------
@@ -1627,20 +1708,44 @@ class TestInitHostErrorPaths:
 class TestCleanHostErrorPaths:
     """Error-path tests for clean_host."""
 
+    @patch("mvmctl.core.network.setup_mvm_chains")
+    @patch("mvmctl.core.network.teardown_bridge")
+    @patch("mvmctl.core.network.delete_tap")
+    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
-    def test_clean_host_bridge_doesnt_exist(self, mock_list, mock_teardown_chains):
+    def test_clean_host_bridge_doesnt_exist(
+        self,
+        mock_list,
+        mock_teardown_chains,
+        mock_get_taps,
+        mock_delete_tap,
+        mock_teardown_bridge,
+        mock_setup_chains,
+    ):
         """clean_host removes MVM chains even when no bridges/networks exist."""
         summary = clean_host(MagicMock())
-        assert len(summary) == 1
-        assert "Removed MVM iptables chains" in summary[0]
+        assert len(summary) == 2
+        assert any("Removed legacy bridge 'mvm-br0'" in s for s in summary)
+        assert any("Removed MVM iptables chains" in s for s in summary)
         mock_list.assert_called_once()
 
+    @patch("mvmctl.core.network.setup_mvm_chains")
+    @patch("mvmctl.core.network.teardown_bridge")
+    @patch("mvmctl.core.network.delete_tap")
+    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.remove_network")
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_remove_network_subprocess_error(
-        self, mock_list, mock_remove, mock_teardown_chains
+        self,
+        mock_list,
+        mock_remove,
+        mock_teardown_chains,
+        mock_get_taps,
+        mock_delete_tap,
+        mock_teardown_bridge,
+        mock_setup_chains,
     ):
         net = MagicMock()
         net.name = "stale-net"
@@ -1649,9 +1754,10 @@ class TestCleanHostErrorPaths:
         mock_remove.side_effect = NetworkError("ip link delete failed")
 
         summary = clean_host(MagicMock())
-        assert len(summary) == 2
+        assert len(summary) == 3
         assert any("Warning" in s for s in summary)
         assert any("stale-net" in s for s in summary)
+        assert any("Removed legacy bridge 'mvm-br0'" in s for s in summary)
         assert any("Removed MVM iptables chains" in s for s in summary)
 
 

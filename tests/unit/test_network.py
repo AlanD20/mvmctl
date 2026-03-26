@@ -1,14 +1,15 @@
 """Tests for core/network.py."""
 
+import ipaddress
 import re
 import subprocess
-import ipaddress
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mvmctl.core.network import (
+    _run_ip_batch,
     add_iptables_forward_rules,
     allocate_ip,
     bridge_exists,
@@ -17,8 +18,8 @@ from mvmctl.core.network import (
     delete_tap,
     generate_mac,
     get_default_interface,
-    _run_ip_batch,
     get_tap_devices,
+    list_tuntap_devices,
     remove_iptables_forward_rules,
     setup_bridge,
     setup_mvm_chains,
@@ -29,7 +30,6 @@ from mvmctl.core.network import (
     teardown_nat,
 )
 from mvmctl.exceptions import NetworkError
-
 
 # ---------------------------------------------------------------------------
 # bridge_exists
@@ -646,8 +646,9 @@ def test_setup_mvm_chains_idempotent():
     with patch("mvmctl.core.network.chain_exists", return_value=True):
         with patch("mvmctl.core.network._iptables_rule_exists", return_value=True):
             with patch("mvmctl.core.network.subprocess.run") as mock_run:
-                setup_mvm_chains()
+                already_existed = setup_mvm_chains()
                 mock_run.assert_not_called()
+                assert already_existed is True
 
 
 def test_setup_mvm_chains_adds_jump_rules():
@@ -660,6 +661,16 @@ def test_setup_mvm_chains_adds_jump_rules():
                 setup_mvm_chains()
                 # 2 jump rules (FORWARD -> MVM-FORWARD, POSTROUTING -> MVM-POSTROUTING)
                 assert mock_run.call_count == 2
+
+
+def test_setup_mvm_chains_returns_false_when_created():
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("mvmctl.core.network.chain_exists", return_value=False):
+        with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
+            with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
+                already_existed = setup_mvm_chains()
+                assert already_existed is False
 
 
 def test_setup_mvm_chains_raises_on_failure():
@@ -826,6 +837,25 @@ def test_remove_iptables_forward_rules_uses_mvm_chain():
             remove_iptables_forward_rules("fc-vm1-0", "fc-br0")
             calls = [str(c) for c in mock_run.call_args_list]
             assert all("MVM-FORWARD" in c for c in calls)
+
+
+def test_list_tuntap_devices_returns_all_names():
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = (
+        "3: mvm-def-vm0-aaa: <BROADCAST> mtu 1500\n4: mvm-orphan: <BROADCAST> mtu 1500\n"
+    )
+    with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
+        devices = list_tuntap_devices()
+        assert devices == ["mvm-def-vm0-aaa", "mvm-orphan"]
+
+
+def test_list_tuntap_devices_handles_command_failure():
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = ""
+    with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
+        assert list_tuntap_devices() == []
 
 
 # ---------------------------------------------------------------------------
@@ -1216,12 +1246,12 @@ def test_ip_batch_mode_is_standardized():
     # This test documents the standardization requirement from Issue #20
     # All network operations that modify state should use ip -batch
     import inspect
+
     from mvmctl.core.network import (
-        setup_bridge,
-        teardown_bridge,
         create_tap,
         delete_tap,
-        _run_ip_batch,
+        setup_bridge,
+        teardown_bridge,
     )
 
     # Get source code of each function

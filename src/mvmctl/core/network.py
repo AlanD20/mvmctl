@@ -358,7 +358,7 @@ def chain_exists(chain: str, table: str = "filter") -> bool:
     return result.returncode == 0
 
 
-def setup_mvm_chains() -> None:
+def setup_mvm_chains() -> bool:
     """Create MVM iptables chains and link them to built-in chains.
 
     Creates:
@@ -371,30 +371,41 @@ def setup_mvm_chains() -> None:
     """
     forward_chain = MVM_FORWARD_CHAIN
     postrouting_chain = MVM_POSTROUTING_CHAIN
+    had_existing_chains = False
+
+    def _create_chain_if_missing(chain_name: str, table: str | None = None) -> bool:
+        nonlocal had_existing_chains
+        if chain_exists(chain_name, table or "filter"):
+            had_existing_chains = True
+            logger.warning("iptables chain %s already exists; keeping existing chain", chain_name)
+            return False
+        cmd = ["iptables"]
+        if table:
+            cmd.extend(["-t", table])
+        cmd.extend(["-N", chain_name])
+        try:
+            subprocess.run(_privileged_cmd(cmd), check=True, capture_output=True)
+            logger.debug("Created iptables chain %s", chain_name)
+            return True
+        except subprocess.CalledProcessError as e:
+            stderr = ""
+            if isinstance(e.stderr, bytes):
+                stderr = e.stderr.decode(errors="ignore")
+            elif isinstance(e.stderr, str):
+                stderr = e.stderr
+            if "Chain already exists" in stderr:
+                had_existing_chains = True
+                logger.warning(
+                    "iptables chain %s already exists; keeping existing chain", chain_name
+                )
+                return False
+            raise NetworkError(f"Failed to create {chain_name} chain") from e
 
     # Create MVM-FORWARD chain in filter table
-    if not chain_exists(forward_chain, "filter"):
-        try:
-            subprocess.run(
-                _privileged_cmd(["iptables", "-N", forward_chain]),
-                check=True,
-                capture_output=True,
-            )
-            logger.debug("Created iptables chain %s", forward_chain)
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to create {forward_chain} chain") from e
+    _create_chain_if_missing(forward_chain)
 
     # Create MVM-POSTROUTING chain in nat table
-    if not chain_exists(postrouting_chain, "nat"):
-        try:
-            subprocess.run(
-                _privileged_cmd(["iptables", "-t", "nat", "-N", postrouting_chain]),
-                check=True,
-                capture_output=True,
-            )
-            logger.debug("Created iptables chain %s in nat table", postrouting_chain)
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to create {postrouting_chain} chain") from e
+    _create_chain_if_missing(postrouting_chain, "nat")
 
     # Add jump from FORWARD to MVM-FORWARD
     jump_rule = ["iptables", "-C", "FORWARD", "-j", forward_chain]
@@ -425,6 +436,7 @@ def setup_mvm_chains() -> None:
             raise NetworkError(f"Failed to add jump to {postrouting_chain}") from e
 
     logger.info("MVM iptables chains configured")
+    return had_existing_chains
 
 
 def teardown_mvm_chains() -> None:
@@ -755,6 +767,24 @@ def get_tap_devices(bridge: str = BRIDGE_NAME) -> list[str]:
             iface = parts[1].rstrip(":")
             devices.append(iface)
 
+    return devices
+
+
+def list_tuntap_devices() -> list[str]:
+    result = subprocess.run(
+        ["ip", "-o", "link", "show", "type", "tuntap"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+
+    devices: list[str] = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            devices.append(parts[1].rstrip(":"))
     return devices
 
 

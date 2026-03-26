@@ -61,7 +61,7 @@ jobs:
         run: uv run pytest tests/ -v --tb=short
 
       - name: Build binary
-        run: uv run pyinstaller --onefile --name mvm src/mvmctl/main.py
+        run: uv run pyinstaller --onefile --name mvm --add-data "src/mvmctl/assets:mvmctl/assets" src/mvmctl/main.py
 
       - name: Smoke test binary
         run: |
