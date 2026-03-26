@@ -251,7 +251,7 @@ def test_convert_qcow2_to_raw_success(mock_run: MagicMock, tmp_path: Path):
 
     assert result is True
     mock_run.assert_called_once_with(
-        ["qemu-img", "convert", "-m", "512", "-f", "qcow2", "-O", "raw", str(qcow2), str(raw)],
+        ["qemu-img", "convert", "-m", "16", "-f", "qcow2", "-O", "raw", str(qcow2), str(raw)],
         capture_output=True,
         text=True,
         check=True,
@@ -275,8 +275,8 @@ def test_convert_qcow2_to_raw_missing_tool(mock_run: MagicMock, tmp_path: Path):
 
 
 @patch("mvmctl.core.image.subprocess.run")
-def test_convert_qcow2_to_raw_memory_limited(mock_run: MagicMock, tmp_path: Path):
-    """Test that qemu-img convert uses memory limit to prevent OOM on large images."""
+def test_convert_qcow2_to_raw_uses_parallel_coroutines(mock_run: MagicMock, tmp_path: Path):
+    """Test that qemu-img convert uses -m 16 (max valid coroutines) for parallelism."""
     mock_run.return_value = MagicMock(returncode=0)
 
     qcow2 = tmp_path / "large_image.qcow2"
@@ -286,9 +286,8 @@ def test_convert_qcow2_to_raw_memory_limited(mock_run: MagicMock, tmp_path: Path
     assert result is True
     call_args = mock_run.call_args[0][0]
     assert "-m" in call_args
-    assert "512" in call_args
     m_index = call_args.index("-m")
-    assert call_args[m_index + 1] == "512"
+    assert call_args[m_index + 1] == "16"
 
 
 # ---------------------------------------------------------------------------

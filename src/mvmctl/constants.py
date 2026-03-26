@@ -449,7 +449,7 @@ CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
 # Retry and timeout constants
 CONST_RETRY_ATTEMPTS: Final[int] = 3
 CONST_RETRY_DELAY_SECONDS: Final[int] = 1
-CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = 1024
+CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = _require_int(("http", "download_chunk_size"))
 CONST_BINARY_FETCH_TIMEOUT: Final[int] = 300
 CONST_SOCKET_TIMEOUT_SECONDS: Final[float] = 5.0
 CONST_POLL_STEP_SECONDS: Final[float] = 0.1

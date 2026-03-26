@@ -63,7 +63,7 @@ def convert_qcow2_to_raw(
                 "qemu-img",
                 "convert",
                 "-m",
-                "512",
+                "16",
                 "-f",
                 "qcow2",
                 "-O",
@@ -80,8 +80,8 @@ def convert_qcow2_to_raw(
         return True
 
     except subprocess.CalledProcessError as e:
-        # Sanitize: don't expose full command details in error message
-        raise ImageError("qemu-img conversion failed") from e
+        detail = e.stderr.strip() if e.stderr else "no details"
+        raise ImageError(f"qemu-img conversion failed: {detail}") from e
     except FileNotFoundError as e:
         raise ImageError("qemu-img not found. Install qemu-utils.") from e
 

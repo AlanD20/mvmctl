@@ -104,6 +104,9 @@ host:
     sudoers_drop_in_template: "/etc/sudoers.d/{cli_name}"
     iptables_rules_v4: "/etc/iptables/rules.v4"
 
+http:
+  download_chunk_size: 100485760   # 100 MB
+
 kernel:
   defaults:
     version: "6.19.9"

@@ -12,12 +12,10 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from mvmctl.constants import HTTP_USER_AGENT
+from mvmctl.constants import CONST_DOWNLOAD_CHUNK_SIZE, HTTP_USER_AGENT
 from mvmctl.exceptions import ChecksumMismatchError, MVMError
 
 logger = logging.getLogger(__name__)
-
-_DOWNLOAD_CHUNK_SIZE = 524288
 _CONTENT_RANGE_PATTERN = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+|\*)$")
 
 
@@ -39,7 +37,7 @@ def _copy_existing_bytes(
     copied = 0
     with src_path.open("rb") as src_file, dest_path.open("wb") as dest_file:
         while True:
-            chunk = src_file.read(_DOWNLOAD_CHUNK_SIZE)
+            chunk = src_file.read(CONST_DOWNLOAD_CHUNK_SIZE)
             if not chunk:
                 break
             dest_file.write(chunk)
@@ -204,7 +202,7 @@ def download_file(
 
             with working_path.open("ab" if is_resume else "wb") as f:
                 while True:
-                    chunk = response.read(_DOWNLOAD_CHUNK_SIZE)
+                    chunk = response.read(CONST_DOWNLOAD_CHUNK_SIZE)
                     if not chunk:
                         break
                     f.write(chunk)
