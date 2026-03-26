@@ -55,7 +55,7 @@ uv run mypy src/
 *Note: A minimum of 80% branch coverage is strictly enforced.*
 
 ## Development Conventions
-- **Defaults:** Never hardcode defaults in function parameters. Fallback defaults reside in `constants.py` with a `FALLBACK_` prefix. User-facing defaults are resolved from `~/.config/mvmctl/config.json` or `MVM_*` environment variables.
+- **Defaults:** Never hardcode defaults in function parameters. Fallback defaults reside in `constants.py` with a `FALLBACK_` prefix. User-facing asset defaults are resolved from `~/.cache/mvmctl/metadata.json` (`is_default` markers) and `MVM_*` environment variables.
 - **Privilege Model:** `sudo mvm host init` is run once to set up the host (mvm group, sudoers). Normal commands run rootless and validate privileges via the `mvm` group.
 - **Asset ID System:** Downloaded or imported assets (images, kernels) use a full 64-character SHA256 hash as their persistent ID. The CLI displays and accepts the first 6 characters as a prefix.
 - **Error Handling:** Avoid bare `except:` blocks. Catch specific domain exceptions derived from `exceptions.py`.

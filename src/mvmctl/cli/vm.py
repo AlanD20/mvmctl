@@ -48,10 +48,17 @@ def help_cmd(ctx: typer.Context) -> None:
 
 def _resolve_default_image() -> str | None:
     try:
-        from mvmctl.api.config import get_defaults_config
+        from mvmctl.api.metadata import get_default_image_entry
+        from mvmctl.utils.fs import get_cache_dir
 
-        val = get_defaults_config().get("image")
-        return str(val) if val is not None else None
+        default_entry = get_default_image_entry(get_cache_dir())
+        if default_entry is None:
+            return None
+        image_id, meta = default_entry
+        internal_id = meta.get("internal_id")
+        if isinstance(internal_id, str) and internal_id:
+            return internal_id
+        return image_id
     except Exception:
         return None
 

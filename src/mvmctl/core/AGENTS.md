@@ -18,8 +18,8 @@ src/mvmctl/core/
 ├── image.py             # Image download, QCOW2→raw conversion, partition extract (666 lines)
 ├── kernel.py            # Kernel fetch (FC CI S3) + build-from-source pipeline (805 lines)
 ├── binary_manager.py    # Firecracker/jailer version management (283 lines)
-├── metadata.py          # Unified metadata.json for images/kernels/binaries (508 lines)
-├── config_state.py      # config.json persistence: active binary, defaults (223 lines)
+├── metadata.py          # Unified metadata.json for images/kernels/binaries + default markers (508 lines)
+├── config_state.py      # config.json persistence + metadata-backed default accessors (223 lines)
 ├── config_gen.py        # Generates Firecracker boot JSON (202 lines)
 ├── firecracker.py       # HTTP API client for live VM control (265 lines)
 ├── ssh.py               # SSH command building + key resolution (211 lines)
@@ -64,21 +64,22 @@ src/mvmctl/core/
 **Asset metadata** (`$MVM_CACHE_DIR/metadata.json`):
 ```json
 {
-  "images":  { "<full-hash>": { "yaml_id": "ubuntu-24.04", "filename": "...", ... } },
-  "kernels": { "<filename>":  { "version": "6.1", "type": "firecracker", ... } }
+  "images":  { "<full-hash>": { "yaml_id": "ubuntu-24.04", "filename": "...", "is_default": 0|1, ... } },
+  "kernels": { "<full-hash>": { "filename": "vmlinux", "version": "6.1", "is_default": 0|1, ... } },
+  "binaries": { "<version>": { "full_version": "v1.15.0", "ci_version": "v1.15", "default_binary_path": "...", "is_default": 0|1, ... } }
 }
 ```
 - Use `find_images_by_short_id(cache_dir, "abc123")` for 6-char prefix lookup
 - Images downloaded via `mvm image fetch` store `yaml_id` to link back to images.yaml
+- Exactly one entry per section should carry `is_default: 1` when a default is set
 
 **Config** (`$MVM_CONFIG_DIR/config.json`):
 ```json
 {
-  "firecracker": { "full_version": "v1.15.0", "ci_version": "v1.15", "default_version": "...", "default_binary_path": "..." },
-  "assets":      { "kernels_dir": "...", "images_dir": "...", "bin_dir": "...", ... },
-  "defaults":    { "image": "ubuntu-24.04", "kernel": "vmlinux-fc-v1.15-x86_64" }
+  "assets": { "kernels_dir": "...", "images_dir": "...", "bin_dir": "...", ... }
 }
 ```
+- Image/kernel/binary defaults are metadata-backed and not stored under `config.json.defaults`
 
 **Network state** (`$MVM_CACHE_DIR/networks/{name}/config.json` + `leases.json`):
 - `NetworkConfig` dataclass persisted per network

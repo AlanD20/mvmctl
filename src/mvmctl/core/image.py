@@ -389,9 +389,16 @@ def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
     import platform
 
     try:
-        from mvmctl.core.config_state import get_firecracker_config
+        from mvmctl.core.metadata import get_default_binary_entry
+        from mvmctl.utils.fs import get_cache_dir
 
-        ci_version = get_firecracker_config().get("ci_version", "")
+        default_binary = get_default_binary_entry(get_cache_dir())
+        ci_version = ""
+        if default_binary is not None:
+            _version, binary_meta = default_binary
+            raw_ci_version = binary_meta.get("ci_version")
+            if isinstance(raw_ci_version, str):
+                ci_version = raw_ci_version
     except Exception:
         ci_version = ""
 

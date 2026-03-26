@@ -164,13 +164,12 @@ def test_set_default_kernel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
+    kernel_id = save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
     set_default_kernel(tmp_path, "vmlinux")
     import json
 
-    config_file = tmp_path / "config.json"
-    assert config_file.exists()
-    data = json.loads(config_file.read_text())
-    assert data["defaults"]["kernel"] == "vmlinux"
+    data = json.loads((tmp_path / "metadata.json").read_text())
+    assert data["kernels"][kernel_id]["is_default"] == 1
 
 
 def test_set_default_kernel_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -185,6 +184,7 @@ def test_get_default_kernel_path_set(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     vmlinux = tmp_path / "vmlinux"
     vmlinux.write_bytes(b"\x7fELF")
+    save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
     set_default_kernel(tmp_path, "vmlinux")
     result = get_default_kernel_path(tmp_path)
     assert result == vmlinux
@@ -212,9 +212,18 @@ def test_list_kernels_shows_default_marker(tmp_path: Path, monkeypatch: pytest.M
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
     import json as _json
 
+    kernel_id = "a" * 64
     (tmp_path / "metadata.json").write_text(
         _json.dumps(
-            {"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}}
+            {
+                "kernels": {
+                    kernel_id: {
+                        "filename": "vmlinux",
+                        "last_modified": "2026-01-01T00:00:00",
+                    }
+                },
+                "images": {},
+            }
         )
     )
     set_default_kernel(tmp_path, "vmlinux")
@@ -349,7 +358,9 @@ def test_download_firecracker_kernel_requires_checksum_when_sha256_url_set(
     mock_urlopen.side_effect = [list_resp, URLError("missing sidecar")]
 
     with pytest.raises(KernelError, match="Checksum required"):
-        download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path, kernel_spec=spec_with_sha256_url)
+        download_firecracker_kernel(
+            "1.12", "amd64", kernels_dir=tmp_path, kernel_spec=spec_with_sha256_url
+        )
 
     mock_dl.assert_not_called()
 

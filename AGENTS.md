@@ -142,12 +142,12 @@ Every downloaded/imported asset (image, kernel, VM) gets a **full 64-char SHA256
 
 ### Default Values Rule
 - Fallback defaults → `constants.py` with `FALLBACK_` prefix: `FALLBACK_FC_CI_VERSION`, `FALLBACK_FIRECRACKER_BIN`, `FALLBACK_KERNEL_BUILD_JOBS`
-- User-facing defaults → `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`)
+- User-facing asset defaults (image/kernel/binary) → `$MVM_CACHE_DIR/metadata.json` via `is_default` flags
 - NEVER hardcode defaults in function parameters or as inline variables
 
 ### Configuration Priority (lowest → highest)
 1. `constants.py` fallbacks
-2. `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`)
+2. State files (`~/.config/mvmctl/config.json` for general config + `$MVM_CACHE_DIR/metadata.json` for asset defaults)
 3. `MVM_*` environment variables
 4. CLI flags
 
@@ -246,8 +246,8 @@ pyinstaller --onefile --name mvm src/mvmctl/main.py
 ## NOTES
 
 - **Cache:** `~/.cache/mvmctl/` (`MVM_CACHE_DIR`)
-- **Config:** `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`) — JSON, not YAML
-- **Metadata:** `$MVM_CACHE_DIR/metadata.json` — single file for all images, kernels, binaries
+- **Config:** `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`) — JSON, not YAML (general runtime config)
+- **Metadata:** `$MVM_CACHE_DIR/metadata.json` — single file for all images, kernels, binaries, and their `is_default` flags
 - **Network prefix:** bridge = `mvm-{network_name}` (e.g. `mvm-default`), TAP = `mvm-{net[:3]}-{vm[:3]}-{rand3}`
 - **Env var prefix:** `MVM_` (e.g. `MVM_CACHE_DIR`, `MVM_KERNEL`)
 - **reconcile_networks():** called on every subcommand invocation in `main.py`; errors are swallowed (not user-visible)

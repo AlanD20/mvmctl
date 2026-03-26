@@ -4,9 +4,9 @@ This document describes the three bundled YAML files that drive asset management
 `mvm`, how each field is interpreted at runtime, and how to extend them.
 
 All three files live under `src/mvmctl/assets/` and are packaged into the installed
-wheel. They are read-only at runtime — user overrides go through
-`~/.config/mvmctl/config.json` or `MVM_*` environment variables, not by editing
-these files directly.
+wheel. They are read-only at runtime — user overrides/default selections are resolved
+from runtime state (`~/.cache/mvmctl/metadata.json`) and `MVM_*` environment variables,
+not by editing these files directly.
 
 ---
 
@@ -89,8 +89,9 @@ source: "https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu
 
 Resolution works as follows:
 
-1. The active Firecracker CI version is read from `~/.config/mvmctl/config.json`
-   (`ci_version`), falling back to `FALLBACK_FC_CI_VERSION` from `defaults.yaml`.
+1. The active Firecracker CI version is read from the default binary entry in
+   `~/.cache/mvmctl/metadata.json` (`binaries.*.ci_version` where `is_default=1`),
+   falling back to `FALLBACK_FC_CI_VERSION` from `defaults.yaml`.
 2. The host architecture is detected via `platform.machine()`, falling back to
    `kernel.defaults.arch`.
 3. The S3 bucket defined by `urls.firecracker_ci_image.list_url_template` is queried
@@ -237,7 +238,9 @@ Values are resolved in this order, from lowest to highest precedence:
 
 ```
 1. defaults.yaml (fallback defaults — these are the floor)
-2. ~/.config/mvmctl/config.json (user config written by mvm configure / mvm image set-default)
+2. Runtime state files:
+   - `~/.config/mvmctl/config.json` for general config and assets paths
+   - `~/.cache/mvmctl/metadata.json` for image/kernel/binary defaults (`is_default`)
 3. MVM_* environment variables (e.g. MVM_CACHE_DIR, MVM_KERNEL)
 4. CLI flags (e.g. --out, --force, --arch)
 ```

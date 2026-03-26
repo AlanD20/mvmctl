@@ -305,32 +305,54 @@ Remove all cached assets (binaries, kernels, images). Does **not** touch VMs.
 
 ## Configuration
 
-`mvm` stores user configuration at `~/.config/mvmctl/config.json` (overridable with `MVM_CONFIG_DIR`).
+`mvm` stores runtime configuration at `~/.config/mvmctl/config.json` (overridable with
+`MVM_CONFIG_DIR`) and asset/default state in `~/.cache/mvmctl/metadata.json`
+(overridable with `MVM_CACHE_DIR`).
 
 ```json
 {
-  "firecracker": {
-    "full_version": "v1.15.0",
-    "ci_version": "v1.15",
-    "default_binary_path": "/home/user/.cache/mvmctl/bin/firecracker-v1.15.0"
-  },
   "assets": {
     "kernels_dir": "/home/user/.cache/mvmctl/kernels",
     "images_dir": "/home/user/.cache/mvmctl/images",
     "bin_dir": "/home/user/.cache/mvmctl/bin"
-  },
-  "defaults": {
-    "image": "ubuntu-24.04",
-    "kernel": "vmlinux-fc-v1.15-x86_64"
   }
 }
 ```
 
-This file is managed by `mvm configure` and `mvm config set`. Edit it manually only if you know what you're doing.
+`config.json` is managed by `mvm configure` and `mvm config set`.
+
+Asset defaults are stored in `metadata.json` with `is_default` markers:
+
+```json
+{
+  "images": {
+    "<image-full-id>": {
+      "internal_id": "ubuntu-24.04",
+      "filename": "ubuntu-24.04.ext4",
+      "is_default": 1
+    }
+  },
+  "kernels": {
+    "<kernel-full-id>": {
+      "filename": "vmlinux-fc-v1.15-x86_64",
+      "is_default": 1
+    }
+  },
+  "binaries": {
+    "1.15.0": {
+      "full_version": "v1.15.0",
+      "ci_version": "v1.15",
+      "default_binary_path": "/home/user/.cache/mvmctl/bin/firecracker",
+      "is_default": 1
+    }
+  }
+}
+```
 
 **Priority (lowest → highest):**
 1. Built-in fallbacks (`constants.py`)
-2. `~/.config/mvmctl/config.json`
+2. Runtime state files (`~/.config/mvmctl/config.json` for general config,
+   `~/.cache/mvmctl/metadata.json` for image/kernel/binary defaults)
 3. `MVM_*` environment variables
 4. CLI flags
 
@@ -342,8 +364,8 @@ This file is managed by `mvm configure` and `mvm config set`. Edit it manually o
 |----------|-------------|---------|
 | `MVM_CACHE_DIR` | Override cache directory | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
-| `MVM_KERNEL` | Override default kernel path | (from config) |
-| `MVM_FIRECRACKER_BIN` | Override Firecracker binary path | (from config) |
+| `MVM_KERNEL` | Override default kernel path | (from metadata default / runtime state) |
+| `MVM_FIRECRACKER_BIN` | Override Firecracker binary path | (from metadata default / runtime state) |
 
 ---
 

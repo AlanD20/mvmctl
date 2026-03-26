@@ -5,6 +5,11 @@ from mvmctl.core.config_state import (
     initialize_default_config,
     set_defaults_value,
 )
+from mvmctl.core.metadata import (
+    get_default_binary_entry,
+    get_default_image_entry,
+    get_default_kernel_entry,
+)
 from mvmctl.core.user_config import get_config_value, get_full_user_config, set_config_value
 
 __all__ = [
@@ -18,4 +23,7 @@ __all__ = [
     "get_defaults_config",
     "set_defaults_value",
     "initialize_default_config",
+    "get_default_image_entry",
+    "get_default_kernel_entry",
+    "get_default_binary_entry",
 ]

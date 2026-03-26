@@ -22,8 +22,9 @@ from mvmctl.constants import (
     HTTP_TIMEOUT_SHA256_FETCH_S,
     HTTP_USER_AGENT,
 )
+from mvmctl.core.metadata import set_default_binary_entry, update_binary_entry
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, MVMError
-from mvmctl.utils.fs import get_bin_dir
+from mvmctl.utils.fs import get_bin_dir, get_cache_dir
 from mvmctl.utils.http import download_file
 
 logger = logging.getLogger(__name__)
@@ -209,6 +210,18 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
         tgz_path.unlink(missing_ok=True)
 
     active = _active_target(d / "firecracker") == fc_dest.name
+    cache_dir = get_cache_dir()
+    update_binary_entry(
+        cache_dir,
+        version,
+        full_version=f"v{version}",
+        ci_version=f"v{version.split('.')[0]}.{version.split('.')[1]}"
+        if len(version.split(".")) >= 2
+        else f"v{version}",
+        firecracker_path=str(fc_dest),
+        jailer_path=str(jl_dest),
+        is_default=1 if active else 0,
+    )
     return BinaryVersion(
         version=version,
         firecracker_path=fc_dest,
@@ -251,17 +264,20 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
     parts = version.split(".")
     ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{version}"
     full_version = f"v{version}"
-    try:
-        from mvmctl.core.config_state import update_firecracker_config
-
-        update_firecracker_config(
-            full_version=full_version,
-            ci_version=ci_version,
-            default_version=full_version,
-            default_binary_path=str(d / "firecracker"),
-        )
-    except Exception:
-        pass
+    cache_dir = get_cache_dir()
+    update_binary_entry(
+        cache_dir,
+        version,
+        full_version=full_version,
+        ci_version=ci_version,
+        default_version=full_version,
+        default_binary_path=str(d / "firecracker"),
+        active_binary_path=str(d / "firecracker"),
+        firecracker_path=str(fc_src),
+        jailer_path=str(jl_src),
+        is_default=1,
+    )
+    set_default_binary_entry(cache_dir, version)
 
 
 def remove_version(version: str, bin_dir: Path | None = None) -> None:

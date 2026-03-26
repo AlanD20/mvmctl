@@ -13,6 +13,16 @@ from mvmctl.constants import (
     DEFAULT_FIRECRACKER_CI_VERSION,
     DEFAULT_FIRECRACKER_VERSION,
 )
+from mvmctl.core.metadata import (
+    get_default_binary_entry,
+    get_default_image_entry,
+    set_default_binary_entry,
+    set_default_image_by_internal_id,
+    set_default_image_entry,
+    set_default_kernel_by_filename,
+    update_binary_entry,
+)
+from mvmctl.utils.fs import get_bin_dir, get_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +82,30 @@ def get_config_value(key: str, default: Any = None) -> Any:
 
 
 def get_firecracker_config() -> dict[str, str]:
+    cache_dir = get_cache_dir()
+    default_binary = get_default_binary_entry(cache_dir)
+    if default_binary is not None:
+        version_key, entry = default_binary
+        result: dict[str, str] = {k: v for k, v in entry.items() if isinstance(v, str)}
+        full_version = result.get("full_version") or f"v{version_key.removeprefix('v')}"
+        ci_version = result.get("ci_version")
+        if not ci_version:
+            normalized = version_key.removeprefix("v")
+            parts = normalized.split(".")
+            ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{normalized}"
+        default_binary_path = result.get("default_binary_path")
+        if not default_binary_path:
+            default_binary_path = str(Path(get_bin_dir()) / "firecracker")
+
+        merged = {
+            "full_version": full_version,
+            "ci_version": ci_version,
+            "default_version": full_version,
+            "default_binary_path": default_binary_path,
+        }
+        merged.update(result)
+        return merged
+
     raw = _read_raw()
     section = raw.get(_FIRECRACKER_KEY, {})
     if not isinstance(section, dict):
@@ -118,21 +152,45 @@ def initialize_default_config() -> dict[str, Any]:
     get_assets_config()
     state = _read_raw()
 
-    if _DEFAULTS_KEY not in state or not isinstance(state.get(_DEFAULTS_KEY), dict):
-        state[_DEFAULTS_KEY] = {}
+    if _DEFAULTS_KEY in state and isinstance(state.get(_DEFAULTS_KEY), dict):
+        defaults_section = state[_DEFAULTS_KEY]
+        image_default = defaults_section.get("image")
+        kernel_default = defaults_section.get("kernel")
+
+        cache_dir = get_cache_dir()
+        if isinstance(image_default, str) and image_default:
+            try:
+                set_default_image_entry(cache_dir, image_default)
+            except KeyError:
+                logger.debug("Legacy default image not found in metadata: %s", image_default)
+        if isinstance(kernel_default, str) and kernel_default:
+            try:
+                set_default_kernel_by_filename(cache_dir, kernel_default)
+            except KeyError:
+                logger.debug("Legacy default kernel not found in metadata: %s", kernel_default)
+
+        if "default_image" in state and isinstance(state["default_image"], str):
+            try:
+                set_default_image_entry(cache_dir, state["default_image"])
+            except KeyError:
+                logger.debug("Legacy top-level default image not found in metadata")
+            del state["default_image"]
+            changed = True
+
+        del state[_DEFAULTS_KEY]
         changed = True
 
-    defaults_section = state[_DEFAULTS_KEY]
-    if "image" not in defaults_section:
-        if "default_image" in state:
-            defaults_section["image"] = state["default_image"]
-            del state["default_image"]
-        else:
-            defaults_section["image"] = None
+    elif "default_image" in state:
+        cache_dir = get_cache_dir()
+        default_image = state.get("default_image")
+        if isinstance(default_image, str):
+            try:
+                set_default_image_entry(cache_dir, default_image)
+            except KeyError:
+                logger.debug("Legacy top-level default image not found in metadata")
+        del state["default_image"]
         changed = True
-    if "kernel" not in defaults_section:
-        defaults_section["kernel"] = None
-        changed = True
+
     if changed:
         _write_raw(state)
 
@@ -140,14 +198,33 @@ def initialize_default_config() -> dict[str, Any]:
 
 
 def update_firecracker_config(**fields: str) -> None:
-    state = _read_raw()
-    section: dict[str, str] = {}
-    existing = state.get(_FIRECRACKER_KEY)
-    if isinstance(existing, dict):
-        section = {k: v for k, v in existing.items() if isinstance(v, str)}
-    section.update(fields)
-    state[_FIRECRACKER_KEY] = section
-    _write_raw(state)
+    normalized_fields = {k: v for k, v in fields.items() if isinstance(v, str)}
+    existing = get_firecracker_config()
+    full_version = normalized_fields.get(
+        "full_version", existing.get("full_version", DEFAULT_FIRECRACKER_VERSION)
+    )
+    ci_version = normalized_fields.get(
+        "ci_version", existing.get("ci_version", DEFAULT_FIRECRACKER_CI_VERSION)
+    )
+    normalized_version = full_version.removeprefix("v")
+    default_binary_path = normalized_fields.get(
+        "default_binary_path", str(Path(get_bin_dir()) / "firecracker")
+    )
+
+    cache_dir = get_cache_dir()
+    payload = dict(normalized_fields)
+    payload["full_version"] = full_version
+    payload["ci_version"] = ci_version
+    payload["default_version"] = payload.get("default_version", full_version)
+    payload["default_binary_path"] = payload.get("default_binary_path", default_binary_path)
+    payload["active_binary_path"] = payload.get("active_binary_path", default_binary_path)
+
+    update_binary_entry(
+        cache_dir,
+        normalized_version,
+        **payload,
+    )
+    set_default_binary_entry(cache_dir, normalized_version)
 
 
 def get_assets_config() -> dict[str, str]:
@@ -203,20 +280,44 @@ def update_assets_config(**fields: str) -> None:
 
 
 def get_defaults_config() -> dict[str, Any]:
-    """Get the defaults section from config.json. Returns {} if missing."""
-    raw = _read_raw()
-    section = raw.get(_DEFAULTS_KEY, {})
-    if not isinstance(section, dict):
-        section = {}
-    return section
+    cache_dir = get_cache_dir()
+    defaults: dict[str, Any] = {"image": None, "kernel": None}
+
+    default_image = get_default_image_entry(cache_dir)
+    if default_image is not None:
+        image_id, image_meta = default_image
+        defaults["image"] = image_meta.get("internal_id") or image_id
+
+    from mvmctl.core.metadata import get_default_kernel_entry
+
+    default_kernel = get_default_kernel_entry(cache_dir)
+    if default_kernel is not None:
+        _kernel_id, kernel_meta = default_kernel
+        defaults["kernel"] = kernel_meta.get("filename")
+
+    return defaults
 
 
 def set_defaults_value(key: str, value: Any) -> None:
-    """Set a value in the defaults section of config.json."""
+    cache_dir = get_cache_dir()
+    if key == "image":
+        if not isinstance(value, str):
+            raise ValueError("Default image must be a string image identifier")
+        try:
+            set_default_image_entry(cache_dir, value)
+            return
+        except KeyError:
+            set_default_image_by_internal_id(cache_dir, value)
+            return
+
+    if key == "kernel":
+        if not isinstance(value, str):
+            raise ValueError("Default kernel must be a string kernel filename")
+        set_default_kernel_by_filename(cache_dir, value)
+        return
+
     state = _read_raw()
-    if _DEFAULTS_KEY not in state or not isinstance(state.get(_DEFAULTS_KEY), dict):
-        state[_DEFAULTS_KEY] = {}
-    state[_DEFAULTS_KEY][key] = value
+    state[key] = value
     _write_raw(state)
 
 

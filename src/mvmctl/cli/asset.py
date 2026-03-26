@@ -28,10 +28,13 @@ from mvmctl.api.assets import (
 from mvmctl.api.metadata import (
     find_images_by_short_id,
     find_kernels_by_short_id,
+    get_default_image_entry,
     get_image_entry,
     list_image_entries,
     remove_image_entry,
     remove_kernel_entry,
+    set_default_image_by_internal_id,
+    set_default_image_entry,
     update_image_entry,
 )
 from mvmctl.constants import (
@@ -76,7 +79,6 @@ bin_app = typer.Typer(
     rich_markup_mode=None,
     add_completion=False,
 )
-
 
 
 @kernel_app.callback(invoke_without_command=True)
@@ -235,7 +237,11 @@ def kernel_fetch(
 
         effective_version = spec.version or DEFAULT_KERNEL_VERSION
         effective_arch = arch if arch != DEFAULT_FC_KERNEL_ARCH else platform.machine() or "x86_64"
-        output_path = out if out is not None else kernels_dir / f"{spec.output_name}-{effective_version}-{effective_arch}"
+        output_path = (
+            out
+            if out is not None
+            else kernels_dir / f"{spec.output_name}-{effective_version}-{effective_arch}"
+        )
 
         if kernel_config and not kernel_config.exists():
             print_error(f"Kernel config file not found: {kernel_config}")
@@ -563,10 +569,14 @@ def image_ls(
 
 def _get_default_image() -> str | None:
     try:
-        from mvmctl.api.config import get_defaults_config
-
-        val = get_defaults_config().get("image")
-        return str(val) if val is not None else None
+        default_entry = get_default_image_entry(get_cache_dir())
+        if default_entry is None:
+            return None
+        image_id, meta = default_entry
+        internal_id = meta.get("internal_id")
+        if isinstance(internal_id, str) and internal_id:
+            return internal_id
+        return image_id
     except Exception:
         return None
 
@@ -659,9 +669,10 @@ def image_fetch(
             if not typer.confirm("Re-download anyway?", default=False):
                 print_info("Skipping download. Use --force to overwrite.")
                 if set_default:
-                    from mvmctl.api.config import set_defaults_value
-
-                    set_defaults_value("image", spec.id)
+                    try:
+                        set_default_image_by_internal_id(get_cache_dir(), spec.id)
+                    except KeyError:
+                        pass
                     print_success(f"Default image set to: {spec.id}")
                 raise typer.Exit(code=0)
             force = True
@@ -694,9 +705,7 @@ def image_fetch(
         print_success(f"Image ready: {result}")
         print_info(f"  ID: {full_id[:6]}")
         if set_default:
-            from mvmctl.api.config import set_defaults_value
-
-            set_defaults_value("image", spec.id)
+            set_default_image_by_internal_id(get_cache_dir(), spec.id)
             print_success(f"Default image set to: {spec.id}")
         raise typer.Exit(code=0)
     else:
@@ -731,9 +740,7 @@ def image_set_default(
             print_error(f"Image file not found for ID '{short_id}'")
             raise typer.Exit(code=1)
 
-    from mvmctl.api.config import set_defaults_value
-
-    set_defaults_value("image", full_key)
+    set_default_image_entry(cache_dir, full_key)
     print_success(f"✓ Default image set to: {short_id}")
 
 
@@ -888,9 +895,7 @@ def image_import(
     print_info(f"  ID:   {short_id}")
 
     if set_default:
-        from mvmctl.api.config import set_defaults_value
-
-        set_defaults_value("image", image_id)
+        set_default_image_entry(get_cache_dir(), image_id)
         print_success(f"Default image set to: {image_id}")
 
     raise typer.Exit(code=0)

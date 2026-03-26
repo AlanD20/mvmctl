@@ -39,8 +39,10 @@ from mvmctl.constants import (
     KERNEL_TYPE_UNKNOWN,
 )
 from mvmctl.core.metadata import (
+    get_default_kernel_entry,
     list_kernel_entries,
     migrate_legacy_metadata,
+    set_default_kernel_by_filename,
     update_kernel_entry,
 )
 from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
@@ -217,9 +219,6 @@ class ParsedKernelFilename:
     base_name: str
     version: str
     arch: str
-
-
-
 
 
 def human_readable_time(iso_timestamp: str) -> str:
@@ -502,7 +501,7 @@ def _apply_config_fragments(
                 raise KernelError(f"Failed to fetch config fragment {rendered}: {exc}") from exc
             logger.info("Applying remote config fragment: %s", rendered)
         else:
-            rel = rendered[len("assets/"):] if rendered.startswith("assets/") else rendered
+            rel = rendered[len("assets/") :] if rendered.startswith("assets/") else rendered
             path = _ASSETS_DIR / rel
             if not path.exists():
                 raise KernelError(f"Config fragment not found: {path} (from '{fragment}')")
@@ -887,7 +886,11 @@ def build_kernel_pipeline(
             logger.info("Using existing source: %s", kernel_src_dir)
 
         config_result = configure_kernel(
-            kernel_src_dir, version, user_config_path=user_config_path, kernel_spec=kernel_spec, arch=arch
+            kernel_src_dir,
+            version,
+            user_config_path=user_config_path,
+            kernel_spec=kernel_spec,
+            arch=arch,
         )
 
         build_result = build_kernel(kernel_src_dir, output_path, jobs)
@@ -976,7 +979,6 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
     migrate_legacy_metadata(cache_dir, kernels_dir, images_dir)
 
-    default_name = _load_default_kernel(kernels_dir)
     entries = list_kernel_entries(cache_dir, kernels_dir)
 
     results: list[dict[str, str]] = []
@@ -1005,6 +1007,8 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
             arch = parsed.arch
             kernel_type = KERNEL_TYPE_UNKNOWN
 
+        is_default_flag = "true" if str(meta.get("is_default", 0)) == "1" else "false"
+
         results.append(
             {
                 "id": entry_id[:6],
@@ -1015,7 +1019,7 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
                 "arch": arch,
                 "last_modified": str(last_modified) if last_modified else "-",
                 "size": f"{size_mb:.1f} MiB",
-                "is_default": str(filename == default_name).lower(),
+                "is_default": is_default_flag,
             }
         )
 
@@ -1023,18 +1027,21 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
 
 def _load_default_kernel(kernels_dir: Path) -> str | None:
-    from mvmctl.core.config_state import get_defaults_config
-
-    return get_defaults_config().get("kernel")
+    default_entry = get_default_kernel_entry(get_cache_dir())
+    if default_entry is None:
+        return None
+    _kernel_id, entry = default_entry
+    filename = entry.get("filename")
+    if isinstance(filename, str) and filename:
+        return filename
+    return None
 
 
 def set_default_kernel(kernels_dir: Path, kernel_name: str) -> None:
-    from mvmctl.core.config_state import set_defaults_value
-
     kernel_path = kernels_dir / kernel_name
     if not kernel_path.exists():
         raise KernelError(f"Kernel not found: {kernel_path}")
-    set_defaults_value("kernel", kernel_name)
+    set_default_kernel_by_filename(get_cache_dir(), kernel_name)
     logger.info("Default kernel set to: %s", kernel_name)
 
 
@@ -1116,7 +1123,9 @@ def download_firecracker_kernel(
             expected_sha256 = str(parts[0]).lower() if parts else None
             logger.info("Fetched CI kernel checksum: %s", expected_sha256)
         except (URLError, OSError):
-            logger.debug("No sha256 sidecar for CI kernel %s — proceeding without checksum", chosen_key)
+            logger.debug(
+                "No sha256 sidecar for CI kernel %s — proceeding without checksum", chosen_key
+            )
 
     if expected_sha256 is None and not intentional_no_checksum:
         raise KernelError(f"Checksum required for Firecracker CI kernel download: {download_url}")

@@ -1318,12 +1318,12 @@ def test_handle_squashfs_mkfs_failure(mock_run: MagicMock, tmp_path: Path):
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("mvmctl.core.config_state.get_firecracker_config")
+@patch("mvmctl.core.metadata.get_default_binary_entry")
 def test_resolve_source_template_success(
-    mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
+    mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
     """Test _resolve_source_template successfully resolves S3 URL."""
-    mock_get_config.return_value = {"ci_version": "v1.15"}
+    mock_get_default_binary.return_value = ("1.15.0", {"ci_version": "v1.15"})
 
     mock_response = MagicMock()
     mock_response.read.return_value = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -1358,12 +1358,12 @@ def test_resolve_source_template_success(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("mvmctl.core.config_state.get_firecracker_config")
+@patch("mvmctl.core.metadata.get_default_binary_entry")
 def test_resolve_source_template_uses_default_version(
-    mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
+    mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
     """Test _resolve_source_template uses default version when config fails."""
-    mock_get_config.side_effect = Exception("config error")
+    mock_get_default_binary.side_effect = Exception("metadata error")
 
     mock_response = MagicMock()
     # Use v1.15 which matches DEFAULT_FIRECRACKER_CI_VERSION
@@ -1395,12 +1395,12 @@ def test_resolve_source_template_uses_default_version(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("mvmctl.core.config_state.get_firecracker_config")
+@patch("mvmctl.core.metadata.get_default_binary_entry")
 def test_resolve_source_template_network_error(
-    mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
+    mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
     """Test _resolve_source_template raises ImageError on network failure."""
-    mock_get_config.return_value = {"ci_version": "v1.15"}
+    mock_get_default_binary.return_value = ("1.15.0", {"ci_version": "v1.15"})
     mock_urlopen.side_effect = URLError("Connection failed")
 
     spec = ImageSpec(
@@ -1423,12 +1423,12 @@ def test_resolve_source_template_network_error(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("mvmctl.core.config_state.get_firecracker_config")
+@patch("mvmctl.core.metadata.get_default_binary_entry")
 def test_resolve_source_template_no_matching_keys(
-    mock_get_config: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
+    mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
     """Test _resolve_source_template raises ImageError when no images found."""
-    mock_get_config.return_value = {"ci_version": "v1.15"}
+    mock_get_default_binary.return_value = ("1.15.0", {"ci_version": "v1.15"})
 
     mock_response = MagicMock()
     mock_response.read.return_value = b"""<?xml version="1.0" encoding="UTF-8"?>

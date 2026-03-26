@@ -62,8 +62,9 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 
 - **Cache:** `~/.cache/mvmctl/` (`MVM_CACHE_DIR`)
 - **Config:** `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`) — JSON, not YAML
+- **Metadata:** `~/.cache/mvmctl/metadata.json` (`MVM_CACHE_DIR`) — images/kernels/binaries + `is_default` markers
 - **Env prefix:** `MVM_` (e.g. `MVM_CACHE_DIR`, `MVM_KERNEL`)
-- **Priority:** constants.py fallbacks → config.json → MVM_* env vars → CLI flags
+- **Priority:** constants.py fallbacks → state files (config.json + metadata.json) → MVM_* env vars → CLI flags
 
 ## Architecture Constraints
 

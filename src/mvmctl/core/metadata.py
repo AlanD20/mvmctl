@@ -230,6 +230,61 @@ def update_kernel_entry(cache_dir: Path, kernel_name: str, **fields: Any) -> Non
     write_metadata(cache_dir, data)
 
 
+def _flag_as_default(value: Any) -> int:
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, int):
+        return 1 if value == 1 else 0
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        return 1 if lowered in {"1", "true", "yes"} else 0
+    return 0
+
+
+def _set_default_entry(cache_dir: Path, section: str, target_key: str) -> None:
+    data = read_metadata(cache_dir)
+    section_data = data.get(section, {})
+    if not isinstance(section_data, dict):
+        raise KeyError(f"Metadata section '{section}' not found")
+    if target_key not in section_data or not isinstance(section_data[target_key], dict):
+        raise KeyError(f"Entry '{target_key}' not found in metadata section '{section}'")
+
+    for key, entry in section_data.items():
+        if not isinstance(entry, dict):
+            continue
+        entry["is_default"] = 1 if key == target_key else 0
+
+    write_metadata(cache_dir, data)
+
+
+def _find_default_entry(cache_dir: Path, section: str) -> tuple[str, dict[str, Any]] | None:
+    data = read_metadata(cache_dir)
+    section_data = data.get(section, {})
+    if not isinstance(section_data, dict):
+        return None
+    for key, entry in section_data.items():
+        if isinstance(entry, dict) and _flag_as_default(entry.get("is_default")) == 1:
+            return key, dict(entry)
+    return None
+
+
+def set_default_kernel_entry(cache_dir: Path, kernel_id: str) -> None:
+    _set_default_entry(cache_dir, "kernels", kernel_id)
+
+
+def set_default_kernel_by_filename(cache_dir: Path, filename: str) -> None:
+    kernels = list_kernel_entries(cache_dir)
+    for kernel_id, entry in kernels.items():
+        if str(entry.get("filename", kernel_id)) == filename:
+            set_default_kernel_entry(cache_dir, kernel_id)
+            return
+    raise KeyError(f"Kernel filename '{filename}' not found in metadata")
+
+
+def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    return _find_default_entry(cache_dir, "kernels")
+
+
 def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
     """Return kernel metadata entry or {} if not found."""
     data = read_metadata(cache_dir)
@@ -368,6 +423,23 @@ def remove_image_entry(cache_dir: Path, image_id: str) -> None:
             write_metadata(cache_dir, data)
 
 
+def set_default_image_entry(cache_dir: Path, image_id: str) -> None:
+    _set_default_entry(cache_dir, "images", image_id)
+
+
+def set_default_image_by_internal_id(cache_dir: Path, internal_id: str) -> None:
+    images = list_image_entries(cache_dir)
+    for image_id, entry in images.items():
+        if str(entry.get("internal_id", "")) == internal_id:
+            set_default_image_entry(cache_dir, image_id)
+            return
+    raise KeyError(f"Image internal_id '{internal_id}' not found in metadata")
+
+
+def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    return _find_default_entry(cache_dir, "images")
+
+
 def find_image_by_short_id(cache_dir: Path, short_id: str) -> tuple[str, dict[str, Any]] | None:
     """Find an image entry whose key starts with short_id. Returns (full_key, meta) or None."""
     data = read_metadata(cache_dir)
@@ -424,6 +496,14 @@ def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
     return {}
 
 
+def set_default_binary_entry(cache_dir: Path, version: str) -> None:
+    _set_default_entry(cache_dir, "binaries", version)
+
+
+def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    return _find_default_entry(cache_dir, "binaries")
+
+
 # =============================================================================
 # Migration from legacy per-file JSON
 # =============================================================================
@@ -451,6 +531,8 @@ def migrate_legacy_metadata(cache_dir: Path, kernels_dir: Path, images_dir: Path
 
     changed = False
 
+    legacy_default_kernel_name: str | None = None
+
     # Migrate kernel metadata files
     if kernels_dir.exists():
         for meta_path in kernels_dir.glob("*.json"):
@@ -459,13 +541,8 @@ def migrate_legacy_metadata(cache_dir: Path, kernels_dir: Path, images_dir: Path
                     legacy_data: dict[str, Any] = json.loads(meta_path.read_text())
                     legacy_name = legacy_data.get("name")
                     if legacy_name:
-                        try:
-                            from mvmctl.core.config_state import set_defaults_value
-
-                            set_defaults_value("kernel", legacy_name)
-                            logger.info("Migrated default kernel: %s", legacy_name)
-                        except Exception:
-                            pass
+                        legacy_default_kernel_name = str(legacy_name)
+                        logger.info("Migrated default kernel marker: %s", legacy_name)
                     meta_path.unlink()
                 except (json.JSONDecodeError, OSError):
                     pass
@@ -508,5 +585,13 @@ def migrate_legacy_metadata(cache_dir: Path, kernels_dir: Path, images_dir: Path
                 logger.warning("Failed to migrate %s: %s", meta_path, e)
 
     if changed:
+        if legacy_default_kernel_name:
+            kernels = data.get("kernels", {})
+            if isinstance(kernels, dict):
+                for kernel_id, kernel_data in kernels.items():
+                    if not isinstance(kernel_data, dict):
+                        continue
+                    filename = str(kernel_data.get("filename", kernel_id))
+                    kernel_data["is_default"] = 1 if filename == legacy_default_kernel_name else 0
         write_metadata(cache_dir, data)
         logger.info("Migrated legacy metadata to %s", _metadata_path(cache_dir))

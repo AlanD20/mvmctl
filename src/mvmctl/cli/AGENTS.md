@@ -58,7 +58,7 @@ Missing `rich_markup_mode=None` causes Rich markup in help output.
 
 Typer option defaults must be `None`. Config-backed values resolved at runtime.
 
-**Why:** Defaults live in `~/.config/mvmctl/config.json` or `assets/defaults.yaml`. Hardcoding in `typer.Option()` bypasses user config.
+**Why:** Defaults come from state/config at runtime (`$MVM_CACHE_DIR/metadata.json` for image/kernel/binary defaults and `assets/defaults.yaml` for static defaults). Hardcoding in `typer.Option()` bypasses user config/state.
 
 ```python
 # CORRECT — default None, resolve at runtime

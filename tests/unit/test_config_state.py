@@ -1,3 +1,4 @@
+import importlib
 import json
 from pathlib import Path
 
@@ -72,7 +73,6 @@ def test_config_directory_has_restricted_permissions(tmp_path: Path, monkeypatch
     fresh_config_dir = tmp_path / "fresh_config"
     monkeypatch.setenv("MVM_CONFIG_DIR", str(fresh_config_dir))
     # Reload module to pick up new env var
-    import importlib
     from mvmctl.core import config_state
 
     importlib.reload(config_state)
@@ -131,10 +131,12 @@ def test_update_firecracker_config_overwrites_field(config_dir: Path) -> None:
 
 
 def test_firecracker_config_persisted_as_nested_key(config_dir: Path) -> None:
+    from mvmctl.core.metadata import read_metadata
+
     update_firecracker_config(full_version="v1.12.0")
-    raw = json.loads((config_dir / "config.json").read_text())
-    assert "firecracker" in raw
-    assert raw["firecracker"]["full_version"] == "v1.12.0"
+    raw = read_metadata(cache_dir=get_cache_dir())
+    assert "binaries" in raw
+    assert any(v.get("full_version") == "v1.12.0" for v in raw["binaries"].values())
 
 
 def test_firecracker_config_ignores_corrupt_section(config_dir: Path) -> None:
@@ -209,7 +211,6 @@ def test_firecracker_and_assets_coexist(config_dir: Path) -> None:
     update_firecracker_config(full_version="v1.12.0")
     get_assets_config()
     raw = json.loads((config_dir / "config.json").read_text())
-    assert "firecracker" in raw
     assert "assets" in raw
 
 
@@ -218,7 +219,6 @@ def test_flat_key_and_sections_coexist(config_dir: Path) -> None:
     update_firecracker_config(full_version="v1.12.0")
     raw = json.loads((config_dir / "config.json").read_text())
     assert raw["default_image"] == "ubuntu-24.04"
-    assert raw["firecracker"]["full_version"] == "v1.12.0"
 
 
 def test_config_dir_env_var_override(config_dir: Path) -> None:
@@ -238,9 +238,10 @@ def test_initialize_default_config_creates_file(config_dir: Path) -> None:
 
 def test_initialize_default_config_writes_defaults(config_dir: Path) -> None:
     result = initialize_default_config()
-    assert "firecracker" in result
-    assert result["firecracker"]["full_version"] == "v1.15.0"
-    assert result["firecracker"]["ci_version"] == "v1.15"
+    assert "assets" in result
+    fc = get_firecracker_config()
+    assert fc["full_version"] == "v1.15.0"
+    assert fc["ci_version"] == "v1.15"
 
 
 def test_initialize_default_config_idempotent(config_dir: Path) -> None:
