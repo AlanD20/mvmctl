@@ -24,7 +24,7 @@ pyinstaller --onefile --name mvm src/mvmctl/main.py
 
 ```
 src/mvmctl/
-├── main.py          # Root Typer app; registers all sub-apps via add_typer()
+├── main.py          # LazyMVMGroup (click.Group) — lazy-loads sub-apps via importlib
 ├── constants.py     # Single source of truth — CLI name, env prefix, all defaults
 ├── exceptions.py    # Custom exception hierarchy (FCMError → domain subclasses)
 ├── cli/             # Thin Typer command definitions (no business logic)
