@@ -18,6 +18,7 @@ from mvmctl.core.metadata import get_image_entry as _get_image_entry
 from mvmctl.core.metadata import list_image_entries as _list_image_entries
 from mvmctl.core.metadata import list_kernel_entries as _list_kernel_entries
 from mvmctl.core.metadata import remove_image_entry as _remove_image_entry
+from mvmctl.core.metadata import remove_kernel_entry as _remove_kernel_entry
 from mvmctl.core.metadata import update_image_entry as _update_image_entry
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "find_images_by_short_id",
     "find_kernels_by_short_id",
     "remove_image_entry",
+    "remove_kernel_entry",
     "update_image_entry",
 ]
 
@@ -74,21 +76,14 @@ def find_images_by_short_id(cache_dir: Path, short_id: str) -> list[tuple[str, d
 
 
 def find_kernels_by_short_id(cache_dir: Path, short_id: str) -> list[tuple[str, dict[str, Any]]]:
-    """Return all kernel entries whose key starts with short_id.
-
-    Note: This is a placeholder implementation. Kernels in mvmctl are stored
-    by their full filename, not by hash-based short IDs like images.
-    This function searches kernel names by prefix for API consistency.
-
-    Args:
-        cache_dir: Directory containing metadata.json
-        short_id: Short ID prefix to search for
-
-    Returns:
-        List of (kernel_name, metadata) tuples matching the prefix
-    """
+    """Return all kernel entries whose full_id starts with short_id."""
     all_kernels = _list_kernel_entries(cache_dir)
-    return [(name, data) for name, data in all_kernels.items() if name.startswith(short_id)]
+    return [(full_id, data) for full_id, data in all_kernels.items() if full_id.startswith(short_id)]
+
+
+def remove_kernel_entry(cache_dir: Path, kernel_id: str) -> None:
+    """Remove a kernel entry from metadata.json by its full hash ID."""
+    return _remove_kernel_entry(cache_dir, kernel_id)
 
 
 def remove_image_entry(cache_dir: Path, image_id: str) -> None:

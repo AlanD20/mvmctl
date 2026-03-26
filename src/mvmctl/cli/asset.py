@@ -27,9 +27,11 @@ from mvmctl.api.assets import (
 )
 from mvmctl.api.metadata import (
     find_images_by_short_id,
+    find_kernels_by_short_id,
     get_image_entry,
     list_image_entries,
     remove_image_entry,
+    remove_kernel_entry,
     update_image_entry,
 )
 from mvmctl.constants import (
@@ -294,28 +296,67 @@ def kernel_set_default(
 
 @kernel_app.command(name="rm")
 def kernel_rm(
-    names: Optional[List[str]] = typer.Argument(None, help="Kernel file name(s) to remove"),
+    short_ids: Optional[List[str]] = typer.Argument(
+        None, help="Kernel short IDs (6 chars) to remove"
+    ),
     kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
-    """Remove one or more cached kernels by filename."""
+    """Remove cached kernels by short ID.
+
+    Examples:
+        mvm kernel rm abc123
+        mvm kernel rm abc123 def456
+    """
     kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
-    effective_names: list[str] = list(names) if names else []
-    if not effective_names:
-        print_error("Provide at least one kernel file name to remove")
+    effective_ids: list[str] = list(short_ids) if short_ids else []
+    if not effective_ids:
+        print_error("Provide at least one kernel short ID")
         raise typer.Exit(code=1)
 
+    cache_dir = get_cache_dir()
     exit_code = 0
-    for name in effective_names:
-        path = kernels_dir / name
-        if not path.exists():
-            print_error(f"Kernel not found: {path}")
+
+    for short_id in effective_ids:
+        matches = find_kernels_by_short_id(cache_dir, short_id)
+        if not matches:
+            print_error(f"No kernel found with short ID '{short_id}'")
             exit_code = 1
             continue
+        if len(matches) > 1:
+            print_error(
+                f"Ambiguous short ID '{short_id}' matches {len(matches)} kernels — use more characters"
+            )
+            exit_code = 1
+            continue
+
+        full_id, meta = matches[0]
+        filename = str(meta.get("filename", ""))
+
+        path: Path | None = kernels_dir / filename if filename else None
+        if path is None or not path.exists():
+            print_error(
+                f"Kernel file not found for ID '{short_id}' (metadata exists but file missing)"
+            )
+            remove_kernel_entry(cache_dir, full_id)
+            exit_code = 1
+            continue
+
+        display_name = str(meta.get("name", filename))
         if not force:
-            typer.confirm(f"Remove {path}?", abort=True)
+            typer.confirm(f"Remove kernel '{display_name}' ({short_id})?", abort=True)
+
         path.unlink()
-        print_success(f"Removed {path}")
+
+        version = str(meta.get("version", ""))
+        if version and version != "-":
+            for stale in cache_dir.glob(f"kernel-cache-{version}-*.vmlinux"):
+                stale.unlink(missing_ok=True)
+            for stale in cache_dir.glob(f"kernel-cache-{version}-*.marker"):
+                stale.unlink(missing_ok=True)
+
+        remove_kernel_entry(cache_dir, full_id)
+        print_success(f"Removed: {filename}")
 
     raise typer.Exit(code=exit_code)
 

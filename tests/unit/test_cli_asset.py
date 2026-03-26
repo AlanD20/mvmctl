@@ -328,44 +328,75 @@ def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, 
 # ---------------------------------------------------------------------------
 
 
-def test_kernel_rm_success(tmp_path: Path):
-    kernel = tmp_path / "vmlinux"
-    kernel.write_bytes(b"\x00" * 1024)
+def _write_kernel_meta(
+    cache_dir: Path, full_hash: str, filename: str, version: str = "6.1.9"
+) -> None:
+    import json
+
+    meta_file = cache_dir / "metadata.json"
+    data: dict = {}
+    if meta_file.exists():
+        data = json.loads(meta_file.read_text())
+    data.setdefault("kernels", {})[full_hash] = {
+        "filename": filename,
+        "name": filename,
+        "full_hash": full_hash,
+        "version": version,
+        "type": "firecracker",
+        "arch": "x86_64",
+        "last_modified": "2026-01-01T12:00:00+00:00",
+    }
+    meta_file.write_text(json.dumps(data, indent=2))
+
+
+def test_kernel_rm_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "a" * 64
+    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
+    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+    _write_kernel_meta(tmp_path, full_hash, kernel.name)
     result = click_runner.invoke(
         main_app,
-        ["kernel", "rm", "vmlinux", "--kernels-dir", str(tmp_path), "--force"],
+        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path), "--force"],
     )
     assert result.exit_code == 0
     assert "Removed" in result.output
     assert not kernel.exists()
 
 
-def test_kernel_rm_not_found(tmp_path: Path):
+def test_kernel_rm_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     result = click_runner.invoke(
         main_app,
-        ["kernel", "rm", "vmlinux", "--kernels-dir", str(tmp_path), "--force"],
+        ["kernel", "rm", "abcdef", "--kernels-dir", str(tmp_path), "--force"],
     )
     assert result.exit_code == 1
 
 
-def test_kernel_rm_with_confirmation(tmp_path: Path):
-    kernel = tmp_path / "vmlinux"
-    kernel.write_bytes(b"\x00" * 1024)
+def test_kernel_rm_with_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "b" * 64
+    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
+    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+    _write_kernel_meta(tmp_path, full_hash, kernel.name)
     result = click_runner.invoke(
         main_app,
-        ["kernel", "rm", "vmlinux", "--kernels-dir", str(tmp_path)],
+        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path)],
         input="y\n",
     )
     assert result.exit_code == 0
     assert not kernel.exists()
 
 
-def test_kernel_rm_abort_confirmation(tmp_path: Path):
-    kernel = tmp_path / "vmlinux"
-    kernel.write_bytes(b"\x00" * 1024)
+def test_kernel_rm_abort_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "c" * 64
+    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
+    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+    _write_kernel_meta(tmp_path, full_hash, kernel.name)
     result = click_runner.invoke(
         main_app,
-        ["kernel", "rm", "vmlinux", "--kernels-dir", str(tmp_path)],
+        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path)],
         input="n\n",
     )
     assert result.exit_code != 0
@@ -1008,15 +1039,20 @@ def test_bin_rm_no_args():
     assert result.exit_code == 1
 
 
-def test_kernel_rm_multiple(tmp_path: Path):
-    (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
-    (tmp_path / "vmlinux-6.1.102").write_bytes(b"\x7fELF")
+def test_kernel_rm_multiple(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    hash_a, hash_b = "d" * 64, "e" * 64
+    (tmp_path / "vmlinux-official-6.19.9-x86_64").write_bytes(b"\x7fELF")
+    (tmp_path / "vmlinux-fc-6.1.102-x86_64").write_bytes(b"\x7fELF")
+    _write_kernel_meta(tmp_path, hash_a, "vmlinux-official-6.19.9-x86_64", version="6.19.9")
+    _write_kernel_meta(tmp_path, hash_b, "vmlinux-fc-6.1.102-x86_64", version="6.1.102")
     result = runner.invoke(
-        kernel_app, ["rm", "vmlinux", "vmlinux-6.1.102", "--kernels-dir", str(tmp_path), "--force"]
+        kernel_app,
+        ["rm", hash_a[:6], hash_b[:6], "--kernels-dir", str(tmp_path), "--force"],
     )
     assert result.exit_code == 0
-    assert not (tmp_path / "vmlinux").exists()
-    assert not (tmp_path / "vmlinux-6.1.102").exists()
+    assert not (tmp_path / "vmlinux-official-6.19.9-x86_64").exists()
+    assert not (tmp_path / "vmlinux-fc-6.1.102-x86_64").exists()
 
 
 def test_kernel_rm_no_args(tmp_path: Path):
