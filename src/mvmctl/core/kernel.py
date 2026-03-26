@@ -19,10 +19,24 @@ from urllib.request import Request, urlopen
 import yaml
 
 from mvmctl.constants import (
+    CONST_FILE_PERMS_EXECUTABLE,
+    CONST_MEBIBYTE_BYTES,
+    CONST_SECONDS_PER_DAY,
+    CONST_SECONDS_PER_HOUR,
+    CONST_SECONDS_PER_MONTH,
+    CONST_SECONDS_PER_WEEK,
+    CONST_SECONDS_PER_YEAR,
     DEFAULT_FC_KERNEL_ARCH,
-    FALLBACK_KERNEL_BUILD_JOBS,
+    DEFAULT_KERNEL_BUILD_JOBS,
+    HTTP_TIMEOUT_KERNEL_CONFIG_S,
+    HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
+    HTTP_TIMEOUT_SHA256_FETCH_S,
+    HTTP_TIMEOUT_SHA256_SIDECAR_S,
     HTTP_USER_AGENT,
     KERNEL_SHA256_URL_TEMPLATE,
+    KERNEL_TYPE_FIRECRACKER,
+    KERNEL_TYPE_OFFICIAL,
+    KERNEL_TYPE_UNKNOWN,
 )
 from mvmctl.core.metadata import (
     list_kernel_entries,
@@ -43,6 +57,45 @@ from mvmctl.utils.yaml import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class KernelConfigResult:
+    """Result from kernel configuration step.
+
+    Contains status and any warnings/info that should be displayed by CLI layer.
+    """
+
+    success: bool
+    missing_settings: list[str]
+    warnings: list[str]
+    info_messages: list[str]
+
+
+@dataclass
+class KernelBuildResult:
+    """Result from kernel build step.
+
+    Contains status and any warnings that should be displayed by CLI layer.
+    """
+
+    success: bool
+    output_path: Path | None
+    warnings: list[str]
+    info_messages: list[str]
+
+
+@dataclass
+class KernelPipelineResult:
+    """Result from the complete kernel build pipeline.
+
+    Contains build directory path and any warnings/info from all stages
+    that should be displayed by CLI layer.
+    """
+
+    build_dir: Path
+    config_result: KernelConfigResult | None
+    build_result: KernelBuildResult | None
 
 _KERNELS_YAML_PATH = Path(__file__).parent.parent / "assets" / "kernels.yaml"
 
@@ -201,23 +254,23 @@ def human_readable_time(iso_timestamp: str) -> str:
 
         if total_seconds < 60:
             return "just now"
-        elif total_seconds < 3600:
+        elif total_seconds < CONST_SECONDS_PER_HOUR:
             minutes = total_seconds // 60
             return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-        elif total_seconds < 86400:
-            hours = total_seconds // 3600
+        elif total_seconds < CONST_SECONDS_PER_DAY:
+            hours = total_seconds // CONST_SECONDS_PER_HOUR
             return f"{hours} hour{'s' if hours != 1 else ''} ago"
-        elif total_seconds < 604800:
-            days = total_seconds // 86400
+        elif total_seconds < CONST_SECONDS_PER_WEEK:
+            days = total_seconds // CONST_SECONDS_PER_DAY
             return f"{days} day{'s' if days != 1 else ''} ago"
-        elif total_seconds < 2592000:
-            weeks = total_seconds // 604800
+        elif total_seconds < CONST_SECONDS_PER_MONTH:
+            weeks = total_seconds // CONST_SECONDS_PER_WEEK
             return f"{weeks} week{'s' if weeks != 1 else ''} ago"
-        elif total_seconds < 31536000:
-            months = total_seconds // 2592000
+        elif total_seconds < CONST_SECONDS_PER_YEAR:
+            months = total_seconds // CONST_SECONDS_PER_MONTH
             return f"{months} month{'s' if months != 1 else ''} ago"
         else:
-            years = total_seconds // 31536000
+            years = total_seconds // CONST_SECONDS_PER_YEAR
             return f"{years} year{'s' if years != 1 else ''} ago"
     except (ValueError, TypeError):
         return "-"
@@ -289,7 +342,7 @@ def download_kernel_source(
             url,
             dest,
             expected_sha256,
-            timeout=600,
+            timeout=HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
             allow_missing_checksum=allow_missing_checksum,
         )
     except ChecksumMismatchError:
@@ -349,7 +402,7 @@ def download_firecracker_config(
         KernelError: If download fails
     """
     if kernel_spec is None:
-        kernel_spec = resolve_kernel_spec(kernel_type="firecracker")
+        kernel_spec = resolve_kernel_spec(kernel_type=KERNEL_TYPE_FIRECRACKER)
 
     config_url_template = kernel_spec.config_url_template
     if not config_url_template:
@@ -367,7 +420,7 @@ def download_firecracker_config(
         logger.info("Downloading Firecracker kernel config...")
         req = Request(config_url, headers={"User-Agent": HTTP_USER_AGENT})
 
-        with urlopen(req, timeout=60) as response:
+        with urlopen(req, timeout=HTTP_TIMEOUT_KERNEL_CONFIG_S) as response:
             config_content = response.read().decode("utf-8")
             config_path = kernel_dir / ".config"
 
@@ -383,7 +436,7 @@ def download_firecracker_config(
 def run_make(
     kernel_dir: Path,
     target: str,
-    jobs: int = FALLBACK_KERNEL_BUILD_JOBS,
+    jobs: int = DEFAULT_KERNEL_BUILD_JOBS,
     capture_output: bool = False,
 ) -> tuple[int, str, str]:
     """Run make command in kernel directory.
@@ -440,7 +493,8 @@ def configure_kernel(
     version: str,
     user_config_path: Path | None = None,
     kernel_spec: KernelSpec | None = None,
-) -> None:
+    skip_confirm: bool = False,
+) -> KernelConfigResult:
     """Configure kernel with Firecracker settings.
 
     Args:
@@ -450,12 +504,21 @@ def configure_kernel(
         user_config_path: Optional path to a user-supplied ``.config`` overlay.
         kernel_spec: Kernel specification with config lists. Defaults to the
             ``kernel-official`` entry from ``kernels.yaml``.
+        skip_confirm: If True, skip interactive confirmation for missing settings
+            and raise KernelError instead. Used by non-interactive callers.
+
+    Returns:
+        KernelConfigResult with status, warnings, and info messages for CLI display.
 
     Raises:
-        KernelError: If configuration fails
+        KernelError: If configuration fails or required settings are missing
+            and skip_confirm is True.
     """
     if kernel_spec is None:
-        kernel_spec = resolve_kernel_spec(kernel_type="official")
+        kernel_spec = resolve_kernel_spec(kernel_type=KERNEL_TYPE_OFFICIAL)
+
+    warnings: list[str] = []
+    info_messages: list[str] = []
 
     # Download Firecracker config
     try:
@@ -510,24 +573,31 @@ def configure_kernel(
             all_present = False
 
     if not all_present:
-        import typer
-
-        from mvmctl.utils.console import print_info, print_warning
-
-        print_warning(f"Required kernel settings missing: {', '.join(missing_settings)}")
-        if not typer.confirm(
-            "Proceed with build anyway? (missing settings may affect VM stability)", default=False
-        ):
+        warnings.append(f"Required kernel settings missing: {', '.join(missing_settings)}")
+        if skip_confirm:
             raise KernelError("Required kernel settings are missing from configuration")
-        print_info("Proceeding with build despite missing settings...")
+        # Return result indicating missing settings - caller (CLI) should handle confirmation
+        return KernelConfigResult(
+            success=False,
+            missing_settings=missing_settings,
+            warnings=warnings,
+            info_messages=info_messages,
+        )
+
+    return KernelConfigResult(
+        success=True,
+        missing_settings=[],
+        warnings=warnings,
+        info_messages=info_messages,
+    )
 
 
 def build_kernel(
     kernel_dir: Path,
     output_path: Path,
-    jobs: int = FALLBACK_KERNEL_BUILD_JOBS,
+    jobs: int = DEFAULT_KERNEL_BUILD_JOBS,
     build_log_path: Path | None = None,
-) -> None:
+) -> KernelBuildResult:
     """Build the kernel.
 
     Args:
@@ -536,15 +606,19 @@ def build_kernel(
         jobs: Number of parallel jobs
         build_log_path: Optional path to write build log (for caching)
 
+    Returns:
+        KernelBuildResult with status, output path, warnings, and info messages.
+
     Raises:
         KernelError: If build fails
     """
     logger.info("Building vmlinux with %d parallel jobs...", jobs)
     logger.info("This may take 10-30 minutes...")
 
-    from mvmctl.utils.console import print_warning
+    warnings: list[str] = []
+    info_messages: list[str] = []
 
-    print_warning("Building kernel... (this may take 10-30 minutes)")
+    warnings.append("Building kernel... (this may take 10-30 minutes)")
 
     cmd = ["make", "vmlinux", f"-j{jobs}"]
     temp_log_path: Path | None = None
@@ -566,12 +640,13 @@ def build_kernel(
             )
             returncode = proc.wait()
 
+        build_output_lines: list[str] = []
         with open(build_log_path, encoding="utf-8") as f:
             for line in f:
                 line = line.rstrip("\n")
                 logger.debug("%s", line)
                 if _BUILD_LOG_PATTERNS.search(line):
-                    print(line)
+                    build_output_lines.append(line)
 
         if returncode != 0:
             raise KernelError(f"Kernel build failed: Command failed (exit {returncode}): make")
@@ -593,18 +668,25 @@ def build_kernel(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(vmlinux_path, output_path)
-    output_path.chmod(0o755)
+    output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
 
     size = output_path.stat().st_size
-    size_mb = size / (1024 * 1024)
+    size_mb = size / CONST_MEBIBYTE_BYTES
     logger.info("Kernel built: %s (%.1f MiB)", output_path.name, size_mb)
+
+    return KernelBuildResult(
+        success=True,
+        output_path=output_path,
+        warnings=warnings,
+        info_messages=info_messages,
+    )
 
 
 def fetch_kernel_sha256(version: str) -> str | None:
     sha256_url = KERNEL_SHA256_URL_TEMPLATE.format(version=version)
     try:
         req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             content = resp.read().decode().strip()
         parts = content.split()
         return str(parts[0]).lower() if parts else None
@@ -616,7 +698,7 @@ def fetch_kernel_sha256(version: str) -> str | None:
 def fetch_kernel_sha256_from_url(sha256_url: str) -> str | None:
     try:
         req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             content = resp.read().decode().strip()
         parts = content.split()
         return str(parts[0]).lower() if parts else None
@@ -641,7 +723,7 @@ def _compute_config_hash(
         Short hash string for cache key
     """
     if kernel_spec is None:
-        kernel_spec = resolve_kernel_spec(kernel_type="official")
+        kernel_spec = resolve_kernel_spec(kernel_type=KERNEL_TYPE_OFFICIAL)
 
     hasher = hashlib.sha256()
     hasher.update(version.encode())
@@ -665,9 +747,9 @@ def build_kernel_pipeline(
     user_config_path: Path | None = None,
     arch: str | None = None,
     kernel_spec: KernelSpec | None = None,
-) -> Path:
+) -> KernelPipelineResult:
     if kernel_spec is None:
-        kernel_spec = resolve_kernel_spec(kernel_type="official")
+        kernel_spec = resolve_kernel_spec(kernel_type=KERNEL_TYPE_OFFICIAL)
 
     if jobs is None:
         jobs = os.cpu_count() or 1
@@ -691,13 +773,21 @@ def build_kernel_pipeline(
     if cache_marker.exists() and cached_kernel_path.exists():
         output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(cached_kernel_path, output_path)
-        output_path.chmod(0o755)
+        output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
         logger.info("Using cached kernel build (config hash match): %s", output_path)
-        return build_dir
+        return KernelPipelineResult(
+            build_dir=build_dir,
+            config_result=None,
+            build_result=None,
+        )
 
     if output_path.exists() and cache_marker.exists():
         logger.info("Using cached kernel (config hash match): %s", output_path)
-        return build_dir
+        return KernelPipelineResult(
+            build_dir=build_dir,
+            config_result=None,
+            build_result=None,
+        )
 
     if output_path.exists():
         logger.info("Kernel exists but config changed, rebuilding: %s", output_path)
@@ -736,11 +826,11 @@ def build_kernel_pipeline(
     else:
         logger.info("Using existing source: %s", kernel_src_dir)
 
-    configure_kernel(
+    config_result = configure_kernel(
         kernel_src_dir, version, user_config_path=user_config_path, kernel_spec=kernel_spec
     )
 
-    build_kernel(kernel_src_dir, output_path, jobs)
+    build_result = build_kernel(kernel_src_dir, output_path, jobs)
 
     shutil.copy2(output_path, cached_kernel_path)
     cache_marker.write_text(cache_key)
@@ -749,7 +839,7 @@ def build_kernel_pipeline(
         output_path.parent,
         output_path.name,
         version=version,
-        kernel_type="official",
+        kernel_type=KERNEL_TYPE_OFFICIAL,
         arch=arch,
     )
 
@@ -759,7 +849,11 @@ def build_kernel_pipeline(
     else:
         logger.info("Build directory kept at: %s", build_dir)
 
-    return build_dir
+    return KernelPipelineResult(
+        build_dir=build_dir,
+        config_result=config_result,
+        build_result=build_result,
+    )
 
 
 def save_kernel_metadata(
@@ -790,7 +884,7 @@ def save_kernel_metadata(
     if arch is None:
         arch = parsed.arch
     if kernel_type is None:
-        kernel_type = "unknown"
+        kernel_type = KERNEL_TYPE_UNKNOWN
 
     last_modified = "-"
     if kernel_path.exists():
@@ -823,45 +917,42 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
     results: list[dict[str, str]] = []
 
-    for path in sorted(kernels_dir.iterdir()):
-        if not path.is_file() or path.suffix == ".json":
-            continue
-        if not (path.name.startswith("vmlinux") or path.name.startswith("kernel")):
+    for kernel_name, meta in sorted(entries.items()):
+        path = kernels_dir / kernel_name
+        if not path.is_file():
             continue
 
-        size_mb = path.stat().st_size / (1024 * 1024)
-
-        meta = entries.get(path.name, {})
+        size_mb = path.stat().st_size / CONST_MEBIBYTE_BYTES
 
         last_modified = meta.get("last_modified")
         if not last_modified:
             last_modified = meta.get("built_at", "-")
 
-        kernel_id = generate_kernel_id(path.name, last_modified)
+        kernel_id = generate_kernel_id(kernel_name, last_modified)
 
         if meta.get("base_name"):
             base_name = meta["base_name"]
             version = meta.get("version", "-")
             arch = meta.get("arch", "-")
-            kernel_type = meta.get("type", "unknown")
+            kernel_type = meta.get("type", KERNEL_TYPE_UNKNOWN)
         else:
-            parsed = parse_kernel_filename(path.name)
+            parsed = parse_kernel_filename(kernel_name)
             base_name = parsed.base_name
             version = parsed.version
             arch = parsed.arch
-            kernel_type = "unknown"
+            kernel_type = KERNEL_TYPE_UNKNOWN
 
         results.append(
             {
                 "id": kernel_id,
                 "name": base_name,
-                "full_name": path.name,
+                "full_name": kernel_name,
                 "version": version,
                 "type": kernel_type,
                 "arch": arch,
                 "last_modified": last_modified,
                 "size": f"{size_mb:.1f} MiB",
-                "is_default": str(path.name == default_name).lower(),
+                "is_default": str(kernel_name == default_name).lower(),
             }
         )
 
@@ -906,7 +997,7 @@ def download_firecracker_kernel(
     kernels_dir.mkdir(parents=True, exist_ok=True)
 
     if kernel_spec is None:
-        kernel_spec = resolve_kernel_spec(kernel_type="firecracker")
+        kernel_spec = resolve_kernel_spec(kernel_type=KERNEL_TYPE_FIRECRACKER)
     list_url_template = kernel_spec.list_url_template
     if not list_url_template:
         raise KernelError(f"Missing 'list_url_template' in kernels.yaml for {kernel_spec.name}")
@@ -920,7 +1011,7 @@ def download_firecracker_kernel(
     list_url = render_template(list_url_template, template_vars)
     try:
         req = Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             xml_content = resp.read().decode("utf-8")
     except (URLError, OSError) as exc:
         raise KernelError(f"Failed to list CI kernels: {exc}") from exc
@@ -953,7 +1044,7 @@ def download_firecracker_kernel(
     expected_sha256: str | None = None
     try:
         req_sha = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req_sha, timeout=15) as resp_sha:
+        with urlopen(req_sha, timeout=HTTP_TIMEOUT_SHA256_SIDECAR_S) as resp_sha:
             content = resp_sha.read().decode().strip()
         parts = content.split()
         expected_sha256 = str(parts[0]).lower() if parts else None
@@ -970,18 +1061,18 @@ def download_firecracker_kernel(
             download_url,
             output_path,
             expected_sha256=expected_sha256,
-            timeout=300,
+            timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
         )
     except MVMError as exc:
         raise KernelError(f"Failed to download Firecracker CI kernel: {exc}") from exc
 
-    output_path.chmod(0o755)
+    output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
 
     save_kernel_metadata(
         kernels_dir,
         output_name,
         version=kernel_version,
-        kernel_type="firecracker",
+        kernel_type=KERNEL_TYPE_FIRECRACKER,
         arch=arch,
     )
     logger.info("Firecracker CI kernel saved: %s", output_path)

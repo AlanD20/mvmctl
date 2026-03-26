@@ -9,6 +9,6 @@ Example::
     from mvmctl.api import vms, network, assets, keys, host
 """
 
-from mvmctl.api import assets, host, keys, network, vms
+from mvmctl.api import assets, host, keys, metadata, network, vms
 
-__all__ = ["assets", "host", "keys", "network", "vms"]
+__all__ = ["assets", "host", "keys", "metadata", "network", "vms"]

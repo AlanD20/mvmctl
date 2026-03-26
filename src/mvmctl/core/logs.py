@@ -6,15 +6,21 @@ from collections import deque
 from collections.abc import Callable, Generator
 from pathlib import Path
 
-from mvmctl.constants import DEFAULT_VM_LOG_LINES, DEFAULT_VM_LOG_TYPE
+from mvmctl.constants import (
+    DEFAULT_FC_CONSOLE_LOG_FILENAME,
+    DEFAULT_FC_LOG_FILENAME,
+    DEFAULT_VM_LOG_LINES,
+    DEFAULT_VM_LOG_TYPE,
+    LOG_FOLLOW_POLL_INTERVAL_S,
+)
 from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
 from mvmctl.utils.fs import get_vm_dir
 
 logger = logging.getLogger(__name__)
 
 _LOG_TYPE_FILES: dict[str, str] = {
-    "boot": "firecracker.console.log",
-    "os": "firecracker.log",
+    "boot": DEFAULT_FC_CONSOLE_LOG_FILENAME,
+    "os": DEFAULT_FC_LOG_FILENAME,
 }
 
 
@@ -93,7 +99,7 @@ def follow_log(
             while True:
                 line = f.readline()
                 if not line:
-                    time.sleep(0.3)  # Wait for new content
+                    time.sleep(LOG_FOLLOW_POLL_INTERVAL_S)  # Wait for new content
                     continue
                 yield line.rstrip("\n")
     except IOError as e:

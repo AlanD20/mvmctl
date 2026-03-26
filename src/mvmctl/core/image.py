@@ -10,11 +10,14 @@ from pathlib import Path
 from urllib.error import URLError
 
 from mvmctl.constants import (
+    CONST_MEBIBYTE_BYTES,
+    CONST_SECTOR_SIZE_BYTES,
     DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_FIRECRACKER_CI_VERSION,
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
     FIRECRACKER_CI_IMAGE_LIST_URL,
     FIRECRACKER_CI_KERNEL_S3_BASE,
+    HTTP_TIMEOUT_SHA256_FETCH_S,
     HTTP_USER_AGENT,
 )
 from mvmctl.exceptions import ConfigError, ImageError
@@ -24,7 +27,7 @@ from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
 
-_SECTOR_SIZE = 512
+_SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
 
 download_file = _download_file
 
@@ -221,7 +224,7 @@ def _detect_and_rename_fs(output_path: Path) -> Path:
     return output_path
 
 
-_COPY_CHUNK_SIZE = 1024 * 1024  # 1 MiB
+_COPY_CHUNK_SIZE = CONST_MEBIBYTE_BYTES  # 1 MiB
 
 
 def _copy_bytes(
@@ -415,7 +418,7 @@ def _resolve_source_template(spec: ImageSpec) -> str:
 
     try:
         req = urllib.request.Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             xml_content = resp.read().decode("utf-8")
     except Exception as e:
         logger.debug("Failed to list Firecracker CI ubuntu images from %s", list_url, exc_info=True)
@@ -439,7 +442,7 @@ def _resolve_source_template(spec: ImageSpec) -> str:
 def _fetch_sha256_from_url(sha256_url: str) -> str | None:
     try:
         req = urllib.request.Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             content = resp.read().decode().strip()
     except (URLError, OSError):
         return None

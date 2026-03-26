@@ -4,6 +4,21 @@ import json
 from pathlib import Path
 from typing import TypedDict
 
+from mvmctl.constants import (
+    DEFAULT_BOOT_CONSOLE,
+    DEFAULT_BOOT_PANIC,
+    DEFAULT_BOOT_PCI_OFF,
+    DEFAULT_BOOT_REBOOT,
+    DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
+    DEFAULT_FC_DRIVE_CACHE_TYPE,
+    DEFAULT_FC_DRIVE_IO_ENGINE,
+    DEFAULT_FC_LOG_FILENAME,
+    DEFAULT_FC_LOG_LEVEL,
+    DEFAULT_FC_METRICS_FILENAME,
+    DEFAULT_GUEST_MAC_DEFAULT,
+    DEFAULT_GUEST_NETWORK_IFACE,
+)
+from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMConfig
 from mvmctl.utils.fs import get_vm_dir
 from mvmctl.utils.validation import validate_boot_arg_component
@@ -60,8 +75,8 @@ FirecrackerConfig = TypedDict(
         "cpu-config": object | None,
         "balloon": object | None,
         "vsock": object | None,
-        "logger": LoggerConfig,
-        "metrics": MetricsConfig,
+        "logger": LoggerConfig | None,
+        "metrics": MetricsConfig | None,
     },
 )
 
@@ -73,80 +88,99 @@ class ConfigGenerator:
         self.vm_config = vm_config
 
     def validate(self) -> None:
-        """Validate vm_config before generation.
-
-        Raises MVMError if validation fails.
-        """
         if self.vm_config.boot_args:
             for component in self.vm_config.boot_args.split():
                 validate_boot_arg_component(component, "boot_args")
         self._validate_boot_components()
 
     def _validate_boot_components(self) -> None:
-        """Validate boot-related components."""
-        gateway = self.vm_config.gateway or "10.20.0.1"
-        subnet_mask = self.vm_config.subnet_mask or "255.255.255.0"
+        if not self.vm_config.gateway:
+            raise MVMError("VM gateway IP is required but not set")
+        if not self.vm_config.subnet_mask:
+            raise MVMError("VM subnet mask is required but not set")
 
         if self.vm_config.guest_ip:
             validate_boot_arg_component(self.vm_config.guest_ip, "guest_ip")
-        validate_boot_arg_component(gateway, "gateway")
-        validate_boot_arg_component(subnet_mask, "subnet_mask")
+        validate_boot_arg_component(self.vm_config.gateway, "gateway")
+        validate_boot_arg_component(self.vm_config.subnet_mask, "subnet_mask")
 
         lsm_flags = self.vm_config.lsm_flags or None
         if lsm_flags:
             validate_boot_arg_component(lsm_flags, "lsm_flags")
 
     def generate(self) -> FirecrackerConfig:
-        """Generate Firecracker config dictionary."""
-        if self.vm_config.boot_args:
-            boot_args = self.vm_config.boot_args
-        else:
-            boot_args = self._build_default_boot_args()
+        boot_args = self.vm_config.boot_args or self._build_default_boot_args()
 
+        context = {
+            "kernel_image_path": str(self.vm_config.kernel_path),
+            "boot_args": boot_args,
+            "drives": json.dumps(self._build_drives_config()),
+            "network_interfaces": json.dumps(self._build_network_config()),
+            "vcpu_count": str(self.vm_config.vcpu_count),
+            "mem_size_mib": str(self.vm_config.mem_size_mib),
+            "logger": json.dumps(self._build_logger_config()),
+            "metrics": json.dumps(self._build_metrics_config()),
+        }
+
+        template_path = Path(__file__).parent.parent / "assets" / "firecracker.template.json"
+        try:
+            template_str = template_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise MVMError(
+                f"Failed to load Firecracker config template: {template_path}"
+            ) from exc
+
+        filled = template_str
+        for key, value in context.items():
+            placeholder = "{" + key + "}"
+            if placeholder not in filled:
+                raise MVMError(
+                    f"Missing template placeholder '{placeholder}' in firecracker.template.json"
+                )
+            filled = filled.replace(placeholder, value)
+
+        try:
+            config: FirecrackerConfig = json.loads(filled)
+        except json.JSONDecodeError as exc:
+            raise MVMError(f"Generated Firecracker config is not valid JSON: {exc}") from exc
+
+        return config
+
+    def _build_drives_config(self) -> list[DriveConfig]:
+        rootfs: DriveConfig = {
+            "drive_id": "rootfs",
+            "path_on_host": str(self.vm_config.rootfs_path),
+            "is_root_device": True,
+            "is_read_only": False,
+            "partuuid": None,
+            "cache_type": DEFAULT_FC_DRIVE_CACHE_TYPE,
+            "io_engine": DEFAULT_FC_DRIVE_IO_ENGINE,
+            "rate_limiter": None,
+            "socket": None,
+        }
+        return [rootfs, *self.vm_config.extra_drives]
+
+    def _build_logger_config(self) -> LoggerConfig | None:
+        if not self.vm_config.enable_logging:
+            return None
         return {
-            "boot-source": {
-                "kernel_image_path": str(self.vm_config.kernel_path),
-                "boot_args": boot_args,
-            },
-            "drives": [
-                {
-                    "drive_id": "rootfs",
-                    "path_on_host": str(self.vm_config.rootfs_path),
-                    "is_root_device": True,
-                    "is_read_only": False,
-                    "partuuid": None,
-                    "cache_type": "Unsafe",
-                    "io_engine": "Sync",
-                    "rate_limiter": None,
-                    "socket": None,
-                }
-            ],
-            "network-interfaces": self._build_network_config(),
-            "machine-config": {
-                "vcpu_count": self.vm_config.vcpu_count,
-                "mem_size_mib": self.vm_config.mem_size_mib,
-                "smt": False,
-                "cpu_template": None,
-            },
-            "cpu-config": None,
-            "balloon": None,
-            "vsock": None,
-            "logger": {
-                "log_path": str(self._get_log_path()),
-                "level": "Debug",
-                "show_level": True,
-                "show_log_origin": True,
-            },
-            "metrics": {
-                "metrics_path": str(self._get_metrics_path()),
-            },
+            "log_path": str(get_vm_dir(self.vm_config.name) / DEFAULT_FC_LOG_FILENAME),
+            "level": DEFAULT_FC_LOG_LEVEL,
+            "show_level": True,
+            "show_log_origin": True,
+        }
+
+    def _build_metrics_config(self) -> MetricsConfig | None:
+        if not self.vm_config.enable_metrics:
+            return None
+        return {
+            "metrics_path": str(get_vm_dir(self.vm_config.name) / DEFAULT_FC_METRICS_FILENAME),
         }
 
     def _build_default_boot_args(self) -> str:
-        """Build default boot arguments."""
-        pci_arg = "pci=off" if not self.vm_config.enable_pci else ""
-        gateway = self.vm_config.gateway or "10.20.0.1"
-        subnet_mask = self.vm_config.subnet_mask or "255.255.255.0"
+        pci_arg = DEFAULT_BOOT_PCI_OFF if not self.vm_config.enable_pci else ""
+        gateway = self.vm_config.gateway or ""
+        subnet_mask = self.vm_config.subnet_mask or ""
 
         ip_arg = (
             f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:off"
@@ -156,45 +190,32 @@ class ConfigGenerator:
         lsm_flags = self.vm_config.lsm_flags or None
         lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
         parts = [
-            "console=ttyS0",
-            "reboot=k",
-            "panic=1",
+            DEFAULT_BOOT_CONSOLE,
+            DEFAULT_BOOT_REBOOT,
+            DEFAULT_BOOT_PANIC,
             pci_arg,
             ip_arg,
             "rw",
             "rootwait",
             "rootfstype=ext4",
-            "ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
+            DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
             lsm_arg,
         ]
         return " ".join(p for p in parts if p).strip()
 
     def _build_network_config(self) -> list[NetworkInterfaceConfig]:
-        """Build network interface configuration."""
         if not self.vm_config.tap_device:
             return []
 
         return [
             {
-                "iface_id": "eth0",
-                "guest_mac": self.vm_config.guest_mac or "02:FC:00:00:00:01",
+                "iface_id": DEFAULT_GUEST_NETWORK_IFACE,
+                "guest_mac": self.vm_config.guest_mac or DEFAULT_GUEST_MAC_DEFAULT,
                 "host_dev_name": self.vm_config.tap_device,
             }
         ]
 
-    def _get_log_path(self) -> Path:
-        """Get path for firecracker.log."""
-        return get_vm_dir(self.vm_config.name) / "firecracker.log"
-
-    def _get_metrics_path(self) -> Path:
-        """Get path for metrics file."""
-        return get_vm_dir(self.vm_config.name) / "firecracker.metrics"
-
     def write_to_file(self, path: Path) -> None:
-        """Write config to JSON file.
-
-        Validates before generating to maintain backward compatibility.
-        """
         self.validate()
         config = self.generate()
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -6,6 +6,14 @@ from typing import Any
 
 import yaml
 
+from mvmctl.constants import (
+    CONST_DIR_PERMS_CACHE,
+    DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD,
+    DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
+    DEFAULT_CLOUD_INIT_SEED_PATH,
+    DEFAULT_DNS_NAMESERVERS,
+    DEFAULT_GUEST_NETWORK_IFACE,
+)
 from mvmctl.exceptions import ConfigError
 
 logger = logging.getLogger(__name__)
@@ -52,9 +60,10 @@ def write_cloud_init(
     vm_name: str,
     guest_ip: str,
     user: str,
+    *,
+    gateway: str,
     ssh_pub_key: str | None = None,
     custom_user_data: Path | None = None,
-    gateway: str = "10.20.0.1",
     prefix_len: int = 24,
 ) -> None:
     """Write cloud-init seed files (meta-data, network-config, user-data)."""
@@ -66,13 +75,13 @@ def write_cloud_init(
         "config": [
             {
                 "type": "physical",
-                "name": "eth0",
+                "name": DEFAULT_GUEST_NETWORK_IFACE,
                 "subnets": [
                     {
                         "type": "static",
                         "address": f"{guest_ip}/{prefix_len}",
                         "gateway": gateway,
-                        "dns_nameservers": ["8.8.8.8", "1.1.1.1"],
+                        "dns_nameservers": DEFAULT_DNS_NAMESERVERS,
                     }
                 ],
             }
@@ -122,8 +131,8 @@ def write_cloud_init(
             "users": ["default"],
             "package_update": False,
             "package_upgrade": False,
-            "runcmd": ["systemctl disable --now snapd.socket 2>/dev/null || true"],
-            "final_message": "mvm cloud-init done",
+            "runcmd": [DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD],
+            "final_message": DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
         }
         if ssh_pub_key:
             ud["users"] = [
@@ -148,11 +157,11 @@ def inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
     """
     import tempfile
 
-    seed_target = "/var/lib/cloud/seed/nocloud"
+    seed_target = DEFAULT_CLOUD_INIT_SEED_PATH
 
     with tempfile.TemporaryDirectory(prefix="mvm-mount-") as tmp_dir:
         mount_point = Path(tmp_dir)
-        mount_point.chmod(0o700)
+        mount_point.chmod(CONST_DIR_PERMS_CACHE)
         mounted = False
         try:
             # Mount the rootfs ext4 image

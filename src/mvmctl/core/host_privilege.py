@@ -11,7 +11,17 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from mvmctl.constants import CLI_NAME, PRIVILEGED_BINARIES, PROJECT_GROUP
+from mvmctl.constants import (
+    CLI_NAME,
+    CONST_FILE_PERMS_SUDOERS,
+    DEFAULT_USR_SBIN_IP,
+    DEFAULT_USR_SBIN_IPTABLES,
+    DEFAULT_USR_SBIN_IPTABLES_RESTORE,
+    DEFAULT_USR_SBIN_IPTABLES_SAVE,
+    DEFAULT_USR_SBIN_SYSCTL,
+    PRIVILEGED_BINARIES,
+    PROJECT_GROUP,
+)
 from mvmctl.exceptions import HostError, PrivilegeError
 
 logger = logging.getLogger(__name__)
@@ -173,11 +183,11 @@ def _validate_sudoers_binaries() -> None:
     for binary in PRIVILEGED_BINARIES:
         if not Path(binary).exists():
             pkg_map = {
-                "/usr/sbin/ip": "iproute2",
-                "/usr/sbin/iptables": "iptables",
-                "/usr/sbin/iptables-restore": "iptables",
-                "/usr/sbin/iptables-save": "iptables",
-                "/usr/sbin/sysctl": "procps",
+                DEFAULT_USR_SBIN_IP: "iproute2",
+                DEFAULT_USR_SBIN_IPTABLES: "iptables",
+                DEFAULT_USR_SBIN_IPTABLES_RESTORE: "iptables",
+                DEFAULT_USR_SBIN_IPTABLES_SAVE: "iptables",
+                DEFAULT_USR_SBIN_SYSCTL: "procps",
             }
             pkg = pkg_map.get(binary, "unknown package")
             raise HostError(f"Required binary not found: {binary} (install {pkg})")
@@ -242,7 +252,7 @@ def _write_sudoers(path: Path, group_name: str) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
-        path.chmod(0o440)
+        path.chmod(CONST_FILE_PERMS_SUDOERS)
     except OSError as e:
         raise HostError(f"Failed to write sudoers file {path}: {e}") from e
 

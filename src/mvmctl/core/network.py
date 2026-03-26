@@ -18,6 +18,8 @@ from pathlib import Path
 
 from mvmctl.constants import (
     BRIDGE_NAME,
+    CONST_TIMESTAMP_INITIAL,
+    DEFAULT_GUEST_MAC_PREFIX,
     DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_GATEWAY,
     MVM_FORWARD_CHAIN,
@@ -30,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Sudo credential cache with TTL (60 seconds)
 _SUDO_CACHE_LOCK = threading.Lock()
 _SUDO_CREDENTIALS_VALID = False
-_SUDO_CACHE_TIMESTAMP: float = 0.0
+_SUDO_CACHE_TIMESTAMP: float = CONST_TIMESTAMP_INITIAL
 _SUDO_CACHE_TTL_SECONDS = 60
 _SUDO_VALIDATION_IN_PROGRESS = False
 
@@ -804,12 +806,12 @@ def get_iptables_rules_for_bridge(bridge: str) -> list[str]:
 
 
 def generate_mac() -> str:
-    """Generate a random MAC address with 02:FC: prefix.
+    """Generate a random MAC address with {DEFAULT_GUEST_MAC_PREFIX} prefix.
 
     Uses ``secrets`` for cryptographically strong randomness.
 
-    Format: 02:FC:XX:XX:XX:XX where X is random hex.
+    Format: {DEFAULT_GUEST_MAC_PREFIX}:XX:XX:XX:XX where X is random hex.
     """
     rand_bytes = secrets.token_bytes(4)
     suffix = ":".join(f"{b:02x}" for b in rand_bytes)
-    return f"02:FC:{suffix}"
+    return f"{DEFAULT_GUEST_MAC_PREFIX}:{suffix}"

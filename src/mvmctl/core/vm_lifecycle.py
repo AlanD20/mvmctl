@@ -16,15 +16,28 @@ from typing import IO
 from mvmctl.constants import (
     BRIDGE_NAME,
     CLI_NAME,
+    CONST_DIR_PERMS_CACHE,
+    CONST_FILE_PERMS_PID_FILE,
+    CONST_POLL_STEP_SECONDS,
+    CONST_VM_MEM_MAX_MIB,
+    CONST_VM_MEM_MIN_MIB,
+    DEFAULT_CLOUD_INIT_DIRNAME,
+    DEFAULT_FC_API_SOCKET_FILENAME,
+    DEFAULT_FC_CONFIG_FILENAME,
+    DEFAULT_FC_CONSOLE_LOG_FILENAME,
+    DEFAULT_FC_LOG_FILENAME,
+    DEFAULT_FC_PID_FILENAME,
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
     DEFAULT_VM_ENABLE_API_SOCKET,
     DEFAULT_VM_ENABLE_PCI,
     DEFAULT_VM_KERNEL_FILENAME,
     DEFAULT_VM_MEM_MIB,
+    DEFAULT_VM_ROOTFS_BASENAME,
     DEFAULT_VM_SSH_USER,
     DEFAULT_VM_VCPU_COUNT,
     FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+    FIRECRACKER_SHUTDOWN_POLL_INTERVAL_S,
     FIRECRACKER_SIGTERM_WAIT_S,
     MAX_VMS,
     SUPPORTED_IMAGE_EXTENSIONS,
@@ -108,7 +121,7 @@ def _generate_tap_name(network_name: str, vm_name: str) -> str:
 
 def _write_pid_file(pid_file: Path, pid: int) -> None:
     """Write PID to file with an exclusive advisory lock."""
-    fd = os.open(str(pid_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(str(pid_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, CONST_FILE_PERMS_PID_FILE)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         os.write(fd, str(pid).encode())
@@ -225,9 +238,9 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
             pass
         # Poll for FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S seconds (100ms steps)
         # to allow graceful shutdown before SIGTERM/SIGKILL.
-        _poll_steps = int(FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S / 0.1)
+        _poll_steps = int(FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S / CONST_POLL_STEP_SECONDS)
         for _ in range(_poll_steps):
-            time.sleep(0.1)
+            time.sleep(FIRECRACKER_SHUTDOWN_POLL_INTERVAL_S)
             # P-L3: single check per iteration — no fix needed
             if not _is_alive(pid):
                 break
@@ -286,7 +299,7 @@ def create_vm(
 
     if not (1 <= vcpus <= 32):
         raise MVMError(f"Invalid vcpus={vcpus}: must be between 1 and 32")
-    if not (128 <= mem <= 65536):
+    if not (CONST_VM_MEM_MIN_MIB <= mem <= CONST_VM_MEM_MAX_MIB):
         raise MVMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
 
     if mac is not None:
@@ -350,15 +363,16 @@ def create_vm(
     tap_name = _generate_tap_name(network_name, name)
     bridge = net_config.bridge
 
-    rootfs_path = vm_dir / "rootfs.ext4"
+    rootfs_ext = image_path.suffix
+    rootfs_path = vm_dir / f"{DEFAULT_VM_ROOTFS_BASENAME}{rootfs_ext}"
     try:
         shutil.copy2(image_path, rootfs_path)
     except OSError as e:
         shutil.rmtree(vm_dir, ignore_errors=True)
         raise MVMError(f"Failed to copy image: {e}")
 
-    cloud_init_dir = vm_dir / "cloud-init"
-    cloud_init_dir.mkdir(mode=0o700, exist_ok=True)
+    cloud_init_dir = vm_dir / DEFAULT_CLOUD_INIT_DIRNAME
+    cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
 
     ssh_pub_key = resolve_ssh_key(ssh_key)
 
@@ -376,7 +390,7 @@ def create_vm(
     )
     inject_cloud_init(rootfs_path, cloud_init_dir)
 
-    socket_path = vm_dir / "firecracker.api.socket" if enable_api_socket else None
+    socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
     _net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
     _subnet_mask = str(_net.netmask)
 
@@ -394,7 +408,7 @@ def create_vm(
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
     )
-    config_file = vm_dir / "firecracker.json"
+    config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
     ConfigGenerator(vm_config).write_to_file(config_file)
 
     # AUDIT-4: Reconcile bridge if it has drifted (e.g. lost after reboot).
@@ -419,9 +433,9 @@ def create_vm(
             pass
         raise NetworkError(f"Network setup failed: {e}")
 
-    log_file = vm_dir / "firecracker.log"
-    console_log_file = vm_dir / "firecracker.console.log"
-    pid_file = vm_dir / "firecracker.pid"
+    log_file = vm_dir / DEFAULT_FC_LOG_FILENAME
+    console_log_file = vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
+    pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
 
     fc_cmd = [firecracker_bin, "--no-api", "--config-file", str(config_file)]
     if enable_api_socket and socket_path:
@@ -488,7 +502,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     net_config = get_network(net_name)
     bridge = net_config.bridge if net_config else BRIDGE_NAME
 
-    pid_file = vm_dir / "firecracker.pid"
+    pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
     pid = _read_pid_file(pid_file)
     if pid is None:
         pid = vm.pid

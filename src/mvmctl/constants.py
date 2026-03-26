@@ -214,6 +214,8 @@ DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = _require_str(("vm", "firecracker_bin_
 # VM feature flags
 DEFAULT_VM_ENABLE_API_SOCKET: Final[bool] = _require_bool(("vm_defaults", "enable_api_socket"))
 DEFAULT_VM_ENABLE_PCI: Final[bool] = _require_bool(("vm_defaults", "enable_pci"))
+DEFAULT_VM_ENABLE_LOGGING: Final[bool] = _require_bool(("vm_defaults", "enable_logging"))
+DEFAULT_VM_ENABLE_METRICS: Final[bool] = _require_bool(("vm_defaults", "enable_metrics"))
 
 # VM network defaults
 DEFAULT_VM_SUBNET_MASK: Final[str] = _require_str(("vm_defaults", "subnet_mask"))
@@ -265,10 +267,104 @@ DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = _require_int(("image", "remote", "ver
 # Fallback values — last-resort runtime values when config lookup fails
 # ---------------------------------------------------------------------------
 
-FALLBACK_FC_CI_VERSION: Final[str] = _require_str(("fallbacks", "fc_ci_version"))
-FALLBACK_FIRECRACKER_BIN: Final[str] = _require_str(("fallbacks", "firecracker_bin"))
-FALLBACK_KERNEL_BUILD_JOBS: Final[int] = _require_int(("fallbacks", "kernel_build_jobs"))
-FALLBACK_MAX_PARALLEL_DOWNLOADS: Final[int] = _require_int(("fallbacks", "max_parallel_downloads"))
+DEFAULT_FC_CI_VERSION: Final[str] = _require_str(("fallbacks", "fc_ci_version"))
+DEFAULT_FIRECRACKER_BIN: Final[str] = _require_str(("fallbacks", "firecracker_bin"))
+DEFAULT_KERNEL_BUILD_JOBS: Final[int] = _require_int(("fallbacks", "kernel_build_jobs"))
+DEFAULT_MAX_PARALLEL_DOWNLOADS: Final[int] = _require_int(("fallbacks", "max_parallel_downloads"))
+
+# ---------------------------------------------------------------------------
+# Network defaults (fallback values)
+# ---------------------------------------------------------------------------
+
+DEFAULT_DNS_NAMESERVERS: Final[list[str]] = ["8.8.8.8", "1.1.1.1"]
+
+# ---------------------------------------------------------------------------
+# Firecracker file names
+# ---------------------------------------------------------------------------
+
+DEFAULT_FC_LOG_FILENAME: Final[str] = "firecracker.log"
+DEFAULT_FC_CONSOLE_LOG_FILENAME: Final[str] = "firecracker.console.log"
+DEFAULT_FC_METRICS_FILENAME: Final[str] = "firecracker.metrics"
+DEFAULT_FC_API_SOCKET_FILENAME: Final[str] = "firecracker.api.socket"
+DEFAULT_FC_PID_FILENAME: Final[str] = "firecracker.pid"
+DEFAULT_FC_CONFIG_FILENAME: Final[str] = "firecracker.json"
+
+# ---------------------------------------------------------------------------
+# Kernel type strings
+# ---------------------------------------------------------------------------
+
+KERNEL_TYPE_FIRECRACKER: Final[str] = "firecracker"
+KERNEL_TYPE_OFFICIAL: Final[str] = "official"
+KERNEL_TYPE_UNKNOWN: Final[str] = "unknown"
+
+# ---------------------------------------------------------------------------
+# VM cloud-init defaults (loaded from assets/defaults.yaml)
+# ---------------------------------------------------------------------------
+DEFAULT_CLOUD_INIT_SEED_PATH: Final[str] = _require_str(("vm", "cloud_init", "seed_path"))
+DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS: Final[str] = _require_str(
+    ("vm", "cloud_init", "kernel_cmdline_ds")
+)
+DEFAULT_CLOUD_INIT_FINAL_MESSAGE: Final[str] = _require_str(("vm", "cloud_init", "final_message"))
+DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD: Final[str] = _require_str(
+    ("vm", "cloud_init", "disable_snapd_cmd")
+)
+DEFAULT_CLOUD_INIT_DIRNAME: Final[str] = _require_str(("vm", "cloud_init", "dirname"))
+
+# ---------------------------------------------------------------------------
+# VM boot arg defaults (loaded from assets/defaults.yaml)
+# ---------------------------------------------------------------------------
+DEFAULT_BOOT_CONSOLE: Final[str] = _require_str(("vm", "boot", "console"))
+DEFAULT_BOOT_REBOOT: Final[str] = _require_str(("vm", "boot", "reboot"))
+DEFAULT_BOOT_PANIC: Final[str] = _require_str(("vm", "boot", "panic"))
+DEFAULT_BOOT_PCI_OFF: Final[str] = _require_str(("vm", "boot", "pci_off"))
+
+# ---------------------------------------------------------------------------
+# VM guest network defaults (loaded from assets/defaults.yaml)
+# ---------------------------------------------------------------------------
+DEFAULT_GUEST_MAC_DEFAULT: Final[str] = _require_str(("vm", "network_guest", "mac_default"))
+DEFAULT_GUEST_MAC_PREFIX: Final[str] = _require_str(("vm", "network_guest", "mac_prefix"))
+DEFAULT_GUEST_NETWORK_IFACE: Final[str] = _require_str(("vm", "network_guest", "iface"))
+
+# ---------------------------------------------------------------------------
+# Firecracker driver defaults (loaded from assets/defaults.yaml)
+# ---------------------------------------------------------------------------
+DEFAULT_FC_LOG_LEVEL: Final[str] = _require_str(("vm", "firecracker", "log_level"))
+DEFAULT_FC_DRIVE_CACHE_TYPE: Final[str] = _require_str(("vm", "firecracker", "drive_cache_type"))
+DEFAULT_FC_DRIVE_IO_ENGINE: Final[str] = _require_str(("vm", "firecracker", "drive_io_engine"))
+
+# VM rootfs basename (no extension — extension comes from image's filesystem type)
+DEFAULT_VM_ROOTFS_BASENAME: Final[str] = _require_str(("vm", "files", "rootfs_basename"))
+
+# ---------------------------------------------------------------------------
+# Host system paths (loaded from assets/defaults.yaml)
+# ---------------------------------------------------------------------------
+DEFAULT_SYSCTL_CONF_DIR: Final[str] = _require_str(("host", "system_dirs", "sysctl_conf_dir"))
+DEFAULT_SUDOERS_DIR: Final[str] = _require_str(("host", "system_dirs", "sudoers_dir"))
+DEFAULT_USR_SBIN_IP: Final[str] = _require_str(("host", "sbin_paths", "ip"))
+DEFAULT_USR_SBIN_IPTABLES: Final[str] = _require_str(("host", "sbin_paths", "iptables"))
+DEFAULT_USR_SBIN_IPTABLES_RESTORE: Final[str] = _require_str(
+    ("host", "sbin_paths", "iptables_restore")
+)
+DEFAULT_USR_SBIN_IPTABLES_SAVE: Final[str] = _require_str(("host", "sbin_paths", "iptables_save"))
+DEFAULT_USR_SBIN_SYSCTL: Final[str] = _require_str(("host", "sbin_paths", "sysctl"))
+
+# ---------------------------------------------------------------------------
+# Timeouts and poll intervals (in seconds)
+# ---------------------------------------------------------------------------
+
+FIRECRACKER_SHUTDOWN_POLL_INTERVAL_S: Final[float] = 0.1
+LOG_FOLLOW_POLL_INTERVAL_S: Final[float] = 0.3
+
+# ---------------------------------------------------------------------------
+# HTTP download timeouts (in seconds)
+# ---------------------------------------------------------------------------
+
+HTTP_TIMEOUT_KERNEL_DOWNLOAD_S: Final[int] = 600
+HTTP_TIMEOUT_KERNEL_CONFIG_S: Final[int] = 60
+HTTP_TIMEOUT_SHA256_FETCH_S: Final[int] = 30
+HTTP_TIMEOUT_FIRECRACKER_DOWNLOAD_S: Final[int] = 300
+HTTP_TIMEOUT_SHA256_SIDECAR_S: Final[int] = 15
+HTTP_TIMEOUT_FC_KERNEL_DOWNLOAD_S: Final[int] = 300
 
 # ---------------------------------------------------------------------------
 # Firecracker defaults
@@ -289,6 +385,75 @@ def _resolve_version() -> str:
 
 
 HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/{_resolve_version()}"
+
+# ---------------------------------------------------------------------------
+# Hardcoded numeric constants extracted from core layer
+# ---------------------------------------------------------------------------
+
+# Buffer sizes (in bytes)
+CONST_BUFFER_SIZE_BYTES: Final[int] = 1024
+CONST_SSH_KEY_SIZE_BITS: Final[int] = 384
+CONST_SSH_KEY_SIZE_BYTES: Final[int] = 384
+CONST_HASH_BUFFER_SIZE: Final[int] = 384
+CONST_SECTOR_SIZE_BYTES: Final[int] = 512
+CONST_MEBIBYTE_BYTES: Final[int] = 1024 * 1024
+CONST_KIBIBYTE_BYTES: Final[int] = 1024
+
+# Permission modes (octal)
+CONST_FILE_PERMS_PRIVATE_KEY: Final[int] = 0o600
+CONST_FILE_PERMS_PUBLIC_KEY: Final[int] = 0o644
+CONST_FILE_PERMS_METADATA: Final[int] = 0o600
+CONST_DIR_PERMS_CACHE: Final[int] = 0o700
+CONST_FILE_PERMS_STATE_FILE: Final[int] = 0o640
+CONST_FILE_PERMS_SUDOERS: Final[int] = 0o440
+CONST_FILE_PERMS_CONFIG: Final[int] = 0o600
+CONST_FILE_PERMS_EXECUTABLE: Final[int] = 0o755
+CONST_FILE_PERMS_PID_FILE: Final[int] = 0o600
+CONST_FILE_PERMS_NETWORK_CONFIG: Final[int] = 0o600
+CONST_FILE_PERMS_DHCP_LEASES: Final[int] = 0o600
+CONST_FILE_PERMS_VM_STATE: Final[int] = 0o600
+
+# File/directory sizes (in bytes)
+CONST_MIN_IMAGE_SIZE_BYTES: Final[int] = 512
+CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
+CONST_CONFIG_FILE_SIZE_BYTES: Final[int] = 448
+CONST_HOST_STATE_SIZE_BYTES: Final[int] = 416
+CONST_HOST_PRIV_SIZE_BYTES: Final[int] = 288
+
+# HTTP status codes
+CONST_HTTP_STATUS_NO_CONTENT: Final[int] = 204
+CONST_HTTP_STATUS_SUCCESS: Final[int] = 200
+CONST_HTTP_STATUS_CREATED: Final[int] = 201
+CONST_HTTP_RANGE_START: Final[int] = 200
+
+# Port and network constants
+CONST_FIRECRACKER_API_PORT_START: Final[int] = 493
+CONST_FIRECRACKER_API_PORT_MIN: Final[int] = 493
+CONST_FIRECRACKER_API_PORT_MAX: Final[int] = 1024
+
+# VM resource limits
+CONST_VM_MEM_MIN_MIB: Final[int] = 128
+CONST_VM_MEM_MAX_MIB: Final[int] = 65536
+CONST_VM_VCPU_MIN: Final[int] = 1
+CONST_VM_VCPU_MAX: Final[int] = 256
+CONST_IP_RANGE_SIZE: Final[int] = 256
+
+# Time constants (in seconds)
+CONST_SECONDS_PER_HOUR: Final[int] = 3600
+CONST_SECONDS_PER_DAY: Final[int] = 86400
+CONST_SECONDS_PER_WEEK: Final[int] = 604800
+CONST_SECONDS_PER_MONTH: Final[int] = 2592000
+CONST_SECONDS_PER_YEAR: Final[int] = 31536000
+CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
+
+# Retry and timeout constants
+CONST_RETRY_ATTEMPTS: Final[int] = 3
+CONST_RETRY_DELAY_SECONDS: Final[int] = 1
+CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = 1024
+CONST_BINARY_FETCH_TIMEOUT: Final[int] = 300
+CONST_SOCKET_TIMEOUT_SECONDS: Final[float] = 5.0
+CONST_POLL_STEP_SECONDS: Final[float] = 0.1
+CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
 MAX_VMS: Final[int] = _require_int(("vm", "limits", "max_vms"))
 
 # External URLs

@@ -1,12 +1,20 @@
 """VM data models."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum, auto
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mvmctl.core.config_gen import DriveConfig
 
 from mvmctl.constants import (
     DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_LOGGING,
+    DEFAULT_VM_ENABLE_METRICS,
     DEFAULT_VM_ENABLE_PCI,
     DEFAULT_VM_KERNEL_FILENAME,
     DEFAULT_VM_LSM_FLAGS,
@@ -60,6 +68,9 @@ class VMConfig:
     enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI
     lsm_flags: str = DEFAULT_VM_LSM_FLAGS
+    extra_drives: list[DriveConfig] = field(default_factory=list)
+    enable_logging: bool = DEFAULT_VM_ENABLE_LOGGING
+    enable_metrics: bool = DEFAULT_VM_ENABLE_METRICS
 
     def __post_init__(self) -> None:
         """Validate that vCPU count and memory size are within acceptable bounds."""

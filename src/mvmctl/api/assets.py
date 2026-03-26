@@ -15,11 +15,13 @@ from typing import Literal, TypedDict
 import yaml
 
 from mvmctl.constants import (
+    CONST_MEBIBYTE_BYTES,
     DEFAULT_KERNEL_VERSION,
-    FALLBACK_MAX_PARALLEL_DOWNLOADS,
+    DEFAULT_MAX_PARALLEL_DOWNLOADS,
     KERNEL_TARBALL_URL_TEMPLATE,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
+from mvmctl.core import kernel as kernel_core
 from mvmctl.core.binary_manager import (
     BinaryVersion,
     fetch_binary,
@@ -29,7 +31,15 @@ from mvmctl.core.binary_manager import (
     set_active_version,
 )
 from mvmctl.core.image import fetch_image, import_image, load_images_config
-from mvmctl.core.kernel import build_kernel_pipeline
+from mvmctl.core.kernel import (
+    build_kernel_pipeline,
+    download_firecracker_kernel,
+    get_default_kernel_path,
+    human_readable_time,
+    list_kernels,
+    resolve_kernel_spec,
+    set_default_kernel,
+)
 from mvmctl.exceptions import ConfigError, ImageError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.fs import get_assets_dir, get_images_dir, get_kernels_dir
@@ -39,6 +49,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "AssetInfo",
     "BinaryVersion",
+    "ImageSpec",
     "fetch_binary",
     "list_local_versions",
     "list_remote_versions",
@@ -50,11 +61,18 @@ __all__ = [
     "load_images_config",
     "ImageImportSpec",
     "build_kernel_pipeline",
+    "list_kernels",
+    "set_default_kernel",
+    "get_default_kernel_path",
+    "resolve_kernel_spec",
+    "download_firecracker_kernel",
+    "human_readable_time",
     "setup_assets",
     "pull_kernel",
     "pull_image",
     "pull_images",
     "list_assets",
+    "kernel_core",
     "remove_asset",
 ]
 
@@ -100,7 +118,7 @@ def pull_kernel(
     output_path: Path | None = None,
     build_dir: Path | None = None,
     jobs: int | None = None,
-) -> Path:
+) -> kernel_core.KernelPipelineResult:
     """Download and/or build a minimal Linux kernel for Firecracker.
 
     Args:
@@ -111,7 +129,7 @@ def pull_kernel(
         jobs: Parallel build jobs.
 
     Returns:
-        Path to the compiled kernel binary.
+        KernelPipelineResult with build directory and any warnings/info messages.
 
     Raises:
         KernelError: If building or fetching fails.
@@ -126,14 +144,13 @@ def pull_kernel(
 
         build_dir = get_cache_dir() / "kernel-build"
 
-    build_kernel_pipeline(
+    return build_kernel_pipeline(
         version=version,
         source_url=remote_tar_url,
         output_path=output_path,
         build_dir=build_dir,
         jobs=jobs,
     )
-    return output_path
 
 
 def pull_image(
@@ -175,7 +192,7 @@ def fetch_images_parallel(
     specs: list[ImageSpec],
     output_dir: Path,
     force: bool = False,
-    max_workers: int = FALLBACK_MAX_PARALLEL_DOWNLOADS,
+    max_workers: int = DEFAULT_MAX_PARALLEL_DOWNLOADS,
 ) -> list[Path]:
     """Fetch multiple images concurrently using a thread pool.
 
@@ -217,7 +234,7 @@ def pull_images(
     force: bool = False,
     images_yaml: Path | None = None,
     output_dir: Path | None = None,
-    max_workers: int = FALLBACK_MAX_PARALLEL_DOWNLOADS,
+    max_workers: int = DEFAULT_MAX_PARALLEL_DOWNLOADS,
 ) -> list[Path]:
     """Fetch multiple image IDs in parallel.
 
@@ -275,7 +292,7 @@ def list_assets() -> list[AssetInfo]:
     if kernels_dir.exists():
         for kp in kernels_dir.iterdir():
             if kp.is_file() and kp.name.startswith("vmlinux"):
-                size_mib = kp.stat().st_size / (1024 * 1024)
+                size_mib = kp.stat().st_size / CONST_MEBIBYTE_BYTES
                 assets.append(
                     {
                         "type": "kernel",
@@ -298,7 +315,7 @@ def list_assets() -> list[AssetInfo]:
 
             size_mib_out: float | None = None
             if exists and target_path is not None:
-                size_mib_out = target_path.stat().st_size / (1024 * 1024)
+                size_mib_out = target_path.stat().st_size / CONST_MEBIBYTE_BYTES
 
             assets.append(
                 {

@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from mvmctl.constants import (
+    CONST_FILE_PERMS_STATE_FILE,
     IPTABLES_RULES_V4,
     ISO_BINARIES,
     PROJECT_GROUP,
@@ -245,7 +246,7 @@ def save_iptables_rules() -> HostChange | None:
     try:
         rules_path.parent.mkdir(parents=True, exist_ok=True)
         rules_path.write_text(filtered)
-        rules_path.chmod(0o640)
+        rules_path.chmod(CONST_FILE_PERMS_STATE_FILE)
     except OSError as e:
         raise HostError(f"Failed to write {rules_path}: {e}") from e
 

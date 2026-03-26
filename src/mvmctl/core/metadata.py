@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any
 
+from mvmctl.constants import CONST_FILE_PERMS_METADATA
+
 logger = logging.getLogger(__name__)
 
 _METADATA_FILENAME = "metadata.json"
@@ -201,7 +203,7 @@ def write_metadata(cache_dir: Path, data: dict[str, Any]) -> None:
         path = _metadata_path(cache_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2))
-        path.chmod(0o600)
+        path.chmod(CONST_FILE_PERMS_METADATA)
         # Invalidate cache since file has been modified
         _metadata_cache.invalidate(cache_dir)
 

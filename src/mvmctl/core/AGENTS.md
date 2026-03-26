@@ -118,8 +118,29 @@ Called in `api/` layer before entering core, or explicitly in core for ops needi
 
 ## KNOWN VIOLATIONS
 
-- `kernel.py:385-444` — calls `print_warning`/`print_info`/`console.print` (should be CLI layer)
-- `host_privilege.py:check_privileges_interactive()` — interactive print_error/print_warning/print_info in core
+- `host_privilege.py:check_privileges_interactive()` — interactive messaging in core layer is an intentional exception for privilege setup UX. This function handles first-time user onboarding with interactive prompts and status messages. The core layer otherwise strictly returns data or raises exceptions.
+
+## CORE LAYER OUTPUT RULE
+
+The core layer **must not** produce console output. All output formatting belongs in the CLI layer (`cli/`).
+
+**Correct pattern:**
+```python
+# core/kernel.py — return data
+def build_kernel(...) -> KernelBuildResult:
+    warnings = []
+    if some_condition:
+        warnings.append("Build may take 10-30 minutes")
+    return KernelBuildResult(success=True, warnings=warnings, ...)
+
+# cli/asset.py — format and display
+def kernel_fetch(...):
+    result = build_kernel(...)
+    for warning in result.warnings:
+        print_warning(warning)
+```
+
+**Exception:** `check_privileges_interactive()` in `host_privilege.py` is allowed to print because it's part of the first-time setup wizard (`mvm host init`) where immediate user feedback is essential for privilege configuration.
 
 ## KEY MODULES
 

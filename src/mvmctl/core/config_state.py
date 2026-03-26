@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from mvmctl.constants import (
+    CONST_DIR_PERMS_CACHE,
+    CONST_FILE_PERMS_CONFIG,
     DEFAULT_FIRECRACKER_CI_VERSION,
     DEFAULT_FIRECRACKER_VERSION,
 )
@@ -39,10 +41,10 @@ def _read_raw() -> dict[str, Any]:
 
 def _write_raw(state: dict[str, Any]) -> None:
     path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.parent.chmod(0o700)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
+    path.parent.chmod(CONST_DIR_PERMS_CACHE)
     path.write_text(json.dumps(state, indent=2))
-    path.chmod(0o600)
+    path.chmod(CONST_FILE_PERMS_CONFIG)
 
 
 def _rand_suffix(n: int = 3) -> str:

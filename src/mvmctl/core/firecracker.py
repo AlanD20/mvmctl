@@ -12,6 +12,12 @@ import socket
 from pathlib import Path
 from typing import override
 
+from mvmctl.constants import (
+    CONST_HTTP_STATUS_NO_CONTENT,
+    CONST_HTTP_STATUS_SUCCESS,
+    CONST_SOCKET_TIMEOUT_SECONDS,
+    DEFAULT_FC_API_SOCKET_FILENAME,
+)
 from mvmctl.exceptions import FirecrackerError, SocketNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -27,7 +33,7 @@ class UnixSocketHTTPConnection(http.client.HTTPConnection):
     @override
     def connect(self) -> None:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(5.0)
+        self.sock.settimeout(CONST_SOCKET_TIMEOUT_SECONDS)
         self.sock.connect(str(self.socket_path))
 
 
@@ -136,7 +142,7 @@ class FirecrackerClient:
 
         status, data = self._request("PUT", "/snapshot/create", body)
 
-        if status == 204:
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
             logger.info("Snapshot created")
             logger.info("  Memory: %s", mem_path)
             logger.info("  State: %s", snapshot_path)
@@ -176,7 +182,7 @@ class FirecrackerClient:
 
         status, data = self._request("PUT", "/snapshot/load", body)
 
-        if status == 204:
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
             logger.info("Snapshot loaded")
             return True
         else:
@@ -193,7 +199,7 @@ class FirecrackerClient:
         """
         status, data = self._request("GET", "/")
 
-        if status == 200 and data:
+        if status == CONST_HTTP_STATUS_SUCCESS and data:
             return data
         return None
 
@@ -205,7 +211,7 @@ class FirecrackerClient:
         """
         status, data = self._request("GET", "/vm")
 
-        if status == 200 and data:
+        if status == CONST_HTTP_STATUS_SUCCESS and data:
             return data
         return None
 
@@ -221,7 +227,7 @@ class FirecrackerClient:
         logger.info("Starting VM...")
         status, _ = self._request("PUT", "/actions", {"action_type": "InstanceStart"})
 
-        if status == 204:
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
             logger.info("VM started")
             return True
         else:
@@ -239,7 +245,7 @@ class FirecrackerClient:
             logger.error("Failed to send Ctrl+Alt+Del")
             return False
 
-        if status == 204:
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
             logger.info("Ctrl+Alt+Del sent")
             return True
         else:
@@ -253,7 +259,7 @@ def get_vm_socket_path(vm_name: str) -> Path | None:
 
     vm_dir = get_vm_dir(vm_name)
     for name in [
-        "firecracker.api.socket",
+        DEFAULT_FC_API_SOCKET_FILENAME,
         f"{vm_name}.socket",
         "firecracker.socket",
         "firecracker.sock",

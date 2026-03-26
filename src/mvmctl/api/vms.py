@@ -6,19 +6,31 @@ from pathlib import Path
 
 from mvmctl.api.host import check_privileges
 from mvmctl.constants import (
+    DEFAULT_FIRECRACKER_BIN_NAME,
+    DEFAULT_NETWORK_NAME,
+    DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_PCI,
     DEFAULT_VM_LOG_FOLLOW,
     DEFAULT_VM_LOG_LINES,
     DEFAULT_VM_LOG_TYPE,
+    DEFAULT_VM_MEM_MIB,
     DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_VCPU_COUNT,
     TAP_PREFIX,
 )
 from mvmctl.core.logs import show_logs
 from mvmctl.core.ssh import connect_to_vm
 from mvmctl.core.vm_lifecycle import (
-    create_vm,
-    load_snapshot,
-    remove_vm,
-    snapshot_vm,
+    create_vm as _create_vm,
+)
+from mvmctl.core.vm_lifecycle import (
+    load_snapshot as _load_snapshot,
+)
+from mvmctl.core.vm_lifecycle import (
+    remove_vm as _remove_vm,
+)
+from mvmctl.core.vm_lifecycle import (
+    snapshot_vm as _snapshot_vm,
 )
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.models.vm import VMInstance, VMState
@@ -35,7 +47,61 @@ __all__ = [
     "ssh_vm",
     "get_logs",
     "cleanup_vms",
+    "get_vm_manager",
+    "VMManager",
 ]
+
+
+def create_vm(
+    name: str,
+    image: str,
+    kernel: str | None = None,
+    vcpus: int = DEFAULT_VM_VCPU_COUNT,
+    mem: int = DEFAULT_VM_MEM_MIB,
+    ip: str | None = None,
+    network_name: str = DEFAULT_NETWORK_NAME,
+    mac: str | None = None,
+    ssh_key: str | None = None,
+    user_data: Path | None = None,
+    user: str = DEFAULT_VM_SSH_USER,
+    enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET,
+    enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
+    firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
+    vm_manager: VMManager | None = None,
+) -> VMInstance:
+    check_privileges("/usr/sbin/ip")
+    return _create_vm(
+        name=name,
+        image=image,
+        kernel=kernel,
+        vcpus=vcpus,
+        mem=mem,
+        ip=ip,
+        network_name=network_name,
+        mac=mac,
+        ssh_key=ssh_key,
+        user_data=user_data,
+        user=user,
+        enable_api_socket=enable_api_socket,
+        enable_pci=enable_pci,
+        firecracker_bin=firecracker_bin,
+        vm_manager=vm_manager,
+    )
+
+
+def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
+    check_privileges("/usr/sbin/ip")
+    return _remove_vm(name=name, vm_manager=vm_manager)
+
+
+def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
+    check_privileges("/usr/sbin/ip")
+    return _snapshot_vm(name=name, mem_out=mem_out, state_out=state_out)
+
+
+def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = True) -> None:
+    check_privileges("/usr/sbin/ip")
+    return _load_snapshot(name=name, mem_in=mem_in, state_in=state_in, resume_after=resume_after)
 
 
 def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) -> list[VMInstance]:

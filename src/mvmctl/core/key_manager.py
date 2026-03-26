@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 
+from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY
 from mvmctl.exceptions import MVMKeyError
 from mvmctl.utils.fs import get_keys_dir
 
@@ -57,7 +58,7 @@ def _save_registry(registry: dict[str, dict[str, Any]]) -> None:
     path = _registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(registry, indent=2))
-    path.chmod(0o600)
+    path.chmod(CONST_FILE_PERMS_PRIVATE_KEY)
 
 
 def _compute_fingerprint(pub_key_content: str) -> str:

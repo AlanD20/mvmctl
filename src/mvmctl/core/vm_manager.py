@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
+from mvmctl.constants import CONST_FILE_PERMS_VM_STATE
 from mvmctl.models.vm import VMInstance, VMState
 from mvmctl.utils.fs import get_vms_dir
 
@@ -151,7 +152,7 @@ class VMManager:
         state["schema_version"] = _STATE_SCHEMA_VERSION
         with open(self.state_file, "w") as f:
             json.dump(state, f, indent=2, default=str)
-        self.state_file.chmod(0o600)
+        self.state_file.chmod(CONST_FILE_PERMS_VM_STATE)
         self._cache = state
 
     def _count_vms_from_file(self) -> int:

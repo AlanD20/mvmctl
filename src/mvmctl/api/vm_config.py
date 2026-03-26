@@ -10,6 +10,13 @@ from mvmctl.constants import (
 from mvmctl.core.config_gen import ConfigGenerator
 from mvmctl.models.vm_config_file import VMCreateConfigFile
 
+__all__ = [
+    "load_vm_config_file",
+    "save_vm_config_file",
+    "build_vm_config_file",
+    "merge_cli_overrides",
+]
+
 
 def _vm_defaults() -> Any:
     from mvmctl.core.config import load_config

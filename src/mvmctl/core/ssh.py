@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from mvmctl.constants import DEFAULT_VM_SSH_USER
+from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY, DEFAULT_VM_SSH_USER
 from mvmctl.core.vm_manager import VMManager
 from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
 from mvmctl.utils.fs import get_cache_dir
@@ -164,7 +164,7 @@ def connect_to_vm(
     if not key_path.exists():
         raise MVMKeyError(f"SSH key not found: {key_path}")
 
-    key_path.chmod(0o600)
+    key_path.chmod(CONST_FILE_PERMS_PRIVATE_KEY)
     logger.info("Connecting to %s as %s...", ip, user)
 
     if exec_mode and not command:

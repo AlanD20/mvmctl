@@ -12,7 +12,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
-from mvmctl.constants import DEFAULT_NETWORK_CIDR, DEFAULT_NETWORK_NAME, device_prefix
+from mvmctl.constants import (
+    CONST_FILE_PERMS_DHCP_LEASES,
+    CONST_FILE_PERMS_NETWORK_CONFIG,
+    CONST_FILE_PERMS_VM_STATE,
+    CONST_IP_RANGE_SIZE,
+    DEFAULT_NETWORK_CIDR,
+    DEFAULT_NETWORK_NAME,
+    device_prefix,
+)
 from mvmctl.core.network import (
     allocate_ip,
     bridge_exists,
@@ -94,7 +102,7 @@ def _save_config(network_dir: Path, config: NetworkConfig) -> None:
     network_dir.mkdir(parents=True, exist_ok=True)
     config_file = network_dir / "config.json"
     config_file.write_text(json.dumps(asdict(config), indent=2))
-    config_file.chmod(0o600)
+    config_file.chmod(CONST_FILE_PERMS_NETWORK_CONFIG)
     _chown_to_real_user(config_file)
     _chown_to_real_user(network_dir)
 
@@ -111,7 +119,7 @@ def _save_leases(network_dir: Path, leases: list[NetworkLease]) -> None:
     network_dir.mkdir(parents=True, exist_ok=True)
     leases_file = network_dir / "leases.json"
     leases_file.write_text(json.dumps([asdict(lease) for lease in leases], indent=2))
-    leases_file.chmod(0o600)
+    leases_file.chmod(CONST_FILE_PERMS_DHCP_LEASES)
     _chown_to_real_user(leases_file)
 
 
@@ -136,7 +144,7 @@ def _save_network_state(network_dir: Path, state: NetworkState) -> None:
     network_dir.mkdir(parents=True, exist_ok=True)
     state_file = network_dir / "state.json"
     state_file.write_text(json.dumps(asdict(state), indent=2))
-    state_file.chmod(0o600)
+    state_file.chmod(CONST_FILE_PERMS_VM_STATE)
     _chown_to_real_user(state_file)
 
 
@@ -477,13 +485,13 @@ def _auto_allocate_subnet() -> str:
     for net in existing:
         used_nets.add(ipaddress.IPv4Network(net.cidr, strict=False))
 
-    # Start from 10.20.0.0/24 and increment the third octet
-    for i in range(256):
+    _POOL_BASE = "10.20.0.0/16"
+    for i in range(CONST_IP_RANGE_SIZE):
         candidate = ipaddress.IPv4Network(f"10.20.{i}.0/24")
         if candidate not in used_nets:
             return str(candidate)
 
-    raise NetworkError("No available /24 subnets in 10.20.0.0/16 pool")
+    raise NetworkError(f"No available /24 subnets in {_POOL_BASE} pool")
 
 
 def _validate_subnet_no_overlap(subnet: str, exclude_name: str = "") -> None:

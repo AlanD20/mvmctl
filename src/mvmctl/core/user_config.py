@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from mvmctl.constants import CLI_NAME
+from mvmctl.constants import CLI_NAME, CONST_FILE_PERMS_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _save_user_config(data: dict[str, Any]) -> None:
     path = _user_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, default_flow_style=False))
-    path.chmod(0o600)
+    path.chmod(CONST_FILE_PERMS_CONFIG)
 
 
 def get_config_value(key: str) -> Any:

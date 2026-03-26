@@ -10,13 +10,21 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mvmctl.constants import IPTABLES_RULES_V4, PROJECT_NAME, SUDOERS_DROP_IN_PATH
+from mvmctl.constants import (
+    CONST_FILE_PERMS_CONFIG,
+    CONST_FILE_PERMS_STATE_FILE,
+    DEFAULT_SUDOERS_DIR,
+    DEFAULT_SYSCTL_CONF_DIR,
+    IPTABLES_RULES_V4,
+    PROJECT_NAME,
+    SUDOERS_DROP_IN_PATH,
+)
 from mvmctl.exceptions import HostError
 
 logger = logging.getLogger(__name__)
 
 SYSCTL_KEY = "net.ipv4.ip_forward"
-SYSCTL_CONF = Path(f"/etc/sysctl.d/{PROJECT_NAME}.conf")
+SYSCTL_CONF = Path(f"{DEFAULT_SYSCTL_CONF_DIR}/{PROJECT_NAME}.conf")
 
 RESTORABLE_SYSCTL_KEYS: frozenset[str] = frozenset({"net.ipv4.ip_forward"})
 RESTORABLE_FILE_PATHS: frozenset[Path] = frozenset({Path(SUDOERS_DROP_IN_PATH), SYSCTL_CONF})
@@ -92,7 +100,7 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
     }
     sf = _state_file(cache_dir)
     sf.write_text(json.dumps(data, indent=2) + "\n")
-    os.chmod(sf, 0o600)
+    os.chmod(sf, CONST_FILE_PERMS_CONFIG)
     # Chown the entire cache root so the real user can write to all subdirs
     # (bin/, kernels/, images/, …) after a sudo-elevated init run.
     chown_to_real_user(cache_dir)
@@ -151,7 +159,7 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
             try:
                 if change.original_value is not None:
                     rules_path.write_text(change.original_value)
-                    rules_path.chmod(0o640)
+                    rules_path.chmod(CONST_FILE_PERMS_STATE_FILE)
                     logger.info("Restored original iptables rules to %s", rules_path)
                 elif rules_path.exists():
                     rules_path.unlink()
@@ -175,8 +183,8 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
             if target.exists():
                 try:
                     if change.original_value is not None:
-                        # Validate sudoers content before writing to /etc/sudoers.d/
-                        if str(target).startswith("/etc/sudoers"):
+                        # Validate sudoers content before writing to sudoers dir
+                        if str(target).startswith(DEFAULT_SUDOERS_DIR):
                             result = subprocess.run(
                                 ["visudo", "-c", "-f", "-"],
                                 input=change.original_value,

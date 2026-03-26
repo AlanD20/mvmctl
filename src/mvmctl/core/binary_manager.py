@@ -13,9 +13,13 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from mvmctl.constants import (
+    CONST_BUFFER_SIZE_BYTES,
+    CONST_HTTP_TIMEOUT_SECONDS,
+    CONST_MIN_BINARY_SIZE_BYTES,
     DEFAULT_REMOTE_VERSION_LIMIT,
     FIRECRACKER_GITHUB_DOWNLOAD_URL,
     FIRECRACKER_GITHUB_RELEASES_API_URL,
+    HTTP_TIMEOUT_SHA256_FETCH_S,
     HTTP_USER_AGENT,
 )
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, MVMError
@@ -24,7 +28,7 @@ from mvmctl.utils.http import download_file
 
 logger = logging.getLogger(__name__)
 
-_CHUNK_SIZE = 512 * 1024
+_CHUNK_SIZE = CONST_MIN_BINARY_SIZE_BYTES * CONST_BUFFER_SIZE_BYTES
 
 GITHUB_RELEASES_URL = FIRECRACKER_GITHUB_RELEASES_API_URL
 GITHUB_DOWNLOAD_URL = FIRECRACKER_GITHUB_DOWNLOAD_URL
@@ -113,7 +117,7 @@ def list_remote_versions(limit: int = DEFAULT_REMOTE_VERSION_LIMIT) -> list[str]
     req = Request(url, headers={"User-Agent": HTTP_USER_AGENT, "Accept": "application/json"})
 
     try:
-        with urlopen(req, timeout=30) as response:
+        with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as response:
             data: list[dict[str, object]] = json.loads(response.read().decode())
     except (URLError, OSError) as exc:
         raise BinaryError(f"Failed to fetch releases from GitHub: {exc}") from exc
@@ -158,7 +162,7 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     expected_sha256: str | None = None
     try:
         req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             content = resp.read().decode().strip()
         parts = content.split()
         if parts:
@@ -176,7 +180,7 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
             tgz_url,
             tgz_path,
             expected_sha256=expected_sha256,
-            timeout=300,
+            timeout=CONST_HTTP_TIMEOUT_SECONDS,
         )
     except MVMError as exc:
         tgz_path.unlink(missing_ok=True)
