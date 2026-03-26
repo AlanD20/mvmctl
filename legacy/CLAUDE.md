@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This repository contains a **Firecracker microVM management system** with two components:
 
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
+
 1. **`firecracker-manager/`** — A production-grade Python CLI (`mvm`) for managing Firecracker microVMs. This is the primary component.
 2. **`single-vm/` and `multi-vm/`** — Legacy bash-based scripts for simpler use cases.
 

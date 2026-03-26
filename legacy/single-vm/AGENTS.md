@@ -1,6 +1,7 @@
 # Firecracker Single-VM Setup
 
 **Scope:** Single Firecracker microVM with TAP device and NAT
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 
 ## STRUCTURE
 

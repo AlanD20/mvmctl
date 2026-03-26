@@ -1,6 +1,7 @@
 # mvmctl/api/ — Public API Layer
 
 **Scope:** Stable Python API boundary between CLI and core  
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Role:** Add privilege checks; delegate to `core/`; export with `__all__`
 
 ## STRUCTURE

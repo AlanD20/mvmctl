@@ -19,7 +19,6 @@ from mvmctl.core.metadata import (
     set_default_binary_entry,
     set_default_image_by_internal_id,
     set_default_image_entry,
-    set_default_kernel_by_filename,
     update_binary_entry,
 )
 from mvmctl.utils.fs import get_bin_dir, get_cache_dir
@@ -121,8 +120,8 @@ def get_firecracker_config() -> dict[str, str]:
 def initialize_default_config() -> dict[str, Any]:
     """Initialize config file with default values if not present.
 
-    Creates the config file with default Firecracker version settings,
-    assets paths, and defaults section. Migrates legacy default_image to defaults.image.
+    Creates the config file with default Firecracker version settings and
+    assets paths.
     Returns the initialized config.
 
     Returns:
@@ -152,42 +151,11 @@ def initialize_default_config() -> dict[str, Any]:
     get_assets_config()
     state = _read_raw()
 
-    if _DEFAULTS_KEY in state and isinstance(state.get(_DEFAULTS_KEY), dict):
-        defaults_section = state[_DEFAULTS_KEY]
-        image_default = defaults_section.get("image")
-        kernel_default = defaults_section.get("kernel")
-
-        cache_dir = get_cache_dir()
-        if isinstance(image_default, str) and image_default:
-            try:
-                set_default_image_entry(cache_dir, image_default)
-            except KeyError:
-                logger.debug("Legacy default image not found in metadata: %s", image_default)
-        if isinstance(kernel_default, str) and kernel_default:
-            try:
-                set_default_kernel_by_filename(cache_dir, kernel_default)
-            except KeyError:
-                logger.debug("Legacy default kernel not found in metadata: %s", kernel_default)
-
-        if "default_image" in state and isinstance(state["default_image"], str):
-            try:
-                set_default_image_entry(cache_dir, state["default_image"])
-            except KeyError:
-                logger.debug("Legacy top-level default image not found in metadata")
-            del state["default_image"]
-            changed = True
-
+    if _DEFAULTS_KEY in state:
         del state[_DEFAULTS_KEY]
         changed = True
 
-    elif "default_image" in state:
-        cache_dir = get_cache_dir()
-        default_image = state.get("default_image")
-        if isinstance(default_image, str):
-            try:
-                set_default_image_entry(cache_dir, default_image)
-            except KeyError:
-                logger.debug("Legacy top-level default image not found in metadata")
+    if "default_image" in state:
         del state["default_image"]
         changed = True
 

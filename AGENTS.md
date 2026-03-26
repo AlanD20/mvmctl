@@ -1,6 +1,7 @@
 # mvmctl
 
 **Scope:** Production-grade Python CLI for managing Firecracker microVMs
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
 **Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
 **Generated:** 2026-03-26T13:00Z  

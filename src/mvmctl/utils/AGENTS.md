@@ -1,6 +1,7 @@
 # mvmctl/utils/ — Shared Helpers
 
 **Scope:** Pure, domain-agnostic utilities; no business logic, no Firecracker knowledge
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Never import from `core/`, `api/`, or `cli/`; zero side effects unless explicitly called
 
 ## STRUCTURE

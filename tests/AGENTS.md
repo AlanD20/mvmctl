@@ -1,6 +1,7 @@
 # tests/ — Test Suite
 
 **Scope:** Unit and integration tests  
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Coverage Gate:** 80% branch coverage (`pyproject.toml --cov-fail-under=80`)  
 **Rule:** Tests must NEVER require root, KVM, or real network stack
 

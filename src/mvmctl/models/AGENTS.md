@@ -1,6 +1,7 @@
 # mvmctl/models/ — Domain Dataclasses
 
 **Scope:** Pure data containers; no subprocess, no I/O, no side effects (except `VMConfig.__post_init__` validation)
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** `@dataclass` only; no methods with business logic
 
 ## STRUCTURE

@@ -1,6 +1,7 @@
 # mvmctl/cli/ — CLI Layer
 
 **Scope:** Typer command definitions only — arg parsing, output formatting, NO business logic  
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Call `api/` for everything; never import from `core/` directly
 
 ## STRUCTURE

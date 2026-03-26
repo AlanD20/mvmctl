@@ -1,7 +1,11 @@
 # mvmctl
 
 ## Project Overview
-`mvmctl` (`mvm`) is a production-grade Python CLI application for managing the complete lifecycle of [Firecracker](https://firecracker-microvm.github.io/) microVMs on Linux. It handles everything from downloading official kernels and root filesystem images to setting up bridge networking, creating/destroying VMs, SSH access, log streaming, and cleanup.
+`mvmctl` (`mvm`) is a production-grade Python CLI application for managing the complete lifecycle of [Firecracker](https://firecracker-microvm.github.io/) microVMs on Linux.
+
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
+
+It handles everything from downloading official kernels and root filesystem images to setting up bridge networking, creating/destroying VMs, SSH access, log streaming, and cleanup.
 
 **Tech Stack:**
 - **Language:** Python 3.13+

@@ -1,6 +1,7 @@
 # mvmctl/core/ — Business Logic Layer
 
 **Scope:** All subprocess calls, privilege checks, VM lifecycle, network, image, kernel  
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Return data or raise typed exceptions — NEVER format output here
 
 ## STRUCTURE

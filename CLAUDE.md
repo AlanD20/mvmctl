@@ -1,6 +1,7 @@
 # mvmctl — Claude Code Context
 
 **Project:** Production-grade Python CLI for managing Firecracker microVMs  
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.  
 **Stack:** Python 3.13, Typer, Rich, uv  
 **CLI Entry:** `mvm` console script (defined in `pyproject.toml`)
 

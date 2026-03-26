@@ -1,6 +1,7 @@
 # Firecracker Multi-VM Setup
 
 **Scope:** Multiple Firecracker microVMs with bridge networking
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 
 ## STRUCTURE
 
