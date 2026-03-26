@@ -164,7 +164,29 @@ class LabelDetector:
         Returns:
             Score based on label matching root filesystem patterns.
         """
-        raise NotImplementedError
+        # Get label from partition["name"] or partition["label"], default to empty string
+        label = partition.get("name", "") or partition.get("label", "")
+        if not isinstance(label, str):
+            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+
+        label_lower = label.lower()
+
+        # Root indicators - positive score
+        root_indicators = ("root", "cloudimg", "rootfs")
+        for indicator in root_indicators:
+            if indicator in label_lower:
+                return constants.DETECTOR_SCORES.get("LABEL_ROOT_SCORE", 1.0)
+
+        # Exclude indicators - negative score
+        exclude_indicators = ("esp", "efi", "boot", "swap")
+        for indicator in exclude_indicators:
+            if indicator in label_lower:
+                return constants.DETECTOR_SCORES.get("LABEL_EXCLUDE_SCORE", -0.5)
+
+        # No indicators - neutral score
+        return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+
+
 
 
 class SizeDetector:

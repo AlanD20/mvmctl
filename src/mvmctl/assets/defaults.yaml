@@ -148,5 +148,7 @@ detectors:
     EXCLUDE_SCORE: -1.0
     NEUTRAL_SCORE: 0.0
     MBR_LINUX_SCORE: 0.5
+    LABEL_ROOT_SCORE: 1.0
+    LABEL_EXCLUDE_SCORE: -0.5
   thresholds:
     MIN_ROOT_SIZE_MB: 500
