@@ -13,7 +13,7 @@ Before releasing, ensure the following are available on your workstation:
 
 ## Bumping the Version
 
-The version is defined in one place: the `version` field under `[project]` in `pyproject.toml`. Update it there, and also update the `__version__` fallback in `src/mvm/__init__.py` to match.
+The version is defined in one place: the `version` field under `[project]` in `pyproject.toml`. Update it there, and also update the `__version__` fallback in `src/mvmctl/__init__.py` to match.
 
 This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 
@@ -22,6 +22,33 @@ This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 - **PATCH** — increment when you make backward-compatible bug fixes (e.g., fixing a crash, correcting wrong behavior, documentation fixes that ship with the binary).
 
 Example: going from `0.3.1` to `0.4.0` means new features were added; going to `0.3.2` means only bugs were fixed.
+
+## Building Locally
+
+While the release workflow automates the binary build on GitHub Actions, you can build both the Python package and the standalone binary locally for testing.
+
+### 1. Building the Python Wheel with uv
+
+This produces a standard `.whl` and `.tar.gz` in the `dist/` folder:
+
+```bash
+uv build
+```
+
+### 2. Building the Standalone Binary with uv
+
+This uses PyInstaller to produce a single-file executable. We use `uv run` with the `build` dependency group to ensure all required tools are available. **Crucially, we must bundle the `assets/` directory** using the `--add-data` flag so the binary can access its bundled configurations at runtime:
+
+```bash
+uv run --group build pyinstaller --onefile --name mvm --add-data "src/mvmctl/assets:mvmctl/assets" src/mvmctl/main.py
+# The output will be located at dist/mvm
+```
+
+You can verify the binary by running:
+
+```bash
+./dist/mvm --version
+```
 
 ## Tagging and Pushing
 
