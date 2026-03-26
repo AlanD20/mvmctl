@@ -1,9 +1,12 @@
 """Root partition detection using weighted detector heuristics."""
 
+import logging
 from typing import Protocol
 
 from mvmctl import constants
 from mvmctl.exceptions import RootPartitionDetectionError, TieDetectedError  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 
 class PartitionDetector(Protocol):
@@ -45,8 +48,13 @@ class RootPartitionDetector:
     """
 
     def __init__(self) -> None:
-        """Initialize the detector with an empty registry."""
-        self._detectors: list[PartitionDetector] = []
+        """Initialize the detector with all built-in detectors registered."""
+        self._detectors: list[PartitionDetector] = [
+            TypeCodeDetector(),
+            LabelDetector(),
+            SizeDetector(),
+            FilesystemDetector(),
+        ]
 
     def register(self, detector: PartitionDetector) -> None:
         """Register a detector for use in root partition detection.
@@ -69,7 +77,30 @@ class RootPartitionDetector:
             RootPartitionDetectionError: If no suitable root partition is found.
             TieDetectedError: If multiple partitions score equally and highest.
         """
-        raise NotImplementedError
+        if len(partitions) == 1:
+            return 1
+
+        scores: list[tuple[int, float]] = []
+        for i, partition in enumerate(partitions):
+            total = sum(
+                detector.weight * detector.score(partition, partitions)
+                for detector in self._detectors
+            )
+            scores.append((i + 1, total))
+            logger.debug("Partition %d score: %f", i + 1, total)
+
+        best_score = max(score for _, score in scores)
+        best_partitions = [p for p, s in scores if s == best_score]
+
+        if len(best_partitions) > 1:
+            raise TieDetectedError([str(p) for p in best_partitions])
+
+        if best_score < 0:
+            raise RootPartitionDetectionError(
+                f"Best score {best_score} < 0, no suitable root partition found"
+            )
+
+        return best_partitions[0]
 
 
 class TypeCodeDetector:
