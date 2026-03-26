@@ -377,7 +377,7 @@ def setup_mvm_chains() -> bool:
         nonlocal had_existing_chains
         if chain_exists(chain_name, table or "filter"):
             had_existing_chains = True
-            logger.warning("iptables chain %s already exists; keeping existing chain", chain_name)
+            logger.debug("iptables chain %s already exists; keeping existing chain", chain_name)
             return False
         cmd = ["iptables"]
         if table:
@@ -395,9 +395,7 @@ def setup_mvm_chains() -> bool:
                 stderr = e.stderr
             if "Chain already exists" in stderr:
                 had_existing_chains = True
-                logger.warning(
-                    "iptables chain %s already exists; keeping existing chain", chain_name
-                )
+                logger.debug("iptables chain %s already exists; keeping existing chain", chain_name)
                 return False
             raise NetworkError(f"Failed to create {chain_name} chain") from e
 
@@ -407,31 +405,39 @@ def setup_mvm_chains() -> bool:
     # Create MVM-POSTROUTING chain in nat table
     _create_chain_if_missing(postrouting_chain, "nat")
 
-    # Add jump from FORWARD to MVM-FORWARD
+    subprocess.run(
+        _privileged_cmd(["iptables", "-D", "FORWARD", "-j", forward_chain]),
+        capture_output=True,
+        check=False,
+    )
     jump_rule = ["iptables", "-C", "FORWARD", "-j", forward_chain]
     if not _iptables_rule_exists(jump_rule):
         try:
             subprocess.run(
-                _privileged_cmd(["iptables", "-A", "FORWARD", "-j", forward_chain]),
+                _privileged_cmd(["iptables", "-I", "FORWARD", "1", "-j", forward_chain]),
                 check=True,
                 capture_output=True,
             )
-            logger.debug("Added jump from FORWARD to %s", forward_chain)
+            logger.debug("Inserted high-priority jump from FORWARD to %s", forward_chain)
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to add jump to {forward_chain}") from e
 
-    # Add jump from POSTROUTING to MVM-POSTROUTING
+    subprocess.run(
+        _privileged_cmd(["iptables", "-t", "nat", "-D", "POSTROUTING", "-j", postrouting_chain]),
+        capture_output=True,
+        check=False,
+    )
     jump_rule_nat = ["iptables", "-t", "nat", "-C", "POSTROUTING", "-j", postrouting_chain]
     if not _iptables_rule_exists(jump_rule_nat):
         try:
             subprocess.run(
                 _privileged_cmd(
-                    ["iptables", "-t", "nat", "-A", "POSTROUTING", "-j", postrouting_chain]
+                    ["iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-j", postrouting_chain]
                 ),
                 check=True,
                 capture_output=True,
             )
-            logger.debug("Added jump from POSTROUTING to %s", postrouting_chain)
+            logger.debug("Inserted high-priority jump from POSTROUTING to %s", postrouting_chain)
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to add jump to {postrouting_chain}") from e
 
@@ -504,6 +510,63 @@ def teardown_mvm_chains() -> None:
             raise NetworkError(f"Failed to remove {postrouting_chain} chain") from e
 
     logger.info("MVM iptables chains removed")
+
+
+def teardown_mvm_chains_with_status() -> list[str]:
+    forward_chain = MVM_FORWARD_CHAIN
+    postrouting_chain = MVM_POSTROUTING_CHAIN
+
+    status: list[str] = []
+
+    if chain_exists(forward_chain, "filter"):
+        subprocess.run(
+            _privileged_cmd(["iptables", "-D", "FORWARD", "-j", forward_chain]),
+            capture_output=True,
+            check=False,
+        )
+        try:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-F", forward_chain]),
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                _privileged_cmd(["iptables", "-X", forward_chain]),
+                check=True,
+                capture_output=True,
+            )
+            status.append(f"MVM Networking: deleted chain {forward_chain}")
+        except subprocess.CalledProcessError:
+            status.append(f"Warning: MVM Networking: failed to delete chain {forward_chain}")
+    else:
+        status.append(f"MVM Networking: chain {forward_chain} already deleted, skipping")
+
+    if chain_exists(postrouting_chain, "nat"):
+        subprocess.run(
+            _privileged_cmd(
+                ["iptables", "-t", "nat", "-D", "POSTROUTING", "-j", postrouting_chain]
+            ),
+            capture_output=True,
+            check=False,
+        )
+        try:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-t", "nat", "-F", postrouting_chain]),
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                _privileged_cmd(["iptables", "-t", "nat", "-X", postrouting_chain]),
+                check=True,
+                capture_output=True,
+            )
+            status.append(f"MVM Networking: deleted chain {postrouting_chain}")
+        except subprocess.CalledProcessError:
+            status.append(f"Warning: MVM Networking: failed to delete chain {postrouting_chain}")
+    else:
+        status.append(f"MVM Networking: chain {postrouting_chain} already deleted, skipping")
+
+    return status
 
 
 def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:

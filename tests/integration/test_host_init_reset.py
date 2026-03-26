@@ -89,24 +89,19 @@ class TestHostInitResetWorkflow:
         assert result.exit_code == 0
         mock_reset.assert_called_once()
 
-    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.cli.host.clean_host")
-    def test_clean_host(self, mock_clean, mock_check_priv):
+    def test_clean_host(self, mock_clean):
         """Test host clean operation."""
-        mock_check_priv.return_value = None
         mock_clean.return_value = []
 
         result = runner.invoke(host_app, ["clean"], input="y\n")
         assert result.exit_code == 0
         mock_clean.assert_called_once()
 
-    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.cli.host.init_host")
     @patch("mvmctl.cli.host.clean_host")
-    def test_init_clean_workflow(self, mock_clean, mock_init, mock_check_priv):
+    def test_init_clean_workflow(self, mock_clean, mock_init):
         """Test init followed by clean."""
-        mock_check_priv.return_value = None
-
         changes = [_host_change("group:mvm", None, "mvm", "groupadd")]
         mock_init.return_value = changes
         mock_clean.return_value = []
@@ -184,11 +179,9 @@ class TestHostWithSubprocessMocking:
 
     @patch("mvmctl.core.host.restore_host")
     @patch("mvmctl.core.host_state._state_file")
-    @patch("mvmctl.api.host.check_privileges")
-    def test_reset_with_subprocess_mocking(self, mock_check_priv, mock_state_file, mock_restore):
+    def test_reset_with_subprocess_mocking(self, mock_state_file, mock_restore):
         from mvmctl.core.host import reset_host
 
-        mock_check_priv.return_value = None
         mock_restore.return_value = []
 
         state_file = MagicMock()
@@ -206,12 +199,10 @@ class TestHostWithSubprocessMocking:
 class TestHostEdgeCases:
     """Test edge cases in host workflows."""
 
-    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.cli.host.reset_host")
     @patch("mvmctl.cli.host.get_host_state")
-    def test_reset_without_prior_init(self, mock_get_state, mock_reset, mock_check_priv):
+    def test_reset_without_prior_init(self, mock_get_state, mock_reset):
         """Test reset when init has never been run."""
-        mock_check_priv.return_value = None
         mock_get_state.return_value = None
         mock_reset.side_effect = HostError("No host state found — init first")
 
@@ -219,34 +210,28 @@ class TestHostEdgeCases:
         assert result.exit_code == 1
         assert "init" in result.output.lower()
 
-    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.cli.host.init_host")
-    def test_init_idempotent(self, mock_init, mock_check_priv):
+    def test_init_idempotent(self, mock_init):
         """Test that init is idempotent."""
-        mock_check_priv.return_value = None
         mock_init.return_value = []
 
         result = runner.invoke(host_app, ["init"])
         assert result.exit_code == 0
         assert "No changes" in result.output or result.exit_code == 0
 
-    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.cli.host.init_host")
-    def test_init_partial_failure(self, mock_init, mock_check_priv):
+    def test_init_partial_failure(self, mock_init):
         """Test init when some operations fail."""
-        mock_check_priv.return_value = None
         mock_init.side_effect = HostError("Failed to create group: permission denied")
 
         result = runner.invoke(host_app, ["init"])
         assert result.exit_code == 1
         assert "permission" in result.output.lower() or "failed" in result.output.lower()
 
-    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.cli.host.clean_host")
     @patch("mvmctl.cli.host.get_vm_manager")
-    def test_clean_with_no_networks(self, mock_get_vm_manager, mock_clean, mock_check_priv):
+    def test_clean_with_no_networks(self, mock_get_vm_manager, mock_clean):
         """Test clean when no networks exist."""
-        mock_check_priv.return_value = None
         mock_get_vm_manager.return_value.list_all.return_value = []
         mock_clean.return_value = []
 

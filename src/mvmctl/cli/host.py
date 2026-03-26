@@ -122,6 +122,7 @@ def init_cmd() -> None:
                 try:
                     env = os.environ.copy()
                     env["MVM_SUDO_RESTART"] = "1"
+                    env["MVM_ESCALATED"] = "1"
                     subprocess.run(["sudo"] + sys.argv, check=False, env=env)
                 except FileNotFoundError:
                     print_error("sudo command not found")
@@ -242,7 +243,10 @@ def clean_cmd(
 
     if summary:
         for item in summary:
-            print_info(f"  {item}")
+            if item.startswith("Warning:"):
+                print_warning(f"  {item}")
+            else:
+                print_info(f"  {item}")
 
     print_success("Host cleaned successfully.")
 
@@ -288,6 +292,9 @@ def reset_cmd(
 
     if summary:
         for item in summary:
-            print_info(f"  {item}")
+            if item.startswith("Warning:"):
+                print_warning(f"  {item}")
+            else:
+                print_info(f"  {item}")
 
     print_success("Host reset successfully.")

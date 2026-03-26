@@ -1486,41 +1486,45 @@ class TestHostHelpers:
 
 
 class TestCleanHost:
-    @patch("mvmctl.core.network.setup_mvm_chains")
-    @patch("mvmctl.core.network.teardown_bridge")
+    @patch(
+        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        return_value=[
+            "MVM Networking: deleted chain MVM-FORWARD",
+            "MVM Networking: deleted chain MVM-POSTROUTING",
+        ],
+    )
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-def-vm0-aaa", "eth0"])
-    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_no_networks(
         self,
         mock_list,
-        mock_teardown_chains,
         mock_get_taps,
         mock_delete_tap,
-        mock_teardown_bridge,
-        mock_setup_chains,
+        mock_teardown_chains,
     ):
         summary = clean_host(MagicMock())
         assert any("Removed TAP device 'mvm-def-vm0-aaa'" in s for s in summary)
-        assert any("Removed MVM iptables chains" in s for s in summary)
+        assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
 
-    @patch("mvmctl.core.network.setup_mvm_chains")
-    @patch("mvmctl.core.network.teardown_bridge")
+    @patch(
+        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        return_value=[
+            "MVM Networking: deleted chain MVM-FORWARD",
+            "MVM Networking: deleted chain MVM-POSTROUTING",
+        ],
+    )
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.remove_network")
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_removes_networks(
         self,
         mock_list,
         mock_remove,
-        mock_teardown_chains,
         mock_get_taps,
         mock_delete_tap,
-        mock_teardown_bridge,
-        mock_setup_chains,
+        mock_teardown_chains,
     ):
         net = MagicMock()
         net.name = "default"
@@ -1530,27 +1534,28 @@ class TestCleanHost:
         summary = clean_host(MagicMock())
         assert len(summary) == 3
         assert any("Removed network 'default'" in s for s in summary)
-        assert any("Removed legacy bridge 'mvm-br0'" in s for s in summary)
-        assert any("Removed MVM iptables chains" in s for s in summary)
+        assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
 
     @patch(
         "mvmctl.core.network_manager.remove_network",
         side_effect=NetworkError("bridge teardown failed"),
     )
-    @patch("mvmctl.core.network.setup_mvm_chains")
-    @patch("mvmctl.core.network.teardown_bridge")
+    @patch(
+        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        return_value=[
+            "MVM Networking: chain MVM-FORWARD already deleted, skipping",
+            "MVM Networking: chain MVM-POSTROUTING already deleted, skipping",
+        ],
+    )
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network_manager.list_networks")
-    @patch("mvmctl.core.network.teardown_mvm_chains")
     def test_clean_host_handles_network_failure(
         self,
-        mock_teardown_chains,
         mock_list,
         mock_get_taps,
         mock_delete_tap,
-        mock_teardown_bridge,
-        mock_setup_chains,
+        mock_teardown_chains,
         mock_remove,
     ):
         net = MagicMock()
@@ -1560,13 +1565,17 @@ class TestCleanHost:
 
         summary = clean_host(MagicMock())
         assert any("Warning" in s for s in summary)
-        assert any("Removed MVM iptables chains" in s for s in summary)
+        assert any("already deleted, skipping" in s for s in summary)
 
-    @patch("mvmctl.core.network.setup_mvm_chains")
-    @patch("mvmctl.core.network.teardown_bridge")
+    @patch(
+        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        return_value=[
+            "MVM Networking: deleted chain MVM-FORWARD",
+            "MVM Networking: deleted chain MVM-POSTROUTING",
+        ],
+    )
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch(
         "mvmctl.core.network_manager.list_networks",
         side_effect=NetworkError("list failed"),
@@ -1574,34 +1583,66 @@ class TestCleanHost:
     def test_clean_host_handles_list_failure(
         self,
         mock_list,
-        mock_teardown_chains,
         mock_get_taps,
         mock_delete_tap,
-        mock_teardown_bridge,
-        mock_setup_chains,
+        mock_teardown_chains,
     ):
         summary = clean_host(MagicMock())
-        assert any("Removed MVM iptables chains" in s for s in summary)
+        assert any("skipped network inventory cleanup" in s for s in summary)
+        assert any("MVM Networking: deleted chain" in s for s in summary)
 
-    @patch("mvmctl.core.network.setup_mvm_chains")
-    @patch("mvmctl.core.network.teardown_bridge")
+    @patch(
+        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        return_value=[
+            "Warning: MVM Networking: failed to delete chain MVM-FORWARD",
+            "Warning: MVM Networking: failed to delete chain MVM-POSTROUTING",
+        ],
+    )
+    @patch("mvmctl.core.network.delete_tap", side_effect=NetworkError("permission denied"))
+    @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-denied-tap"])
+    @patch(
+        "mvmctl.core.network_manager.remove_network", side_effect=NetworkError("permission denied")
+    )
+    @patch("mvmctl.core.network_manager.list_networks")
+    def test_clean_host_permission_denied_becomes_warnings(
+        self,
+        mock_list,
+        mock_remove,
+        mock_get_taps,
+        mock_delete_tap,
+        mock_teardown_chains,
+    ):
+        net = MagicMock()
+        net.name = "default"
+        net.bridge = "mvm-br0"
+        mock_list.return_value = [net]
+
+        summary = clean_host(MagicMock())
+        assert any("Warning: failed to remove TAP" in s for s in summary)
+        assert any("skipped cleanup for network 'default'" in s for s in summary)
+        assert any("failed to delete chain MVM-FORWARD" in s for s in summary)
+
+    @patch(
+        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        return_value=[
+            "MVM Networking: deleted chain MVM-FORWARD",
+            "MVM Networking: deleted chain MVM-POSTROUTING",
+        ],
+    )
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-abc-vm1-xyz", "mvm-stale"])
-    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_removes_stale_taps_without_metadata(
         self,
         mock_list,
-        mock_teardown_chains,
         mock_get_taps,
         mock_delete_tap,
-        mock_teardown_bridge,
-        mock_setup_chains,
+        mock_teardown_chains,
     ):
         summary = clean_host(MagicMock())
         assert any("Removed TAP device 'mvm-abc-vm1-xyz'" in s for s in summary)
         assert any("Removed TAP device 'mvm-stale'" in s for s in summary)
-        assert any("Removed MVM iptables chains" in s for s in summary)
+        assert any("MVM Networking: deleted chain" in s for s in summary)
 
 
 # ---------------------------------------------------------------------------
@@ -1708,44 +1749,47 @@ class TestInitHostErrorPaths:
 class TestCleanHostErrorPaths:
     """Error-path tests for clean_host."""
 
-    @patch("mvmctl.core.network.setup_mvm_chains")
-    @patch("mvmctl.core.network.teardown_bridge")
+    @patch(
+        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        return_value=[
+            "MVM Networking: chain MVM-FORWARD already deleted, skipping",
+            "MVM Networking: chain MVM-POSTROUTING already deleted, skipping",
+        ],
+    )
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_bridge_doesnt_exist(
         self,
         mock_list,
-        mock_teardown_chains,
         mock_get_taps,
         mock_delete_tap,
-        mock_teardown_bridge,
-        mock_setup_chains,
+        mock_teardown_chains,
     ):
         """clean_host removes MVM chains even when no bridges/networks exist."""
         summary = clean_host(MagicMock())
         assert len(summary) == 2
-        assert any("Removed legacy bridge 'mvm-br0'" in s for s in summary)
-        assert any("Removed MVM iptables chains" in s for s in summary)
+        assert any("already deleted, skipping" in s for s in summary)
         mock_list.assert_called_once()
 
-    @patch("mvmctl.core.network.setup_mvm_chains")
-    @patch("mvmctl.core.network.teardown_bridge")
+    @patch(
+        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        return_value=[
+            "MVM Networking: deleted chain MVM-FORWARD",
+            "MVM Networking: deleted chain MVM-POSTROUTING",
+        ],
+    )
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network.teardown_mvm_chains")
     @patch("mvmctl.core.network_manager.remove_network")
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_remove_network_subprocess_error(
         self,
         mock_list,
         mock_remove,
-        mock_teardown_chains,
         mock_get_taps,
         mock_delete_tap,
-        mock_teardown_bridge,
-        mock_setup_chains,
+        mock_teardown_chains,
     ):
         net = MagicMock()
         net.name = "stale-net"
@@ -1757,8 +1801,7 @@ class TestCleanHostErrorPaths:
         assert len(summary) == 3
         assert any("Warning" in s for s in summary)
         assert any("stale-net" in s for s in summary)
-        assert any("Removed legacy bridge 'mvm-br0'" in s for s in summary)
-        assert any("Removed MVM iptables chains" in s for s in summary)
+        assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
 
 
 class TestRestoreHostErrorPaths:

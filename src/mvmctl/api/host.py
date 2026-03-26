@@ -117,10 +117,7 @@ def clean_host(cache_dir: Path | None = None) -> list[str]:
     Returns:
         A list of summary strings describing what was removed.
 
-    Raises:
-        PrivilegeError: If the caller is not in the mvm group and lacks required permissions.
     """
-    check_privileges("/usr/sbin/ip")
     if cache_dir is None:
         cache_dir = get_cache_dir()
     return _clean_host(cache_dir)
@@ -137,10 +134,7 @@ def reset_host(cache_dir: Path | None = None) -> list[str]:
     Returns:
         A list of summary strings describing what was removed/reverted.
 
-    Raises:
-        PrivilegeError: If the caller is not in the mvm group and lacks required permissions.
     """
-    check_privileges("/usr/sbin/ip")
     if cache_dir is None:
         cache_dir = get_cache_dir()
     return _reset_host(cache_dir)
@@ -157,10 +151,7 @@ def prune_host(cache_dir: Path | None = None) -> list[str]:
     Returns:
         A list of summary strings describing what was torn down.
 
-    Raises:
-        PrivilegeError: If the caller is not in the mvm group and lacks required permissions.
     """
-    check_privileges("/usr/sbin/ip")
     if cache_dir is None:
         cache_dir = get_cache_dir()
     return _prune_host(cache_dir)

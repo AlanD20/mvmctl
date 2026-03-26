@@ -637,8 +637,7 @@ def test_setup_mvm_chains_creates_both_chains():
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
                 setup_mvm_chains()
-                # 2 chain creations + 2 jump rule additions = 4 calls
-                assert mock_run.call_count == 4
+                assert mock_run.call_count == 6
 
 
 def test_setup_mvm_chains_idempotent():
@@ -647,7 +646,7 @@ def test_setup_mvm_chains_idempotent():
         with patch("mvmctl.core.network._iptables_rule_exists", return_value=True):
             with patch("mvmctl.core.network.subprocess.run") as mock_run:
                 already_existed = setup_mvm_chains()
-                mock_run.assert_not_called()
+                assert mock_run.call_count == 2
                 assert already_existed is True
 
 
@@ -659,8 +658,18 @@ def test_setup_mvm_chains_adds_jump_rules():
         with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
             with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
                 setup_mvm_chains()
-                # 2 jump rules (FORWARD -> MVM-FORWARD, POSTROUTING -> MVM-POSTROUTING)
-                assert mock_run.call_count == 2
+                assert mock_run.call_count == 4
+
+
+def test_setup_mvm_chains_inserts_forward_jump_at_top_priority():
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("mvmctl.core.network.chain_exists", return_value=True):
+        with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
+            with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
+                setup_mvm_chains()
+                commands = [call.args[0] for call in mock_run.call_args_list]
+                assert ["sudo", "iptables", "-I", "FORWARD", "1", "-j", "MVM-FORWARD"] in commands
 
 
 def test_setup_mvm_chains_returns_false_when_created():

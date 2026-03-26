@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from mvmctl.constants import BRIDGE_NAME, PROJECT_GROUP, SUDOERS_DROP_IN_PATH
+from mvmctl.constants import PROJECT_GROUP, SUDOERS_DROP_IN_PATH
 from mvmctl.core.host_privilege import (
     _remove_group,
     _remove_sudoers,
@@ -84,9 +84,7 @@ def clean_host(cache_dir: Path) -> list[str]:
     from mvmctl.core.network import (
         delete_tap,
         list_tuntap_devices,
-        setup_mvm_chains,
-        teardown_bridge,
-        teardown_mvm_chains,
+        teardown_mvm_chains_with_status,
     )
     from mvmctl.core.network_manager import list_networks, remove_network
     from mvmctl.exceptions import NetworkError
@@ -106,28 +104,25 @@ def clean_host(cache_dir: Path) -> list[str]:
 
     try:
         networks = list_networks()
-    except NetworkError:
+    except NetworkError as e:
+        summary.append(
+            f"Warning: skipped network inventory cleanup (already clean or insufficient privileges): {e}"
+        )
         networks = []
     for net in networks:
         try:
             remove_network(net.name)
             summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
         except NetworkError as e:
-            summary.append(f"Warning: failed to remove network '{net.name}': {e}")
+            summary.append(
+                f"Warning: skipped cleanup for network '{net.name}' "
+                f"(already clean or insufficient privileges): {e}"
+            )
 
-    try:
-        teardown_bridge(BRIDGE_NAME)
-        summary.append(f"Removed legacy bridge '{BRIDGE_NAME}'")
-    except NetworkError:
-        pass
+    summary.extend(teardown_mvm_chains_with_status())
 
-    # Remove MVM iptables chains after networks are removed
-    try:
-        setup_mvm_chains()
-        teardown_mvm_chains()
-        summary.append("Removed MVM iptables chains")
-    except NetworkError as e:
-        summary.append(f"Warning: failed to remove MVM chains: {e}")
+    if not summary:
+        summary.append("Warning: skipped host networking cleanup (already clean)")
 
     return summary
 

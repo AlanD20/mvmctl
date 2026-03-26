@@ -228,6 +228,21 @@ def test_clean_success(mocker: MockerFixture, tmp_path):
     assert "Removed network" in result.output
 
 
+def test_clean_shows_warning_lines(mocker: MockerFixture, tmp_path):
+    mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch(
+        "mvmctl.cli.host.clean_host",
+        return_value=["Warning: MVM Networking: failed to delete chain MVM-FORWARD"],
+    )
+
+    result = runner.invoke(app, ["clean", "--force"])
+
+    assert result.exit_code == 0
+    assert "Warning" in result.output
+    assert "MVM Networking" in result.output
+
+
 def test_clean_refuses_running_vms(mocker: MockerFixture):
     from mvmctl.models.vm import VMState
 
@@ -258,6 +273,22 @@ def test_reset_success(mocker: MockerFixture, tmp_path):
     result = runner.invoke(app, ["reset", "--force"])
     assert result.exit_code == 0
     assert "reset successfully" in result.output
+
+
+def test_reset_shows_warning_lines(mocker: MockerFixture, tmp_path):
+    mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[])
+    mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
+    mocker.patch(
+        "mvmctl.cli.host.reset_host",
+        return_value=[
+            "Warning: skipped legacy bridge cleanup 'mvm-br0' (already clean or insufficient privileges): denied"
+        ],
+    )
+
+    result = runner.invoke(app, ["reset", "--force"])
+
+    assert result.exit_code == 0
+    assert "Warning" in result.output
 
 
 def test_reset_refuses_running_vms(mocker: MockerFixture):
@@ -304,3 +335,4 @@ def test_init_sudo_restart_sets_env(mocker: MockerFixture, tmp_path):
     mock_subprocess.assert_called_once()
     call_args = mock_subprocess.call_args
     assert "MVM_SUDO_RESTART" in call_args.kwargs.get("env", {})
+    assert "MVM_ESCALATED" in call_args.kwargs.get("env", {})
