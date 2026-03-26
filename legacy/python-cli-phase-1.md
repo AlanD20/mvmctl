@@ -22,7 +22,7 @@
 
 ## 1. Goals and Principles
 
-- **Single entrypoint.** Everything that was a bash script becomes a subcommand under `fcm`.
+- **Single entrypoint.** Everything that was a bash script becomes a subcommand under `mvm`.
 - **Minimal dependencies.** Only pull in a library if it meaningfully reduces code complexity. No heavy frameworks.
 - **Config lives in YAML.** Assets, image sources, and kernel config are declared in files under `assets/`. Everything else is a CLI flag with a sensible default.
 - **No magic paths.** The tool must work from any working directory. Paths to the Firecracker binary, socket directory, and run directory are resolved from config or explicit flags — never hardcoded.
@@ -47,7 +47,7 @@ firecracker-manager/
 │   └── defaults.yaml            # default VM sizes, network settings, etc.
 │
 ├── src/
-│   └── fcm/
+│   └── mvm/
 │       ├── __init__.py
 │       ├── main.py              # Typer app root, registers command groups
 │       │
@@ -116,7 +116,7 @@ dependencies = [
 ]
 
 [project.scripts]
-fcm = "fcm.main:app"
+mvm = "mvm.main:app"
 
 [build-system]
 requires = ["hatchling"]
@@ -134,9 +134,9 @@ strict = true
 ### Running locally
 
 ```bash
-uv run fcm --help
-uv run fcm vm list
-uv run fcm image fetch ubuntu-22.04
+uv run mvm --help
+uv run mvm vm list
+uv run mvm image fetch ubuntu-22.04
 ```
 
 ---
@@ -152,9 +152,9 @@ CLI flags override YAML config, which overrides built-in defaults. No environmen
 ```yaml
 firecracker:
   binary: /usr/local/bin/firecracker
-  socket_dir: /tmp/fcm/sockets
-  run_dir: /tmp/fcm/run
-  log_dir: /tmp/fcm/logs
+  socket_dir: /tmp/mvm/sockets
+  run_dir: /tmp/mvm/run
+  log_dir: /tmp/mvm/logs
 
 vm_defaults:
   vcpu_count: 2
@@ -192,7 +192,7 @@ kernel:
   config_fragments:
     - assets/kernel-configs/firecracker-base.config
   output_name: vmlinux
-  build_dir: /tmp/fcm/kernel-build
+  build_dir: /tmp/mvm/kernel-build
 ```
 
 ### Config loading in code
@@ -203,28 +203,28 @@ All YAML files are loaded once at startup by a `ConfigLoader` class in `core/`. 
 
 ## 5. CLI Command Specification
 
-All commands follow the pattern: `fcm <group> <action> [options]`
+All commands follow the pattern: `mvm <group> <action> [options]`
 
-### 5.1 `fcm vm`
+### 5.1 `mvm vm`
 
 | Command | Description | Key flags |
 |---|---|---|
-| `fcm vm create` | Spawn a new Firecracker VM | `--name`, `--kernel`, `--rootfs`, `--cpu`, `--mem`, `--tap`, `--mac`, `--config` |
-| `fcm vm rm` | Stop and remove a VM | `--name`, `--force` |
-| `fcm vm list` | Show running and stopped VMs | `--json`, `--all` |
-| `fcm vm ssh` | Open an SSH session into a VM | `--name`, `--user`, `--key`, `--cmd` |
-| `fcm vm logs` | Print VM serial console output | `--name`, `--follow`, `--lines` |
-| `fcm vm prune` | Remove stopped VMs and stale sockets | `--all`, `--name`, `--dry-run` |
-| `fcm vm snapshot` | Snapshot VM memory and disk state | `--name`, `--out` |
+| `mvm vm create` | Spawn a new Firecracker VM | `--name`, `--kernel`, `--rootfs`, `--cpu`, `--mem`, `--tap`, `--mac`, `--config` |
+| `mvm vm rm` | Stop and remove a VM | `--name`, `--force` |
+| `mvm vm list` | Show running and stopped VMs | `--json`, `--all` |
+| `mvm vm ssh` | Open an SSH session into a VM | `--name`, `--user`, `--key`, `--cmd` |
+| `mvm vm logs` | Print VM serial console output | `--name`, `--follow`, `--lines` |
+| `mvm vm prune` | Remove stopped VMs and stale sockets | `--all`, `--name`, `--dry-run` |
+| `mvm vm snapshot` | Snapshot VM memory and disk state | `--name`, `--out` |
 
 **Example**
 
 ```bash
 # Minimal — uses defaults from assets/defaults.yaml
-fcm vm create --name dev-01 --rootfs ubuntu-22.04 --kernel 6.1.102
+mvm vm create --name dev-01 --rootfs ubuntu-22.04 --kernel 6.1.102
 
 # Explicit
-fcm vm create \
+mvm vm create \
   --name dev-01 \
   --kernel /opt/kernels/vmlinux \
   --rootfs /opt/images/ubuntu.ext4 \
@@ -232,57 +232,57 @@ fcm vm create \
   --mem 1024
 
 # SSH into a running VM
-fcm vm ssh --name dev-01
+mvm vm ssh --name dev-01
 
 # Tail logs
-fcm vm logs --name dev-01 --follow
+mvm vm logs --name dev-01 --follow
 
 # Clean everything up
-fcm vm cleanup --all --dry-run
-fcm vm cleanup --all
+mvm vm cleanup --all --dry-run
+mvm vm cleanup --all
 ```
 
-### 5.2 `fcm image`
+### 5.2 `mvm image`
 
 | Command | Description | Key flags |
 |---|---|---|
-| `fcm image fetch` | Download and convert an image | `--id`, `--out`, `--force` |
-| `fcm image fetch-all` | Fetch all images in `images.yaml` | `--force` |
-| `fcm image list` | Show locally available images | `--json` |
-| `fcm image convert` | Convert an existing image file | `--src`, `--dst`, `--format`, `--size` |
-| `fcm image delete` | Remove a local image | `--id` |
+| `mvm image fetch` | Download and convert an image | `--id`, `--out`, `--force` |
+| `mvm image fetch-all` | Fetch all images in `images.yaml` | `--force` |
+| `mvm image list` | Show locally available images | `--json` |
+| `mvm image convert` | Convert an existing image file | `--src`, `--dst`, `--format`, `--size` |
+| `mvm image delete` | Remove a local image | `--id` |
 
 **Example**
 
 ```bash
-fcm image fetch ubuntu-22.04
-fcm image fetch-all
-fcm image list
+mvm image fetch ubuntu-22.04
+mvm image fetch-all
+mvm image list
 ```
 
-### 5.3 `fcm kernel`
+### 5.3 `mvm kernel`
 
 | Command | Description | Key flags |
 |---|---|---|
-| `fcm kernel build` | Download and compile the kernel | `--version`, `--config`, `--jobs`, `--out` |
-| `fcm kernel list` | Show locally built kernels | `--json` |
-| `fcm kernel clean` | Remove kernel build artifacts | `--version` |
+| `mvm kernel build` | Download and compile the kernel | `--version`, `--config`, `--jobs`, `--out` |
+| `mvm kernel list` | Show locally built kernels | `--json` |
+| `mvm kernel clean` | Remove kernel build artifacts | `--version` |
 
 **Example**
 
 ```bash
-fcm kernel build
-fcm kernel build --version 6.1.102 --jobs 8
-fcm kernel list
+mvm kernel build
+mvm kernel build --version 6.1.102 --jobs 8
+mvm kernel list
 ```
 
-### 5.4 `fcm config`
+### 5.4 `mvm config`
 
 | Command | Description | Key flags |
 |---|---|---|
-| `fcm config show` | Print resolved config (defaults + YAML) | `--section` |
-| `fcm config validate` | Validate all YAML config files | _(none)_ |
-| `fcm config dump-vm` | Print the Firecracker JSON config for a VM | `--name` |
+| `mvm config show` | Print resolved config (defaults + YAML) | `--section` |
+| `mvm config validate` | Validate all YAML config files | _(none)_ |
+| `mvm config dump-vm` | Print the Firecracker JSON config for a VM | `--name` |
 
 ---
 
@@ -368,7 +368,7 @@ Read kernel.yaml
 
 ### User-facing errors
 
-Typer + Rich handles this well. Define a small set of exception types in `fcm/exceptions.py`:
+Typer + Rich handles this well. Define a small set of exception types in `mvm/exceptions.py`:
 
 ```python
 class FCMError(Exception): ...

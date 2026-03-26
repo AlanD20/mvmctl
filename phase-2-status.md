@@ -10,12 +10,12 @@
 | Requirement | Status | Notes |
 |---|---|---|
 | Project name defined once in `pyproject.toml [project] name` | ✅ | `"firecracker-manager"` |
-| Package-level constant generated at build time via `constants.py` | ✅ | `src/fcm/constants.py` holds `PROJECT_NAME` derived from package metadata |
+| Package-level constant generated at build time via `constants.py` | ✅ | `src/mvm/constants.py` holds `PROJECT_NAME` derived from package metadata |
 | Cache directory: `~/.cache/<project-name>/` | ✅ | Derived from `PROJECT_NAME` |
 | Env var prefix: `<PROJECT_NAME>_` (e.g. `FCM_CACHE_DIR`) | ✅ | Implemented |
 | Network device names: `<project-name>-br0`, `<project-name>-tap<n>` | ✅ | Derived from `PROJECT_NAME` |
-| Default config filename: `<project-name>.yaml` | ✅ | `fcm.yaml` |
-| CLI binary name: matches project name (`fcm`) | ✅ | `[project.scripts] fcm = ...` |
+| Default config filename: `<project-name>.yaml` | ✅ | `mvm.yaml` |
+| CLI binary name: matches project name (`mvm`) | ✅ | `[project.scripts] mvm = ...` |
 | Rename in `pyproject.toml` propagates everywhere — no grep-replace | ✅ | All names read from `PROJECT_NAME` constant |
 
 ---
@@ -28,7 +28,7 @@
 | Asset management: binaries, kernels, images | ✅ | `asset bin/kernel/image` groups |
 | Automatic network setup/teardown tied to VM lifecycle | ✅ | `api/network.py` |
 | YAML config file support | ✅ | `core/config.py` |
-| Python API layer (`api/`) usable independently of CLI | ✅ | `src/fcm/api/` package |
+| Python API layer (`api/`) usable independently of CLI | ✅ | `src/mvm/api/` package |
 | Full test suite, CI workflow, documentation | ✅ | 551 tests, CI yml, README/CONTRIBUTING |
 | Single-VM functionality NOT ported | ✅ | Not present |
 | No runtime dependency on bash scripts | ✅ | Python-only implementation |
@@ -159,13 +159,13 @@
 | `api/network.py` — setup_network, teardown_network, allocate_ip, release_ip | ✅ | |
 | `api/keys.py` — key management functions | ✅ | |
 | `api/host.py` — host init, ls, restore, prune | ✅ | |
-| CLI commands are thin wrappers — no business logic in CLI layer | ✅ | All CLI files import from `fcm.api.*` (fixed in Sprint 2: C-1, C-2, BP-C2) |
+| CLI commands are thin wrappers — no business logic in CLI layer | ✅ | All CLI files import from `mvm.api.*` (fixed in Sprint 2: C-1, C-2, BP-C2) |
 | Return types are dataclasses or Pydantic models (not raw dicts) | ✅ | |
 | All user-facing errors raised as typed exceptions from `exceptions.py` | ✅ | |
-| `models.py` / `models/` — shared dataclasses | ✅ | `src/fcm/models/` |
-| `config.py` — YAML loading, env var resolution, precedence | ✅ | `src/fcm/core/config.py` |
-| `constants.py` — project name, default paths, device name helpers | ✅ | `src/fcm/constants.py` |
-| `exceptions.py` — typed exception hierarchy | ✅ | `src/fcm/exceptions.py` |
+| `models.py` / `models/` — shared dataclasses | ✅ | `src/mvm/models/` |
+| `config.py` — YAML loading, env var resolution, precedence | ✅ | `src/mvm/core/config.py` |
+| `constants.py` — project name, default paths, device name helpers | ✅ | `src/mvm/constants.py` |
+| `exceptions.py` — typed exception hierarchy | ✅ | `src/mvm/exceptions.py` |
 
 ---
 
@@ -197,7 +197,7 @@
 | Set up Python 3.13 | ✅ | |
 | `pip install -e ".[dev]"` | ✅ | |
 | `ruff check .` | ✅ | |
-| `mypy firecracker_manager/` (adapted to `src/fcm/`) | ✅ | |
+| `mypy firecracker_manager/` (adapted to `src/mvm/`) | ✅ | |
 | `pytest --cov=firecracker_manager --cov-fail-under=80` | ✅ | |
 | Upload coverage report as artifact | ✅ | Added `actions/upload-artifact` step (Sprint 5 GAP-1 fix) |
 

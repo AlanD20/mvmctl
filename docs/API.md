@@ -229,7 +229,7 @@ try:
 except NetworkError as e:
     print(f"Network setup failed: {e}")
 except MVMError as e:
-    print(f"Unexpected FCM error: {e}")
+    print(f"Unexpected MVM error: {e}")
 
 try:
     key_info = keys.add_key("my-key", "/home/user/.ssh/id_ed25519.pub")

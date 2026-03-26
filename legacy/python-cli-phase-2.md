@@ -26,7 +26,7 @@ application inside the `firecracker-manager/` folder. This application must be:
 
 ## Project Identity and Build Flags
 
-The project name (e.g. `fcm`) must be defined once in a single configuration file at the
+The project name (e.g. `mvm`) must be defined once in a single configuration file at the
 repository root — the natural place for this is `pyproject.toml` under `[project] name`.
 It must never be hardcoded anywhere else in the source code. Every place the project name
 is needed at runtime — CLI binary name, environment variable prefixes, cache directory
@@ -43,7 +43,7 @@ automatically — no grep-and-replace across the codebase.
 - Cache directory: `~/.cache/<project-name>/`
 - Environment variable prefix: `<PROJECT_NAME>_` (uppercased), e.g. `FCM_CACHE_DIR`
 - Network device names: `<project-name>-br0`, `<project-name>-tap0`, `<project-name>-tun0`
-- Default config filename: `<project-name>.yaml`, e.g. `fcm.yaml`
+- Default config filename: `<project-name>.yaml`, e.g. `mvm.yaml`
 - CLI binary name: matches the project name
 
 ---

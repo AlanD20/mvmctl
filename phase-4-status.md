@@ -162,7 +162,7 @@
 | `license = { text = "MIT" }` | ✅ | Added in previous session |
 | `requires-python = ">=3.13"` | ✅ | |
 | All runtime dependencies with minimum version pins | ✅ | |
-| `[project.scripts] fcm = "fcm.main:app"` | ✅ | |
+| `[project.scripts] mvm = "mvm.main:app"` | ✅ | |
 | `[project.optional-dependencies] dev` — pytest, pytest-cov, pytest-mock, ruff, mypy, pyinstaller | ✅ | Added in previous session |
 | `[build-system] hatchling` | ✅ | |
 

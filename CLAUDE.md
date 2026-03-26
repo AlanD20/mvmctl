@@ -26,7 +26,7 @@ pyinstaller --onefile --name mvm src/mvmctl/main.py
 src/mvmctl/
 ├── main.py          # LazyMVMGroup (click.Group) — lazy-loads sub-apps via importlib
 ├── constants.py     # Single source of truth — CLI name, env prefix, all defaults
-├── exceptions.py    # Custom exception hierarchy (FCMError → domain subclasses)
+├── exceptions.py    # Custom exception hierarchy (MVMError → domain subclasses)
 ├── cli/             # Thin Typer command definitions (no business logic)
 ├── api/             # Stable public Python API; adds privilege checks before core
 ├── core/            # All business logic, subprocess, Firecracker interaction

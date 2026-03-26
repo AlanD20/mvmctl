@@ -1,19 +1,19 @@
 - changes to default configuration for the cli application
     - the assets directory must be an absolute path to the cache folder which FCM_CACHE_DIR by default is ~/.cache/firecracker-manager but users can override this
-    - the default bridge name is fcm-bridge
+    - the default bridge name is mvm-bridge
     - default bridge cidr is bridge_subnet = 172.35.0.0/24
     - in the default configuration it's defined as network > vm_network but the default network must be called default, such as user can use network name of default for the default!
-- There must be api implementation to set and get the config, and then the CLI must expose these commands: such as `fcm config set network_interface wlo0` or `fcm config get network_interface`.
-- the firecracker binary path must reflect the absolute path of the firecracker binary that is currently is active in `fcm bin ls`
+- There must be api implementation to set and get the config, and then the CLI must expose these commands: such as `mvm config set network_interface wlo0` or `mvm config get network_interface`.
+- the firecracker binary path must reflect the absolute path of the firecracker binary that is currently is active in `mvm bin ls`
 - the firecracker version that is selected must be a global config in the cli state file because this is the CI_VERSION that will be used when downloading kernel from firecracker repo!! it's important
-- the `fcm bin ls --remote` must sort by version from highest at the top and lowest at the bottom
-- default `fcm bin ls --remote` limit must be 5 for --limit flag
-- When a command is entered such as `fcm bin` it shows missing command but also it must execute the list of available command which in action it looks like `fcm bin` -> shows current output + shows --help output for the current command
-- when running ls on the asset commands, they should check if the folder exist to list out resources if not they must create the folder, for example $FCM_CACHE_DIR/kernels does not exist, and running `fcm kernel ls` should not error out "kernels directory not found", it must create the folder and then list currently downloaded kernels, which in this case it will be empty table
-- when downloading minimal kernel it shows `WARNING: fcm.utils.http: No checksum provided for download: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz` but this checksum needs to be fixed!
+- the `mvm bin ls --remote` must sort by version from highest at the top and lowest at the bottom
+- default `mvm bin ls --remote` limit must be 5 for --limit flag
+- When a command is entered such as `mvm bin` it shows missing command but also it must execute the list of available command which in action it looks like `mvm bin` -> shows current output + shows --help output for the current command
+- when running ls on the asset commands, they should check if the folder exist to list out resources if not they must create the folder, for example $FCM_CACHE_DIR/kernels does not exist, and running `mvm kernel ls` should not error out "kernels directory not found", it must create the folder and then list currently downloaded kernels, which in this case it will be empty table
+- when downloading minimal kernel it shows `WARNING: mvm.utils.http: No checksum provided for download: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.102.tar.xz` but this checksum needs to be fixed!
 - kernel builds must be done at /tmp/firecracker-manager/ folder, user can pass `--keep-build-dir` for debugging purposes!
 - the kernel subcommand requires overhaul reworking:
-    - user enters `fcm kernel ls`, by default shows both firecracker and official kernels, using --firecracker only shows firecracker kernels and --official shows official upstream kernels
+    - user enters `mvm kernel ls`, by default shows both firecracker and official kernels, using --firecracker only shows firecracker kernels and --official shows official upstream kernels
     - firecracker kernel can be downloaded without building anything! they are ready to go and to download this, check out the bash scripts at assets/download-assets.sh in download_kernel_firecracker_ci function.
     - fetching kernel require --type either official or firecracker, this is required!
     - if --type is firecracker then --arch with default amd64 and --version which is default to the CI_VERSION that is currently set. Reminder CI_VERSION is the firecracker version and this is globally available throughout the CLI state
@@ -26,38 +26,38 @@
         - if any of these are disabled, DO NOT BUILD AND ERROR OUT THAT IT WILL BREAK FIRECRACKER booting, are they sure to proceed? (CONFIG_BTRFS_FS=y , CONFIG_VIRTIO_BLK=y , CONFIG_VIRTIO_NET=y , CONFIG_SERIAL_8250_CONSOLE=y , CONFIG_KVM_GUEST=y)
         - build the kernel and while building, tail the build log only for warning/error/cannot find/ undefined reference.
         - once it's built, put the kernel to the cache folder for use so that it's showed.
-        - the `fcm kernel ls` must show the kernel, when it was built, version, type either official or firecracker.
+        - the `mvm kernel ls` must show the kernel, when it was built, version, type either official or firecracker.
         - clean up the build kernel result unless --keep-build-dir is present, then skip cleaning up! which means at the end show a message that build dir wasnt cleaned up and output the path, since each build will have its own unique id suffix
         - there must be a possibility to set a kernel as default by providing the --type and --version
-- the `fcm image` requires an overhaul and complete rewrite
-    - the `fcm image ls` will show the image name, os name, when was pulled, file system type, which official ubuntu cloud images come with ext4 and archlinux image requires re-partitioning to only take out the rootfs and it's btrfs
-    - the `fcm image ls --remote` should show what are the available images to download and providing --name such as ubuntu, debian, arch should filter out the available images, and state if they are downloaded or not!
-    - the `fcm image fetch <image-name>` should pull the latest version by default` or user can provide `fcm image fetch ubuntu noble` to explicitly download a codename. images such as archlinux does not have versioning therefore it's always latest and no versioning is required!
+- the `mvm image` requires an overhaul and complete rewrite
+    - the `mvm image ls` will show the image name, os name, when was pulled, file system type, which official ubuntu cloud images come with ext4 and archlinux image requires re-partitioning to only take out the rootfs and it's btrfs
+    - the `mvm image ls --remote` should show what are the available images to download and providing --name such as ubuntu, debian, arch should filter out the available images, and state if they are downloaded or not!
+    - the `mvm image fetch <image-name>` should pull the latest version by default` or user can provide `mvm image fetch ubuntu noble` to explicitly download a codename. images such as archlinux does not have versioning therefore it's always latest and no versioning is required!
     - there must be a possibility to set an default image so that when creating vms, it will automatically pick this default image.
-- the `fcm key add my-key ../../.ssh/id_rsa` does not work, because it's a private key, it must print out a friendly name!
-- the network name must be used when creating a device or a bridge with fcm prefix!! A network creation represents a bridge being created! So when i have a network called default, the bridge name is fcm-default and whenever a device is created, they have those prefix such as fcm-default-testvm-<rand> where rand is 3 random char, only ASCII letters!
-- the `fcm vm` subcommand requires substantial changes:
-    - Add `fcm vm ps` as alias for `fcm vm ls` and -a or --all should work the same!
-    - rename `fcm vm cleanup` to `fcm vm prune`
-    - when using `fcm vm ssh`, by default it uses the ~/.ssh folder for the private keys, if none of them are found then fail.
-    - the `fcm vm ssh` where --key flag can point to a single private key or a folder that goes through every private key to use!
-    - the `fcm vm create --image` should be required only if a default image from `fcm image` is not being selected! it must check if there is a default image is set or not
-    - the `fcm vm create --kernel` should be required only if a default kernel is not selected from `fcm kernel`. it must check if there is a default kernel is set or not.
-    - the `fcm vm create --firecracker-bin` should come from the currently active firecracker binary version!
+- the `mvm key add my-key ../../.ssh/id_rsa` does not work, because it's a private key, it must print out a friendly name!
+- the network name must be used when creating a device or a bridge with mvm prefix!! A network creation represents a bridge being created! So when i have a network called default, the bridge name is mvm-default and whenever a device is created, they have those prefix such as mvm-default-testvm-<rand> where rand is 3 random char, only ASCII letters!
+- the `mvm vm` subcommand requires substantial changes:
+    - Add `mvm vm ps` as alias for `mvm vm ls` and -a or --all should work the same!
+    - rename `mvm vm cleanup` to `mvm vm prune`
+    - when using `mvm vm ssh`, by default it uses the ~/.ssh folder for the private keys, if none of them are found then fail.
+    - the `mvm vm ssh` where --key flag can point to a single private key or a folder that goes through every private key to use!
+    - the `mvm vm create --image` should be required only if a default image from `mvm image` is not being selected! it must check if there is a default image is set or not
+    - the `mvm vm create --kernel` should be required only if a default kernel is not selected from `mvm kernel`. it must check if there is a default kernel is set or not.
+    - the `mvm vm create --firecracker-bin` should come from the currently active firecracker binary version!
 
 Additional requirements to not miss!
 - standardize the command to set defaults, lets stick with set-default for everything that sets a value as default in the cli state!
-- The `fcm image fetch <image-id>` must use the image id that is provided in `fcm image ls --remote`
+- The `mvm image fetch <image-id>` must use the image id that is provided in `mvm image ls --remote`
 - Add a checkmark when an image id is set to default!
 - ensure checksums are provided when fetching any assets
 - commands that requires elevated root privileges such as mount, iptable, ip, or sysctl, they must provide a confirmation that the user must have the group assigned to their user to utilize elevated privileges
-    - for conveniency, when a command is run that needs sudo, it can show do you want to elevate as sudo to perform the action or cancel. in the meantime, the message should indicate that the fcm configure hasnt be ran since that should handle creating a new sudo file with binaries to be allowed
+    - for conveniency, when a command is run that needs sudo, it can show do you want to elevate as sudo to perform the action or cancel. in the meantime, the message should indicate that the mvm configure hasnt be ran since that should handle creating a new sudo file with binaries to be allowed
 - images always must be checked locally before fetching the image id!!
-- a user can import a custom image, this require overhaul implementation under `fcm image`
-    - the user runs `fcm image import <image-id> <path-to-image, local or remote>
+- a user can import a custom image, this require overhaul implementation under `mvm image`
+    - the user runs `mvm image import <image-id> <path-to-image, local or remote>
     - as of currently the only import is qcow2 images where it also has the capability to extract the root partition if the image has multiple partitions such as official archlinux image. Therefore, this implementation must be dynamic.
     - an imported image can be used exactly the same way as the ones come by default in the cli
-- ensure that the `fcm network inspect <my-network>` will show all the attached VMs with full informatioon of the VM.
+- ensure that the `mvm network inspect <my-network>` will show all the attached VMs with full informatioon of the VM.
 
 - create a separation in the cli state:
     - the firecracker state is a key with these values. Using latest=$(basename "$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/firecracker-microvm/firecracker/releases/latest)") result
@@ -70,14 +70,14 @@ Additional requirements to not miss!
 - the default firecracker version must be in constants.py file and the default in the cli-state.json file must be v1.15.0 and the ci version will be v1.15.
 - Rename the cli-state.json file to config.json file and this must be under FCM_CONFIG_DIR where default is ~/.config/firecracker-manager/config.json. Similar to FCM_BUILD_DIR, this can be overridden by user
 
-- when downloading the fcm kernel fetch --type firecracker, the file name is vmlinux-fc-v1.15-x86_64, from this filename, we should get the version, strip out the name as vmlinux-fc, add another col for arch, and also lets rename built at to last modified so that it applies to once it's downloaded grab the last modified there and this will work for custom kernel as well
+- when downloading the mvm kernel fetch --type firecracker, the file name is vmlinux-fc-v1.15-x86_64, from this filename, we should get the version, strip out the name as vmlinux-fc, add another col for arch, and also lets rename built at to last modified so that it applies to once it's downloaded grab the last modified there and this will work for custom kernel as well
   - when building custom kernel, the data must be stored temporarily and then the final file name must be the same convention! a custom built kernel will be vmlinux-6.19-x86_64. ensure this will be the final kernel file name
-  - the `fcm kernel ls` should have id field instead of name and it's a hash of the filename + last modified date, only showing the first 6 digits
+  - the `mvm kernel ls` should have id field instead of name and it's a hash of the filename + last modified date, only showing the first 6 digits
   - the base_name should be the name instead
-  - the last modified field in the metadata should be full UTC timezone, but when running `fcm kernel ls` it should be human format such as x minutes ago, etc...
+  - the last modified field in the metadata should be full UTC timezone, but when running `mvm kernel ls` it should be human format such as x minutes ago, etc...
 
 - all the metadata files to show kernels, images, binaries, must be in a single json file at cache folder called metadata.json
-- when kernel is downloaded, it should not be a default. user must explicitl set it by using set-default subcommand under fcm kernel.
+- when kernel is downloaded, it should not be a default. user must explicitl set it by using set-default subcommand under mvm kernel.
 - The cli must also put these into the config.json file when it's initialized:
   - absolute path to kernels directory, default is cache/kernels
   - absolute path to images directory, default is cache/images
@@ -85,47 +85,47 @@ Additional requirements to not miss!
   - absolute path to networks directory, default is cache/networks
   - absolute path to vms directory, default is cache/vms
   - absolute path to keys directory, default is cache/keys
-  - absolute path to build custom kernels directory, default is /tmp/fcm-kernel-build-{rand 3 chars}
-  - absolute path to import custom images directory, default is /tmp/fcm-image-import-{rand 3 chars}
+  - absolute path to build custom kernels directory, default is /tmp/mvm-kernel-build-{rand 3 chars}
+  - absolute path to import custom images directory, default is /tmp/mvm-image-import-{rand 3 chars}
   - absolute path to logs directory, default is cache/logs
   - a new section in the config.json called `defaults` where it points to the default `image`, `kernel`, `firecracker_version`, etc...
 
 - the application needs to handle its own vm configuration file written in json format. This change will introduce the following:
-  - new flags to `fcm vm create` command:
+  - new flags to `mvm vm create` command:
     - the `--output-config` flag will outputs the cli-owned configuration file to create a vm, all the necessary flags passed to this command will be in this single configuration file, including the firecracker.json file which will have its own key in this configuration file called `firecracker_config`. This will help in debugging why vm is not working.
     - the `import-config` flag takes a vm configuration json file which will have all the necessary data to create the vm instead of passing the flags. Providing this vm configuration file will make the other flags optional, but if flags are passed, they will override the config file value.
     - this new vm configuration file is a big feature of this application, therefore it has its own file and everything must be handled at API layer then the cli will use the API layer to perform the logics.
 
 - Remove the firecracker_version from defaults list. and rename active_version to default_version and active_binary_path to default_binary_path in the config file.
-- each vm, image, kernel when they are shown with `fcm vm|kernel|image ls`, they have id where the id is generated after creating, downloading, or importing the asset to cache folder by using a full hash of the file + current timestamp. then this full hash is also stored in the metadata file for the asset, but when shown in CLI, it must show a short version which is 6 characters long.
+- each vm, image, kernel when they are shown with `mvm vm|kernel|image ls`, they have id where the id is generated after creating, downloading, or importing the asset to cache folder by using a full hash of the file + current timestamp. then this full hash is also stored in the metadata file for the asset, but when shown in CLI, it must show a short version which is 6 characters long.
 - removing image, kernel, vm is possible by providing the id only. So this id is critical
-- `fcm vm rm <id>` can be deleted by id or if `--name|-n` is provided, they can be removed by their name only if there is only a single resource, if two resources with same name, then it must prompt the user to select which one to be deleted.
-- when fetching image by `fcm image fetch <image id>` the id of the image must be provided to download the image. only the ID! ensure the deescription of the command is also updated
-- use a supported list of extensions from constants.py file for file firecracker-manager/src/fcm/cli/asset.py in line 423!
-- the firecracker ubuntu is missing from firecracker-manager/src/fcm/assets/images.yaml file, which downloading the file, preparation, and making it ready for use must be done when downloading this type of image. replicate exact same process defined in assets/download-assets.sh in the `download_rootfs_firecracker_ci` function. the image must be named as ubuntu-fc. which the version, arch can be found in the file name!
+- `mvm vm rm <id>` can be deleted by id or if `--name|-n` is provided, they can be removed by their name only if there is only a single resource, if two resources with same name, then it must prompt the user to select which one to be deleted.
+- when fetching image by `mvm image fetch <image id>` the id of the image must be provided to download the image. only the ID! ensure the deescription of the command is also updated
+- use a supported list of extensions from constants.py file for file firecracker-manager/src/mvm/cli/asset.py in line 423!
+- the firecracker ubuntu is missing from firecracker-manager/src/mvm/assets/images.yaml file, which downloading the file, preparation, and making it ready for use must be done when downloading this type of image. replicate exact same process defined in assets/download-assets.sh in the `download_rootfs_firecracker_ci` function. the image must be named as ubuntu-fc. which the version, arch can be found in the file name!
 - when checksum on an image is missing, it must provide a helpful information that checksum is missing!
-- add checksum for all the images defined in firecracker-manager/src/fcm/assets/images.yaml file
+- add checksum for all the images defined in firecracker-manager/src/mvm/assets/images.yaml file
 - add checksum for available kernels
 - add checksum for firecracker binary
-- the `fcm image import` the first argument is a name for the image, and image_ID is generated exactly how it's generated internally when downloading image by the cli.
-- when image is imported by `fcm image import` command, they do not show up when running `fcm image ls` - ensure the `fcm image ls` command is readig the cache/metadata.json file correctly!
-- when running `fcm bin ls -r` the table should say `downloaded`
+- the `mvm image import` the first argument is a name for the image, and image_ID is generated exactly how it's generated internally when downloading image by the cli.
+- when image is imported by `mvm image import` command, they do not show up when running `mvm image ls` - ensure the `mvm image ls` command is readig the cache/metadata.json file correctly!
+- when running `mvm bin ls -r` the table should say `downloaded`
 - remove these from the config.json file: 1. kernel_build_dir and image_import_dir
-- the def column when running `fcm kernel ls` is showing for all rows, the checkmark should be only for the default set.
-- defualt bridge and nat allow for this bridge is not created after running `fcm host init`, the command shows default network ready but running `fcm network ls` does not show the default brige which should be `fcm-default` bridge and the default cidr and gateway!
-- creating network is failing due to permission denied despite user is in `fcm` group.
-- when running `fcm vm remove vm1 vm2 vm3` should be supported, where vm1, vm2, and vm3 are vm IDs, and if naming is provided, each vm has to has its own --name, such as `fcm vm remove --name runner1 --name runner2`.
+- the def column when running `mvm kernel ls` is showing for all rows, the checkmark should be only for the default set.
+- defualt bridge and nat allow for this bridge is not created after running `mvm host init`, the command shows default network ready but running `mvm network ls` does not show the default brige which should be `mvm-default` bridge and the default cidr and gateway!
+- creating network is failing due to permission denied despite user is in `mvm` group.
+- when running `mvm vm remove vm1 vm2 vm3` should be supported, where vm1, vm2, and vm3 are vm IDs, and if naming is provided, each vm has to has its own --name, such as `mvm vm remove --name runner1 --name runner2`.
 - supporting multiple deletion must be possible for all subcommands with rm command.
-- rename column from `pulled at` to `added` when running `fcm image ls`, also show the datetime as relative time such as x minutes ago, etc..
-- when running `fcm host init`, it escalates to root and creates the network as root, but the networks state files are also in root which is causing the cache/networks/default/config.json to be unreadable by current user. Only execute networking commands in escalated privileges, creating those files must be under current user.
-- rename the `id` column to image id in `fcm image ls -r`
-- the `fcm network rm` does not remove the NAT for the bridge. Also ensure whem vm is removed, the tap device is removed from nat.
-- implement custom iptables chains that are created during fcm host init and cleaned up during fcm host clean. They also want tests.
+- rename column from `pulled at` to `added` when running `mvm image ls`, also show the datetime as relative time such as x minutes ago, etc..
+- when running `mvm host init`, it escalates to root and creates the network as root, but the networks state files are also in root which is causing the cache/networks/default/config.json to be unreadable by current user. Only execute networking commands in escalated privileges, creating those files must be under current user.
+- rename the `id` column to image id in `mvm image ls -r`
+- the `mvm network rm` does not remove the NAT for the bridge. Also ensure whem vm is removed, the tap device is removed from nat.
+- implement custom iptables chains that are created during mvm host init and cleaned up during mvm host clean. They also want tests.
 
 - go through all the commands, any command that shows date/time, it must be relative, if greater than a week, then show the date and time in a friendly standard format. This must be applied to every command!
 - [!IMPORTANT] when sudo is being used, the cli is making too many attempts and causing the user to get locked and unable to use sudo, this needs to be addressed! this is happening with any sudo commands such as network create, host init.
 - Ensure every file is created in cache or config directory are under the current user! sudo is being used in the entire project for escalation which the application is prone to mistakenly create files with root permission only causing breaking behaviors.
 
 - do not use sudo in the tests, they shouldnt require suo privileges to run tests!!!
-- ensure that when runnnig `fcm host init` the FCM chains are persisted!! it's important that after reboot the networks that are created by the CLI are persisted. use iptables-save to do this action. Ensure when VMs are already has tap devices in this chain, running `fcm host init` will not persist those tap devices. it must only persist the bridges with cidrs, NO tap devices.
+- ensure that when runnnig `mvm host init` the MVM chains are persisted!! it's important that after reboot the networks that are created by the CLI are persisted. use iptables-save to do this action. Ensure when VMs are already has tap devices in this chain, running `mvm host init` will not persist those tap devices. it must only persist the bridges with cidrs, NO tap devices.
 - Do not persist VM tap devices, they must be temporary

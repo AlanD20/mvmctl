@@ -46,7 +46,7 @@ uv.lock
 .DS_Store
 Thumbs.db
 
-# FCM runtime data (user cache dir)
+# MVM runtime data (user cache dir)
 # Note: actual files go to ~/.cache/firecracker-manager/ not in project
 *.pid
 *.socket

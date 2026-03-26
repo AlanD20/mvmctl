@@ -195,7 +195,7 @@ Don't force-push to a PR branch after review starts. If you need to rebase, coor
 
 ## Environment Variables
 
-All FCM environment variables use the `MVM_` prefix.
+All MVM environment variables use the `MVM_` prefix.
 
 | Variable | Description | Default |
 |---|---|---|

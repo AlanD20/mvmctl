@@ -16,27 +16,27 @@
 | `assets/images.yaml` | ✅ | Present |
 | `assets/kernel.yaml` | ✅ | Present |
 | `assets/defaults.yaml` | ✅ | Present |
-| `src/fcm/__init__.py` | ✅ | Present |
-| `src/fcm/main.py` — Typer root, registers command groups | ✅ | Present |
-| `src/fcm/cli/__init__.py` | ✅ | Present |
-| `src/fcm/cli/vm.py` — create, delete, list, ssh, logs, cleanup | ✅ | Present (uses Phase 2/3/4 naming) |
-| `src/fcm/cli/image.py` — fetch, convert, list-local | ✅ | Implemented as `asset image` group |
-| `src/fcm/cli/kernel.py` — build, list-local | ✅ | Implemented as `asset kernel` group |
-| `src/fcm/cli/config.py` — show, validate, dump-template | ✅ | Present |
-| `src/fcm/core/__init__.py` | ✅ | Present |
-| `src/fcm/core/vm_manager.py` | ✅ | Present |
-| `src/fcm/core/firecracker.py` | ✅ | Present |
-| `src/fcm/core/config_gen.py` | ✅ | Present |
-| `src/fcm/core/image.py` | ✅ | Present |
-| `src/fcm/core/kernel.py` | ✅ | Present |
-| `src/fcm/core/ssh.py` | ✅ | Present |
-| `src/fcm/models/__init__.py` | ✅ | Present |
-| `src/fcm/models/vm.py` — VMConfig, VMState, VMInstance | ✅ | Present |
-| `src/fcm/models/image.py` — ImageSpec, KernelSpec | ✅ | Present |
-| `src/fcm/utils/__init__.py` | ✅ | Present |
-| `src/fcm/utils/console.py` — Rich wrapper | ✅ | Present |
-| `src/fcm/utils/process.py` — subprocess helpers | ✅ | Present |
-| `src/fcm/utils/fs.py` — path helpers | ✅ | Present |
+| `src/mvm/__init__.py` | ✅ | Present |
+| `src/mvm/main.py` — Typer root, registers command groups | ✅ | Present |
+| `src/mvm/cli/__init__.py` | ✅ | Present |
+| `src/mvm/cli/vm.py` — create, delete, list, ssh, logs, cleanup | ✅ | Present (uses Phase 2/3/4 naming) |
+| `src/mvm/cli/image.py` — fetch, convert, list-local | ✅ | Implemented as `asset image` group |
+| `src/mvm/cli/kernel.py` — build, list-local | ✅ | Implemented as `asset kernel` group |
+| `src/mvm/cli/config.py` — show, validate, dump-template | ✅ | Present |
+| `src/mvm/core/__init__.py` | ✅ | Present |
+| `src/mvm/core/vm_manager.py` | ✅ | Present |
+| `src/mvm/core/firecracker.py` | ✅ | Present |
+| `src/mvm/core/config_gen.py` | ✅ | Present |
+| `src/mvm/core/image.py` | ✅ | Present |
+| `src/mvm/core/kernel.py` | ✅ | Present |
+| `src/mvm/core/ssh.py` | ✅ | Present |
+| `src/mvm/models/__init__.py` | ✅ | Present |
+| `src/mvm/models/vm.py` — VMConfig, VMState, VMInstance | ✅ | Present |
+| `src/mvm/models/image.py` — ImageSpec, KernelSpec | ✅ | Present |
+| `src/mvm/utils/__init__.py` | ✅ | Present |
+| `src/mvm/utils/console.py` — Rich wrapper | ✅ | Present |
+| `src/mvm/utils/process.py` — subprocess helpers | ✅ | Present |
+| `src/mvm/utils/fs.py` — path helpers | ✅ | Present |
 | `tests/unit/` | ✅ | Present, 551 tests pass |
 | `tests/integration/` | ✅ | Directory present |
 
@@ -50,7 +50,7 @@
 | `pyproject.toml [project] version = "0.1.0"` | ✅ | Set |
 | `pyproject.toml requires-python = ">=3.13"` | ✅ | Set |
 | `dependencies: typer>=0.12, rich>=13, pyyaml>=6` | ✅ | All pinned in pyproject.toml |
-| `[project.scripts] fcm = "fcm.main:app"` | ✅ | Set |
+| `[project.scripts] mvm = "mvm.main:app"` | ✅ | Set |
 | `[build-system] hatchling` | ✅ | Set |
 | `[tool.ruff] line-length = 100, target-version = "py313"` | ✅ | Set |
 | `[tool.mypy] python_version = "3.13", strict = true` | ✅ | Set |
@@ -72,44 +72,44 @@
 
 ## §5 CLI Command Specification
 
-### 5.1 `fcm vm`
+### 5.1 `mvm vm`
 
 | Command | Status | Notes |
 |---|---|---|
-| `fcm vm create` | ✅ | Implemented with all Phase 1–4 flags |
-| `fcm vm delete` / `vm remove` | ✅ | Phase 3/4 canonical verb is `remove` |
-| `fcm vm list` / `vm ls` | ✅ | Both aliases work |
-| `fcm vm ssh` | ✅ | Implemented |
-| `fcm vm logs` | ✅ | Implemented with `--follow` |
-| `fcm vm cleanup` | ✅ | Implemented |
-| `fcm vm pause` | ✅ | Removed per Phase 4 §3; responds with message |
-| `fcm vm resume` | ✅ | Removed per Phase 4 §3; responds with message |
-| `fcm vm snapshot` | ✅ | Implemented |
+| `mvm vm create` | ✅ | Implemented with all Phase 1–4 flags |
+| `mvm vm delete` / `vm remove` | ✅ | Phase 3/4 canonical verb is `remove` |
+| `mvm vm list` / `vm ls` | ✅ | Both aliases work |
+| `mvm vm ssh` | ✅ | Implemented |
+| `mvm vm logs` | ✅ | Implemented with `--follow` |
+| `mvm vm cleanup` | ✅ | Implemented |
+| `mvm vm pause` | ✅ | Removed per Phase 4 §3; responds with message |
+| `mvm vm resume` | ✅ | Removed per Phase 4 §3; responds with message |
+| `mvm vm snapshot` | ✅ | Implemented |
 
-### 5.2 `fcm image` (as `fcm asset image`)
-
-| Command | Status | Notes |
-|---|---|---|
-| `fcm asset image fetch <type>` | ✅ | Implemented |
-| `fcm asset image ls` | ✅ | Implemented |
-| `fcm asset image remove` | ✅ | Implemented |
-
-### 5.3 `fcm kernel` (as `fcm asset kernel`)
+### 5.2 `mvm image` (as `mvm asset image`)
 
 | Command | Status | Notes |
 |---|---|---|
-| `fcm asset kernel build` | ✅ | Implemented |
-| `fcm asset kernel ls` | ✅ | Implemented |
-| `fcm asset kernel fetch` | ✅ | Implemented |
-| `fcm asset kernel remove` | ✅ | Implemented |
+| `mvm asset image fetch <type>` | ✅ | Implemented |
+| `mvm asset image ls` | ✅ | Implemented |
+| `mvm asset image remove` | ✅ | Implemented |
 
-### 5.4 `fcm config`
+### 5.3 `mvm kernel` (as `mvm asset kernel`)
 
 | Command | Status | Notes |
 |---|---|---|
-| `fcm config show` | ✅ | Implemented |
-| `fcm config validate` | ✅ | Implemented |
-| `fcm config dump-vm` | ✅ | Implemented |
+| `mvm asset kernel build` | ✅ | Implemented |
+| `mvm asset kernel ls` | ✅ | Implemented |
+| `mvm asset kernel fetch` | ✅ | Implemented |
+| `mvm asset kernel remove` | ✅ | Implemented |
+
+### 5.4 `mvm config`
+
+| Command | Status | Notes |
+|---|---|---|
+| `mvm config show` | ✅ | Implemented |
+| `mvm config validate` | ✅ | Implemented |
+| `mvm config dump-vm` | ✅ | Implemented |
 
 ---
 
@@ -129,8 +129,8 @@
 
 | Requirement | Status | Notes |
 |---|---|---|
-| `FCMError`, `VMNotFoundError`, `VMAlreadyExistsError`, `FirecrackerAPIError`, `ImageNotFoundError`, `ChecksumMismatchError` in `exceptions.py` | ✅ | All present in `src/fcm/exceptions.py` |
-| CLI catches `FCMError`, prints Rich error panel, exits non-zero | ✅ | Implemented |
+| `mvmError`, `VMNotFoundError`, `VMAlreadyExistsError`, `FirecrackerAPIError`, `ImageNotFoundError`, `ChecksumMismatchError` in `exceptions.py` | ✅ | All present in `src/mvm/exceptions.py` |
+| CLI catches `mvmError`, prints Rich error panel, exits non-zero | ✅ | Implemented |
 | `--verbose` / `-v` flag | ✅ | Implemented |
 | `--debug` flag — full tracebacks | ✅ | Implemented |
 
