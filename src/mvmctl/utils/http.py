@@ -94,6 +94,7 @@ def download_file(
     timeout: int = 300,
     allow_missing_checksum: bool = False,
     resume: bool = False,
+    silent_missing_checksum: bool = False,
 ) -> bool:
     """Download a file with optional progress display and checksum verification.
 
@@ -110,6 +111,9 @@ def download_file(
             If the destination file exists, the download will continue from
             where it left off. If the server doesn't support Range requests,
             the download will restart from the beginning.
+        silent_missing_checksum: If True, skip all warnings and interactive prompts
+            when no checksum is available and proceed silently. Use when the absence
+            of a checksum is intentional (e.g. the asset spec deliberately omits one).
 
     Returns:
         True if successful
@@ -121,29 +125,32 @@ def download_file(
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     if expected_sha256 is None:
-        if not allow_missing_checksum:
+        if silent_missing_checksum:
+            pass
+        elif not allow_missing_checksum:
             raise MVMError(
                 f"No checksum provided for download: {url}. "
                 "Checksum verification is mandatory for security. "
                 "Provide expected_sha256 or use allow_missing_checksum=True with confirmation."
             )
-        # Interactive confirmation when checksum is missing
-        import sys
+        else:
+            # Interactive confirmation when checksum is missing
+            import sys
 
-        from mvmctl.utils.console import print_warning
+            from mvmctl.utils.console import print_warning
 
-        print_warning(f"Warning: No checksum available for {url}")
-        print_warning("Integrity cannot be verified. This is a potential security risk.")
-        if not sys.stdin.isatty():
-            raise MVMError(
-                f"No checksum provided for download: {url}. "
-                "Cannot prompt for confirmation in non-interactive mode. "
-                "Provide expected_sha256 or run in an interactive terminal."
-            )
-        import typer
+            print_warning(f"Warning: No checksum available for {url}")
+            print_warning("Integrity cannot be verified. This is a potential security risk.")
+            if not sys.stdin.isatty():
+                raise MVMError(
+                    f"No checksum provided for download: {url}. "
+                    "Cannot prompt for confirmation in non-interactive mode. "
+                    "Provide expected_sha256 or run in an interactive terminal."
+                )
+            import typer
 
-        if not typer.confirm("Proceed with download anyway?", default=False):
-            raise MVMError(f"Download cancelled: {url} (no checksum provided)")
+            if not typer.confirm("Proceed with download anyway?", default=False):
+                raise MVMError(f"Download cancelled: {url} (no checksum provided)")
 
     partial_path = _partial_download_path(dest)
     temp_path: Path | None = None

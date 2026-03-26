@@ -91,21 +91,23 @@ def test_list_kernel_entries_removes_orphaned_on_read(tmp_path: Path):
     valid_kernel = kernels_dir / "vmlinux"
     valid_kernel.write_bytes(b"\x7fELF")
 
+    valid_id = "a" * 64
+    orphan_id = "b" * 64
     write_metadata(
         tmp_path,
         {
             "kernels": {
-                "vmlinux": {"version": "6.1"},
-                "missing-kernel": {"version": "6.2"},
+                valid_id: {"filename": "vmlinux", "version": "6.1"},
+                orphan_id: {"filename": "missing-kernel", "version": "6.2"},
             }
         },
     )
 
     result = list_kernel_entries(tmp_path, kernels_dir)
 
-    assert result == {"vmlinux": {"version": "6.1"}}
+    assert result == {valid_id: {"filename": "vmlinux", "version": "6.1"}}
     persisted = json.loads((tmp_path / "metadata.json").read_text())
-    assert persisted["kernels"] == {"vmlinux": {"version": "6.1"}}
+    assert persisted["kernels"] == {valid_id: {"filename": "vmlinux", "version": "6.1"}}
 
 
 def test_list_image_entries_removes_orphaned_on_read(tmp_path: Path):

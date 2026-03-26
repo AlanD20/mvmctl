@@ -225,8 +225,7 @@ def kernel_fetch(
 
         effective_version = spec.version or DEFAULT_KERNEL_VERSION
         effective_arch = arch if arch != DEFAULT_FC_KERNEL_ARCH else platform.machine() or "x86_64"
-        output_name_str = spec.output_name
-        output_path = out if out is not None else kernels_dir / output_name_str
+        output_path = out if out is not None else kernels_dir / f"{spec.output_name}-{effective_version}-{effective_arch}"
 
         if kernel_config and not kernel_config.exists():
             print_error(f"Kernel config file not found: {kernel_config}")
@@ -400,16 +399,16 @@ def image_ls(
 
     _all_meta = list_image_entries(get_cache_dir())
 
-    def _find_meta_for_yaml_id(yaml_id: str) -> tuple[str, dict[str, object]] | None:
+    def _find_meta_for_internal_id(internal_id: str) -> tuple[str, dict[str, object]] | None:
         for _k, _v in _all_meta.items():
-            if str(_v.get("yaml_id", "")) == yaml_id:
+            if str(_v.get("internal_id", "")) == internal_id:
                 return _k, _v
         return None
 
     if json_output:
         result = []
         for img in images:
-            entry = _find_meta_for_yaml_id(img.id)
+            entry = _find_meta_for_internal_id(img.id)
             if entry:
                 meta_key, meta = entry
                 display_id = meta_key[:6]
@@ -425,7 +424,7 @@ def image_ls(
                     }
                 )
         for meta_id, meta in _all_meta.items():
-            if str(meta.get("yaml_id", meta_id)) in yaml_ids:
+            if str(meta.get("internal_id", meta_id)) in yaml_ids:
                 continue
             display_id = meta_id[:6] if len(meta_id) >= 6 else meta_id
             result.append(
@@ -455,7 +454,7 @@ def image_ls(
         )
         if found_path is None:
             continue
-        entry = _find_meta_for_yaml_id(img.id)
+        entry = _find_meta_for_internal_id(img.id)
         if entry:
             meta_key, meta = entry
             display_id = meta_key[:6]
@@ -473,7 +472,7 @@ def image_ls(
         rows_local.append([default_marker, display_id, img.name, fs_type, added])
 
     for meta_id, meta in _all_meta.items():
-        if str(meta.get("yaml_id", meta_id)) in yaml_ids:
+        if str(meta.get("internal_id", meta_id)) in yaml_ids:
             continue
         found_path = next(
             (
@@ -632,7 +631,7 @@ def image_fetch(
             result,
             {
                 "os_name": spec.name,
-                "yaml_id": spec.id,
+                "internal_id": spec.id,
                 "fs_type": result.suffix.lstrip("."),
                 "full_hash": full_id,
                 "filename": result.name,

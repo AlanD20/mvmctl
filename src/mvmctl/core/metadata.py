@@ -260,19 +260,21 @@ def list_kernel_entries(
         valid_kernels: dict[str, dict[str, Any]] = {}
         orphaned: list[str] = []
 
-        for kernel_name, kernel_data in kernels.items():
-            if isinstance(kernel_data, dict):
-                kernel_path = kernels_dir / kernel_name
-                if kernel_path.exists():
-                    valid_kernels[kernel_name] = dict(kernel_data)
-                else:
-                    orphaned.append(kernel_name)
+        for kernel_id, kernel_data in kernels.items():
+            if not isinstance(kernel_data, dict):
+                orphaned.append(kernel_id)
+                continue
+            filename = kernel_data.get("filename", kernel_id)
+            kernel_path = kernels_dir / str(filename)
+            if kernel_path.exists():
+                valid_kernels[kernel_id] = dict(kernel_data)
+            else:
+                orphaned.append(kernel_id)
 
-        # Remove orphaned entries
         if orphaned:
             logger.debug("Removing %d orphaned kernel entries: %s", len(orphaned), orphaned)
-            for kernel_name in orphaned:
-                del data["kernels"][kernel_name]
+            for kernel_id in orphaned:
+                del data["kernels"][kernel_id]
             write_metadata(cache_dir, data)
 
         return valid_kernels

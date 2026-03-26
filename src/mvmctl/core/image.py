@@ -527,6 +527,8 @@ def fetch_image(
     if "{" in spec.source:
         source = _resolve_source_template(spec)
 
+    intentional_no_checksum = spec.sha256 is None and spec.sha256_url is None
+
     resolved_sha256 = spec.sha256.lower() if spec.sha256 is not None else None
     sha256_url = render_optional_template(spec.sha256_url, template_vars)
     if resolved_sha256 is None and sha256_url is not None:
@@ -540,6 +542,7 @@ def fetch_image(
         download_path,
         expected_sha256=resolved_sha256,
         allow_missing_checksum=no_checksum,
+        silent_missing_checksum=intentional_no_checksum,
     )
 
     handler = _FORMAT_HANDLERS.get(spec.format)

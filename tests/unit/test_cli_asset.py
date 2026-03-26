@@ -1093,7 +1093,7 @@ def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         "images": {
             full_hash: {
                 "os_name": "Ubuntu 24.04 LTS",
-                "yaml_id": "ubuntu-24.04",
+                "internal_id": "ubuntu-24.04",
                 "filename": "ubuntu-24.04.ext4",
                 "fs_type": "ext4",
                 "pulled_at": "2026-01-01T00:00:00+00:00",

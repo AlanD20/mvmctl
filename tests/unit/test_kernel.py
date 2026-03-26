@@ -511,8 +511,24 @@ def test_build_kernel_pipeline_download_fails(tmp_path: Path):
             )
 
 
+@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value=None)
 @patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value=None)
-def test_build_kernel_pipeline_requires_checksum(mock_fetch_sha256: MagicMock, tmp_path: Path):
+def test_build_kernel_pipeline_requires_checksum(
+    mock_fetch_sha256: MagicMock, mock_fetch_sha256_url: MagicMock, tmp_path: Path
+):
+    from mvmctl.models.kernel import KernelSpec
+
+    spec_with_sha256_url = KernelSpec(
+        name="test-spec",
+        kernel_type="official",
+        version="6.1.102",
+        source="https://example.com/linux-{version}.tar.xz",
+        output_name="vmlinux-test",
+        build_dir=str(tmp_path / "build"),
+        sha256=None,
+        sha256_url="https://example.com/linux-{version}.tar.xz.sha256",
+    )
+
     output_path = tmp_path / "vmlinux"
     build_dir = tmp_path / "build"
     build_dir.mkdir()
@@ -523,6 +539,7 @@ def test_build_kernel_pipeline_requires_checksum(mock_fetch_sha256: MagicMock, t
             source_url="https://example.com/linux.tar.xz",
             output_path=output_path,
             build_dir=build_dir,
+            kernel_spec=spec_with_sha256_url,
         )
 
 
@@ -998,3 +1015,121 @@ def test_build_kernel_pipeline_skips_build_if_cache_matches(
     mock_extract.assert_not_called()
     mock_download.assert_not_called()
     assert output_path.read_bytes() == b"cached artifact"
+
+
+class TestApplyConfigFragments:
+    from mvmctl.core.kernel import _apply_config_fragments
+
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_local_assets_fragment(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        from mvmctl.core.kernel import _ASSETS_DIR, _apply_config_fragments
+
+        fragment_file = _ASSETS_DIR / "test-fragment.config"
+        fragment_file.write_text("CONFIG_FOO=y\n")
+        try:
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            kernel_dir = tmp_path / "linux"
+            kernel_dir.mkdir()
+            _apply_config_fragments(
+                ["assets/test-fragment.config"],
+                {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
+                kernel_dir,
+            )
+            assert mock_run.called
+            call_env = mock_run.call_args.kwargs["env"]
+            assert "KCONFIG_ALLCONFIG" in call_env
+            assert call_env["KCONFIG_ALLCONFIG"].endswith(".fragment_0.config")
+            assert mock_run.call_args.args[0] == ["make", "olddefconfig"]
+        finally:
+            fragment_file.unlink(missing_ok=True)
+
+    @patch("mvmctl.core.kernel.subprocess.run")
+    @patch("mvmctl.core.kernel.urlopen")
+    def test_remote_url_fragment_with_arch_template(
+        self, mock_urlopen: MagicMock, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        from mvmctl.core.kernel import _apply_config_fragments
+
+        resp = MagicMock()
+        resp.read.return_value = b"CONFIG_VIRTIO_BLK=y\n"
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = resp
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux"
+        kernel_dir.mkdir()
+        _apply_config_fragments(
+            ["https://example.com/config-{arch}.config"],
+            {"version": "6.1", "arch": "amd64", "ci_version": "1.12"},
+            kernel_dir,
+        )
+
+        fetched_url = mock_urlopen.call_args.args[0].full_url
+        assert fetched_url == "https://example.com/config-amd64.config"
+        assert mock_run.called
+
+    def test_missing_local_fragment_raises(self, tmp_path: Path) -> None:
+        from mvmctl.core.kernel import _apply_config_fragments
+
+        kernel_dir = tmp_path / "linux"
+        kernel_dir.mkdir()
+        with pytest.raises(KernelError, match="Config fragment not found"):
+            _apply_config_fragments(
+                ["assets/does-not-exist.config"],
+                {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
+                kernel_dir,
+            )
+
+    @patch("mvmctl.core.kernel.urlopen", side_effect=URLError("network error"))
+    def test_remote_fetch_failure_raises(self, mock_urlopen: MagicMock, tmp_path: Path) -> None:
+        from mvmctl.core.kernel import _apply_config_fragments
+
+        kernel_dir = tmp_path / "linux"
+        kernel_dir.mkdir()
+        with pytest.raises(KernelError, match="Failed to fetch config fragment"):
+            _apply_config_fragments(
+                ["https://example.com/broken.config"],
+                {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
+                kernel_dir,
+            )
+
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_make_failure_raises(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        from mvmctl.core.kernel import _ASSETS_DIR, _apply_config_fragments
+
+        fragment_file = _ASSETS_DIR / "bad-fragment.config"
+        fragment_file.write_text("CONFIG_BAD=y\n")
+        try:
+            mock_run.return_value = MagicMock(returncode=1, stderr="make: error")
+            kernel_dir = tmp_path / "linux"
+            kernel_dir.mkdir()
+            with pytest.raises(KernelError, match="Failed to apply config fragment"):
+                _apply_config_fragments(
+                    ["assets/bad-fragment.config"],
+                    {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
+                    kernel_dir,
+                )
+        finally:
+            fragment_file.unlink(missing_ok=True)
+
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_temp_fragment_file_cleaned_up_on_success(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        from mvmctl.core.kernel import _ASSETS_DIR, _apply_config_fragments
+
+        fragment_file = _ASSETS_DIR / "cleanup-test.config"
+        fragment_file.write_text("CONFIG_X=y\n")
+        try:
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            kernel_dir = tmp_path / "linux"
+            kernel_dir.mkdir()
+            _apply_config_fragments(
+                ["assets/cleanup-test.config"],
+                {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
+                kernel_dir,
+            )
+            assert not (kernel_dir / ".fragment_0.config").exists()
+        finally:
+            fragment_file.unlink(missing_ok=True)

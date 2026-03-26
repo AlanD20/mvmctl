@@ -99,6 +99,7 @@ class KernelPipelineResult:
 
 
 _KERNELS_YAML_PATH = Path(__file__).parent.parent / "assets" / "kernels.yaml"
+_ASSETS_DIR = _KERNELS_YAML_PATH.parent
 
 
 @functools.lru_cache(maxsize=1)
@@ -218,19 +219,7 @@ class ParsedKernelFilename:
     arch: str
 
 
-def generate_kernel_id(kernel_name: str, last_modified: str) -> str:
-    """Generate a short ID from kernel name and last modified date.
 
-    Args:
-        kernel_name: Kernel filename
-        last_modified: Last modified timestamp
-
-    Returns:
-        First 6 characters of SHA256 hash
-    """
-    data = f"{kernel_name}:{last_modified}"
-    hash_full = hashlib.sha256(data.encode()).hexdigest()
-    return hash_full[:6]
 
 
 def human_readable_time(iso_timestamp: str) -> str:
@@ -324,6 +313,7 @@ def download_kernel_source(
     dest: Path,
     expected_sha256: str | None = None,
     allow_missing_checksum: bool = False,
+    silent_missing_checksum: bool = False,
 ) -> None:
     """Download kernel source tarball.
 
@@ -332,6 +322,7 @@ def download_kernel_source(
         dest: Destination path
         expected_sha256: Optional SHA-256 checksum
         allow_missing_checksum: If True, allow download without checksum
+        silent_missing_checksum: If True, skip warnings/prompt when no checksum
 
     Raises:
         KernelError: If download fails
@@ -345,6 +336,7 @@ def download_kernel_source(
             expected_sha256,
             timeout=HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
             allow_missing_checksum=allow_missing_checksum,
+            silent_missing_checksum=silent_missing_checksum,
         )
     except ChecksumMismatchError:
         raise
@@ -489,12 +481,61 @@ def _run_config_script(config_script: Path, args: list[str], kernel_dir: Path) -
         )
 
 
+def _fetch_fragment_content(url: str) -> str:
+    req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
+    with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
+        raw: bytes = resp.read()
+    return raw.decode("utf-8")
+
+
+def _apply_config_fragments(
+    fragments: list[str],
+    template_vars: dict[str, str],
+    kernel_dir: Path,
+) -> None:
+    for i, fragment in enumerate(fragments):
+        rendered = render_template(fragment, template_vars)
+        if rendered.startswith("http://") or rendered.startswith("https://"):
+            try:
+                content = _fetch_fragment_content(rendered)
+            except (URLError, OSError) as exc:
+                raise KernelError(f"Failed to fetch config fragment {rendered}: {exc}") from exc
+            logger.info("Applying remote config fragment: %s", rendered)
+        else:
+            rel = rendered[len("assets/"):] if rendered.startswith("assets/") else rendered
+            path = _ASSETS_DIR / rel
+            if not path.exists():
+                raise KernelError(f"Config fragment not found: {path} (from '{fragment}')")
+            content = path.read_text(encoding="utf-8")
+            logger.info("Applying local config fragment: %s", path)
+
+        fragment_path = kernel_dir / f".fragment_{i}.config"
+        try:
+            fragment_path.write_text(content, encoding="utf-8")
+            env = os.environ.copy()
+            env["KCONFIG_ALLCONFIG"] = str(fragment_path)
+            result = subprocess.run(
+                ["make", "olddefconfig"],
+                cwd=kernel_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise KernelError(
+                    f"Failed to apply config fragment '{rendered}': {result.stderr.strip()}"
+                )
+        finally:
+            fragment_path.unlink(missing_ok=True)
+
+
 def configure_kernel(
     kernel_dir: Path,
     version: str,
     user_config_path: Path | None = None,
     kernel_spec: KernelSpec | None = None,
     skip_confirm: bool = False,
+    arch: str | None = None,
 ) -> KernelConfigResult:
     """Configure kernel with Firecracker settings.
 
@@ -535,6 +576,14 @@ def configure_kernel(
     returncode, _, _ = run_make(kernel_dir, "olddefconfig")
     if returncode != 0:
         raise KernelError("olddefconfig failed")
+
+    if kernel_spec.config_fragments:
+        template_vars = {
+            "version": version,
+            "arch": arch or DEFAULT_FC_KERNEL_ARCH,
+            "ci_version": version,
+        }
+        _apply_config_fragments(kernel_spec.config_fragments, template_vars, kernel_dir)
 
     config_script = kernel_dir / "scripts" / "config"
 
@@ -728,6 +777,7 @@ def _compute_config_hash(
 
     hasher = hashlib.sha256()
     hasher.update(version.encode())
+    hasher.update(str(kernel_spec.config_fragments).encode())
     hasher.update(str(kernel_spec.enabled_configs).encode())
     hasher.update(str(kernel_spec.disabled_configs).encode())
     hasher.update(str(kernel_spec.set_val_configs).encode())
@@ -804,51 +854,65 @@ def build_kernel_pipeline(
         render_template(source_url, template_vars) if "{" in source_url else source_url
     )
 
-    if sha256 is None:
+    intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None
+
+    if sha256 is None and not intentional_no_checksum:
         resolved_sha256_url = render_optional_template(kernel_spec.sha256_url, template_vars)
         if resolved_sha256_url is not None:
             sha256 = fetch_kernel_sha256_from_url(resolved_sha256_url)
         if sha256 is None:
             sha256 = fetch_kernel_sha256(version)
 
-    if sha256 is None:
+    if sha256 is None and not intentional_no_checksum:
         raise KernelError(f"Checksum required for kernel source download: {resolved_source_url}")
 
     tarball = build_dir / f"linux-{version}.tar.xz"
     kernel_src_dir = build_dir / f"linux-{version}"
 
-    if not tarball.exists():
-        download_kernel_source(resolved_source_url, tarball, sha256)
+    try:
+        if not tarball.exists():
+            download_kernel_source(
+                resolved_source_url,
+                tarball,
+                sha256,
+                allow_missing_checksum=intentional_no_checksum,
+                silent_missing_checksum=intentional_no_checksum,
+            )
+        else:
+            logger.info("Using cached tarball: %s", tarball)
+
+        if not kernel_src_dir.exists():
+            extract_kernel_tarball(tarball, build_dir)
+        else:
+            logger.info("Using existing source: %s", kernel_src_dir)
+
+        config_result = configure_kernel(
+            kernel_src_dir, version, user_config_path=user_config_path, kernel_spec=kernel_spec, arch=arch
+        )
+
+        build_result = build_kernel(kernel_src_dir, output_path, jobs)
+
+        shutil.copy2(output_path, cached_kernel_path)
+        cache_marker.write_text(cache_key)
+
+        save_kernel_metadata(
+            output_path.parent,
+            output_path.name,
+            version=version,
+            kernel_type=KERNEL_TYPE_OFFICIAL,
+            arch=arch,
+        )
+    except Exception:
+        raise
     else:
-        logger.info("Using cached tarball: %s", tarball)
-
-    if not kernel_src_dir.exists():
-        extract_kernel_tarball(tarball, build_dir)
-    else:
-        logger.info("Using existing source: %s", kernel_src_dir)
-
-    config_result = configure_kernel(
-        kernel_src_dir, version, user_config_path=user_config_path, kernel_spec=kernel_spec
-    )
-
-    build_result = build_kernel(kernel_src_dir, output_path, jobs)
-
-    shutil.copy2(output_path, cached_kernel_path)
-    cache_marker.write_text(cache_key)
-
-    save_kernel_metadata(
-        output_path.parent,
-        output_path.name,
-        version=version,
-        kernel_type=KERNEL_TYPE_OFFICIAL,
-        arch=arch,
-    )
-
-    if not keep_build_dir:
-        shutil.rmtree(build_dir, ignore_errors=True)
-        logger.info("Build directory cleaned up")
-    else:
-        logger.info("Build directory kept at: %s", build_dir)
+        if not keep_build_dir:
+            try:
+                shutil.rmtree(build_dir)
+                logger.info("Build directory cleaned up: %s", build_dir)
+            except OSError as exc:
+                logger.warning("Failed to clean up build directory %s: %s", build_dir, exc)
+        else:
+            logger.info("Build directory kept at: %s", build_dir)
 
     return KernelPipelineResult(
         build_dir=build_dir,
@@ -863,19 +927,7 @@ def save_kernel_metadata(
     version: str | None = None,
     kernel_type: str | None = None,
     arch: str | None = None,
-) -> None:
-    """Save kernel metadata to unified metadata.json.
-
-    Parses the kernel filename to extract base_name, version, and arch if not
-    provided. Uses file modification time for last_modified.
-
-    Args:
-        kernels_dir: Directory containing kernel files
-        kernel_name: Kernel filename
-        version: Kernel version (parsed from filename if None)
-        kernel_type: Kernel type (e.g., "firecracker", "official")
-        arch: Architecture (parsed from filename if None)
-    """
+) -> str:
     kernel_path = kernels_dir / kernel_name
 
     parsed = parse_kernel_filename(kernel_name)
@@ -892,10 +944,20 @@ def save_kernel_metadata(
         mtime = kernel_path.stat().st_mtime
         last_modified = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
 
+    try:
+        file_bytes = kernel_path.read_bytes()
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+    except OSError:
+        file_hash = hashlib.sha256(kernel_name.encode()).hexdigest()
+    timestamp = str(datetime.now(tz=timezone.utc).timestamp())
+    full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()
+
     cache_dir = get_cache_dir()
     update_kernel_entry(
         cache_dir,
-        kernel_name,
+        full_id,
+        filename=kernel_name,
+        full_hash=full_id,
         name=kernel_name,
         base_name=parsed.base_name,
         version=version,
@@ -903,6 +965,7 @@ def save_kernel_metadata(
         type=kernel_type,
         last_modified=last_modified,
     )
+    return full_id
 
 
 def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
@@ -918,8 +981,9 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
     results: list[dict[str, str]] = []
 
-    for kernel_name, meta in sorted(entries.items()):
-        path = kernels_dir / kernel_name
+    for entry_id, meta in sorted(entries.items()):
+        filename = str(meta.get("filename", entry_id))
+        path = kernels_dir / filename
         if not path.is_file():
             continue
 
@@ -929,15 +993,13 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
         if not last_modified:
             last_modified = meta.get("built_at", "-")
 
-        kernel_id = generate_kernel_id(kernel_name, last_modified)
-
         if meta.get("base_name"):
-            base_name = meta["base_name"]
-            version = meta.get("version", "-")
-            arch = meta.get("arch", "-")
-            kernel_type = meta.get("type", KERNEL_TYPE_UNKNOWN)
+            base_name = str(meta["base_name"])
+            version = str(meta.get("version", "-"))
+            arch = str(meta.get("arch", "-"))
+            kernel_type = str(meta.get("type", KERNEL_TYPE_UNKNOWN))
         else:
-            parsed = parse_kernel_filename(kernel_name)
+            parsed = parse_kernel_filename(filename)
             base_name = parsed.base_name
             version = parsed.version
             arch = parsed.arch
@@ -945,15 +1007,15 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
         results.append(
             {
-                "id": kernel_id,
+                "id": entry_id[:6],
                 "name": base_name,
-                "full_name": kernel_name,
+                "full_name": filename,
                 "version": version,
                 "type": kernel_type,
                 "arch": arch,
-                "last_modified": last_modified,
+                "last_modified": str(last_modified) if last_modified else "-",
                 "size": f"{size_mb:.1f} MiB",
-                "is_default": str(kernel_name == default_name).lower(),
+                "is_default": str(filename == default_name).lower(),
             }
         )
 
@@ -1024,12 +1086,12 @@ def download_firecracker_kernel(
     if not keys:
         raise KernelError(f"No vmlinux found for Firecracker CI version {ci_version} / arch {arch}")
 
-    keys.sort()
+    keys.sort(key=lambda k: tuple(int(x) for x in k.split("/vmlinux-")[-1].split(".")))
     chosen_key = keys[-1]
     kernel_version = chosen_key.split("/vmlinux-")[-1]
 
     if output_name is None:
-        output_name = kernel_spec.output_name
+        output_name = f"{kernel_spec.output_name}-{kernel_version}-{arch}"
 
     output_path = kernels_dir / output_name
 
@@ -1037,23 +1099,26 @@ def download_firecracker_kernel(
         logger.info("Firecracker CI kernel already cached: %s", output_path)
         return output_path
 
+    intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None
+
     template_vars["kernel_version"] = kernel_version
-    download_url = render_template(kernel_spec.source, template_vars)
+    download_url = f"{kernel_spec.source.rstrip('/')}/{chosen_key}"
     sha256_url = render_optional_template(kernel_spec.sha256_url, template_vars)
-    if sha256_url is None:
+    if sha256_url is None and not intentional_no_checksum:
         sha256_url = f"{download_url}.sha256"
     expected_sha256: str | None = None
-    try:
-        req_sha = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req_sha, timeout=HTTP_TIMEOUT_SHA256_SIDECAR_S) as resp_sha:
-            content = resp_sha.read().decode().strip()
-        parts = content.split()
-        expected_sha256 = str(parts[0]).lower() if parts else None
-        logger.info("Fetched CI kernel checksum: %s", expected_sha256)
-    except (URLError, OSError):
-        logger.debug("No sha256 sidecar for CI kernel %s — proceeding without checksum", chosen_key)
+    if sha256_url is not None:
+        try:
+            req_sha = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
+            with urlopen(req_sha, timeout=HTTP_TIMEOUT_SHA256_SIDECAR_S) as resp_sha:
+                content = resp_sha.read().decode().strip()
+            parts = content.split()
+            expected_sha256 = str(parts[0]).lower() if parts else None
+            logger.info("Fetched CI kernel checksum: %s", expected_sha256)
+        except (URLError, OSError):
+            logger.debug("No sha256 sidecar for CI kernel %s — proceeding without checksum", chosen_key)
 
-    if expected_sha256 is None:
+    if expected_sha256 is None and not intentional_no_checksum:
         raise KernelError(f"Checksum required for Firecracker CI kernel download: {download_url}")
 
     logger.info("Downloading Firecracker CI kernel from %s", download_url)
@@ -1063,6 +1128,8 @@ def download_firecracker_kernel(
             output_path,
             expected_sha256=expected_sha256,
             timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
+            allow_missing_checksum=intentional_no_checksum,
+            silent_missing_checksum=intentional_no_checksum,
         )
     except MVMError as exc:
         raise KernelError(f"Failed to download Firecracker CI kernel: {exc}") from exc
