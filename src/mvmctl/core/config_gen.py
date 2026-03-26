@@ -126,9 +126,7 @@ class ConfigGenerator:
         try:
             template_str = template_path.read_text(encoding="utf-8")
         except OSError as exc:
-            raise MVMError(
-                f"Failed to load Firecracker config template: {template_path}"
-            ) from exc
+            raise MVMError(f"Failed to load Firecracker config template: {template_path}") from exc
 
         filled = template_str
         for key, value in context.items():

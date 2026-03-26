@@ -33,19 +33,47 @@ MAGIC_STRING_PATTERNS = [
 ]
 
 # Numbers that might be magic values (allow 0, 1, -1, small integers used as flags)
-MAGIC_NUMBER_PATTERN = re.compile(r'\b(?!0$|1$|-1$)(\d{3,})\b')
+MAGIC_NUMBER_PATTERN = re.compile(r"\b(?!0$|1$|-1$)(\d{3,})\b")
 
 # Whitelist of allowed strings (common non-config values)
 ALLOWED_STRINGS = {
-    "true", "false", "yes", "no", "on", "off",
-    "json", "yaml", "yml", "toml",
-    "get", "post", "put", "delete", "patch",
-    "info", "warning", "error", "debug",
-    "running", "stopped", "paused", "error",
-    "linux", "darwin", "windows",
-    "amd64", "x86_64", "arm64", "aarch64",
-    "qcow2", "raw", "vmdk", "vdi",
-    "eth0", "ens3", "enp0s1",
+    "true",
+    "false",
+    "yes",
+    "no",
+    "on",
+    "off",
+    "json",
+    "yaml",
+    "yml",
+    "toml",
+    "get",
+    "post",
+    "put",
+    "delete",
+    "patch",
+    "info",
+    "warning",
+    "error",
+    "debug",
+    "running",
+    "stopped",
+    "paused",
+    "error",
+    "linux",
+    "darwin",
+    "windows",
+    "amd64",
+    "x86_64",
+    "arm64",
+    "aarch64",
+    "qcow2",
+    "raw",
+    "vmdk",
+    "vdi",
+    "eth0",
+    "ens3",
+    "enp0s1",
 }
 
 # Files that are allowed to have certain patterns
@@ -64,17 +92,17 @@ def _get_python_files(directory: Path) -> list[Path]:
 
 def _extract_string_literals(file_path: Path) -> list[tuple[str, int, str]]:
     """Extract string literals from a Python file.
-    
+
     Returns list of (string_value, line_number, context) tuples.
     """
     content = file_path.read_text()
     strings = []
-    
+
     try:
         tree = ast.parse(content)
     except SyntaxError:
         return strings
-    
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             if node.value.lower() not in ALLOWED_STRINGS:
@@ -82,7 +110,7 @@ def _extract_string_literals(file_path: Path) -> list[tuple[str, int, str]]:
         elif isinstance(node, ast.Str):  # For older Python AST
             if node.s.lower() not in ALLOWED_STRINGS:
                 strings.append((node.s, node.lineno, "string literal"))
-    
+
     return strings
 
 
@@ -90,12 +118,12 @@ def _extract_number_literals(file_path: Path) -> list[tuple[int | float, int, st
     """Extract numeric literals from a Python file."""
     content = file_path.read_text()
     numbers = []
-    
+
     try:
         tree = ast.parse(content)
     except SyntaxError:
         return numbers
-    
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
             if isinstance(node.value, int) and node.value >= 100:
@@ -107,7 +135,7 @@ def _extract_number_literals(file_path: Path) -> list[tuple[int | float, int, st
                 numbers.append((node.n, node.lineno, "integer literal"))
             elif isinstance(node.n, float):
                 numbers.append((node.n, node.lineno, "float literal"))
-    
+
     return numbers
 
 
@@ -123,47 +151,53 @@ class TestNoHardcodedValues:
 
     def test_core_no_hardcoded_paths(self):
         """Core layer should not contain hardcoded file paths.
-        
+
         Hardcoded paths should be in constants.py with DEFAULT_* or CONST_* prefix.
         """
         core_files = _get_python_files(CORE_DIR)
         violations = []
-        
+
         for file_path in core_files:
             if file_path in FILE_EXCEPTIONS:
                 continue
-            
+
             content = file_path.read_text()
             lines = content.split("\n")
-            
+
             for line_no, line in enumerate(lines, 1):
                 # Skip comments and docstrings
                 stripped = line.strip()
-                if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'''"):
+                if (
+                    stripped.startswith("#")
+                    or stripped.startswith('"""')
+                    or stripped.startswith("'''")
+                ):
                     continue
-                
+
                 # Check for absolute paths
                 if re.search(r'["\']/(?:usr|etc|var|opt|tmp|root)/[^"\']+["\']', line):
                     # Skip if it's using a constant
                     if "constants." in line or "FALLBACK_" in line or "DEFAULT_" in line:
                         continue
-                    violations.append({
-                        "file": _get_relative_path(file_path),
-                        "line": line_no,
-                        "content": line.strip(),
-                        "type": "hardcoded path",
-                    })
-        
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "content": line.strip(),
+                            "type": "hardcoded path",
+                        }
+                    )
+
         if violations:
             violation_msgs = []
             for v in violations[:10]:  # Limit output
                 violation_msgs.append(
                     f"  {v['file']}:{v['line']} - {v['type']}: {v['content'][:60]}"
                 )
-            
+
             if len(violations) > 10:
                 violation_msgs.append(f"  ... and {len(violations) - 10} more")
-            
+
             msg = (
                 f"Found {len(violations)} hardcoded path(s) in core layer:\n"
                 + "\n".join(violation_msgs)
@@ -174,44 +208,44 @@ class TestNoHardcodedValues:
 
     def test_core_no_hardcoded_large_numbers(self):
         """Core layer should not contain hardcoded large numbers.
-        
+
         Values like timeouts, sizes, limits should be in constants.py.
         """
         core_files = _get_python_files(CORE_DIR)
         violations = []
-        
+
         for file_path in core_files:
             if file_path in FILE_EXCEPTIONS:
                 continue
-            
+
             numbers = _extract_number_literals(file_path)
-            
+
             for value, line_no, context in numbers:
                 # Skip if it's using a constant
                 content = file_path.read_text()
                 lines = content.split("\n")
                 line = lines[line_no - 1]
-                
+
                 if "constants." in line or "FALLBACK_" in line or "DEFAULT_" in line:
                     continue
-                
-                violations.append({
-                    "file": _get_relative_path(file_path),
-                    "line": line_no,
-                    "value": value,
-                    "type": "hardcoded number",
-                })
-        
+
+                violations.append(
+                    {
+                        "file": _get_relative_path(file_path),
+                        "line": line_no,
+                        "value": value,
+                        "type": "hardcoded number",
+                    }
+                )
+
         if violations:
             violation_msgs = []
             for v in violations[:10]:  # Limit output
-                violation_msgs.append(
-                    f"  {v['file']}:{v['line']} - {v['type']}: {v['value']}"
-                )
-            
+                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['type']}: {v['value']}")
+
             if len(violations) > 10:
                 violation_msgs.append(f"  ... and {len(violations) - 10} more")
-            
+
             msg = (
                 f"Found {len(violations)} hardcoded number(s) in core layer:\n"
                 + "\n".join(violation_msgs)
@@ -222,40 +256,40 @@ class TestNoHardcodedValues:
 
     def test_api_no_hardcoded_defaults(self):
         """API layer should not contain hardcoded default values.
-        
+
         API functions should use constants for defaults.
         """
         api_files = _get_python_files(API_DIR)
         violations = []
-        
+
         for file_path in api_files:
             numbers = _extract_number_literals(file_path)
-            
+
             for value, line_no, context in numbers:
                 content = file_path.read_text()
                 lines = content.split("\n")
                 line = lines[line_no - 1]
-                
+
                 if "constants." in line or "FALLBACK_" in line or "DEFAULT_" in line:
                     continue
-                
-                violations.append({
-                    "file": _get_relative_path(file_path),
-                    "line": line_no,
-                    "value": value,
-                    "type": "hardcoded number in API",
-                })
-        
+
+                violations.append(
+                    {
+                        "file": _get_relative_path(file_path),
+                        "line": line_no,
+                        "value": value,
+                        "type": "hardcoded number in API",
+                    }
+                )
+
         if violations:
             violation_msgs = []
             for v in violations[:5]:
-                violation_msgs.append(
-                    f"  {v['file']}:{v['line']} - {v['type']}: {v['value']}"
-                )
-            
+                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['type']}: {v['value']}")
+
             if len(violations) > 5:
                 violation_msgs.append(f"  ... and {len(violations) - 5} more")
-            
+
             msg = (
                 f"Found {len(violations)} hardcoded value(s) in API layer:\n"
                 + "\n".join(violation_msgs)
@@ -272,7 +306,7 @@ class TestConstantsFile:
             pytest.skip("constants.py not found")
 
         content = CONSTANTS_FILE.read_text()
-        const_pattern = re.compile(r'CONST_\w+(?::\s*\w+(?:\[\w+\])?)?\s*=')
+        const_pattern = re.compile(r"CONST_\w+(?::\s*\w+(?:\[\w+\])?)?\s*=")
         matches = const_pattern.findall(content)
 
         if len(matches) < 10:
@@ -284,13 +318,13 @@ class TestConstantsFile:
         """Verify constants.py defines DEFAULT_* values."""
         if not CONSTANTS_FILE.exists():
             pytest.skip("constants.py not found")
-        
+
         content = CONSTANTS_FILE.read_text()
-        
+
         # Check for DEFAULT_ prefix usage (handles type annotations like: DEFAULT_X: Final[str] = ...)
-        default_pattern = re.compile(r'DEFAULT_\w+(?::\s*\w+(?:\[\w+\])?)?\s*=')
+        default_pattern = re.compile(r"DEFAULT_\w+(?::\s*\w+(?:\[\w+\])?)?\s*=")
         matches = default_pattern.findall(content)
-        
+
         if len(matches) < 10:
             pytest.fail(
                 f"Expected at least 10 DEFAULT_* values in constants.py, found {len(matches)}"

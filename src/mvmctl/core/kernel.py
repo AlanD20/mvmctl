@@ -97,6 +97,7 @@ class KernelPipelineResult:
     config_result: KernelConfigResult | None
     build_result: KernelBuildResult | None
 
+
 _KERNELS_YAML_PATH = Path(__file__).parent.parent / "assets" / "kernels.yaml"
 
 

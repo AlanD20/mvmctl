@@ -55,10 +55,14 @@ def test_kernel_ls_normal(tmp_path: Path):
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
     import json as _json
+
     (cache_dir / "metadata.json").write_text(
-        _json.dumps({"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}})
+        _json.dumps(
+            {"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}}
+        )
     )
     import os
+
     with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
         result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -79,6 +83,7 @@ def test_kernel_ls_json(tmp_path: Path):
         json.dumps({"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}})
     )
     import os
+
     with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
         result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
     assert result.exit_code == 0
@@ -99,18 +104,21 @@ def test_kernel_ls_dir_not_found(tmp_path: Path):
 
 def test_kernel_ls_multiple_files(tmp_path: Path):
     import os
+
     (tmp_path / "vmlinux").write_bytes(b"\x00" * 1024)
     (tmp_path / "vmlinux-6.1.102").write_bytes(b"\x00" * 2048)
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
     (cache_dir / "metadata.json").write_text(
-        json.dumps({
-            "kernels": {
-                "vmlinux": {"last_modified": "2026-01-01T00:00:00"},
-                "vmlinux-6.1.102": {"last_modified": "2026-01-02T00:00:00"},
-            },
-            "images": {},
-        })
+        json.dumps(
+            {
+                "kernels": {
+                    "vmlinux": {"last_modified": "2026-01-01T00:00:00"},
+                    "vmlinux-6.1.102": {"last_modified": "2026-01-02T00:00:00"},
+                },
+                "images": {},
+            }
+        )
     )
     with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
         result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
@@ -126,6 +134,7 @@ def test_kernel_ls_multiple_files(tmp_path: Path):
 
 def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
     import os
+
     (tmp_path / "vmlinux").write_bytes(b"\x00" * 1024)
     (tmp_path / "somefile.txt").write_text("not a kernel")
     cache_dir = tmp_path / "cache"
@@ -266,9 +275,7 @@ def test_kernel_fetch_firecracker_conflicting_type():
     assert "cannot be combined" in result.output
 
 
-@patch(
-    "mvmctl.cli.asset.resolve_kernel_spec", side_effect=KernelError("ambiguous type")
-)
+@patch("mvmctl.cli.asset.resolve_kernel_spec", side_effect=KernelError("ambiguous type"))
 def test_kernel_fetch_type_ambiguity_error(mock_resolve: MagicMock):
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--type", "firecracker"])
     assert result.exit_code == 1

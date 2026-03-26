@@ -210,7 +210,9 @@ def test_pull_image_force_re_download(tmp_path: Path, mocker: MockerFixture):
     output_dir = tmp_path / "images"
     output_dir.mkdir()
 
-    mock_fetch = mocker.patch("mvmctl.api.assets.fetch_image", return_value=output_dir / "alpine.ext4")
+    mock_fetch = mocker.patch(
+        "mvmctl.api.assets.fetch_image", return_value=output_dir / "alpine.ext4"
+    )
 
     pull_image("alpine", force=True, images_yaml=images_yaml, output_dir=output_dir)
 
@@ -265,7 +267,9 @@ def test_pull_image_uses_default_paths(tmp_path: Path, mocker: MockerFixture):
 
     mocker.patch("mvmctl.api.assets.get_assets_dir", return_value=assets_dir)
     mocker.patch("mvmctl.api.assets.get_images_dir", return_value=images_dir)
-    mock_fetch = mocker.patch("mvmctl.api.assets.fetch_image", return_value=images_dir / "test.ext4")
+    mock_fetch = mocker.patch(
+        "mvmctl.api.assets.fetch_image", return_value=images_dir / "test.ext4"
+    )
 
     pull_image("test")
 

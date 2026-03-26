@@ -93,7 +93,8 @@ def test_show_logs_success(tmp_path: Path) -> None:
 
 def test_show_logs_not_found() -> None:
     with patch(
-        "mvmctl.core.logs.get_log_path", side_effect=VMNotFoundError("VM 'nonexistent-vm' not found")
+        "mvmctl.core.logs.get_log_path",
+        side_effect=VMNotFoundError("VM 'nonexistent-vm' not found"),
     ):
         with pytest.raises(VMNotFoundError, match="not found"):
             show_logs("nonexistent-vm", log_type="boot")

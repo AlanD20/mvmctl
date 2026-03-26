@@ -109,8 +109,11 @@ def test_list_kernels_with_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF" + b"\x00" * 100)
     import json as _json
+
     (tmp_path / "metadata.json").write_text(
-        _json.dumps({"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}})
+        _json.dumps(
+            {"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}}
+        )
     )
     result = list_kernels(tmp_path)
     assert len(result) == 1
@@ -134,8 +137,11 @@ def test_list_kernels_skips_json_files(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
     import json as _json
+
     (tmp_path / "metadata.json").write_text(
-        _json.dumps({"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}})
+        _json.dumps(
+            {"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}}
+        )
     )
     result = list_kernels(tmp_path)
     assert len(result) == 1
@@ -192,8 +198,11 @@ def test_list_kernels_shows_default_marker(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
     import json as _json
+
     (tmp_path / "metadata.json").write_text(
-        _json.dumps({"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}})
+        _json.dumps(
+            {"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}}
+        )
     )
     set_default_kernel(tmp_path, "vmlinux")
     result = list_kernels(tmp_path)

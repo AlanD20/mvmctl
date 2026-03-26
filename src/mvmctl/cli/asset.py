@@ -434,7 +434,9 @@ def image_ls(
                     "name": str(meta.get("os_name", meta_id)),
                     "format": str(meta.get("fs_type", "unknown")),
                     "fs_type": str(meta.get("fs_type", "unknown")),
-                    "added": human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-",
+                    "added": human_readable_time(str(meta.get("pulled_at", "")))
+                    if meta.get("pulled_at")
+                    else "-",
                 }
             )
         typer.echo(json.dumps(result, indent=2))
@@ -457,7 +459,11 @@ def image_ls(
         if entry:
             meta_key, meta = entry
             display_id = meta_key[:6]
-            added = human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+            added = (
+                human_readable_time(str(meta.get("pulled_at", "")))
+                if meta.get("pulled_at")
+                else "-"
+            )
             fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
         else:
             display_id = "-"
@@ -483,7 +489,9 @@ def image_ls(
                 found_path = images_dir / filename
         if found_path is None or not found_path.exists():
             continue
-        added = human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+        added = (
+            human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+        )
         fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
         os_name = str(meta.get("os_name", meta_id))
         default_marker = "✓" if meta_id == default_img else " "

@@ -88,11 +88,7 @@ def find_kernels_by_short_id(cache_dir: Path, short_id: str) -> list[tuple[str, 
         List of (kernel_name, metadata) tuples matching the prefix
     """
     all_kernels = _list_kernel_entries(cache_dir)
-    return [
-        (name, data)
-        for name, data in all_kernels.items()
-        if name.startswith(short_id)
-    ]
+    return [(name, data) for name, data in all_kernels.items() if name.startswith(short_id)]
 
 
 def remove_image_entry(cache_dir: Path, image_id: str) -> None:

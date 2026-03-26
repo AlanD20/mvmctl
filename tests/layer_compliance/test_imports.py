@@ -34,18 +34,18 @@ def _get_python_files(directory: Path) -> list[Path]:
 
 def _parse_imports(file_path: Path) -> list[tuple[str, str, int]]:
     """Parse a Python file and extract all import statements.
-    
+
     Returns list of (import_type, import_path, line_number) tuples.
     Skips imports inside TYPE_CHECKING blocks.
     """
     imports = []
     content = file_path.read_text()
-    
+
     try:
         tree = ast.parse(content)
     except SyntaxError:
         return imports
-    
+
     def _is_in_type_checking(node: ast.AST) -> bool:
         """Check if a node is inside a TYPE_CHECKING if block."""
         for parent in ast.walk(tree):
@@ -57,7 +57,7 @@ def _parse_imports(file_path: Path) -> list[tuple[str, str, int]]:
                         if child is node:
                             return True
         return False
-    
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -67,7 +67,7 @@ def _parse_imports(file_path: Path) -> list[tuple[str, str, int]]:
             # Skip TYPE_CHECKING imports
             if not _is_in_type_checking(node):
                 imports.append(("from", module, node.lineno))
-    
+
     return imports
 
 
@@ -75,13 +75,13 @@ def _is_core_violation(import_path: str) -> bool:
     """Check if an import path violates the CLI→API→Core rule."""
     if not import_path.startswith("mvmctl.core"):
         return False
-    
+
     parts = import_path.split(".")
     if len(parts) >= 3:
         submodule = parts[2]
         if submodule in ALLOWED_CORE_SUBMODULES:
             return False
-    
+
     return True
 
 
@@ -98,35 +98,35 @@ class TestCLILayerImports:
 
     def test_cli_no_direct_core_imports(self):
         """CLI files should not import directly from mvmctl.core (except models/exceptions/constants).
-        
+
         Known violations:
         - cli/asset.py imports from mvmctl.core.metadata
         - cli/configure.py imports from mvmctl.core.config_state
         """
         cli_files = _get_python_files(CLI_DIR)
         violations = []
-        
+
         for file_path in cli_files:
             if file_path.name == "__init__.py":
                 continue
-            
+
             imports = _parse_imports(file_path)
             for import_type, import_path, line_no in imports:
                 if _is_core_violation(import_path):
-                    violations.append({
-                        "file": _get_relative_path(file_path),
-                        "line": line_no,
-                        "import": import_path,
-                        "type": import_type,
-                    })
-        
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                            "type": import_type,
+                        }
+                    )
+
         if violations:
             violation_msgs = []
             for v in violations:
-                violation_msgs.append(
-                    f"  {v['file']}:{v['line']} - {v['type']} {v['import']}"
-                )
-            
+                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['type']} {v['import']}")
+
             msg = (
                 f"Found {len(violations)} CLI→Core import violation(s):\n"
                 + "\n".join(violation_msgs)
@@ -137,26 +137,28 @@ class TestCLILayerImports:
 
     def test_api_no_direct_core_imports_for_privileged_ops(self):
         """API layer may import from core, but should add privilege checks.
-        
+
         This test documents that API→Core imports are allowed but require
         corresponding privilege checks (tested in test_privilege.py).
         """
         api_files = _get_python_files(API_DIR)
         core_imports = []
-        
+
         for file_path in api_files:
             if file_path.name == "__init__.py":
                 continue
-            
+
             imports = _parse_imports(file_path)
             for import_type, import_path, line_no in imports:
                 if import_path.startswith("mvmctl.core"):
-                    core_imports.append({
-                        "file": _get_relative_path(file_path),
-                        "line": line_no,
-                        "import": import_path,
-                    })
-        
+                    core_imports.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                        }
+                    )
+
         # API→Core imports are allowed, but we document them
         # The actual compliance check is in test_privilege.py
         pytest.skip(
