@@ -187,8 +187,6 @@ class LabelDetector:
         return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
 
 
-
-
 class SizeDetector:
     """Detector for identifying root partitions based on partition size.
 
@@ -214,7 +212,39 @@ class SizeDetector:
         Returns:
             Score based on size being >= MIN_ROOT_SIZE_MB threshold.
         """
-        raise NotImplementedError
+        # Get partition size from partition["size"] (in sectors, 512 bytes/sector)
+        size_value = partition.get("size", 0)
+        if not isinstance(size_value, (int, float)):
+            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+
+        # Convert sectors to MB: size_mb = size_sectors * 512 / (1024 * 1024)
+        size_mb = float(size_value) * 512 / (1024 * 1024)
+
+        # Find the largest partition from all_partitions
+        max_size_mb = 0.0
+        for p in all_partitions:
+            p_size = p.get("size", 0)
+            if isinstance(p_size, (int, float)):
+                p_size_mb = float(p_size) * 512 / (1024 * 1024)
+                if p_size_mb > max_size_mb:
+                    max_size_mb = p_size_mb
+
+        min_root_size_mb = constants.MIN_ROOT_SIZE_MB
+
+        # Too small for root filesystem (< 100MB)
+        if size_mb < 100:
+            return constants.DETECTOR_SCORES.get("SIZE_TOO_SMALL_SCORE", -0.5)
+
+        # At least MIN_ROOT_SIZE_MB (500MB)
+        if size_mb >= min_root_size_mb:
+            # Check if this is the largest partition
+            if size_mb >= max_size_mb:
+                return constants.DETECTOR_SCORES.get("SIZE_LARGEST_SCORE", 0.5)
+            else:
+                return constants.DETECTOR_SCORES.get("SIZE_ROOT_SCORE", 0.3)
+
+        # Medium-sized partition (100MB - 500MB, not largest)
+        return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
 
 
 class FilesystemDetector:
