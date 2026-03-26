@@ -1446,10 +1446,11 @@ class TestCheckPrivileges:
 
 
 class TestHostHelpers:
-    def test_get_current_user(self):
+    def test_get_current_user_no_sudo(self, monkeypatch):
         import os
         import pwd
 
+        monkeypatch.delenv("SUDO_USER", raising=False)
         mock_pwd_info = MagicMock()
         mock_pwd_info.pw_name = "testuser"
         with (
@@ -1457,6 +1458,10 @@ class TestHostHelpers:
             patch.object(pwd, "getpwuid", return_value=mock_pwd_info),
         ):
             assert _get_current_user() == "testuser"
+
+    def test_get_current_user_with_sudo(self, monkeypatch):
+        monkeypatch.setenv("SUDO_USER", "realuser")
+        assert _get_current_user() == "realuser"
 
     def test_group_exists_true(self):
         import grp

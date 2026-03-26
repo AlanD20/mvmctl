@@ -112,7 +112,15 @@ def check_privileges_interactive(binary: str, operation_description: str = "") -
 
 
 def _get_current_user() -> str:
-    """Return the username of the current process owner."""
+    """Return the username of the invoking user.
+
+    When running under sudo, returns the original user (from SUDO_USER),
+    not root. This ensures `mvm host init` adds the correct user to the
+    mvm group.
+    """
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        return sudo_user
     return pwd.getpwuid(os.getuid()).pw_name
 
 
