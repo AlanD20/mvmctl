@@ -173,7 +173,8 @@ class TestHostWithSubprocessMocking:
                                     ):
                                         with patch("mvmctl.core.host_setup.setup_mvm_chains"):
                                             with patch("mvmctl.core.host_setup._save_state"):
-                                                result = init_host(Path("/tmp/cache"))
+                                                with patch("mvmctl.core.host_setup._write_sudoers"):
+                                                    result = init_host(Path("/tmp/cache"))
 
                             assert len(result) > 0
 

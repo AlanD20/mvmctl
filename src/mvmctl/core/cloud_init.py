@@ -15,6 +15,7 @@ from mvmctl.constants import (
     DEFAULT_GUEST_NETWORK_IFACE,
 )
 from mvmctl.exceptions import ConfigError
+from mvmctl.utils.process import privileged_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ def inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
         try:
             # Mount the rootfs ext4 image
             subprocess.run(
-                ["mount", "-o", "loop", str(rootfs_path), str(mount_point)],
+                privileged_cmd(["mount", "-o", "loop", str(rootfs_path), str(mount_point)]),
                 check=True,
                 capture_output=True,
             )
@@ -176,12 +177,12 @@ def inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
             for f in cloud_init_dir.iterdir():
                 shutil.copy2(f, target / f.name)
         except subprocess.CalledProcessError as e:
-            logger.warning("Could not inject cloud-init (requires root): %s", e)
+            logger.warning("Could not inject cloud-init: %s", e)
             logger.info("VM will boot without cloud-init pre-seeding")
         finally:
             if mounted:
                 subprocess.run(
-                    ["umount", str(mount_point)],
+                    privileged_cmd(["umount", str(mount_point)]),
                     check=False,
                     capture_output=True,
                 )

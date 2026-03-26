@@ -7,11 +7,9 @@ import shutil
 import signal
 import string
 import subprocess
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO
 
 from mvmctl.constants import (
     BRIDGE_NAME,
@@ -128,33 +126,6 @@ def _write_pid_file(pid_file: Path, pid: int) -> None:
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
-
-
-def _stream_output_to_file(pipe: IO[str] | None, file_handle: IO[str], name: str) -> None:
-    if pipe is None:
-        file_handle.close()
-        return
-    try:
-        for line in iter(pipe.readline, ""):
-            file_handle.write(line)
-            file_handle.flush()
-    except Exception as exc:
-        logger.debug("Stream %s ended: %s", name, exc)
-    finally:
-        try:
-            file_handle.close()
-        finally:
-            pipe.close()
-
-
-def _start_stream_thread(pipe: IO[str] | None, file_handle: IO[str], name: str) -> threading.Thread:
-    thread = threading.Thread(
-        target=_stream_output_to_file,
-        args=(pipe, file_handle, name),
-        daemon=True,
-    )
-    thread.start()
-    return thread
 
 
 def _read_pid_file(pid_file: Path) -> int | None:
@@ -452,16 +423,11 @@ def create_vm(
         console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
         proc = subprocess.Popen(
             fc_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            stdout=console_fp,
+            stderr=log_fp,
             start_new_session=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
         )
-        _start_stream_thread(proc.stdout, console_fp, "console")
-        _start_stream_thread(proc.stderr, log_fp, "log")
     except FileNotFoundError:
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)

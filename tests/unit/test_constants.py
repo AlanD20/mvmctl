@@ -109,7 +109,9 @@ def test_firecracker_sigterm_wait():
 
 def test_privileged_binaries():
     assert isinstance(PRIVILEGED_BINARIES, list)
-    assert len(PRIVILEGED_BINARIES) == 5
+    assert len(PRIVILEGED_BINARIES) == 7
     assert "/usr/sbin/ip" in PRIVILEGED_BINARIES
     assert "/usr/sbin/iptables" in PRIVILEGED_BINARIES
     assert "/usr/sbin/sysctl" in PRIVILEGED_BINARIES
+    assert "/usr/bin/mount" in PRIVILEGED_BINARIES
+    assert "/usr/bin/umount" in PRIVILEGED_BINARIES

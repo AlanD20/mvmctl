@@ -9,161 +9,22 @@
 
 import ipaddress
 import logging
-import os
 import secrets
 import subprocess
-import threading
-import time
 from pathlib import Path
 
 from mvmctl.constants import (
     BRIDGE_NAME,
-    CONST_TIMESTAMP_INITIAL,
     DEFAULT_GUEST_MAC_PREFIX,
     DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_GATEWAY,
     MVM_FORWARD_CHAIN,
     MVM_POSTROUTING_CHAIN,
-    PROJECT_GROUP,
 )
 from mvmctl.exceptions import NetworkError
+from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
 logger = logging.getLogger(__name__)
-
-# Sudo credential cache with TTL (60 seconds)
-_SUDO_CACHE_LOCK = threading.Lock()
-_SUDO_CREDENTIALS_VALID = False
-_SUDO_CACHE_TIMESTAMP: float = CONST_TIMESTAMP_INITIAL
-_SUDO_CACHE_TTL_SECONDS = 60
-_SUDO_VALIDATION_IN_PROGRESS = False
-
-
-def _is_sudo_cached() -> bool:
-    """Check if sudo credentials are currently cached and valid.
-
-    Returns True if credentials are cached and haven't expired.
-    """
-    global _SUDO_CREDENTIALS_VALID, _SUDO_CACHE_TIMESTAMP
-
-    with _SUDO_CACHE_LOCK:
-        if not _SUDO_CREDENTIALS_VALID:
-            return False
-
-        elapsed = time.monotonic() - _SUDO_CACHE_TIMESTAMP
-        if elapsed > _SUDO_CACHE_TTL_SECONDS:
-            _SUDO_CREDENTIALS_VALID = False
-            return False
-
-        return True
-
-
-def _validate_sudo_credentials() -> bool:
-    """Validate sudo credentials are cached and refresh if needed.
-
-    Uses sudo -n (non-interactive) to check if credentials are cached.
-    If not cached, uses sudo -v to validate (which may prompt for password).
-
-    Includes anti-recursion protection to prevent infinite loops.
-
-    Returns:
-        True if sudo credentials are valid and cached.
-    """
-    global _SUDO_CREDENTIALS_VALID, _SUDO_CACHE_TIMESTAMP, _SUDO_VALIDATION_IN_PROGRESS
-
-    # Anti-recursion protection
-    if _SUDO_VALIDATION_IN_PROGRESS:
-        return False
-
-    # Fast path: check if already cached and not expired
-    if _is_sudo_cached():
-        return True
-
-    try:
-        _SUDO_VALIDATION_IN_PROGRESS = True
-
-        # First, try non-interactive check (sudo -n true)
-        # This succeeds if credentials are cached without requiring password
-        result = subprocess.run(
-            ["sudo", "-n", "true"],
-            capture_output=True,
-            check=False,
-        )
-
-        if result.returncode == 0:
-            with _SUDO_CACHE_LOCK:
-                _SUDO_CREDENTIALS_VALID = True
-                _SUDO_CACHE_TIMESTAMP = time.monotonic()
-            logger.debug("Sudo credentials validated (cached)")
-            return True
-
-        # Credentials not cached - try to validate with sudo -v
-        # This may prompt for password if required
-        result = subprocess.run(
-            ["sudo", "-v"],
-            capture_output=True,
-            check=False,
-        )
-
-        if result.returncode == 0:
-            with _SUDO_CACHE_LOCK:
-                _SUDO_CREDENTIALS_VALID = True
-                _SUDO_CACHE_TIMESTAMP = time.monotonic()
-            logger.debug("Sudo credentials validated (refreshed)")
-            return True
-
-        logger.debug("Sudo credential validation failed")
-        return False
-
-    finally:
-        _SUDO_VALIDATION_IN_PROGRESS = False
-
-
-def _privileged_cmd(cmd: list[str]) -> list[str]:
-    """Prepend sudo if not running as root.
-
-    Requires the user to be in the mvm group (configured by 'mvm host init').
-    Raises PrivilegeError if the user lacks group membership.
-    """
-    if os.getuid() != 0:
-        _require_mvm_group_membership()
-        return ["sudo"] + cmd
-    return cmd
-
-
-def _require_mvm_group_membership() -> None:
-    """Raise PrivilegeError if user is not in the mvm group with active credentials."""
-    import grp
-    import pwd
-
-    from mvmctl.exceptions import PrivilegeError
-
-    try:
-        g = grp.getgrnam(PROJECT_GROUP)
-    except KeyError:
-        raise PrivilegeError(
-            f"Group '{PROJECT_GROUP}' does not exist. "
-            f"Run 'sudo mvm host init' to set up privilege management."
-        )
-
-    user_pw = pwd.getpwuid(os.getuid())
-    username = user_pw.pw_name
-
-    is_supplementary_member = username in g.gr_mem
-    is_primary_group = user_pw.pw_gid == g.gr_gid
-    if not (is_supplementary_member or is_primary_group):
-        raise PrivilegeError(
-            f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
-            f"Run 'sudo mvm host init' to configure privileges, "
-            f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
-        )
-
-    process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
-    if g.gr_gid not in process_gids:
-        raise PrivilegeError(
-            f"Your user is in the '{PROJECT_GROUP}' group, but your current session "
-            f"does not have the group active yet. Please log out and log back in, "
-            f"or run: newgrp {PROJECT_GROUP}"
-        )
 
 
 def _run_ip_batch(commands: list[str]) -> None:
@@ -254,20 +115,29 @@ def setup_bridge(
     effective_cidr = gateway_cidr if gateway_cidr else cidr
 
     if bridge_exists(bridge):
-        logger.debug("Bridge %s already exists, skipping creation", bridge)
-        return
-
-    try:
-        _run_ip_batch(
-            [
-                f"link add name {bridge} type bridge",
-                f"addr add {effective_cidr} dev {bridge}",
-                f"link set {bridge} up",
-            ]
-        )
-    except subprocess.CalledProcessError as e:
-        # Sanitize: don't expose batch commands in error message
-        raise NetworkError(f"Failed to setup bridge {bridge}") from e
+        logger.debug("Bridge %s already exists, reconciling state", bridge)
+        reconcile_cmds: list[str] = []
+        if not _bridge_has_ip(bridge, effective_cidr):
+            reconcile_cmds.append(f"addr add {effective_cidr} dev {bridge}")
+        if reconcile_cmds:
+            reconcile_cmds.append(f"link set {bridge} up")
+            try:
+                _run_ip_batch(reconcile_cmds)
+            except subprocess.CalledProcessError as e:
+                # Sanitize: don't expose batch commands in error message
+                raise NetworkError(f"Failed to setup bridge {bridge}") from e
+    else:
+        try:
+            _run_ip_batch(
+                [
+                    f"link add name {bridge} type bridge",
+                    f"addr add {effective_cidr} dev {bridge}",
+                    f"link set {bridge} up",
+                ]
+            )
+        except subprocess.CalledProcessError as e:
+            # Sanitize: don't expose batch commands in error message
+            raise NetworkError(f"Failed to setup bridge {bridge}") from e
 
     try:
         Path("/proc/sys/net/ipv4/ip_forward").write_text("1\n")
@@ -883,6 +753,24 @@ def list_tuntap_devices() -> list[str]:
         if len(parts) >= 2:
             devices.append(parts[1].rstrip(":"))
     return devices
+
+
+def list_bridges() -> list[str]:
+    result = subprocess.run(
+        ["ip", "-o", "link", "show", "type", "bridge"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+
+    bridges: list[str] = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            bridges.append(parts[1].rstrip(":"))
+    return bridges
 
 
 def allocate_ip(

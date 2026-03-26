@@ -98,6 +98,8 @@ host:
     - "/usr/sbin/iptables-restore"
     - "/usr/sbin/iptables-save"
     - "/usr/sbin/sysctl"
+    - "/usr/bin/mount"
+    - "/usr/bin/umount"
   required_binaries: ["ip", "iptables", "qemu-img"]
   iso_binaries: ["mkisofs", "genisoimage"]
   system_files:

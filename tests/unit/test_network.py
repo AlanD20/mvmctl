@@ -187,11 +187,30 @@ def test_get_default_interface_error_message_sanitized():
 
 
 def test_setup_bridge_already_exists():
-    """setup_bridge should skip creation and not call subprocess when the bridge already exists."""
     with patch("mvmctl.core.network.bridge_exists", return_value=True):
-        with patch("mvmctl.core.network.subprocess.run") as mock_run:
-            setup_bridge("fc-br0", "10.20.0.1/24")
-            mock_run.assert_not_called()
+        with patch("mvmctl.core.network._bridge_has_ip", return_value=True):
+            with patch("mvmctl.core.network.subprocess.run") as mock_run:
+                with patch.object(Path, "write_text") as mock_write:
+                    setup_bridge("fc-br0", "10.20.0.1/24")
+                    mock_run.assert_not_called()
+                    mock_write.assert_called_once_with("1\n")
+
+
+def test_setup_bridge_existing_bridge_missing_ip_reconciles():
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("mvmctl.core.network.bridge_exists", return_value=True):
+        with patch("mvmctl.core.network._bridge_has_ip", return_value=False):
+            with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
+                with patch.object(Path, "write_text") as mock_write:
+                    with patch("mvmctl.utils.process.os.getuid", return_value=0):
+                        setup_bridge("fc-br0", "10.20.0.1/24")
+
+                    assert mock_run.call_count == 1
+                    assert mock_run.call_args.kwargs["input"] == (
+                        "addr add 10.20.0.1/24 dev fc-br0\nlink set fc-br0 up\n"
+                    )
+                    mock_write.assert_called_once_with("1\n")
 
 
 def test_setup_bridge_success():
@@ -202,7 +221,7 @@ def test_setup_bridge_success():
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch.object(Path, "write_text") as mock_write:
                 with patch(
-                    "mvmctl.core.network.os.getuid", return_value=0
+                    "mvmctl.utils.process.os.getuid", return_value=0
                 ):  # Run as root to skip sudo
                     setup_bridge("fc-br0", "10.20.0.1/24")
                     # 1 call for ip -batch (bridge setup)
@@ -496,7 +515,7 @@ def test_run_ip_batch_uses_ip_batch_mode():
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-        with patch("mvmctl.core.network.os.getuid", return_value=0):
+        with patch("mvmctl.utils.process.os.getuid", return_value=0):
             _run_ip_batch(["link set tap0 up", "link delete tap0"])
 
     mock_run.assert_called_once_with(
@@ -874,116 +893,116 @@ def test_list_tuntap_devices_handles_command_failure():
 
 def test_sudo_credentials_cached_after_validation():
     """Sudo credentials should be cached after successful validation."""
-    import mvmctl.core.network as network_module
+    import mvmctl.utils.process as process_module
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
     mock_result = MagicMock()
     mock_result.returncode = 0
 
-    with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
-        result = network_module._validate_sudo_credentials()
+    with patch("mvmctl.utils.process.subprocess.run", return_value=mock_result):
+        result = process_module._validate_sudo_credentials()
         assert result is True
-        assert network_module._is_sudo_cached() is True
+        assert process_module._is_sudo_cached() is True
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
 
 def test_sudo_cache_reduces_validation_calls():
     """Multiple calls should only trigger one sudo validation."""
-    import mvmctl.core.network as network_module
+    import mvmctl.utils.process as process_module
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
     mock_result = MagicMock()
     mock_result.returncode = 0
 
-    with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-        network_module._validate_sudo_credentials()
+    with patch("mvmctl.utils.process.subprocess.run", return_value=mock_result) as mock_run:
+        process_module._validate_sudo_credentials()
         assert mock_run.call_count == 1
 
         mock_run.reset_mock()
-        network_module._validate_sudo_credentials()
+        process_module._validate_sudo_credentials()
         assert mock_run.call_count == 0
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
 
 def test_sudo_cache_expires_after_ttl():
     """Sudo credentials should expire after TTL period."""
-    import mvmctl.core.network as network_module
+    import mvmctl.utils.process as process_module
 
-    network_module._SUDO_CREDENTIALS_VALID = True
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = True
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
-    assert network_module._is_sudo_cached() is False
+    assert process_module._is_sudo_cached() is False
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
 
 def test_sudo_uses_sudo_n_for_non_interactive_check():
     """Sudo validation should use 'sudo -n true' for non-interactive check."""
-    import mvmctl.core.network as network_module
+    import mvmctl.utils.process as process_module
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
     mock_result = MagicMock()
     mock_result.returncode = 0
 
-    with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-        network_module._validate_sudo_credentials()
+    with patch("mvmctl.utils.process.subprocess.run", return_value=mock_result) as mock_run:
+        process_module._validate_sudo_credentials()
 
         calls = mock_run.call_args_list
         assert len(calls) == 1
         assert calls[0][0][0] == ["sudo", "-n", "true"]
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
 
 def test_sudo_uses_sudo_v_when_not_cached():
     """Sudo validation should use 'sudo -v' when credentials are not cached."""
-    import mvmctl.core.network as network_module
+    import mvmctl.utils.process as process_module
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
     not_cached_result = MagicMock(returncode=1)
     cached_result = MagicMock(returncode=0)
 
     with patch(
-        "mvmctl.core.network.subprocess.run",
+        "mvmctl.utils.process.subprocess.run",
         side_effect=[not_cached_result, cached_result],
     ) as mock_run:
-        network_module._validate_sudo_credentials()
+        process_module._validate_sudo_credentials()
 
         calls = mock_run.call_args_list
         assert len(calls) == 2
         assert calls[0][0][0] == ["sudo", "-n", "true"]
         assert calls[1][0][0] == ["sudo", "-v"]
 
-    network_module._SUDO_CREDENTIALS_VALID = False
-    network_module._SUDO_CACHE_TIMESTAMP = 0.0
+    process_module._SUDO_CREDENTIALS_VALID = False
+    process_module._SUDO_CACHE_TIMESTAMP = 0.0
 
 
 def test_sudo_anti_recursion_protection():
     """Sudo validation should have anti-recursion protection."""
-    import mvmctl.core.network as network_module
+    import mvmctl.utils.process as process_module
 
-    original_state = network_module._SUDO_VALIDATION_IN_PROGRESS
-    network_module._SUDO_VALIDATION_IN_PROGRESS = True
+    original_state = process_module._SUDO_VALIDATION_IN_PROGRESS
+    process_module._SUDO_VALIDATION_IN_PROGRESS = True
 
     try:
-        result = network_module._validate_sudo_credentials()
+        result = process_module._validate_sudo_credentials()
         assert result is False
     finally:
-        network_module._SUDO_VALIDATION_IN_PROGRESS = original_state
+        process_module._SUDO_VALIDATION_IN_PROGRESS = original_state
 
 
 @pytest.mark.real_mvm_group_check
@@ -992,7 +1011,7 @@ def test_privileged_cmd_raises_when_not_in_mvm_group():
     import grp
     import pwd
 
-    from mvmctl.core.network import _privileged_cmd
+    from mvmctl.utils.process import privileged_cmd as _privileged_cmd
     from mvmctl.exceptions import PrivilegeError
 
     mock_group = MagicMock()
@@ -1003,7 +1022,7 @@ def test_privileged_cmd_raises_when_not_in_mvm_group():
     mock_passwd.pw_name = "testuser"
     mock_passwd.pw_gid = 1000
 
-    with patch("mvmctl.core.network.os.getuid", return_value=1000):
+    with patch("mvmctl.utils.process.os.getuid", return_value=1000):
         with patch.object(grp, "getgrnam", return_value=mock_group):
             with patch.object(pwd, "getpwuid", return_value=mock_passwd):
                 with pytest.raises(PrivilegeError, match="not in the 'mvm' group"):
@@ -1016,7 +1035,7 @@ def test_privileged_cmd_succeeds_when_in_mvm_group():
     import grp
     import pwd
 
-    from mvmctl.core.network import _privileged_cmd
+    from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
     mock_group = MagicMock()
     mock_group.gr_gid = 1001
@@ -1026,22 +1045,22 @@ def test_privileged_cmd_succeeds_when_in_mvm_group():
     mock_passwd.pw_name = "testuser"
     mock_passwd.pw_gid = 1000
 
-    with patch("mvmctl.core.network.os.getuid", return_value=1000):
+    with patch("mvmctl.utils.process.os.getuid", return_value=1000):
         with patch.object(grp, "getgrnam", return_value=mock_group):
             with patch.object(pwd, "getpwuid", return_value=mock_passwd):
-                with patch("mvmctl.core.network.os.getgroups", return_value=[1001]):
-                    with patch("mvmctl.core.network.os.getgid", return_value=1000):
-                        with patch("mvmctl.core.network.os.getegid", return_value=1000):
+                with patch("mvmctl.utils.process.os.getgroups", return_value=[1001]):
+                    with patch("mvmctl.utils.process.os.getgid", return_value=1000):
+                        with patch("mvmctl.utils.process.os.getegid", return_value=1000):
                             result = _privileged_cmd(["ip", "link", "show"])
                             assert result == ["sudo", "ip", "link", "show"]
 
 
 def test_privileged_cmd_skips_sudo_when_root():
     """_privileged_cmd should not add sudo when running as root."""
-    from mvmctl.core.network import _privileged_cmd
+    from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
-    with patch("mvmctl.core.network.os.getuid", return_value=0):
-        with patch("mvmctl.core.network.subprocess.run") as mock_run:
+    with patch("mvmctl.utils.process.os.getuid", return_value=0):
+        with patch("mvmctl.utils.process.subprocess.run") as mock_run:
             result = _privileged_cmd(["ip", "link", "show"])
             assert result == ["ip", "link", "show"]
             mock_run.assert_not_called()
@@ -1052,7 +1071,7 @@ def test_require_mvm_group_raises_when_group_not_found():
     """_require_mvm_group_membership should raise PrivilegeError when mvm group doesn't exist."""
     import grp
 
-    from mvmctl.core.network import _require_mvm_group_membership
+    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
     from mvmctl.exceptions import PrivilegeError
 
     with patch.object(grp, "getgrnam", side_effect=KeyError("mvm")):
@@ -1066,7 +1085,7 @@ def test_require_mvm_group_raises_when_not_member():
     import grp
     import pwd
 
-    from mvmctl.core.network import _require_mvm_group_membership
+    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
     from mvmctl.exceptions import PrivilegeError
 
     mock_group = MagicMock()
@@ -1079,7 +1098,7 @@ def test_require_mvm_group_raises_when_not_member():
 
     with patch.object(grp, "getgrnam", return_value=mock_group):
         with patch.object(pwd, "getpwuid", return_value=mock_passwd):
-            with patch("mvmctl.core.network.os.getuid", return_value=1000):
+            with patch("mvmctl.utils.process.os.getuid", return_value=1000):
                 with pytest.raises(PrivilegeError, match="not in the 'mvm' group"):
                     _require_mvm_group_membership()
 
@@ -1090,7 +1109,7 @@ def test_require_mvm_group_raises_when_session_not_active():
     import grp
     import pwd
 
-    from mvmctl.core.network import _require_mvm_group_membership
+    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
     from mvmctl.exceptions import PrivilegeError
 
     mock_group = MagicMock()
@@ -1103,10 +1122,10 @@ def test_require_mvm_group_raises_when_session_not_active():
 
     with patch.object(grp, "getgrnam", return_value=mock_group):
         with patch.object(pwd, "getpwuid", return_value=mock_passwd):
-            with patch("mvmctl.core.network.os.getuid", return_value=1000):
-                with patch("mvmctl.core.network.os.getgroups", return_value=[]):
-                    with patch("mvmctl.core.network.os.getgid", return_value=1000):
-                        with patch("mvmctl.core.network.os.getegid", return_value=1000):
+            with patch("mvmctl.utils.process.os.getuid", return_value=1000):
+                with patch("mvmctl.utils.process.os.getgroups", return_value=[]):
+                    with patch("mvmctl.utils.process.os.getgid", return_value=1000):
+                        with patch("mvmctl.utils.process.os.getegid", return_value=1000):
                             with pytest.raises(
                                 PrivilegeError, match="does not have the group active"
                             ):

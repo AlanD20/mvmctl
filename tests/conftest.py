@@ -27,11 +27,11 @@ def _isolate_iptables_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 @pytest.fixture(autouse=True)
 def _mock_sudo_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pre-mark sudo credentials as cached so tests never invoke sudo -n/-v."""
-    import mvmctl.core.network as _net
+    import mvmctl.utils.process as _proc
 
-    monkeypatch.setattr(_net, "_SUDO_CREDENTIALS_VALID", True)
-    monkeypatch.setattr(_net, "_SUDO_CACHE_TIMESTAMP", time.monotonic())
-    monkeypatch.setattr(_net, "_SUDO_VALIDATION_IN_PROGRESS", False)
+    monkeypatch.setattr(_proc, "_SUDO_CREDENTIALS_VALID", True)
+    monkeypatch.setattr(_proc, "_SUDO_CACHE_TIMESTAMP", time.monotonic())
+    monkeypatch.setattr(_proc, "_SUDO_VALIDATION_IN_PROGRESS", False)
 
 
 def _is_sudo_command(command: object) -> bool:

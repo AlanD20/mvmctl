@@ -23,6 +23,7 @@ from mvmctl.constants import (
 from mvmctl.exceptions import ConfigError, ImageError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.http import download_file as _download_file
+from mvmctl.utils.process import privileged_cmd
 from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
@@ -347,7 +348,11 @@ def create_ext4_from_tar(
 
         # Mount and extract
         with tempfile.TemporaryDirectory() as mnt:
-            subprocess.run(["mount", "-o", "loop", str(output_path), mnt], check=True)
+            subprocess.run(
+                privileged_cmd(["mount", "-o", "loop", str(output_path), mnt]),
+                check=True,
+                capture_output=True,
+            )
             try:
                 subprocess.run(
                     ["tar", "-xf", str(tar_path), "-C", mnt],
@@ -355,7 +360,7 @@ def create_ext4_from_tar(
                     check=True,
                 )
             finally:
-                subprocess.run(["umount", mnt], check=False)
+                subprocess.run(privileged_cmd(["umount", mnt]), check=False, capture_output=True)
 
         logger.info("Created %s", output_path.name)
         return True

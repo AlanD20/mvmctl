@@ -232,13 +232,17 @@ class TestNetworkWorkflowEdgeCases:
 class TestNetworkWithSubprocessMocking:
     """Test network workflows with mocked subprocess calls."""
 
+    @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.core.network.subprocess.run")
     @patch("mvmctl.api.network.check_privileges")
-    def test_network_create_with_bridge_setup(self, mock_check_priv, mock_run, mock_cache_dir):
+    def test_network_create_with_bridge_setup(
+        self, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
+    ):
         """Test network creation with mocked bridge setup commands."""
         from mvmctl.core.network_manager import create_network, get_network
 
         mock_check_priv.return_value = None
+        mock_require_group.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("mvmctl.core.network_manager._validate_subnet_no_overlap"):
@@ -250,7 +254,7 @@ class TestNetworkWithSubprocessMocking:
         # Verify persisted in metadata
         assert get_network("subprocess-net") is not None
 
-    @patch("mvmctl.core.network._require_mvm_group_membership")
+    @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.core.network.subprocess.run")
     @patch("mvmctl.api.network.check_privileges")
     def test_network_remove_with_bridge_teardown(

@@ -80,11 +80,15 @@ def clean_host(cache_dir: Path) -> list[str]:
     Does NOT revert sysctl, remove sudoers, or remove project group.
     Returns list of summary strings.
     """
-    from mvmctl.constants import TAP_PREFIX
+    from mvmctl.constants import DEFAULT_NETWORK_NAME, TAP_PREFIX, device_prefix
     from mvmctl.core.network import (
+        bridge_exists,
         delete_tap,
+        list_bridges,
         list_tuntap_devices,
+        teardown_bridge,
         teardown_mvm_chains_with_status,
+        teardown_nat,
     )
     from mvmctl.core.network_manager import list_networks, remove_network
     from mvmctl.exceptions import NetworkError
@@ -102,6 +106,7 @@ def clean_host(cache_dir: Path) -> list[str]:
         except NetworkError as e:
             summary.append(f"Warning: failed to remove TAP '{tap_name}': {e}")
 
+    metadata_bridges: set[str] = set()
     try:
         networks = list_networks()
     except NetworkError as e:
@@ -109,6 +114,7 @@ def clean_host(cache_dir: Path) -> list[str]:
             f"Warning: skipped network inventory cleanup (already clean or insufficient privileges): {e}"
         )
         networks = []
+    metadata_bridges.update(net.bridge for net in networks)
     for net in networks:
         try:
             remove_network(net.name)
@@ -116,6 +122,42 @@ def clean_host(cache_dir: Path) -> list[str]:
         except NetworkError as e:
             summary.append(
                 f"Warning: skipped cleanup for network '{net.name}' "
+                f"(already clean or insufficient privileges): {e}"
+            )
+
+    default_bridge = f"{device_prefix()}-{DEFAULT_NETWORK_NAME[:10]}"
+    if bridge_exists(default_bridge):
+        try:
+            teardown_nat(bridge=default_bridge, force=True)
+        except NetworkError:
+            pass
+        try:
+            teardown_bridge(default_bridge)
+            summary.append(f"Removed orphan bridge '{default_bridge}'")
+        except NetworkError as e:
+            summary.append(
+                f"Warning: failed to remove orphan bridge '{default_bridge}' "
+                f"(already clean or insufficient privileges): {e}"
+            )
+
+    for bridge in list_bridges():
+        if not bridge.startswith(f"{device_prefix()}-"):
+            continue
+        if bridge == default_bridge:
+            continue
+        if bridge in metadata_bridges:
+            continue
+
+        try:
+            teardown_nat(bridge=bridge, force=True)
+        except NetworkError:
+            pass
+        try:
+            teardown_bridge(bridge)
+            summary.append(f"Removed orphan bridge '{bridge}'")
+        except NetworkError as e:
+            summary.append(
+                f"Warning: failed to remove orphan bridge '{bridge}' "
                 f"(already clean or insufficient privileges): {e}"
             )
 

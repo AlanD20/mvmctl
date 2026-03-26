@@ -68,7 +68,8 @@ def test_write_cloud_init_custom_user_data(tmp_path):
 
 
 @patch("mvmctl.core.cloud_init.subprocess.run")
-def test_inject_cloud_init_success(mock_run, tmp_path):
+@patch("mvmctl.utils.process.os.getuid", return_value=0)
+def test_inject_cloud_init_success(mock_getuid, mock_run, tmp_path):
     """inject_cloud_init loop-mounts and copies files."""
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()

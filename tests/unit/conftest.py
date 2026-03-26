@@ -23,7 +23,7 @@ def _mock_mvm_group_membership(request):
         yield None
         return
 
-    with patch("mvmctl.core.network._require_mvm_group_membership"):
+    with patch("mvmctl.utils.process.require_mvm_group_membership"):
         yield
 
 

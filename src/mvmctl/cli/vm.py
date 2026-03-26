@@ -29,6 +29,7 @@ from mvmctl.constants import (
 from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMInstance, VMState
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
+from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 app = typer.Typer(
@@ -287,6 +288,7 @@ def create(
         )
         vm_config.to_json_file(output_config)
         print_info(f"VM config written to: {output_config}")
+        return
 
     try:
         vm = create_vm(
@@ -451,7 +453,7 @@ def ls_vms(
             v.status.value,
             str(v.pid) if v.pid else "-",
             "on" if v.socket_path else "off",
-            v.created_at.strftime("%Y-%m-%d %H:%M") if v.created_at else "-",
+            human_readable_time(v.created_at.isoformat()) if v.created_at else "-",
         ]
         for v in vms
     ]

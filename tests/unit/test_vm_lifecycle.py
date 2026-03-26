@@ -9,7 +9,6 @@ from mvmctl.core.vm_lifecycle import (
     remove_vm,
     snapshot_vm,
     load_snapshot,
-    _stream_output_to_file,
     _write_pid_file,
     _read_pid_file,
     _resolve_image_path,
@@ -35,18 +34,6 @@ def test_write_pid_file_has_restricted_permissions(tmp_path):
         _write_pid_file(pid_file, 99999)
     mode = pid_file.stat().st_mode & 0o777
     assert mode == 0o600
-
-
-def test_stream_output_to_file_flushes_each_line(tmp_path):
-    pipe = MagicMock()
-    pipe.readline.side_effect = ["boot line 1\n", "boot line 2\n", ""]
-    output_path = tmp_path / "console.log"
-
-    with output_path.open("w", encoding="utf-8") as file_handle:
-        _stream_output_to_file(pipe, file_handle, "console")
-
-    assert output_path.read_text(encoding="utf-8") == "boot line 1\nboot line 2\n"
-    pipe.close.assert_called_once()
 
 
 def test_read_pid_file_missing(tmp_path):

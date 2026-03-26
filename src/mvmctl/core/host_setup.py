@@ -19,6 +19,7 @@ from mvmctl.constants import (
 from mvmctl.core.host_privilege import (
     _add_user_to_group,
     _create_group,
+    _generate_sudoers_content,
     _get_current_user,
     _validate_sudoers_binaries,
     _write_sudoers,
@@ -300,12 +301,15 @@ def init_host(cache_dir: Path) -> list[HostChange]:
         )
 
     sudoers_path = Path(SUDOERS_DROP_IN_PATH)
-    sudoers_exists = False
+    sudoers_stale = True
     try:
-        sudoers_exists = sudoers_path.exists()
-    except PermissionError:
+        if sudoers_path.exists():
+            existing = sudoers_path.read_text()
+            expected = _generate_sudoers_content(PROJECT_GROUP)
+            sudoers_stale = existing != expected
+    except (PermissionError, OSError):
         pass
-    if not sudoers_exists:
+    if sudoers_stale:
         _write_sudoers(sudoers_path, PROJECT_GROUP)
         changes.append(
             HostChange(
