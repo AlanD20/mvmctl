@@ -351,6 +351,7 @@ DEFAULT_VM_ROOTFS_BASENAME: Final[str] = _require_str(("vm", "files", "rootfs_ba
 DETECTOR_WEIGHTS: Final[dict[str, float]] = _require_str_float_dict(("detectors", "weights"))
 DETECTOR_SCORES: Final[dict[str, float]] = _require_str_float_dict(("detectors", "scores"))
 MIN_ROOT_SIZE_MB: Final[int] = _require_int(("detectors", "thresholds", "MIN_ROOT_SIZE_MB"))
+SIZE_TOO_SMALL_MB: Final[int] = _require_int(("detectors", "thresholds", "SIZE_TOO_SMALL_MB"))
 
 # ---------------------------------------------------------------------------
 # Host system paths (loaded from assets/defaults.yaml)

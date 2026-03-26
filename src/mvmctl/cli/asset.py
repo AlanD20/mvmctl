@@ -50,7 +50,14 @@ from mvmctl.constants import (
     KERNEL_TYPE_OFFICIAL,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
-from mvmctl.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
+from mvmctl.exceptions import (
+    AssetNotFoundError,
+    BinaryError,
+    ImageError,
+    KernelError,
+    RootPartitionDetectionError,
+    TieDetectedError,
+)
 from mvmctl.utils.console import (
     print_error,
     print_info,
@@ -608,6 +615,9 @@ def image_fetch(
     set_default: bool = typer.Option(
         False, "--set-default", help="Set as default image after download"
     ),
+    no_prompt: bool = typer.Option(
+        False, "--no-prompt", help="Exit with error on detection failure"
+    ),
 ) -> None:
     """Download an image by its ID. Run 'mvm image ls -r' to list available image IDs."""
     out = out if out is not None else get_images_dir()
@@ -683,7 +693,14 @@ def image_fetch(
                 raise typer.Exit(code=0)
             force = True
 
-    result = fetch_image(spec, out, force)
+    try:
+        result = fetch_image(spec, out, force)
+    except (RootPartitionDetectionError, TieDetectedError) as exc:
+        if no_prompt:
+            print_error(str(exc))
+            raise typer.Exit(code=1)
+        raise
+
     if result:
         import hashlib
         import time
@@ -827,6 +844,15 @@ def image_rm(
     raise typer.Exit(code=exit_code)
 
 
+# Mapping from CLI detector names to internal detector names
+CLI_TO_INTERNAL_DETECTOR = {
+    "type": "type_code",
+    "label": "label",
+    "size": "size",
+    "filesystem": "filesystem",
+}
+
+
 @image_app.command(name="import")
 def image_import(
     name: str = typer.Argument(..., help="Display name for the imported image"),
@@ -845,6 +871,14 @@ def image_import(
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing"),
     set_default: bool = typer.Option(False, "--set-default", help="Set as default after import"),
     images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Output directory"),
+    disable_detector: Optional[str] = typer.Option(
+        None,
+        "--disable-detector",
+        help="Comma-separated detectors to disable: type,label,size,filesystem,all",
+    ),
+    no_prompt: bool = typer.Option(
+        False, "--no-prompt", help="Exit with error on detection failure"
+    ),
 ) -> None:
     """Import a local image file (qcow2, raw, tar-rootfs). The first argument is a display name."""
     import hashlib
@@ -855,6 +889,22 @@ def image_import(
     if not source_path.exists():
         print_error(f"Source file not found: {source_path}")
         raise typer.Exit(code=1)
+
+    # Parse disabled detectors
+    disabled_detectors: list[str] = []
+    if disable_detector:
+        names = [n.strip() for n in disable_detector.split(",")]
+        for detector_name in names:
+            if detector_name == "all":
+                disabled_detectors = list(CLI_TO_INTERNAL_DETECTOR.values())
+                break
+            elif detector_name in CLI_TO_INTERNAL_DETECTOR:
+                disabled_detectors.append(CLI_TO_INTERNAL_DETECTOR[detector_name])
+            else:
+                print_error(
+                    f"Unknown detector: {detector_name}. Valid: type,label,size,filesystem,all"
+                )
+                raise typer.Exit(code=1)
 
     file_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     timestamp = str(time.time())
@@ -883,10 +933,16 @@ def image_import(
         format=str(resolved_format),
         convert_to=convert_to,
         size_mib=size_mib,
+        disabled_detectors=disabled_detectors,
     )
 
     try:
         result = import_image(spec, images_dir, force=force)
+    except (RootPartitionDetectionError, TieDetectedError) as exc:
+        if no_prompt:
+            print_error(str(exc))
+            raise typer.Exit(code=1)
+        raise
     except ImageError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)

@@ -649,9 +649,11 @@ def test_extract_partition_from_raw_fdisk_multi_partition(
         if cmd[0] == "sfdisk":
             raise FileNotFoundError("sfdisk not found")
         elif cmd[0] == "fdisk":
+            # Format: Device Boot Start End Sectors Id Type
+            # Real fdisk output: /tmp/image.raw1 * 2048 50000 47953 ef EFI
             mock_result.stdout = (
-                f"{raw_path_str}1  2048  50000  47953  ef EFI\n"
-                f"{raw_path_str}2  52048  200000  147953  83 Linux\n"
+                f"{raw_path_str}1  *  2048  50000  47953  ef EFI\n"
+                f"{raw_path_str}2  -  52048  200000  147953  83 Linux\n"
             )
             mock_result.returncode = 0
         elif cmd[0] == "blkid":
@@ -683,7 +685,9 @@ def test_extract_partition_from_raw_fdisk_parse_failure(mock_run: MagicMock, tmp
         if cmd[0] == "sfdisk":
             raise FileNotFoundError("sfdisk not found")
         elif cmd[0] == "fdisk":
-            mock_result.stdout = f"{raw_path_str}1  nodigits  here\n"
+            # Format: Device Boot Start End Sectors Id Type
+            # Test with unparseable numeric values (non-integer)
+            mock_result.stdout = f"{raw_path_str}1  *  nodigits  here  ef EFI\n"
             mock_result.returncode = 0
         else:
             mock_result.returncode = 0
@@ -2033,7 +2037,7 @@ def test_import_image_qcow2_cleans_up_on_exception(
 
     mock_convert.return_value = True
 
-    def _extract_side_effect(_raw_path: Path, extracted_path: Path) -> Path:
+    def _extract_side_effect(_raw_path: Path, extracted_path: Path, **kwargs: object) -> Path:
         extracted_path.write_text("partial image")
         raise ImageError("Extraction failed")
 

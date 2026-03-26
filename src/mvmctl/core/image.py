@@ -33,6 +33,20 @@ _SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
 download_file = _download_file
 
 
+def _get_int(value: object, default: int = 0) -> int:
+    """Safely extract an integer from a partition dict value."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
 class _NoPartitionTable:
     """Sentinel: raw image has no partition table and should be used as-is."""
 
@@ -90,11 +104,12 @@ def convert_qcow2_to_raw(
 def _parse_partitions_sfdisk(
     raw_path: Path,
     partition: int | None,
-) -> tuple[int, int | None, int] | _NoPartitionTable | None:
+) -> tuple[list[dict[str, object]], int | None] | _NoPartitionTable | None:
     """Parse partition table using sfdisk.
 
     Returns:
-        ``(start_sector, sector_count, partition_number)`` on success,
+        ``(partitions, requested_partition)`` on success where partitions is a list
+        of partition dicts with 'start', 'size', 'type' keys.
         ``_NO_PARTITION_TABLE`` sentinel if image has no partition table,
         or ``None`` if sfdisk is unavailable or fails.
 
@@ -111,31 +126,26 @@ def _parse_partitions_sfdisk(
             check=True,
         )
         table = json_mod.loads(sfdisk_result.stdout)
-        partitions = table.get("partitiontable", {}).get("partitions", [])
+        partitions_raw = table.get("partitiontable", {}).get("partitions", [])
 
-        if not partitions:
+        if not partitions_raw:
             return _NO_PARTITION_TABLE
 
-        if len(partitions) > 1 and partition is None:
-            logger.info("Found %d partitions:", len(partitions))
-            for i, p in enumerate(partitions, 1):
-                logger.debug(
-                    "  %d: start=%s size=%s type=%s",
-                    i,
-                    p.get("start"),
-                    p.get("size"),
-                    p.get("type", "?"),
-                )
-            logger.info("Using last partition as root")
-            partition = len(partitions)
+        # Convert to standard partition dicts, validating types
+        partitions: list[dict[str, object]] = []
+        for p in partitions_raw:
+            start = p.get("start")
+            size = p.get("size")
+            if not isinstance(start, (int, float)) or not isinstance(size, (int, float)):
+                raise ImageError("Failed to parse partition table")
+            partitions.append({
+                "start": int(start),
+                "size": int(size),
+                "type": p.get("type", ""),
+                "node": p.get("node", ""),
+            })
 
-        if partition is None:
-            partition = 1
-
-        chosen = partitions[partition - 1]
-        start_sector = int(chosen["start"])
-        sector_count = int(chosen["size"])
-        return (start_sector, sector_count, partition)
+        return partitions, partition
 
     except (
         FileNotFoundError,
@@ -149,11 +159,12 @@ def _parse_partitions_sfdisk(
 def _parse_partitions_fdisk(
     raw_path: Path,
     partition: int | None,
-) -> tuple[int, int | None, int] | _NoPartitionTable:
+) -> tuple[list[dict[str, object]], int | None] | _NoPartitionTable:
     """Parse partition table using fdisk (fallback when sfdisk unavailable).
 
     Returns:
-        ``(start_sector, sector_count, partition_number)`` on success, or
+        ``(partitions, requested_partition)`` on success where partitions is a list
+        of partition dicts with 'start', 'size', 'type' keys.
         ``_NO_PARTITION_TABLE`` sentinel if image has no partition table.
 
     Raises:
@@ -177,23 +188,31 @@ def _parse_partitions_fdisk(
     if not partition_lines:
         return _NO_PARTITION_TABLE
 
-    if len(partition_lines) > 1 and partition is None:
-        logger.info("Found %d partitions:", len(partition_lines))
-        for i, line in enumerate(partition_lines, 1):
-            logger.debug("  %d: %s", i, line)
-        logger.info("Using last partition as root")
-        partition = len(partition_lines)
+    # Parse fdisk output into partition dicts
+    # Format: Device Boot Start End Sectors Size Id Type
+    partitions: list[dict[str, object]] = []
+    has_valid_lines = False
+    for line in partition_lines:
+        parts = line.split()
+        if len(parts) >= 6:
+            try:
+                start = int(parts[3])
+                size = int(parts[4])
+                part_type = parts[5] if len(parts) > 5 else ""
+                partitions.append({
+                    "start": start,
+                    "size": size,
+                    "type": part_type,
+                })
+                has_valid_lines = True
+            except (ValueError, IndexError):
+                # Found a line that looks like a partition but can't be parsed
+                raise ImageError("Failed to parse fdisk output for partition sectors")
 
-    if partition is None:
-        partition = 1
+    if not partitions:
+        return _NO_PARTITION_TABLE
 
-    chosen_line = partition_lines[partition - 1]
-    numeric_parts = [p for p in chosen_line.split() if p.isdigit()]
-    if len(numeric_parts) < 2:
-        raise ImageError("Failed to parse fdisk output for partition sectors")
-    start_sector = int(numeric_parts[0])
-    sector_count = int(numeric_parts[1]) if len(numeric_parts) >= 3 else None
-    return (start_sector, sector_count, partition)
+    return partitions, partition
 
 
 def _detect_and_rename_fs(output_path: Path) -> Path:
@@ -263,6 +282,7 @@ def extract_partition_from_raw(
     raw_path: Path,
     output_path: Path,
     partition: int | None = None,
+    disabled_detectors: list[str] | None = None,
 ) -> Path:
     """Extract root partition from raw disk image.
 
@@ -272,6 +292,7 @@ def extract_partition_from_raw(
         raw_path: Raw disk image
         output_path: Output filesystem image
         partition: Partition number (auto-detect if None)
+        disabled_detectors: List of detector names to disable for auto-detection
 
     Returns:
         Path to extracted partition image
@@ -279,6 +300,8 @@ def extract_partition_from_raw(
     Raises:
         ImageError: On extraction failure
     """
+    from mvmctl.core.partition_detection import RootPartitionDetector
+
     try:
         parsed = _parse_partitions_sfdisk(raw_path, partition)
         if parsed is None:
@@ -291,8 +314,47 @@ def extract_partition_from_raw(
 
         if not isinstance(parsed, tuple):
             raise ImageError(f"Unexpected parse result type: {type(parsed).__name__}")
-        start_sector, sector_count, partition = parsed
-        logger.info("Extracting partition %d (start=%d)...", partition, start_sector)
+
+        partitions, requested_partition = parsed
+
+        if len(partitions) == 0:
+            logger.info("No partitions found, using image as-is")
+            raw_path.rename(output_path)
+            return output_path
+
+        # Determine which partition to extract
+        if len(partitions) > 1 and requested_partition is None:
+            logger.info("Found %d partitions:", len(partitions))
+            for i, p in enumerate(partitions, 1):
+                logger.debug(
+                    "  %d: start=%s size=%s type=%s",
+                    i,
+                    p.get("start"),
+                    p.get("size"),
+                    p.get("type", "?"),
+                )
+            detector = RootPartitionDetector(disabled_detectors=disabled_detectors)
+            chosen_idx = detector.detect(partitions)
+            logger.info("Detector selected partition %d as root", chosen_idx)
+            chosen = partitions[chosen_idx - 1]
+            partition_num = chosen_idx
+        elif requested_partition is not None:
+            if requested_partition < 1 or requested_partition > len(partitions):
+                raise ImageError(f"Partition {requested_partition} out of range (1-{len(partitions)})")
+            logger.info("Found %d partitions:", len(partitions))
+            logger.info("Using partition %d as root", requested_partition)
+            chosen = partitions[requested_partition - 1]
+            partition_num = requested_partition
+        else:
+            # Single partition - use it directly
+            chosen = partitions[0]
+            partition_num = 1
+
+        start_sector = _get_int(chosen.get("start"), 0)
+        size_val = chosen.get("size")
+        sector_count: int | None = _get_int(size_val, 0) if size_val else None
+
+        logger.info("Extracting partition %d (start=%d)...", partition_num, start_sector)
 
         skip_bytes = start_sector * _SECTOR_SIZE
         count_bytes = sector_count * _SECTOR_SIZE if sector_count else None
@@ -373,10 +435,19 @@ def create_ext4_from_tar(
         raise ImageError("Required tool not found") from e
 
 
-def _handle_qcow2(download_path: Path, final_path: Path, size_mib: int) -> Path:
+def _handle_qcow2(
+    download_path: Path,
+    final_path: Path,
+    size_mib: int,
+    disabled_detectors: list[str] | None = None,
+) -> Path:
     raw_path = download_path.with_suffix(".raw")
     convert_qcow2_to_raw(download_path, raw_path)
-    actual_path = extract_partition_from_raw(raw_path, final_path.with_suffix(".img"))
+    actual_path = extract_partition_from_raw(
+        raw_path,
+        final_path.with_suffix(".img"),
+        disabled_detectors=disabled_detectors,
+    )
     raw_path.unlink(missing_ok=True)
     return actual_path
 
@@ -386,8 +457,17 @@ def _handle_tar_rootfs(download_path: Path, final_path: Path, size_mib: int) -> 
     return final_path
 
 
-def _handle_raw(download_path: Path, final_path: Path, size_mib: int) -> Path:
-    return extract_partition_from_raw(download_path, final_path.with_suffix(".img"))
+def _handle_raw(
+    download_path: Path,
+    final_path: Path,
+    size_mib: int,
+    disabled_detectors: list[str] | None = None,
+) -> Path:
+    return extract_partition_from_raw(
+        download_path,
+        final_path.with_suffix(".img"),
+        disabled_detectors=disabled_detectors,
+    )
 
 
 def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
@@ -654,7 +734,11 @@ def import_image(
             raw_path = tmpdir_path / f"{spec.id}.raw"
             extracted_path = tmpdir_path / f"{spec.id}.img"
             convert_qcow2_to_raw(spec.source_path, raw_path)
-            actual_path = extract_partition_from_raw(raw_path, extracted_path)
+            actual_path = extract_partition_from_raw(
+                raw_path,
+                extracted_path,
+                disabled_detectors=spec.disabled_detectors,
+            )
 
             destination_path = output_dir / f"{spec.id}{actual_path.suffix}"
             if destination_path.exists() and not force:

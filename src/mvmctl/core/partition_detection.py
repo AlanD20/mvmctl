@@ -47,14 +47,19 @@ class RootPartitionDetector:
     to identify the most suitable candidate for use as the root filesystem.
     """
 
-    def __init__(self) -> None:
-        """Initialize the detector with all built-in detectors registered."""
+    def __init__(self, disabled_detectors: list[str] | None = None) -> None:
+        """Initialize the detector with all built-in detectors registered.
+
+        Args:
+            disabled_detectors: List of detector names to skip during detection.
+        """
         self._detectors: list[PartitionDetector] = [
             TypeCodeDetector(),
             LabelDetector(),
             SizeDetector(),
             FilesystemDetector(),
         ]
+        self._disabled = set(disabled_detectors or [])
 
     def register(self, detector: PartitionDetector) -> None:
         """Register a detector for use in root partition detection.
@@ -85,6 +90,7 @@ class RootPartitionDetector:
             total = sum(
                 detector.weight * detector.score(partition, partitions)
                 for detector in self._detectors
+                if detector.name not in self._disabled
             )
             scores.append((i + 1, total))
             logger.debug("Partition %d score: %f", i + 1, total)
@@ -243,27 +249,30 @@ class SizeDetector:
         Returns:
             Score based on size being >= MIN_ROOT_SIZE_MB threshold.
         """
-        # Get partition size from partition["size"] (in sectors, 512 bytes/sector)
+        # Get partition size from partition["size"] (in sectors)
         size_value = partition.get("size", 0)
         if not isinstance(size_value, (int, float)):
             return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
 
-        # Convert sectors to MB: size_mb = size_sectors * 512 / (1024 * 1024)
-        size_mb = float(size_value) * 512 / (1024 * 1024)
+        # Convert sectors to MB: size_mb = size_sectors * SECTOR_SIZE / MEBIBYTE
+        sector_bytes = constants.CONST_SECTOR_SIZE_BYTES
+        mebibyte_bytes = constants.CONST_MEBIBYTE_BYTES
+        size_mb = float(size_value) * sector_bytes / mebibyte_bytes
 
         # Find the largest partition from all_partitions
-        max_size_mb = 0.0
+        max_size_mb = float(0)
         for p in all_partitions:
             p_size = p.get("size", 0)
             if isinstance(p_size, (int, float)):
-                p_size_mb = float(p_size) * 512 / (1024 * 1024)
+                p_size_mb = float(p_size) * sector_bytes / mebibyte_bytes
                 if p_size_mb > max_size_mb:
                     max_size_mb = p_size_mb
 
         min_root_size_mb = constants.MIN_ROOT_SIZE_MB
+        too_small_mb = constants.SIZE_TOO_SMALL_MB
 
-        # Too small for root filesystem (< 100MB)
-        if size_mb < 100:
+        # Too small for root filesystem (< too_small_mb)
+        if size_mb < too_small_mb:
             return constants.DETECTOR_SCORES.get("SIZE_TOO_SMALL_SCORE", -0.5)
 
         # At least MIN_ROOT_SIZE_MB (500MB)
@@ -274,7 +283,7 @@ class SizeDetector:
             else:
                 return constants.DETECTOR_SCORES.get("SIZE_ROOT_SCORE", 0.3)
 
-        # Medium-sized partition (100MB - 500MB, not largest)
+        # Medium-sized partition (too_small_mb - min_root_size_mb, not largest)
         return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
 
 

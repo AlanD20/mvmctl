@@ -28,3 +28,4 @@ class ImageImportSpec:
     format: str  # noqa: N816  # "qcow2", "raw", "tar-rootfs"
     convert_to: str = "ext4"
     size_mib: int = field(default=2048)
+    disabled_detectors: list[str] = field(default_factory=list)
