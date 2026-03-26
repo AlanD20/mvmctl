@@ -272,4 +272,18 @@ class FilesystemDetector:
         Returns:
             Score based on filesystem type matching common root types.
         """
-        raise NotImplementedError
+        fstype = partition.get("fstype", "")
+        if not isinstance(fstype, str):
+            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+
+        fstype_lower = fstype.lower()
+        root_filesystems = ("ext4", "btrfs", "xfs", "f2fs")
+
+        if fstype_lower in root_filesystems:
+            return constants.DETECTOR_SCORES.get("FILESYSTEM_ROOT_SCORE", 0.5)
+        if fstype_lower == "vfat":
+            return constants.DETECTOR_SCORES.get("FILESYSTEM_VFAT_SCORE", -0.8)
+        if fstype_lower in ("crypto_luks", ""):
+            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+
+        return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
