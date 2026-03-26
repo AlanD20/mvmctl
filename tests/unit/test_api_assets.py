@@ -42,9 +42,16 @@ def test_pull_kernel_success(
     mock_get_kernels_dir: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
     """pull_kernel calls build_kernel_pipeline with correct arguments."""
+    from mvmctl.core.kernel import KernelPipelineResult
+
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
     mock_get_kernels_dir.return_value = kernels_dir
+    mock_result = MagicMock(spec=KernelPipelineResult)
+    mock_result.build_dir = tmp_path / "build"
+    mock_result.config_result = None
+    mock_result.build_result = None
+    mock_build.return_value = mock_result
 
     result = pull_kernel(version="6.1.102")
 
@@ -53,7 +60,7 @@ def test_pull_kernel_success(
     assert call_kwargs["version"] == "6.1.102"
     assert "cdn.kernel.org" in call_kwargs["source_url"]
     assert call_kwargs["output_path"] == kernels_dir / "vmlinux"
-    assert result == kernels_dir / "vmlinux"
+    assert result == mock_result
 
 
 @patch("mvmctl.api.assets.build_kernel_pipeline")

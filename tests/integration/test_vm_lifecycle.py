@@ -123,7 +123,7 @@ class TestVMLifecycleWorkflow:
         )
 
     @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.cli.vm.remove_vm")
     @patch("mvmctl.cli.vm.list_vms")
     def test_full_lifecycle_create_remove(self, mock_list, mock_remove, mock_manager, mock_create):
@@ -172,7 +172,7 @@ class TestVMLifecycleWorkflow:
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.snapshot_vm")
     @patch("mvmctl.cli.vm.load_snapshot")
-    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.cli.vm.remove_vm")
     def test_snapshot_restore_workflow(
         self, mock_remove, mock_manager, mock_load, mock_snapshot, mock_create, tmp_path
@@ -230,7 +230,7 @@ class TestVMLifecycleEdgeCases:
     """Test edge cases in VM lifecycle workflows."""
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.cli.vm.remove_vm")
     def test_remove_nonexistent_vm(self, mock_remove, mock_manager, mock_check_priv):
         """Test attempting to remove a VM that doesn't exist."""

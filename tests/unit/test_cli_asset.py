@@ -52,7 +52,15 @@ _FAKE_IMAGES = [
 def test_kernel_ls_normal(tmp_path: Path):
     kernel = tmp_path / "vmlinux"
     kernel.write_bytes(b"\x00" * (1024 * 1024))
-    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path)])
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    import json as _json
+    (cache_dir / "metadata.json").write_text(
+        _json.dumps({"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}})
+    )
+    import os
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert "vmlinux" in result.output
 
@@ -65,7 +73,14 @@ def test_kernel_ls_empty_dir(tmp_path: Path):
 def test_kernel_ls_json(tmp_path: Path):
     kernel = tmp_path / "vmlinux"
     kernel.write_bytes(b"\x00" * 2048)
-    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    (cache_dir / "metadata.json").write_text(
+        json.dumps({"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}})
+    )
+    import os
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert isinstance(data, list)
@@ -83,25 +98,43 @@ def test_kernel_ls_dir_not_found(tmp_path: Path):
 
 
 def test_kernel_ls_multiple_files(tmp_path: Path):
+    import os
     (tmp_path / "vmlinux").write_bytes(b"\x00" * 1024)
     (tmp_path / "vmlinux-6.1.102").write_bytes(b"\x00" * 2048)
-    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    (cache_dir / "metadata.json").write_text(
+        json.dumps({
+            "kernels": {
+                "vmlinux": {"last_modified": "2026-01-01T00:00:00"},
+                "vmlinux-6.1.102": {"last_modified": "2026-01-02T00:00:00"},
+            },
+            "images": {},
+        })
+    )
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    # name is now base_name, so both will be "vmlinux"
     names = [e["name"] for e in data]
     assert "vmlinux" in names
     assert len(data) == 2
-    # full_name contains the actual filenames
     full_names = [e["full_name"] for e in data]
     assert "vmlinux" in full_names
     assert "vmlinux-6.1.102" in full_names
 
 
 def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
+    import os
     (tmp_path / "vmlinux").write_bytes(b"\x00" * 1024)
     (tmp_path / "somefile.txt").write_text("not a kernel")
-    result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    (cache_dir / "metadata.json").write_text(
+        json.dumps({"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}})
+    )
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(tmp_path), "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     names = [e["name"] for e in data]
@@ -114,11 +147,13 @@ def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline", return_value=None)
-@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+@patch("mvmctl.cli.asset.build_kernel_pipeline")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
 def test_kernel_fetch_official_success(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
+    from mvmctl.core.kernel import KernelPipelineResult
+
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
         kernel_type="official",
@@ -127,6 +162,12 @@ def test_kernel_fetch_official_success(
         output_name="vmlinux-official",
         build_dir="/tmp/build",
     )
+    mock_result = MagicMock(spec=KernelPipelineResult)
+    mock_result.build_dir = tmp_path / "build"
+    mock_result.config_result = None
+    mock_result.build_result = None
+    mock_build.return_value = mock_result
+
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
     result = click_runner.invoke(
@@ -138,7 +179,7 @@ def test_kernel_fetch_official_success(
 
 
 @patch("mvmctl.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
-@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
 def test_kernel_fetch_official_failure(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -157,9 +198,9 @@ def test_kernel_fetch_official_failure(
     assert result.exit_code == 1
 
 
-@patch("mvmctl.cli.asset.kernel_core.download_firecracker_kernel")
+@patch("mvmctl.cli.asset.download_firecracker_kernel")
 @patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
 def test_kernel_fetch_firecracker_success(
     mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -185,9 +226,9 @@ def test_kernel_fetch_firecracker_success(
     assert call_kwargs["output_name"] is None
 
 
-@patch("mvmctl.cli.asset.kernel_core.download_firecracker_kernel")
+@patch("mvmctl.cli.asset.download_firecracker_kernel")
 @patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
 def test_kernel_fetch_firecracker_flag_shortcut(
     mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -226,7 +267,7 @@ def test_kernel_fetch_firecracker_conflicting_type():
 
 
 @patch(
-    "mvmctl.cli.asset.kernel_core.resolve_kernel_spec", side_effect=KernelError("ambiguous type")
+    "mvmctl.cli.asset.resolve_kernel_spec", side_effect=KernelError("ambiguous type")
 )
 def test_kernel_fetch_type_ambiguity_error(mock_resolve: MagicMock):
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--type", "firecracker"])
@@ -234,9 +275,11 @@ def test_kernel_fetch_type_ambiguity_error(mock_resolve: MagicMock):
     assert "ambiguous type" in result.output
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline", return_value=None)
-@patch("mvmctl.cli.asset.kernel_core.resolve_kernel_spec")
+@patch("mvmctl.cli.asset.build_kernel_pipeline")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
 def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path):
+    from mvmctl.core.kernel import KernelPipelineResult
+
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
         kernel_type="official",
@@ -245,6 +288,13 @@ def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, 
         output_name="vmlinux-official",
         build_dir="/tmp/build",
     )
+
+    mock_result = MagicMock(spec=KernelPipelineResult)
+    mock_result.build_dir = tmp_path / "build"
+    mock_result.config_result = None
+    mock_result.build_result = None
+    mock_build.return_value = mock_result
+
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
     result = click_runner.invoke(

@@ -395,6 +395,7 @@ def test_configure_kernel_second_olddefconfig_fails(
 def test_configure_kernel_missing_required_settings(
     mock_run: MagicMock, mock_download: MagicMock, tmp_path: Path
 ):
+    """Test that configure_kernel returns result with missing settings instead of raising."""
     mock_download.return_value = True
     mock_run.return_value = MagicMock(returncode=0)
 
@@ -406,9 +407,11 @@ def test_configure_kernel_missing_required_settings(
     config_path = kernel_dir / ".config"
     config_path.write_text("CONFIG_BTRFS_FS=y\n")
 
-    with patch("typer.confirm", return_value=False):
-        with pytest.raises(KernelError):
-            configure_kernel(kernel_dir, version="6.1.102")
+    result = configure_kernel(kernel_dir, version="6.1.102")
+
+    assert result.success is False
+    assert len(result.missing_settings) > 0
+    assert len(result.warnings) > 0
 
 
 def test_build_kernel_success(tmp_path: Path):
@@ -776,9 +779,8 @@ def test_build_kernel_pipeline_cached_tarball_needs_extract(
     mock_build.assert_called_once()
 
 
-def test_configure_kernel_missing_settings_prompt(tmp_path: Path):
-    """P2-10: configure_kernel shows confirmation prompt for missing required settings."""
-    # Create a kernel dir with a config missing required settings
+def test_configure_kernel_missing_settings_returns_result(tmp_path: Path):
+    """Test that configure_kernel returns result with missing settings - CLI handles confirmation."""
     kernel_dir = tmp_path / "linux-6.1.102"
     kernel_dir.mkdir()
     scripts = kernel_dir / "scripts"
@@ -791,33 +793,30 @@ def test_configure_kernel_missing_settings_prompt(tmp_path: Path):
         patch("mvmctl.core.kernel.download_firecracker_config"),
         patch("mvmctl.core.kernel.run_make", return_value=(0, "", "")),
         patch("mvmctl.core.kernel.subprocess.run", return_value=MagicMock(returncode=0)),
-        patch("typer.confirm", return_value=False) as mock_confirm,
+    ):
+        result = configure_kernel(kernel_dir, "6.1.102")
+        assert result.success is False
+        assert len(result.missing_settings) > 0
+        assert any("CONFIG_BTRFS_FS" in w for w in result.warnings)
+
+
+def test_configure_kernel_skip_confirm_raises_error(tmp_path: Path):
+    """Test that configure_kernel raises KernelError with skip_confirm=True when settings missing."""
+    kernel_dir = tmp_path / "linux-6.1.102"
+    kernel_dir.mkdir()
+    scripts = kernel_dir / "scripts"
+    scripts.mkdir()
+    (scripts / "config").write_text("#!/bin/sh")
+    (scripts / "config").chmod(0o755)
+    (kernel_dir / ".config").write_text("# minimal config\nCONFIG_SOMETHING=y\n")
+
+    with (
+        patch("mvmctl.core.kernel.download_firecracker_config"),
+        patch("mvmctl.core.kernel.run_make", return_value=(0, "", "")),
+        patch("mvmctl.core.kernel.subprocess.run", return_value=MagicMock(returncode=0)),
     ):
         with pytest.raises(KernelError, match="Required kernel settings are missing"):
-            configure_kernel(kernel_dir, "6.1.102")
-        mock_confirm.assert_called_once()
-
-
-def test_configure_kernel_missing_settings_proceed(tmp_path: Path):
-    """P2-10: configure_kernel proceeds when user confirms despite missing settings."""
-    # Create a kernel dir with a config missing required settings
-    kernel_dir = tmp_path / "linux-6.1.102"
-    kernel_dir.mkdir()
-    scripts = kernel_dir / "scripts"
-    scripts.mkdir()
-    (scripts / "config").write_text("#!/bin/sh")
-    (scripts / "config").chmod(0o755)
-    (kernel_dir / ".config").write_text("# minimal config\nCONFIG_SOMETHING=y\n")
-
-    with (
-        patch("mvmctl.core.kernel.download_firecracker_config"),
-        patch("mvmctl.core.kernel.run_make", return_value=(0, "", "")),
-        patch("mvmctl.core.kernel.subprocess.run", return_value=MagicMock(returncode=0)),
-        patch("typer.confirm", return_value=True) as mock_confirm,
-    ):
-        # Should not raise when user confirms
-        configure_kernel(kernel_dir, "6.1.102")
-        mock_confirm.assert_called_once()
+            configure_kernel(kernel_dir, "6.1.102", skip_confirm=True)
 
 
 # ---------------------------------------------------------------------------

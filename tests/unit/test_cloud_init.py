@@ -16,6 +16,7 @@ def test_write_cloud_init_basic(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
+        gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
@@ -52,6 +53,7 @@ def test_write_cloud_init_custom_user_data(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
+        gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         ssh_pub_key="ssh-rsa CUSTOM",
@@ -121,6 +123,7 @@ def test_validate_user_data_rejects_dangerous_directives(tmp_path):
         write_cloud_init(
             cloud_init_dir=cloud_init_dir,
             vm_name="testvm",
+            gateway="10.20.0.1",
             guest_ip="10.20.0.10",
             user="myuser",
             custom_user_data=custom_ud,
@@ -138,6 +141,7 @@ def test_validate_user_data_rejects_runcmd(tmp_path):
         write_cloud_init(
             cloud_init_dir=cloud_init_dir,
             vm_name="testvm",
+            gateway="10.20.0.1",
             guest_ip="10.20.0.10",
             user="myuser",
             custom_user_data=custom_ud,

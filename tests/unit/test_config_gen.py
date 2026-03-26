@@ -79,6 +79,8 @@ def test_boot_args_rejects_shell_injection_in_guest_ip():
         kernel_path=Path("vmlinux"),
         rootfs_path=Path("rootfs.ext4"),
         guest_ip="10.0.0.2;rm -rf /",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
     )
@@ -183,6 +185,8 @@ def test_config_gen_invalid_ip_with_shell_chars():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         guest_ip="not-a-valid;ip",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
     )
@@ -200,6 +204,8 @@ def test_config_gen_write_to_file(tmp_path):
         mem_size_mib=256,
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
     )
     generator = ConfigGenerator(vm_config)
     out_file = tmp_path / "subdir" / "firecracker.json"
@@ -248,3 +254,81 @@ def test_config_gen_no_guest_ip_omits_ip_arg():
     generator = ConfigGenerator(vm_config)
     config = generator.generate()
     assert "ip=" not in config["boot-source"]["boot_args"]
+
+
+def test_config_gen_extra_drives():
+    from mvmctl.core.config_gen import DriveConfig
+
+    extra: DriveConfig = {
+        "drive_id": "data",
+        "path_on_host": "/tmp/data.ext4",
+        "is_root_device": False,
+        "is_read_only": False,
+        "partuuid": None,
+        "cache_type": "Unsafe",
+        "io_engine": "Sync",
+        "rate_limiter": None,
+        "socket": None,
+    }
+    vm_config = VMConfig(
+        name="multi-drive",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        extra_drives=[extra],
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+
+    assert len(config["drives"]) == 2
+    assert config["drives"][0]["drive_id"] == "rootfs"
+    assert config["drives"][0]["is_root_device"] is True
+    assert config["drives"][1]["drive_id"] == "data"
+    assert config["drives"][1]["is_root_device"] is False
+
+
+def test_config_gen_logging_disabled():
+    vm_config = VMConfig(
+        name="no-log",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        enable_logging=False,
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    assert config["logger"] is None
+
+
+def test_config_gen_logging_enabled_by_default():
+    vm_config = VMConfig(
+        name="with-log",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    assert config["logger"] is not None
+    assert "log_path" in config["logger"]
+
+
+def test_config_gen_metrics_disabled_by_default():
+    vm_config = VMConfig(
+        name="no-metrics",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    assert config["metrics"] is None
+
+
+def test_config_gen_metrics_enabled():
+    vm_config = VMConfig(
+        name="with-metrics",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        enable_metrics=True,
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    assert config["metrics"] is not None
+    assert "metrics_path" in config["metrics"]
