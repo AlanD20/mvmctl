@@ -24,6 +24,7 @@ from mvmctl.constants import (
     DEFAULT_NETWORK_GATEWAY,
     MVM_FORWARD_CHAIN,
     MVM_POSTROUTING_CHAIN,
+    PROJECT_GROUP,
 )
 from mvmctl.exceptions import NetworkError
 
@@ -120,16 +121,49 @@ def _validate_sudo_credentials() -> bool:
 def _privileged_cmd(cmd: list[str]) -> list[str]:
     """Prepend sudo if not running as root.
 
-    Validates and caches sudo credentials to prevent excessive authentication
-    attempts that could trigger account lockout mechanisms (faillock, PAM policy).
-    Credentials are cached for 60 seconds.
+    Requires the user to be in the mvm group (configured by 'mvm host init').
+    Raises PrivilegeError if the user lacks group membership.
     """
     if os.getuid() != 0:
-        # Validate credentials before returning the sudo command
-        # This ensures credentials are cached and reduces repeated prompts
-        _validate_sudo_credentials()
+        _require_mvm_group_membership()
         return ["sudo"] + cmd
     return cmd
+
+
+def _require_mvm_group_membership() -> None:
+    """Raise PrivilegeError if user is not in the mvm group with active credentials."""
+    import grp
+    import pwd
+
+    from mvmctl.exceptions import PrivilegeError
+
+    try:
+        g = grp.getgrnam(PROJECT_GROUP)
+    except KeyError:
+        raise PrivilegeError(
+            f"Group '{PROJECT_GROUP}' does not exist. "
+            f"Run 'sudo mvm host init' to set up privilege management."
+        )
+
+    user_pw = pwd.getpwuid(os.getuid())
+    username = user_pw.pw_name
+
+    is_supplementary_member = username in g.gr_mem
+    is_primary_group = user_pw.pw_gid == g.gr_gid
+    if not (is_supplementary_member or is_primary_group):
+        raise PrivilegeError(
+            f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
+            f"Run 'sudo mvm host init' to configure privileges, "
+            f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
+        )
+
+    process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
+    if g.gr_gid not in process_gids:
+        raise PrivilegeError(
+            f"Your user is in the '{PROJECT_GROUP}' group, but your current session "
+            f"does not have the group active yet. Please log out and log back in, "
+            f"or run: newgrp {PROJECT_GROUP}"
+        )
 
 
 def _run_ip_batch(commands: list[str]) -> None:

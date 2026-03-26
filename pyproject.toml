@@ -52,6 +52,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--cov=src/mvmctl --cov-branch --cov-report=term-missing --cov-fail-under=80"
+markers = [
+    "real_mvm_group_check: test uses real _require_mvm_group_membership (not mocked)",
+]
 
 [dependency-groups]
 dev = [

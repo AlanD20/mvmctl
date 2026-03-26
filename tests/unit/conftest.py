@@ -1,12 +1,30 @@
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mvmctl.core.key_manager import KeyInfo
 from mvmctl.core.vm_manager import VMManager
 from mvmctl.models.vm import VMConfig, VMInstance, VMState
+
+
+@pytest.fixture(autouse=True)
+def _mock_mvm_group_membership(request):
+    """Auto-mock mvm group membership check for all unit tests.
+
+    This prevents PrivilegeError from being raised in network operations
+    when tests aren't specifically testing privilege behavior.
+
+    Tests that need to verify privilege behavior should be marked with:
+        @pytest.mark.real_mvm_group_check
+    """
+    if request.node.get_closest_marker("real_mvm_group_check"):
+        yield None
+        return
+
+    with patch("mvmctl.core.network._require_mvm_group_membership"):
+        yield
 
 
 @pytest.fixture

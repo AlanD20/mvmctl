@@ -986,28 +986,131 @@ def test_sudo_anti_recursion_protection():
         network_module._SUDO_VALIDATION_IN_PROGRESS = original_state
 
 
-def test_privileged_cmd_triggers_validation():
-    """_privileged_cmd should trigger credential validation when not root."""
-    import mvmctl.core.network as network_module
+@pytest.mark.real_mvm_group_check
+def test_privileged_cmd_raises_when_not_in_mvm_group():
+    """_privileged_cmd should raise PrivilegeError when user is not in mvm group."""
+    import grp
+    import pwd
 
-    mock_result = MagicMock()
-    mock_result.returncode = 0
+    from mvmctl.core.network import _privileged_cmd
+    from mvmctl.exceptions import PrivilegeError
+
+    mock_group = MagicMock()
+    mock_group.gr_gid = 1001
+    mock_group.gr_mem = ["otheruser"]
+
+    mock_passwd = MagicMock()
+    mock_passwd.pw_name = "testuser"
+    mock_passwd.pw_gid = 1000
 
     with patch("mvmctl.core.network.os.getuid", return_value=1000):
-        with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
-            result = network_module._privileged_cmd(["ip", "link", "show"])
-            assert result == ["sudo", "ip", "link", "show"]
+        with patch.object(grp, "getgrnam", return_value=mock_group):
+            with patch.object(pwd, "getpwuid", return_value=mock_passwd):
+                with pytest.raises(PrivilegeError, match="not in the 'mvm' group"):
+                    _privileged_cmd(["ip", "link", "show"])
+
+
+@pytest.mark.real_mvm_group_check
+def test_privileged_cmd_succeeds_when_in_mvm_group():
+    """_privileged_cmd should return sudo command when user is in mvm group."""
+    import grp
+    import pwd
+
+    from mvmctl.core.network import _privileged_cmd
+
+    mock_group = MagicMock()
+    mock_group.gr_gid = 1001
+    mock_group.gr_mem = ["testuser"]
+
+    mock_passwd = MagicMock()
+    mock_passwd.pw_name = "testuser"
+    mock_passwd.pw_gid = 1000
+
+    with patch("mvmctl.core.network.os.getuid", return_value=1000):
+        with patch.object(grp, "getgrnam", return_value=mock_group):
+            with patch.object(pwd, "getpwuid", return_value=mock_passwd):
+                with patch("mvmctl.core.network.os.getgroups", return_value=[1001]):
+                    with patch("mvmctl.core.network.os.getgid", return_value=1000):
+                        with patch("mvmctl.core.network.os.getegid", return_value=1000):
+                            result = _privileged_cmd(["ip", "link", "show"])
+                            assert result == ["sudo", "ip", "link", "show"]
 
 
 def test_privileged_cmd_skips_sudo_when_root():
     """_privileged_cmd should not add sudo when running as root."""
-    import mvmctl.core.network as network_module
+    from mvmctl.core.network import _privileged_cmd
 
     with patch("mvmctl.core.network.os.getuid", return_value=0):
         with patch("mvmctl.core.network.subprocess.run") as mock_run:
-            result = network_module._privileged_cmd(["ip", "link", "show"])
+            result = _privileged_cmd(["ip", "link", "show"])
             assert result == ["ip", "link", "show"]
             mock_run.assert_not_called()
+
+
+@pytest.mark.real_mvm_group_check
+def test_require_mvm_group_raises_when_group_not_found():
+    """_require_mvm_group_membership should raise PrivilegeError when mvm group doesn't exist."""
+    import grp
+
+    from mvmctl.core.network import _require_mvm_group_membership
+    from mvmctl.exceptions import PrivilegeError
+
+    with patch.object(grp, "getgrnam", side_effect=KeyError("mvm")):
+        with pytest.raises(PrivilegeError, match="does not exist"):
+            _require_mvm_group_membership()
+
+
+@pytest.mark.real_mvm_group_check
+def test_require_mvm_group_raises_when_not_member():
+    """_require_mvm_group_membership should raise PrivilegeError when user is not in group."""
+    import grp
+    import pwd
+
+    from mvmctl.core.network import _require_mvm_group_membership
+    from mvmctl.exceptions import PrivilegeError
+
+    mock_group = MagicMock()
+    mock_group.gr_gid = 1001
+    mock_group.gr_mem = ["otheruser"]
+
+    mock_passwd = MagicMock()
+    mock_passwd.pw_name = "testuser"
+    mock_passwd.pw_gid = 1000
+
+    with patch.object(grp, "getgrnam", return_value=mock_group):
+        with patch.object(pwd, "getpwuid", return_value=mock_passwd):
+            with patch("mvmctl.core.network.os.getuid", return_value=1000):
+                with pytest.raises(PrivilegeError, match="not in the 'mvm' group"):
+                    _require_mvm_group_membership()
+
+
+@pytest.mark.real_mvm_group_check
+def test_require_mvm_group_raises_when_session_not_active():
+    """_require_mvm_group_membership should raise PrivilegeError when group not active in session."""
+    import grp
+    import pwd
+
+    from mvmctl.core.network import _require_mvm_group_membership
+    from mvmctl.exceptions import PrivilegeError
+
+    mock_group = MagicMock()
+    mock_group.gr_gid = 1001
+    mock_group.gr_mem = ["testuser"]
+
+    mock_passwd = MagicMock()
+    mock_passwd.pw_name = "testuser"
+    mock_passwd.pw_gid = 1000
+
+    with patch.object(grp, "getgrnam", return_value=mock_group):
+        with patch.object(pwd, "getpwuid", return_value=mock_passwd):
+            with patch("mvmctl.core.network.os.getuid", return_value=1000):
+                with patch("mvmctl.core.network.os.getgroups", return_value=[]):
+                    with patch("mvmctl.core.network.os.getgid", return_value=1000):
+                        with patch("mvmctl.core.network.os.getegid", return_value=1000):
+                            with pytest.raises(
+                                PrivilegeError, match="does not have the group active"
+                            ):
+                                _require_mvm_group_membership()
 
 
 # ---------------------------------------------------------------------------

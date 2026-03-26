@@ -250,14 +250,18 @@ class TestNetworkWithSubprocessMocking:
         # Verify persisted in metadata
         assert get_network("subprocess-net") is not None
 
+    @patch("mvmctl.core.network._require_mvm_group_membership")
     @patch("mvmctl.core.network.subprocess.run")
     @patch("mvmctl.api.network.check_privileges")
-    def test_network_remove_with_bridge_teardown(self, mock_check_priv, mock_run, mock_cache_dir):
+    def test_network_remove_with_bridge_teardown(
+        self, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
+    ):
         """Test network removal with mocked bridge teardown commands."""
         from mvmctl.core.metadata import update_network_entry
-        from mvmctl.core.network_manager import remove_network, get_network
+        from mvmctl.core.network_manager import get_network, remove_network
 
         mock_check_priv.return_value = None
+        mock_require_group.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Add network to metadata first
