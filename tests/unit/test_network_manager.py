@@ -22,7 +22,6 @@ from mvmctl.core.network_manager import (
     allocate_network_ip,
     release_network_ip,
     ensure_default_network,
-    _auto_allocate_subnet,
     _validate_subnet_no_overlap,
 )
 from mvmctl.exceptions import NetworkError
@@ -131,7 +130,7 @@ def test_get_network_leases(mock_cache_dir: Path):
 @patch("mvmctl.core.network_manager.setup_bridge")
 @patch("mvmctl.core.network_manager.setup_nat")
 def test_create_network_success(mock_setup_nat, mock_setup_bridge, mock_cache_dir: Path):
-    config = create_network(name="mynet")
+    config = create_network(name="mynet", cidr="10.20.0.0/24")
     assert config.name == "mynet"
     assert config.cidr == "10.20.0.0/24"
     assert config.gateway == "10.20.0.1"
@@ -142,20 +141,13 @@ def test_create_network_success(mock_setup_nat, mock_setup_bridge, mock_cache_di
     mock_setup_nat.assert_called_once_with("mvm-mynet")
 
 
-@patch("mvmctl.core.network_manager.setup_bridge")
-@patch("mvmctl.core.network_manager.setup_nat")
-def test_create_network_with_legacy_subnet(mock_setup_nat, mock_setup_bridge, mock_cache_dir: Path):
-    config = create_network(name="legacynet", subnet="10.20.5.0/24")
-    assert config.cidr == "10.20.5.0/24"
-
-
 def test_create_network_already_exists(mock_cache_dir: Path):
     net_dir = mock_cache_dir / "networks" / "mynet"
     net_dir.mkdir(parents=True)
     _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
 
     with pytest.raises(NetworkError, match="already exists"):
-        create_network(name="mynet")
+        create_network(name="mynet", cidr="10.20.1.0/24")
 
 
 @patch("mvmctl.core.network_manager.setup_bridge")
@@ -166,7 +158,7 @@ def test_create_network_setup_failure(
     mock_setup_bridge.side_effect = NetworkError("Failed to setup bridge")
 
     with pytest.raises(NetworkError, match="Failed to setup bridge"):
-        create_network(name="mynet")
+        create_network(name="mynet", cidr="10.20.0.0/24")
 
     mock_teardown_bridge.assert_called_once()
     assert get_network("mynet") is None
@@ -301,29 +293,6 @@ def test_ensure_default_network(mock_create_network, mock_cache_dir: Path):
     mock_create_network.reset_mock()
     config = ensure_default_network()
     mock_create_network.assert_not_called()
-
-
-def test_auto_allocate_subnet(mock_cache_dir: Path):
-    assert _auto_allocate_subnet() == "10.20.0.0/24"
-
-    net_dir1 = mock_cache_dir / "networks" / "net1"
-    net_dir1.mkdir(parents=True)
-    _save_config(net_dir1, NetworkConfig("net1", "10.20.0.0/24", "10.20.0.1", "mvm-net1"))
-
-    assert _auto_allocate_subnet() == "10.20.1.0/24"
-
-
-def test_auto_allocate_subnet_exhausted(mock_cache_dir: Path):
-    # Fill up all 256 subnets
-    for i in range(256):
-        net_dir = mock_cache_dir / "networks" / f"net{i}"
-        net_dir.mkdir(parents=True)
-        _save_config(
-            net_dir, NetworkConfig(f"net{i}", f"10.20.{i}.0/24", f"10.20.{i}.1", f"mvm-net{i}")
-        )
-
-    with pytest.raises(NetworkError, match="No available"):
-        _auto_allocate_subnet()
 
 
 def test_validate_subnet_no_overlap(mock_cache_dir: Path):

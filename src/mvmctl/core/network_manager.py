@@ -16,7 +16,6 @@ from mvmctl.constants import (
     CONST_FILE_PERMS_DHCP_LEASES,
     CONST_FILE_PERMS_NETWORK_CONFIG,
     CONST_FILE_PERMS_VM_STATE,
-    CONST_IP_RANGE_SIZE,
     DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_NAME,
     device_prefix,
@@ -189,11 +188,9 @@ def _persist_iptables_if_root() -> None:
 
 def create_network(
     name: str,
-    cidr: str | None = None,
+    cidr: str,
     gateway: str | None = None,
     nat: bool = True,
-    # Legacy alias for backward compatibility
-    subnet: str | None = None,
 ) -> NetworkConfig:
     """Create a named network.
 
@@ -205,7 +202,6 @@ def create_network(
         cidr: IP subnet in CIDR notation (e.g., "192.168.100.0/24").
         gateway: Gateway IP for the bridge. Defaults to first host in subnet.
         nat: Whether to configure NAT/masquerade. Default True.
-        subnet: Deprecated alias for cidr.
 
     Returns:
         The created NetworkConfig.
@@ -215,17 +211,10 @@ def create_network(
     """
     validate_entity_name(name, "network")
 
-    # Handle legacy subnet parameter
-    if cidr is None and subnet is not None:
-        cidr = subnet
-
     network_dir = get_network_dir(name)
     if _load_config(network_dir) is not None:
         raise NetworkError(f"Network '{name}' already exists")
 
-    # Resolve defaults
-    if cidr is None:
-        cidr = _auto_allocate_subnet()
     _validate_subnet_no_overlap(cidr, name)
 
     if gateway is None:
@@ -476,22 +465,6 @@ def reconcile_networks() -> list[ReconcileResult]:
 
 def _prefix_len(subnet: str) -> int:
     return ipaddress.IPv4Network(subnet, strict=False).prefixlen
-
-
-def _auto_allocate_subnet() -> str:
-    """Auto-allocate the next available /24 subnet."""
-    existing = list_networks()
-    used_nets = set()
-    for net in existing:
-        used_nets.add(ipaddress.IPv4Network(net.cidr, strict=False))
-
-    _POOL_BASE = "10.20.0.0/16"
-    for i in range(CONST_IP_RANGE_SIZE):
-        candidate = ipaddress.IPv4Network(f"10.20.{i}.0/24")
-        if candidate not in used_nets:
-            return str(candidate)
-
-    raise NetworkError(f"No available /24 subnets in {_POOL_BASE} pool")
 
 
 def _validate_subnet_no_overlap(subnet: str, exclude_name: str = "") -> None:

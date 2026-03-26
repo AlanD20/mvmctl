@@ -135,13 +135,7 @@ pyinstaller --onefile --name mvm src/mvmctl/main.py
 - **Metadata:** `$MVM_CACHE_DIR/metadata.json` — single file for all images, kernels, binaries
 - **Network prefix:** bridge = `mvm-{network_name}` (e.g. `mvm-default`), TAP = `mvm-{net[:3]}-{vm[:3]}-{rand3}`
 - **Env var prefix:** `MVM_` (e.g. `MVM_CACHE_DIR`, `MVM_KERNEL`)
-- **Known violations:**
-  - `core/kernel.py` — calls `console.print` / `print_warning` directly (CLI-layer output in core)
-  - `core/host_privilege.py:check_privileges_interactive()` — interactive messaging in core
-  - `cli/asset.py` — imports `mvmctl.core.metadata` directly (bypasses api/)
-  - `cli/configure.py` — imports `mvmctl.core.config_state` directly (bypasses api/)
 - **reconcile_networks():** called on every subcommand invocation in `main.py`; errors are swallowed (not user-visible)
-- **Privilege reality:** `api/vms.py` only calls `check_privileges` in `cleanup_vms`, NOT in `create_vm`; `api/network.py` checks in `create_network` + `remove_network`
 
 ## Related AGENTS.md
 

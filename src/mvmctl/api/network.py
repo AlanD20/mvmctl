@@ -40,14 +40,13 @@ __all__ = [
 
 def create_network(
     name: str,
-    cidr: str | None = None,
+    cidr: str,
     gateway: str | None = None,
     nat: bool = True,
-    subnet: str | None = None,
 ) -> NetworkConfig:
     """Create a named network, setting up bridge and NAT rules."""
     check_privileges("/usr/sbin/ip")
-    return _create_network(name, cidr=cidr, gateway=gateway, nat=nat, subnet=subnet)
+    return _create_network(name, cidr=cidr, gateway=gateway, nat=nat)
 
 
 def remove_network(name: str) -> None:
