@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from mvmctl.constants import DETECTOR_SCORES, DETECTOR_WEIGHTS, MIN_ROOT_SIZE_MB  # noqa: F401
+from mvmctl import constants
 from mvmctl.exceptions import RootPartitionDetectionError, TieDetectedError  # noqa: F401
 
 
@@ -79,13 +79,26 @@ class TypeCodeDetector:
     their purpose in the system.
     """
 
+    # GPT type GUIDs
+    GPT_ROOT_X86_64 = "44479540-f297-41b2-9af7-d131d5f0458a"
+    GPT_ROOT_AARCH64 = "4f68bce3-e8cd-4db1-96e7-fbcaf984b709"
+    GPT_ESP = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+    GPT_SWAP = "0657fd6d-a4ab-43c4-84e5-0933c84b4f4f"
+
+    # MBR type codes (as strings from sfdisk JSON)
+    MBR_LINUX = "83"
+    MBR_EFI = "ef"
+    MBR_SWAP = "82"
+    MBR_EXTENDED = "85"
+    MBR_LVM = "8e"
+
     @property
     def name(self) -> str:
         return "type_code"
 
     @property
     def weight(self) -> float:
-        return DETECTOR_WEIGHTS.get("type_code", 0.25)
+        return constants.DETECTOR_WEIGHTS.get("type_code", 0.25)
 
     def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
         """Score a partition based on its type code.
@@ -97,7 +110,33 @@ class TypeCodeDetector:
         Returns:
             Score based on type code matching root filesystem patterns.
         """
-        raise NotImplementedError
+        partition_type = partition.get("type", "")
+        if not isinstance(partition_type, str):
+            return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
+
+        type_lower = partition_type.lower()
+
+        # Root partitions get highest score
+        if type_lower in (self.GPT_ROOT_X86_64.lower(), self.GPT_ROOT_AARCH64.lower()):
+            return constants.DETECTOR_SCORES.get("ROOT_SCORE", 1.0)
+
+        # Linux MBR type gets medium score
+        if type_lower == self.MBR_LINUX.lower():
+            return constants.DETECTOR_SCORES.get("MBR_LINUX_SCORE", 0.5)
+
+        # Exclude partitions (ESP, swap, LVM, extended) get negative score
+        if type_lower in (
+            self.GPT_ESP.lower(),
+            self.GPT_SWAP.lower(),
+            self.MBR_EFI.lower(),
+            self.MBR_SWAP.lower(),
+            self.MBR_EXTENDED.lower(),
+            self.MBR_LVM.lower(),
+        ):
+            return constants.DETECTOR_SCORES.get("EXCLUDE_SCORE", -1.0)
+
+        # Unknown types get neutral score
+        return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
 
 
 class LabelDetector:
@@ -113,7 +152,7 @@ class LabelDetector:
 
     @property
     def weight(self) -> float:
-        return DETECTOR_WEIGHTS.get("label", 0.25)
+        return constants.DETECTOR_WEIGHTS.get("label", 0.25)
 
     def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
         """Score a partition based on its filesystem label.
@@ -141,7 +180,7 @@ class SizeDetector:
 
     @property
     def weight(self) -> float:
-        return DETECTOR_WEIGHTS.get("size", 0.25)
+        return constants.DETECTOR_WEIGHTS.get("size", 0.25)
 
     def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
         """Score a partition based on its size relative to minimum root size.
@@ -169,7 +208,7 @@ class FilesystemDetector:
 
     @property
     def weight(self) -> float:
-        return DETECTOR_WEIGHTS.get("filesystem", 0.25)
+        return constants.DETECTOR_WEIGHTS.get("filesystem", 0.25)
 
     def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
         """Score a partition based on its filesystem type.
