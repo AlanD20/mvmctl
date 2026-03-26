@@ -48,7 +48,14 @@ from mvmctl.constants import (
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
-from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
+from mvmctl.utils.console import (
+    print_error,
+    print_info,
+    print_success,
+    print_table,
+    print_warning,
+    resolve_single_by_short_id,
+)
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
 kernel_app = typer.Typer(
@@ -69,6 +76,7 @@ bin_app = typer.Typer(
     rich_markup_mode=None,
     add_completion=False,
 )
+
 
 
 @kernel_app.callback(invoke_without_command=True)
@@ -281,17 +289,29 @@ def kernel_fetch(
 
 @kernel_app.command(name="set-default")
 def kernel_set_default(
-    name: str = typer.Argument(..., help="Kernel file name to set as default"),
+    short_id: str = typer.Argument(..., help="Kernel short ID (6 chars) to set as default"),
     kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
 ) -> None:
     """Set a kernel as the default for VM creation."""
     kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
+    cache_dir = get_cache_dir()
+
+    match = resolve_single_by_short_id(short_id, find_kernels_by_short_id, cache_dir, "kernel")
+    if match is None:
+        raise typer.Exit(code=1)
+
+    _, meta = match
+    filename = str(meta.get("filename", ""))
+    if not filename or not (kernels_dir / filename).exists():
+        print_error(f"Kernel file not found for ID '{short_id}'")
+        raise typer.Exit(code=1)
+
     try:
-        set_default_kernel(kernels_dir, name)
+        set_default_kernel(kernels_dir, filename)
     except KernelError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1) from exc
-    print_success(f"Default kernel set to: {name}")
+    print_success(f"Default kernel set to: {filename}")
 
 
 @kernel_app.command(name="rm")
@@ -318,19 +338,12 @@ def kernel_rm(
     exit_code = 0
 
     for short_id in effective_ids:
-        matches = find_kernels_by_short_id(cache_dir, short_id)
-        if not matches:
-            print_error(f"No kernel found with short ID '{short_id}'")
-            exit_code = 1
-            continue
-        if len(matches) > 1:
-            print_error(
-                f"Ambiguous short ID '{short_id}' matches {len(matches)} kernels — use more characters"
-            )
+        match = resolve_single_by_short_id(short_id, find_kernels_by_short_id, cache_dir, "kernel")
+        if match is None:
             exit_code = 1
             continue
 
-        full_id, meta = matches[0]
+        full_id, meta = match
         filename = str(meta.get("filename", ""))
 
         path: Path | None = kernels_dir / filename if filename else None
@@ -693,39 +706,35 @@ def image_fetch(
 
 @image_app.command(name="set-default")
 def image_set_default(
-    image_id: str = typer.Argument(..., help="Image short ID or YAML image ID to set as default"),
+    short_id: str = typer.Argument(..., help="Image short ID (6 chars) to set as default"),
     images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
 ) -> None:
     """Set the default image for VM creation."""
     images_dir = images_dir if images_dir is not None else get_images_dir()
     images_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = get_cache_dir()
 
-    found = any((images_dir / f"{image_id}{ext}").exists() for ext in SUPPORTED_IMAGE_EXTENSIONS)
-    stored_id = image_id
-
-    if not found:
-        matches = find_images_by_short_id(get_cache_dir(), image_id)
-        if len(matches) == 1:
-            full_key, meta = matches[0]
-            filename = str(meta.get("filename", ""))
-            if filename and (images_dir / filename).exists():
-                found = True
-                stored_id = full_key
-            else:
-                for ext in SUPPORTED_IMAGE_EXTENSIONS:
-                    if (images_dir / f"{full_key}{ext}").exists():
-                        found = True
-                        stored_id = full_key
-                        break
-
-    if not found:
-        print_error(f"Image '{image_id}' not found in {images_dir}. Download or import it first.")
+    match = resolve_single_by_short_id(short_id, find_images_by_short_id, cache_dir, "image")
+    if match is None:
         raise typer.Exit(code=1)
+
+    full_key, meta = match
+    filename = str(meta.get("filename", ""))
+
+    if filename and (images_dir / filename).exists():
+        pass
+    else:
+        found = any(
+            (images_dir / f"{full_key}{ext}").exists() for ext in SUPPORTED_IMAGE_EXTENSIONS
+        )
+        if not found:
+            print_error(f"Image file not found for ID '{short_id}'")
+            raise typer.Exit(code=1)
 
     from mvmctl.api.config import set_defaults_value
 
-    set_defaults_value("image", stored_id)
-    print_success(f"✓ Default image set to: {image_id}")
+    set_defaults_value("image", full_key)
+    print_success(f"✓ Default image set to: {short_id}")
 
 
 @image_app.command(name="rm")
@@ -752,19 +761,12 @@ def image_rm(
     exit_code = 0
 
     for short_id in effective_ids:
-        matches = find_images_by_short_id(cache_dir, short_id)
-        if not matches:
-            print_error(f"No image found with short ID '{short_id}'")
-            exit_code = 1
-            continue
-        if len(matches) > 1:
-            print_error(
-                f"Ambiguous short ID '{short_id}' matches {len(matches)} images — use more characters"
-            )
+        match = resolve_single_by_short_id(short_id, find_images_by_short_id, cache_dir, "image")
+        if match is None:
             exit_code = 1
             continue
 
-        full_key, meta = matches[0]
+        full_key, meta = match
         filename = str(meta.get("filename", ""))
         files_to_remove: list[Path] = []
 

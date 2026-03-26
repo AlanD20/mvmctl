@@ -926,14 +926,18 @@ def test_cache_clear_preserves_vms_dir(tmp_path: Path):
 
 def test_image_set_default(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    (tmp_path / "images").mkdir()
-    (tmp_path / "images" / "ubuntu-24.04.ext4").write_bytes(b"\x00" * 1024)
+    full_hash = "f" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+    _write_image_meta(tmp_path, full_hash, img_file.name, os_name="Ubuntu 24.04")
     result = click_runner.invoke(
         main_app,
-        ["image", "set-default", "ubuntu-24.04", "--images-dir", str(tmp_path / "images")],
+        ["image", "set-default", full_hash[:6], "--images-dir", str(images_dir)],
     )
     assert result.exit_code == 0
-    assert "ubuntu-24.04" in result.output
+    assert full_hash[:6] in result.output
 
 
 def test_image_set_default_not_found(tmp_path: Path, monkeypatch):
@@ -941,7 +945,7 @@ def test_image_set_default_not_found(tmp_path: Path, monkeypatch):
     (tmp_path / "images").mkdir()
     result = click_runner.invoke(
         main_app,
-        ["image", "set-default", "ubuntu-24.04", "--images-dir", str(tmp_path / "images")],
+        ["image", "set-default", "abcdef", "--images-dir", str(tmp_path / "images")],
     )
     assert result.exit_code == 1
 
@@ -958,21 +962,25 @@ def test_image_ls_remote(tmp_path: Path):
     assert "ubuntu-24.04" in result.output
 
 
-def test_kernel_set_default_cli(tmp_path: Path):
-    vmlinux = tmp_path / "vmlinux"
+def test_kernel_set_default_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "9" * 64
+    vmlinux = tmp_path / "vmlinux-fc-6.1.9-x86_64"
     vmlinux.write_bytes(b"\x7fELF")
+    _write_kernel_meta(tmp_path, full_hash, vmlinux.name)
     result = click_runner.invoke(
         main_app,
-        ["kernel", "set-default", "vmlinux", "--kernels-dir", str(tmp_path)],
+        ["kernel", "set-default", full_hash[:6], "--kernels-dir", str(tmp_path)],
     )
     assert result.exit_code == 0
-    assert "vmlinux" in result.output
+    assert vmlinux.name in result.output
 
 
-def test_kernel_set_default_not_found(tmp_path: Path):
+def test_kernel_set_default_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     result = click_runner.invoke(
         main_app,
-        ["kernel", "set-default", "vmlinux", "--kernels-dir", str(tmp_path)],
+        ["kernel", "set-default", "abcdef", "--kernels-dir", str(tmp_path)],
     )
     assert result.exit_code == 1
 

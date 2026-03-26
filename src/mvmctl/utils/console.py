@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 
 def _strip_markup(text: str) -> str:
@@ -68,3 +69,21 @@ def print_warning(message: str) -> None:
 
 def print_info(message: str) -> None:
     print(f"  {message}")
+
+
+def resolve_single_by_short_id(
+    short_id: str,
+    find_fn: Callable[[Path, str], list[tuple[str, dict[str, Any]]]],
+    cache_dir: Path,
+    label: str,
+) -> tuple[str, dict[str, Any]] | None:
+    matches = find_fn(cache_dir, short_id)
+    if not matches:
+        print_error(f"No {label} found with short ID '{short_id}'")
+        return None
+    if len(matches) > 1:
+        print_error(
+            f"Ambiguous short ID '{short_id}' matches {len(matches)} {label}s — use more characters"
+        )
+        return None
+    return matches[0]
