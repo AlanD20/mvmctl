@@ -1,6 +1,6 @@
 # Release Process
 
-This document covers how to release a new version of firecracker-manager.
+This document covers how to release a new version of mvmctl.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ Before releasing, ensure the following are available on your workstation:
 
 ## Bumping the Version
 
-The version is defined in one place: the `version` field under `[project]` in `pyproject.toml`. Update it there, and also update the `__version__` fallback in `src/fcm/__init__.py` to match.
+The version is defined in one place: the `version` field under `[project]` in `pyproject.toml`. Update it there, and also update the `__version__` fallback in `src/mvm/__init__.py` to match.
 
 This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 
@@ -43,9 +43,9 @@ Pushing a tag that matches `v*` triggers the `release.yml` GitHub Actions workfl
 
 Once the tag is pushed, `release.yml` runs without any manual intervention:
 
-1. **Binary builds** — PyInstaller builds a standalone `fcm` binary on two runners:
-   - `ubuntu-22.04` (glibc 2.35) — produces artifact named `fcm-linux-ubuntu-22.04`
-   - `ubuntu-24.04` (glibc 2.39) — produces artifact named `fcm-linux-ubuntu-24.04`
+1. **Binary builds** — PyInstaller builds a standalone `mvm` binary on two runners:
+   - `ubuntu-22.04` (glibc 2.35) — produces artifact named `mvm-linux-ubuntu-22.04`
+   - `ubuntu-24.04` (glibc 2.39) — produces artifact named `mvm-linux-ubuntu-24.04`
 
    Two binaries are needed because a binary linked against glibc 2.39 will not run on a host with glibc 2.35.
 
@@ -65,41 +65,41 @@ After the workflow completes (typically 5-10 minutes), verify the release is cor
 
 ```bash
 # Download the binary for your platform
-curl -L -o fcm https://github.com/<org>/firecracker-manager/releases/download/v1.2.3/fcm-linux-ubuntu-24.04
-chmod +x fcm
+curl -L -o mvm https://github.com/<org>/mvmctl/releases/download/v1.2.3/mvm-linux-ubuntu-24.04
+chmod +x mvm
 
 # Check the version
-./fcm --version
-# Expected: fcm 1.2.3
+./mvm --version
+# Expected: mvm 1.2.3
 ```
 
 ### PyPI verification
 
 ```bash
 # Install from PyPI
-pip install firecracker-manager==1.2.3
+pip install mvmctl==1.2.3
 
 # Check the version
-fcm --version
-# Expected: fcm 1.2.3
+mvm --version
+# Expected: mvm 1.2.3
 ```
 
 ### pipx / uvx verification
 
 ```bash
 # Install with pipx
-pipx install firecracker-manager==1.2.3
-fcm --version
+pipx install mvmctl==1.2.3
+mvm --version
 
 # Or run directly with uvx (no install)
-uvx firecracker-manager==1.2.3 fcm --version
+uvx mvmctl==1.2.3 mvm --version
 ```
 
 ### GitHub release page
 
 Visit the releases page and confirm:
 - The release notes are present and accurate.
-- Both binary assets (`fcm-linux-ubuntu-22.04`, `fcm-linux-ubuntu-24.04`) are attached.
+- Both binary assets (`mvm-linux-ubuntu-22.04`, `mvm-linux-ubuntu-24.04`) are attached.
 
 ## Issuing a Hotfix
 
@@ -112,7 +112,7 @@ git checkout -b hotfix/v1.2.4 v1.2.3
 # Make the fix
 # ...
 
-# Bump the patch version in pyproject.toml and src/fcm/__init__.py
+# Bump the patch version in pyproject.toml and src/mvm/__init__.py
 # e.g., 1.2.3 -> 1.2.4
 
 # Commit, tag, and push
@@ -133,10 +133,10 @@ If a release is broken and should not be installed by anyone:
 ```bash
 # Yank the specific version (requires PyPI credentials or token)
 pip install twine
-twine yank firecracker-manager 1.2.3
+twine yank mvmctl 1.2.3
 ```
 
-Yanking does not delete the release — it marks it so that `pip install firecracker-manager` will not pick it up, but `pip install firecracker-manager==1.2.3` still works for anyone who explicitly pins to it.
+Yanking does not delete the release — it marks it so that `pip install mvmctl` will not pick it up, but `pip install mvmctl==1.2.3` still works for anyone who explicitly pins to it.
 
 ### Mark or delete the GitHub release
 

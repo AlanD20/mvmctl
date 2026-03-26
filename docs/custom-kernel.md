@@ -13,12 +13,12 @@ Firecracker requires a kernel that is:
 - Built with a Firecracker-compatible configuration (minimal, no PCI/ACPI by default)
 - Small enough to start in under 125ms (the default SLA target)
 
-`fcm` supports two workflows:
+`mvm` supports two workflows:
 
 | Workflow | Command | Time | Use when |
 |----------|---------|------|----------|
-| **Firecracker CI kernel** | `fcm kernel fetch --type firecracker` | ~30s (download only) | Production use, fastest start times |
-| **Official upstream kernel** | `fcm kernel fetch --type official` | 10-30 min (compile) | Custom configs, latest features, debugging |
+| **Firecracker CI kernel** | `mvm kernel fetch --type firecracker` | ~30s (download only) | Production use, fastest start times |
+| **Official upstream kernel** | `mvm kernel fetch --type official` | 10-30 min (compile) | Custom configs, latest features, debugging |
 
 ---
 
@@ -30,8 +30,8 @@ Firecracker requires a kernel that is:
 # Verify KVM access
 ls -la /dev/kvm
 
-# Verify fcm host is initialized
-fcm host ls
+# Verify mvm host is initialized
+mvm host ls
 ```
 
 ### Official kernel builds only
@@ -90,19 +90,19 @@ against the exact Firecracker version.
 
 ```bash
 # Download the Firecracker CI kernel matching the active binary version
-fcm kernel fetch --type firecracker
+mvm kernel fetch --type firecracker
 
 # Download for a specific CI version
-fcm kernel fetch --type firecracker --version 1.12
+mvm kernel fetch --type firecracker --version 1.12
 
 # Download for a different architecture
-fcm kernel fetch --type firecracker --arch aarch64
+mvm kernel fetch --type firecracker --arch aarch64
 
 # Set as default kernel after download
-fcm kernel fetch --type firecracker --set-default
+mvm kernel fetch --type firecracker --set-default
 ```
 
-The kernel is saved to `~/.cache/firecracker-manager/kernels/vmlinux-fc-<version>-<arch>`.
+The kernel is saved to `~/.cache/mvmctl/kernels/vmlinux-fc-<version>-<arch>`.
 
 **Why use this?** These kernels are curated by the Firecracker team, are the smallest and
 fastest to boot, and have guaranteed compatibility with the matching Firecracker release.
@@ -117,21 +117,21 @@ Build any Linux kernel version from source with Firecracker's recommended config
 
 ```bash
 # Build the default version (6.19.9) with Firecracker config
-fcm kernel fetch --type official
+mvm kernel fetch --type official
 
 # Build a specific version
-fcm kernel fetch --type official --version 6.1.102
+mvm kernel fetch --type official --version 6.1.102
 
 # Build with parallel jobs (faster)
-fcm kernel fetch --type official --jobs 8
+mvm kernel fetch --type official --jobs 8
 
 # Keep the build directory after completion (useful for debugging)
-fcm kernel fetch --type official --keep-build-dir
+mvm kernel fetch --type official --keep-build-dir
 ```
 
 ### Build process
 
-`fcm kernel fetch --type official` runs the following steps automatically:
+`mvm kernel fetch --type official` runs the following steps automatically:
 
 | Step | Description |
 |------|-------------|
@@ -140,7 +140,7 @@ fcm kernel fetch --type official --keep-build-dir
 | 3. Extract | Extracts the tarball to a temporary build directory |
 | 4. Download config | Fetches Firecracker's recommended `.config` for the kernel version |
 | 5. `make olddefconfig` | Resolves any missing config options to defaults |
-| 6. Apply overrides | Enables/disables specific configs from `fcm/constants.py` |
+| 6. Apply overrides | Enables/disables specific configs from `mvm/constants.py` |
 | 7. Build | Compiles `vmlinux` using `make vmlinux -jN` |
 | 8. Copy & metadata | Copies `vmlinux` to kernels cache and saves metadata JSON |
 | 9. Cleanup | Removes the build directory (unless `--keep-build-dir`) |
@@ -158,7 +158,7 @@ CONFIG_9P_FS_POSIX_ACL=y
 EOF
 
 # Build with your custom overlay applied last
-fcm kernel fetch --type official \
+mvm kernel fetch --type official \
   --version 6.1.102 \
   --kernel-config /tmp/my-overrides.config
 
@@ -172,7 +172,7 @@ fcm kernel fetch --type official \
 
 ## Verifying Required Settings
 
-After building, `fcm` verifies that all required kernel settings are present. The required
+After building, `mvm` verifies that all required kernel settings are present. The required
 settings are defined under `required_settings` in `src/mvmctl/assets/kernels.yaml` for the `kernel-official` entry.
 
 If a required setting is missing, you will be prompted:
@@ -191,22 +191,22 @@ correctly with Firecracker.
 
 ```bash
 # List all cached kernels
-fcm kernel ls
+mvm kernel ls
 
 # List only Firecracker CI kernels
-fcm kernel ls --firecracker
+mvm kernel ls --firecracker
 
 # List only official/upstream kernels
-fcm kernel ls --official
+mvm kernel ls --official
 
 # Set a kernel as default for vm create
-fcm kernel set-default vmlinux-fc-1.12-x86_64
+mvm kernel set-default vmlinux-fc-1.12-x86_64
 
 # Remove a kernel
-fcm kernel rm vmlinux-fc-1.10-x86_64
+mvm kernel rm vmlinux-fc-1.10-x86_64
 ```
 
-The `Def` column (✓) in `fcm kernel ls` shows the active default kernel.
+The `Def` column (✓) in `mvm kernel ls` shows the active default kernel.
 
 ---
 
@@ -214,12 +214,12 @@ The `Def` column (✓) in `fcm kernel ls` shows the active default kernel.
 
 ```bash
 # Use the default kernel (set via set-default)
-fcm vm create --name myvm --image ubuntu-24.04
+mvm vm create --name myvm --image ubuntu-24.04
 
 # Use a specific kernel path
-fcm vm create --name myvm \
+mvm vm create --name myvm \
   --image ubuntu-24.04 \
-  --kernel ~/.cache/firecracker-manager/kernels/vmlinux-custom
+  --kernel ~/.cache/mvmctl/kernels/vmlinux-custom
 ```
 
 ---
@@ -234,14 +234,14 @@ Install the build tools as shown in [Prerequisites](#prerequisites).
 
 The config file may be incompatible with the kernel version. Try without a custom config:
 ```bash
-fcm kernel fetch --type official --version 6.1.102
+mvm kernel fetch --type official --version 6.1.102
 ```
 
 ### VM panics on boot
 
 Check the boot log:
 ```bash
-fcm vm logs --name myvm --type boot --follow
+mvm vm logs --name myvm --type boot --follow
 ```
 
 Common causes:
@@ -254,7 +254,7 @@ Common causes:
 The Firecracker CI kernel is typically ~5 MiB. If your custom kernel is much larger,
 check for unnecessary configs:
 ```bash
-grep -c "=y" ~/.cache/firecracker-manager/kernels/vmlinux.config
+grep -c "=y" ~/.cache/mvmctl/kernels/vmlinux.config
 ```
 
 Consider using the Firecracker CI kernel as your base config.
@@ -263,10 +263,10 @@ Consider using the Firecracker CI kernel as your base config.
 
 The Firecracker config URL may have changed. Check constants:
 ```bash
-python3 -c "from fcm.constants import FIRECRACKER_KERNEL_CONFIG_URL; print(FIRECRACKER_KERNEL_CONFIG_URL)"
+python3 -c "from mvmctl.constants import FIRECRACKER_KERNEL_CONFIG_URL; print(FIRECRACKER_KERNEL_CONFIG_URL)"
 ```
 
-Then update the `FIRECRACKER_KERNEL_CONFIG_URL` constant in `src/fcm/constants.py` if needed.
+Then update the `FIRECRACKER_KERNEL_CONFIG_URL` constant in `src/mvm/constants.py` if needed.
 
 ---
 

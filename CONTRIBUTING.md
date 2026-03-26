@@ -1,4 +1,4 @@
-# Contributing to firecracker-manager
+# Contributing to mvmctl
 
 Thanks for wanting to contribute. This guide covers everything you need to get set up and productive.
 
@@ -15,14 +15,14 @@ Thanks for wanting to contribute. This guide covers everything you need to get s
 ## Development Setup
 
 ```bash
-git clone https://github.com/your-org/firecracker-manager
-cd firecracker-manager
+git clone https://github.com/your-org/mvmctl
+cd mvmctl
 
 # Install all dependencies including dev tools
 uv sync --group dev
 
 # Verify the CLI is available
-uv run fcm --help
+uv run mvm --help
 ```
 
 This creates a `.venv/` directory and installs everything there. You don't need to activate it manually; `uv run` handles that.
@@ -30,8 +30,8 @@ This creates a `.venv/` directory and installs everything there. You don't need 
 ## Project Structure
 
 ```
-firecracker-manager/
-├── src/fcm/
+mvmctl/
+├── src/mvmctl/
 │   ├── api/          # Public Python API (vms.py, host.py, assets.py, network.py, keys.py)
 │   ├── cli/          # Typer command groups (vm.py, network.py, key.py, asset.py, host.py)
 │   ├── core/         # Business logic (vm_lifecycle.py, network_manager.py, etc.)
@@ -59,7 +59,7 @@ uv run pytest tests/unit/test_vm_manager.py -v
 uv run pytest tests/ -v -k "test_create"
 
 # Run with coverage
-uv run pytest tests/ --cov=src/fcm --cov-report=term-missing
+uv run pytest tests/ --cov=src/mvm --cov-report=term-missing
 ```
 
 Unit tests don't need root or KVM. Integration tests might — check their docstrings.
@@ -86,7 +86,7 @@ All code should pass ruff with no errors. mypy is configured with `--strict`; ne
 
 ## Adding a New Command
 
-1. Find the right group file in `src/fcm/cli/` (e.g., `vm.py` for `fcm vm ...`).
+1. Find the right group file in `src/mvmctl/cli/` (e.g., `vm.py` for `mvm vm ...`).
 2. Add a new Typer command function. Follow the existing pattern:
    ```python
    @app.command()
@@ -101,15 +101,15 @@ All code should pass ruff with no errors. mypy is configured with `--strict`; ne
 3. Put the actual logic in the corresponding `core/` module.
 4. Add a test in `tests/unit/`.
 
-For entirely new command groups, create both `src/fcm/cli/mygroup.py` and register the Typer app in `src/fcm/cli/__init__.py` or `main.py`.
+For entirely new command groups, create both `src/mvmctl/cli/mygroup.py` and register the Typer app in `src/mvmctl/cli/__init__.py` or `main.py`.
 
 ## Adding a New Image Type
 
 Image specifications are defined in YAML config files and loaded using the `ImageSpec` model
-(`src/fcm/models/image.py`). Each entry describes where to download an image, its source
+(`src/mvmctl/models/image.py`). Each entry describes where to download an image, its source
 format, and how to convert it for use with Firecracker.
 
-**Supported source formats** (handled by `_FORMAT_HANDLERS` in `src/fcm/core/image.py`):
+**Supported source formats** (handled by `_FORMAT_HANDLERS` in `src/mvmctl/core/image.py`):
 
 - `qcow2` — QEMU copy-on-write image; converted to raw with `qemu-img`, then the root
   partition is extracted.
@@ -118,7 +118,7 @@ format, and how to convert it for use with Firecracker.
 
 **Steps to add a new image:**
 
-1. Open (or create) the images YAML config at `src/fcm/assets/images.yaml`.
+1. Open (or create) the images YAML config at `src/mvmctl/assets/images.yaml`.
 2. Add an entry following the `ImageSpec` schema:
 
    ```yaml
@@ -133,7 +133,7 @@ format, and how to convert it for use with Firecracker.
    ```
 
 3. Confirm the `format` value has a corresponding handler in `_FORMAT_HANDLERS` in
-   `src/fcm/core/image.py`. If you need a new format, add a handler function and register
+   `src/mvmctl/core/image.py`. If you need a new format, add a handler function and register
    it in that dict.
 4. Add tests in `tests/unit/` covering the new handler or any conversion logic.
 
@@ -144,7 +144,7 @@ Tests live in `tests/unit/` for pure logic and `tests/integration/` for anything
 ```python
 # tests/unit/test_my_feature.py
 import pytest
-from fcm.core.my_module import MyClass
+from mvmctl.core.my_module import MyClass
 
 
 def test_something_works() -> None:
@@ -166,7 +166,7 @@ Use `pytest.fixture` for shared setup. Keep unit tests fast; avoid `sleep()` or 
 This project follows [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-feat: add fcm vm pause command
+feat: add mvm vm pause command
 fix: handle missing kernel path gracefully
 test: add unit tests for image converter
 docs: update quick start in README
@@ -195,14 +195,14 @@ Don't force-push to a PR branch after review starts. If you need to rebase, coor
 
 ## Environment Variables
 
-All FCM environment variables use the `FCM_` prefix.
+All FCM environment variables use the `MVM_` prefix.
 
 | Variable | Description | Default |
 |---|---|---|
-| `FCM_CACHE_DIR` | Override the cache directory for images, kernels, and VM state | `~/.cache/firecracker-manager` |
-| `FCM_CONFIG_FILE` | Override the config file path | `~/.config/fcm/config.yaml` |
-| `FCM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
-| `FCM_FIRECRACKER_BIN` | Path to the Firecracker binary | auto-detected from `$PATH` |
+| `MVM_CACHE_DIR` | Override the cache directory for images, kernels, and VM state | `~/.cache/mvmctl` |
+| `MVM_CONFIG_FILE` | Override the config file path | `~/.config/mvm/config.yaml` |
+| `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
+| `MVM_FIRECRACKER_BIN` | Path to the Firecracker binary | auto-detected from `$PATH` |
 
 When writing code that reads config or paths, always go through the settings module rather than reading env vars directly. That keeps everything in one place and makes testing easier.
 
@@ -213,9 +213,9 @@ When writing code that reads config or paths, always go through the settings mod
 The project name is defined once in `pyproject.toml` under `[project] name`. Changing it there automatically propagates to:
 
 - The CLI entry point name (via `[project.scripts]`)
-- The environment variable prefix (`FCM_` — derived from `constants.py` which reads from `pyproject.toml`)
-- The cache directory name (`~/.cache/firecracker-manager/`)
-- The network device prefixes (`fcm-br0`, `fc-<name>-0`)
+- The environment variable prefix (`MVM_` — derived from `constants.py` which reads from `pyproject.toml`)
+- The cache directory name (`~/.cache/mvmctl/`)
+- The network device prefixes (`mvm-br0`, `fc-<name>-0`)
 
 To rename the project, update `pyproject.toml` and re-run the PyInstaller command with `--name <new-name>`. No grep-and-replace needed.
 
@@ -224,12 +224,12 @@ To rename the project, update `pyproject.toml` and re-run the PyInstaller comman
 The project ships a self-contained single-file binary built with PyInstaller. The binary bundles all runtime dependencies and requires no Python installation on the target machine.
 
 ```bash
-git clone https://github.com/your-org/firecracker-manager
-cd firecracker-manager
+git clone https://github.com/your-org/mvmctl
+cd mvmctl
 uv sync --group dev --group build
-pyinstaller --onefile --name fcm src/fcm/main.py
-./dist/fcm --version
-./dist/fcm --help
+pyinstaller --onefile --name mvm src/mvmctl/main.py
+./dist/mvm --version
+./dist/mvm --help
 ```
 
 The GitHub Actions `release.yml` workflow runs this automatically on every tagged release and uploads the binary as a release asset. Two binaries are produced — one built on `ubuntu-22.04` and one on `ubuntu-24.04` — because glibc version differences mean a binary from 24.04 will not run on 22.04.
@@ -237,11 +237,11 @@ The GitHub Actions `release.yml` workflow runs this automatically on every tagge
 ## Privileged Operations
 
 Networking operations (bridge/TAP setup, iptables, sysctl) require elevated privileges.
-Rather than requiring `sudo` for every command, fcm uses a privilege delegation model:
+Rather than requiring `sudo` for every command, mvm uses a privilege delegation model:
 
-1. **`sudo fcm host init`** creates a system group (`fcm`) and a sudoers drop-in file
-   (`/etc/sudoers.d/fcm`) that grants members of the `fcm` group passwordless access
-   to a specific set of binaries defined in `fcm.constants.PRIVILEGED_BINARIES`.
+1. **`sudo mvm host init`** creates a system group (`mvm`) and a sudoers drop-in file
+   (`/etc/sudoers.d/mvm`) that grants members of the `mvm` group passwordless access
+   to a specific set of binaries defined in `mvmctl.constants.PRIVILEGED_BINARIES`.
 
 2. **`PRIVILEGED_BINARIES`** is the single source of truth for which system binaries
    the sudoers file grants access to:
@@ -249,18 +249,18 @@ Rather than requiring `sudo` for every command, fcm uses a privilege delegation 
    - `/usr/sbin/iptables`, `/usr/sbin/iptables-restore`, `/usr/sbin/iptables-save`
    - `/usr/sbin/sysctl` (procps)
 
-3. **`check_privileges(binary)`** (in `fcm.api.host`) verifies that the current user
+3. **`check_privileges(binary)`** (in `mvmctl.api.host`) verifies that the current user
    can invoke a given binary with elevated privileges. It checks:
    - The binary exists on the host.
-   - The user is either root or a member of the `fcm` group.
+   - The user is either root or a member of the `mvm` group.
    Raises `PrivilegeError` (a subclass of `HostError`) on failure.
 
 4. **Sudoers generation** is handled by `_generate_sudoers_content()` and
    `_write_sudoers()` in `core/host.py`. The generated file is validated with
    `visudo -c` before being written to the final location.
 
-5. **Cleanup**: `fcm host reset` removes the sudoers drop-in and the `fcm` group,
-   fully reverting the privilege setup. `fcm host clean` only tears down networking
+5. **Cleanup**: `mvm host reset` removes the sudoers drop-in and the `mvm` group,
+   fully reverting the privilege setup. `mvm host clean` only tears down networking
    without touching the privilege model.
 
 When adding a new binary that needs elevated privileges, add it to
@@ -269,12 +269,12 @@ in `core/host.py` if the binary belongs to a specific package.
 
 ## Bumping the Version
 
-The project version is defined in exactly one place: the `version` field under `[project]` in `pyproject.toml`. There is no separate version constant to update — `importlib.metadata` reads it at runtime, and `__version__` in `src/fcm/__init__.py` exists only as a fallback for editable installs.
+The project version is defined in exactly one place: the `version` field under `[project]` in `pyproject.toml`. There is no separate version constant to update — `importlib.metadata` reads it at runtime, and `__version__` in `src/mvmctl/__init__.py` exists only as a fallback for editable installs.
 
 To cut a release:
 
 1. Edit `pyproject.toml` and update `version` (e.g., `"0.1.0"` to `"0.2.0"`).
-2. Update the matching `__version__` in `src/fcm/__init__.py` to the same value.
+2. Update the matching `__version__` in `src/mvmctl/__init__.py` to the same value.
 3. Commit the change: `git commit -m "chore: bump version to 0.2.0"`.
 4. Tag the commit: `git tag -a v0.2.0 -m "Release v0.2.0"`.
 5. Push the tag: `git push origin v0.2.0`.

@@ -1,8 +1,8 @@
-# firecracker-manager Python API Reference
+# mvmctl Python API Reference
 
 ## Introduction
 
-Every CLI command maps 1:1 to a Python function in `fcm.api.*`. The CLI is a thin
+Every CLI command maps 1:1 to a Python function in `mvmctl.api.*`. The CLI is a thin
 presentation layer on top of these modules — it handles argument parsing, output
 formatting, and exit codes, then calls the same functions documented here.
 
@@ -18,11 +18,11 @@ Install the package so the API is importable:
 
 ```bash
 # From PyPI
-pip install firecracker-manager
+pip install mvmctl
 
 # From source
-git clone https://github.com/your-org/firecracker-manager
-cd firecracker-manager
+git clone https://github.com/your-org/mvmctl
+cd mvmctl
 pip install -e .
 
 # Using uv
@@ -32,7 +32,7 @@ uv sync
 Then import:
 
 ```python
-from fcm.api import vms, network, assets, keys, host
+from mvmctl.api import vms, network, assets, keys, host
 ```
 
 ---
@@ -68,7 +68,7 @@ from fcm.api import vms, network, assets, keys, host
 
 ## Data Models
 
-### `fcm.models.vm`
+### `mvmctl.models.vm`
 
 #### `VMState`
 
@@ -114,7 +114,7 @@ Runtime state for a registered VM.
 | `status` | `VMState` | Current lifecycle state |
 | `config` | `VMConfig \| None` | Launch config, if persisted |
 
-### `fcm.models.image`
+### `mvmctl.models.image`
 
 #### `ImageSpec`
 
@@ -130,7 +130,7 @@ Specification for downloading and converting a VM root filesystem image.
 | `size_mib` | `int` | `2048` | Target filesystem size in MiB (used for `tar-rootfs` images) |
 | `sha256` | `str \| None` | `None` | Expected SHA256 checksum for integrity verification |
 
-### `fcm.core.network_manager`
+### `mvmctl.core.network_manager`
 
 #### `NetworkConfig`
 
@@ -150,7 +150,7 @@ Specification for downloading and converting a VM root filesystem image.
 | `vm_name` | `str` | VM name holding the lease |
 | `ip` | `str` | Leased IP address |
 
-### `fcm.core.key_manager`
+### `mvmctl.core.key_manager`
 
 #### `KeyInfo`
 
@@ -162,7 +162,7 @@ Specification for downloading and converting a VM root filesystem image.
 | `comment` | `str` | Key comment from the `.pub` file |
 | `added_at` | `str` | ISO 8601 timestamp when the key was added |
 
-### `fcm.core.host`
+### `mvmctl.core.host`
 
 #### `HostChange`
 
@@ -180,7 +180,7 @@ Specification for downloading and converting a VM root filesystem image.
 | `init_timestamp` | `str` | ISO 8601 timestamp when `host init` was last run |
 | `changes` | `list[HostChange]` | All changes applied during init (used to restore) |
 
-### `fcm.core.binary_manager`
+### `mvmctl.core.binary_manager`
 
 #### `BinaryVersion`
 
@@ -195,12 +195,12 @@ Specification for downloading and converting a VM root filesystem image.
 
 ## Error Handling
 
-All exceptions derive from `fcm.exceptions.FCMError`.
+All exceptions derive from `mvmctl.exceptions.MVMError`.
 
 ### Exception Hierarchy
 
 ```
-FCMError
+MVMError
 ├── VMNotFoundError       — VM does not exist in state
 ├── VMAlreadyExistsError  — VM name already registered
 ├── NetworkError          — Network setup/teardown failure
@@ -215,25 +215,25 @@ FCMError
 ├── ProcessError          — Subprocess execution failure
 ├── AssetNotFoundError    — Asset not found locally or remotely
 ├── BinaryError           — Firecracker/jailer binary management failure
-└── FCMKeyError           — SSH key management failure
+└── MVMError           — SSH key management failure
 ```
 
 ### Catching Typed Exceptions
 
 ```python
-from fcm.api import network, keys
-from fcm.exceptions import FCMError, NetworkError, FCMKeyError
+from mvmctl.api import network, keys
+from mvmctl.exceptions import MVMError, NetworkError
 
 try:
     net = network.create_network("my-net", cidr="192.168.100.0/24")
 except NetworkError as e:
     print(f"Network setup failed: {e}")
-except FCMError as e:
+except MVMError as e:
     print(f"Unexpected FCM error: {e}")
 
 try:
     key_info = keys.add_key("my-key", "/home/user/.ssh/id_ed25519.pub")
-except FCMKeyError as e:
+except MVMError as e:
     print(f"Key error: {e}")
 ```
 
@@ -241,7 +241,7 @@ except FCMKeyError as e:
 
 ## Function Reference
 
-### `fcm.api.vms`
+### `mvmctl.api.vms`
 
 #### `list_vms(include_stopped: bool = True) -> list[VMInstance]`
 
@@ -270,7 +270,7 @@ Look up a VM by name.
 #### `deregister_vm(name: str) -> None`
 
 Remove a VM entry from the state registry. Does not stop the process or clean up
-networking — use `fcm vm remove` (or the CLI) for the full teardown sequence.
+networking — use `mvm vm remove` (or the CLI) for the full teardown sequence.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -314,13 +314,13 @@ config, starts the Firecracker process, and registers the VM in the state regist
 **Example:**
 ```python
 from pathlib import Path
-from fcm.api import vms
-from fcm.models.vm import VMConfig
+from mvmctl.api import vms
+from mvmctl.models.vm import VMConfig
 
 config = VMConfig(
     name="my-vm",
-    kernel_path=Path("/home/user/.cache/firecracker-manager/kernels/vmlinux"),
-    rootfs_path=Path("/home/user/.cache/firecracker-manager/images/ubuntu-24.04.ext4"),
+    kernel_path=Path("/home/user/.cache/mvmctl/kernels/vmlinux"),
+    rootfs_path=Path("/home/user/.cache/mvmctl/images/ubuntu-24.04.ext4"),
     vcpu_count=2,
     mem_size_mib=2048,
 )
@@ -347,7 +347,7 @@ deregisters the VM, and deletes its cache directory.
 
 **Example:**
 ```python
-from fcm.api import vms
+from mvmctl.api import vms
 
 # Graceful shutdown
 vms.remove_vm("my-vm")
@@ -374,7 +374,7 @@ Resolves the VM IP from the registry, then calls `ssh` with appropriate flags.
 
 **Example:**
 ```python
-from fcm.api import vms
+from mvmctl.api import vms
 
 # Interactive shell
 vms.ssh_vm("my-vm")
@@ -401,7 +401,7 @@ Retrieve log lines for a VM.
 
 **Example:**
 ```python
-from fcm.api import vms
+from mvmctl.api import vms
 
 # Get last 100 lines of boot log
 boot_lines = vms.get_logs("my-vm", log_type="boot", lines=100)
@@ -414,7 +414,7 @@ os_lines = vms.get_logs("my-vm", log_type="os")
 
 ---
 
-### `fcm.api.network`
+### `mvmctl.api.network`
 
 #### `list_networks() -> list[NetworkConfig]`
 
@@ -527,7 +527,7 @@ Ensure the default network exists, creating it if needed. Called automatically b
 
 ---
 
-### `fcm.api.assets`
+### `mvmctl.api.assets`
 
 #### `fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion`
 
@@ -643,7 +643,7 @@ Run the full kernel build pipeline: download source, extract, configure, compile
 
 ---
 
-### `fcm.api.keys`
+### `mvmctl.api.keys`
 
 #### `list_keys() -> list[KeyInfo]`
 
@@ -677,7 +677,7 @@ Import an existing `.pub` file into the cache under a given name.
 
 **Returns:** `KeyInfo` with fingerprint, algorithm, comment, and timestamp.
 
-**Raises:** `FCMKeyError` if the file is not found, empty, or the name already exists (when `overwrite=False`).
+**Raises:** `MVMError` if the file is not found, empty, or the name already exists (when `overwrite=False`).
 
 ---
 
@@ -694,7 +694,7 @@ Generate a new ED25519 keypair via `ssh-keygen` and register the public key in t
 
 **Returns:** `(KeyInfo, private_key_path)` tuple.
 
-**Raises:** `FCMKeyError` if `ssh-keygen` fails or the key already exists (when `overwrite=False`).
+**Raises:** `MVMError` if `ssh-keygen` fails or the key already exists (when `overwrite=False`).
 
 ---
 
@@ -707,7 +707,7 @@ Does not touch private key files on disk.
 |-----------|------|---------|-------------|
 | `name` | `str` | — | Key name |
 
-**Raises:** `FCMKeyError` if the key is not found.
+**Raises:** `MVMError` if the key is not found.
 
 ---
 
@@ -721,11 +721,11 @@ Return detailed info about a named key, including the full public key content.
 
 **Returns:** Dict with keys: `name`, `fingerprint`, `algorithm`, `comment`, `added_at`, `public_key`.
 
-**Raises:** `FCMKeyError` if the key is not found.
+**Raises:** `MVMError` if the key is not found.
 
 ---
 
-### `fcm.api.host`
+### `mvmctl.api.host`
 
 #### `init_host(cache_dir: Path) -> list[HostChange]`
 
@@ -799,7 +799,7 @@ removes the sudoers drop-in file, and removes the project group.
 #### `check_privileges(binary: str) -> None`
 
 Check that the current process can invoke `binary` with elevated privileges. Verifies
-that the binary exists and the current user is either root or a member of the `fcm` group.
+that the binary exists and the current user is either root or a member of the `mvm` group.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -844,7 +844,7 @@ Return the current value of `net.ipv4.ip_forward` (`"0"` or `"1"`), or `None` on
 
 #### `default_cache_dir() -> Path`
 
-Return the default cache root directory (`~/.cache/firecracker-manager` or `$FCM_CACHE_DIR`).
+Return the default cache root directory (`~/.cache/mvmctl` or `$MVM_CACHE_DIR`).
 
 ---
 
@@ -855,19 +855,19 @@ The following complete script creates a VM from scratch using the Python API:
 ```python
 #!/usr/bin/env python3
 """
-End-to-end example: create a Firecracker VM using the fcm Python API.
+End-to-end example: create a Firecracker VM using the mvm Python API.
 
 Prerequisites:
     - Linux x86_64 with KVM (/dev/kvm accessible)
     - System packages: ip, iptables, genisoimage/mkisofs, qemu-img
     - Run as root (networking operations require root)
-    - pip install firecracker-manager
+    - pip install mvmctl
 """
 
 from pathlib import Path
 
-from fcm.api import assets, host, keys, network, vms
-from fcm.exceptions import FCMError
+from mvmctl.api import assets, host, keys, network, vms
+from mvmctl.exceptions import MVMError
 
 CACHE_DIR = host.default_cache_dir()
 
@@ -893,7 +893,7 @@ def main() -> None:
     vmlinux = kernels_dir / "vmlinux"
     if not vmlinux.exists():
         print("Fetching prebuilt kernel ...")
-        # This requires the CLI: run `fcm asset kernel fetch` instead,
+        # This requires the CLI: run `mvm asset kernel fetch` instead,
         # or call build_kernel_pipeline() to build from source.
 
     # 4. Ensure an image is available
@@ -940,7 +940,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except FCMError as e:
+    except MVMError as e:
         print(f"Error: {e}")
         raise SystemExit(1)
 ```
