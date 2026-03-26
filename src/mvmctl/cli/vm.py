@@ -15,6 +15,8 @@ from mvmctl.api.vms import (
     list_vms,
     load_snapshot,
     remove_vm,
+    resolve_image_short_id_path,
+    resolve_kernel_short_id_path,
     snapshot_vm,
     ssh_vm,
 )
@@ -116,12 +118,12 @@ def create(
     image: Optional[str] = typer.Option(
         None,
         "--image",
-        help="Image ID or path to rootfs file with single root partition (required if no default image)",
+        help="Image short ID (same discovery behavior as 'mvm image rm')",
     ),
     kernel: Optional[str] = typer.Option(
         None,
         "--kernel",
-        help="Path to vmlinux kernel (default: active default kernel or MVM_KERNEL env var)",
+        help="Kernel short ID (same discovery behavior as 'mvm kernel rm')",
     ),
     vcpus: Optional[int] = typer.Option(
         None, "--vcpus", "--cpus", help="Number of vCPUs (default: from user config)"
@@ -247,41 +249,51 @@ def create(
                 "Use 'mvm image fetch <name>' then 'mvm image set-default <name>', or pass --image."
             )
             raise typer.Exit(code=1)
+        resolved_image_path = resolve_image_short_id_path(image)
+    else:
+        try:
+            resolved_image_path = resolve_image_short_id_path(image)
+            image = str(resolved_image_path)
+        except MVMError:
+            print_error(
+                f"Image short ID '{image}' was not found or is ambiguous. "
+                "Use the same short ID format accepted by 'mvm image rm'."
+            )
+            raise typer.Exit(code=1)
 
     if kernel is None:
         kernel = _resolve_default_kernel()
+        resolved_kernel_path = Path(kernel) if kernel is not None else None
+    else:
+        try:
+            resolved_kernel_path = resolve_kernel_short_id_path(kernel)
+            kernel = str(resolved_kernel_path)
+        except MVMError:
+            print_error(
+                f"Kernel short ID '{kernel}' was not found or is ambiguous. "
+                "Use the same short ID format accepted by 'mvm kernel rm'."
+            )
+            raise typer.Exit(code=1)
 
     effective_bin = firecracker_bin or _resolve_active_firecracker_bin()
 
     if output_config is not None:
-        from mvmctl.utils.fs import get_images_dir
-
-        image_path: Path | None = None
-        candidate = get_images_dir() / f"{image}.ext4"
-        if candidate.exists():
-            image_path = candidate
-        else:
-            test_path = Path(image)
-            if test_path.exists():
-                image_path = test_path
-
-        kernel_path = Path(kernel) if kernel else None
-
+        # Keep this at the end of config computation so we provide the latest configuration to the user.
         vm_config = build_vm_config_file(
             name=name,
-            image=image,
-            kernel=str(kernel_path) if kernel_path else None,
+            image=str(resolved_image_path),
+            kernel=str(resolved_kernel_path) if resolved_kernel_path else None,
             vcpus=effective_vcpus,
             mem=effective_mem,
             ip=ip,
-            network=network_name,
+            network=effective_network,
             mac=mac,
             ssh_key=ssh_key,
             user=effective_user,
             enable_api_socket=effective_api_socket,
             enable_pci=effective_pci,
             firecracker_bin=effective_bin,
-            rootfs_path=image_path,
+            rootfs_path=resolved_image_path,
             gateway=None,
             subnet_mask=None,
             tap_device=None,

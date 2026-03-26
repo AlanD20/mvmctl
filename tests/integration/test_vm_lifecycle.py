@@ -6,13 +6,11 @@ Tests the complete VM lifecycle: create -> list -> ssh (mocked) -> snapshot -> r
 import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 from mvmctl.cli.vm import app as vm_app
-from mvmctl.core.vm_manager import VMManager
 from mvmctl.models.vm import VMInstance, VMState
 
 runner = CliRunner()
@@ -42,19 +40,21 @@ class TestVMLifecycleWorkflow:
     """Test complete VM lifecycle workflow end-to-end."""
 
     @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.list_vms")
-    def test_create_and_list_vm(self, mock_list_vms, mock_create_vm, mock_check_priv, tmp_path):
+    def test_create_and_list_vm(
+        self, mock_list_vms, mock_create_vm, mock_resolve_image, mock_check_priv, tmp_path
+    ):
         """Test creating a VM and then listing it."""
         mock_check_priv.return_value = None
+        mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("lifecycle-vm")
         mock_create_vm.return_value = vm
         mock_list_vms.return_value = [vm]
 
-        result = runner.invoke(
-            vm_app, ["create", "--name", "lifecycle-vm", "--image", "ubuntu-24.04"]
-        )
+        result = runner.invoke(vm_app, ["create", "--name", "lifecycle-vm", "--image", "abc123"])
         assert result.exit_code == 0
         assert "lifecycle-vm" in result.output
         mock_create_vm.assert_called_once()
@@ -66,19 +66,19 @@ class TestVMLifecycleWorkflow:
         assert data[0]["name"] == "lifecycle-vm"
 
     @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.ssh_vm")
-    def test_create_and_ssh_vm(self, mock_ssh, mock_create_vm, mock_check_priv):
+    def test_create_and_ssh_vm(self, mock_ssh, mock_create_vm, mock_resolve_image, mock_check_priv):
         """Test creating a VM and then SSHing into it."""
         mock_check_priv.return_value = None
+        mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("ssh-test-vm", ip="10.20.0.5")
         mock_create_vm.return_value = vm
         mock_ssh.return_value = 0
 
-        result = runner.invoke(
-            vm_app, ["create", "--name", "ssh-test-vm", "--image", "ubuntu-24.04"]
-        )
+        result = runner.invoke(vm_app, ["create", "--name", "ssh-test-vm", "--image", "abc123"])
         assert result.exit_code == 0
 
         result = runner.invoke(vm_app, ["ssh", "--name", "ssh-test-vm"])
@@ -86,21 +86,21 @@ class TestVMLifecycleWorkflow:
         mock_ssh.assert_called_once()
 
     @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.snapshot_vm")
     def test_create_snapshot_and_remove(
-        self, mock_snapshot, mock_create_vm, mock_check_priv, tmp_path
+        self, mock_snapshot, mock_create_vm, mock_resolve_image, mock_check_priv, tmp_path
     ):
         """Test creating a VM, taking a snapshot, then removing it."""
         mock_check_priv.return_value = None
+        mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("snapshot-vm")
         mock_create_vm.return_value = vm
         mock_snapshot.return_value = None
 
-        result = runner.invoke(
-            vm_app, ["create", "--name", "snapshot-vm", "--image", "ubuntu-24.04"]
-        )
+        result = runner.invoke(vm_app, ["create", "--name", "snapshot-vm", "--image", "abc123"])
         assert result.exit_code == 0
 
         mem_path = tmp_path / "snapshot.mem"
@@ -122,12 +122,16 @@ class TestVMLifecycleWorkflow:
             name="snapshot-vm", mem_out=mem_path, state_out=state_path
         )
 
+    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.cli.vm.remove_vm")
     @patch("mvmctl.cli.vm.list_vms")
-    def test_full_lifecycle_create_remove(self, mock_list, mock_remove, mock_manager, mock_create):
+    def test_full_lifecycle_create_remove(
+        self, mock_list, mock_remove, mock_manager, mock_create, mock_resolve_image
+    ):
         """Test full lifecycle: create VM, verify it exists, then remove it."""
+        mock_resolve_image.return_value = Path("/tmp/image.ext4")
         vm = _make_vm("full-lifecycle-vm")
         mock_create.return_value = vm
         mock_list.return_value = [vm]
@@ -136,7 +140,7 @@ class TestVMLifecycleWorkflow:
 
         result = runner.invoke(
             vm_app,
-            ["create", "--name", "full-lifecycle-vm", "--image", "ubuntu-24.04"],
+            ["create", "--name", "full-lifecycle-vm", "--image", "abc123"],
         )
         assert result.exit_code == 0
         assert "full-lifecycle-vm" in result.output
@@ -151,17 +155,21 @@ class TestVMLifecycleWorkflow:
         mock_remove.assert_called_once_with("full-lifecycle-vm")
 
     @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.get_logs")
-    def test_create_and_check_logs(self, mock_logs, mock_create, mock_check_priv):
+    def test_create_and_check_logs(
+        self, mock_logs, mock_create, mock_resolve_image, mock_check_priv
+    ):
         """Test creating a VM and checking its logs."""
         mock_check_priv.return_value = None
+        mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("logs-vm")
         mock_create.return_value = vm
         mock_logs.return_value = ["Boot log line 1\n", "Boot log line 2\n"]
 
-        result = runner.invoke(vm_app, ["create", "--name", "logs-vm", "--image", "ubuntu-24.04"])
+        result = runner.invoke(vm_app, ["create", "--name", "logs-vm", "--image", "abc123"])
         assert result.exit_code == 0
 
         result = runner.invoke(vm_app, ["logs", "--name", "logs-vm", "--type", "boot"])
@@ -169,15 +177,24 @@ class TestVMLifecycleWorkflow:
         assert "Boot log line 1" in result.output
         mock_logs.assert_called_once()
 
+    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.snapshot_vm")
     @patch("mvmctl.cli.vm.load_snapshot")
     @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.cli.vm.remove_vm")
     def test_snapshot_restore_workflow(
-        self, mock_remove, mock_manager, mock_load, mock_snapshot, mock_create, tmp_path
+        self,
+        mock_remove,
+        mock_manager,
+        mock_load,
+        mock_snapshot,
+        mock_create,
+        mock_resolve_image,
+        tmp_path,
     ):
         """Test full snapshot workflow: create -> snapshot -> load -> remove."""
+        mock_resolve_image.return_value = Path("/tmp/image.ext4")
         vm = _make_vm("restore-vm")
         mock_create.return_value = vm
         mock_snapshot.return_value = None
@@ -186,9 +203,7 @@ class TestVMLifecycleWorkflow:
         mock_manager.return_value.get_by_name.return_value = [vm]
         mock_manager.return_value.find_by_short_id.return_value = []
 
-        result = runner.invoke(
-            vm_app, ["create", "--name", "restore-vm", "--image", "ubuntu-24.04"]
-        )
+        result = runner.invoke(vm_app, ["create", "--name", "restore-vm", "--image", "abc123"])
         assert result.exit_code == 0
 
         mem_path = tmp_path / "vm.mem"
@@ -243,36 +258,38 @@ class TestVMLifecycleEdgeCases:
         assert "no vm found" in result.output.lower()
 
     @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
     @patch("mvmctl.cli.vm.create_vm")
-    def test_create_duplicate_vm_name(self, mock_create, mock_check_priv):
+    def test_create_duplicate_vm_name(self, mock_create, mock_resolve_image, mock_check_priv):
         """Test attempting to create a VM with a duplicate name."""
         from mvmctl.exceptions import MVMError
 
         mock_check_priv.return_value = None
+        mock_resolve_image.return_value = Path("/tmp/image.ext4")
         mock_create.side_effect = MVMError("VM 'duplicate-vm' already exists")
 
-        result = runner.invoke(
-            vm_app, ["create", "--name", "duplicate-vm", "--image", "ubuntu-24.04"]
-        )
+        result = runner.invoke(vm_app, ["create", "--name", "duplicate-vm", "--image", "abc123"])
         assert result.exit_code == 1
         assert "already exists" in result.output.lower()
 
     @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.cleanup_vms")
     @patch("mvmctl.cli.vm.list_vms")
-    def test_cleanup_workflow(self, mock_list, mock_cleanup, mock_create, mock_check_priv):
+    def test_cleanup_workflow(
+        self, mock_list, mock_cleanup, mock_create, mock_resolve_image, mock_check_priv
+    ):
         """Test cleanup workflow for stopped VMs."""
         mock_check_priv.return_value = None
+        mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("cleanup-vm", status=VMState.STOPPED)
         mock_create.return_value = vm
         mock_list.return_value = [vm]
         mock_cleanup.return_value = [vm]
 
-        result = runner.invoke(
-            vm_app, ["create", "--name", "cleanup-vm", "--image", "ubuntu-24.04"]
-        )
+        result = runner.invoke(vm_app, ["create", "--name", "cleanup-vm", "--image", "abc123"])
         assert result.exit_code == 0
 
         result = runner.invoke(vm_app, ["prune", "--force"])

@@ -100,6 +100,99 @@ def _resolve_image_path(image: str) -> Path:
     raise MVMError(f"Image not found: {image!r}")
 
 
+def _resolve_image_short_id_path(image: str) -> Path:
+    from mvmctl.core.metadata import find_images_by_short_id
+    from mvmctl.utils.fs import get_cache_dir
+    from mvmctl.utils.short_id import resolve_single_by_short_id
+
+    images_dir = get_images_dir()
+    match = resolve_single_by_short_id(image, find_images_by_short_id, get_cache_dir())
+    if match is None:
+        raise MVMError(f"Image short ID not found or ambiguous: {image!r}")
+
+    full_key, meta = match
+    filename = str(meta.get("filename", ""))
+    if filename:
+        candidate = images_dir / filename
+        if candidate.exists():
+            return candidate
+    for ext in SUPPORTED_IMAGE_EXTENSIONS:
+        candidate = images_dir / f"{full_key}{ext}"
+        if candidate.exists():
+            return candidate
+
+    raise MVMError(f"Image not found: {image!r}")
+
+
+def _resolve_kernel_path(kernel: str) -> Path:
+    kernels_dir = get_kernels_dir()
+
+    candidate = kernels_dir / kernel
+    if candidate.exists():
+        return candidate
+
+    direct = Path(kernel)
+    if direct.is_absolute() and direct.exists():
+        return direct
+
+    from mvmctl.core.metadata import list_kernel_entries
+    from mvmctl.utils.fs import get_cache_dir
+
+    matches = [
+        (full_key, meta)
+        for full_key, meta in list_kernel_entries(get_cache_dir(), kernels_dir).items()
+        if full_key.startswith(kernel)
+    ]
+    if len(matches) == 1:
+        full_key, meta = matches[0]
+        filename = str(meta.get("filename", ""))
+        if filename:
+            candidate = kernels_dir / filename
+            if candidate.exists():
+                return candidate
+        candidate = kernels_dir / full_key
+        if candidate.exists():
+            return candidate
+
+    if direct.exists():
+        return direct
+
+    raise MVMError(f"Kernel not found: {kernel!r}")
+
+
+def _resolve_kernel_short_id_path(kernel: str) -> Path:
+    from mvmctl.core.metadata import list_kernel_entries
+    from mvmctl.utils.fs import get_cache_dir
+    from mvmctl.utils.short_id import resolve_single_by_short_id
+
+    kernels_dir = get_kernels_dir()
+
+    def _find_kernels_by_short_id(
+        cache_dir: Path, short_id: str
+    ) -> list[tuple[str, dict[str, object]]]:
+        return [
+            (full_key, meta)
+            for full_key, meta in list_kernel_entries(cache_dir, kernels_dir).items()
+            if full_key.startswith(short_id)
+        ]
+
+    match = resolve_single_by_short_id(kernel, _find_kernels_by_short_id, get_cache_dir())
+    if match is None:
+        raise MVMError(f"Kernel short ID not found or ambiguous: {kernel!r}")
+
+    full_key, meta = match
+    filename = str(meta.get("filename", ""))
+    if filename:
+        candidate = kernels_dir / filename
+        if candidate.exists():
+            return candidate
+    candidate = kernels_dir / full_key
+    if candidate.exists():
+        return candidate
+
+    raise MVMError(f"Kernel not found: {kernel!r}")
+
+
 def generate_vm_id(name: str) -> str:
     """Generate a unique VM ID from name and current time."""
     data = f"{name}:{time.time()}"
@@ -284,11 +377,11 @@ def create_vm(
 
     kernel_path: Path
     if kernel:
-        kernel_path = Path(kernel)
+        kernel_path = _resolve_kernel_path(kernel)
     else:
         env_kernel = os.environ.get("MVM_KERNEL")
         if env_kernel:
-            kernel_path = Path(env_kernel)
+            kernel_path = _resolve_kernel_path(env_kernel)
         else:
             kernel_path = get_kernels_dir() / DEFAULT_VM_KERNEL_FILENAME
 

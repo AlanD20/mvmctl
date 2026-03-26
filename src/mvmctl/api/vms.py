@@ -21,6 +21,18 @@ from mvmctl.constants import (
 from mvmctl.core.logs import show_logs
 from mvmctl.core.ssh import connect_to_vm
 from mvmctl.core.vm_lifecycle import (
+    _resolve_image_path as _core_resolve_image_path,
+)
+from mvmctl.core.vm_lifecycle import (
+    _resolve_image_short_id_path as _core_resolve_image_short_id_path,
+)
+from mvmctl.core.vm_lifecycle import (
+    _resolve_kernel_path as _core_resolve_kernel_path,
+)
+from mvmctl.core.vm_lifecycle import (
+    _resolve_kernel_short_id_path as _core_resolve_kernel_short_id_path,
+)
+from mvmctl.core.vm_lifecycle import (
     create_vm as _create_vm,
 )
 from mvmctl.core.vm_lifecycle import (
@@ -49,7 +61,27 @@ __all__ = [
     "cleanup_vms",
     "get_vm_manager",
     "VMManager",
+    "resolve_image_path",
+    "resolve_kernel_path",
+    "resolve_image_short_id_path",
+    "resolve_kernel_short_id_path",
 ]
+
+
+def resolve_image_path(image: str) -> Path:
+    return _core_resolve_image_path(image)
+
+
+def resolve_kernel_path(kernel: str) -> Path:
+    return _core_resolve_kernel_path(kernel)
+
+
+def resolve_image_short_id_path(image: str) -> Path:
+    return _core_resolve_image_short_id_path(image)
+
+
+def resolve_kernel_short_id_path(kernel: str) -> Path:
+    return _core_resolve_kernel_short_id_path(kernel)
 
 
 def create_vm(

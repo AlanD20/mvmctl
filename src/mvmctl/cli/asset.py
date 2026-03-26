@@ -57,9 +57,9 @@ from mvmctl.utils.console import (
     print_success,
     print_table,
     print_warning,
-    resolve_single_by_short_id,
 )
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
+from mvmctl.utils.short_id import resolve_single_by_short_id
 
 kernel_app = typer.Typer(
     help="Kernel management",
@@ -346,6 +346,12 @@ def kernel_rm(
     for short_id in effective_ids:
         match = resolve_single_by_short_id(short_id, find_kernels_by_short_id, cache_dir, "kernel")
         if match is None:
+            if not find_kernels_by_short_id(cache_dir, short_id):
+                print_error(f"No kernel found with short ID '{short_id}'")
+            else:
+                print_error(
+                    f"Ambiguous short ID '{short_id}' matches {len(find_kernels_by_short_id(cache_dir, short_id))} kernels — use more characters"
+                )
             exit_code = 1
             continue
 
@@ -770,6 +776,12 @@ def image_rm(
     for short_id in effective_ids:
         match = resolve_single_by_short_id(short_id, find_images_by_short_id, cache_dir, "image")
         if match is None:
+            if not find_images_by_short_id(cache_dir, short_id):
+                print_error(f"No image found with short ID '{short_id}'")
+            else:
+                print_error(
+                    f"Ambiguous short ID '{short_id}' matches {len(find_images_by_short_id(cache_dir, short_id))} images — use more characters"
+                )
             exit_code = 1
             continue
 

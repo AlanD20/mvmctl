@@ -1,11 +1,13 @@
 import json
 from datetime import datetime
 
+from click.testing import CliRunner as ClickCliRunner
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
 from mvmctl.cli.vm import app
 from mvmctl.exceptions import MVMError
+from mvmctl.main import app as main_app
 from mvmctl.models.vm import VMInstance, VMState
 
 runner = CliRunner()
@@ -91,17 +93,83 @@ def test_prune_with_vms(mocker: MockerFixture):
 
 def test_create_vm_success(mocker: MockerFixture):
     vm = _make_vm("newvm")
+    mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value="/tmp/image.ext4")
     mocker.patch("mvmctl.cli.vm.create_vm", return_value=vm)
-    result = runner.invoke(app, ["create", "--name", "newvm", "--image", "ubuntu-24.04"])
+    result = runner.invoke(app, ["create", "--name", "newvm", "--image", "abc123"])
     assert result.exit_code == 0
     assert "newvm" in result.output
 
 
 def test_create_vm_fail(mocker: MockerFixture):
+    mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value="/tmp/image.ext4")
     mocker.patch("mvmctl.cli.vm.create_vm", side_effect=MVMError("Kernel not found"))
-    result = runner.invoke(app, ["create", "--name", "newvm", "--image", "ubuntu-24.04"])
+    result = runner.invoke(app, ["create", "--name", "newvm", "--image", "abc123"])
     assert result.exit_code == 1
     assert "Kernel not found" in result.output
+
+
+def test_create_vm_rejects_non_matching_image_short_id(mocker: MockerFixture):
+    mocker.patch(
+        "mvmctl.cli.vm.resolve_image_short_id_path",
+        side_effect=MVMError("Image short ID not found or ambiguous: 'badid'"),
+    )
+    mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
+    result = runner.invoke(app, ["create", "--name", "newvm", "--image", "badid"])
+    assert result.exit_code == 1
+    assert "Image short ID 'badid' was not found or is ambiguous" in result.output
+    mock_create.assert_not_called()
+
+
+def test_create_vm_resolves_kernel_short_id(mocker: MockerFixture):
+    vm = _make_vm("newvm")
+    mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value="/tmp/image.ext4")
+    mocker.patch("mvmctl.cli.vm.resolve_kernel_short_id_path", return_value="/tmp/vmlinux")
+    mock_create = mocker.patch("mvmctl.cli.vm.create_vm", return_value=vm)
+    result = runner.invoke(
+        app,
+        ["create", "--name", "newvm", "--image", "abc123", "--kernel", "def456"],
+    )
+    assert result.exit_code == 0
+    mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["image"] == "/tmp/image.ext4"
+    assert mock_create.call_args.kwargs["kernel"] == "/tmp/vmlinux"
+
+
+def test_create_output_config_uses_resolved_absolute_paths(mocker: MockerFixture, tmp_path):
+    image_path = tmp_path / "rootfs.ext4"
+    kernel_path = tmp_path / "vmlinux"
+    output_path = tmp_path / "vm.json"
+
+    mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value=image_path)
+    mocker.patch("mvmctl.cli.vm.resolve_kernel_short_id_path", return_value=kernel_path)
+    mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
+    mock_build = mocker.patch("mvmctl.cli.vm.build_vm_config_file")
+    mock_config = mocker.MagicMock()
+    mock_build.return_value = mock_config
+
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--name",
+            "newvm",
+            "--image",
+            "abc123",
+            "--kernel",
+            "def456",
+            "--output-config",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["image"] == str(image_path)
+    assert mock_build.call_args.kwargs["kernel"] == str(kernel_path)
+    assert mock_build.call_args.kwargs["rootfs_path"] == image_path
+    assert mock_build.call_args.kwargs["tap_device"] is None
+    assert mock_build.call_args.kwargs["gateway"] is None
+    mock_create.assert_not_called()
+    mock_config.to_json_file.assert_called_once_with(output_path)
 
 
 def test_ssh_success(mocker: MockerFixture):
@@ -216,21 +284,26 @@ def test_create_missing_image_flag():
 def test_create_invalid_image_not_found(mocker: MockerFixture):
     """Image that doesn't exist should result in exit code 1."""
     mocker.patch(
+        "mvmctl.cli.vm.resolve_image_short_id_path",
+        side_effect=MVMError("Image short ID not found or ambiguous: 'no-such-image'"),
+    )
+    mocker.patch(
         "mvmctl.cli.vm.create_vm",
         side_effect=MVMError("Image not found: 'no-such-image'"),
     )
     result = runner.invoke(app, ["create", "--name", "myvm", "--image", "no-such-image"])
     assert result.exit_code == 1
-    assert "Image not found" in result.output
+    assert "Image short ID 'no-such-image' was not found or is ambiguous" in result.output
 
 
 def test_create_duplicate_vm_name(mocker: MockerFixture):
     """Creating a VM whose name already exists should fail with exit code 1."""
+    mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value="/tmp/image.ext4")
     mocker.patch(
         "mvmctl.cli.vm.create_vm",
         side_effect=MVMError("VM 'myvm' already exists"),
     )
-    result = runner.invoke(app, ["create", "--name", "myvm", "--image", "ubuntu-24.04"])
+    result = runner.invoke(app, ["create", "--name", "myvm", "--image", "abc123"])
     assert result.exit_code == 1
     assert "already exists" in result.output
 
@@ -238,9 +311,6 @@ def test_create_duplicate_vm_name(mocker: MockerFixture):
 # ---------------------------------------------------------------------------
 # T-H3 (via main app): vm create error-path tests through the top-level CLI
 # ---------------------------------------------------------------------------
-
-from mvmctl.main import app as main_app  # noqa: E402
-from click.testing import CliRunner as ClickCliRunner
 
 main_runner = ClickCliRunner()
 
@@ -260,23 +330,26 @@ def test_main_app_create_missing_image():
 def test_main_app_create_invalid_image(mocker: MockerFixture):
     """Invalid image via the top-level app should exit 1."""
     mocker.patch(
+        "mvmctl.cli.vm.resolve_image_short_id_path",
+        side_effect=MVMError("Image short ID not found or ambiguous: 'bogus'"),
+    )
+    mocker.patch(
         "mvmctl.cli.vm.create_vm",
         side_effect=MVMError("Image not found: 'bogus'"),
     )
     result = main_runner.invoke(main_app, ["vm", "create", "--name", "myvm", "--image", "bogus"])
     assert result.exit_code == 1
-    assert "Image not found" in result.output
+    assert "Image short ID 'bogus' was not found or is ambiguous" in result.output
 
 
 def test_main_app_create_duplicate(mocker: MockerFixture):
     """Duplicate VM name via the top-level app should exit 1."""
+    mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value="/tmp/image.ext4")
     mocker.patch(
         "mvmctl.cli.vm.create_vm",
         side_effect=MVMError("VM 'myvm' already exists at /some/path"),
     )
-    result = main_runner.invoke(
-        main_app, ["vm", "create", "--name", "myvm", "--image", "ubuntu-24.04"]
-    )
+    result = main_runner.invoke(main_app, ["vm", "create", "--name", "myvm", "--image", "abc123"])
     assert result.exit_code == 1
     assert "already exists" in result.output
 
