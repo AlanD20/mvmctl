@@ -113,7 +113,7 @@ mvm vm ssh --name myvm
 mvm vm ls
 
 # 8. Remove the VM
-mvm vm remove --name myvm --force
+mvm vm rm --name myvm --force
 ```
 
 Or run the interactive setup wizard which guides you through all of the above:
@@ -155,17 +155,16 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | Command | Description |
 |---------|-------------|
 | `mvm kernel ls` | List cached kernels |
-| `mvm kernel fetch` | Download the official Firecracker-optimised kernel |
-| `mvm kernel build` | Build a custom upstream kernel from source |
-| `mvm kernel rm NAME` | Remove a cached kernel |
+| `mvm kernel fetch` | Download a kernel (official or Firecracker-optimized) |
+| `mvm kernel set-default` | Set a kernel as the default for VM creation |
+| `mvm kernel rm` | Remove a cached kernel |
 
-**`fetch` / `build` flags:**
+**`fetch` flags:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--version VERSION` | Kernel version | `6.1.102` |
-| `--out PATH` | Output path | `~/.cache/mvmctl/kernels/vmlinux` |
-| `--jobs N` | Parallel build jobs (build only) | `os.cpu_count()` |
+| `--type` | `firecracker` or `official` | `firecracker` |
+| `--version VERSION` | Kernel version | (latest) |
 
 ---
 
@@ -174,8 +173,9 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | Command | Description |
 |---------|-------------|
 | `mvm image ls` | List available and cached images |
-| `mvm image fetch ID` | Download and convert an image |
+| `mvm image fetch ID` | Download an image by its ID |
 | `mvm image import PATH` | Import a local image file |
+| `mvm image set-default` | Set the default image for VM creation |
 | `mvm image rm ID` | Remove a cached image |
 
 **Supported image IDs:**
@@ -191,7 +191,6 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--out DIR` | Output directory | `~/.cache/mvmctl/images/` |
 | `--force, -f` | Re-download even if cached | false |
 
 ---
@@ -202,7 +201,7 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 |---------|-------------|
 | `mvm bin ls` | List local (and optionally remote) Firecracker versions |
 | `mvm bin fetch VERSION` | Download a specific Firecracker release |
-| `mvm bin use VERSION` | Set the active Firecracker version |
+| `mvm bin set-default` | Set the active Firecracker version |
 | `mvm bin rm VERSION` | Remove a cached version |
 
 **`ls` flags:**
@@ -210,7 +209,7 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--remote, -r` | Include remote available versions | false |
-| `--limit N` | Max remote versions to show | 10 |
+| `--limit N` | Max remote versions to show | 5 |
 
 ---
 
@@ -219,11 +218,12 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | Command | Description |
 |---------|-------------|
 | `mvm vm create` | Create and start a new VM |
-| `mvm vm remove` | Stop and remove a VM |
+| `mvm vm rm` | Stop and remove a VM |
 | `mvm vm ls` | List VMs |
+| `mvm vm ps` | List running VMs (alias for ls) |
 | `mvm vm ssh` | SSH into a VM |
 | `mvm vm logs` | View VM logs |
-| `mvm vm cleanup` | Remove all stopped VMs |
+| `mvm vm prune` | Remove all stopped VMs |
 | `mvm vm snapshot` | Snapshot a running VM |
 | `mvm vm load` | Load a VM from a snapshot |
 
@@ -245,7 +245,6 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | `--import-config PATH` | Load all settings from a JSON config file | — |
 | `--output-config PATH` | Write resolved config to a JSON file | — |
 | `--enable-api-socket` | Expose Firecracker API socket | false |
-| `--enable-pci` | Enable PCI device support | false |
 | `--firecracker-bin PATH` | Path to `firecracker` binary | from config |
 
 **`vm logs` flags:**
@@ -282,12 +281,14 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 
 ---
 
-### `mvm config` — Configuration inspection
+### `mvm config` — Configuration management
 
 | Command | Description |
 |---------|-------------|
 | `mvm config show` | Show resolved configuration |
 | `mvm config validate` | Validate config file |
+| `mvm config get KEY` | Get a configuration value |
+| `mvm config set KEY VALUE` | Set a configuration value |
 | `mvm config dump-vm NAME` | Print the Firecracker JSON boot config for a running VM |
 
 ---
