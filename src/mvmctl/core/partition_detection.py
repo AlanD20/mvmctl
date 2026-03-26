@@ -99,11 +99,15 @@ class RootPartitionDetector:
         best_partitions = [p for p, s in scores if s == best_score]
 
         if len(best_partitions) > 1:
-            raise TieDetectedError([str(p) for p in best_partitions])
+            raise TieDetectedError(
+                [str(p) for p in best_partitions],
+                partitions=partitions,
+            )
 
         if best_score < 0:
             raise RootPartitionDetectionError(
-                f"Best score {best_score} < 0, no suitable root partition found"
+                f"Best score {best_score} < 0, no suitable root partition found",
+                partitions=partitions,
             )
 
         return best_partitions[0]

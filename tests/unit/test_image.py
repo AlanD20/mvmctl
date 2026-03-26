@@ -1565,7 +1565,9 @@ def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
     mock_download.return_value = True
 
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s: expected_output
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s, p=None, dd=None: (
+        expected_output
+    )
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
@@ -1608,7 +1610,9 @@ def test_fetch_image_ubuntu_fc_resolves_source(
 
     # Patch _FORMAT_HANDLERS to return our mock handler
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s: expected_output
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s, p=None, dd=None: (
+        expected_output
+    )
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
@@ -1939,7 +1943,9 @@ def test_fetch_image_squashfs_format(mock_download: MagicMock, tmp_path: Path):
     mock_download.return_value = True
 
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s: expected_output
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s, p=None, dd=None: (
+        expected_output
+    )
 
     try:
         result = fetch_image(spec, tmp_path, force=True)

@@ -68,8 +68,13 @@ class MVMKeyError(MVMError):
 class RootPartitionDetectionError(MVMError):
     """Root partition could not be detected."""
 
-    def __init__(self, message: str = "No root partition candidate found") -> None:
+    def __init__(
+        self,
+        message: str = "No root partition candidate found",
+        partitions: list[dict[str, object]] | None = None,
+    ) -> None:
         self.message = message
+        self.partitions = partitions or []
         super().__init__(message)
 
     def __str__(self) -> str:
@@ -80,10 +85,14 @@ class TieDetectedError(MVMError):
     """Multiple partitions scored equally; cannot auto-select."""
 
     def __init__(
-        self, tied_partitions: list[str], message: str = "Tie detected between partitions"
+        self,
+        tied_partitions: list[str],
+        message: str = "Tie detected between partitions",
+        partitions: list[dict[str, object]] | None = None,
     ) -> None:
         self.tied_partitions = tied_partitions
         self.message = message
+        self.partitions = partitions or []
         super().__init__(message)
 
     def __str__(self) -> str:

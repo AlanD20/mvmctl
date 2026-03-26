@@ -68,6 +68,77 @@ from mvmctl.utils.console import (
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 from mvmctl.utils.short_id import resolve_single_by_short_id
 
+
+def _format_size_human_readable(size_sectors: int) -> str:
+    """Convert size in sectors to human-readable format."""
+    from mvmctl.constants import CONST_MEBIBYTE_BYTES, CONST_SECTOR_SIZE_BYTES
+
+    size_bytes = size_sectors * CONST_SECTOR_SIZE_BYTES
+    size_mib = size_bytes / CONST_MEBIBYTE_BYTES
+    if size_mib >= 1024:
+        return f"{size_mib / 1024:.1f} GiB"
+    return f"{size_mib:.1f} MiB"
+
+
+def _prompt_for_partition_selection(
+    partitions: list[dict[str, object]],
+    tied_partitions: list[str] | None = None,
+    disabled_detectors: list[str] | None = None,
+) -> int:
+    """Display partition information and prompt user to select the root partition.
+
+    Args:
+        partitions: List of partition dictionaries with 'size', 'type', 'name', 'label', 'fstype'.
+        tied_partitions: Optional list of tied partition numbers (as strings) for display.
+        disabled_detectors: List of detector names that were disabled during detection.
+
+    Returns:
+        The selected partition number (1-indexed).
+
+    Raises:
+        typer.Exit: If user cancels or invalid input after retries.
+    """
+    if not partitions:
+        print_error("No partitions available to select")
+        raise typer.Exit(code=1)
+
+    print_warning("Could not automatically detect root partition")
+    if tied_partitions:
+        print_info(f"Tie detected between partitions: {', '.join(tied_partitions)}")
+    print_info("")
+    print_info("Available partitions:")
+
+    rows: list[list[str]] = []
+    for i, partition in enumerate(partitions, 1):
+        size_sectors = partition.get("size", 0)
+        size_str = (
+            _format_size_human_readable(int(size_sectors))
+            if isinstance(size_sectors, (int, float))
+            else "Unknown"
+        )
+        part_type = str(partition.get("type", "-"))[:20]
+        label = str(partition.get("name", partition.get("label", "-")))[:15]
+        fstype = str(partition.get("fstype", "-"))[:10]
+        rows.append([str(i), size_str, part_type, label, fstype])
+
+    print_table(
+        columns=["#", "Size", "Type", "Label", "FS Type"],
+        rows=rows,
+        title="",
+    )
+
+    num_partitions = len(partitions)
+    while True:
+        try:
+            user_input = input(f"\nSelect root partition (1-{num_partitions}): ")
+            selection = int(user_input.strip())
+            if 1 <= selection <= num_partitions:
+                return selection
+            print_error(f"Invalid selection. Please enter a number between 1 and {num_partitions}")
+        except ValueError:
+            print_error(f"Invalid input. Please enter a number between 1 and {num_partitions}")
+
+
 kernel_app = typer.Typer(
     help="Kernel management",
     no_args_is_help=False,
@@ -699,7 +770,13 @@ def image_fetch(
         if no_prompt:
             print_error(str(exc))
             raise typer.Exit(code=1)
-        raise
+        tied = exc.tied_partitions if isinstance(exc, TieDetectedError) else None
+        selected = _prompt_for_partition_selection(
+            exc.partitions,
+            tied_partitions=tied,
+        )
+        print_info(f"Using user-selected partition: {selected}")
+        result = fetch_image(spec, out, force, partition=selected)
 
     if result:
         import hashlib
@@ -942,7 +1019,14 @@ def image_import(
         if no_prompt:
             print_error(str(exc))
             raise typer.Exit(code=1)
-        raise
+        tied = exc.tied_partitions if isinstance(exc, TieDetectedError) else None
+        selected = _prompt_for_partition_selection(
+            exc.partitions,
+            tied_partitions=tied,
+            disabled_detectors=disabled_detectors,
+        )
+        print_info(f"Using user-selected partition: {selected}")
+        result = import_image(spec, images_dir, force=force, partition=selected)
     except ImageError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)

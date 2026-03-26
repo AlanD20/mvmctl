@@ -138,12 +138,14 @@ def _parse_partitions_sfdisk(
             size = p.get("size")
             if not isinstance(start, (int, float)) or not isinstance(size, (int, float)):
                 raise ImageError("Failed to parse partition table")
-            partitions.append({
-                "start": int(start),
-                "size": int(size),
-                "type": p.get("type", ""),
-                "node": p.get("node", ""),
-            })
+            partitions.append(
+                {
+                    "start": int(start),
+                    "size": int(size),
+                    "type": p.get("type", ""),
+                    "node": p.get("node", ""),
+                }
+            )
 
         return partitions, partition
 
@@ -199,11 +201,13 @@ def _parse_partitions_fdisk(
                 start = int(parts[3])
                 size = int(parts[4])
                 part_type = parts[5] if len(parts) > 5 else ""
-                partitions.append({
-                    "start": start,
-                    "size": size,
-                    "type": part_type,
-                })
+                partitions.append(
+                    {
+                        "start": start,
+                        "size": size,
+                        "type": part_type,
+                    }
+                )
                 has_valid_lines = True
             except (ValueError, IndexError):
                 # Found a line that looks like a partition but can't be parsed
@@ -340,7 +344,9 @@ def extract_partition_from_raw(
             partition_num = chosen_idx
         elif requested_partition is not None:
             if requested_partition < 1 or requested_partition > len(partitions):
-                raise ImageError(f"Partition {requested_partition} out of range (1-{len(partitions)})")
+                raise ImageError(
+                    f"Partition {requested_partition} out of range (1-{len(partitions)})"
+                )
             logger.info("Found %d partitions:", len(partitions))
             logger.info("Using partition %d as root", requested_partition)
             chosen = partitions[requested_partition - 1]
@@ -439,6 +445,7 @@ def _handle_qcow2(
     download_path: Path,
     final_path: Path,
     size_mib: int,
+    partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
     raw_path = download_path.with_suffix(".raw")
@@ -446,13 +453,20 @@ def _handle_qcow2(
     actual_path = extract_partition_from_raw(
         raw_path,
         final_path.with_suffix(".img"),
+        partition=partition,
         disabled_detectors=disabled_detectors,
     )
     raw_path.unlink(missing_ok=True)
     return actual_path
 
 
-def _handle_tar_rootfs(download_path: Path, final_path: Path, size_mib: int) -> Path:
+def _handle_tar_rootfs(
+    download_path: Path,
+    final_path: Path,
+    size_mib: int,
+    partition: int | None = None,
+    disabled_detectors: list[str] | None = None,
+) -> Path:
     create_ext4_from_tar(download_path, final_path, size=f"{size_mib}M")
     return final_path
 
@@ -461,11 +475,13 @@ def _handle_raw(
     download_path: Path,
     final_path: Path,
     size_mib: int,
+    partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
     return extract_partition_from_raw(
         download_path,
         final_path.with_suffix(".img"),
+        partition=partition,
         disabled_detectors=disabled_detectors,
     )
 
@@ -545,7 +561,13 @@ def _fetch_sha256_from_url(sha256_url: str) -> str | None:
     return str(parts[0]).lower()
 
 
-def _handle_squashfs(download_path: Path, final_path: Path, size_mib: int) -> Path:
+def _handle_squashfs(
+    download_path: Path,
+    final_path: Path,
+    size_mib: int,
+    partition: int | None = None,
+    disabled_detectors: list[str] | None = None,
+) -> Path:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         extract_dir = tmpdir_path / "squashfs-root"
@@ -579,7 +601,7 @@ def _handle_squashfs(download_path: Path, final_path: Path, size_mib: int) -> Pa
     return final_path
 
 
-_FORMAT_HANDLERS: dict[str, Callable[[Path, Path, int], Path]] = {
+_FORMAT_HANDLERS: dict[str, Callable[[Path, Path, int, int | None, list[str] | None], Path]] = {
     "qcow2": _handle_qcow2,
     "tar-rootfs": _handle_tar_rootfs,
     "raw": _handle_raw,
@@ -591,6 +613,7 @@ def fetch_image(
     spec: ImageSpec,
     output_dir: Path,
     force: bool = False,
+    partition: int | None = None,
 ) -> Path:
     """Fetch and convert an image.
 
@@ -598,6 +621,7 @@ def fetch_image(
         spec: Image specification
         output_dir: Directory to store images
         force: Re-download even if exists
+        partition: Specific partition number to extract (1-indexed), or None for auto-detect
 
     Returns:
         Path to final image
@@ -641,7 +665,7 @@ def fetch_image(
     if handler is None:
         download_path.unlink(missing_ok=True)
         raise ImageError(f"Unknown format: {spec.format}")
-    actual_path = handler(download_path, final_path, spec.size_mib)
+    actual_path = handler(download_path, final_path, spec.size_mib, partition, None)
 
     # Cleanup download
     download_path.unlink(missing_ok=True)
@@ -694,6 +718,7 @@ def import_image(
     spec: ImageImportSpec,
     output_dir: Path,
     force: bool = False,
+    partition: int | None = None,
 ) -> Path:
     """Import a local image file into the image cache.
 
@@ -701,6 +726,7 @@ def import_image(
         spec: Import specification (id, name, source_path, format)
         output_dir: Directory to store the imported image
         force: Overwrite existing image if present
+        partition: Specific partition number to extract (1-indexed), or None for auto-detect
 
     Returns:
         Path to the imported image
@@ -737,6 +763,7 @@ def import_image(
             actual_path = extract_partition_from_raw(
                 raw_path,
                 extracted_path,
+                partition=partition,
                 disabled_detectors=spec.disabled_detectors,
             )
 
