@@ -187,12 +187,17 @@ def test_get_default_interface_error_message_sanitized():
 
 
 def test_setup_bridge_already_exists():
+    mock_result = MagicMock()
+    mock_result.returncode = 0
     with patch("mvmctl.core.network.bridge_exists", return_value=True):
         with patch("mvmctl.core.network._bridge_has_ip", return_value=True):
-            with patch("mvmctl.core.network.subprocess.run") as mock_run:
+            with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
                 with patch.object(Path, "write_text") as mock_write:
-                    setup_bridge("fc-br0", "10.20.0.1/24")
-                    mock_run.assert_not_called()
+                    with patch("mvmctl.utils.process.os.getuid", return_value=0):
+                        setup_bridge("fc-br0", "10.20.0.1/24")
+
+                    assert mock_run.call_count == 1
+                    assert mock_run.call_args.kwargs["input"] == "link set fc-br0 up\n"
                     mock_write.assert_called_once_with("1\n")
 
 

@@ -1,18 +1,18 @@
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mvmctl.core.vm_lifecycle import (
-    graceful_shutdown,
-    create_vm,
-    remove_vm,
-    snapshot_vm,
-    load_snapshot,
-    _write_pid_file,
     _read_pid_file,
     _resolve_image_path,
     _secure_mkdir_vm,
+    _write_pid_file,
+    create_vm,
+    graceful_shutdown,
+    load_snapshot,
+    remove_vm,
+    snapshot_vm,
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMInstance, VMState
@@ -170,7 +170,6 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
 
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 @patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
-@patch("mvmctl.core.vm_lifecycle.teardown_nat")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.delete_tap")
@@ -188,7 +187,6 @@ def test_remove_vm_success(
     mock_del_tap,
     mock_rm_rules,
     mock_get_net,
-    mock_teardown_nat,
     mock_graceful,
     mock_mgr,
 ):
@@ -217,7 +215,6 @@ def test_remove_vm_success(
     _, rm_kwargs = mock_rm_rules.call_args
     assert rm_kwargs.get("bridge") == "mvm-default"
     mock_del_tap.assert_called_once()
-    mock_teardown_nat.assert_called_once_with(bridge="mvm-default", force=False)
     mock_rel_ip.assert_called_once()
     mock_manager.deregister.assert_called_once()
     mock_rmtree.assert_called_once_with(mock_vm_dir_ret)
@@ -225,7 +222,6 @@ def test_remove_vm_success(
 
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 @patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
-@patch("mvmctl.core.vm_lifecycle.teardown_nat")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.delete_tap")
@@ -243,7 +239,6 @@ def test_remove_vm_no_nat_skips_teardown(
     mock_del_tap,
     mock_rm_rules,
     mock_get_net,
-    mock_teardown_nat,
     mock_graceful,
     mock_mgr,
 ):
@@ -268,7 +263,54 @@ def test_remove_vm_no_nat_skips_teardown(
 
     _, rm_kwargs = mock_rm_rules.call_args
     assert rm_kwargs.get("bridge") == "mvm-isolated"
-    mock_teardown_nat.assert_not_called()
+
+
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.delete_tap")
+@patch("mvmctl.core.vm_lifecycle.release_network_ip")
+@patch("mvmctl.core.vm_lifecycle.subprocess.run")
+@patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle._read_pid_file")
+def test_remove_vm_does_not_teardown_shared_network_nat(
+    mock_read_pid,
+    mock_get_vm_dir,
+    mock_rmtree,
+    mock_run,
+    mock_rel_ip,
+    mock_del_tap,
+    mock_rm_rules,
+    mock_get_net,
+    mock_graceful,
+    mock_mgr,
+):
+    mock_manager = MagicMock()
+    vm = VMInstance(
+        name="shared", ip="10.20.0.7", pid=789, status=VMState.RUNNING, network_name="default"
+    )
+    mock_manager.get.return_value = vm
+    mock_mgr.return_value = mock_manager
+
+    net_cfg = MagicMock()
+    net_cfg.bridge = "mvm-default"
+    net_cfg.nat_enabled = True
+    mock_get_net.return_value = net_cfg
+
+    mock_read_pid.return_value = 789
+    mock_vm_dir_ret = MagicMock()
+    mock_vm_dir_ret.exists.return_value = True
+    mock_get_vm_dir.return_value = mock_vm_dir_ret
+
+    remove_vm("shared")
+
+    _, rm_kwargs = mock_rm_rules.call_args
+    assert rm_kwargs.get("bridge") == "mvm-default"
+    mock_del_tap.assert_called_once()
+    mock_rel_ip.assert_called_once_with("default", "shared")
+    mock_manager.deregister.assert_called_once()
 
 
 @patch("mvmctl.core.vm_lifecycle.get_vm_socket_path")

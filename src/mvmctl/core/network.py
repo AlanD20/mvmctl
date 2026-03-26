@@ -119,13 +119,12 @@ def setup_bridge(
         reconcile_cmds: list[str] = []
         if not _bridge_has_ip(bridge, effective_cidr):
             reconcile_cmds.append(f"addr add {effective_cidr} dev {bridge}")
-        if reconcile_cmds:
-            reconcile_cmds.append(f"link set {bridge} up")
-            try:
-                _run_ip_batch(reconcile_cmds)
-            except subprocess.CalledProcessError as e:
-                # Sanitize: don't expose batch commands in error message
-                raise NetworkError(f"Failed to setup bridge {bridge}") from e
+        reconcile_cmds.append(f"link set {bridge} up")
+        try:
+            _run_ip_batch(reconcile_cmds)
+        except subprocess.CalledProcessError as e:
+            # Sanitize: don't expose batch commands in error message
+            raise NetworkError(f"Failed to setup bridge {bridge}") from e
     else:
         try:
             _run_ip_batch(

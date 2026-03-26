@@ -52,7 +52,6 @@ from mvmctl.core.network import (
     remove_iptables_forward_rules,
     setup_bridge,
     setup_nat,
-    teardown_nat,
 )
 from mvmctl.core.network_manager import (
     allocate_network_ip,
@@ -480,12 +479,6 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
         delete_tap(tap_name)
     except NetworkError:
         pass
-
-    if net_config and net_config.nat_enabled:
-        try:
-            teardown_nat(bridge=bridge, force=False)
-        except NetworkError as e:
-            logger.warning("Failed to teardown NAT for bridge %s: %s", bridge, e)
 
     try:
         release_network_ip(net_name, name)
