@@ -3,8 +3,8 @@
 **Scope:** Production-grade Python CLI for managing Firecracker microVMs
 **Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
 **Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
-**Generated:** 2026-03-25T13:00Z  
-**Commit:** 0bf8543  
+**Generated:** 2026-03-26T13:00Z  
+**Commit:** 7d72dbc  
 **Branch:** main
 
 ## STRUCTURE
@@ -21,7 +21,7 @@ mvmctl/
 │   ├── models/          # Pure dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
 │   ├── utils/           # Shared helpers: console, process, fs, http, audit, validation
 │   └── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
-├── tests/               # 45 test_*.py (41 unit, 4 integration); see tests/AGENTS.md
+├── tests/               # 48 test_*.py (41 unit, 4 integration, 3 layer_compliance); see tests/AGENTS.md
 └── pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
 ```
 
