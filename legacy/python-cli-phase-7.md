@@ -11,7 +11,7 @@
 - the network_guest has mac_default in defaults.yaml file, there shouldnt be a default mac! only mac prefix then randomly generated mac for everything. NO FALLBACK!
 - you must create a helper function to get asset files such as the `firecracker.template.json` or any other file under assets folder`
 - there are two functions to do auto network ip allocation one is _auto_allocate_subnet and the other is allocate_network_ip functions in core/network_manager.py, keep the most accurate one that allocates the IP based on the given network name, where given network name has its own cidr defined in the network state metadata.
-- remove the `migrate_legacy_metadata` function and its test cases, it's a redundant function in core/metadata.py!
+- remove legacy metadata migration helpers and their tests to keep pre-production logic clean.
 - in core/config_gen.py at line 200, the `rootfstype=` is hardcoding ext4, it must use the image's file system getting it fromi image metadata file!
 - when running `mvm image fetch` and specify an image in assets/images.yaml, if the sha value for both sha256 and sha256_url are null, then do not warn or say checksum is missing! proceed and it's intentional!
 - rename `yaml_id` in the metadata file to internal_id`

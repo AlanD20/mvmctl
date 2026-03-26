@@ -136,7 +136,11 @@ def test_firecracker_config_persisted_as_nested_key(config_dir: Path) -> None:
     update_firecracker_config(full_version="v1.12.0")
     raw = read_metadata(cache_dir=get_cache_dir())
     assert "binaries" in raw
-    assert any(v.get("full_version") == "v1.12.0" for v in raw["binaries"].values())
+    assert set(raw["binaries"].keys()) == {"firecracker", "jailer"}
+    assert raw["binaries"]["firecracker"]["full_version"] == "v1.12.0"
+    assert raw["binaries"]["jailer"]["full_version"] == "v1.12.0"
+    assert raw["binaries"]["firecracker"]["binary_name"] == "firecracker"
+    assert raw["binaries"]["jailer"]["binary_name"] == "jailer"
 
 
 def test_firecracker_config_ignores_corrupt_section(config_dir: Path) -> None:

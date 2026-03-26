@@ -41,13 +41,12 @@ from mvmctl.constants import (
 from mvmctl.core.metadata import (
     get_default_kernel_entry,
     list_kernel_entries,
-    migrate_legacy_metadata,
     set_default_kernel_by_filename,
     update_kernel_entry,
 )
 from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
 from mvmctl.models.kernel import KernelSpec
-from mvmctl.utils.fs import get_cache_dir, get_images_dir
+from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.http import download_file
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
@@ -975,9 +974,6 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
     kernels_dir.mkdir(parents=True, exist_ok=True)
 
     cache_dir = get_cache_dir()
-    images_dir = get_images_dir()
-
-    migrate_legacy_metadata(cache_dir, kernels_dir, images_dir)
 
     entries = list_kernel_entries(cache_dir, kernels_dir)
 

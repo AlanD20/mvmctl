@@ -6,17 +6,13 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from mvmctl.core.metadata import (
     MetadataCache,
-    _metadata_cache,
     get_binary_entry,
     get_image_entry,
     get_kernel_entry,
     list_image_entries,
     list_kernel_entries,
-    migrate_legacy_metadata,
     read_metadata,
     remove_image_entry,
     remove_kernel_entry,
@@ -215,94 +211,35 @@ def test_remove_image_entry(tmp_path: Path):
 
 
 def test_update_binary_entry(tmp_path: Path):
-    update_binary_entry(tmp_path, "1.15.0", firecracker_path="/bin/fc")
+    update_binary_entry(
+        tmp_path,
+        "1.15.0",
+        firecracker_path="/bin/firecracker-v1.15.0",
+        jailer_path="/bin/jailer-v1.15.0",
+        default_binary_path="/bin/firecracker",
+        active_binary_path="/bin/firecracker",
+    )
+    raw = read_metadata(tmp_path)
+    assert "binaries" in raw
+    assert set(raw["binaries"].keys()) == {"firecracker", "jailer"}
+
+    firecracker = raw["binaries"]["firecracker"]
+    jailer = raw["binaries"]["jailer"]
+    assert firecracker["binary_name"] == "firecracker"
+    assert jailer["binary_name"] == "jailer"
+    assert firecracker["binary_path"] == "/bin/firecracker-v1.15.0"
+    assert jailer["binary_path"] == "/bin/jailer-v1.15.0"
+    assert firecracker["default_binary_path"] == "/bin/firecracker"
+    assert jailer["default_binary_path"] == "/bin/jailer"
+    assert firecracker["package_version"] == "1.15.0"
+    assert jailer["package_version"] == "1.15.0"
+
     entry = get_binary_entry(tmp_path, "1.15.0")
-    assert entry["firecracker_path"] == "/bin/fc"
+    assert entry["package_version"] == "1.15.0"
 
 
 def test_get_binary_entry_missing_returns_empty(tmp_path: Path):
     assert get_binary_entry(tmp_path, "99.0.0") == {}
-
-
-def test_migrate_legacy_metadata_imports_per_file_json(tmp_path: Path):
-    kernels_dir = tmp_path / "kernels"
-    images_dir = tmp_path / "images"
-    kernels_dir.mkdir()
-    images_dir.mkdir()
-
-    (kernels_dir / "vmlinux").write_bytes(b"\x7fELF")
-    (kernels_dir / "vmlinux.json").write_text(
-        json.dumps({"name": "vmlinux", "version": "6.1", "type": "official"})
-    )
-    (images_dir / "ubuntu-24.04.ext4.json").write_text(
-        json.dumps({"os_name": "Ubuntu", "fs_type": "ext4"})
-    )
-
-    migrate_legacy_metadata(tmp_path, kernels_dir, images_dir)
-
-    meta = read_metadata(tmp_path)
-    assert "vmlinux" in meta["kernels"]
-    assert meta["kernels"]["vmlinux"]["version"] == "6.1"
-    assert "ubuntu-24.04" in meta["images"]
-    assert meta["images"]["ubuntu-24.04"]["os_name"] == "Ubuntu"
-
-    assert not (kernels_dir / "vmlinux.json").exists()
-    assert not (images_dir / "ubuntu-24.04.ext4.json").exists()
-
-
-def test_migrate_legacy_metadata_skips_if_already_populated(tmp_path: Path):
-    kernels_dir = tmp_path / "kernels"
-    images_dir = tmp_path / "images"
-    kernels_dir.mkdir()
-    images_dir.mkdir()
-
-    update_kernel_entry(tmp_path, "vmlinux", version="6.1")
-
-    (kernels_dir / "vmlinux").write_bytes(b"\x7fELF")
-    sidecar = kernels_dir / "vmlinux.json"
-    sidecar.write_text(json.dumps({"name": "vmlinux", "version": "9.9"}))
-
-    migrate_legacy_metadata(tmp_path, kernels_dir, images_dir)
-
-    meta = read_metadata(tmp_path)
-    assert meta["kernels"]["vmlinux"]["version"] == "6.1"
-    assert sidecar.exists()
-
-
-def test_migrate_legacy_metadata_handles_default_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    kernels_dir = tmp_path / "kernels"
-    images_dir = tmp_path / "images"
-    kernels_dir.mkdir()
-    images_dir.mkdir()
-
-    (kernels_dir / "vmlinux").write_bytes(b"\x7fELF")
-    (kernels_dir / "default.json").write_text(json.dumps({"name": "vmlinux"}))
-
-    migrate_legacy_metadata(tmp_path, kernels_dir, images_dir)
-
-    assert not (kernels_dir / "default.json").exists()
-
-    config_file = tmp_path / "config.json"
-    if config_file.exists():
-        data = json.loads(config_file.read_text())
-        assert data.get("defaults", {}).get("kernel") == "vmlinux"
-
-
-def test_migrate_legacy_metadata_ignores_corrupt_json(tmp_path: Path):
-    kernels_dir = tmp_path / "kernels"
-    images_dir = tmp_path / "images"
-    kernels_dir.mkdir()
-    images_dir.mkdir()
-
-    (kernels_dir / "vmlinux").write_bytes(b"\x7fELF")
-    (kernels_dir / "vmlinux.json").write_text("CORRUPT{{")
-
-    migrate_legacy_metadata(tmp_path, kernels_dir, images_dir)
-    meta = read_metadata(tmp_path)
-    assert meta.get("kernels", {}) == {}
 
 
 def test_concurrent_writes_no_corruption(tmp_path: Path):

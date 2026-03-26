@@ -67,7 +67,10 @@ src/mvmctl/core/
 {
   "images":  { "<full-hash>": { "yaml_id": "ubuntu-24.04", "filename": "...", "is_default": 0|1, ... } },
   "kernels": { "<full-hash>": { "filename": "vmlinux", "version": "6.1", "is_default": 0|1, ... } },
-  "binaries": { "<version>": { "full_version": "v1.15.0", "ci_version": "v1.15", "default_binary_path": "...", "is_default": 0|1, ... } }
+  "binaries": {
+    "firecracker": { "binary_name": "firecracker", "binary_path": ".../firecracker-v1.15.0", "full_version": "v1.15.0", "ci_version": "v1.15", "package_version": "1.15.0", "default_binary_path": ".../firecracker", "is_default": 0|1, ... },
+    "jailer":      { "binary_name": "jailer", "binary_path": ".../jailer-v1.15.0", "full_version": "v1.15.0", "ci_version": "v1.15", "package_version": "1.15.0", "default_binary_path": ".../jailer", "is_default": 0|1, ... }
+  }
 }
 ```
 - Use `find_images_by_short_id(cache_dir, "abc123")` for 6-char prefix lookup
@@ -173,5 +176,4 @@ def kernel_fetch(...):
 - `find_images_by_short_id(cache_dir, short_id)` → `list[tuple[str, dict]]` (full_key, meta)
 - `find_kernels_by_short_id(cache_dir, short_id)` → same
 - `update_kernel_entry()`, `update_image_entry()` — upsert by full key
-- `migrate_legacy_metadata()` — converts old name-keyed entries on first load
 - `MetadataCache` class with LRU cache and TTL for read performance

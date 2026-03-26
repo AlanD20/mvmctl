@@ -339,10 +339,20 @@ Asset defaults are stored in `metadata.json` with `is_default` markers:
     }
   },
   "binaries": {
-    "1.15.0": {
+    "firecracker": {
+      "binary_name": "firecracker",
+      "binary_path": "/home/user/.cache/mvmctl/bin/firecracker-v1.15.0",
       "full_version": "v1.15.0",
       "ci_version": "v1.15",
       "default_binary_path": "/home/user/.cache/mvmctl/bin/firecracker",
+      "is_default": 1
+    },
+    "jailer": {
+      "binary_name": "jailer",
+      "binary_path": "/home/user/.cache/mvmctl/bin/jailer-v1.15.0",
+      "full_version": "v1.15.0",
+      "ci_version": "v1.15",
+      "default_binary_path": "/home/user/.cache/mvmctl/bin/jailer",
       "is_default": 1
     }
   }

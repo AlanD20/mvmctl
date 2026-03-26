@@ -30,7 +30,7 @@ This document compares the current codebase state against the authoritative requ
 ## 3. Asset Management
 
 ### 3.1 Metadata System
-- [!] **Mismatch**: `migrate_legacy_metadata` still exists in `core/metadata.py` despite the explicit instruction in Requirement §6.3 to remove it.
+- [x] **Aligned**: legacy metadata migration helper was removed from `core/metadata.py` per Requirement §6.3.
 - [!] **Mismatch**: Asset IDs are currently generated using `hashlib.sha256(f"{name}:{time.time()}".encode()).hexdigest()` in `vm_lifecycle.py`. Requirement §3.2 specifies a full hash of the **file content** + current timestamp for assets.
 
 ### 3.2 Kernels & Images

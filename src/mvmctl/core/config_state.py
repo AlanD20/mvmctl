@@ -19,6 +19,7 @@ from mvmctl.core.metadata import (
     set_default_binary_entry,
     set_default_image_by_internal_id,
     set_default_image_entry,
+    set_default_kernel_by_filename,
     update_binary_entry,
 )
 from mvmctl.utils.fs import get_bin_dir, get_cache_dir

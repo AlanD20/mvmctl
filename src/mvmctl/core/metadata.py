@@ -466,132 +466,181 @@ def find_images_by_short_id(cache_dir: Path, short_id: str) -> list[tuple[str, d
 # =============================================================================
 
 
+_BINARY_METADATA_NAMES = ("firecracker", "jailer")
+
+
+def _normalized_package_version(value: str) -> str:
+    return value.removeprefix("v")
+
+
+def _derive_ci_version(version: str) -> str:
+    parts = version.split(".")
+    return f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{version}"
+
+
+def _binary_entry_version(entry: dict[str, Any]) -> str:
+    package_version = entry.get("package_version")
+    if isinstance(package_version, str) and package_version:
+        return _normalized_package_version(package_version)
+    full_version = entry.get("full_version")
+    if isinstance(full_version, str) and full_version:
+        return _normalized_package_version(full_version)
+    return ""
+
+
+def _binary_matches_version(entry: dict[str, Any], version: str) -> bool:
+    normalized = _normalized_package_version(version)
+    if not normalized:
+        return False
+    entry_version = _binary_entry_version(entry)
+    return entry_version == normalized
+
+
+def _derive_peer_binary_path(path_value: str, target_binary_name: str) -> str:
+    path = Path(path_value)
+    if path.name in {"firecracker", "jailer"}:
+        return str(path.with_name(target_binary_name))
+    if path.name.startswith("firecracker") and target_binary_name == "jailer":
+        return str(path.with_name(path.name.replace("firecracker", "jailer", 1)))
+    if path.name.startswith("jailer") and target_binary_name == "firecracker":
+        return str(path.with_name(path.name.replace("jailer", "firecracker", 1)))
+    return str(path.with_name(target_binary_name))
+
+
 def update_binary_entry(cache_dir: Path, version: str, **fields: Any) -> None:
-    """Upsert binary entry in metadata.json binaries section."""
+    normalized_version = _normalized_package_version(version)
     data = read_metadata(cache_dir)
     if "binaries" not in data or not isinstance(data.get("binaries"), dict):
         data["binaries"] = {}
 
-    binary_data: dict[str, Any] = data["binaries"].get(version, {})
-    binary_data.update(fields)
-    data["binaries"][version] = binary_data
+    payload = dict(fields)
+    payload["package_version"] = normalized_version
+    payload["full_version"] = str(payload.get("full_version") or f"v{normalized_version}")
+    payload["ci_version"] = str(payload.get("ci_version") or _derive_ci_version(normalized_version))
+
+    firecracker_path = payload.get("firecracker_path")
+    jailer_path = payload.get("jailer_path")
+    default_binary_path = payload.get("default_binary_path")
+    active_binary_path = payload.get("active_binary_path")
+    default_jailer_path = payload.get("default_jailer_path")
+    active_jailer_path = payload.get("active_jailer_path")
+
+    if not isinstance(default_jailer_path, str) and isinstance(default_binary_path, str):
+        default_jailer_path = _derive_peer_binary_path(default_binary_path, "jailer")
+    if not isinstance(active_jailer_path, str) and isinstance(active_binary_path, str):
+        active_jailer_path = _derive_peer_binary_path(active_binary_path, "jailer")
+
+    shared_payload = {
+        k: v
+        for k, v in payload.items()
+        if k
+        not in {
+            "default_binary_path",
+            "active_binary_path",
+            "default_jailer_path",
+            "active_jailer_path",
+            "binary_name",
+            "binary_path",
+        }
+    }
+
+    per_binary_payloads: dict[str, dict[str, Any]] = {
+        "firecracker": {
+            **shared_payload,
+            "binary_name": "firecracker",
+            "binary_path": firecracker_path,
+            "default_binary_path": default_binary_path,
+            "active_binary_path": active_binary_path,
+        },
+        "jailer": {
+            **shared_payload,
+            "binary_name": "jailer",
+            "binary_path": jailer_path,
+            "default_binary_path": default_jailer_path,
+            "active_binary_path": active_jailer_path,
+        },
+    }
+
+    for binary_name, binary_payload in per_binary_payloads.items():
+        existing = data["binaries"].get(binary_name, {})
+        binary_data = dict(existing) if isinstance(existing, dict) else {}
+        binary_data.update({k: v for k, v in binary_payload.items() if v is not None})
+        data["binaries"][binary_name] = binary_data
+
     write_metadata(cache_dir, data)
 
 
 def get_binary_entry(cache_dir: Path, version: str) -> dict[str, Any]:
-    """Return binary metadata entry or {} if not found."""
     data = read_metadata(cache_dir)
     binaries = data.get("binaries", {})
-    if isinstance(binaries, dict):
-        return dict(binaries.get(version, {}))
+    if not isinstance(binaries, dict):
+        return {}
+
+    if version in _BINARY_METADATA_NAMES:
+        named = binaries.get(version, {})
+        return dict(named) if isinstance(named, dict) else {}
+
+    for binary_name in _BINARY_METADATA_NAMES:
+        candidate = binaries.get(binary_name, {})
+        if isinstance(candidate, dict) and _binary_matches_version(candidate, version):
+            return dict(candidate)
+
     return {}
 
 
 def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
-    """Return all binary entries dict keyed by version."""
     data = read_metadata(cache_dir)
     binaries = data.get("binaries", {})
     if isinstance(binaries, dict):
-        return {k: dict(v) for k, v in binaries.items() if isinstance(v, dict)}
+        return {
+            name: dict(entry)
+            for name in _BINARY_METADATA_NAMES
+            if isinstance((entry := binaries.get(name)), dict)
+        }
     return {}
 
 
 def set_default_binary_entry(cache_dir: Path, version: str) -> None:
-    _set_default_entry(cache_dir, "binaries", version)
+    data = read_metadata(cache_dir)
+    binaries = data.get("binaries", {})
+    if not isinstance(binaries, dict):
+        raise KeyError("Metadata section 'binaries' not found")
+
+    has_match = False
+    for binary_name in _BINARY_METADATA_NAMES:
+        entry = binaries.get(binary_name)
+        if isinstance(entry, dict) and _binary_matches_version(entry, version):
+            has_match = True
+            break
+
+    if not has_match:
+        raise KeyError(f"Binary version '{version}' not found in metadata")
+
+    changed = False
+    for binary_name in _BINARY_METADATA_NAMES:
+        entry = binaries.get(binary_name)
+        if not isinstance(entry, dict):
+            continue
+        entry["is_default"] = 1
+        changed = True
+
+    if not changed:
+        raise KeyError("No binary entries found in metadata")
+
+    write_metadata(cache_dir, data)
 
 
 def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    return _find_default_entry(cache_dir, "binaries")
+    binaries = list_binary_entries(cache_dir)
 
+    firecracker = binaries.get("firecracker")
+    if isinstance(firecracker, dict) and _flag_as_default(firecracker.get("is_default")) == 1:
+        version = _binary_entry_version(firecracker)
+        return version or "firecracker", firecracker
 
-# =============================================================================
-# Migration from legacy per-file JSON
-# =============================================================================
+    jailer = binaries.get("jailer")
+    if isinstance(jailer, dict) and _flag_as_default(jailer.get("is_default")) == 1:
+        version = _binary_entry_version(jailer)
+        return version or "jailer", jailer
 
-
-def migrate_legacy_metadata(cache_dir: Path, kernels_dir: Path, images_dir: Path) -> None:
-    """One-time migration: read existing per-file JSON into metadata.json.
-
-    Reads:
-    - kernels_dir/{kernel_name}.json files -> kernels section
-    - images_dir/{image_id}*.json files -> images section
-    After migrating, removes the individual .json sidecar files.
-    Skips if metadata.json already has data in kernels or images sections.
-    """
-    data = read_metadata(cache_dir)
-
-    # Skip if already has kernel or image data
-    existing_kernels = data.get("kernels", {})
-    existing_images = data.get("images", {})
-    if (isinstance(existing_kernels, dict) and existing_kernels) or (
-        isinstance(existing_images, dict) and existing_images
-    ):
-        logger.debug("Metadata already populated, skipping migration")
-        return
-
-    changed = False
-
-    legacy_default_kernel_name: str | None = None
-
-    # Migrate kernel metadata files
-    if kernels_dir.exists():
-        for meta_path in kernels_dir.glob("*.json"):
-            if meta_path.name == "default.json":
-                try:
-                    legacy_data: dict[str, Any] = json.loads(meta_path.read_text())
-                    legacy_name = legacy_data.get("name")
-                    if legacy_name:
-                        legacy_default_kernel_name = str(legacy_name)
-                        logger.info("Migrated default kernel marker: %s", legacy_name)
-                    meta_path.unlink()
-                except (json.JSONDecodeError, OSError):
-                    pass
-                continue
-            try:
-                kernel_data: dict[str, Any] = json.loads(meta_path.read_text())
-                if isinstance(kernel_data, dict) and "name" in kernel_data:
-                    kernel_name = kernel_data["name"]
-                    if "kernels" not in data:
-                        data["kernels"] = {}
-                    data["kernels"][kernel_name] = kernel_data
-                    changed = True
-                    # Remove the legacy file after migration
-                    meta_path.unlink()
-                    logger.debug("Migrated kernel metadata: %s", kernel_name)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Failed to migrate %s: %s", meta_path, e)
-
-    # Migrate image metadata files
-    if images_dir.exists():
-        for meta_path in images_dir.glob("*.json"):
-            try:
-                image_data: dict[str, Any] = json.loads(meta_path.read_text())
-                if isinstance(image_data, dict):
-                    # Determine image ID from filename (remove .ext4.json, etc.)
-                    image_id = meta_path.stem
-                    # Strip known extensions to get base image ID
-                    for ext in (".ext4", ".btrfs", ".img", ".raw"):
-                        if image_id.endswith(ext):
-                            image_id = image_id[: -len(ext)]
-                            break
-                    if "images" not in data:
-                        data["images"] = {}
-                    data["images"][image_id] = image_data
-                    changed = True
-                    # Remove the legacy file after migration
-                    meta_path.unlink()
-                    logger.debug("Migrated image metadata: %s", image_id)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Failed to migrate %s: %s", meta_path, e)
-
-    if changed:
-        if legacy_default_kernel_name:
-            kernels = data.get("kernels", {})
-            if isinstance(kernels, dict):
-                for kernel_id, kernel_data in kernels.items():
-                    if not isinstance(kernel_data, dict):
-                        continue
-                    filename = str(kernel_data.get("filename", kernel_id))
-                    kernel_data["is_default"] = 1 if filename == legacy_default_kernel_name else 0
-        write_metadata(cache_dir, data)
-        logger.info("Migrated legacy metadata to %s", _metadata_path(cache_dir))
+    return None
