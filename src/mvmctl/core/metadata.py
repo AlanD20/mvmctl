@@ -644,3 +644,57 @@ def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | No
         return version or "jailer", jailer
 
     return None
+
+
+# =============================================================================
+# Network metadata
+# =============================================================================
+
+
+def update_network_entry(cache_dir: Path, network_name: str, **fields: Any) -> None:
+    """Upsert network entry in metadata.json networks section."""
+    data = read_metadata(cache_dir)
+    if "networks" not in data or not isinstance(data.get("networks"), dict):
+        data["networks"] = {}
+
+    network_data: dict[str, Any] = data["networks"].get(network_name, {})
+    network_data.update(fields)
+    data["networks"][network_name] = network_data
+    write_metadata(cache_dir, data)
+
+
+def get_network_entry(cache_dir: Path, network_name: str) -> dict[str, Any]:
+    """Return network metadata entry or {} if not found."""
+    data = read_metadata(cache_dir)
+    networks = data.get("networks", {})
+    if isinstance(networks, dict):
+        return dict(networks.get(network_name, {}))
+    return {}
+
+
+def list_network_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
+    """Return all network entries dict keyed by network name."""
+    data = read_metadata(cache_dir)
+    networks = data.get("networks", {})
+    if isinstance(networks, dict):
+        return {k: dict(v) for k, v in networks.items() if isinstance(v, dict)}
+    return {}
+
+
+def remove_network_entry(cache_dir: Path, network_name: str) -> None:
+    """Remove a network entry from metadata.json."""
+    data = read_metadata(cache_dir)
+    if "networks" in data and isinstance(data["networks"], dict):
+        if network_name in data["networks"]:
+            del data["networks"][network_name]
+            write_metadata(cache_dir, data)
+
+
+def set_default_network_entry(cache_dir: Path, network_name: str) -> None:
+    """Set a network as the default, clearing is_default from all others."""
+    _set_default_entry(cache_dir, "networks", network_name)
+
+
+def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    """Return the default network entry as (name, metadata) or None if not set."""
+    return _find_default_entry(cache_dir, "networks")

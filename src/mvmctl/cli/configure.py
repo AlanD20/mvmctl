@@ -49,10 +49,8 @@ def _run_host_init_noninteractive(cache_dir: Path) -> None:
         print_warning(f"  Host init failed: {e}")
     try:
         from mvmctl.api.network import ensure_default_network
-        from mvmctl.utils.fs import chown_to_real_user, get_networks_dir
 
         ensure_default_network()
-        chown_to_real_user(get_networks_dir())
         print_success("  Default network ready")
     except MVMError:
         pass

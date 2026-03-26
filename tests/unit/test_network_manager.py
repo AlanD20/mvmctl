@@ -1,18 +1,19 @@
+"""Tests for network_manager.py — metadata-based network storage."""
+
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from mvmctl.core.metadata import update_network_entry
 from mvmctl.core.network_manager import (
     NetworkConfig,
     NetworkLease,
     _bridge_name_for,
     _gateway_for_subnet,
-    _load_config,
-    _save_config,
-    _load_leases,
-    _save_leases,
+    _network_entry_to_config,
+    _leases_from_entry,
     list_networks,
     get_network,
     get_network_leases,
@@ -37,79 +38,108 @@ def test_gateway_for_subnet():
     assert _gateway_for_subnet("192.168.100.0/24") == "192.168.100.1"
 
 
-def test_save_and_load_config(mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "testnet"
-    net_dir.mkdir(parents=True)
+class TestNetworkEntryConversion:
+    """Tests for converting metadata entries to NetworkConfig."""
 
-    config = NetworkConfig(
-        name="testnet",
-        cidr="10.20.1.0/24",
-        gateway="10.20.1.1",
-        bridge="mvm-testnet",
-        nat_enabled=True,
-    )
+    def test_network_entry_to_config_success(self):
+        entry = {
+            "cidr": "10.20.1.0/24",
+            "gateway": "10.20.1.1",
+            "bridge": "mvm-testnet",
+            "nat_enabled": True,
+            "created_at": "2026-01-01T00:00:00Z",
+            "is_default": 0,
+        }
+        config = _network_entry_to_config("testnet", entry)
+        assert config is not None
+        assert config.name == "testnet"
+        assert config.cidr == "10.20.1.0/24"
+        assert config.gateway == "10.20.1.1"
+        assert config.bridge == "mvm-testnet"
+        assert config.nat_enabled is True
+        assert config.is_default is False
 
-    _save_config(net_dir, config)
-    loaded = _load_config(net_dir)
-    assert loaded is not None
-    assert loaded.name == "testnet"
-    assert loaded.cidr == "10.20.1.0/24"
+    def test_network_entry_to_config_empty_entry(self):
+        assert _network_entry_to_config("testnet", {}) is None
 
+    def test_network_entry_to_config_missing_required_fields(self):
+        # Missing gateway
+        entry = {"cidr": "10.20.1.0/24", "bridge": "mvm-testnet"}
+        assert _network_entry_to_config("testnet", entry) is None
 
-def test_load_config_migration(mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "testnet"
-    net_dir.mkdir(parents=True)
+        # Missing cidr
+        entry = {"gateway": "10.20.1.1", "bridge": "mvm-testnet"}
+        assert _network_entry_to_config("testnet", entry) is None
 
-    config_file = net_dir / "config.json"
-    config_file.write_text(
-        json.dumps(
-            {
-                "name": "testnet",
-                "subnet": "10.20.2.0/24",
-                "gateway": "10.20.2.1",
-                "bridge": "mvm-testnet",
-                "nat_enabled": True,
-                "created_at": "2026-01-01T00:00:00Z",
-            }
-        )
-    )
+        # Missing bridge
+        entry = {"cidr": "10.20.1.0/24", "gateway": "10.20.1.1"}
+        assert _network_entry_to_config("testnet", entry) is None
 
-    loaded = _load_config(net_dir)
-    assert loaded is not None
-    assert loaded.cidr == "10.20.2.0/24"
-
-
-def test_load_config_not_found():
-    assert _load_config(Path("/nonexistent")) is None
-
-
-def test_save_and_load_leases(mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "testnet"
-    net_dir.mkdir(parents=True)
-
-    leases = [NetworkLease(vm_name="vm1", ip="10.20.1.2")]
-    _save_leases(net_dir, leases)
-
-    loaded = _load_leases(net_dir)
-    assert len(loaded) == 1
-    assert loaded[0].vm_name == "vm1"
-    assert loaded[0].ip == "10.20.1.2"
+    def test_network_entry_to_config_is_default_flag(self):
+        entry = {
+            "cidr": "10.20.1.0/24",
+            "gateway": "10.20.1.1",
+            "bridge": "mvm-testnet",
+            "is_default": 1,
+        }
+        config = _network_entry_to_config("testnet", entry)
+        assert config is not None
+        assert config.is_default is True
 
 
-def test_load_leases_not_found():
-    assert _load_leases(Path("/nonexistent")) == []
+class TestLeasesFromEntry:
+    """Tests for extracting leases from metadata entries."""
+
+    def test_leases_from_entry_success(self):
+        entry = {
+            "leases": [
+                {"vm_name": "vm1", "ip": "10.20.1.2"},
+                {"vm_name": "vm2", "ip": "10.20.1.3"},
+            ]
+        }
+        leases = _leases_from_entry(entry)
+        assert len(leases) == 2
+        assert leases[0].vm_name == "vm1"
+        assert leases[0].ip == "10.20.1.2"
+        assert leases[1].vm_name == "vm2"
+        assert leases[1].ip == "10.20.1.3"
+
+    def test_leases_from_entry_empty(self):
+        assert _leases_from_entry({}) == []
+        assert _leases_from_entry({"leases": []}) == []
+
+    def test_leases_from_entry_invalid_format(self):
+        # leases is not a list
+        assert _leases_from_entry({"leases": "invalid"}) == []
+        # Missing required fields
+        assert _leases_from_entry({"leases": [{"vm_name": "vm1"}]}) == []
+        assert _leases_from_entry({"leases": [{"ip": "10.20.1.2"}]}) == []
+
+
+def _add_network_to_metadata(cache_dir: Path, name: str, **fields) -> None:
+    """Helper to add a network entry to metadata.json."""
+    defaults = {
+        "cidr": "10.20.1.0/24",
+        "gateway": "10.20.1.1",
+        "bridge": f"mvm-{name}",
+        "nat_enabled": True,
+        "created_at": "2026-01-01T00:00:00Z",
+        "leases": [],
+        "bridge_active": True,
+    }
+    defaults.update(fields)
+    update_network_entry(cache_dir, name, **defaults)
 
 
 def test_list_networks(mock_cache_dir: Path):
     assert list_networks() == []
 
-    net_dir1 = mock_cache_dir / "networks" / "net1"
-    net_dir1.mkdir(parents=True)
-    _save_config(net_dir1, NetworkConfig("net1", "10.20.1.0/24", "10.20.1.1", "mvm-net1"))
-
-    net_dir2 = mock_cache_dir / "networks" / "net2"
-    net_dir2.mkdir(parents=True)
-    _save_config(net_dir2, NetworkConfig("net2", "10.20.2.0/24", "10.20.2.1", "mvm-net2"))
+    _add_network_to_metadata(
+        mock_cache_dir, "net1", cidr="10.20.1.0/24", gateway="10.20.1.1", bridge="mvm-net1"
+    )
+    _add_network_to_metadata(
+        mock_cache_dir, "net2", cidr="10.20.2.0/24", gateway="10.20.2.1", bridge="mvm-net2"
+    )
 
     networks = list_networks()
     assert len(networks) == 2
@@ -117,14 +147,36 @@ def test_list_networks(mock_cache_dir: Path):
     assert names == {"net1", "net2"}
 
 
+def test_get_network(mock_cache_dir: Path):
+    assert get_network("nonexistent") is None
+
+    _add_network_to_metadata(
+        mock_cache_dir, "testnet", cidr="10.20.1.0/24", gateway="10.20.1.1", bridge="mvm-testnet"
+    )
+
+    config = get_network("testnet")
+    assert config is not None
+    assert config.name == "testnet"
+    assert config.cidr == "10.20.1.0/24"
+
+
 def test_get_network_leases(mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "testnet"
-    net_dir.mkdir(parents=True)
-    _save_leases(net_dir, [NetworkLease("vm1", "10.20.1.2")])
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "testnet",
+        leases=[{"vm_name": "vm1", "ip": "10.20.1.2"}],
+    )
 
     leases = get_network_leases("testnet")
     assert len(leases) == 1
     assert leases[0].vm_name == "vm1"
+    assert leases[0].ip == "10.20.1.2"
+
+
+def test_get_network_leases_empty(mock_cache_dir: Path):
+    # Network doesn't exist — returns empty list
+    leases = get_network_leases("nonexistent")
+    assert leases == []
 
 
 @patch("mvmctl.core.network_manager.setup_bridge")
@@ -135,16 +187,14 @@ def test_create_network_success(mock_setup_nat, mock_setup_bridge, mock_cache_di
     assert config.cidr == "10.20.0.0/24"
     assert config.gateway == "10.20.0.1"
 
-    # Verify persistence
+    # Verify persistence in metadata
     assert get_network("mynet") is not None
     mock_setup_bridge.assert_called_once_with("mvm-mynet", gateway_cidr="10.20.0.1/24")
     mock_setup_nat.assert_called_once_with("mvm-mynet")
 
 
 def test_create_network_already_exists(mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "mynet"
-    net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
+    _add_network_to_metadata(mock_cache_dir, "mynet")
 
     with pytest.raises(NetworkError, match="already exists"):
         create_network(name="mynet", cidr="10.20.1.0/24")
@@ -167,10 +217,7 @@ def test_create_network_setup_failure(
 @patch("mvmctl.core.network_manager.teardown_bridge")
 @patch("mvmctl.core.network_manager.teardown_nat")
 def test_remove_network(mock_teardown_nat, mock_teardown_bridge, mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "mynet"
-    net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
-    _save_leases(net_dir, [])
+    _add_network_to_metadata(mock_cache_dir, "mynet", leases=[])
 
     remove_network("mynet")
 
@@ -185,10 +232,9 @@ def test_remove_network_not_found():
 
 
 def test_remove_network_with_vms(mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "mynet"
-    net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
-    _save_leases(net_dir, [NetworkLease("vm1", "10.20.1.2")])
+    _add_network_to_metadata(
+        mock_cache_dir, "mynet", leases=[{"vm_name": "vm1", "ip": "10.20.1.2"}]
+    )
 
     with pytest.raises(NetworkError, match="still has VMs attached"):
         remove_network("mynet")
@@ -199,10 +245,7 @@ def test_remove_network_with_vms(mock_cache_dir: Path):
 def test_remove_network_partial_failure(
     mock_teardown_nat, mock_teardown_bridge, mock_cache_dir: Path
 ):
-    net_dir = mock_cache_dir / "networks" / "mynet"
-    net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
-    _save_leases(net_dir, [])
+    _add_network_to_metadata(mock_cache_dir, "mynet", leases=[])
 
     mock_teardown_nat.side_effect = NetworkError("NAT cleanup failed")
 
@@ -213,10 +256,9 @@ def test_remove_network_partial_failure(
 
 @patch("mvmctl.core.network_manager.bridge_exists", return_value=True)
 def test_inspect_network(mock_bridge_exists, mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "mynet"
-    net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
-    _save_leases(net_dir, [NetworkLease("vm1", "10.20.1.2")])
+    _add_network_to_metadata(
+        mock_cache_dir, "mynet", leases=[{"vm_name": "vm1", "ip": "10.20.1.2"}]
+    )
 
     info = inspect_network("mynet")
     assert info["name"] == "mynet"
@@ -238,10 +280,7 @@ def test_inspect_network_not_found():
 
 @patch("mvmctl.core.network_manager.allocate_ip")
 def test_allocate_network_ip(mock_allocate_ip, mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "mynet"
-    net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
-    _save_leases(net_dir, [])
+    _add_network_to_metadata(mock_cache_dir, "mynet", leases=[])
 
     mock_allocate_ip.return_value = "10.20.1.2"
 
@@ -263,10 +302,14 @@ def test_allocate_network_ip_not_found():
 
 
 def test_release_network_ip(mock_cache_dir: Path):
-    net_dir = mock_cache_dir / "networks" / "mynet"
-    net_dir.mkdir(parents=True)
-    _save_config(net_dir, NetworkConfig("mynet", "10.20.1.0/24", "10.20.1.1", "mvm-mynet"))
-    _save_leases(net_dir, [NetworkLease("vm1", "10.20.1.2"), NetworkLease("vm2", "10.20.1.3")])
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "mynet",
+        leases=[
+            {"vm_name": "vm1", "ip": "10.20.1.2"},
+            {"vm_name": "vm2", "ip": "10.20.1.3"},
+        ],
+    )
 
     release_network_ip("mynet", "vm1")
 
@@ -276,7 +319,7 @@ def test_release_network_ip(mock_cache_dir: Path):
 
 
 @patch("mvmctl.core.network_manager.create_network")
-def test_ensure_default_network(mock_create_network, mock_cache_dir: Path):
+def test_ensure_default_network_creates_when_missing(mock_create_network, mock_cache_dir: Path):
     # Doesn't exist, will be created
     mock_create_network.return_value = NetworkConfig(
         "default", "172.35.0.0/24", "172.35.0.1", "mvm-default"
@@ -285,20 +328,25 @@ def test_ensure_default_network(mock_create_network, mock_cache_dir: Path):
     assert config is not None
     mock_create_network.assert_called_once_with("default", cidr="172.35.0.0/24", nat=True)
 
-    # Exists, should return immediately
-    net_dir = mock_cache_dir / "networks" / "default"
-    net_dir.mkdir(parents=True)
-    _save_config(net_dir, config)
 
-    mock_create_network.reset_mock()
+def test_ensure_default_network_returns_existing(mock_cache_dir: Path):
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "default",
+        cidr="172.35.0.0/24",
+        gateway="172.35.0.1",
+        bridge="mvm-default",
+    )
+
     config = ensure_default_network()
-    mock_create_network.assert_not_called()
+    assert config is not None
+    assert config.name == "default"
 
 
 def test_validate_subnet_no_overlap(mock_cache_dir: Path):
-    net_dir1 = mock_cache_dir / "networks" / "net1"
-    net_dir1.mkdir(parents=True)
-    _save_config(net_dir1, NetworkConfig("net1", "10.20.0.0/24", "10.20.0.1", "mvm-net1"))
+    _add_network_to_metadata(
+        mock_cache_dir, "net1", cidr="10.20.0.0/24", gateway="10.20.0.1", bridge="mvm-net1"
+    )
 
     # Should raise error on overlap
     with pytest.raises(NetworkError, match="overlaps with network"):
@@ -309,3 +357,29 @@ def test_validate_subnet_no_overlap(mock_cache_dir: Path):
 
     # Should not raise on non-overlapping
     _validate_subnet_no_overlap("10.20.1.0/24")
+
+
+class TestSetDefaultNetwork:
+    """Tests for set_default_network."""
+
+    def test_set_default_network_success(self, mock_cache_dir: Path):
+        from mvmctl.core.network_manager import set_default_network
+
+        _add_network_to_metadata(mock_cache_dir, "mynet")
+
+        set_default_network("mynet")
+
+        # Verify the network is now default
+        config = get_network("mynet")
+        # is_default should be determined by get_default_network_entry
+        from mvmctl.core.metadata import get_default_network_entry
+
+        default = get_default_network_entry(mock_cache_dir)
+        assert default is not None
+        assert default[0] == "mynet"
+
+    def test_set_default_network_not_found(self, mock_cache_dir: Path):
+        from mvmctl.core.network_manager import set_default_network
+
+        with pytest.raises(NetworkError, match="does not exist"):
+            set_default_network("nonexistent")

@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import ipaddress
-import json
 import logging
 import os
-import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from mvmctl.constants import (
-    CONST_FILE_PERMS_DHCP_LEASES,
-    CONST_FILE_PERMS_NETWORK_CONFIG,
-    CONST_FILE_PERMS_VM_STATE,
     DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_NAME,
     device_prefix,
+)
+from mvmctl.core.metadata import (
+    get_default_network_entry,
+    get_network_entry,
+    list_network_entries,
+    remove_network_entry,
+    set_default_network_entry,
+    update_network_entry,
 )
 from mvmctl.core.network import (
     allocate_ip,
@@ -29,7 +31,7 @@ from mvmctl.core.network import (
     teardown_nat,
 )
 from mvmctl.exceptions import NetworkError
-from mvmctl.utils.fs import get_network_dir, get_networks_dir
+from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.validation import validate_entity_name
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class NetworkConfig:
     bridge: str
     nat_enabled: bool = True
     created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
+    is_default: bool = False
 
 
 @dataclass
@@ -68,83 +71,41 @@ def _gateway_for_subnet(subnet: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Persistence
+# Metadata helpers
 # ---------------------------------------------------------------------------
 
 
-def _load_config(network_dir: Path) -> NetworkConfig | None:
-    config_file = network_dir / "config.json"
-    if not config_file.exists():
+def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig | None:
+    """Convert a metadata entry to NetworkConfig, returns None if essential fields missing."""
+    if not entry:
         return None
-    data = json.loads(config_file.read_text())
-    # Migrate legacy 'subnet' key to 'cidr'
-    if "subnet" in data and "cidr" not in data:
-        data["cidr"] = data.pop("subnet")
-    return NetworkConfig(**data)
+    # Required fields
+    cidr = entry.get("cidr")
+    gateway = entry.get("gateway")
+    bridge = entry.get("bridge")
+    if not isinstance(cidr, str) or not isinstance(gateway, str) or not isinstance(bridge, str):
+        return None
+    return NetworkConfig(
+        name=name,
+        cidr=cidr,
+        gateway=gateway,
+        bridge=bridge,
+        nat_enabled=entry.get("nat_enabled", True),
+        created_at=entry.get("created_at", ""),
+        is_default=entry.get("is_default", 0) == 1,
+    )
 
 
-def _chown_to_real_user(path: Path) -> None:
-    import os
-    import pwd
-
-    sudo_user = os.environ.get("SUDO_USER")
-    if not sudo_user or os.getuid() != 0:
-        return
-    try:
-        pw = pwd.getpwnam(sudo_user)
-        os.chown(path, pw.pw_uid, pw.pw_gid)
-    except (KeyError, OSError):
-        pass
-
-
-def _save_config(network_dir: Path, config: NetworkConfig) -> None:
-    network_dir.mkdir(parents=True, exist_ok=True)
-    config_file = network_dir / "config.json"
-    config_file.write_text(json.dumps(asdict(config), indent=2))
-    config_file.chmod(CONST_FILE_PERMS_NETWORK_CONFIG)
-    _chown_to_real_user(config_file)
-    _chown_to_real_user(network_dir)
-
-
-def _load_leases(network_dir: Path) -> list[NetworkLease]:
-    leases_file = network_dir / "leases.json"
-    if not leases_file.exists():
+def _leases_from_entry(entry: dict[str, Any]) -> list[NetworkLease]:
+    """Extract leases from a metadata entry."""
+    raw_leases = entry.get("leases", [])
+    if not isinstance(raw_leases, list):
         return []
-    data = json.loads(leases_file.read_text())
-    return [NetworkLease(**entry) for entry in data]
-
-
-def _save_leases(network_dir: Path, leases: list[NetworkLease]) -> None:
-    network_dir.mkdir(parents=True, exist_ok=True)
-    leases_file = network_dir / "leases.json"
-    leases_file.write_text(json.dumps([asdict(lease) for lease in leases], indent=2))
-    leases_file.chmod(CONST_FILE_PERMS_DHCP_LEASES)
-    _chown_to_real_user(leases_file)
-
-
-@dataclass
-class NetworkState:
-    """Runtime state for a named network, persisted as ``state.json``."""
-
-    bridge_active: bool
-    last_checked: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
-
-
-def _load_network_state(network_dir: Path) -> NetworkState | None:
-    """Load persisted runtime state for a network."""
-    state_file = network_dir / "state.json"
-    if not state_file.exists():
-        return None
-    data = json.loads(state_file.read_text())
-    return NetworkState(**data)
-
-
-def _save_network_state(network_dir: Path, state: NetworkState) -> None:
-    network_dir.mkdir(parents=True, exist_ok=True)
-    state_file = network_dir / "state.json"
-    state_file.write_text(json.dumps(asdict(state), indent=2))
-    state_file.chmod(CONST_FILE_PERMS_VM_STATE)
-    _chown_to_real_user(state_file)
+    leases = []
+    for item in raw_leases:
+        if isinstance(item, dict) and "vm_name" in item and "ip" in item:
+            leases.append(NetworkLease(vm_name=item["vm_name"], ip=item["ip"]))
+    return leases
 
 
 # ---------------------------------------------------------------------------
@@ -153,29 +114,58 @@ def _save_network_state(network_dir: Path, state: NetworkState) -> None:
 
 
 def list_networks() -> list[NetworkConfig]:
-    """List all named networks."""
-    networks_dir = get_networks_dir()
-    if not networks_dir.exists():
+    """List all configured networks with their metadata.
+
+    Returns:
+        List of NetworkConfig objects with is_default populated from metadata
+    """
+    cache_dir = get_cache_dir()
+    entries = list_network_entries(cache_dir)
+    if not entries:
         return []
 
-    result: list[NetworkConfig] = []
-    for d in sorted(networks_dir.iterdir()):
-        if d.is_dir():
-            config = _load_config(d)
-            if config:
-                result.append(config)
-    return result
+    default_entry = get_default_network_entry(cache_dir)
+    default_name = default_entry[0] if default_entry else None
+
+    configs: list[NetworkConfig] = []
+    for name, entry in entries.items():
+        config = _network_entry_to_config(name, entry)
+        if config is not None:
+            config.is_default = name == default_name
+            configs.append(config)
+
+    return sorted(configs, key=lambda c: c.name)
 
 
 def get_network(name: str) -> NetworkConfig | None:
     """Get a named network by name."""
-    network_dir = get_network_dir(name)
-    return _load_config(network_dir)
+    cache_dir = get_cache_dir()
+    entry = get_network_entry(cache_dir, name)
+    return _network_entry_to_config(name, entry)
 
 
 def get_network_leases(name: str) -> list[NetworkLease]:
     """Get all IP leases for a network."""
-    return _load_leases(get_network_dir(name))
+    cache_dir = get_cache_dir()
+    entry = get_network_entry(cache_dir, name)
+    return _leases_from_entry(entry)
+
+
+def set_default_network(name: str) -> None:
+    """Set a network as the default for VM creation.
+
+    Args:
+        name: Network name to set as default
+
+    Raises:
+        NetworkError: If network does not exist
+    """
+    config = get_network(name)
+    if config is None:
+        raise NetworkError(f"Network '{name}' does not exist")
+
+    cache_dir = get_cache_dir()
+    set_default_network_entry(cache_dir, name)
 
 
 def _persist_iptables_if_root() -> None:
@@ -195,7 +185,7 @@ def create_network(
     """Create a named network.
 
     Sets up the bridge device, IP range, and optionally NAT rules.
-    The network configuration is persisted to disk.
+    The network configuration is persisted to metadata.json.
 
     Args:
         name: Network name.
@@ -211,8 +201,8 @@ def create_network(
     """
     validate_entity_name(name, "network")
 
-    network_dir = get_network_dir(name)
-    if _load_config(network_dir) is not None:
+    # Check if network already exists
+    if get_network(name) is not None:
         raise NetworkError(f"Network '{name}' already exists")
 
     _validate_subnet_no_overlap(cidr, name)
@@ -249,9 +239,19 @@ def create_network(
             logger.warning("Rollback: failed to tear down bridge: %s", e)
         raise
 
-    _save_config(network_dir, config)
-    _save_leases(network_dir, [])
-    _save_network_state(network_dir, NetworkState(bridge_active=True))
+    # Persist to metadata.json
+    cache_dir = get_cache_dir()
+    update_network_entry(
+        cache_dir,
+        name,
+        cidr=cidr,
+        gateway=config.gateway,
+        bridge=config.bridge,
+        nat_enabled=config.nat_enabled,
+        created_at=config.created_at,
+        leases=[],
+        bridge_active=True,
+    )
 
     _persist_iptables_if_root()
 
@@ -261,7 +261,7 @@ def create_network(
 def remove_network(name: str) -> None:
     """Remove a named network.
 
-    Tears down the bridge and NAT rules, then removes persisted state.
+    Tears down the bridge and NAT rules, then removes metadata entry.
 
     Raises:
         NetworkError: If the network has VMs attached or doesn't exist.
@@ -275,12 +275,11 @@ def remove_network(name: str) -> None:
                 "Cannot remove the 'default' network while VMs exist. Remove all VMs first."
             )
 
-    network_dir = get_network_dir(name)
-    config = _load_config(network_dir)
+    config = get_network(name)
     if config is None:
         raise NetworkError(f"Network '{name}' not found")
 
-    leases = _load_leases(network_dir)
+    leases = get_network_leases(name)
     if leases:
         vm_names = ", ".join(lease.vm_name for lease in leases)
         raise NetworkError(
@@ -295,7 +294,9 @@ def remove_network(name: str) -> None:
     except NetworkError as e:
         logger.warning("Partial teardown for network '%s': %s", name, e)
 
-    shutil.rmtree(network_dir, ignore_errors=True)
+    # Remove from metadata.json
+    cache_dir = get_cache_dir()
+    remove_network_entry(cache_dir, name)
 
     _persist_iptables_if_root()
 
@@ -323,15 +324,16 @@ def inspect_network(name: str) -> NetworkInspect:
     """Return full details for a named network."""
     from mvmctl.core.vm_manager import VMManager
 
-    network_dir = get_network_dir(name)
-    config = _load_config(network_dir)
+    config = get_network(name)
     if config is None:
         raise NetworkError(f"Network '{name}' not found")
 
-    leases = _load_leases(network_dir)
+    leases = get_network_leases(name)
     active = bridge_exists(config.bridge)
 
-    _save_network_state(network_dir, NetworkState(bridge_active=active))
+    # Update bridge_active in metadata
+    cache_dir = get_cache_dir()
+    update_network_entry(cache_dir, name, bridge_active=active)
 
     vm_manager = VMManager()
     enriched_vms: list[_VMLease] = []
@@ -373,33 +375,38 @@ def inspect_network(name: str) -> NetworkInspect:
 def allocate_network_ip(network_name: str, vm_name: str) -> str:
     """Allocate the next available IP from a network's subnet.
 
-    Registers the lease in the network's leases.json.
+    Registers the lease in metadata.json.
 
     Returns:
         The allocated IP address string.
     """
-    network_dir = get_network_dir(network_name)
-    config = _load_config(network_dir)
+    config = get_network(network_name)
     if config is None:
         raise NetworkError(f"Network '{network_name}' not found")
 
-    leases = _load_leases(network_dir)
+    leases = get_network_leases(network_name)
     used_ips = [lease.ip for lease in leases]
     # Also reserve the gateway
     used_ips.append(config.gateway)
 
     ip = allocate_ip(used_ips, subnet=config.cidr)
     leases.append(NetworkLease(vm_name=vm_name, ip=ip))
-    _save_leases(network_dir, leases)
+
+    # Persist updated leases to metadata
+    cache_dir = get_cache_dir()
+    update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
+
     return ip
 
 
 def release_network_ip(network_name: str, vm_name: str) -> None:
     """Release a VM's IP lease from a network."""
-    network_dir = get_network_dir(network_name)
-    leases = _load_leases(network_dir)
+    leases = get_network_leases(network_name)
     leases = [lease for lease in leases if lease.vm_name != vm_name]
-    _save_leases(network_dir, leases)
+
+    # Persist updated leases to metadata
+    cache_dir = get_cache_dir()
+    update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
 
 
 def ensure_default_network() -> NetworkConfig:
@@ -424,22 +431,24 @@ class ReconcileResult:
 def reconcile_networks() -> list[ReconcileResult]:
     """Compare stored network state with actual kernel bridge state.
 
-    For each persisted network, checks whether its bridge device still
-    exists on the host.  Updates each network's ``state.json`` and
-    returns a list of reconciliation results.  Entries where
+    For each network in metadata, checks whether its bridge device still
+    exists on the host. Updates bridge_active in metadata.json and
+    returns a list of reconciliation results. Entries where
     ``stale is True`` indicate that the bridge was expected to be up
     but is no longer present in the kernel.
     """
+    cache_dir = get_cache_dir()
     results: list[ReconcileResult] = []
+
     for config in list_networks():
-        network_dir = get_network_dir(config.name)
-        stored = _load_network_state(network_dir)
+        entry = get_network_entry(cache_dir, config.name)
+        stored_active = entry.get("bridge_active")
         actual_active = bridge_exists(config.bridge)
 
-        stored_active = stored.bridge_active if stored else None
         stale = (stored_active is True) and (not actual_active)
 
-        _save_network_state(network_dir, NetworkState(bridge_active=actual_active))
+        # Update bridge_active in metadata
+        update_network_entry(cache_dir, config.name, bridge_active=actual_active)
 
         results.append(
             ReconcileResult(

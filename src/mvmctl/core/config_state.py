@@ -203,7 +203,6 @@ def get_assets_config() -> dict[str, str]:
         get_kernels_dir,
         get_keys_dir,
         get_logs_dir,
-        get_networks_dir,
         get_vms_dir,
     )
 
@@ -225,7 +224,6 @@ def get_assets_config() -> dict[str, str]:
     _default("kernels_dir", str(get_kernels_dir()))
     _default("images_dir", str(get_images_dir()))
     _default("bin_dir", str(get_bin_dir()))
-    _default("networks_dir", str(get_networks_dir()))
     _default("vms_dir", str(get_vms_dir()))
     _default("keys_dir", str(get_keys_dir()))
     _default("logs_dir", str(get_logs_dir()))

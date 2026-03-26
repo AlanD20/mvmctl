@@ -11,11 +11,12 @@ from mvmctl.api.network import (
     inspect_network,
     list_networks,
     remove_network,
+    set_default_network,
 )
 from mvmctl.cli._helpers import check_name_arg
-from mvmctl.constants import DEFAULT_NETWORK_NAME
 from mvmctl.exceptions import NetworkError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
+from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import validate_entity_name
 
 app = typer.Typer(
@@ -49,6 +50,7 @@ def ls(
                 "bridge": n.bridge,
                 "nat_enabled": n.nat_enabled,
                 "created_at": n.created_at,
+                "is_default": n.is_default,
                 "vm_count": len(get_network_leases(n.name)),
             }
             for n in networks
@@ -62,21 +64,39 @@ def ls(
 
     rows = [
         [
-            f"{n.name} (default)" if n.name == DEFAULT_NETWORK_NAME else n.name,
+            f"* {n.name}" if n.is_default else f"  {n.name}",
             n.cidr,
             n.gateway,
             n.bridge,
             "yes" if n.nat_enabled else "no",
             str(len(get_network_leases(n.name))),
-            n.created_at[:19] if n.created_at else "-",
+            human_readable_time(n.created_at) if n.created_at else "-",
         ]
         for n in networks
     ]
     print_table(
         title="Networks",
-        columns=["Name", "CIDR", "Gateway", "Bridge", "NAT", "VM Count", "Created"],
+        columns=["Name", "CIDR", "Gateway", "Bridge", "NAT", "VMs", "Created"],
         rows=rows,
     )
+
+
+@app.command(
+    name="set-default", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def set_default(
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Network name to set as default"),
+) -> None:
+    """Set a network as the default for VM creation."""
+    name = check_name_arg(ctx, name)
+    validate_entity_name(name, "network")
+    try:
+        set_default_network(name)
+    except NetworkError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    print_success(f"Default network set to '{name}'")
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

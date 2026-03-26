@@ -99,6 +99,16 @@ def _resolve_active_firecracker_bin() -> str:
     return DEFAULT_FIRECRACKER_BIN
 
 
+def _resolve_default_network() -> str:
+    """Resolve the default network from metadata, falling back to 'default'."""
+    from mvmctl.api.metadata import get_default_network_entry
+
+    entry = get_default_network_entry()
+    if entry is not None:
+        return entry[0]  # network name
+    return DEFAULT_NETWORK_NAME
+
+
 @app.command()
 def create(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
@@ -119,8 +129,8 @@ def create(
         None, "--mem", "--memory", help="Memory in MiB (default: from user config)"
     ),
     ip: Optional[str] = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
-    network_name: str = typer.Option(
-        DEFAULT_NETWORK_NAME, "--network", "--net", help="Named network to attach to"
+    network_name: Optional[str] = typer.Option(
+        None, "--network", "--net", help="Named network to use"
     ),
     mac: Optional[str] = typer.Option(
         None, "--mac", help="Custom MAC address (auto-generated if omitted)"
@@ -224,6 +234,9 @@ def create(
         enable_api_socket if enable_api_socket is not None else _defaults.enable_api_socket
     )
     effective_pci: bool = enable_pci if enable_pci is not None else _defaults.enable_pci
+    effective_network: str = (
+        network_name if network_name is not None else _resolve_default_network()
+    )
 
     if image is None:
         image = _resolve_default_image()
@@ -283,7 +296,7 @@ def create(
             vcpus=effective_vcpus,
             mem=effective_mem,
             ip=ip,
-            network_name=network_name,
+            network_name=effective_network,
             mac=mac,
             ssh_key=ssh_key,
             user_data=user_data,

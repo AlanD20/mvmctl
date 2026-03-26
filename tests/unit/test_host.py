@@ -1332,14 +1332,20 @@ class TestCheckPrivileges:
 
     @patch("mvmctl.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
     @patch("mvmctl.core.host_privilege.os.getuid", return_value=1000)
-    def test_user_in_group_passes(self, mock_uid, mock_which):
+    @patch("mvmctl.core.host_privilege.os.getgroups", return_value=[1000, 957])
+    @patch("mvmctl.core.host_privilege.os.getgid", return_value=1000)
+    @patch("mvmctl.core.host_privilege.os.getegid", return_value=1000)
+    def test_user_in_group_passes(self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which):
         import grp
         import pwd
 
         mock_grp_info = MagicMock()
         mock_grp_info.gr_mem = ["testuser"]
+        mock_grp_info.gr_gid = 957
+
         mock_pwd_info = MagicMock()
         mock_pwd_info.pw_name = "testuser"
+        mock_pwd_info.pw_gid = 1000
 
         with (
             patch.object(grp, "getgrnam", return_value=mock_grp_info),
@@ -1349,14 +1355,20 @@ class TestCheckPrivileges:
 
     @patch("mvmctl.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
     @patch("mvmctl.core.host_privilege.os.getuid", return_value=1000)
-    def test_user_not_in_group_fails(self, mock_uid, mock_which):
+    @patch("mvmctl.core.host_privilege.os.getgroups", return_value=[1000])
+    @patch("mvmctl.core.host_privilege.os.getgid", return_value=1000)
+    @patch("mvmctl.core.host_privilege.os.getegid", return_value=1000)
+    def test_user_not_in_group_fails(self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which):
         import grp
         import pwd
 
         mock_grp_info = MagicMock()
         mock_grp_info.gr_mem = ["otheruser"]
+        mock_grp_info.gr_gid = 957
+
         mock_pwd_info = MagicMock()
         mock_pwd_info.pw_name = "testuser"
+        mock_pwd_info.pw_gid = 1000
 
         with (
             patch.object(grp, "getgrnam", return_value=mock_grp_info),
@@ -1372,6 +1384,59 @@ class TestCheckPrivileges:
 
         with patch.object(grp, "getgrnam", side_effect=KeyError("mvm")):
             with pytest.raises(PrivilegeError, match="does not exist"):
+                check_privileges("/usr/sbin/ip")
+
+    @patch("mvmctl.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
+    @patch("mvmctl.core.host_privilege.os.getuid", return_value=1000)
+    @patch("mvmctl.core.host_privilege.os.getgroups", return_value=[1000, 957])
+    @patch("mvmctl.core.host_privilege.os.getgid", return_value=957)
+    @patch("mvmctl.core.host_privilege.os.getegid", return_value=957)
+    def test_user_with_primary_group_passes(
+        self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which
+    ):
+        """Test that user whose primary gid is mvm group passes privilege check."""
+        import grp
+        import pwd
+
+        mock_grp_info = MagicMock()
+        mock_grp_info.gr_mem = []  # User NOT in gr_mem (primary group users aren't listed)
+        mock_grp_info.gr_gid = 957
+
+        mock_pwd_info = MagicMock()
+        mock_pwd_info.pw_name = "testuser"
+        mock_pwd_info.pw_gid = 957  # Primary group IS mvm
+
+        with (
+            patch.object(grp, "getgrnam", return_value=mock_grp_info),
+            patch.object(pwd, "getpwuid", return_value=mock_pwd_info),
+        ):
+            check_privileges("/usr/sbin/ip")
+
+    @patch("mvmctl.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
+    @patch("mvmctl.core.host_privilege.os.getuid", return_value=1000)
+    @patch("mvmctl.core.host_privilege.os.getgroups", return_value=[1000])
+    @patch("mvmctl.core.host_privilege.os.getgid", return_value=1000)
+    @patch("mvmctl.core.host_privilege.os.getegid", return_value=1000)
+    def test_user_in_group_but_session_not_restarted(
+        self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which
+    ):
+        """Test session-not-restarted error when group not in process credentials."""
+        import grp
+        import pwd
+
+        mock_grp_info = MagicMock()
+        mock_grp_info.gr_mem = ["testuser"]  # User IS in group per /etc/group
+        mock_grp_info.gr_gid = 957
+
+        mock_pwd_info = MagicMock()
+        mock_pwd_info.pw_name = "testuser"
+        mock_pwd_info.pw_gid = 1000  # Different primary group
+
+        with (
+            patch.object(grp, "getgrnam", return_value=mock_grp_info),
+            patch.object(pwd, "getpwuid", return_value=mock_pwd_info),
+        ):
+            with pytest.raises(PrivilegeError, match="session does not have the group active"):
                 check_privileges("/usr/sbin/ip")
 
 

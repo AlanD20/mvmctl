@@ -100,16 +100,6 @@ def get_state_file() -> Path:
     return get_vms_dir() / "state.json"
 
 
-def get_networks_dir() -> Path:
-    """Return the directory for named network state."""
-    return get_cache_dir() / "networks"
-
-
-def get_network_dir(name: str) -> Path:
-    """Return the directory for a specific network."""
-    return get_networks_dir() / name
-
-
 def get_keys_dir() -> Path:
     """Return the directory for SSH key management."""
     return get_cache_dir() / "keys"

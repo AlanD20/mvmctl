@@ -14,6 +14,7 @@ from mvmctl.core.network_manager import (
     inspect_network,
     list_networks,
     release_network_ip,
+    set_default_network,
 )
 from mvmctl.core.network_manager import (
     create_network as _create_network,
@@ -35,6 +36,7 @@ __all__ = [
     "allocate_network_ip",
     "release_network_ip",
     "ensure_default_network",
+    "set_default_network",
 ]
 
 

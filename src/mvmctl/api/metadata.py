@@ -15,6 +15,7 @@ from typing import Any
 
 from mvmctl.core.metadata import find_images_by_short_id as _find_images_by_short_id
 from mvmctl.core.metadata import get_default_image_entry as _get_default_image_entry
+from mvmctl.core.metadata import get_default_network_entry as _get_default_network_entry
 from mvmctl.core.metadata import get_image_entry as _get_image_entry
 from mvmctl.core.metadata import list_image_entries as _list_image_entries
 from mvmctl.core.metadata import list_kernel_entries as _list_kernel_entries
@@ -32,6 +33,7 @@ __all__ = [
     "find_images_by_short_id",
     "find_kernels_by_short_id",
     "get_default_image_entry",
+    "get_default_network_entry",
     "remove_image_entry",
     "remove_kernel_entry",
     "set_default_image_entry",
@@ -127,3 +129,10 @@ def set_default_image_entry(cache_dir: Path, image_id: str) -> None:
 
 def set_default_image_by_internal_id(cache_dir: Path, internal_id: str) -> None:
     _set_default_image_by_internal_id(cache_dir, internal_id)
+
+
+def get_default_network_entry() -> tuple[str, dict[str, Any]] | None:
+    """Return the default network entry as (name, metadata) or None if not set."""
+    from mvmctl.utils.fs import get_cache_dir
+
+    return _get_default_network_entry(get_cache_dir())

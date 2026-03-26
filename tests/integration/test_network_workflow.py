@@ -233,54 +233,48 @@ class TestNetworkWithSubprocessMocking:
     """Test network workflows with mocked subprocess calls."""
 
     @patch("mvmctl.core.network.subprocess.run")
-    @patch("mvmctl.utils.fs.get_networks_dir")
     @patch("mvmctl.api.network.check_privileges")
-    def test_network_create_with_bridge_setup(self, mock_check_priv, mock_net_dir, mock_run):
+    def test_network_create_with_bridge_setup(self, mock_check_priv, mock_run, mock_cache_dir):
         """Test network creation with mocked bridge setup commands."""
-        from mvmctl.core.network_manager import create_network
+        from mvmctl.core.network_manager import create_network, get_network
 
         mock_check_priv.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        net_dir = Path("/tmp/test-networks")
-        mock_net_dir.return_value = net_dir
-
-        with patch(
-            "mvmctl.core.network_manager.get_network_dir", return_value=net_dir / "subprocess-net"
-        ):
-            with patch("mvmctl.core.network_manager._load_config", return_value=None):
-                with patch("mvmctl.core.network_manager._validate_subnet_no_overlap"):
-                    with patch("mvmctl.core.network_manager._save_config"):
-                        with patch("mvmctl.core.network_manager._save_leases"):
-                            with patch("mvmctl.core.network_manager._save_network_state"):
-                                with patch("mvmctl.core.network_manager.setup_nat"):
-                                    result = create_network("subprocess-net", cidr="10.77.0.0/24")
+        with patch("mvmctl.core.network_manager._validate_subnet_no_overlap"):
+            with patch("mvmctl.core.network_manager.setup_nat"):
+                result = create_network("subprocess-net", cidr="10.77.0.0/24")
 
         assert result.name == "subprocess-net"
         assert result.cidr == "10.77.0.0/24"
+        # Verify persisted in metadata
+        assert get_network("subprocess-net") is not None
 
     @patch("mvmctl.core.network.subprocess.run")
-    @patch("mvmctl.utils.fs.get_networks_dir")
     @patch("mvmctl.api.network.check_privileges")
-    def test_network_remove_with_bridge_teardown(self, mock_check_priv, mock_net_dir, mock_run):
+    def test_network_remove_with_bridge_teardown(self, mock_check_priv, mock_run, mock_cache_dir):
         """Test network removal with mocked bridge teardown commands."""
-        from mvmctl.core.network_manager import remove_network
+        from mvmctl.core.metadata import update_network_entry
+        from mvmctl.core.network_manager import remove_network, get_network
 
         mock_check_priv.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        net_dir = Path("/tmp/test-networks")
-        mock_net_dir.return_value = net_dir
+        # Add network to metadata first
+        update_network_entry(
+            mock_cache_dir,
+            "teardown-net",
+            cidr="10.66.0.0/24",
+            gateway="10.66.0.1",
+            bridge="mvm-teardown-n",
+            nat_enabled=True,
+            created_at="2024-01-01T00:00:00+00:00",
+            leases=[],
+            bridge_active=True,
+        )
 
-        with patch(
-            "mvmctl.core.network_manager.get_network_dir", return_value=net_dir / "teardown-net"
-        ):
-            with patch(
-                "mvmctl.core.network_manager._load_config",
-                return_value=_make_network("teardown-net", "10.66.0.0/24"),
-            ):
-                with patch("mvmctl.core.network_manager._load_leases", return_value=[]):
-                    with patch("mvmctl.core.network_manager.shutil.rmtree"):
-                        remove_network("teardown-net")
+        remove_network("teardown-net")
 
         mock_run.assert_called()
+        # Verify removed from metadata
+        assert get_network("teardown-net") is None

@@ -49,18 +49,35 @@ def check_privileges(binary: str) -> None:
 
     try:
         g = grp.getgrnam(PROJECT_GROUP)
-        username = pwd.getpwuid(os.getuid()).pw_name
-        if username not in g.gr_mem:
-            raise PrivilegeError(
-                f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
-                f"Run 'sudo mvm host init' to configure privileges, "
-                f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
-            )
     except KeyError as e:
         raise PrivilegeError(
             f"Group '{PROJECT_GROUP}' does not exist. "
             f"Run 'sudo mvm host init' to set up privilege management."
         ) from e
+
+    user_pw = pwd.getpwuid(os.getuid())
+    username = user_pw.pw_name
+
+    # Check if user is in group via supplementary OR primary group
+    is_supplementary_member = username in g.gr_mem
+    is_primary_group = user_pw.pw_gid == g.gr_gid
+    user_in_group = is_supplementary_member or is_primary_group
+
+    if not user_in_group:
+        raise PrivilegeError(
+            f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
+            f"Run 'sudo mvm host init' to configure privileges, "
+            f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
+        )
+
+    # User is in group per /etc/group — but check if THIS process has the credentials
+    process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
+    if g.gr_gid not in process_gids:
+        raise PrivilegeError(
+            f"Your user is in the '{PROJECT_GROUP}' group, but your current session "
+            f"does not have the group active yet. Please log out and log back in, "
+            f"or run: newgrp {PROJECT_GROUP}"
+        )
 
 
 def check_privileges_interactive(binary: str, operation_description: str = "") -> None:

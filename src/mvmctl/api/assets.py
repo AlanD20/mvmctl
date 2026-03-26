@@ -35,7 +35,6 @@ from mvmctl.core.kernel import (
     build_kernel_pipeline,
     download_firecracker_kernel,
     get_default_kernel_path,
-    human_readable_time,
     list_kernels,
     resolve_kernel_spec,
     set_default_kernel,
@@ -43,6 +42,7 @@ from mvmctl.core.kernel import (
 from mvmctl.exceptions import ConfigError, ImageError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.fs import get_assets_dir, get_images_dir, get_kernels_dir
+from mvmctl.utils.time import human_readable_time
 
 logger = logging.getLogger(__name__)
 

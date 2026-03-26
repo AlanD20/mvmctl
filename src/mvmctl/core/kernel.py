@@ -21,11 +21,6 @@ import yaml
 from mvmctl.constants import (
     CONST_FILE_PERMS_EXECUTABLE,
     CONST_MEBIBYTE_BYTES,
-    CONST_SECONDS_PER_DAY,
-    CONST_SECONDS_PER_HOUR,
-    CONST_SECONDS_PER_MONTH,
-    CONST_SECONDS_PER_WEEK,
-    CONST_SECONDS_PER_YEAR,
     DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_KERNEL_BUILD_JOBS,
     HTTP_TIMEOUT_KERNEL_CONFIG_S,
@@ -220,48 +215,7 @@ class ParsedKernelFilename:
     arch: str
 
 
-def human_readable_time(iso_timestamp: str) -> str:
-    """Convert ISO timestamp to human-readable relative time.
-
-    Args:
-        iso_timestamp: ISO format timestamp (e.g., 2026-03-24T17:37:45.896256+00:00)
-
-    Returns:
-        Human-readable string like "2 minutes ago", "1 hour ago", "3 days ago"
-    """
-    if not iso_timestamp or iso_timestamp == "-":
-        return "-"
-
-    try:
-        # Parse the ISO timestamp
-        dt = datetime.fromisoformat(iso_timestamp)
-        now = datetime.now(tz=timezone.utc)
-        diff = now - dt
-
-        total_seconds = int(diff.total_seconds())
-
-        if total_seconds < 60:
-            return "just now"
-        elif total_seconds < CONST_SECONDS_PER_HOUR:
-            minutes = total_seconds // 60
-            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-        elif total_seconds < CONST_SECONDS_PER_DAY:
-            hours = total_seconds // CONST_SECONDS_PER_HOUR
-            return f"{hours} hour{'s' if hours != 1 else ''} ago"
-        elif total_seconds < CONST_SECONDS_PER_WEEK:
-            days = total_seconds // CONST_SECONDS_PER_DAY
-            return f"{days} day{'s' if days != 1 else ''} ago"
-        elif total_seconds < CONST_SECONDS_PER_MONTH:
-            weeks = total_seconds // CONST_SECONDS_PER_WEEK
-            return f"{weeks} week{'s' if weeks != 1 else ''} ago"
-        elif total_seconds < CONST_SECONDS_PER_YEAR:
-            months = total_seconds // CONST_SECONDS_PER_MONTH
-            return f"{months} month{'s' if months != 1 else ''} ago"
-        else:
-            years = total_seconds // CONST_SECONDS_PER_YEAR
-            return f"{years} year{'s' if years != 1 else ''} ago"
-    except (ValueError, TypeError):
-        return "-"
+# Re-export for backward compatibility
 
 
 def parse_kernel_filename(filename: str) -> ParsedKernelFilename:
