@@ -10,6 +10,7 @@ from mvmctl.api.config import (
     set_config_value,
     validate_config,
 )
+from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.fs import get_assets_dir, get_vm_dir
@@ -78,7 +79,7 @@ def dump_vm(
 ) -> None:
     """Print the Firecracker JSON config for a VM."""
     vm_dir = get_vm_dir(name)
-    config_file = vm_dir / "firecracker.json"
+    config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
 
     if not config_file.exists():
         print_error(f"VM '{name}' not found or no config file")

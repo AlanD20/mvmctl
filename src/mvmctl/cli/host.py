@@ -6,6 +6,7 @@ import sys
 import typer
 
 from mvmctl.api.host import (
+    HostChange,
     check_kvm_access,
     check_required_binaries,
     clean_host,
@@ -16,7 +17,6 @@ from mvmctl.api.host import (
     reset_host,
 )
 from mvmctl.constants import PROJECT_GROUP
-from mvmctl.core.host import HostChange
 from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.fs import get_cache_dir

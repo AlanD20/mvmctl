@@ -20,6 +20,8 @@ vm_defaults:
   disk_size: "2G"
   enable_api_socket: false
   enable_pci: false
+  enable_logging: true
+  enable_metrics: false
   lsm_flags: "landlock,lockdown,yama,integrity,selinux,bpf"
 
 network:
@@ -32,6 +34,26 @@ vm:
   files:
     kernel_filename: "vmlinux"
     rootfs_filename: "rootfs.ext4"
+    rootfs_basename: "rootfs"
+  cloud_init:
+    seed_path: "/var/lib/cloud/seed/nocloud"
+    kernel_cmdline_ds: "ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/"
+    final_message: "mvm cloud-init done"
+    disable_snapd_cmd: "systemctl disable --now snapd.socket 2>/dev/null || true"
+    dirname: "cloud-init"
+  boot:
+    console: "console=ttyS0"
+    reboot: "reboot=k"
+    panic: "panic=1"
+    pci_off: "pci=off"
+  network_guest:
+    mac_default: "02:FC:00:00:00:01"
+    mac_prefix: "02:FC"
+    iface: "eth0"
+  firecracker:
+    log_level: "Debug"
+    drive_cache_type: "Unsafe"
+    drive_io_engine: "Sync"
   firecracker_bin_name: "firecracker"
   logging:
     type: "os"
@@ -61,6 +83,15 @@ image:
     max_parallel_downloads: 4
 
 host:
+  system_dirs:
+    sysctl_conf_dir: "/etc/sysctl.d"
+    sudoers_dir: "/etc/sudoers"
+  sbin_paths:
+    ip: "/usr/sbin/ip"
+    iptables: "/usr/sbin/iptables"
+    iptables_restore: "/usr/sbin/iptables-restore"
+    iptables_save: "/usr/sbin/iptables-save"
+    sysctl: "/usr/sbin/sysctl"
   privileged_binaries:
     - "/usr/sbin/ip"
     - "/usr/sbin/iptables"

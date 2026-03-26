@@ -19,12 +19,12 @@ from mvmctl.api.vms import (
     ssh_vm,
 )
 from mvmctl.constants import (
+    DEFAULT_FIRECRACKER_BIN,
     DEFAULT_NETWORK_NAME,
     DEFAULT_SNAPSHOT_RESUME,
     DEFAULT_VM_LOG_FOLLOW,
     DEFAULT_VM_LOG_LINES,
     DEFAULT_VM_LOG_TYPE,
-    FALLBACK_FIRECRACKER_BIN,
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMInstance, VMState
@@ -48,9 +48,9 @@ def help_cmd(ctx: typer.Context) -> None:
 
 def _resolve_default_image() -> str | None:
     try:
-        from mvmctl.core.config_state import get_config_value
+        from mvmctl.api.config import get_defaults_config
 
-        val = get_config_value("default_image")
+        val = get_defaults_config().get("image")
         return str(val) if val is not None else None
     except Exception:
         return None
@@ -58,7 +58,7 @@ def _resolve_default_image() -> str | None:
 
 def _resolve_default_kernel() -> str | None:
     try:
-        from mvmctl.core.kernel import get_default_kernel_path
+        from mvmctl.api.assets import get_default_kernel_path
         from mvmctl.utils.fs import get_kernels_dir
 
         path = get_default_kernel_path(get_kernels_dir())
@@ -68,7 +68,7 @@ def _resolve_default_kernel() -> str | None:
 
 
 def _get_vm_defaults() -> "VMDefaultsConfig":
-    from mvmctl.core.config import load_config
+    from mvmctl.api.config import load_config
     from mvmctl.utils.fs import get_assets_dir
 
     return load_config(get_assets_dir()).vm_defaults
@@ -76,20 +76,20 @@ def _get_vm_defaults() -> "VMDefaultsConfig":
 
 def _resolve_active_firecracker_bin() -> str:
     try:
-        from mvmctl.core.config_state import get_firecracker_config
+        from mvmctl.api.config import get_firecracker_config
 
         stored = get_firecracker_config().get("default_binary_path")
         if stored is not None and Path(str(stored)).exists():
             return str(stored)
-        from mvmctl.core.binary_manager import list_local_versions
+        from mvmctl.api.assets import list_local_versions as _list_local_versions
 
-        local = list_local_versions()
+        local = _list_local_versions()
         active = next((b for b in local if b.is_active), None)
         if active:
             return str(active.firecracker_path)
     except Exception:
         pass
-    return FALLBACK_FIRECRACKER_BIN
+    return DEFAULT_FIRECRACKER_BIN
 
 
 @app.command()
@@ -313,9 +313,9 @@ def rm(
         # Remove by name (prompts if multiple with same name):
         mvm vm rm --name runner1 --name runner2
     """
-    from mvmctl.core.vm_manager import get_vm_manager
+    from mvmctl.api.vms import get_vm_manager as _get_vm_manager
 
-    manager = get_vm_manager()
+    manager = _get_vm_manager()
     targets: list[VMInstance] = []
     errors: list[str] = []
 

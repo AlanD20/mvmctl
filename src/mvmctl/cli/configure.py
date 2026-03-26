@@ -14,6 +14,7 @@ from mvmctl.api.assets import (
     list_remote_versions,
     load_images_config,
 )
+from mvmctl.api.config import initialize_default_config
 from mvmctl.api.host import check_kvm_access, get_host_state, init_host
 from mvmctl.api.keys import add_key, create_key, list_keys
 from mvmctl.constants import (
@@ -21,7 +22,6 @@ from mvmctl.constants import (
     KERNEL_TARBALL_URL_TEMPLATE,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
-from mvmctl.core.config_state import initialize_default_config
 from mvmctl.exceptions import BinaryError, HostError, KernelError, MVMError, MVMKeyError
 from mvmctl.utils.console import print_info, print_success, print_warning
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir

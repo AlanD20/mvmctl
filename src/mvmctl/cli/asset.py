@@ -11,32 +11,39 @@ from mvmctl.api.assets import (
     BinaryVersion,
     ImageImportSpec,
     build_kernel_pipeline,
+    download_firecracker_kernel,
     fetch_binary,
     fetch_image,
+    human_readable_time,
     import_image,
+    list_kernels,
     list_local_versions,
     list_remote_versions,
     load_images_config,
     remove_version,
+    resolve_kernel_spec,
     set_active_version,
+    set_default_kernel,
+)
+from mvmctl.api.metadata import (
+    find_images_by_short_id,
+    get_image_entry,
+    list_image_entries,
+    remove_image_entry,
+    update_image_entry,
 )
 from mvmctl.constants import (
+    DEFAULT_FC_CI_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_IMAGE_CONVERT_TO,
     DEFAULT_IMAGE_IMPORT_FORMAT,
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
     DEFAULT_KERNEL_VERSION,
     DEFAULT_REMOTE_VERSION_LIMIT,
-    FALLBACK_FC_CI_VERSION,
     IMAGE_IMPORT_FORMAT_MAP,
+    KERNEL_TYPE_FIRECRACKER,
+    KERNEL_TYPE_OFFICIAL,
     SUPPORTED_IMAGE_EXTENSIONS,
-)
-from mvmctl.core import kernel as kernel_core
-from mvmctl.core.metadata import (
-    find_images_by_short_id,
-    get_image_entry,
-    remove_image_entry,
-    update_image_entry,
 )
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, ImageError, KernelError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
@@ -95,16 +102,14 @@ def kernel_ls(
     ),
 ) -> None:
     """List cached kernels (both Firecracker CI and official upstream)."""
-    from mvmctl.core.kernel import list_kernels
-
     kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
     kernels_dir.mkdir(parents=True, exist_ok=True)
     kernels = list_kernels(kernels_dir)
 
     if firecracker_only:
-        kernels = [k for k in kernels if k.get("type") == "firecracker"]
+        kernels = [k for k in kernels if k.get("type") == KERNEL_TYPE_FIRECRACKER]
     elif official_only:
-        kernels = [k for k in kernels if k.get("type") == "official"]
+        kernels = [k for k in kernels if k.get("type") == KERNEL_TYPE_OFFICIAL]
 
     if json_output:
         typer.echo(json.dumps(kernels, indent=2))
@@ -115,8 +120,6 @@ def kernel_ls(
 
         print_info("No kernels found. Use 'mvm kernel fetch --type firecracker' to download one.")
         return
-
-    from mvmctl.core.kernel import human_readable_time
 
     rows: list[list[str]] = []
     for k in kernels:
@@ -135,25 +138,23 @@ def kernel_ls(
             ]
         )
     print_table(
-        title="Cached Kernels",
+        title="Downloaded Kernels",
         columns=["Def", "ID", "Name", "Version", "Arch", "Type", "Last Modified", "Size"],
         rows=rows,
     )
 
 
 def _get_ci_version() -> str:
-    from mvmctl.core.config_state import get_firecracker_config
+    from mvmctl.api.config import get_firecracker_config
 
     ci_version = get_firecracker_config().get("ci_version", "")
     if not ci_version:
-        from mvmctl.core.binary_manager import list_local_versions as _lv
-
-        local = _lv()
+        local = list_local_versions()
         active = next((b for b in local if b.is_active), None)
         if active:
             parts = active.version.split(".")
             ci_version = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else active.version
-    return ci_version or FALLBACK_FC_CI_VERSION
+    return ci_version or DEFAULT_FC_CI_VERSION
 
 
 @kernel_app.command(name="fetch")
@@ -188,26 +189,26 @@ def kernel_fetch(
     kernels_dir.mkdir(parents=True, exist_ok=True)
 
     if firecracker:
-        if kernel_type is not None and kernel_type != "firecracker":
+        if kernel_type is not None and kernel_type != KERNEL_TYPE_FIRECRACKER:
             print_error("--firecracker cannot be combined with a different --type value")
             raise typer.Exit(code=1)
-        kernel_type = "firecracker"
+        kernel_type = KERNEL_TYPE_FIRECRACKER
 
     if kernel_type is None:
         print_error("Provide --type <kernel-type> or use --firecracker")
         raise typer.Exit(code=1)
 
     try:
-        spec = kernel_core.resolve_kernel_spec(kernel_type=kernel_type, version=version)
+        spec = resolve_kernel_spec(kernel_type=kernel_type, version=version)
     except KernelError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1) from exc
 
-    if spec.kernel_type == "firecracker":
+    if spec.kernel_type == KERNEL_TYPE_FIRECRACKER:
         ci_version = _get_ci_version()
         output_name = out.name if out is not None else None
         try:
-            result = kernel_core.download_firecracker_kernel(
+            result = download_firecracker_kernel(
                 ci_version=ci_version,
                 arch=arch,
                 kernels_dir=kernels_dir,
@@ -219,7 +220,7 @@ def kernel_fetch(
             raise typer.Exit(code=1) from exc
         print_success(f"Firecracker kernel ready: {result}")
 
-    elif spec.kernel_type == "official":
+    elif spec.kernel_type == KERNEL_TYPE_OFFICIAL:
         import platform
 
         effective_version = spec.version or DEFAULT_KERNEL_VERSION
@@ -233,7 +234,7 @@ def kernel_fetch(
 
         source_url = spec.source
         try:
-            build_dir_path = build_kernel_pipeline(
+            pipeline_result = build_kernel_pipeline(
                 version=effective_version,
                 source_url=source_url,
                 output_path=output_path,
@@ -248,8 +249,20 @@ def kernel_fetch(
             print_error(f"Kernel build failed: {exc}")
             raise typer.Exit(code=1) from exc
 
+        if pipeline_result.config_result:
+            for warning in pipeline_result.config_result.warnings:
+                print_warning(warning)
+            for info in pipeline_result.config_result.info_messages:
+                print_info(info)
+
+        if pipeline_result.build_result:
+            for warning in pipeline_result.build_result.warnings:
+                print_warning(warning)
+            for info in pipeline_result.build_result.info_messages:
+                print_info(info)
+
         if keep_build_dir:
-            print_info(f"Build directory kept at: {build_dir_path}")
+            print_info(f"Build directory kept at: {pipeline_result.build_dir}")
 
         result = output_path
         print_success(f"Kernel built: {result}")
@@ -259,9 +272,7 @@ def kernel_fetch(
         raise typer.Exit(code=1)
 
     if set_default:
-        from mvmctl.core.kernel import set_default_kernel as _set_default
-
-        _set_default(kernels_dir, result.name)
+        set_default_kernel(kernels_dir, result.name)
         print_success(f"Default kernel set to: {result.name}")
 
     raise typer.Exit(code=0)
@@ -273,8 +284,6 @@ def kernel_set_default(
     kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
 ) -> None:
     """Set a kernel as the default for VM creation."""
-    from mvmctl.core.kernel import set_default_kernel
-
     kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
     try:
         set_default_kernel(kernels_dir, name)
@@ -389,11 +398,7 @@ def image_ls(
     default_img = _get_default_image()
     yaml_ids = {img.id for img in images}
 
-    from mvmctl.core.kernel import human_readable_time as _hrt
-    from mvmctl.core.metadata import list_image_entries as _list_img_entries
-    from mvmctl.utils.fs import get_cache_dir as _get_cache_dir
-
-    _all_meta = _list_img_entries(_get_cache_dir())
+    _all_meta = list_image_entries(get_cache_dir())
 
     def _find_meta_for_yaml_id(yaml_id: str) -> tuple[str, dict[str, object]] | None:
         for _k, _v in _all_meta.items():
@@ -414,7 +419,7 @@ def image_ls(
                         "name": img.name,
                         "format": img.format,
                         "fs_type": str(meta.get("fs_type", img.convert_to)),
-                        "added": _hrt(str(meta.get("pulled_at", "")))
+                        "added": human_readable_time(str(meta.get("pulled_at", "")))
                         if meta.get("pulled_at")
                         else "-",
                     }
@@ -429,7 +434,7 @@ def image_ls(
                     "name": str(meta.get("os_name", meta_id)),
                     "format": str(meta.get("fs_type", "unknown")),
                     "fs_type": str(meta.get("fs_type", "unknown")),
-                    "added": _hrt(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-",
+                    "added": human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-",
                 }
             )
         typer.echo(json.dumps(result, indent=2))
@@ -452,7 +457,7 @@ def image_ls(
         if entry:
             meta_key, meta = entry
             display_id = meta_key[:6]
-            added = _hrt(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+            added = human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
             fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
         else:
             display_id = "-"
@@ -478,7 +483,7 @@ def image_ls(
                 found_path = images_dir / filename
         if found_path is None or not found_path.exists():
             continue
-        added = _hrt(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+        added = human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
         fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
         os_name = str(meta.get("os_name", meta_id))
         default_marker = "✓" if meta_id == default_img else " "
@@ -497,7 +502,7 @@ def image_ls(
 
 def _get_default_image() -> str | None:
     try:
-        from mvmctl.core.config_state import get_defaults_config
+        from mvmctl.api.config import get_defaults_config
 
         val = get_defaults_config().get("image")
         return str(val) if val is not None else None
@@ -593,7 +598,7 @@ def image_fetch(
             if not typer.confirm("Re-download anyway?", default=False):
                 print_info("Skipping download. Use --force to overwrite.")
                 if set_default:
-                    from mvmctl.core.config_state import set_defaults_value
+                    from mvmctl.api.config import set_defaults_value
 
                     set_defaults_value("image", spec.id)
                     print_success(f"Default image set to: {spec.id}")
@@ -628,7 +633,7 @@ def image_fetch(
         print_success(f"Image ready: {result}")
         print_info(f"  ID: {full_id[:6]}")
         if set_default:
-            from mvmctl.core.config_state import set_defaults_value
+            from mvmctl.api.config import set_defaults_value
 
             set_defaults_value("image", spec.id)
             print_success(f"Default image set to: {spec.id}")
@@ -669,7 +674,7 @@ def image_set_default(
         print_error(f"Image '{image_id}' not found in {images_dir}. Download or import it first.")
         raise typer.Exit(code=1)
 
-    from mvmctl.core.config_state import set_defaults_value
+    from mvmctl.api.config import set_defaults_value
 
     set_defaults_value("image", stored_id)
     print_success(f"✓ Default image set to: {image_id}")
@@ -833,7 +838,7 @@ def image_import(
     print_info(f"  ID:   {short_id}")
 
     if set_default:
-        from mvmctl.core.config_state import set_defaults_value
+        from mvmctl.api.config import set_defaults_value
 
         set_defaults_value("image", image_id)
         print_success(f"Default image set to: {image_id}")
@@ -895,7 +900,7 @@ def bin_ls(
 
 @bin_app.command(name="fetch")
 def bin_fetch(
-    version: str = typer.Argument(..., help="Version to download (e.g. 1.12.0)"),
+    version: str = typer.Argument(..., help="Version to download (e.g. 1.15.0)"),
 ) -> None:
     """Download a specific Firecracker version."""
     try:
