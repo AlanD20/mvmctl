@@ -94,6 +94,8 @@ Configuration for launching a Firecracker VM.
 | `guest_mac` | `str \| None` | MAC address for the guest NIC |
 | `tap_device` | `str \| None` | Host TAP interface name |
 | `boot_args` | `str \| None` | Override kernel boot arguments |
+| `root_uuid` | `str \| None` | Filesystem UUID for the root partition (used in boot args) |
+| `root_fs_type` | `str \| None` | Filesystem type of the root image (e.g. ext4, btrfs) |
 | `enable_api_socket` | `bool` | Enable Firecracker HTTP API socket (default: False) |
 | `enable_pci` | `bool` | Enable PCI device support (default: False) |
 | `lsm_flags` | `str` | Linux Security Module flags for boot args |
@@ -624,7 +626,7 @@ Load the built-in image catalogue from YAML.
 
 ---
 
-#### `build_kernel_pipeline(version: str, source_url: str, output_path: Path, build_dir: Path, sha256: str | None = None, jobs: int | None = None) -> bool`
+#### `build_kernel_pipeline(version: str, source_url: str, output_path: Path, build_dir: Path | None = None, sha256: str | None = None, jobs: int | None = None, keep_build_dir: bool = False, user_config_path: Path | None = None, arch: str | None = None, kernel_spec: KernelSpec | None = None, use_cache: bool = True) -> KernelPipelineResult`
 
 Run the full kernel build pipeline: download source, extract, configure, compile, copy `vmlinux`.
 
@@ -633,11 +635,16 @@ Run the full kernel build pipeline: download source, extract, configure, compile
 | `version` | `str` | — | Kernel version string, e.g. `"6.1.102"` |
 | `source_url` | `str` | — | URL to download the kernel tarball from |
 | `output_path` | `Path` | — | Destination path for the compiled `vmlinux` |
-| `build_dir` | `Path` | — | Directory for intermediate build artifacts |
+| `build_dir` | `Path \| None` | `None` | Directory for intermediate build artifacts |
 | `sha256` | `str \| None` | `None` | Expected SHA256 checksum for integrity verification |
 | `jobs` | `int \| None` | `None` | Parallel make jobs. Defaults to CPU count. |
+| `keep_build_dir` | `bool` | `False` | Keep the build directory after completion |
+| `user_config_path` | `Path \| None` | `None` | Optional path to user config overlay |
+| `arch` | `str \| None` | `None` | Target architecture |
+| `kernel_spec` | `KernelSpec \| None` | `None` | Custom kernel specification |
+| `use_cache` | `bool` | `True` | Whether to use the kernel build cache |
 
-**Returns:** `True` on success.
+**Returns:** `KernelPipelineResult` describing the build outcome.
 
 **Raises:** `KernelError` on any build step failure.
 

@@ -249,10 +249,11 @@ def kernel_fetch(...):
 
 ### kernel.py (805 lines)
 - `fetch_kernel_sha256(version)` — fetches `.sha256` sidecar before download
-- `build_kernel_pipeline()` — auto-fetches sha256, downloads tarball, patches config, builds
+- `build_kernel_pipeline()` — auto-fetches sha256, downloads tarball, patches config, builds, returns `KernelPipelineResult`
 - `download_firecracker_kernel()` — downloads prebuilt from Firecracker CI S3
 - `human_readable_time(iso)` — "5 minutes ago" format; imported by CLI asset.py
 - `parse_kernel_filename(name)` → `ParsedKernelFilename(base_name, version, arch)`
+- Implements config fragments merging and `--clean-build` cache bypassing logic.
 
 ### image.py (666 lines)
 - `fetch_image(spec, out, force)` — download + sha256 verify + optional QCOW2 convert

@@ -117,21 +117,22 @@ special `id` value or `format` is required.
 ## kernels.yaml
 
 **Path:** `src/mvmctl/assets/kernels.yaml`
-**Consumed by:** `mvm kernel fetch --type official` (build pipeline)
+**Consumed by:** `mvm kernel fetch` (build pipeline or direct download)
 
-Defines the default parameters for the official upstream kernel build workflow.
-These values are used when the corresponding CLI flag is omitted.
+Defines the default parameters for the official upstream kernel build workflow and the Firecracker CI kernel download workflow.
 
 ### Structure
 
 ```yaml
 kernel-official:
-  version: <string>          # kernel version to fetch (e.g. "6.1.102")
+  type: official               # kernel type (official or firecracker)
+  version: <string>          # kernel version to fetch (e.g. "6.19.9")
   source: <url>              # tarball URL (can reference {version})
   sha256: <hex|null>         # expected digest of the tarball, or null
   sha256_url: <url|null>     # upstream checksum URL (informational)
-  config_fragments:          # list of config overlay files to apply
-    - <path>
+  config_url_template: <url> # URL to fetch the base config from
+  config_fragments:          # list of config overlay files or URLs to apply
+    - <path_or_url>
   output_name: <string>      # filename for the built vmlinux
   build_dir: <path>          # temporary directory used during compilation
   parallel_jobs: <int|null>  # build parallelism; null = use FALLBACK_KERNEL_BUILD_JOBS
@@ -144,23 +145,43 @@ kernel-official:
       value: <string>
   required_settings:         # settings that MUST be =y after build; missing ones trigger a prompt
     - <CONFIG_OPTION=y>
+
+kernel-firecracker:
+  type: firecracker
+  version: <string>
+  source: <url>
+  list_url_template: <url>   # S3 listing URL template for dynamically resolving the latest binary
+  config_url_template: <url> # Optional base config template
+  output_name: <string>
+  build_dir: <path>
+  sha256: <hex|null>
+  sha256_url: <url|null>
+  config_fragments: []
+  parallel_jobs: null
+  enabled_configs: []
+  disabled_configs: []
+  set_val_configs: []
+  required_settings: []
 ```
 
 ### Field reference
 
 | Field | Description |
 |-------|-------------|
-| `version` | Kernel version string passed to the build pipeline. Overridden by `--version` on the CLI. |
-| `source` | Tarball download URL. At runtime this is superseded by `KERNEL_TARBALL_URL_TEMPLATE` from `defaults.yaml`. |
-| `sha256` / `sha256_url` | Same semantics as [images.yaml SHA-256](#sha-256-semantics): `null` skips verification; a hex value is checked against the downloaded tarball. |
-| `config_fragments` | Paths to additional kernel config files merged on top of the Firecracker baseline config. Relative paths are resolved from the project root. |
-| `output_name` | Base filename for the compiled `vmlinux` binary in the kernels cache. |
+| `type` | Whether this entry represents an `official` (built from source) or `firecracker` (pre-built) kernel. |
+| `version` | Kernel version string. Overridden by `--version` on the CLI. |
+| `source` | Tarball download URL or S3 base URL. |
+| `list_url_template` | S3 listing URL template for Firecracker CI kernels; placeholders: `{ci_version}`, `{arch}`, `{version}`. |
+| `config_url_template` | URL template to download the base `.config` file. |
+| `sha256` / `sha256_url` | Same semantics as [images.yaml SHA-256](#sha-256-semantics). |
+| `config_fragments` | Paths or URLs to additional kernel config files merged on top of the base config. |
+| `output_name` | Base filename for the compiled or downloaded `vmlinux` binary in the kernels cache. |
 | `build_dir` | Working directory for the kernel compilation. Cleaned up automatically unless `--keep-build-dir` is passed. |
 | `parallel_jobs` | `make -j` value. `null` defers to `FALLBACK_KERNEL_BUILD_JOBS` (defaults to 1). |
-| `enabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --enable`. Applied before any user-supplied `--kernel-config` override. |
+| `enabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --enable`. |
 | `disabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --disable`. |
-| `set_val_configs` | List of `{option, value}` pairs passed to `scripts/config --set-val`. Each entry sets an integer-valued config option. |
-| `required_settings` | List of `CONFIG_OPTION=y` strings that must be present in `.config` after the build. If any are missing the build prompts the user before continuing. |
+| `set_val_configs` | List of `{option, value}` pairs passed to `scripts/config --set-val`. |
+| `required_settings` | List of `CONFIG_OPTION=y` strings that must be present in `.config` after the build. |
 
 ---
 

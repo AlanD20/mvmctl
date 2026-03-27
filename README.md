@@ -155,7 +155,7 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | Command | Description |
 |---------|-------------|
 | `mvm kernel ls` | List cached kernels |
-| `mvm kernel fetch` | Download a kernel (official or Firecracker-optimized) |
+| `mvm kernel fetch` | Download or build a kernel (official or Firecracker-optimized) |
 | `mvm kernel set-default` | Set a kernel as the default for VM creation |
 | `mvm kernel rm` | Remove a cached kernel |
 
@@ -165,6 +165,8 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 |------|-------------|---------|
 | `--type` | `firecracker` or `official` | `firecracker` |
 | `--version VERSION` | Kernel version | (latest) |
+| `--name NAME` | Override the base name of the output file | `vmlinux` or `vmlinux-fc` |
+| `--clean-build` | Bypass cache and force a clean kernel build | false |
 
 ---
 
@@ -494,6 +496,16 @@ All four commands must pass before opening a PR — they are enforced by CI.
 - **Architecture layers:** `cli/` → `api/` → `core/` — no skipping layers. See [`AGENTS.md`](AGENTS.md) for the full architecture reference.
 - **No hardcoded defaults** — use `FALLBACK_*` constants in `constants.py`.
 - **Strict mypy** — no `type: ignore` suppressions.
+- One feature or fix per PR; write a clear description of *why*, not just *what*.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+suppressions.
 - One feature or fix per PR; write a clear description of *why*, not just *what*.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.

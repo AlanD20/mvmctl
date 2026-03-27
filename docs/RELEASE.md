@@ -93,19 +93,16 @@ Pushing a tag that matches `v*` triggers the `release.yml` GitHub Actions workfl
 
 Once the tag is pushed, `release.yml` runs without any manual intervention:
 
-1. **Binary builds** — PyInstaller builds a standalone `mvm` binary on two runners:
-   - `ubuntu-22.04` (glibc 2.35) — produces artifact named `mvm-linux-ubuntu-22.04`
+1. **Binary builds** — Nuitka builds a standalone `mvm` binary on the runner:
    - `ubuntu-24.04` (glibc 2.39) — produces artifact named `mvm-linux-ubuntu-24.04`
 
-   Two binaries are needed because a binary linked against glibc 2.39 will not run on a host with glibc 2.35.
-
-2. **GitHub release creation** — a GitHub release is created for the tag with auto-generated release notes. Both binaries are attached as release assets.
+2. **GitHub release creation** — a GitHub release is created for the tag with auto-generated release notes. The binary is attached as a release asset.
 
 3. **Artifact upload** — all build artifacts are uploaded as GitHub Actions artifacts for debugging if needed.
 
 > **Note:** PyPI publishing is **not** automated by the release workflow. To publish to PyPI, follow the manual steps in the [Yanking a Bad Release](#yanking-a-bad-release) section or run `uv build && twine upload dist/*` after verifying the release.
 
-You do not need to run PyInstaller or `gh release` manually. Binary builds and GitHub release creation are automated.
+You do not need to run Nuitka or `gh release` manually. Binary builds and GitHub release creation are automated.
 
 ## Verifying a Release
 

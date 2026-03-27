@@ -200,9 +200,9 @@ All MVM environment variables use the `MVM_` prefix.
 | Variable | Description | Default |
 |---|---|---|
 | `MVM_CACHE_DIR` | Override the cache directory for images, kernels, and VM state | `~/.cache/mvmctl` |
-| `MVM_CONFIG_FILE` | Override the config file path | `~/.config/mvm/config.yaml` |
+| `MVM_CONFIG_DIR` | Override the config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
-| `MVM_FIRECRACKER_BIN` | Path to the Firecracker binary | auto-detected from `$PATH` |
+| `MVM_FIRECRACKER_BIN` | Path to the Firecracker binary | auto-detected from metadata |
 
 When writing code that reads config or paths, always go through the settings module rather than reading env vars directly. That keeps everything in one place and makes testing easier.
 
@@ -221,18 +221,18 @@ To rename the project, update `pyproject.toml` and re-run the PyInstaller comman
 
 ### Building the Standalone Binary
 
-The project ships a self-contained single-file binary built with PyInstaller. The binary bundles all runtime dependencies and requires no Python installation on the target machine.
+The project ships a self-contained single-file binary built primarily with Nuitka for high performance. The binary bundles all runtime dependencies and requires no Python installation on the target machine.
 
 ```bash
 git clone https://github.com/your-org/mvmctl
 cd mvmctl
 uv sync --group dev --group build
-pyinstaller --onefile --name mvm src/mvmctl/main.py
+uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
 ./dist/mvm --version
 ./dist/mvm --help
 ```
 
-The GitHub Actions `release.yml` workflow runs this automatically on every tagged release and uploads the binary as a release asset. Two binaries are produced — one built on `ubuntu-22.04` and one on `ubuntu-24.04` — because glibc version differences mean a binary from 24.04 will not run on 22.04.
+PyInstaller can also be used for faster compilation during development. The GitHub Actions `release.yml` workflow runs Nuitka automatically on every tagged release and uploads the binary as a release asset.
 
 ## Privileged Operations
 
