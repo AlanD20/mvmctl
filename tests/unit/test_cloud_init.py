@@ -132,7 +132,11 @@ def test_create_cloud_init_iso_success(tmp_path):
         # Verify the command uses cloud-localds
         call_args = mock_run_cmd.call_args[0][0]
         assert call_args[0] == "cloud-localds"
-        assert call_args[1] == str(output_iso)
+        assert "-N" in call_args
+        assert str(cloud_init_dir / "network-config") in call_args
+        assert str(output_iso) in call_args
+        assert str(cloud_init_dir / "user-data") in call_args
+        assert str(cloud_init_dir / "meta-data") in call_args
 
 
 def test_create_cloud_init_iso_missing_file(tmp_path):

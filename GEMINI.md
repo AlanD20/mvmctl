@@ -5,7 +5,7 @@
 
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 
-It handles everything from downloading official kernels and root filesystem images to setting up bridge networking, creating/destroying VMs, SSH access, log streaming, and cleanup.
+It handles everything from downloading official kernels and root filesystem images to setting up bridge networking, creating/destroying VMs, SSH access, log streaming, and cleanup. Detailed binary and system requirements are documented in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
 **Tech Stack:**
 - **Language:** Python 3.13+
@@ -36,11 +36,16 @@ uv run mvm --help
 ```
 
 **Building a Standalone Binary:**
+PyInstaller (Fast build, decompression overhead):
 ```bash
-pip install -e ".[dev]" pyinstaller
-pyinstaller --onefile --name mvm src/mvmctl/main.py
-# The output will be located at dist/mvm
+uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
 ```
+
+Nuitka (Slow build, compiled C++ performance - Recommended):
+```bash
+uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
+```
+*Note: Binaries are located in the `dist/` directory.*
 
 ## Testing and Quality Gates
 All checks are enforced in CI and must pass before opening a PR.

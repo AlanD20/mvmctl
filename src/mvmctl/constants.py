@@ -2,6 +2,7 @@
 
 import functools
 import importlib.metadata
+import importlib.resources
 import ipaddress
 from pathlib import Path
 from typing import Any, Final
@@ -40,14 +41,22 @@ def _format_path(path: tuple[str, ...]) -> str:
 @functools.lru_cache(maxsize=1)
 def _load_defaults_yaml() -> dict[str, Any]:
     """Load packaged defaults.yaml once for constant bootstrapping."""
-    defaults_path = Path(__file__).parent / "assets" / "defaults.yaml"
     try:
-        with defaults_path.open("r", encoding="utf-8") as f:
+        # Using importlib.resources is more robust across different install/freeze scenarios
+        resource_path = importlib.resources.files("mvmctl") / "assets" / "defaults.yaml"
+        with resource_path.open("r", encoding="utf-8") as f:
             loaded = yaml.safe_load(f) or {}
     except (OSError, yaml.YAMLError) as exc:
-        raise RuntimeError(f"Failed to load required defaults file: {defaults_path}") from exc
+        # Fallback to Path(__file__) if importlib.resources fails (e.g., during development or very old Python)
+        try:
+            defaults_path = Path(__file__).parent / "assets" / "defaults.yaml"
+            with defaults_path.open("r", encoding="utf-8") as f:
+                loaded = yaml.safe_load(f) or {}
+        except Exception:
+            raise RuntimeError(f"Failed to load required defaults file: {exc}") from exc
+
     if not isinstance(loaded, dict):
-        raise RuntimeError(f"defaults.yaml root must be a mapping: {defaults_path}")
+        raise RuntimeError("defaults.yaml root must be a mapping")
     return loaded
 
 

@@ -101,14 +101,17 @@ Return: summary of changes made.
 mvmctl/
 ├── src/mvmctl/
 │   ├── main.py          # LazyMVMGroup (click.Group) — lazy-loads sub-apps from _COMMAND_SPECS
-│   ├── constants.py     # Single source of truth — CLI name, env prefix, all defaults
+│   ├── constants.py     # Single source of truth — CLI name, env prefix, all defaults; uses importlib.resources
 │   ├── exceptions.py    # Custom exception hierarchy (MVMError → domain subclasses)
 │   ├── cli/             # Thin Typer command definitions (no business logic)
-│   ├── api/             # Stable public Python API; adds privilege checks before core
-│   ├── core/            # All business logic, subprocess, Firecracker interaction
-│   ├── models/          # Pure dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
-│   ├── utils/           # Shared helpers: console, process, fs, http, audit, validation
+│   ├── api/             # Stable public Python API boundary. Performs privilege checks before delegating to core/
+│   ├── core/            # All business logic, subprocesses, and Firecracker interactions
+│   ├── models/          # Pure @dataclass objects containing domain data (VMInstance, VMConfig, etc.)
+│   ├── utils/           # Shared helpers (console, process, fs, http, audit, validation)
 │   └── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
+├── docs/                # Project documentation
+│   ├── DEPENDENCIES.md  # Detailed map of all binary and system dependencies per command
+│   └── RELEASE.md       # Release process and build instructions (Nuitka/PyInstaller)
 ├── tests/               # 48 test_*.py (41 unit, 4 integration, 3 layer_compliance); see tests/AGENTS.md
 └── pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
 ```
@@ -132,6 +135,7 @@ mvmctl/
 |--------|------|---------|
 | `PROJECT_NAME` | Final[str] | Resolved from package metadata |
 | `CLI_NAME` | Final[str] | Resolved from entry points, defaults to "mvm" |
+| `_load_defaults_yaml()`| function | Loads `defaults.yaml` via `importlib.resources` |
 | `_BOOTSTRAP_NAME` | Final[str] | Internal package name "mvmctl" |
 | `env_var(suffix)` | function | Returns `MVM_*` env var name |
 | `DEFAULT_*` | Final[*] | User-facing defaults from `defaults.yaml` |
@@ -325,10 +329,11 @@ uv sync --group dev            # Install all deps
 uv run pytest tests/ -x -q    # Test (stop at first failure)
 uv run ruff check src/ && uv run mypy src/  # Lint + types
 
-# Build standalone binary
-pip install -e ".[dev]" pyinstaller
-pyinstaller --onefile --name mvm src/mvmctl/main.py
-# Output: dist/mvm
+# Build standalone binary (Nuitka - Recommended for performance)
+uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
+
+# Build standalone binary (PyInstaller - Fast build)
+uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
 ```
 
 ## NOTES

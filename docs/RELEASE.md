@@ -37,20 +37,43 @@ uv build
 
 ### 2. Building the Standalone Binary with uv
 
-This uses PyInstaller to produce a single-file executable. We use `uv run` with the `build` dependency group to ensure all required tools are available. **Crucially, we must bundle the `assets/` directory** using the `--add-data` flag so the binary can access its bundled configurations at runtime:
+You can build a standalone executable using either **PyInstaller** or **Nuitka**.
+
+#### Option A: PyInstaller (Bundled Byte-code)
+
+PyInstaller produces a single-file executable by bundling the Python interpreter and byte-code. This is fast to build but has a slight decompression overhead on startup.
 
 ```bash
-uv run --group build pyinstaller --onefile --name mvm --add-data "src/mvmctl/assets:mvmctl/assets" src/mvmctl/main.py
+uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
 # The output will be located at dist/mvm
 ```
 
-You can verify the binary by running:
+#### Option B: Nuitka (Compiled C++)
+
+Nuitka translates the Python code into C++ and compiles it into a machine-code binary. This results in much faster startup and overall execution, though the build time is significantly longer.
 
 ```bash
-./dist/mvm --version
+uv run --group build python -m nuitka --onefile --output-dir=dist --output-filename=mvm-nuitka --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets src/mvmctl/main.py
+# The output will be located at dist/mvm-nuitka
 ```
 
-## Tagging and Pushing
+### 3. Comparing Performance
+
+To compare the startup and execution speed of both binaries, use the `time` command:
+
+```bash
+# Compare help output speed
+time ./dist/mvm --help
+time ./dist/mvm-nuitka --help
+
+# Compare version output speed
+time ./dist/mvm --version
+time ./dist/mvm-nuitka --version
+```
+
+Look at the `real` time to see the total elapsed time for each. Nuitka should typically be faster due to the lack of a decompression step.
+
+### 4. Tagging and Pushing
 
 After committing the version bump:
 

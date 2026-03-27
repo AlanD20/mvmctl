@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import importlib.util
 import logging
 import os
 from dataclasses import dataclass
@@ -12,6 +13,21 @@ from dataclasses import dataclass
 import click
 import typer
 import typer.models
+
+if getattr(importlib.util, "find_spec", lambda x: None)("sys") and getattr(
+    importlib.import_module("sys"), "frozen", False
+):
+    # Help PyInstaller's static analysis find the subcommands that we lazy-load
+    # in the LazyMVMGroup.get_command method. These imports are only needed for
+    # PyInstaller to see the dependencies, but they also ensure that when we are
+    # frozen, all commands are readily available in memory.
+    import mvmctl.cli.asset  # noqa: F401
+    import mvmctl.cli.config  # noqa: F401
+    import mvmctl.cli.configure  # noqa: F401
+    import mvmctl.cli.host  # noqa: F401
+    import mvmctl.cli.key  # noqa: F401
+    import mvmctl.cli.network  # noqa: F401
+    import mvmctl.cli.vm  # noqa: F401
 
 from mvmctl.constants import _BOOTSTRAP_NAME, CLI_NAME, env_var
 
