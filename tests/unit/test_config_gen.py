@@ -316,6 +316,22 @@ def test_config_gen_extra_drives():
     assert config["drives"][1]["is_root_device"] is False
 
 
+def test_config_gen_cloud_init_drive_added_once():
+    vm_config = VMConfig(
+        name="ci-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        cloud_init_mode=CloudInitMode.AUTO,
+        cloud_init_iso_path=Path("/tmp/cloud-init.iso"),
+    )
+
+    config = ConfigGenerator(vm_config).generate()
+    cloud_init_drives = [drive for drive in config["drives"] if drive["drive_id"] == "cloud-init"]
+
+    assert len(cloud_init_drives) == 1
+    assert cloud_init_drives[0]["path_on_host"] == "/tmp/cloud-init.iso"
+
+
 def test_config_gen_logging_disabled():
     vm_config = VMConfig(
         name="no-log",

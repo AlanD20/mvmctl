@@ -20,13 +20,10 @@ from mvmctl.constants import (
     CONST_VM_MEM_MAX_MIB,
     CONST_VM_MEM_MIN_MIB,
     DEFAULT_CLOUD_INIT_DIRNAME,
-    DEFAULT_CLOUD_INIT_DRIVE_ID,
     DEFAULT_CLOUD_INIT_ISO_NAME,
     DEFAULT_FC_API_SOCKET_FILENAME,
     DEFAULT_FC_CONFIG_FILENAME,
     DEFAULT_FC_CONSOLE_LOG_FILENAME,
-    DEFAULT_FC_DRIVE_CACHE_TYPE,
-    DEFAULT_FC_DRIVE_IO_ENGINE,
     DEFAULT_FC_LOG_FILENAME,
     DEFAULT_FC_PID_FILENAME,
     DEFAULT_FIRECRACKER_BIN_NAME,
@@ -518,21 +515,6 @@ def create_vm(
             except CloudInitError as e:
                 shutil.rmtree(vm_dir, ignore_errors=True)
                 raise MVMError(f"Failed to create cloud-init ISO: {e}") from e
-
-        # Add cloud-init drive if ISO is configured
-    if cloud_init_iso is not None:
-        cloud_init_drive: DriveConfig = {
-            "drive_id": DEFAULT_CLOUD_INIT_DRIVE_ID,
-            "path_on_host": str(cloud_init_iso),
-            "is_root_device": False,
-            "is_read_only": True,
-            "partuuid": None,
-            "cache_type": DEFAULT_FC_DRIVE_CACHE_TYPE,
-            "io_engine": DEFAULT_FC_DRIVE_IO_ENGINE,
-            "rate_limiter": None,
-            "socket": None,
-        }
-        extra_drives.append(cloud_init_drive)
 
     socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
     _net = _ipaddress.IPv4Network(net_config.cidr, strict=False)

@@ -159,6 +159,8 @@ def test_create_vm_core_success(
     assert vm.ip == "10.20.0.5"
     vm_config_arg = mock_config_gen.call_args.args[0]
     assert vm_config_arg.root_uuid == "11111111-2222-3333-4444-555555555555"
+    assert vm_config_arg.cloud_init_iso_path is not None
+    assert vm_config_arg.extra_drives == []
     mock_manager.register.assert_called_once()
     mock_popen.assert_called_once()
     mock_write_pid.assert_called_once()
