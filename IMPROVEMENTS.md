@@ -14,8 +14,9 @@ VM:
 - when `mvm vm create` throws an exception, it leaves out the directory creation of the vm state!
 - ensure root partition detection is available on both `mvm image fetch` and `mvm image import`
 - nocloud-net port from the flag is not passed dynamically in the code.
-- DO NOT COPY rootfs into vm state file! use absolute file to cached imgaes
 -  when user fetches/imports an image via `mvm image fetch/import`, the process at the end it must run 'blkid -p -s UUID -o value' on the final image that has only rootfs content, and then store the `fs_uuid` in the image's metadata. And then later when user enters `mvm vm create ...` the command must pull the `fs_uuid` of the image from metadata and use it as boot arg with root=UUID={fs_uuid}
+- DO NOT COPY rootfs into vm state file! use absolute file to cached imgaes
+- each image has `fs_type` in the metadata file, this type must be used in the boot arg of firecracker json file which `rootfstype={fs_type}`
 
 Kernel:
 - `mvm kernel fetch` the effective_arch defaults to the `host machine arch` (e.g., x86_64), this is wrong, it must be default to x86_64 because the CLI has defined it! this does not have relevency with current host's architecture

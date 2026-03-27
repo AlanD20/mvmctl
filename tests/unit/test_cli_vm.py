@@ -120,7 +120,21 @@ def test_create_vm_rejects_non_matching_image_short_id(mocker: MockerFixture):
     mock_create.assert_not_called()
 
 
-def test_create_vm_resolves_kernel_short_id(mocker: MockerFixture):
+def test_create_vm_short_id_preserves_identifier_for_uuid_lookup(mocker: MockerFixture):
+    vm = _make_vm("newvm")
+    image_path = "/cache/images/ubuntu-24.04.ext4"
+    mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value=image_path)
+    mocker.patch("mvmctl.cli.vm.resolve_kernel_short_id_path", return_value="/tmp/vmlinux")
+    mock_create = mocker.patch("mvmctl.cli.vm.create_vm", return_value=vm)
+    result = runner.invoke(
+        app,
+        ["create", "--name", "newvm", "--image", "1b0a", "--kernel", "def456"],
+    )
+    assert result.exit_code == 0
+    mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["image"] == "1b0a"
+    assert mock_create.call_args.kwargs["kernel"] == "/tmp/vmlinux"
+
     vm = _make_vm("newvm")
     mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value="/tmp/image.ext4")
     mocker.patch("mvmctl.cli.vm.resolve_kernel_short_id_path", return_value="/tmp/vmlinux")
@@ -131,7 +145,7 @@ def test_create_vm_resolves_kernel_short_id(mocker: MockerFixture):
     )
     assert result.exit_code == 0
     mock_create.assert_called_once()
-    assert mock_create.call_args.kwargs["image"] == "/tmp/image.ext4"
+    assert mock_create.call_args.kwargs["image"] == "abc123"
     assert mock_create.call_args.kwargs["kernel"] == "/tmp/vmlinux"
 
 

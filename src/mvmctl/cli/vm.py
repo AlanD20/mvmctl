@@ -283,7 +283,6 @@ def create(
     else:
         try:
             resolved_image_path = resolve_image_short_id_path(image)
-            image = str(resolved_image_path)
         except MVMError:
             print_error(
                 f"Image short ID '{image}' was not found or is ambiguous. "
