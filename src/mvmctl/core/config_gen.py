@@ -1,6 +1,7 @@
 """Firecracker JSON config generation."""
 
 import json
+import re
 from pathlib import Path
 from typing import TypedDict
 
@@ -111,6 +112,7 @@ class ConfigGenerator:
 
     def generate(self) -> FirecrackerConfig:
         boot_args = self.vm_config.boot_args or self._build_default_boot_args()
+        boot_args = self._ensure_root_partuuid_in_boot_args(boot_args)
 
         context = {
             "kernel_image_path": str(self.vm_config.kernel_path),
@@ -154,7 +156,7 @@ class ConfigGenerator:
             "path_on_host": str(self.vm_config.rootfs_path),
             "is_root_device": True,
             "is_read_only": False,
-            "partuuid": None,
+            "partuuid": self.vm_config.root_partuuid,
             "cache_type": DEFAULT_FC_DRIVE_CACHE_TYPE,
             "io_engine": DEFAULT_FC_DRIVE_IO_ENGINE,
             "rate_limiter": None,
@@ -224,9 +226,11 @@ class ConfigGenerator:
         else:
             ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
 
-        # Get rootfs UUID for root= kernel parameter
-        root_uuid = self._get_rootfs_uuid()
-        root_arg = f"root=UUID={root_uuid}" if root_uuid else "root=/dev/vda"
+        root_arg = (
+            f"root=PARTUUID={self.vm_config.root_partuuid}"
+            if self.vm_config.root_partuuid
+            else "root=/dev/vda"
+        )
 
         parts = [
             DEFAULT_BOOT_CONSOLE,
@@ -243,21 +247,15 @@ class ConfigGenerator:
         ]
         return " ".join(p for p in parts if p).strip()
 
-    def _get_rootfs_uuid(self) -> str | None:
-        """Get UUID of the root filesystem using blkid."""
-        import subprocess
+    def _ensure_root_partuuid_in_boot_args(self, boot_args: str) -> str:
+        partuuid = self.vm_config.root_partuuid
+        if not partuuid:
+            return boot_args
 
-        try:
-            result = subprocess.run(
-                ["blkid", "-s", "UUID", "-o", "value", str(self.vm_config.rootfs_path)],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            uuid = result.stdout.strip()
-            return uuid if uuid else None
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return None
+        replacement = f"root=PARTUUID={partuuid}"
+        if re.search(r"\broot=[^\s]+", boot_args):
+            return re.sub(r"\broot=[^\s]+", replacement, boot_args, count=1)
+        return f"{boot_args} {replacement}".strip()
 
     def _build_network_config(self) -> list[NetworkInterfaceConfig]:
         if not self.vm_config.tap_device:

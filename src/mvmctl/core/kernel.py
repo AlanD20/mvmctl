@@ -440,19 +440,29 @@ def _fetch_fragment_content(url: str) -> str:
     return raw.decode("utf-8")
 
 
+def _extract_config_key(config_line: str) -> str | None:
+    line = config_line.strip()
+    if not line:
+        return None
+
+    if line.startswith("# ") and line.endswith(" is not set"):
+        key = line[2:-11]
+        return key if key.startswith("CONFIG_") else None
+
+    if line.startswith("CONFIG_") and "=" in line:
+        return line.split("=", 1)[0]
+
+    return None
+
+
 def _apply_config_fragments(
     fragments: list[str],
     template_vars: dict[str, str],
     kernel_dir: Path,
 ) -> None:
-    """Apply config fragments by writing directly to .config (OVERWRITE, not merge).
-
-    This writes fragment content directly to .config file. The caller is
-    responsible for running 'make olddefconfig' after all fragments are applied.
-    """
     config_path = kernel_dir / ".config"
 
-    for fragment in fragments:
+    for idx, fragment in enumerate(fragments):
         rendered = render_template(fragment, template_vars)
         if rendered.startswith("http://") or rendered.startswith("https://"):
             try:
@@ -468,8 +478,38 @@ def _apply_config_fragments(
             content = path.read_text(encoding="utf-8")
             logger.info("Applying local config fragment: %s", path)
 
-        # Write fragment content directly to .config (OVERWRITE, not merge)
-        config_path.write_text(content, encoding="utf-8")
+        if idx == 0 and not config_path.exists():
+            base_content = content if content.endswith("\n") else f"{content}\n"
+            config_path.write_text(base_content, encoding="utf-8")
+            continue
+
+        if not config_path.exists():
+            config_path.write_text("", encoding="utf-8")
+
+        existing_lines = config_path.read_text(encoding="utf-8").splitlines()
+        key_to_index: dict[str, int] = {}
+
+        for line_index, line in enumerate(existing_lines):
+            key = _extract_config_key(line)
+            if key:
+                key_to_index[key] = line_index
+
+        for fragment_line in content.splitlines():
+            normalized = fragment_line.strip()
+            key = _extract_config_key(normalized)
+            if key is None:
+                continue
+
+            if key in key_to_index:
+                existing_lines[key_to_index[key]] = normalized
+            else:
+                key_to_index[key] = len(existing_lines)
+                existing_lines.append(normalized)
+
+        merged_content = "\n".join(existing_lines)
+        if merged_content:
+            merged_content += "\n"
+        config_path.write_text(merged_content, encoding="utf-8")
 
 
 def configure_kernel(
@@ -505,9 +545,25 @@ def configure_kernel(
     warnings: list[str] = []
     info_messages: list[str] = []
 
-    # Download Firecracker config
+    effective_arch = arch or DEFAULT_FC_KERNEL_ARCH
+    major_minor = ".".join(version.split(".")[:2])
+    template_vars = {
+        "major_minor": major_minor,
+        "version": major_minor,
+        "kernel_version": version,
+        "ci_version": version,
+        "arch": effective_arch,
+    }
+
     try:
-        download_firecracker_config(kernel_dir, version, kernel_spec=kernel_spec)
+        download_firecracker_config(
+            kernel_dir,
+            version,
+            arch=effective_arch,
+            kernel_spec=kernel_spec,
+        )
+        if kernel_spec.config_fragments:
+            _apply_config_fragments(kernel_spec.config_fragments, template_vars, kernel_dir)
     except KernelError:
         logger.info("Using defconfig instead...")
         returncode, _, _ = run_make(kernel_dir, "defconfig")
@@ -546,11 +602,21 @@ def configure_kernel(
     logger.info("Verifying configuration...")
     config_path = kernel_dir / ".config"
     config_content = config_path.read_text()
+    config_lines = set(config_content.splitlines())
     all_present = True
     missing_settings: list[str] = []
 
     for setting in kernel_spec.required_settings:
-        if setting in config_content:
+        if "=" in setting:
+            present = setting in config_lines
+        else:
+            present = (
+                f"{setting}=y" in config_lines
+                or f"{setting}=m" in config_lines
+                or f"# {setting} is not set" in config_lines
+            )
+
+        if present:
             logger.info("  %s", setting)
         else:
             logger.error("  MISSING: %s", setting)

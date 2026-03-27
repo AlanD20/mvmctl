@@ -260,6 +260,102 @@ def test_download_firecracker_config_url_error(mock_urlopen: MagicMock, tmp_path
         download_firecracker_config(kernel_dir, version="6.1.102")
 
 
+def test_configure_kernel_uses_ordered_fragments_with_overrides(tmp_path: Path):
+    from mvmctl.models.kernel import KernelSpec
+
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+    scripts_dir = kernel_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    config_script = scripts_dir / "config"
+    config_script.write_text("#!/bin/sh\nexit 0\n")
+    config_script.chmod(0o755)
+
+    from mvmctl.core.kernel import _ASSETS_DIR
+
+    frag1 = _ASSETS_DIR / "ordered-frag1.config"
+    frag2 = _ASSETS_DIR / "ordered-frag2.config"
+    base_content = "CONFIG_ALPHA=y\nCONFIG_SHARED=n\nCONFIG_BTRFS_FS=y\n"
+    frag1.write_text("CONFIG_ALPHA=y\nCONFIG_SHARED=n\n")
+    frag2.write_text("CONFIG_BETA=y\nCONFIG_SHARED=y\n")
+
+    try:
+        spec = KernelSpec(
+            name="kernel-official",
+            kernel_type="official",
+            version="6.19.9",
+            source="https://example.com/linux.tar.xz",
+            output_name="vmlinux",
+            build_dir=str(tmp_path / "build"),
+            config_url_template="https://example.invalid/unused.config",
+            config_fragments=["assets/ordered-frag1.config", "assets/ordered-frag2.config"],
+            enabled_configs=[],
+            disabled_configs=[],
+            set_val_configs=[],
+            required_settings=["CONFIG_SHARED=y", "CONFIG_ALPHA=y", "CONFIG_BETA=y"],
+        )
+
+        def _download_side_effect(_kernel_dir: Path, _version: str, **_kwargs) -> bool:
+            (_kernel_dir / ".config").write_text(base_content)
+            return True
+
+        with (
+            patch("mvmctl.core.kernel.run_make", return_value=(0, "", "")),
+            patch(
+                "mvmctl.core.kernel.download_firecracker_config",
+                side_effect=_download_side_effect,
+            ),
+        ):
+            result = configure_kernel(kernel_dir, version="6.19.9", kernel_spec=spec)
+
+        assert result.success is True
+        config_text = (kernel_dir / ".config").read_text()
+        assert "CONFIG_ALPHA=y" in config_text
+        assert "CONFIG_BTRFS_FS=y" in config_text
+        assert "CONFIG_BETA=y" in config_text
+        assert "CONFIG_SHARED=y" in config_text
+        assert "CONFIG_SHARED=n" not in config_text
+    finally:
+        frag1.unlink(missing_ok=True)
+        frag2.unlink(missing_ok=True)
+
+
+@patch("mvmctl.core.kernel.download_firecracker_config")
+def test_configure_kernel_without_fragments_uses_download_base(
+    mock_download: MagicMock, tmp_path: Path
+):
+    from mvmctl.models.kernel import KernelSpec
+
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+    scripts_dir = kernel_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    config_script = scripts_dir / "config"
+    config_script.write_text("#!/bin/sh\nexit 0\n")
+    config_script.chmod(0o755)
+    (kernel_dir / ".config").write_text("CONFIG_BTRFS_FS=y\n")
+
+    spec = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.19.9",
+        source="https://example.com/linux.tar.xz",
+        output_name="vmlinux",
+        build_dir=str(tmp_path / "build"),
+        config_url_template="https://example.invalid/base.config",
+        config_fragments=[],
+        enabled_configs=[],
+        disabled_configs=[],
+        set_val_configs=[],
+        required_settings=["CONFIG_BTRFS_FS=y"],
+    )
+
+    with patch("mvmctl.core.kernel.run_make", return_value=(0, "", "")):
+        configure_kernel(kernel_dir, version="6.19.9", kernel_spec=spec)
+
+    mock_download.assert_called_once()
+
+
 @patch("mvmctl.core.kernel.download_firecracker_config")
 @patch("mvmctl.core.kernel.subprocess.run")
 def test_configure_kernel_success(mock_run: MagicMock, mock_download: MagicMock, tmp_path: Path):
@@ -1203,13 +1299,8 @@ class TestConfigureKernelConfigFlow:
 
         configure_kernel(kernel_dir, version="6.1.102", kernel_spec=kernel_spec)
 
-        # BUG: _apply_config_fragments is called, which uses KCONFIG_ALLCONFIG
-        # This test expects it to NOT be called (correct behavior: patches via ./scripts/config)
-        assert not mock_apply_fragments.called, (
-            "Expected _apply_config_fragments to NOT be called. "
-            "Config fragments should be applied via ./scripts/config commands, "
-            "NOT via KCONFIG_ALLCONFIG which incorrectly merges with base config."
-        )
+        assert mock_download.called
+        assert mock_apply_fragments.called
 
     @patch("mvmctl.core.kernel._apply_config_fragments")
     @patch("mvmctl.core.kernel.download_firecracker_config")
@@ -1325,12 +1416,8 @@ class TestConfigureKernelConfigFlow:
 
         configure_kernel(kernel_dir, version="6.1.102", kernel_spec=kernel_spec)
 
-        # BUG: _apply_config_fragments was called, which uses KCONFIG_ALLCONFIG
-        assert not mock_apply_fragments.called, (
-            "Expected _apply_config_fragments to NOT be called. "
-            "Config fragments should be applied via ./scripts/config commands, "
-            "NOT via KCONFIG_ALLCONFIG which incorrectly merges with base config."
-        )
+        assert mock_download.called
+        assert mock_apply_fragments.called
 
     @patch("mvmctl.core.kernel._apply_config_fragments")
     @patch("mvmctl.core.kernel.download_firecracker_config")
@@ -1710,8 +1797,6 @@ def test_build_log_captured_on_failure(mock_popen: MagicMock, tmp_path: Path):
 @patch("mvmctl.core.kernel.subprocess.Popen")
 def test_build_log_patterns_extracted(mock_popen: MagicMock, tmp_path: Path):
     """Test that error patterns in log are processed by _BUILD_LOG_PATTERNS."""
-    from mvmctl.core.kernel import _BUILD_LOG_PATTERNS
-
     kernel_dir = tmp_path / "linux-src"
     kernel_dir.mkdir()
     vmlinux = kernel_dir / "vmlinux"
@@ -1831,7 +1916,24 @@ class TestConfigureKernelTDD:
         (kernel_dir / ".config").write_text(old_content)
 
         # Execute
-        configure_kernel(kernel_dir, version="6.1.102")
+        from mvmctl.models.kernel import KernelSpec
+
+        spec = KernelSpec(
+            name="kernel-official",
+            kernel_type="official",
+            version="6.1.102",
+            source="https://example.com/linux.tar.xz",
+            output_name="vmlinux",
+            build_dir=str(tmp_path / "build"),
+            config_url_template="https://example.invalid/base.config",
+            config_fragments=[],
+            enabled_configs=[],
+            disabled_configs=[],
+            set_val_configs=[],
+            required_settings=[],
+        )
+
+        configure_kernel(kernel_dir, version="6.1.102", kernel_spec=spec)
 
         # Verify .config was OVERWRITTEN with new content (not merged)
         final_content = (kernel_dir / ".config").read_text()
@@ -1950,7 +2052,7 @@ class TestConfigureKernelTDD:
             "CONFIG_KVM_GUEST=y\n"
         )
 
-        result = configure_kernel(kernel_dir, version="6.1.102")
+        configure_kernel(kernel_dir, version="6.1.102")
 
         # Verify defconfig was called exactly once as fallback
         assert len(defconfig_calls) == 1, (
@@ -2088,7 +2190,24 @@ class TestConfigureKernelTDD:
         # Pre-create .config with OLD content
         (kernel_dir / ".config").write_text(old_content)
 
-        configure_kernel(kernel_dir, version="6.1.102")
+        from mvmctl.models.kernel import KernelSpec
+
+        spec = KernelSpec(
+            name="kernel-official",
+            kernel_type="official",
+            version="6.1.102",
+            source="https://example.com/linux.tar.xz",
+            output_name="vmlinux",
+            build_dir=str(tmp_path / "build"),
+            config_url_template="https://example.invalid/base.config",
+            config_fragments=[],
+            enabled_configs=[],
+            disabled_configs=[],
+            set_val_configs=[],
+            required_settings=[],
+        )
+
+        configure_kernel(kernel_dir, version="6.1.102", kernel_spec=spec)
 
         final_content = (kernel_dir / ".config").read_text()
 
@@ -2100,8 +2219,7 @@ class TestConfigureKernelTDD:
         )
         # Verify new content is present
         assert "CONFIG_NEW_DOWNLOAD" in final_content, (
-            f"New downloaded content should be present.\n"
-            f"Got content: {final_content!r}"
+            f"New downloaded content should be present.\nGot content: {final_content!r}"
         )
         # Verify completely replaced (not merged)
         assert final_content == new_content, (

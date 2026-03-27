@@ -260,6 +260,41 @@ def test_kernel_fetch_firecracker_flag_shortcut(
     mock_resolve.assert_called_once_with(kernel_type="firecracker", version=None)
 
 
+@patch("mvmctl.cli.asset.build_kernel_pipeline")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
+def test_kernel_fetch_official_flag_shortcut(
+    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+):
+    from mvmctl.core.kernel import KernelPipelineResult
+
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
+    mock_result = MagicMock(spec=KernelPipelineResult)
+    mock_result.build_dir = tmp_path / "build"
+    mock_result.config_result = None
+    mock_result.build_result = None
+    mock_build.return_value = mock_result
+
+    out = tmp_path / "vmlinux-6.1.9"
+    out.write_bytes(b"\x7fELF")
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official", "--out", str(out)])
+
+    assert result.exit_code == 0
+    mock_resolve.assert_called_once_with(kernel_type="official", version=None)
+
+
+def test_kernel_fetch_official_conflicts_with_firecracker():
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--firecracker", "--official"])
+    assert result.exit_code == 1
+    assert "cannot be combined" in result.output
+
+
 def test_kernel_fetch_requires_type_or_shortcut():
     result = click_runner.invoke(main_app, ["kernel", "fetch"])
     assert result.exit_code == 1

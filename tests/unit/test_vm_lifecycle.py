@@ -104,7 +104,6 @@ def test_create_vm_core_success(
     mock_add_rules,
     mock_create_tap,
     mock_config_gen,
-
     mock_create_iso,
     mock_write_ci,
     mock_copy,
@@ -155,6 +154,8 @@ def test_create_vm_core_success(
     assert isinstance(vm, VMInstance)
     assert vm.name == "myvm"
     assert vm.ip == "10.20.0.5"
+    vm_config_arg = mock_config_gen.call_args.args[0]
+    assert vm_config_arg.root_partuuid is not None
     mock_manager.register.assert_called_once()
     mock_popen.assert_called_once()
     mock_write_pid.assert_called_once()

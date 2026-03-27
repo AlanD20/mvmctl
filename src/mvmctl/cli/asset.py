@@ -255,6 +255,7 @@ def kernel_fetch(
     firecracker: bool = typer.Option(
         False, "--firecracker", help="Shortcut for --type firecracker"
     ),
+    official: bool = typer.Option(False, "--official", help="Shortcut for --type official"),
     version: Optional[str] = typer.Option(
         None,
         "--version",
@@ -278,14 +279,24 @@ def kernel_fetch(
     kernels_dir = get_kernels_dir()
     kernels_dir.mkdir(parents=True, exist_ok=True)
 
+    if firecracker and official:
+        print_error("--firecracker cannot be combined with --official")
+        raise typer.Exit(code=1)
+
     if firecracker:
         if kernel_type is not None and kernel_type != KERNEL_TYPE_FIRECRACKER:
             print_error("--firecracker cannot be combined with a different --type value")
             raise typer.Exit(code=1)
         kernel_type = KERNEL_TYPE_FIRECRACKER
 
+    if official:
+        if kernel_type is not None and kernel_type != KERNEL_TYPE_OFFICIAL:
+            print_error("--official cannot be combined with a different --type value")
+            raise typer.Exit(code=1)
+        kernel_type = KERNEL_TYPE_OFFICIAL
+
     if kernel_type is None:
-        print_error("Provide --type <kernel-type> or use --firecracker")
+        print_error("Provide --type <kernel-type> or use --firecracker/--official")
         raise typer.Exit(code=1)
 
     try:

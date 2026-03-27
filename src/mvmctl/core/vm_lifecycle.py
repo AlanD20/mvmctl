@@ -8,6 +8,7 @@ import signal
 import string
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -521,6 +522,7 @@ def create_vm(
         gateway=net_config.gateway,
         subnet_mask=_subnet_mask,
         tap_device=tap_name,
+        root_partuuid=str(uuid.uuid4()),
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
         cloud_init_mode=cloud_init_mode,
