@@ -8,7 +8,6 @@ import signal
 import string
 import subprocess
 import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -104,6 +103,33 @@ def _resolve_image_path(image: str) -> Path:
         return direct
 
     raise MVMError(f"Image not found: {image!r}")
+
+
+def _resolve_image_fs_uuid(image: str) -> str | None:
+    from mvmctl.core.metadata import find_images_by_short_id, list_image_entries
+    from mvmctl.utils.fs import get_cache_dir
+
+    cache_dir = get_cache_dir()
+
+    all_entries = list_image_entries(cache_dir)
+    for _full_key, meta in all_entries.items():
+        internal_id = str(meta.get("internal_id", ""))
+        filename = str(meta.get("filename", ""))
+        if image not in {internal_id, filename}:
+            continue
+
+        fs_uuid = meta.get("fs_uuid")
+        if isinstance(fs_uuid, str) and fs_uuid.strip():
+            return fs_uuid.strip()
+
+    matches = find_images_by_short_id(cache_dir, image)
+    if len(matches) == 1:
+        _, meta = matches[0]
+        fs_uuid = meta.get("fs_uuid")
+        if isinstance(fs_uuid, str) and fs_uuid.strip():
+            return fs_uuid.strip()
+
+    return None
 
 
 def _resolve_image_short_id_path(image: str) -> Path:
@@ -406,6 +432,7 @@ def create_vm(
             raise MVMError(f"Firecracker binary is not executable: {firecracker_bin}")
 
     image_path = _resolve_image_path(image)
+    image_fs_uuid = _resolve_image_fs_uuid(image)
 
     if user_data is not None and not user_data.exists():
         raise MVMError(f"User-data file not found: {user_data}")
@@ -522,7 +549,7 @@ def create_vm(
         gateway=net_config.gateway,
         subnet_mask=_subnet_mask,
         tap_device=tap_name,
-        root_partuuid=str(uuid.uuid4()),
+        root_uuid=image_fs_uuid,
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
         cloud_init_mode=cloud_init_mode,

@@ -95,9 +95,11 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle._write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("builtins.open", new_callable=MagicMock)
 def test_create_vm_core_success(
     mock_open,
+    mock_resolve_fs_uuid,
     mock_bridge_exists,
     mock_write_pid,
     mock_popen,
@@ -145,6 +147,7 @@ def test_create_vm_core_success(
 
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
 
     mock_bridge_exists.return_value = True
     mock_popen.return_value.pid = 99999
@@ -155,7 +158,7 @@ def test_create_vm_core_success(
     assert vm.name == "myvm"
     assert vm.ip == "10.20.0.5"
     vm_config_arg = mock_config_gen.call_args.args[0]
-    assert vm_config_arg.root_partuuid is not None
+    assert vm_config_arg.root_uuid == "11111111-2222-3333-4444-555555555555"
     mock_manager.register.assert_called_once()
     mock_popen.assert_called_once()
     mock_write_pid.assert_called_once()
@@ -401,6 +404,55 @@ def test_resolve_image_path_by_short_hash(tmp_path, monkeypatch):
     with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
         result = _resolve_image_path(full_hash[:6])
     assert result == img
+
+
+def test_resolve_image_fs_uuid_by_short_hash(tmp_path, monkeypatch):
+    import json
+
+    from mvmctl.core.vm_lifecycle import _resolve_image_fs_uuid
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "a" * 64
+    meta_file = tmp_path / "metadata.json"
+    meta_file.write_text(
+        json.dumps(
+            {
+                "images": {
+                    full_hash: {
+                        "filename": "ubuntu-24.04.ext4",
+                        "fs_uuid": "11111111-2222-3333-4444-555555555555",
+                    }
+                }
+            }
+        )
+    )
+
+    result = _resolve_image_fs_uuid(full_hash[:6])
+    assert result == "11111111-2222-3333-4444-555555555555"
+
+
+def test_resolve_image_fs_uuid_missing_returns_none(tmp_path, monkeypatch):
+    import json
+
+    from mvmctl.core.vm_lifecycle import _resolve_image_fs_uuid
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "b" * 64
+    meta_file = tmp_path / "metadata.json"
+    meta_file.write_text(
+        json.dumps(
+            {
+                "images": {
+                    full_hash: {
+                        "filename": "ubuntu-24.04.ext4",
+                    }
+                }
+            }
+        )
+    )
+
+    result = _resolve_image_fs_uuid(full_hash[:6])
+    assert result is None
 
 
 def test_resolve_image_path_not_found(tmp_path, monkeypatch):

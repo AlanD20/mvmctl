@@ -583,7 +583,7 @@ def test_kernel_rm_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_kernel_rm_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path / "cache"))
     result = click_runner.invoke(
         main_app,
         ["kernel", "rm", "abcdef", "--kernels-dir", str(tmp_path), "--force"],
@@ -607,7 +607,7 @@ def test_kernel_rm_with_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_kernel_rm_abort_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path / "cache"))
     full_hash = "c" * 64
     kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
     kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
@@ -823,6 +823,77 @@ def test_image_fetch_with_force(mock_config: MagicMock, mock_fetch: MagicMock, t
         or call_args.kwargs.get("force") is True
         or call_args[1].get("force") is True
     )
+
+
+@patch("mvmctl.cli.asset.fetch_image")
+@patch("mvmctl.cli.asset.get_filesystem_uuid", return_value="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+def test_image_fetch_saves_fs_uuid_in_metadata(
+    mock_config: MagicMock,
+    mock_get_uuid: MagicMock,
+    mock_fetch: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path / "cache"))
+    image_path = tmp_path / "images" / "ubuntu-24.04.ext4"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(b"image")
+    mock_fetch.return_value = image_path
+
+    result = click_runner.invoke(
+        main_app,
+        ["image", "fetch", "ubuntu-24.04", "--out", str(image_path.parent), "--force"],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads((tmp_path / "cache" / "metadata.json").read_text())
+    image_entries = data.get("images", {})
+    assert len(image_entries) == 1
+    entry = next(iter(image_entries.values()))
+    assert entry.get("fs_uuid") == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+@patch("mvmctl.cli.asset.import_image")
+@patch("mvmctl.cli.asset.get_filesystem_uuid", return_value="ffffffff-1111-2222-3333-444444444444")
+def test_image_import_saves_fs_uuid_in_metadata(
+    mock_get_uuid: MagicMock,
+    mock_import: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path / "cache"))
+    source = tmp_path / "source.qcow2"
+    source.write_bytes(b"qcow2")
+    imported = tmp_path / "images" / "imported.ext4"
+    imported.parent.mkdir(parents=True, exist_ok=True)
+    imported.write_bytes(b"image")
+    mock_import.return_value = imported
+
+    result = click_runner.invoke(
+        main_app,
+        [
+            "image",
+            "import",
+            "Imported OS",
+            str(source),
+            "--format",
+            "qcow2",
+            "--images-dir",
+            str(imported.parent),
+        ],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads((tmp_path / "cache" / "metadata.json").read_text())
+    image_entries = data.get("images", {})
+    assert len(image_entries) == 1
+    entry = next(iter(image_entries.values()))
+    assert entry.get("fs_uuid") == "ffffffff-1111-2222-3333-444444444444"
 
 
 # ---------------------------------------------------------------------------

@@ -31,28 +31,26 @@ def test_config_generator_basic():
     assert config["drives"][0]["path_on_host"] == "/tmp/rootfs.ext4"
 
 
-def test_config_generator_sets_root_partuuid_in_drive_and_boot_args():
+def test_config_generator_sets_root_uuid_in_boot_args():
     vm_config = VMConfig(
         name="test-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        root_partuuid="123e4567-e89b-12d3-a456-426614174000",
+        root_uuid="123e4567-e89b-12d3-a456-426614174000",
     )
 
     config = ConfigGenerator(vm_config).generate()
 
-    assert config["drives"][0]["partuuid"] == "123e4567-e89b-12d3-a456-426614174000"
-    assert (
-        "root=PARTUUID=123e4567-e89b-12d3-a456-426614174000" in config["boot-source"]["boot_args"]
-    )
+    assert config["drives"][0]["partuuid"] is None
+    assert "root=UUID=123e4567-e89b-12d3-a456-426614174000" in config["boot-source"]["boot_args"]
 
 
-def test_config_generator_overrides_existing_root_arg_with_partuuid():
+def test_config_generator_overrides_existing_root_arg_with_uuid():
     vm_config = VMConfig(
         name="test-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        root_partuuid="123e4567-e89b-12d3-a456-426614174001",
+        root_uuid="123e4567-e89b-12d3-a456-426614174001",
         boot_args="console=ttyS0 root=/dev/vda rw",
     )
 
@@ -60,7 +58,7 @@ def test_config_generator_overrides_existing_root_arg_with_partuuid():
     boot_args = config["boot-source"]["boot_args"]
 
     assert "root=/dev/vda" not in boot_args
-    assert "root=PARTUUID=123e4567-e89b-12d3-a456-426614174001" in boot_args
+    assert "root=UUID=123e4567-e89b-12d3-a456-426614174001" in boot_args
 
 
 def test_config_generator_network():

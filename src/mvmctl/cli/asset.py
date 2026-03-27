@@ -14,6 +14,7 @@ from mvmctl.api.assets import (
     download_firecracker_kernel,
     fetch_binary,
     fetch_image,
+    get_filesystem_uuid,
     human_readable_time,
     import_image,
     list_kernels,
@@ -510,6 +511,9 @@ def _save_image_meta(
     fields: dict[str, object] = dict(meta)
     fields.setdefault("pulled_at", datetime.now(tz=timezone.utc).isoformat())
     fields.setdefault("fs_type", image_path.suffix.lstrip(".") if image_path.suffix else "unknown")
+    fs_uuid = get_filesystem_uuid(image_path)
+    if fs_uuid:
+        fields.setdefault("fs_uuid", fs_uuid)
     update_image_entry(cache_dir, image_id, **fields)
 
 

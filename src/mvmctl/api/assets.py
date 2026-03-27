@@ -30,7 +30,7 @@ from mvmctl.core.binary_manager import (
     remove_version,
     set_active_version,
 )
-from mvmctl.core.image import fetch_image, import_image, load_images_config
+from mvmctl.core.image import fetch_image, get_filesystem_uuid, import_image, load_images_config
 from mvmctl.core.kernel import (
     build_kernel_pipeline,
     download_firecracker_kernel,
@@ -59,6 +59,7 @@ __all__ = [
     "import_image",
     "fetch_images_parallel",
     "load_images_config",
+    "get_filesystem_uuid",
     "ImageImportSpec",
     "build_kernel_pipeline",
     "list_kernels",

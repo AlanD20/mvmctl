@@ -85,7 +85,7 @@ class VMConfig:
     subnet_mask: str = DEFAULT_VM_SUBNET_MASK
     tap_device: str | None = None
     boot_args: str | None = None
-    root_partuuid: str | None = None
+    root_uuid: str | None = None
     enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI
     lsm_flags: str = DEFAULT_VM_LSM_FLAGS

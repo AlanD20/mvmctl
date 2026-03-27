@@ -23,6 +23,7 @@ from mvmctl.core.image import (
     download_file,
     extract_partition_from_raw,
     fetch_image,
+    get_filesystem_uuid,
     import_image,
     load_images_config,
 )
@@ -234,6 +235,33 @@ def test_download_file_url_error(mock_urlopen: MagicMock, tmp_path: Path):
     dest = tmp_path / "output.bin"
     with pytest.raises(MVMError):
         download_file("https://example.com/file.bin", dest, show_progress=False)
+
+
+@patch("mvmctl.core.image.subprocess.run")
+def test_get_filesystem_uuid_success(mock_run: MagicMock, tmp_path: Path):
+    image = tmp_path / "rootfs.ext4"
+    image.write_bytes(b"image")
+    mock_run.return_value = MagicMock(stdout="123e4567-e89b-12d3-a456-426614174000\n")
+
+    fs_uuid = get_filesystem_uuid(image)
+
+    assert fs_uuid == "123e4567-e89b-12d3-a456-426614174000"
+    mock_run.assert_called_once_with(
+        ["blkid", "-p", "-s", "UUID", "-o", "value", str(image)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@patch("mvmctl.core.image.subprocess.run", side_effect=FileNotFoundError("blkid not found"))
+def test_get_filesystem_uuid_no_blkid(mock_run: MagicMock, tmp_path: Path):
+    image = tmp_path / "rootfs.ext4"
+    image.write_bytes(b"image")
+
+    fs_uuid = get_filesystem_uuid(image)
+
+    assert fs_uuid is None
 
 
 # ---------------------------------------------------------------------------

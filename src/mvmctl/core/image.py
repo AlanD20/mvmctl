@@ -193,7 +193,6 @@ def _parse_partitions_fdisk(
     # Parse fdisk output into partition dicts
     # Format: Device Boot Start End Sectors Size Id Type
     partitions: list[dict[str, object]] = []
-    has_valid_lines = False
     for line in partition_lines:
         parts = line.split()
         if len(parts) >= 6:
@@ -208,7 +207,6 @@ def _parse_partitions_fdisk(
                         "type": part_type,
                     }
                 )
-                has_valid_lines = True
             except (ValueError, IndexError):
                 # Found a line that looks like a partition but can't be parsed
                 raise ImageError("Failed to parse fdisk output for partition sectors")
@@ -246,6 +244,21 @@ def _detect_and_rename_fs(output_path: Path) -> Path:
     except FileNotFoundError:
         pass
     return output_path
+
+
+def get_filesystem_uuid(image_path: Path) -> str | None:
+    try:
+        blkid_result = subprocess.run(
+            ["blkid", "-p", "-s", "UUID", "-o", "value", str(image_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+
+    fs_uuid = blkid_result.stdout.strip()
+    return fs_uuid if fs_uuid else None
 
 
 _COPY_CHUNK_SIZE = CONST_MEBIBYTE_BYTES  # 1 MiB

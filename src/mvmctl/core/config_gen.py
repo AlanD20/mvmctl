@@ -112,7 +112,7 @@ class ConfigGenerator:
 
     def generate(self) -> FirecrackerConfig:
         boot_args = self.vm_config.boot_args or self._build_default_boot_args()
-        boot_args = self._ensure_root_partuuid_in_boot_args(boot_args)
+        boot_args = self._ensure_root_uuid_in_boot_args(boot_args)
 
         context = {
             "kernel_image_path": str(self.vm_config.kernel_path),
@@ -156,7 +156,7 @@ class ConfigGenerator:
             "path_on_host": str(self.vm_config.rootfs_path),
             "is_root_device": True,
             "is_read_only": False,
-            "partuuid": self.vm_config.root_partuuid,
+            "partuuid": None,
             "cache_type": DEFAULT_FC_DRIVE_CACHE_TYPE,
             "io_engine": DEFAULT_FC_DRIVE_IO_ENGINE,
             "rate_limiter": None,
@@ -227,9 +227,7 @@ class ConfigGenerator:
             ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
 
         root_arg = (
-            f"root=PARTUUID={self.vm_config.root_partuuid}"
-            if self.vm_config.root_partuuid
-            else "root=/dev/vda"
+            f"root=UUID={self.vm_config.root_uuid}" if self.vm_config.root_uuid else "root=/dev/vda"
         )
 
         parts = [
@@ -247,12 +245,12 @@ class ConfigGenerator:
         ]
         return " ".join(p for p in parts if p).strip()
 
-    def _ensure_root_partuuid_in_boot_args(self, boot_args: str) -> str:
-        partuuid = self.vm_config.root_partuuid
-        if not partuuid:
+    def _ensure_root_uuid_in_boot_args(self, boot_args: str) -> str:
+        root_uuid = self.vm_config.root_uuid
+        if not root_uuid:
             return boot_args
 
-        replacement = f"root=PARTUUID={partuuid}"
+        replacement = f"root=UUID={root_uuid}"
         if re.search(r"\broot=[^\s]+", boot_args):
             return re.sub(r"\broot=[^\s]+", replacement, boot_args, count=1)
         return f"{boot_args} {replacement}".strip()
