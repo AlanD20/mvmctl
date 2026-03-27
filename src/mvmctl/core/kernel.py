@@ -853,6 +853,7 @@ def build_kernel_pipeline(
     user_config_path: Path | None = None,
     arch: str | None = None,
     kernel_spec: KernelSpec | None = None,
+    use_cache: bool = True,
 ) -> KernelPipelineResult:
     check_build_dependencies()
 
@@ -878,7 +879,7 @@ def build_kernel_pipeline(
     cache_marker = build_dir.parent / f"kernel-cache-{cache_key}.marker"
     cached_kernel_path = build_dir.parent / f"kernel-cache-{cache_key}.vmlinux"
 
-    if cache_marker.exists() and cached_kernel_path.exists():
+    if use_cache and cache_marker.exists() and cached_kernel_path.exists():
         output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(cached_kernel_path, output_path)
         output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
@@ -889,7 +890,7 @@ def build_kernel_pipeline(
             build_result=None,
         )
 
-    if output_path.exists() and cache_marker.exists():
+    if use_cache and output_path.exists() and cache_marker.exists():
         logger.info("Using cached kernel (config hash match): %s", output_path)
         return KernelPipelineResult(
             build_dir=build_dir,
@@ -953,8 +954,9 @@ def build_kernel_pipeline(
 
         build_result = build_kernel(kernel_src_dir, output_path, jobs)
 
-        shutil.copy2(output_path, cached_kernel_path)
-        cache_marker.write_text(cache_key)
+        if use_cache:
+            shutil.copy2(output_path, cached_kernel_path)
+            cache_marker.write_text(cache_key)
 
         save_kernel_metadata(
             output_path.parent,
@@ -1113,6 +1115,7 @@ def download_firecracker_kernel(
     arch: str = DEFAULT_FC_KERNEL_ARCH,
     kernels_dir: Path | None = None,
     output_name: str | None = None,
+    output_path: Path | None = None,
     kernel_spec: KernelSpec | None = None,
 ) -> Path:
     if kernels_dir is None:
@@ -1152,14 +1155,16 @@ def download_firecracker_kernel(
     chosen_key = keys[-1]
     kernel_version = chosen_key.split("/vmlinux-")[-1]
 
-    if output_name is None:
-        output_name = f"{kernel_spec.output_name}-{kernel_version}-{arch}"
+    resolved_output_name = output_name or kernel_spec.output_name
+    resolved_output_path = (
+        output_path
+        if output_path is not None
+        else kernels_dir / f"{resolved_output_name}-{kernel_version}-{arch}"
+    )
 
-    output_path = kernels_dir / output_name
-
-    if output_path.exists():
-        logger.info("Firecracker CI kernel already cached: %s", output_path)
-        return output_path
+    if resolved_output_path.exists():
+        logger.info("Firecracker CI kernel already cached: %s", resolved_output_path)
+        return resolved_output_path
 
     intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None
 
@@ -1189,7 +1194,7 @@ def download_firecracker_kernel(
     try:
         download_file(
             download_url,
-            output_path,
+            resolved_output_path,
             expected_sha256=expected_sha256,
             timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
             allow_missing_checksum=intentional_no_checksum,
@@ -1198,14 +1203,14 @@ def download_firecracker_kernel(
     except MVMError as exc:
         raise KernelError(f"Failed to download Firecracker CI kernel: {exc}") from exc
 
-    output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
+    resolved_output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
 
     save_kernel_metadata(
         kernels_dir,
-        output_name,
+        resolved_output_path.name,
         version=kernel_version,
         kernel_type=KERNEL_TYPE_FIRECRACKER,
         arch=arch,
     )
-    logger.info("Firecracker CI kernel saved: %s", output_path)
-    return output_path
+    logger.info("Firecracker CI kernel saved: %s", resolved_output_path)
+    return resolved_output_path

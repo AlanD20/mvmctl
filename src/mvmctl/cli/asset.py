@@ -265,11 +265,21 @@ def kernel_fetch(
         DEFAULT_FC_KERNEL_ARCH, "--arch", help="Architecture (for firecracker type)"
     ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output path/name"),
+    name: Optional[str] = typer.Option(
+        None,
+        "--name",
+        help="Override output filename only (placed in kernels directory unless --out is used)",
+    ),
     jobs: Optional[int] = typer.Option(
         None, "--jobs", "-j", help="Parallel build jobs (official only)"
     ),
     keep_build_dir: bool = typer.Option(
         False, "--keep-build-dir", help="Keep build directory after build"
+    ),
+    clean_build: bool = typer.Option(
+        False,
+        "--clean-build",
+        help="Skip kernel build cache and force a clean build",
     ),
     kernel_config: Optional[Path] = typer.Option(
         None, "--kernel-config", help="Path to custom kernel .config file"
@@ -278,6 +288,10 @@ def kernel_fetch(
 ) -> None:
     kernels_dir = get_kernels_dir()
     kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    if name is not None and out is not None:
+        print_error("--name cannot be combined with --out")
+        raise typer.Exit(code=1)
 
     if firecracker and official:
         print_error("--firecracker cannot be combined with --official")
@@ -307,13 +321,14 @@ def kernel_fetch(
 
     if spec.kernel_type == KERNEL_TYPE_FIRECRACKER:
         ci_version = _get_ci_version()
-        output_name = out.name if out is not None else None
+        output_name = name
         try:
             result = download_firecracker_kernel(
                 ci_version=ci_version,
                 arch=arch,
                 kernels_dir=kernels_dir,
                 output_name=output_name,
+                output_path=out,
                 kernel_spec=spec,
             )
         except KernelError as exc:
@@ -329,7 +344,11 @@ def kernel_fetch(
         output_path = (
             out
             if out is not None
-            else kernels_dir / f"{spec.output_name}-{effective_version}-{effective_arch}"
+            else (
+                kernels_dir / f"{name}-{effective_version}-{effective_arch}"
+                if name is not None
+                else kernels_dir / f"{spec.output_name}-{effective_version}-{effective_arch}"
+            )
         )
 
         if kernel_config and not kernel_config.exists():
@@ -348,6 +367,7 @@ def kernel_fetch(
                 user_config_path=kernel_config,
                 arch=effective_arch,
                 kernel_spec=spec,
+                use_cache=not clean_build,
             )
         except KernelError as exc:
             print_error(f"Kernel build failed: {exc}")

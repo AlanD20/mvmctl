@@ -412,6 +412,80 @@ def test_download_firecracker_kernel_supports_version_placeholder_in_source(
 
 @patch("mvmctl.core.kernel.download_file")
 @patch("mvmctl.core.kernel.urlopen")
+def test_download_firecracker_kernel_output_name_overrides_base_only(
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
+
+    xml_response = b"""<?xml version=\"1.0\"?>
+<ListBucketResult>
+<Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
+</ListBucketResult>"""
+
+    list_resp = MagicMock()
+    list_resp.read.return_value = xml_response
+    list_resp.__enter__ = lambda s: s
+    list_resp.__exit__ = MagicMock(return_value=False)
+
+    mock_urlopen.side_effect = [list_resp]
+
+    def fake_download(url, dest, **kw):
+        dest.write_bytes(b"\x7fELF")
+        return True
+
+    mock_dl.side_effect = fake_download
+
+    result = download_firecracker_kernel(
+        "1.12",
+        "amd64",
+        kernels_dir=tmp_path,
+        output_name="custom-base",
+    )
+
+    assert result.name == "custom-base-6.1.9-amd64"
+
+
+@patch("mvmctl.core.kernel.download_file")
+@patch("mvmctl.core.kernel.urlopen")
+def test_download_firecracker_kernel_output_path_is_explicit(
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
+
+    xml_response = b"""<?xml version=\"1.0\"?>
+<ListBucketResult>
+<Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
+</ListBucketResult>"""
+
+    list_resp = MagicMock()
+    list_resp.read.return_value = xml_response
+    list_resp.__enter__ = lambda s: s
+    list_resp.__exit__ = MagicMock(return_value=False)
+
+    mock_urlopen.side_effect = [list_resp]
+
+    def fake_download(url, dest, **kw):
+        dest.write_bytes(b"\x7fELF")
+        return True
+
+    mock_dl.side_effect = fake_download
+
+    explicit_out = tmp_path / "my-explicit-kernel"
+    result = download_firecracker_kernel(
+        "1.12",
+        "amd64",
+        kernels_dir=tmp_path,
+        output_name="ignored-base",
+        output_path=explicit_out,
+    )
+
+    assert result == explicit_out
+
+
+@patch("mvmctl.core.kernel.download_file")
+@patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_uses_templated_sha256_url(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

@@ -233,6 +233,7 @@ def test_kernel_fetch_firecracker_success(
     assert "ready" in result.output.lower() or "kernel" in result.output.lower()
     call_kwargs = mock_dl.call_args.kwargs
     assert call_kwargs["output_name"] is None
+    assert call_kwargs["output_path"] is None
 
 
 @patch("mvmctl.cli.asset.download_firecracker_kernel")
@@ -293,6 +294,188 @@ def test_kernel_fetch_official_conflicts_with_firecracker():
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--firecracker", "--official"])
     assert result.exit_code == 1
     assert "cannot be combined" in result.output
+
+
+def test_kernel_fetch_name_conflicts_with_out(tmp_path: Path):
+    out = tmp_path / "vmlinux-custom"
+    result = click_runner.invoke(
+        main_app,
+        ["kernel", "fetch", "--official", "--name", "custom-kernel", "--out", str(out)],
+    )
+    assert result.exit_code == 1
+    assert "--name cannot be combined with --out" in result.output
+
+
+@patch("mvmctl.cli.asset.download_firecracker_kernel")
+@patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
+def test_kernel_fetch_firecracker_uses_name_override(
+    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
+):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-firecracker",
+        kernel_type="firecracker",
+        version="6.1",
+        source="https://example.com/fc/{ci_version}/{arch}/vmlinux-{version}",
+        output_name="vmlinux-fc",
+        build_dir="/tmp/build",
+        list_url_template="https://example.com/list?ci={ci_version}&arch={arch}",
+    )
+    result_path = tmp_path / "my-fc-kernel"
+    result_path.write_bytes(b"\x7fELF")
+    mock_dl.return_value = result_path
+
+    result = click_runner.invoke(
+        main_app, ["kernel", "fetch", "--firecracker", "--name", "my-fc-kernel"]
+    )
+
+    assert result.exit_code == 0
+    assert mock_dl.call_args.kwargs["output_name"] == "my-fc-kernel"
+    assert mock_dl.call_args.kwargs["output_path"] is None
+
+
+@patch("mvmctl.cli.asset.download_firecracker_kernel")
+@patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
+def test_kernel_fetch_firecracker_out_is_explicit_path(
+    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
+):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-firecracker",
+        kernel_type="firecracker",
+        version="6.1",
+        source="https://example.com/fc/{ci_version}/{arch}/vmlinux-{version}",
+        output_name="vmlinux-fc",
+        build_dir="/tmp/build",
+        list_url_template="https://example.com/list?ci={ci_version}&arch={arch}",
+    )
+    explicit_out = tmp_path / "explicit-kernel-path"
+    explicit_out.write_bytes(b"\x7fELF")
+    mock_dl.return_value = explicit_out
+
+    result = click_runner.invoke(
+        main_app,
+        ["kernel", "fetch", "--firecracker", "--out", str(explicit_out)],
+    )
+
+    assert result.exit_code == 0
+    assert mock_dl.call_args.kwargs["output_name"] is None
+    assert mock_dl.call_args.kwargs["output_path"] == explicit_out
+
+
+@patch("mvmctl.cli.asset.build_kernel_pipeline")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
+def test_kernel_fetch_official_uses_name_override(
+    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+):
+    from mvmctl.core.kernel import KernelPipelineResult
+
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
+    mock_result = MagicMock(spec=KernelPipelineResult)
+    mock_result.build_dir = tmp_path / "build"
+    mock_result.config_result = None
+    mock_result.build_result = None
+    mock_build.return_value = mock_result
+
+    result = click_runner.invoke(
+        main_app, ["kernel", "fetch", "--official", "--name", "my-official-kernel"]
+    )
+
+    assert result.exit_code == 0
+    output_path = mock_build.call_args.kwargs["output_path"]
+    assert output_path.name.startswith("my-official-kernel-6.1.9-")
+    assert mock_build.call_args.kwargs["use_cache"] is True
+
+
+@patch("mvmctl.cli.asset.build_kernel_pipeline")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
+def test_kernel_fetch_official_without_name_uses_cache(
+    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+):
+    from mvmctl.core.kernel import KernelPipelineResult
+
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
+    mock_result = MagicMock(spec=KernelPipelineResult)
+    mock_result.build_dir = tmp_path / "build"
+    mock_result.config_result = None
+    mock_result.build_result = None
+    mock_build.return_value = mock_result
+
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official"])
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["use_cache"] is True
+
+
+@patch("mvmctl.cli.asset.build_kernel_pipeline")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
+def test_kernel_fetch_official_clean_build_disables_cache(
+    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+):
+    from mvmctl.core.kernel import KernelPipelineResult
+
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
+    mock_result = MagicMock(spec=KernelPipelineResult)
+    mock_result.build_dir = tmp_path / "build"
+    mock_result.config_result = None
+    mock_result.build_result = None
+    mock_build.return_value = mock_result
+
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official", "--clean-build"])
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["use_cache"] is False
+
+
+@patch("mvmctl.cli.asset.build_kernel_pipeline")
+@patch("mvmctl.cli.asset.resolve_kernel_spec")
+def test_kernel_fetch_official_name_with_clean_build_disables_cache(
+    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+):
+    from mvmctl.core.kernel import KernelPipelineResult
+
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
+    mock_result = MagicMock(spec=KernelPipelineResult)
+    mock_result.build_dir = tmp_path / "build"
+    mock_result.config_result = None
+    mock_result.build_result = None
+    mock_build.return_value = mock_result
+
+    result = click_runner.invoke(
+        main_app,
+        ["kernel", "fetch", "--official", "--name", "custom-base", "--clean-build"],
+    )
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["use_cache"] is False
 
 
 def test_kernel_fetch_requires_type_or_shortcut():

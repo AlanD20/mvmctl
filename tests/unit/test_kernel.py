@@ -589,6 +589,54 @@ def test_build_kernel_pipeline_cached(tmp_path: Path):
     )
 
 
+@patch("mvmctl.core.kernel.configure_kernel")
+@patch("mvmctl.core.kernel.extract_kernel_tarball")
+@patch("mvmctl.core.kernel.download_kernel_source")
+def test_build_kernel_pipeline_ignores_cache_when_disabled(
+    mock_download: MagicMock,
+    mock_extract: MagicMock,
+    mock_configure: MagicMock,
+    tmp_path: Path,
+):
+    output_path = tmp_path / "vmlinux"
+    output_path.write_bytes(b"existing-kernel")
+
+    from mvmctl.core.kernel import _compute_config_hash
+
+    config_hash = _compute_config_hash("6.1.102", None)
+    cache_key = f"6.1.102-{config_hash}"
+    cache_marker = tmp_path / f"kernel-cache-{cache_key}.marker"
+    cache_marker.write_text(cache_key)
+    cached_kernel = tmp_path / f"kernel-cache-{cache_key}.vmlinux"
+    cached_kernel.write_bytes(b"cached-kernel")
+
+    with (
+        patch("mvmctl.core.kernel.build_kernel") as mock_build,
+        patch("mvmctl.core.kernel.run_make", return_value=(0, "", "")),
+        patch("mvmctl.core.kernel.subprocess.run", return_value=MagicMock(returncode=0, stderr="")),
+        patch("mvmctl.core.kernel.download_firecracker_config", return_value=True),
+    ):
+
+        def create_vmlinux(src_dir: Path, out_path: Path, jobs: int) -> None:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(b"rebuilt-kernel")
+
+        mock_build.side_effect = create_vmlinux
+
+        build_kernel_pipeline(
+            version="6.1.102",
+            source_url="https://example.com/linux.tar.xz",
+            output_path=output_path,
+            build_dir=tmp_path / "build",
+            use_cache=False,
+        )
+
+    mock_download.assert_called_once()
+    mock_extract.assert_called_once()
+    mock_configure.assert_called_once()
+    assert output_path.read_bytes() == b"rebuilt-kernel"
+
+
 def test_build_kernel_pipeline_download_fails(tmp_path: Path):
     output_path = tmp_path / "vmlinux"
     build_dir = tmp_path / "build"
