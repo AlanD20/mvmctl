@@ -97,6 +97,15 @@ def _require_str_dict(path: tuple[str, ...]) -> dict[str, str]:
     raise RuntimeError(f"defaults key must be dict[str, str]: {_format_path(path)}")
 
 
+def _require_str_float_dict(path: tuple[str, ...]) -> dict[str, float]:
+    value = _get_required(path)
+    if isinstance(value, dict) and all(
+        isinstance(k, str) and isinstance(v, (int, float)) for k, v in value.items()
+    ):
+        return {k: float(v) for k, v in value.items()}
+    raise RuntimeError(f"defaults key must be dict[str, float]: {_format_path(path)}")
+
+
 def _default_bridge_name(network_name: str) -> str:
     """Generate bridge name using the same logic as network manager."""
     return f"{CLI_NAME}-{network_name[:10]}"
@@ -334,6 +343,14 @@ DEFAULT_FC_DRIVE_IO_ENGINE: Final[str] = _require_str(("vm", "firecracker", "dri
 
 # VM rootfs basename (no extension — extension comes from image's filesystem type)
 DEFAULT_VM_ROOTFS_BASENAME: Final[str] = _require_str(("vm", "files", "rootfs_basename"))
+
+# ---------------------------------------------------------------------------
+# Rootfs detector constants (loaded from assets/defaults.yaml)
+# ---------------------------------------------------------------------------
+
+DETECTOR_WEIGHTS: Final[dict[str, float]] = _require_str_float_dict(("detectors", "weights"))
+DETECTOR_SCORES: Final[dict[str, float]] = _require_str_float_dict(("detectors", "scores"))
+MIN_ROOT_SIZE_MB: Final[int] = _require_int(("detectors", "thresholds", "MIN_ROOT_SIZE_MB"))
 
 # ---------------------------------------------------------------------------
 # Host system paths (loaded from assets/defaults.yaml)

@@ -136,3 +136,16 @@ urls:
   kernel:
     tarball_template: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz"
     sha256_template: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz.sha256"
+
+detectors:
+  weights:
+    type_code: 1.0
+    label: 0.8
+    size: 0.5
+    filesystem: 0.7
+  scores:
+    ROOT_SCORE: 1.0
+    EXCLUDE_SCORE: -1.0
+    NEUTRAL_SCORE: 0.0
+  thresholds:
+    MIN_ROOT_SIZE_MB: 500

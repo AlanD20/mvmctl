@@ -63,3 +63,28 @@ class BinaryError(MVMError):
 
 class MVMKeyError(MVMError):
     """SSH key management failure."""
+
+
+class RootPartitionDetectionError(MVMError):
+    """Root partition could not be detected."""
+
+    def __init__(self, message: str = "No root partition candidate found") -> None:
+        self.message = message
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return self.message
+
+
+class TieDetectedError(MVMError):
+    """Multiple partitions scored equally; cannot auto-select."""
+
+    def __init__(
+        self, tied_partitions: list[str], message: str = "Tie detected between partitions"
+    ) -> None:
+        self.tied_partitions = tied_partitions
+        self.message = message
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return f"{self.message}: {', '.join(self.tied_partitions)}"
