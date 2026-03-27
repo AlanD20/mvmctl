@@ -589,17 +589,6 @@ def create_vm(
 
     _write_pid_file(pid_file, proc.pid)
 
-    # Cleanup ISO if not keeping (best effort)
-    if (
-        cloud_init_iso is not None
-        and not keep_cloud_init_iso
-        and cloud_init_mode == CloudInitMode.AUTO
-    ):
-        try:
-            cloud_init_iso.unlink(missing_ok=True)
-        except OSError:
-            pass  # Best effort cleanup
-
     vm_instance = VMInstance(
         name=name,
         id=generate_vm_id(name),

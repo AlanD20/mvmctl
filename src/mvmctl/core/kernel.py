@@ -691,6 +691,60 @@ def fetch_kernel_sha256_from_url(sha256_url: str) -> str | None:
         return None
 
 
+def check_build_dependencies() -> list[str]:
+    """Check for required kernel build dependencies.
+
+    Returns:
+        Empty list if all dependencies are present.
+
+    Raises:
+        KernelError: If any dependencies are missing, with install instructions.
+    """
+    required_commands = ["git", "curl", "make", "gcc", "flex", "bison", "bc", "pahole", "ld"]
+    missing_deps: list[str] = []
+
+    # Check for required commands
+    for cmd in required_commands:
+        if shutil.which(cmd) is None:
+            missing_deps.append(cmd)
+
+    # Check for required libraries via pkg-config
+    library_checks = [
+        ("libelf", "libelf"),
+        ("openssl", "libssl-dev"),
+    ]
+
+    for pkg_name, display_name in library_checks:
+        try:
+            result = subprocess.run(
+                ["pkg-config", "--exists", pkg_name],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                missing_deps.append(display_name)
+        except FileNotFoundError:
+            missing_deps.append(display_name)
+
+    if missing_deps:
+        missing_str = ", ".join(sorted(missing_deps))
+        msg = (
+            f"Missing kernel build dependencies: {missing_str}\n"
+            "\n"
+            "Install on Ubuntu/Debian:\n"
+            "  sudo apt update\n"
+            "  sudo apt install -y build-essential libncurses-dev bison flex\n"
+            "  sudo apt install -y libssl-dev libelf-dev bc curl git dwarves\n"
+            "\n"
+            "Install on Arch Linux:\n"
+            "  sudo pacman -S base-devel ncurses bison flex\n"
+            "  sudo pacman -S openssl bc curl git pahole\n"
+        )
+        raise KernelError(msg)
+
+    return []
+
+
 def _compute_config_hash(
     version: str,
     user_config_path: Path | None = None,
@@ -734,6 +788,8 @@ def build_kernel_pipeline(
     arch: str | None = None,
     kernel_spec: KernelSpec | None = None,
 ) -> KernelPipelineResult:
+    check_build_dependencies()
+
     if kernel_spec is None:
         kernel_spec = resolve_kernel_spec(kernel_type=KERNEL_TYPE_OFFICIAL)
 

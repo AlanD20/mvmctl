@@ -166,16 +166,15 @@ def create_cloud_init_iso(cloud_init_dir: Path, output_iso: Path) -> None:
             raise CloudInitError(f"Missing required cloud-init file: {filename}")
 
     # Run cloud-localds to create ISO
+    # Use -N flag for network-config (compatible with older versions)
     cmd = [
         REQUIRED_ISO_TOOL,  # "cloud-localds"
-        str(output_iso),
-        str(cloud_init_dir / "meta-data"),
-        "--network-config",
-        str(cloud_init_dir / "network-config"),
-        "--user-data",
-        str(cloud_init_dir / "user-data"),
         "-v",  # Verbose
-        DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL,  # "cidata"
+        "-N",
+        str(cloud_init_dir / "network-config"),
+        str(output_iso),
+        str(cloud_init_dir / "user-data"),
+        str(cloud_init_dir / "meta-data"),
     ]
 
     from mvmctl.utils.process import run_cmd

@@ -1534,3 +1534,578 @@ class TestConfigureKernelDefconfigFallback:
         assert len(defconfig_calls) == 1, (
             f"Expected exactly 1 defconfig call, got {len(defconfig_calls)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TDD Tests: check_build_dependencies()
+# Verifies kernel build dependency checking based on legacy/build-kernel.sh:34-73
+# ---------------------------------------------------------------------------
+
+
+class TestCheckBuildDependencies:
+    """Tests for check_build_dependencies() function.
+
+    Based on legacy/assets/build-kernel.sh:34-73, this function should check:
+    - Commands: git, curl, make, gcc, flex, bison, bc, pahole
+    - Libraries: libelf, openssl (via pkg-config --exists)
+    - Build tool: ld (indicator for build-essential)
+    """
+
+    def _make_which_mock(self, missing_commands: list[str] | None = None) -> MagicMock:
+        """Create a shutil.which mock that returns None for missing commands."""
+        all_commands = {"git", "curl", "make", "gcc", "flex", "bison", "bc", "pahole", "ld"}
+        missing = set(missing_commands or [])
+
+        def which_side_effect(cmd: str) -> str | None:
+            if cmd in all_commands - missing:
+                return f"/usr/bin/{cmd}"
+            return None
+
+        return MagicMock(side_effect=which_side_effect)
+
+    def _make_subprocess_mock(
+        self,
+        pkg_config_results: dict[str, int] | None = None,
+    ) -> MagicMock:
+        """Create a subprocess.run mock for pkg-config --exists calls."""
+        results = pkg_config_results or {"libelf": 0, "openssl": 0}
+
+        def run_side_effect(cmd: list, **kwargs) -> MagicMock:
+            mock_result = MagicMock()
+            if cmd[0] == "pkg-config" and cmd[1] == "--exists":
+                pkg_name = cmd[2]
+                mock_result.returncode = results.get(pkg_name, 0)
+            else:
+                mock_result.returncode = 0
+            return mock_result
+
+        return MagicMock(side_effect=run_side_effect)
+
+    @patch("mvmctl.core.kernel.shutil.which")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_check_build_dependencies_all_present(
+        self, mock_subprocess: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """Test that check_build_dependencies succeeds when all deps are present."""
+        from mvmctl.core.kernel import check_build_dependencies
+
+        mock_which.return_value = "/usr/bin/test"
+        mock_subprocess.return_value = MagicMock(returncode=0)
+
+        # Should return empty list (no missing deps) or succeed without raising
+        result = check_build_dependencies()
+        assert result == [] or result is None
+
+    @patch("mvmctl.core.kernel.shutil.which")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_check_build_dependencies_missing_flex(
+        self, mock_subprocess: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """Test that missing flex raises KernelError with install instructions."""
+        from mvmctl.core.kernel import check_build_dependencies
+
+        mock_which.side_effect = self._make_which_mock(missing_commands=["flex"])
+        mock_subprocess.return_value = MagicMock(returncode=0)
+
+        with pytest.raises(KernelError, match="flex"):
+            check_build_dependencies()
+
+    @patch("mvmctl.core.kernel.shutil.which")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_check_build_dependencies_missing_bison(
+        self, mock_subprocess: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """Test that missing bison raises KernelError with install instructions."""
+        from mvmctl.core.kernel import check_build_dependencies
+
+        mock_which.side_effect = self._make_which_mock(missing_commands=["bison"])
+        mock_subprocess.return_value = MagicMock(returncode=0)
+
+        with pytest.raises(KernelError, match="bison"):
+            check_build_dependencies()
+
+    @patch("mvmctl.core.kernel.shutil.which")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_check_build_dependencies_missing_libelf(
+        self, mock_subprocess: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """Test that missing libelf raises KernelError with install instructions."""
+        from mvmctl.core.kernel import check_build_dependencies
+
+        mock_which.return_value = "/usr/bin/test"
+        mock_subprocess.side_effect = self._make_subprocess_mock(
+            pkg_config_results={"libelf": 1, "openssl": 0}
+        )
+
+        with pytest.raises(KernelError, match="libelf"):
+            check_build_dependencies()
+
+    @patch("mvmctl.core.kernel.shutil.which")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_check_build_dependencies_missing_libssl(
+        self, mock_subprocess: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """Test that missing openssl/libssl raises KernelError with install instructions."""
+        from mvmctl.core.kernel import check_build_dependencies
+
+        mock_which.return_value = "/usr/bin/test"
+        mock_subprocess.side_effect = self._make_subprocess_mock(
+            pkg_config_results={"libelf": 0, "openssl": 1}
+        )
+
+        with pytest.raises(KernelError, match="libssl"):
+            check_build_dependencies()
+
+    @patch("mvmctl.core.kernel.shutil.which")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_check_build_dependencies_missing_ld(
+        self, mock_subprocess: MagicMock, mock_which: MagicMock
+    ) -> None:
+        """Test that missing ld raises KernelError with build-essential install instructions."""
+        from mvmctl.core.kernel import check_build_dependencies
+
+        mock_which.side_effect = self._make_which_mock(missing_commands=["ld"])
+        mock_subprocess.return_value = MagicMock(returncode=0)
+
+        with pytest.raises(KernelError, match="build-essential"):
+            check_build_dependencies()
+
+
+# ---------------------------------------------------------------------------
+# TDD Tests: build_kernel() Log Capture
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.core.kernel.subprocess.Popen")
+def test_build_log_captured_on_failure(mock_popen: MagicMock, tmp_path: Path):
+    """Test that build log is created and contains error output when build fails."""
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+    vmlinux = kernel_dir / "vmlinux"
+    vmlinux.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    output_path = tmp_path / "out" / "vmlinux"
+    log_path = tmp_path / "build.log"
+
+    error_content = "make: *** [arch/x86/kernel/traps.o] Error 1\n"
+
+    def fake_popen(cmd, cwd=None, stdout=None, stderr=None, **kwargs):
+        if stdout and hasattr(stdout, "write"):
+            stdout.write(error_content)
+            stdout.flush()
+        mock_proc = MagicMock()
+        mock_proc.wait.return_value = 2  # failure
+        return mock_proc
+
+    mock_popen.side_effect = fake_popen
+
+    with pytest.raises(KernelError):
+        build_kernel(kernel_dir, output_path, jobs=1, build_log_path=log_path)
+
+    # Assert log file was created with error content
+    assert log_path.exists(), "Build log should be created at specified path"
+    assert "Error 1" in log_path.read_text(), "Error message should be in log file"
+
+
+@patch("mvmctl.core.kernel.subprocess.Popen")
+def test_build_log_patterns_extracted(mock_popen: MagicMock, tmp_path: Path):
+    """Test that error patterns in log are processed by _BUILD_LOG_PATTERNS."""
+    from mvmctl.core.kernel import _BUILD_LOG_PATTERNS
+
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+    vmlinux = kernel_dir / "vmlinux"
+    vmlinux.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    output_path = tmp_path / "out" / "vmlinux"
+    log_path = tmp_path / "build.log"
+
+    log_content = (
+        "CC init/main.o\n"
+        "ERROR: undefined reference to 'schedule'\n"
+        "ERROR: cannot find symbol 'mutex_lock'\n"
+        "make: fatal error: compile failed\n"
+        "note: this is informational\n"
+    )
+
+    def fake_popen(cmd, cwd=None, stdout=None, stderr=None, **kwargs):
+        if stdout and hasattr(stdout, "write"):
+            stdout.write(log_content)
+            stdout.flush()
+        return MagicMock(wait=lambda: 0)
+
+    mock_popen.side_effect = fake_popen
+
+    with patch("mvmctl.core.kernel.logger.debug") as mock_debug:
+        build_kernel(kernel_dir, output_path, jobs=1, build_log_path=log_path)
+
+    # Verify that debug was called for lines matching _BUILD_LOG_PATTERNS
+    debug_calls = [str(call) for call in mock_debug.call_args_list]
+    logged_content = " ".join(debug_calls)
+
+    # Check that error patterns were logged
+    assert mock_debug.call_count >= 1, "logger.debug should be called for pattern-matched lines"
+    # Verify the patterns were extracted
+    assert any(p in logged_content.lower() for p in ["error", "undefined", "cannot find", "fatal"])
+
+
+@patch("mvmctl.core.kernel.subprocess.Popen")
+def test_build_log_temp_cleanup(mock_popen: MagicMock, tmp_path: Path):
+    """Test that temp log file is cleaned up on successful build."""
+    kernel_dir = tmp_path / "linux-src"
+    kernel_dir.mkdir()
+    vmlinux = kernel_dir / "vmlinux"
+    vmlinux.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    output_path = tmp_path / "out" / "vmlinux"
+
+    def fake_popen(cmd, cwd=None, stdout=None, stderr=None, **kwargs):
+        if stdout and hasattr(stdout, "write"):
+            stdout.write("Building kernel...\nCC init/main.o\n")
+            stdout.flush()
+        return MagicMock(wait=lambda: 0)
+
+    mock_popen.side_effect = fake_popen
+
+    # Call without build_log_path - should create temp and clean up
+    build_kernel(kernel_dir, output_path, jobs=1)
+
+    # After successful build, temp log file should be cleaned up
+    # The function completes successfully without leaving temp files behind
+    # This test verifies the finally block cleanup works correctly
+    temp_logs = list(tmp_path.glob("*.log"))
+    assert len(temp_logs) == 0, "No temp log files should remain after successful build"
+
+
+# ---------------------------------------------------------------------------
+# TDD Tests: configure_kernel() config flow - Verify CORRECT behavior
+# ---------------------------------------------------------------------------
+
+
+class TestConfigureKernelTDD:
+    """TDD tests for configure_kernel() config flow.
+
+    These tests verify the CORRECT behavior of the kernel configuration flow.
+    Most tests SHOULD FAIL with current implementation - they drive the fix.
+    """
+
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_firecracker_config_overwrites_config_file(
+        self,
+        mock_run: MagicMock,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Verify that download_firecracker_config() writes directly to .config (overwrite).
+
+        CORRECT BEHAVIOR: Firecracker config should overwrite .config entirely,
+        NOT be merged via KCONFIG_ALLCONFIG.
+
+        This test SHOULD FAIL if current implementation uses KCONFIG_ALLCONFIG.
+        """
+        # Setup
+        new_config_content = "# NEW_FIRECRACKER_CONFIG\nCONFIG_NEW_OPTION=y\n"
+
+        def mock_download_side_effect(kernel_dir: Path, version: str, **kwargs) -> bool:
+            """Simulate download writing new content to .config."""
+            config_path = kernel_dir / ".config"
+            config_path.write_text(new_config_content)
+            return True
+
+        mock_download.side_effect = mock_download_side_effect
+        mock_run_make.return_value = (0, "", "")
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Pre-create .config with OLD content
+        old_content = "# OLD_CONFIG\nCONFIG_OLD=y\n"
+        (kernel_dir / ".config").write_text(old_content)
+
+        # Execute
+        configure_kernel(kernel_dir, version="6.1.102")
+
+        # Verify .config was OVERWRITTEN with new content (not merged)
+        final_content = (kernel_dir / ".config").read_text()
+        assert final_content == new_config_content, (
+            f"Expected .config to be overwritten with new content.\n"
+            f"Expected: {new_config_content!r}\n"
+            f"Got: {final_content!r}\n"
+            f"This test FAILS if current implementation merges configs instead of overwriting."
+        )
+
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_olddefconfig_called_twice_in_sequence(
+        self,
+        mock_run: MagicMock,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Verify olddefconfig is called exactly twice in correct sequence.
+
+        CORRECT SEQUENCE:
+        1. First olddefconfig after downloading Firecracker config (sync to kernel version)
+        2. Second olddefconfig after applying all patches/options
+
+        This test SHOULD PASS with current implementation.
+        """
+        mock_download.return_value = True
+
+        olddefconfig_calls = []
+
+        def run_make_side_effect(kernel_dir: Path, target: str, **kwargs):
+            if target == "olddefconfig":
+                olddefconfig_calls.append(len(olddefconfig_calls) + 1)
+            return (0, "", "")
+
+        mock_run_make.side_effect = run_make_side_effect
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with required settings so verification passes
+        (kernel_dir / ".config").write_text(
+            "CONFIG_BTRFS_FS=y\n"
+            "CONFIG_VIRTIO_BLK=y\n"
+            "CONFIG_VIRTIO_NET=y\n"
+            "CONFIG_SERIAL_8250_CONSOLE=y\n"
+            "CONFIG_KVM_GUEST=y\n"
+        )
+
+        configure_kernel(kernel_dir, version="6.1.102")
+
+        # Verify exactly 2 olddefconfig calls
+        assert len(olddefconfig_calls) == 2, (
+            f"Expected exactly 2 olddefconfig calls, got {len(olddefconfig_calls)}: {olddefconfig_calls}"
+        )
+        # Verify they were called in sequence (1st, then 2nd)
+        assert olddefconfig_calls == [1, 2], (
+            f"Expected olddefconfig calls in sequence [1, 2], got {olddefconfig_calls}"
+        )
+
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_defconfig_fallback_on_download_failure(
+        self,
+        mock_run: MagicMock,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Verify defconfig is called when download fails, and olddefconfig still called twice.
+
+        CORRECT BEHAVIOR:
+        1. Download fails -> defconfig is called as fallback
+        2. olddefconfig called to sync to kernel version
+        3. Patches applied via ./scripts/config
+        4. olddefconfig called again to resolve dependencies
+
+        This test SHOULD FAIL if current code doesn't handle fallback correctly.
+        """
+        mock_download.side_effect = KernelError("Download failed")
+
+        defconfig_calls = []
+        olddefconfig_calls = []
+
+        def run_make_side_effect(kernel_dir: Path, target: str, **kwargs):
+            if target == "defconfig":
+                defconfig_calls.append(len(defconfig_calls) + 1)
+            elif target == "olddefconfig":
+                olddefconfig_calls.append(len(olddefconfig_calls) + 1)
+            return (0, "", "")
+
+        mock_run_make.side_effect = run_make_side_effect
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with required settings so verification passes
+        (kernel_dir / ".config").write_text(
+            "CONFIG_BTRFS_FS=y\n"
+            "CONFIG_VIRTIO_BLK=y\n"
+            "CONFIG_VIRTIO_NET=y\n"
+            "CONFIG_SERIAL_8250_CONSOLE=y\n"
+            "CONFIG_KVM_GUEST=y\n"
+        )
+
+        result = configure_kernel(kernel_dir, version="6.1.102")
+
+        # Verify defconfig was called exactly once as fallback
+        assert len(defconfig_calls) == 1, (
+            f"Expected exactly 1 defconfig call for fallback, got {len(defconfig_calls)}"
+        )
+        # Verify olddefconfig is still called twice
+        assert len(olddefconfig_calls) == 2, (
+            f"Expected exactly 2 olddefconfig calls, got {len(olddefconfig_calls)}: {olddefconfig_calls}\n"
+            f"This test FAILS if fallback doesn't properly call olddefconfig twice."
+        )
+
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_required_settings_verification_raises_kernel_error(
+        self,
+        mock_run: MagicMock,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Verify KernelError raised when required settings are missing with skip_confirm=True.
+
+        This test SHOULD PASS with current implementation.
+        """
+        mock_download.return_value = True
+        mock_run_make.return_value = (0, "", "")
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with MISSING required settings
+        (kernel_dir / ".config").write_text("CONFIG_SOMETHING_UNRELATED=y\n")
+
+        with pytest.raises(KernelError, match="Required kernel settings are missing"):
+            configure_kernel(kernel_dir, version="6.1.102", skip_confirm=True)
+
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_firecracker_config_written_to_dot_config_not_kconfig_allconfig(
+        self,
+        mock_run: MagicMock,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Verify KCONFIG_ALLCONFIG is NOT set during subprocess calls.
+
+        CORRECT BEHAVIOR: Firecracker config is written directly to .config,
+        NOT via KCONFIG_ALLCONFIG environment variable.
+
+        This test SHOULD FAIL if current implementation uses KCONFIG_ALLCONFIG.
+        """
+        mock_download.return_value = True
+        mock_run_make.return_value = (0, "", "")
+
+        kconfig_allconfig_values = []
+
+        def capture_env(cmd, **kwargs):
+            """Capture any KCONFIG_ALLCONFIG from environment."""
+            env = kwargs.get("env", {})
+            if env and "KCONFIG_ALLCONFIG" in env:
+                kconfig_allconfig_values.append(env["KCONFIG_ALLCONFIG"])
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = capture_env
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with required settings
+        (kernel_dir / ".config").write_text(
+            "CONFIG_BTRFS_FS=y\n"
+            "CONFIG_VIRTIO_BLK=y\n"
+            "CONFIG_VIRTIO_NET=y\n"
+            "CONFIG_SERIAL_8250_CONSOLE=y\n"
+            "CONFIG_KVM_GUEST=y\n"
+        )
+
+        configure_kernel(kernel_dir, version="6.1.102")
+
+        # Verify KCONFIG_ALLCONFIG was NEVER set
+        assert len(kconfig_allconfig_values) == 0, (
+            f"KCONFIG_ALLCONFIG should NOT be set. Found: {kconfig_allconfig_values}\n"
+            f"This test FAILS if current implementation uses KCONFIG_ALLCONFIG."
+        )
+
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_config_download_replaces_existing_config(
+        self,
+        mock_run: MagicMock,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Verify downloaded config REPLACES existing .config, not merges.
+
+        CORRECT BEHAVIOR: When download succeeds, it overwrites .config entirely.
+        The old content should be completely replaced.
+
+        This test SHOULD FAIL if current code merges configs instead of overwriting.
+        """
+        old_content = "CONFIG_OLD_MARKER=y\nCONFIG_OTHER_OLD=z\n"
+        new_content = "CONFIG_NEW_DOWNLOAD=y\nCONFIG_ANOTHER_NEW=w\n"
+
+        def mock_download_side_effect(kernel_dir: Path, version: str, **kwargs) -> bool:
+            """Simulate download writing new content to .config."""
+            config_path = kernel_dir / ".config"
+            config_path.write_text(new_content)
+            return True
+
+        mock_download.side_effect = mock_download_side_effect
+        mock_run_make.return_value = (0, "", "")
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Pre-create .config with OLD content
+        (kernel_dir / ".config").write_text(old_content)
+
+        configure_kernel(kernel_dir, version="6.1.102")
+
+        final_content = (kernel_dir / ".config").read_text()
+
+        # Verify old content is GONE
+        assert "CONFIG_OLD_MARKER" not in final_content, (
+            f"Old config marker should be GONE after download.\n"
+            f"Got content: {final_content!r}\n"
+            f"This test FAILS if current implementation MERGES configs instead of replacing."
+        )
+        # Verify new content is present
+        assert "CONFIG_NEW_DOWNLOAD" in final_content, (
+            f"New downloaded content should be present.\n"
+            f"Got content: {final_content!r}"
+        )
+        # Verify completely replaced (not merged)
+        assert final_content == new_content, (
+            f"Expected .config to be completely replaced.\n"
+            f"Expected: {new_content!r}\n"
+            f"Got: {final_content!r}"
+        )

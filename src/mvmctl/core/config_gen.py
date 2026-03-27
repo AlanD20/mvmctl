@@ -224,12 +224,17 @@ class ConfigGenerator:
         else:
             ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
 
+        # Get rootfs UUID for root= kernel parameter
+        root_uuid = self._get_rootfs_uuid()
+        root_arg = f"root=UUID={root_uuid}" if root_uuid else "root=/dev/vda"
+
         parts = [
             DEFAULT_BOOT_CONSOLE,
             DEFAULT_BOOT_REBOOT,
             DEFAULT_BOOT_PANIC,
             pci_arg,
             ip_arg,
+            root_arg,
             "rw",
             "rootwait",
             "rootfstype=ext4",
@@ -237,6 +242,22 @@ class ConfigGenerator:
             lsm_arg,
         ]
         return " ".join(p for p in parts if p).strip()
+
+    def _get_rootfs_uuid(self) -> str | None:
+        """Get UUID of the root filesystem using blkid."""
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ["blkid", "-s", "UUID", "-o", "value", str(self.vm_config.rootfs_path)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            uuid = result.stdout.strip()
+            return uuid if uuid else None
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
 
     def _build_network_config(self) -> list[NetworkInterfaceConfig]:
         if not self.vm_config.tap_device:

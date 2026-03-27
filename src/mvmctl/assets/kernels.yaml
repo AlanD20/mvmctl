@@ -4,6 +4,7 @@ kernel-official:
   source: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz
   sha256: null
   sha256_url: null
+  config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config"
   config_fragments:
     - https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config
   output_name: vmlinux-official
@@ -20,6 +21,7 @@ kernel-official:
     # VirtIO (all must be built-in for Firecracker)
     - CONFIG_VIRTIO
     - CONFIG_VIRTIO_MENU
+    - CONFIG_VIRTIO_MMIO
     - CONFIG_VIRTIO_PCI
     - CONFIG_VIRTIO_BLK
     - CONFIG_VIRTIO_NET
