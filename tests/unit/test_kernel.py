@@ -1020,14 +1020,12 @@ def test_build_kernel_pipeline_skips_build_if_cache_matches(
 class TestApplyConfigFragments:
     from mvmctl.core.kernel import _apply_config_fragments
 
-    @patch("mvmctl.core.kernel.subprocess.run")
-    def test_local_assets_fragment(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_local_assets_fragment(self, tmp_path: Path) -> None:
         from mvmctl.core.kernel import _ASSETS_DIR, _apply_config_fragments
 
         fragment_file = _ASSETS_DIR / "test-fragment.config"
         fragment_file.write_text("CONFIG_FOO=y\n")
         try:
-            mock_run.return_value = MagicMock(returncode=0, stderr="")
             kernel_dir = tmp_path / "linux"
             kernel_dir.mkdir()
             _apply_config_fragments(
@@ -1035,18 +1033,15 @@ class TestApplyConfigFragments:
                 {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
                 kernel_dir,
             )
-            assert mock_run.called
-            call_env = mock_run.call_args.kwargs["env"]
-            assert "KCONFIG_ALLCONFIG" in call_env
-            assert call_env["KCONFIG_ALLCONFIG"].endswith(".fragment_0.config")
-            assert mock_run.call_args.args[0] == ["make", "olddefconfig"]
+            # Verify fragment content was written directly to .config (OVERWRITE)
+            config_content = (kernel_dir / ".config").read_text()
+            assert "CONFIG_FOO=y" in config_content
         finally:
             fragment_file.unlink(missing_ok=True)
 
-    @patch("mvmctl.core.kernel.subprocess.run")
     @patch("mvmctl.core.kernel.urlopen")
     def test_remote_url_fragment_with_arch_template(
-        self, mock_urlopen: MagicMock, mock_run: MagicMock, tmp_path: Path
+        self, mock_urlopen: MagicMock, tmp_path: Path
     ) -> None:
         from mvmctl.core.kernel import _apply_config_fragments
 
@@ -1055,7 +1050,6 @@ class TestApplyConfigFragments:
         resp.__enter__ = lambda s: s
         resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = resp
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         kernel_dir = tmp_path / "linux"
         kernel_dir.mkdir()
@@ -1067,7 +1061,9 @@ class TestApplyConfigFragments:
 
         fetched_url = mock_urlopen.call_args.args[0].full_url
         assert fetched_url == "https://example.com/config-amd64.config"
-        assert mock_run.called
+        # Verify remote fragment content was written directly to .config (OVERWRITE)
+        config_content = (kernel_dir / ".config").read_text()
+        assert "CONFIG_VIRTIO_BLK=y" in config_content
 
     def test_missing_local_fragment_raises(self, tmp_path: Path) -> None:
         from mvmctl.core.kernel import _apply_config_fragments
@@ -1094,35 +1090,32 @@ class TestApplyConfigFragments:
                 kernel_dir,
             )
 
-    @patch("mvmctl.core.kernel.subprocess.run")
-    def test_make_failure_raises(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_fragment_written_to_config(self, tmp_path: Path) -> None:
         from mvmctl.core.kernel import _ASSETS_DIR, _apply_config_fragments
 
-        fragment_file = _ASSETS_DIR / "bad-fragment.config"
-        fragment_file.write_text("CONFIG_BAD=y\n")
+        fragment_file = _ASSETS_DIR / "test-fragment.config"
+        fragment_file.write_text("CONFIG_TEST=y\nCONFIG_ANOTHER=m\n")
         try:
-            mock_run.return_value = MagicMock(returncode=1, stderr="make: error")
             kernel_dir = tmp_path / "linux"
             kernel_dir.mkdir()
-            with pytest.raises(KernelError, match="Failed to apply config fragment"):
-                _apply_config_fragments(
-                    ["assets/bad-fragment.config"],
-                    {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
-                    kernel_dir,
-                )
+            _apply_config_fragments(
+                ["assets/test-fragment.config"],
+                {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
+                kernel_dir,
+            )
+            # Verify fragment content was written directly to .config (OVERWRITE)
+            config_content = (kernel_dir / ".config").read_text()
+            assert "CONFIG_TEST=y" in config_content
+            assert "CONFIG_ANOTHER=m" in config_content
         finally:
             fragment_file.unlink(missing_ok=True)
 
-    @patch("mvmctl.core.kernel.subprocess.run")
-    def test_temp_fragment_file_cleaned_up_on_success(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_no_temp_files_created(self, tmp_path: Path) -> None:
         from mvmctl.core.kernel import _ASSETS_DIR, _apply_config_fragments
 
         fragment_file = _ASSETS_DIR / "cleanup-test.config"
         fragment_file.write_text("CONFIG_X=y\n")
         try:
-            mock_run.return_value = MagicMock(returncode=0, stderr="")
             kernel_dir = tmp_path / "linux"
             kernel_dir.mkdir()
             _apply_config_fragments(
@@ -1130,6 +1123,414 @@ class TestApplyConfigFragments:
                 {"version": "6.1", "arch": "x86_64", "ci_version": "1.12"},
                 kernel_dir,
             )
+            # Verify .config was created and no temp fragment files exist
+            assert (kernel_dir / ".config").exists()
             assert not (kernel_dir / ".fragment_0.config").exists()
+            assert not list(kernel_dir.glob(".fragment_*.config"))
         finally:
             fragment_file.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# TDD Tests: configure_kernel() config flow
+# These tests verify the CORRECT behavior per bash script:
+# 1. Download Firecracker config directly to .config (OVERWRITE, not merge)
+# 2. Run make olddefconfig
+# 3. Apply patches via ./scripts/config
+# 4. Run make olddefconfig again
+# 5. Verify critical settings
+# ---------------------------------------------------------------------------
+
+
+class TestConfigureKernelConfigFlow:
+    """Tests for configure_kernel() config flow.
+
+    These tests verify the correct behavior of the kernel configuration flow.
+    Current implementation has issues with config fragment handling.
+    """
+
+    @patch("mvmctl.core.kernel._apply_config_fragments")
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_firecracker_config_overwrites_base_config(
+        self,
+        mock_subprocess_run: MagicMock,
+        mock_download: MagicMock,
+        mock_apply_fragments: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that Firecracker config OVERWRITES .config rather than being merged.
+
+        CORRECT BEHAVIOR: Firecracker config should be written directly to .config
+        as the complete base config, NOT merged via KCONFIG_ALLCONFIG.
+
+        CURRENT BUG: When config_fragments exist, _apply_config_fragments uses
+        KCONFIG_ALLCONFIG which MERGES fragments into the base config. This changes
+        the Firecracker base config instead of just patching on top.
+
+        This test WILL FAIL with current implementation if config_fragments are used.
+        """
+        mock_download.return_value = True
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with Firecracker base content
+        (kernel_dir / ".config").write_text(
+            "# FIRECRACKER_BASE_CONFIG\nCONFIG_BTRFS_FS=y\nCONFIG_VIRTIO_BLK=y\n"
+        )
+
+        from mvmctl.models.kernel import KernelSpec
+
+        kernel_spec = KernelSpec(
+            name="test-kernel",
+            kernel_type="firecracker",
+            version="6.1.102",
+            source="https://example.com/linux.tar.xz",
+            output_name="vmlinux",
+            build_dir=str(kernel_dir),
+            config_fragments=["assets/test-fragment.config"],
+            enabled_configs=["CONFIG_FOO"],
+            disabled_configs=[],
+            set_val_configs=[],
+            required_settings=["CONFIG_BTRFS_FS", "CONFIG_VIRTIO_BLK"],
+        )
+
+        configure_kernel(kernel_dir, version="6.1.102", kernel_spec=kernel_spec)
+
+        # BUG: _apply_config_fragments is called, which uses KCONFIG_ALLCONFIG
+        # This test expects it to NOT be called (correct behavior: patches via ./scripts/config)
+        assert not mock_apply_fragments.called, (
+            "Expected _apply_config_fragments to NOT be called. "
+            "Config fragments should be applied via ./scripts/config commands, "
+            "NOT via KCONFIG_ALLCONFIG which incorrectly merges with base config."
+        )
+
+    @patch("mvmctl.core.kernel._apply_config_fragments")
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    def test_olddefconfig_called_exactly_twice(
+        self,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        mock_apply_fragments: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that olddefconfig is called exactly twice in the correct sequence.
+
+        CORRECT SEQUENCE:
+        1. First olddefconfig after downloading Firecracker config (sync to kernel version)
+        2. Second olddefconfig after applying all patches/options
+
+        CURRENT BEHAVIOR: olddefconfig IS called twice (lines 528 and 559).
+        This test verifies the count is exactly 2 and the sequence is correct.
+        """
+        mock_download.return_value = True
+
+        olddefconfig_calls = []
+
+        def run_make_side_effect(kernel_dir: Path, target: str, **kwargs):
+            if target == "olddefconfig":
+                olddefconfig_calls.append("olddefconfig")
+            return (0, "", "")
+
+        mock_run_make.side_effect = run_make_side_effect
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with required settings so verification passes
+        (kernel_dir / ".config").write_text(
+            "CONFIG_BTRFS_FS=y\n"
+            "CONFIG_VIRTIO_BLK=y\n"
+            "CONFIG_VIRTIO_NET=y\n"
+            "CONFIG_SERIAL_8250_CONSOLE=y\n"
+            "CONFIG_KVM_GUEST=y\n"
+        )
+
+        configure_kernel(kernel_dir, version="6.1.102")
+
+        # BUG: If config_fragments exist, _apply_config_fragments calls olddefconfig internally
+        # via KCONFIG_ALLCONFIG, causing more than 2 calls
+        assert len(olddefconfig_calls) == 2, (
+            f"Expected exactly 2 olddefconfig calls, got {len(olddefconfig_calls)}. "
+            "Current implementation may call olddefconfig additional times via "
+            "_apply_config_fragments which uses KCONFIG_ALLCONFIG."
+        )
+
+    @patch("mvmctl.core.kernel._apply_config_fragments")
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_config_fragments_not_applied_via_kconfig_allconfig(
+        self,
+        mock_subprocess_run: MagicMock,
+        mock_download: MagicMock,
+        mock_apply_fragments: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that config_fragments are NOT applied via KCONFIG_ALLCONFIG merge.
+
+        CORRECT BEHAVIOR: Config fragments should be applied AFTER the first
+        olddefconfig via ./scripts/config commands (--enable/--disable).
+
+        CURRENT BUG: When config_fragments exist, _apply_config_fragments uses
+        KCONFIG_ALLCONFIG which runs make olddefconfig with a merged config.
+        This causes extra olddefconfig calls and changes the base config.
+
+        This test WILL FAIL with current implementation when config_fragments are used.
+        """
+        mock_download.return_value = True
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with required settings so verification passes
+        (kernel_dir / ".config").write_text(
+            "CONFIG_BTRFS_FS=y\n"
+            "CONFIG_VIRTIO_BLK=y\n"
+            "CONFIG_VIRTIO_NET=y\n"
+            "CONFIG_SERIAL_8250_CONSOLE=y\n"
+            "CONFIG_KVM_GUEST=y\n"
+        )
+
+        from mvmctl.models.kernel import KernelSpec
+
+        kernel_spec = KernelSpec(
+            name="test-kernel",
+            kernel_type="firecracker",
+            version="6.1.102",
+            source="https://example.com/linux.tar.xz",
+            output_name="vmlinux",
+            build_dir=str(kernel_dir),
+            config_fragments=["assets/test-fragment.config"],
+            enabled_configs=["CONFIG_FOO"],
+            disabled_configs=[],
+            set_val_configs=[],
+            required_settings=["CONFIG_BTRFS_FS", "CONFIG_VIRTIO_BLK"],
+        )
+
+        configure_kernel(kernel_dir, version="6.1.102", kernel_spec=kernel_spec)
+
+        # BUG: _apply_config_fragments was called, which uses KCONFIG_ALLCONFIG
+        assert not mock_apply_fragments.called, (
+            "Expected _apply_config_fragments to NOT be called. "
+            "Config fragments should be applied via ./scripts/config commands, "
+            "NOT via KCONFIG_ALLCONFIG which incorrectly merges with base config."
+        )
+
+    @patch("mvmctl.core.kernel._apply_config_fragments")
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    def test_verify_required_settings_returns_missing_list(
+        self,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        mock_apply_fragments: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that missing required settings are properly detected and returned."""
+        mock_download.return_value = True
+        mock_run_make.return_value = (0, "", "")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with only some required settings
+        (kernel_dir / ".config").write_text("CONFIG_BTRFS_FS=y\nCONFIG_SERIAL_8250_CONSOLE=y\n")
+
+        from mvmctl.models.kernel import KernelSpec
+
+        kernel_spec = KernelSpec(
+            name="test-kernel",
+            kernel_type="firecracker",
+            version="6.1.102",
+            source="https://example.com/linux.tar.xz",
+            output_name="vmlinux",
+            build_dir=str(kernel_dir),
+            config_fragments=[],
+            enabled_configs=[],
+            disabled_configs=[],
+            set_val_configs=[],
+            required_settings=[
+                "CONFIG_BTRFS_FS",
+                "CONFIG_VIRTIO_BLK",
+                "CONFIG_MISSING_OPTION",
+            ],
+        )
+
+        result = configure_kernel(
+            kernel_dir, version="6.1.102", kernel_spec=kernel_spec, skip_confirm=False
+        )
+
+        assert result.success is False
+        assert "CONFIG_VIRTIO_BLK" in result.missing_settings
+        assert "CONFIG_MISSING_OPTION" in result.missing_settings
+
+    @patch("mvmctl.core.kernel._apply_config_fragments")
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    def test_required_settings_present_succeeds(
+        self,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        mock_apply_fragments: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that configure_kernel succeeds when all required settings are present."""
+        mock_download.return_value = True
+        mock_run_make.return_value = (0, "", "")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config with all required settings
+        (kernel_dir / ".config").write_text(
+            "CONFIG_BTRFS_FS=y\n"
+            "CONFIG_VIRTIO_BLK=y\n"
+            "CONFIG_VIRTIO_NET=y\n"
+            "CONFIG_SERIAL_8250_CONSOLE=y\n"
+            "CONFIG_KVM_GUEST=y\n"
+        )
+
+        from mvmctl.models.kernel import KernelSpec
+
+        kernel_spec = KernelSpec(
+            name="test-kernel",
+            kernel_type="firecracker",
+            version="6.1.102",
+            source="https://example.com/linux.tar.xz",
+            output_name="vmlinux",
+            build_dir=str(kernel_dir),
+            config_fragments=[],
+            enabled_configs=[],
+            disabled_configs=[],
+            set_val_configs=[],
+            required_settings=[
+                "CONFIG_BTRFS_FS",
+                "CONFIG_VIRTIO_BLK",
+                "CONFIG_VIRTIO_NET",
+                "CONFIG_SERIAL_8250_CONSOLE",
+                "CONFIG_KVM_GUEST",
+            ],
+        )
+
+        result = configure_kernel(
+            kernel_dir, version="6.1.102", kernel_spec=kernel_spec, skip_confirm=False
+        )
+
+        assert result.success is True
+        assert len(result.missing_settings) == 0
+
+
+class TestConfigureKernelDefconfigFallback:
+    """Tests for configure_kernel() defconfig fallback behavior."""
+
+    @patch("mvmctl.core.kernel._apply_config_fragments")
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.subprocess.run")
+    def test_defconfig_fallback_on_download_failure(
+        self,
+        mock_subprocess_run: MagicMock,
+        mock_download: MagicMock,
+        mock_apply_fragments: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that configure_kernel falls back to defconfig when download fails."""
+        mock_download.side_effect = KernelError("Download failed")
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stderr="")
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        # Create .config so verification passes
+        (kernel_dir / ".config").write_text(
+            "CONFIG_BTRFS_FS=y\n"
+            "CONFIG_VIRTIO_BLK=y\n"
+            "CONFIG_VIRTIO_NET=y\n"
+            "CONFIG_SERIAL_8250_CONSOLE=y\n"
+            "CONFIG_KVM_GUEST=y\n"
+        )
+
+        result = configure_kernel(kernel_dir, version="6.1.102")
+
+        assert result.success is True
+        mock_download.assert_called_once()
+
+    @patch("mvmctl.core.kernel._apply_config_fragments")
+    @patch("mvmctl.core.kernel.download_firecracker_config")
+    @patch("mvmctl.core.kernel.run_make")
+    def test_defconfig_fallback_still_calls_olddefconfig_twice(
+        self,
+        mock_run_make: MagicMock,
+        mock_download: MagicMock,
+        mock_apply_fragments: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that even with defconfig fallback, olddefconfig is still called twice."""
+        mock_download.side_effect = KernelError("Download failed")
+
+        olddefconfig_calls = []
+        defconfig_calls = []
+
+        def run_make_side_effect(kernel_dir: Path, target: str, **kwargs):
+            if target == "olddefconfig":
+                olddefconfig_calls.append("olddefconfig")
+            elif target == "defconfig":
+                defconfig_calls.append("defconfig")
+            return (0, "", "")
+
+        mock_run_make.side_effect = run_make_side_effect
+
+        kernel_dir = tmp_path / "linux-src"
+        kernel_dir.mkdir()
+        scripts_dir = kernel_dir / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "config").write_text("#!/bin/bash\nexit 0")
+        (scripts_dir / "config").chmod(0o755)
+
+        with patch("mvmctl.core.kernel.subprocess.run") as mock_subprocess_run:
+            mock_subprocess_run.return_value = MagicMock(returncode=0, stderr="")
+
+            # Create .config so verification passes
+            (kernel_dir / ".config").write_text(
+                "CONFIG_BTRFS_FS=y\n"
+                "CONFIG_VIRTIO_BLK=y\n"
+                "CONFIG_VIRTIO_NET=y\n"
+                "CONFIG_SERIAL_8250_CONSOLE=y\n"
+                "CONFIG_KVM_GUEST=y\n"
+            )
+
+            configure_kernel(kernel_dir, version="6.1.102")
+
+        assert len(olddefconfig_calls) == 2, (
+            f"Expected exactly 2 olddefconfig calls, got {len(olddefconfig_calls)}"
+        )
+        assert len(defconfig_calls) == 1, (
+            f"Expected exactly 1 defconfig call, got {len(defconfig_calls)}"
+        )

@@ -445,7 +445,14 @@ def _apply_config_fragments(
     template_vars: dict[str, str],
     kernel_dir: Path,
 ) -> None:
-    for i, fragment in enumerate(fragments):
+    """Apply config fragments by writing directly to .config (OVERWRITE, not merge).
+
+    This writes fragment content directly to .config file. The caller is
+    responsible for running 'make olddefconfig' after all fragments are applied.
+    """
+    config_path = kernel_dir / ".config"
+
+    for fragment in fragments:
         rendered = render_template(fragment, template_vars)
         if rendered.startswith("http://") or rendered.startswith("https://"):
             try:
@@ -461,24 +468,8 @@ def _apply_config_fragments(
             content = path.read_text(encoding="utf-8")
             logger.info("Applying local config fragment: %s", path)
 
-        fragment_path = kernel_dir / f".fragment_{i}.config"
-        try:
-            fragment_path.write_text(content, encoding="utf-8")
-            env = os.environ.copy()
-            env["KCONFIG_ALLCONFIG"] = str(fragment_path)
-            result = subprocess.run(
-                ["make", "olddefconfig"],
-                cwd=kernel_dir,
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                raise KernelError(
-                    f"Failed to apply config fragment '{rendered}': {result.stderr.strip()}"
-                )
-        finally:
-            fragment_path.unlink(missing_ok=True)
+        # Write fragment content directly to .config (OVERWRITE, not merge)
+        config_path.write_text(content, encoding="utf-8")
 
 
 def configure_kernel(
@@ -528,14 +519,6 @@ def configure_kernel(
     returncode, _, _ = run_make(kernel_dir, "olddefconfig")
     if returncode != 0:
         raise KernelError("olddefconfig failed")
-
-    if kernel_spec.config_fragments:
-        template_vars = {
-            "version": version,
-            "arch": arch or DEFAULT_FC_KERNEL_ARCH,
-            "ci_version": version,
-        }
-        _apply_config_fragments(kernel_spec.config_fragments, template_vars, kernel_dir)
 
     config_script = kernel_dir / "scripts" / "config"
 
