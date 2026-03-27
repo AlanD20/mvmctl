@@ -72,6 +72,7 @@ class VMConfig:
         datasource_mode: Cloud-init datasource mode (auto/nocloud-net).
         cloud_init_iso_path: Path to custom cloud-init ISO (used when mode is CUSTOM).
         keep_cloud_init_iso: Retain the generated cloud-init ISO after boot.
+        root_fs_type: Filesystem type of the root image (e.g. ext4, btrfs, xfs).
     """
 
     name: str
@@ -86,6 +87,7 @@ class VMConfig:
     tap_device: str | None = None
     boot_args: str | None = None
     root_uuid: str | None = None
+    root_fs_type: str | None = None
     enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI
     lsm_flags: str = DEFAULT_VM_LSM_FLAGS

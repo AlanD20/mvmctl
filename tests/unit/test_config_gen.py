@@ -420,3 +420,51 @@ def test_boot_args_cloud_init_disabled():
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "ds=" not in boot_args
+
+
+def test_boot_args_uses_root_fs_type_from_config():
+    """Boot args include rootfstype from VMConfig.root_fs_type."""
+    vm_config = VMConfig(
+        name="btrfs-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.btrfs"),
+        root_fs_type="btrfs",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    boot_args = config["boot-source"]["boot_args"]
+    assert "rootfstype=btrfs" in boot_args
+
+
+def test_boot_args_falls_back_to_ext4_when_root_fs_type_none():
+    """Boot args fall back to rootfstype=ext4 when root_fs_type is None."""
+    vm_config = VMConfig(
+        name="ext4-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        root_fs_type=None,
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    boot_args = config["boot-source"]["boot_args"]
+    assert "rootfstype=ext4" in boot_args
+
+
+def test_boot_args_rootfstype_from_metadata():
+    """root_fs_type from metadata propagates to boot args."""
+    vm_config = VMConfig(
+        name="xfs-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.xfs"),
+        root_fs_type="xfs",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    boot_args = config["boot-source"]["boot_args"]
+    assert "rootfstype=xfs" in boot_args

@@ -32,7 +32,6 @@ from mvmctl.constants import (
     DEFAULT_VM_ENABLE_PCI,
     DEFAULT_VM_KERNEL_FILENAME,
     DEFAULT_VM_MEM_MIB,
-    DEFAULT_VM_ROOTFS_BASENAME,
     DEFAULT_VM_SSH_USER,
     DEFAULT_VM_VCPU_COUNT,
     FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
@@ -125,6 +124,32 @@ def _resolve_image_fs_uuid(image: str) -> str | None:
         fs_uuid = meta.get("fs_uuid")
         if isinstance(fs_uuid, str) and fs_uuid.strip():
             return fs_uuid.strip()
+
+    return None
+
+
+def _resolve_image_fs_type(image: str) -> str | None:
+    from mvmctl.core.metadata import find_images_by_short_id, list_image_entries
+    from mvmctl.utils.fs import get_cache_dir
+
+    cache_dir = get_cache_dir()
+
+    all_entries = list_image_entries(cache_dir)
+    for _full_key, meta in all_entries.items():
+        internal_id = str(meta.get("internal_id", ""))
+        filename = str(meta.get("filename", ""))
+        if image not in {internal_id, filename}:
+            continue
+        fs_type = meta.get("fs_type")
+        if isinstance(fs_type, str) and fs_type.strip():
+            return fs_type.strip()
+
+    matches = find_images_by_short_id(cache_dir, image)
+    if len(matches) == 1:
+        _, meta = matches[0]
+        fs_type = meta.get("fs_type")
+        if isinstance(fs_type, str) and fs_type.strip():
+            return fs_type.strip()
 
     return None
 
@@ -430,6 +455,7 @@ def create_vm(
 
     image_path = _resolve_image_path(image)
     image_fs_uuid = _resolve_image_fs_uuid(image)
+    image_fs_type = _resolve_image_fs_type(image)
 
     if user_data is not None and not user_data.exists():
         raise MVMError(f"User-data file not found: {user_data}")
@@ -460,13 +486,7 @@ def create_vm(
     tap_name = _generate_tap_name(network_name, name)
     bridge = net_config.bridge
 
-    rootfs_ext = image_path.suffix
-    rootfs_path = vm_dir / f"{DEFAULT_VM_ROOTFS_BASENAME}{rootfs_ext}"
-    try:
-        shutil.copy2(image_path, rootfs_path)
-    except OSError as e:
-        shutil.rmtree(vm_dir, ignore_errors=True)
-        raise MVMError(f"Failed to copy image: {e}")
+    rootfs_path = image_path  # Use absolute cached image path directly
 
     # Handle cloud-init based on mode
     cloud_init_iso: Path | None = None
@@ -532,6 +552,7 @@ def create_vm(
         subnet_mask=_subnet_mask,
         tap_device=tap_name,
         root_uuid=image_fs_uuid,
+        root_fs_type=image_fs_type,
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
         cloud_init_mode=cloud_init_mode,

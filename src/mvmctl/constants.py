@@ -227,6 +227,7 @@ ISO_BINARIES: Final[list[str]] = _require_str_list(("host", "iso_binaries"))
 DEFAULT_VM_VCPU_COUNT: Final[int] = _require_int(("vm_defaults", "vcpu_count"))
 DEFAULT_VM_MEM_MIB: Final[int] = _require_int(("vm_defaults", "mem_size_mib"))
 DEFAULT_VM_SSH_USER: Final[str] = _require_str(("vm_defaults", "ssh_user"))
+DEFAULT_VM_ROOT_FS_TYPE: Final[str] = _require_str(("vm_defaults", "root_fs_type"))
 DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = _require_str(("vm", "firecracker_bin_name"))
 
 # VM feature flags

@@ -19,6 +19,7 @@ from mvmctl.constants import (
     DEFAULT_FC_METRICS_FILENAME,
     DEFAULT_GUEST_MAC_DEFAULT,
     DEFAULT_GUEST_NETWORK_IFACE,
+    DEFAULT_VM_ROOT_FS_TYPE,
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import CloudInitMode, VMConfig
@@ -239,7 +240,7 @@ class ConfigGenerator:
             root_arg,
             "rw",
             "rootwait",
-            "rootfstype=ext4",
+            f"rootfstype={self.vm_config.root_fs_type or DEFAULT_VM_ROOT_FS_TYPE}",
             ds_arg,
             lsm_arg,
         ]

@@ -74,7 +74,7 @@ class TestCloudInitISOCreation:
         # Verify create_vm was called with correct cloud-init mode
         call_kwargs = mock_create_vm.call_args.kwargs
         assert call_kwargs["name"] == "cloud-init-vm"
-        assert call_kwargs["image"] == "/tmp/image.ext4"
+        assert call_kwargs["image"] == "abc123"
 
     @patch("mvmctl.api.vms.check_privileges")
     @patch("mvmctl.cli.vm.resolve_image_short_id_path")

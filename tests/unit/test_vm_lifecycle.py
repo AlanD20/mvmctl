@@ -5,6 +5,7 @@ import pytest
 
 from mvmctl.core.vm_lifecycle import (
     _read_pid_file,
+    _resolve_image_fs_type,
     _resolve_image_path,
     _resolve_kernel_path,
     _secure_mkdir_vm,
@@ -86,7 +87,6 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
 @patch("mvmctl.core.vm_lifecycle.generate_mac")
-@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
 @patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
 @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
@@ -96,9 +96,11 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("mvmctl.core.vm_lifecycle._write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 def test_create_vm_core_success(
     mock_open,
+    mock_resolve_fs_type,
     mock_resolve_fs_uuid,
     mock_bridge_exists,
     mock_write_pid,
@@ -108,7 +110,6 @@ def test_create_vm_core_success(
     mock_config_gen,
     mock_create_iso,
     mock_write_ci,
-    mock_copy,
     mock_gen_mac,
     mock_alloc_ip,
     mock_get_net,
@@ -148,6 +149,7 @@ def test_create_vm_core_success(
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
     mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
+    mock_resolve_fs_type.return_value = "ext4"
 
     mock_bridge_exists.return_value = True
     mock_popen.return_value.pid = 99999
@@ -159,6 +161,7 @@ def test_create_vm_core_success(
     assert vm.ip == "10.20.0.5"
     vm_config_arg = mock_config_gen.call_args.args[0]
     assert vm_config_arg.root_uuid == "11111111-2222-3333-4444-555555555555"
+    assert vm_config_arg.root_fs_type == "ext4"
     assert vm_config_arg.cloud_init_iso_path is not None
     assert vm_config_arg.extra_drives == []
     mock_manager.register.assert_called_once()
@@ -457,6 +460,53 @@ def test_resolve_image_fs_uuid_missing_returns_none(tmp_path, monkeypatch):
     assert result is None
 
 
+def test_resolve_image_fs_type_by_short_hash(tmp_path, monkeypatch):
+    """_resolve_image_fs_type returns fs_type from metadata by short hash."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "c" * 64
+    meta_file = tmp_path / "metadata.json"
+    meta_file.write_text(
+        json.dumps(
+            {
+                "images": {
+                    full_hash: {
+                        "filename": "ubuntu-24.04.ext4",
+                        "fs_type": "ext4",
+                    }
+                }
+            }
+        )
+    )
+
+    result = _resolve_image_fs_type(full_hash[:6])
+    assert result == "ext4"
+
+
+def test_resolve_image_fs_type_missing_returns_none(tmp_path, monkeypatch):
+    """_resolve_image_fs_type returns None when fs_type is not in metadata."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "d" * 64
+    meta_file = tmp_path / "metadata.json"
+    meta_file.write_text(
+        json.dumps(
+            {
+                "images": {
+                    full_hash: {
+                        "filename": "ubuntu-24.04.ext4",
+                    }
+                }
+            }
+        )
+    )
+
+    result = _resolve_image_fs_type(full_hash[:6])
+    assert result is None
+
+
 def test_resolve_image_path_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
@@ -665,3 +715,84 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 
         with pytest.raises(MVMError, match="symlink"):
             create_vm(name="attackvm", image="ubuntu-24.04")
+
+
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("builtins.open", new_callable=MagicMock)
+def test_create_vm_uses_cached_image_path_not_copy(
+    mock_open,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_create_iso,
+    mock_write_ci,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+):
+    """create_vm sets VMConfig.rootfs_path to the cached image path, not a copy."""
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.exists.return_value = False
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    mock_kernel_dir = MagicMock()
+    vmlinux = MagicMock()
+    vmlinux.exists.return_value = True
+    mock_kernel_dir.__truediv__.return_value = vmlinux
+    mock_get_kernels.return_value = mock_kernel_dir
+
+    # Image - this is the cached image path
+    mock_img_dir = MagicMock()
+    img_ext4 = MagicMock()
+    img_ext4.exists.return_value = True
+    mock_img_dir.__truediv__.return_value = img_ext4
+    mock_get_images.return_value = mock_img_dir
+
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_get_net.return_value = mock_net
+
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
+    mock_resolve_fs_type.return_value = "ext4"
+
+    mock_bridge_exists.return_value = True
+    mock_popen.return_value.pid = 99999
+
+    create_vm(name="myvm", image="ubuntu-22.04")
+
+    vm_config_arg = mock_config_gen.call_args.args[0]
+    # Verify that rootfs_path is the cached image path (not copied to vm_dir)
+    assert vm_config_arg.rootfs_path == img_ext4
