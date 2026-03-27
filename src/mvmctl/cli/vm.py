@@ -29,7 +29,7 @@ from mvmctl.constants import (
     DEFAULT_VM_LOG_TYPE,
 )
 from mvmctl.exceptions import MVMError
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import CloudInitMode, VMInstance, VMState
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
@@ -144,6 +144,26 @@ def create(
     user_data: Optional[Path] = typer.Option(
         None, "--user-data", help="Path to custom cloud-init user-data file"
     ),
+    cloud_init_iso: Optional[Path] = typer.Option(
+        None,
+        "--cloud-init-iso",
+        help="Path to custom cloud-init ISO file",
+    ),
+    no_cloud_init: bool = typer.Option(
+        False,
+        "--no-cloud-init",
+        help="Disable cloud-init injection entirely",
+    ),
+    nocloud_net: bool = typer.Option(
+        False,
+        "--nocloud-net",
+        help="Use nocloud-net HTTP datasource instead of ISO (serves cloud-init files via HTTP)",
+    ),
+    nocloud_net_port: Optional[int] = typer.Option(
+        None,
+        "--nocloud-net-port",
+        help="Port for nocloud-net HTTP server (0 for auto-assign, default: auto-assign)",
+    ),
     user: Optional[str] = typer.Option(
         None, "--user", help="Default SSH user for cloud-init (default: from user config)"
     ),
@@ -162,6 +182,11 @@ def create(
         "--firecracker-bin",
         envvar="MVM_FIRECRACKER_BIN",
         help="Path to firecracker binary (default: active version from mvm bin use)",
+    ),
+    keep_cloud_init_iso: bool = typer.Option(
+        False,
+        "--keep-cloud-init-iso",
+        help="Keep cloud-init ISO file after VM starts (for debugging)",
     ),
     output_config: Optional[Path] = typer.Option(
         None,
@@ -241,6 +266,11 @@ def create(
         network_name if network_name is not None else _resolve_default_network()
     )
 
+    # Check mutual exclusivity of --no-cloud-init and --cloud-init-iso
+    if no_cloud_init and cloud_init_iso is not None:
+        print_error("--no-cloud-init and --cloud-init-iso are mutually exclusive")
+        raise typer.Exit(code=1)
+
     if image is None:
         image = _resolve_default_image()
         if image is None:
@@ -302,6 +332,33 @@ def create(
         print_info(f"VM config written to: {output_config}")
         return
 
+    # Validate cloud_init_iso path if provided
+    if cloud_init_iso is not None and not cloud_init_iso.exists():
+        print_error(f"Cloud-init ISO not found: {cloud_init_iso}")
+        raise typer.Exit(code=1)
+
+    # Check mutual exclusivity of cloud-init flags
+    cloud_init_flags = sum([no_cloud_init, cloud_init_iso is not None, nocloud_net])
+    if cloud_init_flags > 1:
+        print_error(
+            "Only one of --no-cloud-init, --cloud-init-iso, or --nocloud-net can be specified"
+        )
+        raise typer.Exit(code=1)
+
+    # Determine cloud_init_mode based on flags
+    if no_cloud_init:
+        effective_cloud_init_mode = CloudInitMode.DISABLED
+        effective_cloud_init_iso_path: Path | None = None
+    elif cloud_init_iso is not None:
+        effective_cloud_init_mode = CloudInitMode.CUSTOM
+        effective_cloud_init_iso_path = cloud_init_iso
+    elif nocloud_net:
+        effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
+        effective_cloud_init_iso_path = None
+    else:
+        effective_cloud_init_mode = CloudInitMode.AUTO
+        effective_cloud_init_iso_path = None
+
     try:
         vm = create_vm(
             name=name,
@@ -318,6 +375,10 @@ def create(
             enable_api_socket=effective_api_socket,
             enable_pci=effective_pci,
             firecracker_bin=effective_bin,
+            cloud_init_mode=effective_cloud_init_mode,
+            cloud_init_iso_path=effective_cloud_init_iso_path,
+            keep_cloud_init_iso=keep_cloud_init_iso,
+            nocloud_net_port=nocloud_net_port if nocloud_net_port is not None else 0,
         )
         from mvmctl.utils.audit import log_audit
 

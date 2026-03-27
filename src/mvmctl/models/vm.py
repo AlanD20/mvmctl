@@ -33,6 +33,22 @@ class VMState(StrEnum):
     ERROR = auto()
 
 
+class CloudInitMode(StrEnum):
+    """Cloud-init configuration mode.
+
+    Attributes:
+        AUTO: Generate cloud-init ISO from config files (default).
+        CUSTOM: Use a pre-existing custom cloud-init ISO.
+        DISABLED: Skip cloud-init entirely (no ISO mounted).
+        NO_CLOUD_NET: Serve cloud-init files via HTTP (nocloud-net datasource).
+    """
+
+    AUTO = "auto"
+    CUSTOM = "custom"
+    DISABLED = "disabled"
+    NO_CLOUD_NET = "nocloud-net"
+
+
 @dataclass
 class VMConfig:
     """VM configuration parameters.
@@ -52,6 +68,10 @@ class VMConfig:
         enable_api_socket: Enable Firecracker HTTP API socket.
         enable_pci: Enable PCI device support.
         lsm_flags: Linux Security Module flags for the kernel cmdline.
+        cloud_init_mode: Cloud-init configuration mode (auto/custom/disabled).
+        datasource_mode: Cloud-init datasource mode (auto/nocloud-net).
+        cloud_init_iso_path: Path to custom cloud-init ISO (used when mode is CUSTOM).
+        keep_cloud_init_iso: Retain the generated cloud-init ISO after boot.
     """
 
     name: str
@@ -71,6 +91,11 @@ class VMConfig:
     extra_drives: list[DriveConfig] = field(default_factory=list)
     enable_logging: bool = DEFAULT_VM_ENABLE_LOGGING
     enable_metrics: bool = DEFAULT_VM_ENABLE_METRICS
+    cloud_init_mode: CloudInitMode = CloudInitMode.AUTO
+    datasource_mode: CloudInitMode = CloudInitMode.AUTO
+    cloud_init_iso_path: Path | None = None
+    keep_cloud_init_iso: bool = False
+    nocloud_net_url: str | None = None
 
     def __post_init__(self) -> None:
         """Validate that vCPU count and memory size are within acceptable bounds."""

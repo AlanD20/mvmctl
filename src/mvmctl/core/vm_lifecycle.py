@@ -20,9 +20,13 @@ from mvmctl.constants import (
     CONST_VM_MEM_MAX_MIB,
     CONST_VM_MEM_MIN_MIB,
     DEFAULT_CLOUD_INIT_DIRNAME,
+    DEFAULT_CLOUD_INIT_DRIVE_ID,
+    DEFAULT_CLOUD_INIT_ISO_NAME,
     DEFAULT_FC_API_SOCKET_FILENAME,
     DEFAULT_FC_CONFIG_FILENAME,
     DEFAULT_FC_CONSOLE_LOG_FILENAME,
+    DEFAULT_FC_DRIVE_CACHE_TYPE,
+    DEFAULT_FC_DRIVE_IO_ENGINE,
     DEFAULT_FC_LOG_FILENAME,
     DEFAULT_FC_PID_FILENAME,
     DEFAULT_FIRECRACKER_BIN_NAME,
@@ -40,8 +44,8 @@ from mvmctl.constants import (
     MAX_VMS,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
-from mvmctl.core.cloud_init import inject_cloud_init, write_cloud_init
-from mvmctl.core.config_gen import ConfigGenerator
+from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
+from mvmctl.core.config_gen import ConfigGenerator, DriveConfig
 from mvmctl.core.firecracker import FirecrackerClient, get_vm_socket_path
 from mvmctl.core.network import (
     add_iptables_forward_rules,
@@ -59,10 +63,11 @@ from mvmctl.core.network_manager import (
     get_network,
     release_network_ip,
 )
+from mvmctl.core.nocloud_net_server import NoCloudNetServer
 from mvmctl.core.ssh import resolve_ssh_key
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
-from mvmctl.exceptions import MVMError, NetworkError, VMNotFoundError
-from mvmctl.models.vm import VMConfig, VMInstance, VMState
+from mvmctl.exceptions import CloudInitError, MVMError, NetworkError, VMNotFoundError
+from mvmctl.models.vm import CloudInitMode, VMConfig, VMInstance, VMState
 from mvmctl.utils.fs import get_images_dir, get_kernels_dir, get_vm_dir
 
 
@@ -345,7 +350,11 @@ def create_vm(
     enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET,
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
+    cloud_init_mode: CloudInitMode = CloudInitMode.AUTO,
+    cloud_init_iso_path: Path | None = None,
+    keep_cloud_init_iso: bool = False,
     vm_manager: VMManager | None = None,
+    nocloud_net_port: int = 0,
 ) -> VMInstance:
     import ipaddress as _ipaddress
     import re
@@ -434,24 +443,68 @@ def create_vm(
         shutil.rmtree(vm_dir, ignore_errors=True)
         raise MVMError(f"Failed to copy image: {e}")
 
-    cloud_init_dir = vm_dir / DEFAULT_CLOUD_INIT_DIRNAME
-    cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
+    # Handle cloud-init based on mode
+    cloud_init_iso: Path | None = None
+    extra_drives: list[DriveConfig] = []
+    nocloud_net_url: str | None = None
 
-    ssh_pub_key = resolve_ssh_key(ssh_key)
+    if cloud_init_mode != CloudInitMode.DISABLED:
+        cloud_init_dir = vm_dir / DEFAULT_CLOUD_INIT_DIRNAME
+        cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
 
-    _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
+        ssh_pub_key = resolve_ssh_key(ssh_key)
 
-    write_cloud_init(
-        cloud_init_dir,
-        name,
-        guest_ip,
-        user,
-        ssh_pub_key=ssh_pub_key,
-        custom_user_data=user_data,
-        gateway=net_config.gateway,
-        prefix_len=_prefix_len,
-    )
-    inject_cloud_init(rootfs_path, cloud_init_dir)
+        _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
+
+        write_cloud_init(
+            cloud_init_dir,
+            name,
+            guest_ip,
+            user,
+            ssh_pub_key=ssh_pub_key,
+            custom_user_data=user_data,
+            gateway=net_config.gateway,
+            prefix_len=_prefix_len,
+        )
+
+        if cloud_init_mode == CloudInitMode.CUSTOM:
+            if cloud_init_iso_path is None:
+                raise MVMError("cloud_init_iso_path required when cloud_init_mode is CUSTOM")
+            if not cloud_init_iso_path.exists():
+                raise MVMError(f"Custom cloud-init ISO not found: {cloud_init_iso_path}")
+            cloud_init_iso = cloud_init_iso_path
+        elif cloud_init_mode == CloudInitMode.NO_CLOUD_NET:
+            # Start HTTP server for nocloud-net datasource
+            try:
+                nocloud_server = NoCloudNetServer(cloud_init_dir, port=nocloud_net_port)
+                nocloud_server.start()
+                nocloud_net_url = nocloud_server.url
+                logger.info("NoCloud-net server started at %s", nocloud_net_url)
+            except MVMError as e:
+                shutil.rmtree(vm_dir, ignore_errors=True)
+                raise MVMError(f"Failed to start nocloud-net server: {e}") from e
+        else:  # CloudInitMode.AUTO
+            cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
+            try:
+                create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
+            except CloudInitError as e:
+                shutil.rmtree(vm_dir, ignore_errors=True)
+                raise MVMError(f"Failed to create cloud-init ISO: {e}") from e
+
+        # Add cloud-init drive if ISO is configured
+    if cloud_init_iso is not None:
+        cloud_init_drive: DriveConfig = {
+            "drive_id": DEFAULT_CLOUD_INIT_DRIVE_ID,
+            "path_on_host": str(cloud_init_iso),
+            "is_root_device": False,
+            "is_read_only": True,
+            "partuuid": None,
+            "cache_type": DEFAULT_FC_DRIVE_CACHE_TYPE,
+            "io_engine": DEFAULT_FC_DRIVE_IO_ENGINE,
+            "rate_limiter": None,
+            "socket": None,
+        }
+        extra_drives.append(cloud_init_drive)
 
     socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
     _net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
@@ -470,6 +523,11 @@ def create_vm(
         tap_device=tap_name,
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
+        cloud_init_mode=cloud_init_mode,
+        cloud_init_iso_path=cloud_init_iso,
+        keep_cloud_init_iso=keep_cloud_init_iso,
+        nocloud_net_url=nocloud_net_url,
+        extra_drives=extra_drives,
     )
     config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
     ConfigGenerator(vm_config).write_to_file(config_file)
@@ -530,6 +588,17 @@ def create_vm(
         raise MVMError(f"Failed to start Firecracker: {e}")
 
     _write_pid_file(pid_file, proc.pid)
+
+    # Cleanup ISO if not keeping (best effort)
+    if (
+        cloud_init_iso is not None
+        and not keep_cloud_init_iso
+        and cloud_init_mode == CloudInitMode.AUTO
+    ):
+        try:
+            cloud_init_iso.unlink(missing_ok=True)
+        except OSError:
+            pass  # Best effort cleanup
 
     vm_instance = VMInstance(
         name=name,

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.config_gen import ConfigGenerator
-from mvmctl.models.vm import VMConfig
+from mvmctl.models.vm import CloudInitMode, VMConfig
 
 
 def test_config_generator_basic():
@@ -332,3 +332,45 @@ def test_config_gen_metrics_enabled():
     config = generator.generate()
     assert config["metrics"] is not None
     assert "metrics_path" in config["metrics"]
+
+
+def test_boot_args_nocloud_ds_default():
+    """nocloud (default) mode produces ds=nocloud."""
+    vm_config = VMConfig(
+        name="nocloud-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    assert "ds=nocloud" in config["boot-source"]["boot_args"]
+
+
+def test_boot_args_nocloud_net_ds():
+    """nocloud-net mode produces ds=nocloud-net;s=http://GATEWAY:80/."""
+    vm_config = VMConfig(
+        name="nocloud-net-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        datasource_mode=CloudInitMode.NO_CLOUD_NET,
+        gateway="172.35.0.1",
+        subnet_mask="255.255.255.0",
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    boot_args = config["boot-source"]["boot_args"]
+    assert "ds=nocloud-net;s=http://172.35.0.1:80/" in boot_args
+
+
+def test_boot_args_cloud_init_disabled():
+    """cloud_init_mode=disabled produces no ds= arg."""
+    vm_config = VMConfig(
+        name="no-ci-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        cloud_init_mode=CloudInitMode.DISABLED,
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    boot_args = config["boot-source"]["boot_args"]
+    assert "ds=" not in boot_args

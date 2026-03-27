@@ -1,21 +1,18 @@
 import logging
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from mvmctl.constants import (
-    CONST_DIR_PERMS_CACHE,
     DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD,
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
-    DEFAULT_CLOUD_INIT_SEED_PATH,
+    DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL,
     DEFAULT_DNS_NAMESERVERS,
     DEFAULT_GUEST_NETWORK_IFACE,
+    REQUIRED_ISO_TOOL,
 )
-from mvmctl.exceptions import ConfigError
-from mvmctl.utils.process import privileged_cmd
+from mvmctl.exceptions import CloudInitError, ConfigError, ProcessError
 
 logger = logging.getLogger(__name__)
 
@@ -151,38 +148,39 @@ def write_cloud_init(
         )
 
 
-def inject_cloud_init(rootfs_path: Path, cloud_init_dir: Path) -> None:
-    """Loop-mount rootfs and inject cloud-init seed files.
+def create_cloud_init_iso(cloud_init_dir: Path, output_iso: Path) -> None:
+    """Create a cloud-init ISO from the seed directory.
 
-    Requires root. Falls back gracefully if loop mount fails.
+    Args:
+        cloud_init_dir: Directory containing meta-data, network-config, user-data
+        output_iso: Path where the ISO should be written
+
+    Raises:
+        CloudInitError: If ISO creation fails
     """
-    import tempfile
+    # Validate required files exist
+    required_files = ["meta-data", "network-config", "user-data"]
+    for filename in required_files:
+        filepath = cloud_init_dir / filename
+        if not filepath.exists():
+            raise CloudInitError(f"Missing required cloud-init file: {filename}")
 
-    seed_target = DEFAULT_CLOUD_INIT_SEED_PATH
+    # Run cloud-localds to create ISO
+    cmd = [
+        REQUIRED_ISO_TOOL,  # "cloud-localds"
+        str(output_iso),
+        str(cloud_init_dir / "meta-data"),
+        "--network-config",
+        str(cloud_init_dir / "network-config"),
+        "--user-data",
+        str(cloud_init_dir / "user-data"),
+        "-v",  # Verbose
+        DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL,  # "cidata"
+    ]
 
-    with tempfile.TemporaryDirectory(prefix="mvm-mount-") as tmp_dir:
-        mount_point = Path(tmp_dir)
-        mount_point.chmod(CONST_DIR_PERMS_CACHE)
-        mounted = False
-        try:
-            # Mount the rootfs ext4 image
-            subprocess.run(
-                privileged_cmd(["mount", "-o", "loop", str(rootfs_path), str(mount_point)]),
-                check=True,
-                capture_output=True,
-            )
-            mounted = True
-            target = mount_point / seed_target.lstrip("/")
-            target.mkdir(parents=True, exist_ok=True)
-            for f in cloud_init_dir.iterdir():
-                shutil.copy2(f, target / f.name)
-        except subprocess.CalledProcessError as e:
-            logger.warning("Could not inject cloud-init: %s", e)
-            logger.info("VM will boot without cloud-init pre-seeding")
-        finally:
-            if mounted:
-                subprocess.run(
-                    privileged_cmd(["umount", str(mount_point)]),
-                    check=False,
-                    capture_output=True,
-                )
+    from mvmctl.utils.process import run_cmd
+
+    try:
+        run_cmd(cmd, check=True)
+    except ProcessError as e:
+        raise CloudInitError(f"Failed to create cloud-init ISO: {e}") from e

@@ -52,6 +52,10 @@ def check_required_binaries() -> list[str]:
     return missing
 
 
+def check_cloud_localds() -> bool:
+    return shutil.which("cloud-localds") is not None
+
+
 def get_ip_forward_status() -> str:
     try:
         result = subprocess.run(
@@ -276,6 +280,11 @@ def init_host(cache_dir: Path) -> list[HostChange]:
         raise HostError(f"Missing required binaries: {', '.join(missing)}")
 
     _validate_sudoers_binaries()
+
+    if not check_cloud_localds():
+        logger.warning(
+            "cloud-localds not found. Install cloud-image-utils (Debian/Ubuntu) or cloud-utils (Arch) package"
+        )
 
     group_created = _create_group(PROJECT_GROUP)
     if group_created:

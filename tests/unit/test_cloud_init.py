@@ -1,11 +1,11 @@
 import subprocess
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 
-from mvmctl.core.cloud_init import write_cloud_init, inject_cloud_init, _validate_user_data
-from mvmctl.exceptions import ConfigError
+from mvmctl.core.cloud_init import write_cloud_init, _validate_user_data, create_cloud_init_iso
+from mvmctl.exceptions import ConfigError, CloudInitError, ProcessError
 
 
 def test_write_cloud_init_basic(tmp_path):
@@ -67,47 +67,6 @@ def test_write_cloud_init_custom_user_data(tmp_path):
     assert "ssh-rsa CUSTOM" in ud["users"][0]["ssh-authorized-keys"]
 
 
-@patch("mvmctl.core.cloud_init.subprocess.run")
-@patch("mvmctl.utils.process.os.getuid", return_value=0)
-def test_inject_cloud_init_success(mock_getuid, mock_run, tmp_path):
-    """inject_cloud_init loop-mounts and copies files."""
-    cloud_init_dir = tmp_path / "cloud-init"
-    cloud_init_dir.mkdir()
-    (cloud_init_dir / "meta-data").write_text("test")
-
-    rootfs = tmp_path / "rootfs.ext4"
-    rootfs.write_text("fake")
-
-    with patch("mvmctl.core.cloud_init.shutil.copy2") as mock_copy:
-        inject_cloud_init(rootfs, cloud_init_dir)
-
-    assert mock_run.call_count == 2
-    mount_call = mock_run.call_args_list[0]
-    assert mount_call.args[0][0] == "mount"
-    assert mount_call.args[0][3] == str(rootfs)
-
-    umount_call = mock_run.call_args_list[1]
-    assert umount_call.args[0][0] == "umount"
-
-    mock_copy.assert_called_once()
-
-
-@patch("mvmctl.core.cloud_init.subprocess.run")
-@patch("mvmctl.core.cloud_init.logger")
-def test_inject_cloud_init_mount_error(mock_logger, mock_run, tmp_path):
-    """inject_cloud_init gracefully handles mount errors."""
-    mock_run.side_effect = subprocess.CalledProcessError(1, "mount")
-
-    cloud_init_dir = tmp_path / "cloud-init"
-    cloud_init_dir.mkdir()
-
-    rootfs = tmp_path / "rootfs.ext4"
-
-    inject_cloud_init(rootfs, cloud_init_dir)
-
-    mock_logger.warning.assert_called_once()
-
-
 # ---------------------------------------------------------------------------
 # Cloud-init security validation (issue #26)
 # ---------------------------------------------------------------------------
@@ -147,3 +106,64 @@ def test_validate_user_data_rejects_runcmd(tmp_path):
             user="myuser",
             custom_user_data=custom_ud,
         )
+
+
+# ---------------------------------------------------------------------------
+# Cloud-init ISO creation
+# ---------------------------------------------------------------------------
+
+
+def test_create_cloud_init_iso_success(tmp_path):
+    """create_cloud_init_iso succeeds when all required files exist and command succeeds."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    # Create required files
+    (cloud_init_dir / "meta-data").write_text("instance-id: testvm\n")
+    (cloud_init_dir / "network-config").write_text("version: 1\n")
+    (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+    output_iso = tmp_path / "test.iso"
+
+    with patch("mvmctl.utils.process.run_cmd") as mock_run_cmd:
+        mock_run_cmd.return_value = MagicMock(returncode=0)
+        create_cloud_init_iso(cloud_init_dir, output_iso)
+        mock_run_cmd.assert_called_once()
+        # Verify the command uses cloud-localds
+        call_args = mock_run_cmd.call_args[0][0]
+        assert call_args[0] == "cloud-localds"
+        assert call_args[1] == str(output_iso)
+
+
+def test_create_cloud_init_iso_missing_file(tmp_path):
+    """create_cloud_init_iso raises CloudInitError when required file is missing."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    # Create only some files (missing meta-data)
+    (cloud_init_dir / "network-config").write_text("version: 1\n")
+    (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+    output_iso = tmp_path / "test.iso"
+
+    with pytest.raises(CloudInitError, match="meta-data"):
+        create_cloud_init_iso(cloud_init_dir, output_iso)
+
+
+def test_create_cloud_init_iso_creation_fails(tmp_path):
+    """create_cloud_init_iso raises CloudInitError when ISO creation fails."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    # Create all required files
+    (cloud_init_dir / "meta-data").write_text("instance-id: testvm\n")
+    (cloud_init_dir / "network-config").write_text("version: 1\n")
+    (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+    output_iso = tmp_path / "test.iso"
+
+    with patch("mvmctl.utils.process.run_cmd") as mock_run_cmd:
+        mock_run_cmd.side_effect = ProcessError("cloud-localds failed")
+
+        with pytest.raises(CloudInitError, match="Failed to create cloud-init ISO"):
+            create_cloud_init_iso(cloud_init_dir, output_iso)

@@ -11,6 +11,8 @@ VM:
 - when creating a new vm via `mvm vm create` it copies the rootfs file into the vm's state folder! the kernel and the rootfs must use the absolute path of the kernel or rootfs provided or if default is chosen, then use default's absolute path of rootfs and kernel. do not copy rootfs or kernel into each vm's state!
 - firecracker rootfs requires integrating the ssh key into the image! need to figure out a way to do this? perhaps create a copy of an image by integrating a file?
 - introduce --kernel-path and --image-path to `mvm vm create` to allow custom image and kernel path
+- when `mvm vm create` throws an exception, it leaves out the directory creation of the vm state!
+- ensure root partition detection is available on both `mvm image fetch` and `mvm image import`
 
 
 UI:

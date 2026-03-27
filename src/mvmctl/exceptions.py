@@ -65,6 +65,15 @@ class MVMKeyError(MVMError):
     """SSH key management failure."""
 
 
+class CloudInitError(MVMError):
+    """Cloud-init ISO creation failure.
+
+    Common messages:
+    - cloud-localds not found. Install cloud-image-utils or cloud-utils package
+    - Failed to create cloud-init ISO: {details}
+    """
+
+
 class RootPartitionDetectionError(MVMError):
     """Root partition could not be detected."""
 

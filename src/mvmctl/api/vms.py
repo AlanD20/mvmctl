@@ -45,7 +45,7 @@ from mvmctl.core.vm_lifecycle import (
     snapshot_vm as _snapshot_vm,
 )
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import CloudInitMode, VMInstance, VMState
 
 __all__ = [
     "list_vms",
@@ -99,7 +99,11 @@ def create_vm(
     enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET,
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
+    cloud_init_mode: CloudInitMode = CloudInitMode.AUTO,
+    cloud_init_iso_path: Path | None = None,
+    keep_cloud_init_iso: bool = False,
     vm_manager: VMManager | None = None,
+    nocloud_net_port: int = 0,
 ) -> VMInstance:
     check_privileges("/usr/sbin/ip")
     return _create_vm(
@@ -117,7 +121,11 @@ def create_vm(
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
         firecracker_bin=firecracker_bin,
+        cloud_init_mode=cloud_init_mode,
+        cloud_init_iso_path=cloud_init_iso_path,
+        keep_cloud_init_iso=keep_cloud_init_iso,
         vm_manager=vm_manager,
+        nocloud_net_port=nocloud_net_port,
     )
 
 

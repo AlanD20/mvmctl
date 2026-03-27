@@ -31,7 +31,7 @@ vm:
     rootfs_basename: rootfs
   cloud_init:
     seed_path: /var/lib/cloud/seed/nocloud
-    kernel_cmdline_ds: ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/
+    kernel_cmdline_ds: ds=nocloud
     final_message: mvm cloud-init done
     disable_snapd_cmd: systemctl disable --now snapd.socket 2>/dev/null || true
     dirname: cloud-init

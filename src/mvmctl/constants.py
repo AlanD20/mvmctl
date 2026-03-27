@@ -313,11 +313,16 @@ DEFAULT_CLOUD_INIT_SEED_PATH: Final[str] = _require_str(("vm", "cloud_init", "se
 DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS: Final[str] = _require_str(
     ("vm", "cloud_init", "kernel_cmdline_ds")
 )
+DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD: Final[str] = "ds=nocloud"
 DEFAULT_CLOUD_INIT_FINAL_MESSAGE: Final[str] = _require_str(("vm", "cloud_init", "final_message"))
 DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD: Final[str] = _require_str(
     ("vm", "cloud_init", "disable_snapd_cmd")
 )
 DEFAULT_CLOUD_INIT_DIRNAME: Final[str] = _require_str(("vm", "cloud_init", "dirname"))
+DEFAULT_CLOUD_INIT_ISO_NAME: Final[str] = "cloud-init.iso"
+DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL: Final[str] = "cidata"
+DEFAULT_CLOUD_INIT_DRIVE_ID: Final[str] = "cloud-init"
+REQUIRED_ISO_TOOL: Final[str] = "cloud-localds"
 
 # ---------------------------------------------------------------------------
 # VM boot arg defaults (loaded from assets/defaults.yaml)
@@ -471,6 +476,7 @@ CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = _require_int(("http", "download_chunk_si
 CONST_BINARY_FETCH_TIMEOUT: Final[int] = 300
 CONST_SOCKET_TIMEOUT_SECONDS: Final[float] = 5.0
 CONST_POLL_STEP_SECONDS: Final[float] = 0.1
+CONST_NO_CLOUD_NET_SHUTDOWN_TIMEOUT_S: Final[float] = 5.0
 CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
 MAX_VMS: Final[int] = _require_int(("vm", "limits", "max_vms"))
 

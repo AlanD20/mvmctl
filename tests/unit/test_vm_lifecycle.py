@@ -88,7 +88,7 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("mvmctl.core.vm_lifecycle.generate_mac")
 @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
-@patch("mvmctl.core.vm_lifecycle.inject_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
 @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
@@ -104,7 +104,8 @@ def test_create_vm_core_success(
     mock_add_rules,
     mock_create_tap,
     mock_config_gen,
-    mock_inject,
+
+    mock_create_iso,
     mock_write_ci,
     mock_copy,
     mock_gen_mac,

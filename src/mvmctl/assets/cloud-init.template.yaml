@@ -1,0 +1,46 @@
+# Cloud-init template for mvmctl VMs
+# All sections are rendered together; Jinja2 placeholders are substituted at runtime.
+
+user_data: |
+  #cloud-config
+  users:
+    - default
+    {% if ssh_pub_key %}
+    - name: {{user}}
+      groups: sudo
+      shell: /bin/bash
+      sudo: ALL=(ALL) NOPASSWD:ALL
+      ssh-authorized-keys:
+        - {{ssh_pub_key}}
+    {% endif %}
+  package_update: false
+  package_upgrade: false
+  {% if ssh_pub_key %}
+  runcmd:
+    - systemctl disable --now snapd.appliance.service 2>/dev/null || true
+  {% endif %}
+  final_message: "mvmctl VM provisioning complete"
+
+meta_data: |
+  instance-id: {{vm_name}}
+  local-hostname: {{vm_name}}
+
+network_config: |
+  version: 1
+  config:
+    - type: physical
+      name: eth0
+      subnets:
+        - type: static
+          address: {{guest_ip}}/{{prefix_len}}
+          gateway: {{gateway}}
+          dns_nameservers:
+            - 8.8.8.8
+            - 1.1.1.1
+
+nocloud_cfg: |
+  datasource_list:
+    - NoCloud
+  datasource:
+    NoCloud:
+      seedfrom: /

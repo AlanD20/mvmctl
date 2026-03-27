@@ -9,7 +9,8 @@ from mvmctl.constants import (
     DEFAULT_BOOT_PANIC,
     DEFAULT_BOOT_PCI_OFF,
     DEFAULT_BOOT_REBOOT,
-    DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
+    DEFAULT_CLOUD_INIT_DRIVE_ID,
+    DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD,
     DEFAULT_FC_DRIVE_CACHE_TYPE,
     DEFAULT_FC_DRIVE_IO_ENGINE,
     DEFAULT_FC_LOG_FILENAME,
@@ -19,7 +20,7 @@ from mvmctl.constants import (
     DEFAULT_GUEST_NETWORK_IFACE,
 )
 from mvmctl.exceptions import MVMError
-from mvmctl.models.vm import VMConfig
+from mvmctl.models.vm import CloudInitMode, VMConfig
 from mvmctl.utils.fs import get_vm_dir
 from mvmctl.utils.validation import validate_boot_arg_component
 
@@ -145,6 +146,9 @@ class ConfigGenerator:
         return config
 
     def _build_drives_config(self) -> list[DriveConfig]:
+        drives: list[DriveConfig] = []
+
+        # Rootfs drive
         rootfs: DriveConfig = {
             "drive_id": "rootfs",
             "path_on_host": str(self.vm_config.rootfs_path),
@@ -156,7 +160,30 @@ class ConfigGenerator:
             "rate_limiter": None,
             "socket": None,
         }
-        return [rootfs, *self.vm_config.extra_drives]
+        drives.append(rootfs)
+
+        # Cloud-init ISO drive (if configured)
+        if (
+            self.vm_config.cloud_init_mode != CloudInitMode.DISABLED
+            and self.vm_config.cloud_init_iso_path is not None
+        ):
+            cloud_init_drive: DriveConfig = {
+                "drive_id": DEFAULT_CLOUD_INIT_DRIVE_ID,
+                "path_on_host": str(self.vm_config.cloud_init_iso_path),
+                "is_root_device": False,
+                "is_read_only": True,
+                "partuuid": None,
+                "cache_type": DEFAULT_FC_DRIVE_CACHE_TYPE,
+                "io_engine": DEFAULT_FC_DRIVE_IO_ENGINE,
+                "rate_limiter": None,
+                "socket": None,
+            }
+            drives.append(cloud_init_drive)
+
+        # Extra drives
+        drives.extend(self.vm_config.extra_drives)
+
+        return drives
 
     def _build_logger_config(self) -> LoggerConfig | None:
         if not self.vm_config.enable_logging:
@@ -187,6 +214,16 @@ class ConfigGenerator:
         )
         lsm_flags = self.vm_config.lsm_flags or None
         lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
+
+        # Determine cloud-init datasource string
+        if self.vm_config.datasource_mode == CloudInitMode.NO_CLOUD_NET:
+            # For nocloud-net, use network datasource with gateway as HTTP server
+            ds_arg = f"ds=nocloud-net;s=http://{gateway}:80/"
+        elif self.vm_config.cloud_init_mode == CloudInitMode.DISABLED:
+            ds_arg = ""
+        else:
+            ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
+
         parts = [
             DEFAULT_BOOT_CONSOLE,
             DEFAULT_BOOT_REBOOT,
@@ -196,7 +233,7 @@ class ConfigGenerator:
             "rw",
             "rootwait",
             "rootfstype=ext4",
-            DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
+            ds_arg,
             lsm_arg,
         ]
         return " ".join(p for p in parts if p).strip()
