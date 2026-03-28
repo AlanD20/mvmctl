@@ -4,10 +4,9 @@ Tests all detector classes and the RootPartitionDetector integration.
 Uses mocked partition data - no real disk images required.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-from pytest_mock import MockerFixture
 
 from mvmctl.core.partition_detection import (
     FilesystemDetector,
@@ -17,7 +16,6 @@ from mvmctl.core.partition_detection import (
     TypeCodeDetector,
 )
 from mvmctl.exceptions import RootPartitionDetectionError, TieDetectedError
-
 
 # -----------------------------------------------------------------------------
 # TypeCodeDetector Tests

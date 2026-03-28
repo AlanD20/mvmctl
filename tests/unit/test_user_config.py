@@ -1,13 +1,12 @@
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from mvmctl.core.user_config import (
+    _coerce_value,
     get_config_value,
     get_full_user_config,
     set_config_value,
-    _coerce_value,
 )
 
 

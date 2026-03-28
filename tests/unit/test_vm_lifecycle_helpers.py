@@ -2,7 +2,6 @@
 
 from unittest.mock import ANY, patch
 
-
 from mvmctl.core.vm_lifecycle import cleanup_tap, graceful_shutdown
 from mvmctl.exceptions import NetworkError
 

@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 import mvmctl.api.network as network_api
 from mvmctl.api.network import create_network, remove_network
 from mvmctl.core.network_manager import NetworkConfig, NetworkLease

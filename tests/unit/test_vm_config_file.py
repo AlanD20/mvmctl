@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.models.vm_config_file import VMCreateConfigFile
 from mvmctl.api.vm_config import (
     build_vm_config_file,
     load_vm_config_file,
     merge_cli_overrides,
     save_vm_config_file,
 )
+from mvmctl.models.vm_config_file import VMCreateConfigFile
 
 
 def test_vm_create_config_file_to_dict_roundtrip():

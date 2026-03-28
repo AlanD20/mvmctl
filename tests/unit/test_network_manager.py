@@ -1,6 +1,5 @@
 """Tests for network_manager.py — metadata-based network storage."""
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,21 +8,20 @@ import pytest
 from mvmctl.core.metadata import update_network_entry
 from mvmctl.core.network_manager import (
     NetworkConfig,
-    NetworkLease,
     _bridge_name_for,
     _gateway_for_subnet,
-    _network_entry_to_config,
     _leases_from_entry,
-    list_networks,
+    _network_entry_to_config,
+    _validate_subnet_no_overlap,
+    allocate_network_ip,
+    create_network,
+    ensure_default_network,
     get_network,
     get_network_leases,
-    create_network,
-    remove_network,
     inspect_network,
-    allocate_network_ip,
+    list_networks,
     release_network_ip,
-    ensure_default_network,
-    _validate_subnet_no_overlap,
+    remove_network,
 )
 from mvmctl.exceptions import NetworkError
 
@@ -370,7 +368,7 @@ class TestSetDefaultNetwork:
         set_default_network("mynet")
 
         # Verify the network is now default
-        config = get_network("mynet")
+        get_network("mynet")  # Verify network exists
         # is_default should be determined by get_default_network_entry
         from mvmctl.core.metadata import get_default_network_entry
 

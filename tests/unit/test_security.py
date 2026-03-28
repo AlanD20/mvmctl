@@ -7,17 +7,15 @@ Tests malicious input handling to ensure the system properly rejects:
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 from pytest_mock import MockerFixture
 
-from mvmctl.core.host_privilege import _generate_sudoers_content, _validate_sudoers_binaries
+from mvmctl.core.host_privilege import _generate_sudoers_content
 from mvmctl.core.vm_lifecycle import _resolve_image_path, create_vm
-from mvmctl.exceptions import MVMError, HostError, ImageError
+from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.http import download_file
 from mvmctl.utils.validation import validate_boot_arg_component, validate_entity_name
-
 
 # -----------------------------------------------------------------------------
 # VM Name Sanitization - Path Traversal Prevention

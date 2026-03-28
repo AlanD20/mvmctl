@@ -17,6 +17,7 @@ A production-grade Python CLI for managing [Firecracker](https://firecracker-mic
 - [Quick Start](#quick-start)
 - [Command Reference](#command-reference)
 - [Configuration](#configuration)
+- [Cloud-Init](#cloud-init)
 - [Environment Variables](#environment-variables)
 - [Building from Source](#building-from-source)
 - [Cache Directory Structure](#cache-directory-structure)
@@ -244,6 +245,10 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | `--ssh-key NAME_OR_PATH` | SSH public key (cache name or file path) | auto-detected |
 | `--user USER` | Default SSH user (cloud-init) | `root` |
 | `--user-data PATH` | Custom cloud-init user-data file | — |
+| `--cloud-init-iso PATH` | Path to custom cloud-init ISO file | — |
+| `--nocloud-net` | Use nocloud-net HTTP datasource (default: auto) | false |
+| `--nocloud-net-port PORT` | Port for nocloud-net HTTP server (0=auto) | 0 (auto) |
+| `--no-cloud-init` | Disable cloud-init entirely | false |
 | `--import-config PATH` | Load all settings from a JSON config file | — |
 | `--output-config PATH` | Write resolved config to a JSON file | — |
 | `--enable-api-socket` | Expose Firecracker API socket | false |
@@ -370,6 +375,65 @@ Asset defaults are stored in `metadata.json` with `is_default` markers:
 
 ---
 
+## Cloud-Init
+
+`mvm` uses **nocloud-net** as the default method for delivering cloud-init configuration to VMs.
+This replaces the older ISO-based approach and offers several benefits.
+
+### How It Works
+
+When you create a VM with cloud-init enabled (the default):
+
+1. **HTTP Server**: A temporary HTTP server is started on the host (port range 8000-9000)
+2. **Firewall Rules**: iptables rules in the `MVM-NOCLOUD-INPUT` chain allow the VM to reach the server
+3. **Kernel Command Line**: The VM boots with `ds=nocloud-net;s=http://GATEWAY_IP:PORT/`
+4. **Configuration Delivery**: cloud-init inside the VM fetches `meta-data`, `user-data`, and `network-config` via HTTP
+5. **Automatic Cleanup**: The HTTP server is stopped when the VM is removed
+
+### Cloud-Init Modes
+
+| Mode | Flag | Description |
+|------|------|-------------|
+| **nocloud-net (default)** | `--nocloud-net` or auto | Serves cloud-init files via HTTP server |
+| **ISO** | `--cloud-init-iso PATH` | Uses a pre-existing ISO file |
+| **Disabled** | `--no-cloud-init` | Skips cloud-init entirely |
+
+**Example: Force ISO mode**
+```bash
+mvm vm create --name myvm --image ubuntu-24.04 --cloud-init-iso /path/to/cloud-init.iso
+```
+
+**Example: Explicit nocloud-net mode**
+```bash
+mvm vm create --name myvm --image ubuntu-24.04 --nocloud-net
+```
+
+### Security Architecture
+
+- **Per-VM Isolation**: Each VM gets its own HTTP server on a unique port
+- **Source-Based Firewall**: Only the VM's IP can reach its nocloud server (via `MVM-NOCLOUD-INPUT` chain)
+- **Gateway Binding**: HTTP servers bind to the bridge gateway IP, not `0.0.0.0`
+- **Rule Comments**: Firewall rules are tagged with `# mvm-nocloud:<vm_name>:<port>` for auditability
+
+### Port Allocation
+
+Ports are allocated from the range **8000-9000** with automatic collision detection:
+
+- If port 8000 is in use, the system tries 8001, 8002, etc.
+- Up to 100 retries are attempted before failing
+- Each VM's port is tracked and released when the VM stops
+
+### Benefits Over ISO Mode
+
+| Feature | nocloud-net | ISO Mode |
+|---------|-------------|----------|
+| Boot speed | Faster (no ISO generation) | Slower (genisoimage) |
+| Portability | Works with any image | Requires CD-ROM drive |
+| Cleanup | Automatic | Manual (if using `--keep-cloud-init-iso`) |
+| Debugging | Check logs for URL | Mount ISO to inspect |
+
+---
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -464,6 +528,41 @@ mvm bin use 1.15.0
 
 `mvm host reset` requires a prior snapshot. Run `sudo mvm host init` first.
 
+**`NoCloud-net server failed to start`**
+
+The port range (8000-9000) may be exhausted. Check for stale servers:
+```bash
+# List processes using nocloud ports
+sudo ss -tlnp | grep -E ':(8[0-9]{3}|9[0-9]{3})'
+# Kill any orphaned mvm processes
+pkill -f nocloud-net-server
+```
+
+**`VM can't fetch cloud-init data via nocloud-net`**
+
+Verify firewall rules are configured:
+```bash
+sudo iptables -L MVM-NOCLOUD-INPUT -n -v
+# Should show rules allowing source IP to destination ports
+```
+
+Check that the VM's network is correctly set up:
+```bash
+# From within the VM, test connectivity to the gateway
+ping -c 1 10.0.0.1
+# Test HTTP access to nocloud server
+curl -v http://10.0.0.1:8080/
+```
+
+**`Cloud-init seems slow`**
+
+nocloud-net is faster than ISO mode because it avoids ISO generation, but cloud-init
+inside the VM still takes 30-60 seconds on first boot. To monitor progress:
+```bash
+mvm vm logs --name myvm --type boot --follow
+```
+Look for cloud-init status messages like `Cloud-init v. X.X.X running modules...`
+
 ---
 
 ## Contributing
@@ -496,16 +595,6 @@ All four commands must pass before opening a PR — they are enforced by CI.
 - **Architecture layers:** `cli/` → `api/` → `core/` — no skipping layers. See [`AGENTS.md`](AGENTS.md) for the full architecture reference.
 - **No hardcoded defaults** — use `FALLBACK_*` constants in `constants.py`.
 - **Strict mypy** — no `type: ignore` suppressions.
-- One feature or fix per PR; write a clear description of *why*, not just *what*.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-suppressions.
 - One feature or fix per PR; write a clear description of *why*, not just *what*.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.

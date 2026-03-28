@@ -393,19 +393,33 @@ def test_boot_args_nocloud_ds_default():
 
 
 def test_boot_args_nocloud_net_ds():
-    """nocloud-net mode produces ds=nocloud-net;s=http://GATEWAY:80/."""
+    """nocloud-net mode uses nocloud_net_url from config."""
     vm_config = VMConfig(
         name="nocloud-net-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        datasource_mode=CloudInitMode.NO_CLOUD_NET,
-        gateway="172.35.0.1",
-        subnet_mask="255.255.255.0",
+        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+        nocloud_net_url="http://192.168.1.1:8123/",
     )
     generator = ConfigGenerator(vm_config)
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
-    assert "ds=nocloud-net;s=http://172.35.0.1:80/" in boot_args
+    assert "ds=nocloud-net;s=http://192.168.1.1:8123/" in boot_args
+
+
+def test_boot_args_nocloud_net_requires_url():
+    """nocloud-net mode without nocloud_net_url raises ConfigError."""
+    from mvmctl.exceptions import ConfigError
+
+    vm_config = VMConfig(
+        name="nocloud-net-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+    )
+    generator = ConfigGenerator(vm_config)
+    with pytest.raises(ConfigError, match="nocloud_net_url must be set"):
+        generator.generate()
 
 
 def test_boot_args_cloud_init_disabled():

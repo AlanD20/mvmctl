@@ -4,11 +4,10 @@ import pytest
 
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.validation import (
+    is_ip_address,
     validate_boot_arg_component,
     validate_entity_name,
-    is_ip_address,
 )
-
 
 # ---------------------------------------------------------------------------
 # validate_entity_name — valid inputs

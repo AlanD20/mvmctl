@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.utils.http import download_file
 from mvmctl.exceptions import ChecksumMismatchError, MVMError
+from mvmctl.utils.http import download_file
 
 
 def _mock_urlopen_response(

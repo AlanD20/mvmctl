@@ -1,11 +1,7 @@
 """Tests for audit logging utility."""
 
 import logging
-import os
-from pathlib import Path
 from unittest.mock import Mock, patch
-
-import pytest
 
 from mvmctl.utils.audit import _audit_logger, _get_audit_log_path, log_audit
 

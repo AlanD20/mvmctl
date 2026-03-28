@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import typer
 
@@ -34,12 +34,30 @@ from mvmctl.utils.console import print_error, print_info, print_success, print_t
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
+# Sentinel for auto-generation mode
+USE_ISO_AUTO = "__use_iso_auto__"
+
 app = typer.Typer(
     help="VM lifecycle management",
     no_args_is_help=True,
     rich_markup_mode=None,
     add_completion=False,
 )
+
+
+def _cloud_init_iso_callback(value: Union[str, bool, None]) -> Optional[Path]:
+    """Normalize --cloud-init-iso option value.
+
+    Returns:
+        None: Don't use ISO mode
+        USE_ISO_AUTO: Use ISO mode with auto-generation
+        Path: Use custom ISO at that path
+    """
+    if value is None:
+        return None
+    if value is True or value == "":
+        return USE_ISO_AUTO  # type: ignore[return-value]
+    return Path(value)  # type: ignore[arg-type]
 
 
 @app.command(name="help", hidden=True)
@@ -147,7 +165,8 @@ def create(
     cloud_init_iso: Optional[Path] = typer.Option(
         None,
         "--cloud-init-iso",
-        help="Path to custom cloud-init ISO file",
+        help="Use ISO mode (optionally specify custom ISO path)",
+        callback=_cloud_init_iso_callback,
     ),
     no_cloud_init: bool = typer.Option(
         False,
@@ -157,7 +176,7 @@ def create(
     nocloud_net: bool = typer.Option(
         False,
         "--nocloud-net",
-        help="Use nocloud-net HTTP datasource instead of ISO (serves cloud-init files via HTTP)",
+        help="Use nocloud-net HTTP datasource (default mode; use --cloud-init-iso for ISO mode)",
     ),
     nocloud_net_port: Optional[int] = typer.Option(
         None,
@@ -331,13 +350,22 @@ def create(
         print_info(f"VM config written to: {output_config}")
         return
 
-    # Validate cloud_init_iso path if provided
-    if cloud_init_iso is not None and not cloud_init_iso.exists():
-        print_error(f"Cloud-init ISO not found: {cloud_init_iso}")
-        raise typer.Exit(code=1)
+    # Validate cloud_init_iso path if it's a custom path (not USE_ISO_AUTO)
+    if cloud_init_iso is not None and cloud_init_iso != USE_ISO_AUTO:  # type: ignore[comparison-overlap]
+        custom_path = Path(cloud_init_iso)
+        if not custom_path.exists():
+            print_error(f"Cloud-init ISO not found: {custom_path}")
+            raise typer.Exit(code=1)
 
     # Check mutual exclusivity of cloud-init flags
-    cloud_init_flags = sum([no_cloud_init, cloud_init_iso is not None, nocloud_net])
+    cloud_init_flags = sum(
+        [
+            no_cloud_init,
+            cloud_init_iso is not None and cloud_init_iso != USE_ISO_AUTO,  # type: ignore[comparison-overlap]
+            cloud_init_iso == USE_ISO_AUTO,  # type: ignore[comparison-overlap]
+            nocloud_net,
+        ]
+    )
     if cloud_init_flags > 1:
         print_error(
             "Only one of --no-cloud-init, --cloud-init-iso, or --nocloud-net can be specified"
@@ -350,7 +378,12 @@ def create(
         effective_cloud_init_iso_path: Path | None = None
     elif cloud_init_iso is not None:
         effective_cloud_init_mode = CloudInitMode.CUSTOM
-        effective_cloud_init_iso_path = cloud_init_iso
+        # USE_ISO_AUTO means auto-generate (None path), otherwise use custom path
+        effective_cloud_init_iso_path = (
+            None
+            if cloud_init_iso == USE_ISO_AUTO  # type: ignore[comparison-overlap]
+            else Path(cloud_init_iso)
+        )
     elif nocloud_net:
         effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
         effective_cloud_init_iso_path = None

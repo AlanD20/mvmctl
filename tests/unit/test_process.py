@@ -8,7 +8,6 @@ import pytest
 from mvmctl.exceptions import ProcessError
 from mvmctl.utils.process import run_cmd, stream_cmd
 
-
 # ---------------------------------------------------------------------------
 # run_cmd
 # ---------------------------------------------------------------------------

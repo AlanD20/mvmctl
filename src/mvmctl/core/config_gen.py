@@ -21,7 +21,7 @@ from mvmctl.constants import (
     DEFAULT_GUEST_NETWORK_IFACE,
     DEFAULT_VM_ROOT_FS_TYPE,
 )
-from mvmctl.exceptions import MVMError
+from mvmctl.exceptions import ConfigError, MVMError
 from mvmctl.models.vm import CloudInitMode, VMConfig
 from mvmctl.utils.fs import get_vm_dir
 from mvmctl.utils.validation import validate_boot_arg_component
@@ -219,9 +219,11 @@ class ConfigGenerator:
         lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
 
         # Determine cloud-init datasource string
-        if self.vm_config.datasource_mode == CloudInitMode.NO_CLOUD_NET:
-            # For nocloud-net, use network datasource with gateway as HTTP server
-            ds_arg = f"ds=nocloud-net;s=http://{gateway}:80/"
+        if self.vm_config.cloud_init_mode == CloudInitMode.NO_CLOUD_NET:
+            # For nocloud-net, validate URL is configured
+            if not self.vm_config.nocloud_net_url:
+                raise ConfigError("nocloud_net_url must be set when using NO_CLOUD_NET mode")
+            ds_arg = f"ds=nocloud-net;s={self.vm_config.nocloud_net_url}"
         elif self.vm_config.cloud_init_mode == CloudInitMode.DISABLED:
             ds_arg = ""
         else:

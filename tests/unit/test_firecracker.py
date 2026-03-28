@@ -1,8 +1,9 @@
 """Tests for FirecrackerClient."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from mvmctl.core.firecracker import FirecrackerClient, get_vm_socket_path
 

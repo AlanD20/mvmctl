@@ -1,15 +1,14 @@
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
+from unittest.mock import MagicMock, patch
 
 from mvmctl.api.vms import (
-    list_vms,
-    get_vm,
-    deregister_vm,
-    vm_cache_dir,
-    ssh_vm,
-    get_logs,
     cleanup_vms,
+    deregister_vm,
+    get_logs,
+    get_vm,
+    list_vms,
+    ssh_vm,
+    vm_cache_dir,
 )
 from mvmctl.models.vm import VMInstance, VMState
 

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-
 from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
-from mvmctl.exceptions import MVMError, HostError, PrivilegeError
+from mvmctl.exceptions import HostError, MVMError, PrivilegeError
 
 runner = CliRunner()
 
@@ -106,6 +105,7 @@ class TestCliReset:
 class TestHelpCommand:
     def test_help_no_args(self):
         from click.testing import CliRunner
+
         from mvmctl.main import app
 
         click_runner = CliRunner()
@@ -115,6 +115,7 @@ class TestHelpCommand:
 
     def test_help_vm(self):
         from click.testing import CliRunner
+
         from mvmctl.main import app
 
         click_runner = CliRunner()
@@ -124,6 +125,7 @@ class TestHelpCommand:
 
     def test_help_host(self):
         from click.testing import CliRunner
+
         from mvmctl.main import app
 
         click_runner = CliRunner()
@@ -133,6 +135,7 @@ class TestHelpCommand:
 
     def test_help_unknown_command(self):
         from click.testing import CliRunner
+
         from mvmctl.main import app
 
         click_runner = CliRunner()
@@ -143,10 +146,12 @@ class TestHelpCommand:
 
 def test_check_privileges_interactive_prints_guidance():
     """FIX-008: check_privileges_interactive prints helpful options when privileges lacking."""
+    from unittest.mock import patch
+
     import pytest
+
     from mvmctl.core.host_privilege import check_privileges_interactive
     from mvmctl.exceptions import PrivilegeError
-    from unittest.mock import patch
 
     with patch("mvmctl.core.host_privilege.check_privileges") as mock_check:
         mock_check.side_effect = PrivilegeError("not in group")

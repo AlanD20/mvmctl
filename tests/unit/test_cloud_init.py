@@ -1,11 +1,10 @@
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 
-from mvmctl.core.cloud_init import write_cloud_init, _validate_user_data, create_cloud_init_iso
-from mvmctl.exceptions import ConfigError, CloudInitError, ProcessError
+from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
+from mvmctl.exceptions import CloudInitError, ConfigError, ProcessError
 
 
 def test_write_cloud_init_basic(tmp_path):

@@ -1016,8 +1016,8 @@ def test_privileged_cmd_raises_when_not_in_mvm_group():
     import grp
     import pwd
 
-    from mvmctl.utils.process import privileged_cmd as _privileged_cmd
     from mvmctl.exceptions import PrivilegeError
+    from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
     mock_group = MagicMock()
     mock_group.gr_gid = 1001
@@ -1076,8 +1076,8 @@ def test_require_mvm_group_raises_when_group_not_found():
     """_require_mvm_group_membership should raise PrivilegeError when mvm group doesn't exist."""
     import grp
 
-    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
     from mvmctl.exceptions import PrivilegeError
+    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
 
     with patch.object(grp, "getgrnam", side_effect=KeyError("mvm")):
         with pytest.raises(PrivilegeError, match="does not exist"):
@@ -1090,8 +1090,8 @@ def test_require_mvm_group_raises_when_not_member():
     import grp
     import pwd
 
-    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
     from mvmctl.exceptions import PrivilegeError
+    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
 
     mock_group = MagicMock()
     mock_group.gr_gid = 1001
@@ -1114,8 +1114,8 @@ def test_require_mvm_group_raises_when_session_not_active():
     import grp
     import pwd
 
-    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
     from mvmctl.exceptions import PrivilegeError
+    from mvmctl.utils.process import require_mvm_group_membership as _require_mvm_group_membership
 
     mock_group = MagicMock()
     mock_group.gr_gid = 1001

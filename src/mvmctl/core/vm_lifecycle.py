@@ -14,6 +14,7 @@ from pathlib import Path
 from mvmctl.constants import (
     BRIDGE_NAME,
     CLI_NAME,
+    CONST_CLOUD_INIT_TIMEOUT_S,
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_PID_FILE,
     CONST_POLL_STEP_SECONDS,
@@ -41,8 +42,14 @@ from mvmctl.constants import (
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
+from mvmctl.core.cloud_init_status import wait_for_cloud_init_done
 from mvmctl.core.config_gen import ConfigGenerator, DriveConfig
 from mvmctl.core.firecracker import FirecrackerClient, get_vm_socket_path
+from mvmctl.core.firewall import (
+    add_nocloud_input_rule,
+    remove_nocloud_input_rule,
+    setup_nocloud_input_chain,
+)
 from mvmctl.core.network import (
     add_iptables_forward_rules,
     bridge_exists,
@@ -59,11 +66,12 @@ from mvmctl.core.network_manager import (
     get_network,
     release_network_ip,
 )
-from mvmctl.core.nocloud_net_server import NoCloudNetServer
+from mvmctl.core.nocloud_net_manager import NoCloudNetServerManager
 from mvmctl.core.ssh import resolve_ssh_key
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.exceptions import CloudInitError, MVMError, NetworkError, VMNotFoundError
 from mvmctl.models.vm import CloudInitMode, VMConfig, VMInstance, VMState
+from mvmctl.utils.console import print_info, print_warning
 from mvmctl.utils.fs import get_images_dir, get_kernels_dir, get_vm_dir
 
 
@@ -423,6 +431,15 @@ def create_vm(
     if not (CONST_VM_MEM_MIN_MIB <= mem <= CONST_VM_MEM_MAX_MIB):
         raise MVMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
 
+    # AUTO mode defaults to nocloud-net for new VMs
+    if cloud_init_mode == CloudInitMode.AUTO:
+        effective_mode = CloudInitMode.NO_CLOUD_NET
+    else:
+        effective_mode = cloud_init_mode
+
+    # Setup nocloud firewall chain (idempotent - safe to call multiple times)
+    setup_nocloud_input_chain()
+
     if mac is not None:
         mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
         if not mac_re.match(mac):
@@ -492,8 +509,9 @@ def create_vm(
     cloud_init_iso: Path | None = None
     extra_drives: list[DriveConfig] = []
     nocloud_net_url: str | None = None
+    net_manager: NoCloudNetServerManager | None = None
 
-    if cloud_init_mode != CloudInitMode.DISABLED:
+    if effective_mode != CloudInitMode.DISABLED:
         cloud_init_dir = vm_dir / DEFAULT_CLOUD_INIT_DIRNAME
         cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
 
@@ -512,23 +530,35 @@ def create_vm(
             prefix_len=_prefix_len,
         )
 
-        if cloud_init_mode == CloudInitMode.CUSTOM:
+        if effective_mode == CloudInitMode.CUSTOM:
             if cloud_init_iso_path is None:
                 raise MVMError("cloud_init_iso_path required when cloud_init_mode is CUSTOM")
             if not cloud_init_iso_path.exists():
                 raise MVMError(f"Custom cloud-init ISO not found: {cloud_init_iso_path}")
             cloud_init_iso = cloud_init_iso_path
-        elif cloud_init_mode == CloudInitMode.NO_CLOUD_NET:
-            # Start HTTP server for nocloud-net datasource
+        elif effective_mode == CloudInitMode.NO_CLOUD_NET:
+            # Start HTTP server for nocloud-net datasource using manager
+            net_manager = NoCloudNetServerManager()
+            _server_started = False
             try:
-                nocloud_server = NoCloudNetServer(cloud_init_dir, port=nocloud_net_port)
-                nocloud_server.start()
-                nocloud_net_url = nocloud_server.url
+                url, port = net_manager.start_server(name, cloud_init_dir, net_config.gateway)
+                nocloud_net_url = url
+                nocloud_net_port = port
                 logger.info("NoCloud-net server started at %s", nocloud_net_url)
-            except MVMError as e:
+                _server_started = True
+                # Add firewall rule - stop server if this fails
+                add_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+            except MVMError:
+                if _server_started:
+                    # Firewall rule failed - stop the server and cleanup
+                    net_manager.stop_server(name)
                 shutil.rmtree(vm_dir, ignore_errors=True)
-                raise MVMError(f"Failed to start nocloud-net server: {e}") from e
-        else:  # CloudInitMode.AUTO
+                try:
+                    release_network_ip(network_name, name)
+                except NetworkError:
+                    pass
+                raise
+        elif effective_mode == CloudInitMode.AUTO:
             cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
             try:
                 create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
@@ -555,7 +585,7 @@ def create_vm(
         root_fs_type=image_fs_type,
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
-        cloud_init_mode=cloud_init_mode,
+        cloud_init_mode=effective_mode,
         cloud_init_iso_path=cloud_init_iso,
         keep_cloud_init_iso=keep_cloud_init_iso,
         nocloud_net_url=nocloud_net_url,
@@ -611,10 +641,16 @@ def create_vm(
             start_new_session=True,
         )
     except FileNotFoundError:
+        if effective_mode == CloudInitMode.NO_CLOUD_NET and net_manager is not None:
+            net_manager.stop_server(name)
+            remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)
         raise MVMError(f"Firecracker binary not found: {firecracker_bin!r}")
     except OSError as e:
+        if effective_mode == CloudInitMode.NO_CLOUD_NET and net_manager is not None:
+            net_manager.stop_server(name)
+            remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)
         raise MVMError(f"Failed to start Firecracker: {e}")
@@ -632,8 +668,28 @@ def create_vm(
         tap_device=tap_name,
         created_at=datetime.now(tz=timezone.utc),
         status=VMState.RUNNING,
+        nocloud_net_port=nocloud_net_port,
     )
     manager.register(vm_instance)
+
+    # Wait for cloud-init completion if using NO_CLOUD_NET mode
+    # This is OPTIONAL - VM creation succeeds regardless of timeout
+    if effective_mode == CloudInitMode.NO_CLOUD_NET:
+        try:
+            completed = wait_for_cloud_init_done(name, console_log_file, CONST_CLOUD_INIT_TIMEOUT_S)
+            if completed:
+                print_info(f"Cloud-init completed for VM '{name}'")
+            else:
+                print_warning(
+                    f"Cloud-init timeout ({CONST_CLOUD_INIT_TIMEOUT_S}s) reached for VM '{name}'. "
+                    "VM will continue running without cloud-init."
+                )
+        except Exception:
+            # Never block VM creation - just log and continue
+            print_warning(
+                f"Could not detect cloud-init completion for VM '{name}'. VM will continue running."
+            )
+
     return vm_instance
 
 
@@ -656,6 +712,15 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
         pid = vm.pid
 
     graceful_shutdown(pid, vm.socket_path)
+
+    # Stop nocloud-net server and remove firewall rule if VM has nocloud-net configured
+    if vm.nocloud_net_port is not None and vm.ip is not None:
+        try:
+            nocloud_manager = NoCloudNetServerManager()
+            nocloud_manager.stop_server(name)
+            remove_nocloud_input_rule(vm.ip, name, vm.nocloud_net_port)
+        except Exception as e:
+            logger.warning("Failed to cleanup nocloud-net resources: %s", e)
 
     remove_iptables_forward_rules(tap_name, bridge=bridge)
     try:

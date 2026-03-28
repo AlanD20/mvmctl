@@ -1,17 +1,17 @@
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mvmctl.core.ssh import (
-    find_ssh_keys,
-    extract_ip_from_config,
+    _validate_ssh_username,
     build_ssh_command,
     connect_to_vm,
-    _validate_ssh_username,
+    extract_ip_from_config,
+    find_ssh_keys,
 )
-from mvmctl.exceptions import VMNotFoundError, MVMKeyError, MVMError
+from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
 from mvmctl.models.vm import VMInstance, VMState
 
 
@@ -221,7 +221,7 @@ def test_build_ssh_command_rejects_bad_username():
 # run_ssh and exec_ssh coverage (3e)
 # ---------------------------------------------------------------------------
 
-from mvmctl.core.ssh import run_ssh, exec_ssh  # noqa: E402
+from mvmctl.core.ssh import exec_ssh, run_ssh  # noqa: E402
 
 
 @patch("mvmctl.core.ssh.subprocess.run")

@@ -24,7 +24,6 @@ from mvmctl.core.binary_manager import (
 )
 from mvmctl.exceptions import AssetNotFoundError, BinaryError
 
-
 # ---------------------------------------------------------------------------
 # _normalize_version
 # ---------------------------------------------------------------------------
