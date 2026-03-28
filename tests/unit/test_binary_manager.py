@@ -257,6 +257,14 @@ def test_fetch_binary_downloads_and_extracts(tmp_path: Path, mocker: MockerFixtu
 
 
 def test_fetch_binary_download_failure_cleans_up(tmp_path: Path, mocker: MockerFixture):
+    # Mock SHA256 sidecar fetch to return a valid checksum
+    sha_resp = MagicMock()
+    sha_resp.read.return_value = b"abc123...  file.tgz\n"
+    sha_resp.__enter__ = lambda s: s
+    sha_resp.__exit__ = MagicMock(return_value=False)
+    mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
+    
+    # Mock actual download to fail
     mocker.patch("mvmctl.utils.http.urlopen", side_effect=URLError("network error"))
     with pytest.raises(BinaryError, match="Failed to download"):
         fetch_binary("1.5.0", bin_dir=tmp_path)

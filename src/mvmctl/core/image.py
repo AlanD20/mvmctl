@@ -560,7 +560,7 @@ def _resolve_source_template(spec: ImageSpec) -> str:
     return f"{FIRECRACKER_CI_KERNEL_S3_BASE}/{chosen_key}"
 
 
-def _fetch_sha256_from_url(sha256_url: str) -> str | None:
+def _fetch_sha256_from_url(sha256_url: str, source_filename: str | None = None) -> str | None:
     try:
         req = urllib.request.Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
@@ -568,10 +568,35 @@ def _fetch_sha256_from_url(sha256_url: str) -> str | None:
     except (URLError, OSError):
         return None
 
-    parts = content.split()
-    if not parts:
-        return None
-    return str(parts[0]).lower()
+    if source_filename is None:
+        # Backward compatible: return first token for single-entry checksum files
+        parts: list[str] = content.split()
+        if not parts:
+            return None
+        return parts[0].lower()
+
+    # Multi-entry checksum file: find the line matching source_filename
+    source_basename = Path(source_filename).name
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        line_parts: list[str] = line.split()
+        if len(line_parts) < 2:
+            continue
+        # Handle BSD format: "SHA256 (filename) = hash" or "hash *filename"
+        # The filename is always the last token (after stripping leading *)
+        filename_in_line = line_parts[-1].lstrip("*")
+        # Compare: exact match, basename match, or path basename match
+        filename_in_line_basename = Path(filename_in_line).name
+        if (
+            filename_in_line == source_filename
+            or filename_in_line == source_basename
+            or filename_in_line_basename == source_filename
+            or filename_in_line_basename == source_basename
+        ):
+            return line_parts[0].lower()
+    return None
 
 
 def _handle_squashfs(
@@ -661,7 +686,8 @@ def fetch_image(
     resolved_sha256 = spec.sha256.lower() if spec.sha256 is not None else None
     sha256_url = render_optional_template(spec.sha256_url, template_vars)
     if resolved_sha256 is None and sha256_url is not None:
-        resolved_sha256 = _fetch_sha256_from_url(sha256_url)
+        source_basename = source.rsplit("/", 1)[-1] if source else None
+        resolved_sha256 = _fetch_sha256_from_url(sha256_url, source_filename=source_basename)
 
     no_checksum = resolved_sha256 is None
 

@@ -13,6 +13,7 @@ from pytest_mock import MockerFixture
 import mvmctl.core.image
 from mvmctl.core.image import (
     _copy_bytes,
+    _fetch_sha256_from_url,
     _handle_qcow2,
     _handle_raw,
     _handle_squashfs,
@@ -2081,3 +2082,170 @@ def test_import_image_qcow2_cleans_up_on_exception(
         import_image(spec, output_dir)
 
     assert list(output_dir.iterdir()) == []
+
+
+# ---------------------------------------------------------------------------
+# _fetch_sha256_from_url
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_single_entry_backward_compat(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url returns first token for single-entry checksum (backward compat)."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = b"abc123def456789"
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = _fetch_sha256_from_url("https://example.com/checksum.sha256")
+
+    assert result == "abc123def456789"
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_multi_entry_exact_match(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url matches filename exactly in multi-entry checksum file."""
+    checksum_content = (
+        "abc111  file1.tar.xz\n"
+        "abc222  file2.img\n"
+        "abc333  file3.raw\n"
+    )
+    mock_response = MagicMock()
+    mock_response.read.return_value = checksum_content.encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = _fetch_sha256_from_url(
+        "https://example.com/SHA256SUMS", source_filename="file2.img"
+    )
+
+    assert result == "abc222"
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_multi_entry_basename_match(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url matches basename when full path provided."""
+    checksum_content = (
+        "abc111  /path/to/file1.tar.xz\n"
+        "abc222  /path/to/file2.img\n"
+        "abc333  /path/to/file3.raw\n"
+    )
+    mock_response = MagicMock()
+    mock_response.read.return_value = checksum_content.encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = _fetch_sha256_from_url(
+        "https://example.com/SHA256SUMS", source_filename="file2.img"
+    )
+
+    assert result == "abc222"
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_multi_entry_first_line_selected(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url returns correct hash when filename is first entry."""
+    checksum_content = (
+        "abc111  ubuntu-24.04.qcow2\n"
+        "abc222  ubuntu-22.04.qcow2\n"
+        "abc333  debian-12.qcow2\n"
+    )
+    mock_response = MagicMock()
+    mock_response.read.return_value = checksum_content.encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = _fetch_sha256_from_url(
+        "https://example.com/SHA256SUMS", source_filename="ubuntu-24.04.qcow2"
+    )
+
+    assert result == "abc111"
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_filename_not_found(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url returns None when filename not in checksum file."""
+    checksum_content = (
+        "abc111  file1.tar.xz\n"
+        "abc222  file2.img\n"
+    )
+    mock_response = MagicMock()
+    mock_response.read.return_value = checksum_content.encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = _fetch_sha256_from_url(
+        "https://example.com/SHA256SUMS", source_filename="nonexistent.file"
+    )
+
+    assert result is None
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_bsd_format(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url handles BSD checksum format with asterisks."""
+    # BSD format: hash *filename
+    checksum_content = (
+        "abc111 *file1.tar.xz\n"
+        "abc222 *file2.img\n"
+    )
+    mock_response = MagicMock()
+    mock_response.read.return_value = checksum_content.encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = _fetch_sha256_from_url(
+        "https://example.com/SHA256SUMS", source_filename="file2.img"
+    )
+
+    assert result == "abc222"
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_multiple_spaces_between_hash_and_file(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url handles multiple spaces between hash and filename."""
+    checksum_content = (
+        "abc111    file1.tar.xz\n"  # 4 spaces
+        "abc222  \t  file2.img\n"  # mixed tabs and spaces
+    )
+    mock_response = MagicMock()
+    mock_response.read.return_value = checksum_content.encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = _fetch_sha256_from_url(
+        "https://example.com/SHA256SUMS", source_filename="file1.tar.xz"
+    )
+
+    assert result == "abc111"
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_empty_file(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url returns None for empty checksum file."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = b""
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+    mock_urlopen.return_value = mock_response
+
+    result = _fetch_sha256_from_url("https://example.com/empty.sha256")
+
+    assert result is None
+
+
+@patch("mvmctl.core.image.urllib.request.urlopen")
+def test_fetch_sha256_network_error(mock_urlopen: MagicMock):
+    """Test _fetch_sha256_from_url returns None on network error."""
+    mock_urlopen.side_effect = URLError("Connection refused")
+
+    result = _fetch_sha256_from_url("https://example.com/checksum.sha256")
+
+    assert result is None
