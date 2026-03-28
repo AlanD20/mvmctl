@@ -483,3 +483,51 @@ def test_boot_args_rootfstype_from_metadata():
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "rootfstype=xfs" in boot_args
+
+
+def test_boot_args_local_mode_explicit():
+    """LOCAL mode (explicit) uses file-based nocloud datasource."""
+    vm_config = VMConfig(
+        name="local-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        cloud_init_mode=CloudInitMode.LOCAL,
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    boot_args = config["boot-source"]["boot_args"]
+    assert "ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/" in boot_args
+
+def test_boot_args_includes_net_ifnames_zero():
+    """Boot args should include net.ifnames=0 to prevent interface renaming."""
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        guest_ip="10.0.0.2",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+        tap_device="fc-tap0",
+        guest_mac="02:FC:00:00:00:01",
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    boot_args = config["boot-source"]["boot_args"]
+    assert "net.ifnames=0" in boot_args
+
+def test_boot_args_includes_eth0_none_when_guest_ip_set():
+    """Boot args should include ::eth0:none when guest_ip is set."""
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        guest_ip="10.0.0.2",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+        tap_device="fc-tap0",
+        guest_mac="02:FC:00:00:00:01",
+    )
+    generator = ConfigGenerator(vm_config)
+    config = generator.generate()
+    boot_args = config["boot-source"]["boot_args"]
+    assert "::eth0:none" in boot_args

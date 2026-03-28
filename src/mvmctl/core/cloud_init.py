@@ -134,15 +134,28 @@ def _render_cloud_init_template(
     current_key: str | None = None
     current_content: list[str] = []
 
+    # Top-level section headers in the template (not nested ones like write_files content)
+    _SECTION_HEADERS = {"user_data", "meta_data", "network_config", "nocloud_cfg"}
+
     for line in rendered.splitlines():
-        if line.endswith(": |") or line.endswith(":|>") or line.endswith(":|-"):
-            # Found a new section header (literal block scalar)
-            if current_key is not None:
-                # Preserve indentation by joining without stripping
-                result[current_key] = "\n".join(current_content)
-            current_key = line.rsplit(":", 1)[0]
-            current_content = []
-        elif current_key is not None:
+        # Only treat unindented lines with known section names as section headers
+        # This prevents nested content like "content: |" in write_files from being
+        # treated as a new section
+        if (
+            not line.startswith(" ")
+            and not line.startswith("\t")
+            and (line.endswith(": |") or line.endswith(":|>") or line.endswith(":|-"))
+        ):
+            section_name = line.rsplit(":", 1)[0]
+            if section_name in _SECTION_HEADERS:
+                # Found a new top-level section header
+                if current_key is not None:
+                    # Preserve indentation by joining without stripping
+                    result[current_key] = "\n".join(current_content)
+                current_key = section_name
+                current_content = []
+                continue
+        if current_key is not None:
             current_content.append(line)
 
     if current_key is not None:

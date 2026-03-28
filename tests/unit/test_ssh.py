@@ -58,7 +58,7 @@ def test_extract_ip_from_config_valid(tmp_path: Path):
     config = {
         "boot-source": {
             "kernel_image_path": "vmlinux",
-            "boot_args": "console=ttyS0 ip=10.20.0.2::10.20.0.1:255.255.255.0::eth0:off",
+            "boot_args": "console=ttyS0 ip=10.20.0.2::10.20.0.1:255.255.255.0::eth0:none",
         }
     }
     config_path = tmp_path / "firecracker.json"

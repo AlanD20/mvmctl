@@ -333,8 +333,16 @@ def test_create_ext4_from_tar_success(mock_run: MagicMock, tmp_path: Path):
     result = create_ext4_from_tar(tar, output, size="1G")
 
     assert result is True
-    # Verify multiple subprocess.run calls were made (truncate, mkfs.ext4, mount, tar, umount)
-    assert mock_run.call_count >= 4
+    assert mock_run.call_count == 2
+    assert mock_run.call_args_list[0][0][0] == ["truncate", "-s", "1G", str(output)]
+    assert mock_run.call_args_list[1][0][0] == [
+        "mkfs.ext4",
+        "-d",
+        str(tar),
+        "-O",
+        "metadata_csum,64bit",
+        str(output),
+    ]
 
 
 @patch("mvmctl.core.image.subprocess.run")
@@ -1977,7 +1985,9 @@ def test_extract_partition_from_raw_value_error(
 
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.download_file")
-def test_fetch_image_squashfs_format(mock_download: MagicMock, mock_validate: MagicMock, tmp_path: Path):
+def test_fetch_image_squashfs_format(
+    mock_download: MagicMock, mock_validate: MagicMock, tmp_path: Path
+):
     """Test fetch_image handles squashfs format."""
     spec = ImageSpec(
         id="test-squashfs",
@@ -2129,20 +2139,14 @@ def test_fetch_sha256_single_entry_backward_compat(mock_urlopen: MagicMock):
 @patch("mvmctl.core.image.urllib.request.urlopen")
 def test_fetch_sha256_multi_entry_exact_match(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url matches filename exactly in multi-entry checksum file."""
-    checksum_content = (
-        "abc111  file1.tar.xz\n"
-        "abc222  file2.img\n"
-        "abc333  file3.raw\n"
-    )
+    checksum_content = "abc111  file1.tar.xz\nabc222  file2.img\nabc333  file3.raw\n"
     mock_response = MagicMock()
     mock_response.read.return_value = checksum_content.encode()
     mock_response.__enter__ = MagicMock(return_value=mock_response)
     mock_response.__exit__ = MagicMock(return_value=False)
     mock_urlopen.return_value = mock_response
 
-    result = _fetch_sha256_from_url(
-        "https://example.com/SHA256SUMS", source_filename="file2.img"
-    )
+    result = _fetch_sha256_from_url("https://example.com/SHA256SUMS", source_filename="file2.img")
 
     assert result == "abc222"
 
@@ -2151,9 +2155,7 @@ def test_fetch_sha256_multi_entry_exact_match(mock_urlopen: MagicMock):
 def test_fetch_sha256_multi_entry_basename_match(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url matches basename when full path provided."""
     checksum_content = (
-        "abc111  /path/to/file1.tar.xz\n"
-        "abc222  /path/to/file2.img\n"
-        "abc333  /path/to/file3.raw\n"
+        "abc111  /path/to/file1.tar.xz\nabc222  /path/to/file2.img\nabc333  /path/to/file3.raw\n"
     )
     mock_response = MagicMock()
     mock_response.read.return_value = checksum_content.encode()
@@ -2161,9 +2163,7 @@ def test_fetch_sha256_multi_entry_basename_match(mock_urlopen: MagicMock):
     mock_response.__exit__ = MagicMock(return_value=False)
     mock_urlopen.return_value = mock_response
 
-    result = _fetch_sha256_from_url(
-        "https://example.com/SHA256SUMS", source_filename="file2.img"
-    )
+    result = _fetch_sha256_from_url("https://example.com/SHA256SUMS", source_filename="file2.img")
 
     assert result == "abc222"
 
@@ -2172,9 +2172,7 @@ def test_fetch_sha256_multi_entry_basename_match(mock_urlopen: MagicMock):
 def test_fetch_sha256_multi_entry_first_line_selected(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url returns correct hash when filename is first entry."""
     checksum_content = (
-        "abc111  ubuntu-24.04.qcow2\n"
-        "abc222  ubuntu-22.04.qcow2\n"
-        "abc333  debian-12.qcow2\n"
+        "abc111  ubuntu-24.04.qcow2\nabc222  ubuntu-22.04.qcow2\nabc333  debian-12.qcow2\n"
     )
     mock_response = MagicMock()
     mock_response.read.return_value = checksum_content.encode()
@@ -2192,10 +2190,7 @@ def test_fetch_sha256_multi_entry_first_line_selected(mock_urlopen: MagicMock):
 @patch("mvmctl.core.image.urllib.request.urlopen")
 def test_fetch_sha256_filename_not_found(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url returns None when filename not in checksum file."""
-    checksum_content = (
-        "abc111  file1.tar.xz\n"
-        "abc222  file2.img\n"
-    )
+    checksum_content = "abc111  file1.tar.xz\nabc222  file2.img\n"
     mock_response = MagicMock()
     mock_response.read.return_value = checksum_content.encode()
     mock_response.__enter__ = MagicMock(return_value=mock_response)
@@ -2213,19 +2208,14 @@ def test_fetch_sha256_filename_not_found(mock_urlopen: MagicMock):
 def test_fetch_sha256_bsd_format(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url handles BSD checksum format with asterisks."""
     # BSD format: hash *filename
-    checksum_content = (
-        "abc111 *file1.tar.xz\n"
-        "abc222 *file2.img\n"
-    )
+    checksum_content = "abc111 *file1.tar.xz\nabc222 *file2.img\n"
     mock_response = MagicMock()
     mock_response.read.return_value = checksum_content.encode()
     mock_response.__enter__ = MagicMock(return_value=mock_response)
     mock_response.__exit__ = MagicMock(return_value=False)
     mock_urlopen.return_value = mock_response
 
-    result = _fetch_sha256_from_url(
-        "https://example.com/SHA256SUMS", source_filename="file2.img"
-    )
+    result = _fetch_sha256_from_url("https://example.com/SHA256SUMS", source_filename="file2.img")
 
     assert result == "abc222"
 
@@ -2303,7 +2293,6 @@ def test_validate_downloaded_file_tar_success(mock_run: MagicMock, tmp_path: Pat
 @patch("mvmctl.core.image.subprocess.run")
 def test_validate_downloaded_file_tar_invalid(mock_run: MagicMock, tmp_path: Path):
     """Test _validate_downloaded_file raises ImageError for invalid tar files."""
-    import subprocess
     from mvmctl.core.image import _validate_downloaded_file
 
     download_path = tmp_path / "image.tar"
@@ -2358,7 +2347,6 @@ def test_validate_downloaded_file_squashfs_success(mock_run: MagicMock, tmp_path
 @patch("mvmctl.core.image.subprocess.run")
 def test_validate_downloaded_file_squashfs_invalid(mock_run: MagicMock, tmp_path: Path):
     """Test _validate_downloaded_file raises ImageError for invalid squashfs files."""
-    import subprocess
     from mvmctl.core.image import _validate_downloaded_file
 
     download_path = tmp_path / "image.squashfs"
@@ -2655,7 +2643,6 @@ def test_fetch_image_tar_validation_failure_cleans_up(
     tmp_path: Path,
 ):
     """Test that failed tar validation cleans up the download file."""
-    import subprocess
     from mvmctl.core.image import fetch_image
 
     spec = ImageSpec(
@@ -2692,7 +2679,6 @@ def test_fetch_image_squashfs_validation_failure_cleans_up(
     tmp_path: Path,
 ):
     """Test that failed squashfs validation cleans up the download file."""
-    import subprocess
     from mvmctl.core.image import fetch_image
 
     spec = ImageSpec(

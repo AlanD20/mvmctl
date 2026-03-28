@@ -502,3 +502,47 @@ def test_render_cloud_init_template_without_ssh_key():
     # user_data should not have SSH key section
     user_data = rendered["user_data"]
     assert "ssh-authorized-keys" not in user_data or "ssh_pub_key" not in user_data
+
+def test_write_cloud_init_uses_run_systemd_network(tmp_path):
+    """write_cloud_init should use /run/systemd/network for .network file."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    # Clear the cache to ensure we test fresh template loading
+    _load_cloud_init_template.cache_clear()
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="testvm",
+        gateway="10.20.0.1",
+        guest_ip="10.20.0.10",
+        user="myuser",
+        ssh_pub_key="ssh-rsa AAAAB3...",
+    )
+
+    # Read user-data and verify write_files uses /run/systemd/network
+    user_data_text = (cloud_init_dir / "user-data").read_text()
+    assert "/run/systemd/network/10-mvmctl-eth0.network" in user_data_text
+    assert "/etc/systemd/network/10-mvmctl-eth0.network" not in user_data_text
+
+
+def test_write_cloud_init_masks_systemd_networkd_wait_online(tmp_path):
+    """write_cloud_init should mask systemd-networkd-wait-online in bootcmd."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    # Clear the cache to ensure we test fresh template loading
+    _load_cloud_init_template.cache_clear()
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="testvm",
+        gateway="10.20.0.1",
+        guest_ip="10.20.0.10",
+        user="myuser",
+        ssh_pub_key="ssh-rsa AAAAB3...",
+    )
+
+    # Read user-data and verify bootcmd masks systemd-networkd-wait-online
+    user_data_text = (cloud_init_dir / "user-data").read_text()
+    assert "systemctl mask systemd-networkd-wait-online" in user_data_text

@@ -420,7 +420,7 @@ def create_ext4_from_tar(
         )
 
         subprocess.run(
-            ["mkfs.ext4", "-d", str(tar_path), str(output_path)],
+            ["mkfs.ext4", "-d", str(tar_path), "-O", "metadata_csum,64bit", str(output_path)],
             capture_output=True,
             check=True,
         )

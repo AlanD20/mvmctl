@@ -211,7 +211,7 @@ class ConfigGenerator:
         subnet_mask = self.vm_config.subnet_mask or ""
 
         ip_arg = (
-            f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:off"
+            f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:none"
             if self.vm_config.guest_ip
             else ""
         )
@@ -226,6 +226,9 @@ class ConfigGenerator:
             ds_arg = f"ds=nocloud;seedfrom={self.vm_config.nocloud_net_url}"
         elif self.vm_config.cloud_init_mode == CloudInitMode.DISABLED:
             ds_arg = ""
+        elif self.vm_config.cloud_init_mode == CloudInitMode.LOCAL:
+            # Local rootfs seed: files injected at /var/lib/cloud/seed/nocloud/
+            ds_arg = "ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/"
         else:
             ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
 
@@ -237,6 +240,7 @@ class ConfigGenerator:
             DEFAULT_BOOT_CONSOLE,
             DEFAULT_BOOT_REBOOT,
             DEFAULT_BOOT_PANIC,
+            "net.ifnames=0",  # prevent interface renaming
             pci_arg,
             ip_arg,
             root_arg,
