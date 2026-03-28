@@ -55,3 +55,7 @@ Codebase Maintainability:
 - move `mvm vm logs` to `mvm logs`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
 - move `mvm vm ssh` to `mvm ssh`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
 - change `cli/asset.py` to `cli/bin.py` to be consistent with the top command name, , DO NOT LEAVE DEPRECATION NOTES, project is in development state
+
+
+NEW Features:
+- possibility of getting into VMs via serial cable? no ssh?
