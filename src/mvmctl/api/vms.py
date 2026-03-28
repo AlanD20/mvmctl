@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from mvmctl.api.host import check_privileges
 from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
     DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_CONSOLE,
     DEFAULT_VM_ENABLE_PCI,
     DEFAULT_VM_LOG_FOLLOW,
     DEFAULT_VM_LOG_LINES,
@@ -16,6 +18,16 @@ from mvmctl.constants import (
     DEFAULT_VM_MEM_MIB,
     DEFAULT_VM_SSH_USER,
     DEFAULT_VM_VCPU_COUNT,
+)
+from mvmctl.core.console import (
+    check_escape_sequence,
+    connect_to_relay,
+    disconnect_from_relay,
+    read_console_output,
+    send_console_input,
+)
+from mvmctl.core.console import (
+    get_console_state as _get_console_state,
 )
 from mvmctl.core.logs import show_logs
 from mvmctl.core.ssh import connect_to_vm
@@ -45,6 +57,7 @@ from mvmctl.core.vm_lifecycle import (
 )
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.models import CloudInitMode, VMInstance, VMState
+from mvmctl.services.console_relay import ConsoleRelayManager
 
 __all__ = [
     "list_vms",
@@ -64,6 +77,15 @@ __all__ = [
     "resolve_kernel_path",
     "resolve_image_short_id_path",
     "resolve_kernel_short_id_path",
+    "attach_console",
+    "detach_console",
+    "kill_console",
+    "get_console_state",
+    "check_escape_sequence",
+    "connect_to_relay",
+    "disconnect_from_relay",
+    "read_console_output",
+    "send_console_input",
 ]
 
 
@@ -97,6 +119,7 @@ def create_vm(
     user: str = DEFAULT_VM_SSH_USER,
     enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET,
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
+    enable_console: bool = DEFAULT_VM_ENABLE_CONSOLE,
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
     cloud_init_mode: CloudInitMode = CloudInitMode.AUTO,
     cloud_init_iso_path: Path | None = None,
@@ -119,6 +142,7 @@ def create_vm(
         user=user,
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
+        enable_console=enable_console,
         firecracker_bin=firecracker_bin,
         cloud_init_mode=cloud_init_mode,
         cloud_init_iso_path=cloud_init_iso_path,
@@ -276,3 +300,47 @@ def cleanup_vms(
             shutil.rmtree(vm_dir)
 
     return targets
+
+
+def attach_console(name: str) -> dict[str, Any]:
+    from mvmctl.exceptions import MVMError, VMNotFoundError
+
+    manager = get_vm_manager()
+    vm = manager.get(name)
+    if vm is None:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    mgr = ConsoleRelayManager()
+    if not mgr.is_relay_running(name):
+        raise MVMError(f"No console relay running for VM '{name}'")
+
+    socket_path = mgr.get_socket_path(name)
+    return {"socket_path": str(socket_path), "vm_name": name}
+
+
+def detach_console(sock: Any) -> None:
+    if sock is not None:
+        disconnect_from_relay(sock)
+
+
+def kill_console(name: str) -> bool:
+    from mvmctl.exceptions import VMNotFoundError
+
+    manager = get_vm_manager()
+    vm = manager.get(name)
+    if vm is None:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    mgr = ConsoleRelayManager()
+    return mgr.kill_relay(name)
+
+
+def get_console_state(name: str) -> dict[str, Any]:
+    from mvmctl.exceptions import VMNotFoundError
+
+    manager = get_vm_manager()
+    vm = manager.get(name)
+    if vm is None:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    return _get_console_state(name)

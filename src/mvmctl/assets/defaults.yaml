@@ -19,6 +19,7 @@ vm_defaults:
   enable_pci: false
   enable_logging: true
   enable_metrics: false
+  enable_console: true
   lsm_flags: landlock,lockdown,yama,integrity,selinux,bpf
 network:
   defaults:

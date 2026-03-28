@@ -24,6 +24,7 @@ if getattr(importlib.util, "find_spec", lambda x: None)("sys") and getattr(
     import mvmctl.cli.asset  # noqa: F401
     import mvmctl.cli.config  # noqa: F401
     import mvmctl.cli.configure  # noqa: F401
+    import mvmctl.cli.console  # noqa: F401
     import mvmctl.cli.host  # noqa: F401
     import mvmctl.cli.key  # noqa: F401
     import mvmctl.cli.network  # noqa: F401
@@ -50,6 +51,7 @@ class _LazyCommandSpec:
 
 _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "vm": _LazyCommandSpec("mvmctl.cli.vm", "app", "VM lifecycle management"),
+    "console": _LazyCommandSpec("mvmctl.cli.console", "app", "VM console access"),
     "host": _LazyCommandSpec("mvmctl.cli.host", "app", "Host configuration"),
     "network": _LazyCommandSpec("mvmctl.cli.network", "app", "Network management"),
     "key": _LazyCommandSpec("mvmctl.cli.key", "app", "SSH key management"),
@@ -69,6 +71,7 @@ _STATIC_COMMAND_HELP: dict[str, str] = {
 
 _COMMAND_ORDER = [
     "vm",
+    "console",
     "host",
     "network",
     "key",

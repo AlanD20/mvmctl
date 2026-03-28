@@ -196,6 +196,11 @@ def create(
         "--enable-pci/--no-enable-pci",
         help="Enable PCI device support (default: from user config)",
     ),
+    no_console: bool = typer.Option(
+        False,
+        "--no-console",
+        help="Disable serial console",
+    ),
     firecracker_bin: Optional[str] = typer.Option(
         None,
         "--firecracker-bin",
@@ -406,6 +411,7 @@ def create(
             user=effective_user,
             enable_api_socket=effective_api_socket,
             enable_pci=effective_pci,
+            enable_console=not no_console,
             firecracker_bin=effective_bin,
             cloud_init_mode=effective_cloud_init_mode,
             cloud_init_iso_path=effective_cloud_init_iso_path,

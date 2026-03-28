@@ -29,6 +29,7 @@ from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
     DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_CONSOLE,
     DEFAULT_VM_ENABLE_PCI,
     DEFAULT_VM_KERNEL_FILENAME,
     DEFAULT_VM_MEM_MIB,
@@ -68,6 +69,7 @@ from mvmctl.core.ssh import resolve_ssh_key
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.exceptions import CloudInitError, MVMError, NetworkError, VMNotFoundError
 from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMState
+from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.services.nocloud_server import NoCloudNetServerManager
 from mvmctl.utils.fs import get_images_dir, get_kernels_dir, get_vm_dir
 
@@ -403,6 +405,7 @@ def create_vm(
     user: str = DEFAULT_VM_SSH_USER,
     enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET,
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
+    enable_console: bool = DEFAULT_VM_ENABLE_CONSOLE,
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
     cloud_init_mode: CloudInitMode = CloudInitMode.AUTO,
     cloud_init_iso_path: Path | None = None,
@@ -587,6 +590,7 @@ def create_vm(
         root_fs_type=image_fs_type,
         enable_api_socket=enable_api_socket,
         enable_pci=enable_pci,
+        enable_console=enable_console,
         cloud_init_mode=effective_mode,
         cloud_init_iso_path=cloud_init_iso,
         keep_cloud_init_iso=keep_cloud_init_iso,
@@ -595,6 +599,28 @@ def create_vm(
     )
     config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
     ConfigGenerator(vm_config).write_to_file(config_file)
+
+    pty_master_fd: int | None = None
+    pty_slave_fd: int | None = None
+    relay_mgr: ConsoleRelayManager | None = None
+    console_socket_path: Path | None = None
+    console_relay_pid: int | None = None
+
+    if enable_console:
+        try:
+            pty_master_fd, pty_slave_fd = os.openpty()
+            relay_mgr = ConsoleRelayManager()
+        except OSError as e:
+            if effective_mode == CloudInitMode.NO_CLOUD_NET and net_manager is not None:
+                net_manager.stop_server(name)
+                remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+            cleanup_tap(tap_name)
+            shutil.rmtree(vm_dir, ignore_errors=True)
+            try:
+                release_network_ip(network_name, name)
+            except NetworkError:
+                pass
+            raise MVMError(f"Failed to create PTY for console: {e}")
 
     # AUDIT-4: Reconcile bridge if it has drifted (e.g. lost after reboot).
     if not bridge_exists(bridge):
@@ -634,18 +660,38 @@ def create_vm(
 
     try:
         log_fp = open(log_file, "w", buffering=1, encoding="utf-8")
-        console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
-        proc = subprocess.Popen(
-            fc_cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=console_fp,
-            stderr=log_fp,
-            start_new_session=True,
-        )
+        if enable_console and pty_slave_fd is not None:
+            proc = subprocess.Popen(
+                fc_cmd,
+                stdin=pty_slave_fd,
+                stdout=log_fp,
+                stderr=log_fp,
+                start_new_session=True,
+                pass_fds=[pty_slave_fd],
+            )
+        else:
+            console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
+            proc = subprocess.Popen(
+                fc_cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=console_fp,
+                stderr=log_fp,
+                start_new_session=True,
+            )
     except FileNotFoundError:
         if effective_mode == CloudInitMode.NO_CLOUD_NET and net_manager is not None:
             net_manager.stop_server(name)
             remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+        if enable_console and pty_slave_fd is not None:
+            try:
+                os.close(pty_slave_fd)
+            except OSError:
+                pass
+        if enable_console and pty_master_fd is not None:
+            try:
+                os.close(pty_master_fd)
+            except OSError:
+                pass
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)
         raise MVMError(f"Firecracker binary not found: {firecracker_bin!r}")
@@ -653,9 +699,37 @@ def create_vm(
         if effective_mode == CloudInitMode.NO_CLOUD_NET and net_manager is not None:
             net_manager.stop_server(name)
             remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+        if enable_console and pty_slave_fd is not None:
+            try:
+                os.close(pty_slave_fd)
+            except OSError:
+                pass
+        if enable_console and pty_master_fd is not None:
+            try:
+                os.close(pty_master_fd)
+            except OSError:
+                pass
         cleanup_tap(tap_name)
         shutil.rmtree(vm_dir, ignore_errors=True)
         raise MVMError(f"Failed to start Firecracker: {e}")
+
+    if enable_console and pty_slave_fd is not None:
+        try:
+            os.close(pty_slave_fd)
+        except OSError:
+            pass
+
+    if enable_console and relay_mgr is not None and pty_master_fd is not None:
+        try:
+            console_socket_path, console_relay_pid = relay_mgr.start_relay(
+                name, pty_master_fd, vm_dir
+            )
+        except MVMError as e:
+            logger.warning("Failed to start console relay: %s", e)
+            try:
+                os.close(pty_master_fd)
+            except OSError:
+                pass
 
     _write_pid_file(pid_file, proc.pid)
 
@@ -672,6 +746,8 @@ def create_vm(
         status=VMState.RUNNING,
         nocloud_net_port=nocloud_net_port,
         nocloud_server_pid=nocloud_server_pid,
+        console_relay_pid=console_relay_pid,
+        console_socket_path=console_socket_path,
     )
     manager.register(vm_instance)
 
@@ -697,6 +773,13 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
         pid = vm.pid
 
     graceful_shutdown(pid, vm.socket_path)
+
+    if vm.console_relay_pid is not None:
+        try:
+            relay_mgr = ConsoleRelayManager()
+            relay_mgr.stop_relay(name)
+        except (OSError, RuntimeError) as e:
+            logger.warning("Failed to cleanup console relay: %s", e)
 
     # Stop nocloud-net server and remove firewall rule if VM has nocloud-net configured
     if vm.nocloud_net_port is not None and vm.ip is not None:

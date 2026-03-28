@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 from mvmctl.constants import (
     DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_CONSOLE,
     DEFAULT_VM_ENABLE_LOGGING,
     DEFAULT_VM_ENABLE_METRICS,
     DEFAULT_VM_ENABLE_PCI,
@@ -79,6 +80,7 @@ class VMConfig:
     extra_drives: list[DriveConfig] = field(default_factory=list)
     enable_logging: bool = DEFAULT_VM_ENABLE_LOGGING
     enable_metrics: bool = DEFAULT_VM_ENABLE_METRICS
+    enable_console: bool = DEFAULT_VM_ENABLE_CONSOLE
     cloud_init_mode: CloudInitMode = CloudInitMode.AUTO
     cloud_init_iso_path: Path | None = None
     keep_cloud_init_iso: bool = False
@@ -124,6 +126,7 @@ class VMConfig:
             ],
             "enable_logging": self.enable_logging,
             "enable_metrics": self.enable_metrics,
+            "enable_console": self.enable_console,
             "cloud_init_mode": self.cloud_init_mode.value,
             "cloud_init_iso_path": str(self.cloud_init_iso_path)
             if self.cloud_init_iso_path
@@ -178,6 +181,7 @@ class VMConfig:
             extra_drives=extra_drives,
             enable_logging=data.get("enable_logging", DEFAULT_VM_ENABLE_LOGGING),
             enable_metrics=data.get("enable_metrics", DEFAULT_VM_ENABLE_METRICS),
+            enable_console=data.get("enable_console", DEFAULT_VM_ENABLE_CONSOLE),
             cloud_init_mode=CloudInitMode(data["cloud_init_mode"])
             if data.get("cloud_init_mode")
             else CloudInitMode.AUTO,
@@ -224,6 +228,8 @@ class VMInstance:
     cloud_init_mode: CloudInitMode = CloudInitMode.AUTO
     nocloud_net_port: int | None = None
     nocloud_server_pid: int | None = None
+    console_relay_pid: int | None = None
+    console_socket_path: Path | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize VMInstance to a dictionary."""
@@ -242,6 +248,10 @@ class VMInstance:
             "cloud_init_mode": self.cloud_init_mode.value,
             "nocloud_net_port": self.nocloud_net_port,
             "nocloud_server_pid": self.nocloud_server_pid,
+            "console_relay_pid": self.console_relay_pid,
+            "console_socket_path": str(self.console_socket_path)
+            if self.console_socket_path
+            else None,
         }
 
     @classmethod
@@ -277,4 +287,8 @@ class VMInstance:
             cloud_init_mode=cloud_init_mode,
             nocloud_net_port=data.get("nocloud_net_port"),
             nocloud_server_pid=data.get("nocloud_server_pid"),
+            console_relay_pid=data.get("console_relay_pid"),
+            console_socket_path=Path(data["console_socket_path"])
+            if data.get("console_socket_path")
+            else None,
         )

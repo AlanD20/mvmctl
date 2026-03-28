@@ -236,6 +236,7 @@ DEFAULT_VM_ENABLE_API_SOCKET: Final[bool] = _require_bool(("vm_defaults", "enabl
 DEFAULT_VM_ENABLE_PCI: Final[bool] = _require_bool(("vm_defaults", "enable_pci"))
 DEFAULT_VM_ENABLE_LOGGING: Final[bool] = _require_bool(("vm_defaults", "enable_logging"))
 DEFAULT_VM_ENABLE_METRICS: Final[bool] = _require_bool(("vm_defaults", "enable_metrics"))
+DEFAULT_VM_ENABLE_CONSOLE: Final[bool] = _require_bool(("vm_defaults", "enable_console"))
 
 # VM network defaults
 DEFAULT_VM_SUBNET_MASK: Final[str] = _require_str(("vm_defaults", "subnet_mask"))
@@ -308,6 +309,8 @@ DEFAULT_FC_METRICS_FILENAME: Final[str] = "firecracker.metrics"
 DEFAULT_FC_API_SOCKET_FILENAME: Final[str] = "firecracker.api.socket"
 DEFAULT_FC_PID_FILENAME: Final[str] = "firecracker.pid"
 DEFAULT_FC_CONFIG_FILENAME: Final[str] = "firecracker.json"
+DEFAULT_CONSOLE_SOCKET_FILENAME: Final[str] = "console.sock"
+DEFAULT_CONSOLE_PID_FILENAME: Final[str] = "console.pid"
 
 # ---------------------------------------------------------------------------
 # Kernel type strings
@@ -497,6 +500,10 @@ CONST_NO_CLOUD_NET_SHUTDOWN_TIMEOUT_S: Final[float] = 5.0
 CONST_NO_CLOUD_NET_PORT_RANGE: Final[tuple[int, int]] = (8000, 9000)
 CONST_NO_CLOUD_NET_BIND_TIMEOUT_S: Final[float] = 5.0
 CONST_NO_CLOUD_NET_MAX_PORT_RETRIES: Final[int] = 100
+CONST_CONSOLE_SOCKET_TIMEOUT_S: Final[float] = 5.0
+CONST_CONSOLE_BUFFER_SIZE: Final[int] = 4096
+CONST_CONSOLE_RECONNECT_DELAY_S: Final[float] = 0.5
+CONST_CONSOLE_KILL_TIMEOUT_S: Final[float] = 5.0
 CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
 MAX_VMS: Final[int] = _require_int(("vm", "limits", "max_vms"))
 
