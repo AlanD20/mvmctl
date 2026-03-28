@@ -21,6 +21,7 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_lifecycle.bridge_exists")
     @patch("mvmctl.core.vm_lifecycle.create_tap")
     @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+    @patch("mvmctl.core.vm_lifecycle.setup_nat")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
     @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
     @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
@@ -42,6 +43,7 @@ class TestConsoleWorkflow:
         mock_config_gen,
         mock_write_pid,
         mock_add_rules,
+        mock_setup_nat,
         mock_create_tap,
         mock_bridge_exists,
         mock_gen_mac,
@@ -140,6 +142,7 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_lifecycle.bridge_exists")
     @patch("mvmctl.core.vm_lifecycle.create_tap")
     @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+    @patch("mvmctl.core.vm_lifecycle.setup_nat")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
     @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
     @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
@@ -157,6 +160,7 @@ class TestConsoleWorkflow:
         mock_config_gen,
         mock_write_pid,
         mock_add_rules,
+        mock_setup_nat,
         mock_create_tap,
         mock_bridge_exists,
         mock_gen_mac,

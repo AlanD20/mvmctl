@@ -209,7 +209,9 @@ def _build_iptables_restore_input(rules: list[dict[str, str]]) -> str:
             chains.add(rule["chain"])
 
         for chain in chains:
-            lines.append(f":{chain} - [0:0]")
+            # Only declare chain if it doesn't exist (redeclaring may flush rules)
+            if not chain_exists(chain, table):
+                lines.append(f":{chain} - [0:0]")
 
         for rule in table_rules:
             lines.append(f"-A {rule['chain']} {rule['rule']}")
@@ -228,6 +230,7 @@ def _apply_iptables_rules_batch(
 
     restore_input = _build_iptables_restore_input(rules)
 
+    logger.debug("Applying iptables rules batch:\n%s", restore_input)
     try:
         subprocess.run(
             _privileged_cmd(["iptables-restore", "--noflush"]),
@@ -236,7 +239,9 @@ def _apply_iptables_rules_batch(
             check=True,
             capture_output=True,
         )
+        logger.debug("Successfully applied iptables rules batch")
     except subprocess.CalledProcessError as e:
+        logger.error("Failed to apply iptables rules batch. Input was:\n%s", restore_input)
         raise NetworkError(error_label) from e
 
 

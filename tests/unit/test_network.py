@@ -307,9 +307,10 @@ def test_setup_nat_all_rules_exist():
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
             with patch("mvmctl.core.network.setup_mvm_chains"):
-                setup_nat("fc-br0", "eth0")
-                # Single iptables-restore call for all rules
-                assert mock_run.call_count == 1
+                with patch("mvmctl.core.network.chain_exists", return_value=False):
+                    setup_nat("fc-br0", "eth0")
+                    # Single iptables-restore call for all rules
+                    assert mock_run.call_count == 1
                 args = mock_run.call_args[0][0]
                 assert "iptables-restore" in args
 
@@ -324,9 +325,10 @@ def test_setup_nat_no_rules_exist():
     ) as mock_run:
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
             with patch("mvmctl.core.network.setup_mvm_chains"):
-                setup_nat("fc-br0", "eth0")
-                # Single iptables-restore call for all rules
-                assert mock_run.call_count == 1
+                with patch("mvmctl.core.network.chain_exists", return_value=False):
+                    setup_nat("fc-br0", "eth0")
+                    # Single iptables-restore call for all rules
+                    assert mock_run.call_count == 1
                 args = mock_run.call_args[0][0]
                 assert "iptables-restore" in args
 
@@ -339,8 +341,9 @@ def test_setup_nat_masquerade_add_fails():
     ):
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
             with patch("mvmctl.core.network.setup_mvm_chains"):
-                with pytest.raises(NetworkError, match="Failed to setup NAT"):
-                    setup_nat("fc-br0", "eth0")
+                with patch("mvmctl.core.network.chain_exists", return_value=False):
+                    with pytest.raises(NetworkError, match="Failed to setup NAT"):
+                        setup_nat("fc-br0", "eth0")
 
 
 def test_setup_nat_auto_detect_interface():
@@ -549,9 +552,10 @@ def test_add_iptables_forward_rules_already_exist():
     mock_result.returncode = 0
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
         with patch("mvmctl.core.network.setup_mvm_chains"):
-            add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-            # Single iptables-restore call for all rules
-            assert mock_run.call_count == 1
+            with patch("mvmctl.core.network.chain_exists", return_value=False):
+                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+                # Single iptables-restore call for all rules
+                assert mock_run.call_count == 1
             args = mock_run.call_args[0][0]
             assert "iptables-restore" in args
 
@@ -565,9 +569,10 @@ def test_add_iptables_forward_rules_add_success():
         return_value=mock_result,
     ) as mock_run:
         with patch("mvmctl.core.network.setup_mvm_chains"):
-            add_iptables_forward_rules("fc-vm1-0", "fc-br0")
-            # Single iptables-restore call for all rules
-            assert mock_run.call_count == 1
+            with patch("mvmctl.core.network.chain_exists", return_value=False):
+                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+                # Single iptables-restore call for all rules
+                assert mock_run.call_count == 1
             args = mock_run.call_args[0][0]
             assert "iptables-restore" in args
 
@@ -579,8 +584,9 @@ def test_add_iptables_forward_rules_bridge_to_tap_fails():
         side_effect=subprocess.CalledProcessError(1, ["iptables-restore", "--noflush"]),
     ):
         with patch("mvmctl.core.network.setup_mvm_chains"):
-            with pytest.raises(NetworkError, match="Failed to add FORWARD rules"):
-                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+            with patch("mvmctl.core.network.chain_exists", return_value=False):
+                with pytest.raises(NetworkError, match="Failed to add FORWARD rules"):
+                    add_iptables_forward_rules("fc-vm1-0", "fc-br0")
 
 
 def test_remove_iptables_forward_rules_success():
@@ -1202,10 +1208,11 @@ def test_apply_iptables_rules_batch_success():
     mock_result.returncode = 0
 
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-        rules = [
-            {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i eth0 -j ACCEPT"},
-        ]
-        _apply_iptables_rules_batch(rules)
+        with patch("mvmctl.core.network.chain_exists", return_value=False):
+            rules = [
+                {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i eth0 -j ACCEPT"},
+            ]
+            _apply_iptables_rules_batch(rules)
 
         assert mock_run.call_count == 1
         args = mock_run.call_args[0][0]
@@ -1230,9 +1237,10 @@ def test_apply_iptables_rules_batch_failure():
         "mvmctl.core.network.subprocess.run",
         side_effect=subprocess.CalledProcessError(1, ["iptables-restore"]),
     ):
-        rules = [{"table": "filter", "chain": "MVM-FORWARD", "rule": "-i eth0 -j ACCEPT"}]
-        with pytest.raises(NetworkError, match="Failed to apply iptables rules"):
-            _apply_iptables_rules_batch(rules)
+        with patch("mvmctl.core.network.chain_exists", return_value=False):
+            rules = [{"table": "filter", "chain": "MVM-FORWARD", "rule": "-i eth0 -j ACCEPT"}]
+            with pytest.raises(NetworkError, match="Failed to apply iptables rules"):
+                _apply_iptables_rules_batch(rules)
 
 
 def test_setup_nat_uses_batch_mode():
@@ -1243,10 +1251,11 @@ def test_setup_nat_uses_batch_mode():
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
             with patch("mvmctl.core.network.setup_mvm_chains"):
-                setup_nat("fc-br0", "eth0")
+                with patch("mvmctl.core.network.chain_exists", return_value=False):
+                    setup_nat("fc-br0", "eth0")
 
-                # Should be exactly 1 call to iptables-restore
-                assert mock_run.call_count == 1
+                    # Should be exactly 1 call to iptables-restore
+                    assert mock_run.call_count == 1
                 args = mock_run.call_args[0][0]
                 assert "iptables-restore" in args
                 assert "--noflush" in args
@@ -1266,10 +1275,11 @@ def test_add_iptables_forward_rules_uses_batch_mode():
 
     with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
         with patch("mvmctl.core.network.setup_mvm_chains"):
-            add_iptables_forward_rules("fc-vm1-0", "fc-br0")
+            with patch("mvmctl.core.network.chain_exists", return_value=False):
+                add_iptables_forward_rules("fc-vm1-0", "fc-br0")
 
-            # Should be exactly 1 call to iptables-restore
-            assert mock_run.call_count == 1
+                # Should be exactly 1 call to iptables-restore
+                assert mock_run.call_count == 1
             args = mock_run.call_args[0][0]
             assert "iptables-restore" in args
 
@@ -1397,3 +1407,86 @@ def test_ip_batch_mode_is_standardized():
         assert "-batch" in source or "_run_ip_batch" in source, (
             f"{func.__name__} should use ip -batch or _run_ip_batch"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #8: iptables chain fix - only declare chains that don't exist
+# ---------------------------------------------------------------------------
+
+
+def test_build_iptables_restore_input_declares_new_chain():
+    """_build_iptables_restore_input should declare chain when chain_exists returns False."""
+    from mvmctl.core.network import _build_iptables_restore_input
+
+    with patch("mvmctl.core.network.chain_exists", return_value=False):
+        rules = [
+            {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i br0 -o tap0 -j ACCEPT"},
+        ]
+        result = _build_iptables_restore_input(rules)
+
+        assert ":MVM-FORWARD - [0:0]" in result
+        assert "-A MVM-FORWARD -i br0 -o tap0 -j ACCEPT" in result
+
+
+def test_build_iptables_restore_input_skips_existing_chain():
+    """_build_iptables_restore_input should NOT declare chain when chain_exists returns True."""
+    from mvmctl.core.network import _build_iptables_restore_input
+
+    with patch("mvmctl.core.network.chain_exists", return_value=True):
+        rules = [
+            {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i br0 -o tap0 -j ACCEPT"},
+        ]
+        result = _build_iptables_restore_input(rules)
+
+        assert ":MVM-FORWARD - [0:0]" not in result
+        assert "-A MVM-FORWARD -i br0 -o tap0 -j ACCEPT" in result
+
+
+def test_build_iptables_restore_input_mixed_chains():
+    """_build_iptables_restore_input should only declare chains where chain_exists returns False."""
+    from mvmctl.core.network import _build_iptables_restore_input
+
+    def chain_exists_side_effect(chain, table="filter"):
+        # MVM-POSTROUTING doesn't exist, MVM-FORWARD exists
+        if chain == "MVM-POSTROUTING":
+            return False
+        return True
+
+    with patch("mvmctl.core.network.chain_exists", side_effect=chain_exists_side_effect):
+        rules = [
+            {"table": "nat", "chain": "MVM-POSTROUTING", "rule": "-o eth0 -j MASQUERADE"},
+            {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i br0 -o tap0 -j ACCEPT"},
+        ]
+        result = _build_iptables_restore_input(rules)
+
+        # MVM-POSTROUTING should be declared (chain didn't exist)
+        assert ":MVM-POSTROUTING - [0:0]" in result
+        # MVM-FORWARD should NOT be declared (chain already existed)
+        assert ":MVM-FORWARD - [0:0]" not in result
+        # But both rules should still be present
+        assert "-A MVM-POSTROUTING -o eth0 -j MASQUERADE" in result
+        assert "-A MVM-FORWARD -i br0 -o tap0 -j ACCEPT" in result
+
+
+def test_apply_iptables_rules_batch_logs_input():
+    """_apply_iptables_rules_batch should log the restore input via logger.debug."""
+    from mvmctl.core.network import _apply_iptables_rules_batch
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+
+    with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
+        with patch("mvmctl.core.network.logger") as mock_logger:
+            rules = [
+                {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i br0 -o tap0 -j ACCEPT"},
+            ]
+            _apply_iptables_rules_batch(rules)
+
+            # Verify logger.debug was called with the restore input
+            assert mock_logger.debug.called
+            # First call logs the input (second call logs "Successfully applied")
+            first_call_args = mock_logger.debug.call_args_list[0]
+            call_str = str(first_call_args)
+            # The restore input should be in the first logged message
+            assert "*filter" in call_str
+            assert "-A MVM-FORWARD" in call_str

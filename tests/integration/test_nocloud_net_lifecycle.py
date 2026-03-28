@@ -140,15 +140,16 @@ class TestFullNocloudNetLifecycle:
         vm_mgr = VMManager(tmp_path / "vms")
 
         with patch("mvmctl.core.vm_lifecycle.get_vm_manager", return_value=vm_mgr):
-            vm = create_vm(
-                name="nocloud-test-vm",
-                image="ubuntu-24.04",
-                kernel="vmlinux",
-                vcpus=2,
-                mem=2048,
-                cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
-                vm_manager=vm_mgr,
-            )
+            with patch("mvmctl.core.vm_lifecycle.setup_nat"):
+                vm = create_vm(
+                    name="nocloud-test-vm",
+                    image="ubuntu-24.04",
+                    kernel="vmlinux",
+                    vcpus=2,
+                    mem=2048,
+                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                    vm_manager=vm_mgr,
+                )
 
         # Verify nocloud-net server was started
         mock_nocloud_mgr.assert_called_once()
@@ -255,14 +256,15 @@ class TestFullNocloudNetLifecycle:
         vm_mgr = VMManager(tmp_path / "vms")
 
         with patch("mvmctl.core.vm_lifecycle.get_vm_manager", return_value=vm_mgr):
-            # Create VM
-            create_vm(
-                name="cleanup-test-vm",
-                image="ubuntu-24.04",
-                kernel="vmlinux",
-                cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
-                vm_manager=vm_mgr,
-            )
+            with patch("mvmctl.core.vm_lifecycle.setup_nat"):
+                # Create VM
+                create_vm(
+                    name="cleanup-test-vm",
+                    image="ubuntu-24.04",
+                    kernel="vmlinux",
+                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                    vm_manager=vm_mgr,
+                )
 
             # Verify server was started
             mock_mgr_instance.start_server.assert_called_once()
@@ -346,41 +348,44 @@ class TestMultipleVMsDifferentPorts:
                     with patch("mvmctl.core.vm_lifecycle.bridge_exists", return_value=True):
                         with patch("mvmctl.core.vm_lifecycle.create_tap"):
                             with patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules"):
-                                with patch("mvmctl.core.vm_lifecycle._write_pid_file"):
-                                    with patch(
-                                        "mvmctl.core.vm_lifecycle.setup_nocloud_input_chain"
-                                    ):
-                                        with patch("mvmctl.utils.fs.get_vm_dir") as mock_get_vm_dir:
-                                            vm_dir1 = tmp_path / "vms" / "vm1"
-                                            vm_dir2 = tmp_path / "vms" / "vm2"
-                                            vm_dir1.mkdir(parents=True)
-                                            vm_dir2.mkdir(parents=True)
-                                            mock_get_vm_dir.side_effect = [vm_dir1, vm_dir2]
+                                with patch("mvmctl.core.vm_lifecycle.setup_nat"):
+                                    with patch("mvmctl.core.vm_lifecycle._write_pid_file"):
+                                        with patch(
+                                            "mvmctl.core.vm_lifecycle.setup_nocloud_input_chain"
+                                        ):
+                                            with patch(
+                                                "mvmctl.utils.fs.get_vm_dir"
+                                            ) as mock_get_vm_dir:
+                                                vm_dir1 = tmp_path / "vms" / "vm1"
+                                                vm_dir2 = tmp_path / "vms" / "vm2"
+                                                vm_dir1.mkdir(parents=True)
+                                                vm_dir2.mkdir(parents=True)
+                                                mock_get_vm_dir.side_effect = [vm_dir1, vm_dir2]
 
-                                            mock_get_net.return_value = NetworkConfig(
-                                                name="default",
-                                                cidr="10.20.0.0/24",
-                                                gateway="10.20.0.1",
-                                                bridge="mvm-br0",
-                                                nat_enabled=True,
-                                                created_at="2024-01-01T00:00:00+00:00",
-                                            )
+                                                mock_get_net.return_value = NetworkConfig(
+                                                    name="default",
+                                                    cidr="10.20.0.0/24",
+                                                    gateway="10.20.0.1",
+                                                    bridge="mvm-br0",
+                                                    nat_enabled=True,
+                                                    created_at="2024-01-01T00:00:00+00:00",
+                                                )
 
-                                            vm1 = create_vm(
-                                                name="vm1",
-                                                image="ubuntu-24.04",
-                                                kernel="vmlinux",
-                                                cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
-                                                vm_manager=vm_mgr,
-                                            )
+                                                vm1 = create_vm(
+                                                    name="vm1",
+                                                    image="ubuntu-24.04",
+                                                    kernel="vmlinux",
+                                                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                                                    vm_manager=vm_mgr,
+                                                )
 
-                                            vm2 = create_vm(
-                                                name="vm2",
-                                                image="ubuntu-24.04",
-                                                kernel="vmlinux",
-                                                cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
-                                                vm_manager=vm_mgr,
-                                            )
+                                                vm2 = create_vm(
+                                                    name="vm2",
+                                                    image="ubuntu-24.04",
+                                                    kernel="vmlinux",
+                                                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                                                    vm_manager=vm_mgr,
+                                                )
 
         # Verify different ports were allocated
         assert vm1.nocloud_net_port == 8001
@@ -616,14 +621,15 @@ class TestNocloudNetFailureCleanup:
         vm_mgr = VMManager(tmp_path / "vms")
 
         with patch("mvmctl.core.vm_lifecycle.get_vm_manager", return_value=vm_mgr):
-            with pytest.raises(MVMError, match="Firecracker binary not found"):
-                create_vm(
-                    name="fc-fail-vm",
-                    image="ubuntu-24.04",
-                    kernel="vmlinux",
-                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
-                    vm_manager=vm_mgr,
-                )
+            with patch("mvmctl.core.vm_lifecycle.setup_nat"):
+                with pytest.raises(MVMError, match="Firecracker binary not found"):
+                    create_vm(
+                        name="fc-fail-vm",
+                        image="ubuntu-24.04",
+                        kernel="vmlinux",
+                        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                        vm_manager=vm_mgr,
+                    )
 
         # Verify server was stopped on failure
         mock_mgr_instance.stop_server.assert_called_once_with("fc-fail-vm")
@@ -684,31 +690,34 @@ class TestVMWithoutNocloudNet:
                     with patch("mvmctl.core.vm_lifecycle.bridge_exists", return_value=True):
                         with patch("mvmctl.core.vm_lifecycle.create_tap"):
                             with patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules"):
-                                with patch("mvmctl.core.vm_lifecycle._write_pid_file"):
-                                    with patch(
-                                        "mvmctl.core.vm_lifecycle.setup_nocloud_input_chain"
-                                    ):
-                                        with patch("mvmctl.utils.fs.get_vm_dir") as mock_get_vm_dir:
-                                            vm_dir = tmp_path / "vms" / "disabled-mode-vm"
-                                            vm_dir.mkdir(parents=True)
-                                            mock_get_vm_dir.return_value = vm_dir
+                                with patch("mvmctl.core.vm_lifecycle.setup_nat"):
+                                    with patch("mvmctl.core.vm_lifecycle._write_pid_file"):
+                                        with patch(
+                                            "mvmctl.core.vm_lifecycle.setup_nocloud_input_chain"
+                                        ):
+                                            with patch(
+                                                "mvmctl.utils.fs.get_vm_dir"
+                                            ) as mock_get_vm_dir:
+                                                vm_dir = tmp_path / "vms" / "disabled-mode-vm"
+                                                vm_dir.mkdir(parents=True)
+                                                mock_get_vm_dir.return_value = vm_dir
 
-                                            mock_get_net.return_value = NetworkConfig(
-                                                name="default",
-                                                cidr="10.20.0.0/24",
-                                                gateway="10.20.0.1",
-                                                bridge="mvm-br0",
-                                                nat_enabled=True,
-                                                created_at="2024-01-01T00:00:00+00:00",
-                                            )
+                                                mock_get_net.return_value = NetworkConfig(
+                                                    name="default",
+                                                    cidr="10.20.0.0/24",
+                                                    gateway="10.20.0.1",
+                                                    bridge="mvm-br0",
+                                                    nat_enabled=True,
+                                                    created_at="2024-01-01T00:00:00+00:00",
+                                                )
 
-                                            vm = create_vm(
-                                                name="disabled-mode-vm",
-                                                image="ubuntu-24.04",
-                                                kernel="vmlinux",
-                                                cloud_init_mode=CloudInitMode.DISABLED,
-                                                vm_manager=vm_mgr,
-                                            )
+                                                vm = create_vm(
+                                                    name="disabled-mode-vm",
+                                                    image="ubuntu-24.04",
+                                                    kernel="vmlinux",
+                                                    cloud_init_mode=CloudInitMode.DISABLED,
+                                                    vm_manager=vm_mgr,
+                                                )
 
         # Verify nocloud-net server was NOT started
         mock_nocloud_mgr.assert_not_called()

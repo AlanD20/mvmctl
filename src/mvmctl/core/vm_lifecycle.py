@@ -65,6 +65,7 @@ from mvmctl.core.network_manager import (
     get_network,
     release_network_ip,
 )
+from mvmctl.core.rootfs_seed import copy_rootfs_for_vm, inject_cloud_init_to_rootfs
 from mvmctl.core.ssh import resolve_ssh_key
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.exceptions import CloudInitError, MVMError, NetworkError, VMNotFoundError
@@ -431,7 +432,7 @@ def create_vm(
     if not (CONST_VM_MEM_MIN_MIB <= mem <= CONST_VM_MEM_MAX_MIB):
         raise MVMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
 
-    # AUTO mode defaults to nocloud-net for new VMs
+    # AUTO mode defaults to NO_CLOUD_NET for new VMs (HTTP-based, no rootfs mount required)
     if cloud_init_mode == CloudInitMode.AUTO:
         effective_mode = CloudInitMode.NO_CLOUD_NET
     else:
@@ -503,7 +504,14 @@ def create_vm(
     tap_name = _generate_tap_name(network_name, name)
     bridge = net_config.bridge
 
-    rootfs_path = image_path  # Use absolute cached image path directly
+    # For LOCAL mode, create per-VM rootfs copy
+    # For other modes, use original image directly
+    if effective_mode == CloudInitMode.LOCAL:
+        # Copy rootfs to per-VM location (preserves original)
+        rootfs_path = copy_rootfs_for_vm(image_path, vm_dir, image_fs_type)
+    else:
+        # Use original image directly (for NO_CLOUD_NET, CUSTOM, DISABLED)
+        rootfs_path = image_path
 
     # Handle cloud-init based on mode
     cloud_init_iso: Path | None = None
@@ -520,7 +528,8 @@ def create_vm(
 
         _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
 
-        # Skip network-config for NO_CLOUD_NET mode - kernel ip= configures networking early
+        # Write cloud-init seed files for all modes (network-config now included for NO_CLOUD_NET)
+        # The network-config provides fallback configuration that cloud-init can apply
         write_cloud_init(
             cloud_init_dir,
             name,
@@ -530,7 +539,7 @@ def create_vm(
             custom_user_data=user_data,
             gateway=net_config.gateway,
             prefix_len=_prefix_len,
-            skip_network_config=(effective_mode == CloudInitMode.NO_CLOUD_NET),
+            skip_network_config=False,
         )
 
         if effective_mode == CloudInitMode.CUSTOM:
@@ -563,7 +572,26 @@ def create_vm(
                 except NetworkError:
                     pass
                 raise
+        elif effective_mode == CloudInitMode.LOCAL:
+            # Inject cloud-init seed into per-VM rootfs copy
+            try:
+                inject_cloud_init_to_rootfs(rootfs_path, cloud_init_dir, image_fs_type)
+                logger.info("Injected cloud-init seed into per-VM rootfs: %s", rootfs_path)
+            except MVMError as e:
+                # Cleanup on failure
+                shutil.rmtree(vm_dir, ignore_errors=True)
+                try:
+                    release_network_ip(network_name, name)
+                except NetworkError:
+                    pass
+                raise MVMError(f"Failed to inject cloud-init seed: {e}") from e
+
+            # No ISO needed for LOCAL mode - seed is in rootfs
+            cloud_init_iso = None
+            nocloud_net_url = None
+            nocloud_server_pid = None
         elif effective_mode == CloudInitMode.AUTO:
+            # Fallback to ISO mode for AUTO (should not reach here due to default)
             cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
             try:
                 create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
@@ -630,6 +658,10 @@ def create_vm(
             f"/{_ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen}"
         )
         setup_bridge(bridge, gateway_cidr=_gw_cidr)
+        if net_config.nat_enabled:
+            setup_nat(bridge)
+    else:
+        # Bridge exists - reconcile NAT rules if enabled
         if net_config.nat_enabled:
             setup_nat(bridge)
 
