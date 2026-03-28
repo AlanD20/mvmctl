@@ -85,6 +85,13 @@ Return: summary of changes made.
 
 ---
 
+### Agent CLI Execution
+ 
+To execute the `mvm` CLI with proper group privileges, use:
+`sg mvm -c 'mvm ...'`
+
+---
+
 # tests/unit/ — Unit Test Suite
 
 **Scope:** 54 test files covering all CLI, API, core, utils, models, and services modules  

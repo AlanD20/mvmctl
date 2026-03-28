@@ -14,13 +14,14 @@ cloud-init:
 
 VM:
 - [x] when user fetches/imports an image via `mvm image fetch/import`, the process at the end it must run 'blkid -p -s UUID -o value' on the final image that has only rootfs content, and then store the `fs_uuid` in the image's metadata. And then later when user enters `mvm vm create ...` the command must pull the `fs_uuid` of the image from metadata and use it as boot arg with root=UUID={fs_uuid}
-- [x] DO NOT COPY rootfs into vm state file! use absolute file to cached imgaes. when creating a new vm via `mvm vm create` it copies the rootfs file into the vm's state folder! the kernel and the rootfs must use the absolute path of the kernel or rootfs provided or if default is chosen, then use default's absolute path of rootfs and kernel. do not copy rootfs or kernel into each vm's state!
+- [x] DO NOT COPY rootfs into vm state file! use absolute file to cached imgaes. when creating a new vm via `mvm vm create` it copies the rootfs file into the vm's state folder! the kernel and the rootfs must use the absolute path of the kernel or rootfs provided or if default is chosen, then use default's absolute path of rootfs and kernel. do not copy rootfs or kernel into each vm's state! -- THIS MUST BE REVERTED, the actual rootfs is the system, that means the size is also the system's size. maybe expose flags to increase the size!!
 - [x] each image has `fs_type` in the metadata file, this type must be used in the boot arg of firecracker json file which `rootfstype={fs_type}`
 - firecracker rootfs requires integrating the ssh key into the image! need to figure out a way to do this? perhaps create a copy of an image by integrating a file?
 - introduce --kernel-path and --image-path to `mvm vm create` to allow custom image and kernel path
 - when `mvm vm create` throws an exception, it leaves out the directory creation of the vm state!
 - ensure root partition detection is available on both `mvm image fetch` and `mvm image import`
 - nocloud-net port from the flag is not passed dynamically in the code.
+- The vm state folder per vm must be changed from vm name to full sha for the folder name to make it unique even if duplicate names are being used.
 
 Kernel:
 - [x] user enters `mvm kernel fetch --official` then it will pull the kernel 6.19.9 official defined in kernels.yaml file! and then the config_fragmets is an array of either local path relative to assets folder or HTTP url where during the build it will apply these config files to kernel, and then later goes through enabled/disabled and set value keys to do those against the config!
@@ -33,6 +34,7 @@ CLI:
 - when running `ls` on EVERY SUPPORTED commands such as `mvm image ls`, etc.. it must read through the metadata and check if it has a path, file exist? if no, add (X) mark to indicate it's deleted and only metadata left. if it's a network bridge, check if it's still there. etc.. the state check with actual environment depends on the command, for image, kernel, vm, key, bin, they are file state checks, but for network, it's a check with the actual bridge if it still exists!
 - when user enters `rm` for any resources such as kernel, image, vm, keys, etc.. it shouldn't prompt y/n. It MUST PROCEED WITH REMOVAL.
 - DO NOT ALLOW REMOVAL OF networks, images, kernels, if they are used by an active VM. The CLI must utilize the metadata to ensure there isnt an active VM using these.
+- Add size to `kernel`, `image` ls commands
 
 Debugging: Complete overhaul of every single path of the CLI application and handle any user facing error gracefully as a friendly output. DO NOT SHOW EXCEPTIONS and STACK TRACES, unless DEBUG MODE is enabled. Every single path of the entire application must support this mode, ensure that every single path of the code has this particularly more emphasis on complex logics requiring sequential state in order to allow the cli application to perform an action.
 - introduce a new build type that enables debugging at finer grain for easier debugging issues. a value defined in constants.py file where it derives the DEBUG_MODE value from defaults.yaml file! this will enable debug mode throughout the cli application.

@@ -85,6 +85,13 @@ Return: summary of changes made.
 
 ---
 
+### Agent CLI Execution
+ 
+To execute the `mvm` CLI with proper group privileges, use:
+`sg mvm -c 'mvm ...'`
+
+---
+
 # mvmctl/cli/ — CLI Layer
 
 **Scope:** Typer command definitions only — arg parsing, output formatting, NO business logic  

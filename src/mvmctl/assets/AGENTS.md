@@ -85,6 +85,13 @@ Return: summary of changes made.
 
 ---
 
+### Agent CLI Execution
+ 
+To execute the `mvm` CLI with proper group privileges, use:
+`sg mvm -c 'mvm ...'`
+
+---
+
 # mvmctl/assets/ — Bundled Configuration
 
 **Scope:** Static YAML/JSON assets bundled with the package; read at runtime, never mutated  

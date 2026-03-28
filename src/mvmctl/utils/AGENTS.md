@@ -85,6 +85,13 @@ Return: summary of changes made.
 
 ---
 
+### Agent CLI Execution
+ 
+To execute the `mvm` CLI with proper group privileges, use:
+`sg mvm -c 'mvm ...'`
+
+---
+
 # mvmctl/utils/ — Shared Helpers
 
 **Scope:** Pure, domain-agnostic utilities; no business logic, no Firecracker knowledge

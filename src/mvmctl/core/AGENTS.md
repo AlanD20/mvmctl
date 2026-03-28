@@ -85,6 +85,13 @@ Return: summary of changes made.
 
 ---
 
+### Agent CLI Execution
+ 
+To execute the `mvm` CLI with proper group privileges, use:
+`sg mvm -c 'mvm ...'`
+
+---
+
 # mvmctl/core/ — Business Logic Layer
 
 **Scope:** All subprocess calls, privilege checks, VM lifecycle, network, image, kernel  
