@@ -13,7 +13,8 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.vm import app as vm_app
 from mvmctl.core.network_manager import NetworkConfig
-from mvmctl.models.vm import CloudInitMode, VMInstance, VMState
+from mvmctl.models import CloudInitMode
+from mvmctl.models.vm import VMInstance, VMState
 
 runner = CliRunner()
 
@@ -515,7 +516,7 @@ class TestNocloudNetFailureCleanup:
 
         from mvmctl.core.vm_lifecycle import create_vm
         from mvmctl.core.vm_manager import VMManager
-        from mvmctl.models.vm import CloudInitMode
+        from mvmctl.models import CloudInitMode
 
         vm_mgr = VMManager(tmp_path / "vms")
 
@@ -619,7 +620,7 @@ class TestNocloudNetFailureCleanup:
         from mvmctl.core.vm_lifecycle import create_vm
         from mvmctl.core.vm_manager import VMManager
         from mvmctl.exceptions import MVMError
-        from mvmctl.models.vm import CloudInitMode
+        from mvmctl.models import CloudInitMode
 
         vm_mgr = VMManager(tmp_path / "vms")
 
@@ -680,7 +681,7 @@ class TestVMWithoutNocloudNet:
 
         from mvmctl.core.vm_lifecycle import create_vm
         from mvmctl.core.vm_manager import VMManager
-        from mvmctl.models.vm import CloudInitMode
+        from mvmctl.models import CloudInitMode
 
         vm_mgr = VMManager(tmp_path / "vms")
 

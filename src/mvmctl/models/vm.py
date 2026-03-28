@@ -8,6 +8,8 @@ from enum import StrEnum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from mvmctl.models.cloud_init import CloudInitMode
+
 if TYPE_CHECKING:
     from mvmctl.core.config_gen import DriveConfig
 
@@ -31,31 +33,6 @@ class VMState(StrEnum):
     RUNNING = auto()
     STOPPED = auto()
     ERROR = auto()
-
-
-class CloudInitStatus(StrEnum):
-    """Cloud-init execution status based on console log detection."""
-
-    PENDING = auto()  # Console log file doesn't exist yet
-    RUNNING = auto()  # Console log exists but no "done" marker found
-    DONE = auto()  # Final message marker detected in console log
-    ERROR = auto()  # Error state (for future use)
-
-
-class CloudInitMode(StrEnum):
-    """Cloud-init configuration mode.
-
-    Attributes:
-        AUTO: Generate cloud-init ISO from config files (default).
-        CUSTOM: Use a pre-existing custom cloud-init ISO.
-        DISABLED: Skip cloud-init entirely (no ISO mounted).
-        NO_CLOUD_NET: Serve cloud-init files via HTTP (nocloud-net datasource).
-    """
-
-    AUTO = "auto"
-    CUSTOM = "custom"
-    DISABLED = "disabled"
-    NO_CLOUD_NET = "nocloud-net"
 
 
 @dataclass
@@ -103,8 +80,6 @@ class VMConfig:
     enable_logging: bool = DEFAULT_VM_ENABLE_LOGGING
     enable_metrics: bool = DEFAULT_VM_ENABLE_METRICS
     cloud_init_mode: CloudInitMode = CloudInitMode.AUTO
-    # @deprecated: Use cloud_init_mode instead. Kept for backward compatibility.
-    datasource_mode: CloudInitMode = CloudInitMode.AUTO
     cloud_init_iso_path: Path | None = None
     keep_cloud_init_iso: bool = False
     nocloud_net_url: str | None = None
@@ -150,7 +125,6 @@ class VMConfig:
             "enable_logging": self.enable_logging,
             "enable_metrics": self.enable_metrics,
             "cloud_init_mode": self.cloud_init_mode.value,
-            "datasource_mode": self.datasource_mode.value,
             "cloud_init_iso_path": str(self.cloud_init_iso_path)
             if self.cloud_init_iso_path
             else None,
@@ -206,9 +180,6 @@ class VMConfig:
             enable_metrics=data.get("enable_metrics", DEFAULT_VM_ENABLE_METRICS),
             cloud_init_mode=CloudInitMode(data["cloud_init_mode"])
             if data.get("cloud_init_mode")
-            else CloudInitMode.AUTO,
-            datasource_mode=CloudInitMode(data["datasource_mode"])
-            if data.get("datasource_mode")
             else CloudInitMode.AUTO,
             cloud_init_iso_path=Path(data["cloud_init_iso_path"])
             if data.get("cloud_init_iso_path")

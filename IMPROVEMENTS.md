@@ -39,6 +39,7 @@ Following UI errors must be more friendlier for user:
 
 Networking:
 - prompt user to provide the interface that provides internet for routing
+- When a new network is created, this is effectively a new bridge with its own subnet and every rule. in `chain POSTROUTING` the target for this bridge must only allow `source` for the cidr provided only! and the `out` value must be the bridge interface name! for example a new network called `mvm-test` with cidr 175.39.0.0/24. the expected `source` value is 175.39.0.0/24 and `out` value is !mvm-test when the target is `MVM-POSTROUTING` chain.
 
 
 Escalation:

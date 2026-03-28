@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.config_gen import ConfigGenerator
-from mvmctl.models.vm import CloudInitMode, VMConfig
+from mvmctl.models import CloudInitMode
+from mvmctl.models.vm import VMConfig
 
 
 def test_config_generator_basic():

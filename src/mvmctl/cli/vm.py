@@ -29,7 +29,7 @@ from mvmctl.constants import (
     DEFAULT_VM_LOG_TYPE,
 )
 from mvmctl.exceptions import MVMError
-from mvmctl.models.vm import CloudInitMode, VMInstance, VMState
+from mvmctl.models import CloudInitMode, VMInstance, VMState
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import is_ip_address, validate_entity_name

@@ -45,7 +45,7 @@ from mvmctl.core.vm_lifecycle import (
     snapshot_vm as _snapshot_vm,
 )
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
-from mvmctl.models.vm import CloudInitMode, VMInstance, VMState
+from mvmctl.models import CloudInitMode, VMInstance, VMState
 
 __all__ = [
     "list_vms",

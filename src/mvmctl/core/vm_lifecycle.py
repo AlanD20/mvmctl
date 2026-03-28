@@ -70,7 +70,7 @@ from mvmctl.core.nocloud_net_manager import NoCloudNetServerManager
 from mvmctl.core.ssh import resolve_ssh_key
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.exceptions import CloudInitError, MVMError, NetworkError, VMNotFoundError
-from mvmctl.models.vm import CloudInitMode, VMConfig, VMInstance, VMState
+from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMState
 from mvmctl.utils.console import print_info, print_warning
 from mvmctl.utils.fs import get_images_dir, get_kernels_dir, get_vm_dir
 

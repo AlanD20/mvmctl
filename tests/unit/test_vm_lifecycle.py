@@ -17,7 +17,8 @@ from mvmctl.core.vm_lifecycle import (
     snapshot_vm,
 )
 from mvmctl.exceptions import MVMError
-from mvmctl.models.vm import CloudInitMode, VMInstance, VMState
+from mvmctl.models import CloudInitMode
+from mvmctl.models.vm import VMInstance, VMState
 from mvmctl.utils.short_id import resolve_single_by_short_id
 
 
@@ -1671,7 +1672,7 @@ def test_create_vm_waits_for_cloud_init_completion(
 ):
     """Test that create_vm waits for cloud-init completion when mode=NO_CLOUD_NET and completes successfully."""
     from mvmctl.core.vm_lifecycle import create_vm
-    from mvmctl.models.vm import CloudInitMode
+    from mvmctl.models import CloudInitMode
 
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
@@ -1788,7 +1789,7 @@ def test_cloud_init_timeout_logs_warning(
 ):
     """Test that cloud-init timeout logs warning but VM creation still succeeds."""
     from mvmctl.core.vm_lifecycle import create_vm
-    from mvmctl.models.vm import CloudInitMode
+    from mvmctl.models import CloudInitMode
 
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0

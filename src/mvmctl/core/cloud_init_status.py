@@ -10,7 +10,7 @@ from mvmctl.constants import (
     CONST_CLOUD_INIT_TIMEOUT_S,
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
 )
-from mvmctl.models.vm import CloudInitStatus
+from mvmctl.models import CloudInitStatus
 
 logger = logging.getLogger(__name__)
 

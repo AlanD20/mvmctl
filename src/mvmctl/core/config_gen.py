@@ -22,7 +22,7 @@ from mvmctl.constants import (
     DEFAULT_VM_ROOT_FS_TYPE,
 )
 from mvmctl.exceptions import ConfigError, MVMError
-from mvmctl.models.vm import CloudInitMode, VMConfig
+from mvmctl.models import CloudInitMode, VMConfig
 from mvmctl.utils.fs import get_vm_dir
 from mvmctl.utils.validation import validate_boot_arg_component
 

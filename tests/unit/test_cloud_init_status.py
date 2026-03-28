@@ -9,7 +9,7 @@ from mvmctl.core.cloud_init_status import (
     check_cloud_init_status,
     wait_for_cloud_init_done,
 )
-from mvmctl.models.vm import CloudInitStatus
+from mvmctl.models import CloudInitStatus
 
 
 class TestCheckCloudInitStatus:
