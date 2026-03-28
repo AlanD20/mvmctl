@@ -42,6 +42,7 @@ Following UI errors must be more friendlier for user:
 Networking:
 - prompt user to provide the interface that provides internet for routing
 - When a new network is created, this is effectively a new bridge with its own subnet and every rule. in `chain POSTROUTING` the target for this bridge must only allow `source` for the cidr provided only! and the `out` value must be the bridge interface name! for example a new network called `mvm-test` with cidr 175.39.0.0/24. the expected `source` value is 175.39.0.0/24 and `out` value is !mvm-test when the target is `MVM-POSTROUTING` chain.
+- when `--ip` is passed to `mvm vm create` the IP isnt being checked against if this ip is already leased or free. the application must show a friendly error that given ip on given network name is already reserved.
 
 
 Escalation:
@@ -62,3 +63,5 @@ NEW Features:
     - user runs `mvm console <vm-sha-id>` or --name/-n for vm name, then it connects to an interactive console-like to the vm where user can send commands and it shows back the output.
     - if user accesses the vm at the initial stage of vm creation `mvm console -n r1` then it must also output the initial streaming of the boot where firecracker exposes the serial output to this!
     - the services/ layer, we need to understand how the implementation looks like. If it's an implementation where it spawns a subprocess with its own pid, then yes lets go with services/ layer implementation. But if it does not have any pid on its own, then we will go with the same paterrn where core -> api -> cli similar with other commands.
+    - Add `mvm vm inspect <id|--name|-n` to view the metadata of the target vm
+
