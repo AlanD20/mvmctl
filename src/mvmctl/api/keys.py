@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mvmctl.core.key_manager import (
     KeyInfo,
     add_key,
     create_key,
+    export_key,
     get_key,
     inspect_key,
     list_keys,
@@ -20,4 +23,5 @@ __all__ = [
     "create_key",
     "remove_key",
     "inspect_key",
+    "export_key",
 ]

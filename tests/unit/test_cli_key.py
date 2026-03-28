@@ -17,6 +17,9 @@ _FAKE_KEY = KeyInfo(
     algorithm="ssh-ed25519",
     comment="test@host",
     added_at="2024-01-01T00:00:00+00:00",
+    has_private_key=True,
+    private_key_path="/home/user/.cache/mvmctl/keys/testkey",
+    public_key_path="/home/user/.cache/mvmctl/keys/testkey.pub",
 )
 
 
@@ -91,7 +94,7 @@ def test_create_success(mock_create):
 )
 def test_create_with_options(mock_create):
     result = runner.invoke(
-        app, ["create", "testkey", "--output", "/custom", "--comment", "my comment"]
+        app, ["create", "testkey", "--out", "/custom", "--comment", "my comment"]
     )
     assert result.exit_code == 0
     mock_create.assert_called_once_with(
@@ -144,6 +147,7 @@ _FAKE_INSPECT = {
     "algorithm": "ssh-ed25519",
     "comment": "test@host",
     "added_at": "2024-01-01T00:00:00+00:00",
+    "has_private_key": True,
     "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtest test@host",
 }
 
@@ -254,15 +258,17 @@ def test_key_ls_shows_private_key_column(mock_list):
             algorithm="ssh-ed25519",
             comment="test",
             added_at="2026-01-01T00:00:00+00:00",
+            has_private_key=True,
         )
     ]
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "Private Key" in result.output
+    assert "yes" in result.output
 
 
 @patch("mvmctl.cli.key.list_keys")
-def test_key_ls_json_includes_has_private_key(mock_list):
+def test_key_ls_json_includes_private_key_status(mock_list):
     """P3-13: key ls --json includes has_private_key field."""
     mock_list.return_value = [
         KeyInfo(
@@ -271,8 +277,49 @@ def test_key_ls_json_includes_has_private_key(mock_list):
             algorithm="ssh-ed25519",
             comment="test",
             added_at="2026-01-01T00:00:00+00:00",
+            has_private_key=False,
         )
     ]
     result = runner.invoke(app, ["ls", "--json"])
     assert result.exit_code == 0
     assert '"has_private_key"' in result.output
+    assert "false" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Export command tests
+# ---------------------------------------------------------------------------
+
+
+@patch(
+    "mvmctl.cli.key.export_key",
+    return_value=(Path("/dest/test"), Path("/dest/test.pub")),
+)
+def test_export_success(mock_export):
+    result = runner.invoke(app, ["export", "mykey"])
+    assert result.exit_code == 0
+    assert "exported" in result.output.lower()
+    mock_export.assert_called_once_with("mykey", None, overwrite=True)
+
+
+@patch(
+    "mvmctl.cli.key.export_key",
+    return_value=(Path("/custom/test"), Path("/custom/test.pub")),
+)
+def test_export_with_custom_output(mock_export):
+    result = runner.invoke(app, ["export", "mykey", "--out", "/custom"])
+    assert result.exit_code == 0
+    mock_export.assert_called_once_with("mykey", "/custom", overwrite=True)
+
+
+@patch("mvmctl.cli.key.export_key", side_effect=MVMKeyError("not found in cache"))
+def test_export_error(mock_export):
+    result = runner.invoke(app, ["export", "nonexistent"])
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()
+
+
+def test_export_help_arg_shows_help():
+    result = runner.invoke(app, ["export", "--help"])
+    assert result.exit_code == 0
+    assert "export" in result.output.lower()

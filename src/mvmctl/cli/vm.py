@@ -604,7 +604,9 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
         if resolved is None:
             raise MVMError(f"No SSH key found at: {key}")
         return resolved
-    mvm_keys_dir = Path.home() / ".cache" / "mvmctl" / "keys"
+    from mvmctl.utils.fs import get_keys_dir
+
+    mvm_keys_dir = get_keys_dir()
     if mvm_keys_dir.exists():
         for f in sorted(mvm_keys_dir.iterdir()):
             if f.is_file() and f.suffix not in (".pub", ".json") and not f.name.startswith("."):

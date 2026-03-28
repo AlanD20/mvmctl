@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import logging
+import shutil
 import socket
 import subprocess
 from dataclasses import asdict, dataclass
@@ -22,13 +23,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class KeyInfo:
-    """Metadata for a stored public key."""
+    """Metadata for a stored keypair."""
 
     name: str
     fingerprint: str
     algorithm: str
     comment: str
     added_at: str
+    has_private_key: bool = False
+    private_key_path: str | None = None
+    public_key_path: str | None = None
 
 
 def _registry_path() -> Path:
@@ -144,12 +148,22 @@ def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> Key
     dest = keys_dir / f"{name}.pub"
     dest.write_text(content + "\n")
 
+    # Check if there's a matching private key in the same directory
+    private_key_path = pub_key_path.with_suffix("")
+    if private_key_path == pub_key_path:
+        # If pub_key_path has no .pub extension, check for .pub removed
+        private_key_path = Path(str(pub_key_path).replace(".pub", ""))
+    has_private_key = private_key_path.exists() and private_key_path != pub_key_path
+
     info = KeyInfo(
         name=name,
         fingerprint=_compute_fingerprint(content),
         algorithm=_parse_algorithm(content),
         comment=_parse_comment(content),
         added_at=datetime.now(timezone.utc).isoformat(),
+        has_private_key=has_private_key,
+        private_key_path=str(private_key_path) if has_private_key else None,
+        public_key_path=str(dest),
     )
     registry[name] = asdict(info)
     _save_registry(registry)
@@ -191,12 +205,21 @@ def _generate_keypair(private_key_path: Path, pub_key_path: Path, comment: str) 
     return pub_key_path.read_text().strip()
 
 
-def _build_key_info(name: str, pub_key_content: str) -> KeyInfo:
+def _build_key_info(
+    name: str,
+    pub_key_content: str,
+    has_private_key: bool = False,
+    private_key_path: str | None = None,
+    public_key_path: str | None = None,
+) -> KeyInfo:
     """Create a KeyInfo from a public key's content string.
 
     Args:
         name: Logical name for the key.
         pub_key_content: Raw public key text (algorithm + base64 + optional comment).
+        has_private_key: Whether a private key exists for this key.
+        private_key_path: Path to the private key file.
+        public_key_path: Path to the public key file.
 
     Returns:
         A fully populated KeyInfo dataclass instance.
@@ -207,6 +230,9 @@ def _build_key_info(name: str, pub_key_content: str) -> KeyInfo:
         algorithm=_parse_algorithm(pub_key_content),
         comment=_parse_comment(pub_key_content),
         added_at=datetime.now(timezone.utc).isoformat(),
+        has_private_key=has_private_key,
+        private_key_path=private_key_path,
+        public_key_path=public_key_path,
     )
 
 
@@ -234,7 +260,7 @@ def create_key(
     Returns (KeyInfo, private_key_path).
     """
     if output_dir is None:
-        output_dir = Path.home() / ".ssh"
+        output_dir = get_keys_dir()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -265,7 +291,13 @@ def create_key(
 
     content = _generate_keypair(private_key_path, pub_key_path, comment)
     _cache_public_key(name, content)
-    info = _build_key_info(name, content)
+    info = _build_key_info(
+        name,
+        content,
+        has_private_key=True,
+        private_key_path=str(private_key_path),
+        public_key_path=str(pub_key_path),
+    )
 
     registry[name] = asdict(info)
     _save_registry(registry)
@@ -291,6 +323,69 @@ def remove_key(name: str) -> None:
     logger.info("Removed key '%s' from cache", name)
 
 
+def export_key(
+    name: str,
+    destination: str | Path | None = None,
+    overwrite: bool = False,
+) -> tuple[Path, Path]:
+    """Export a keypair from cache to destination directory.
+
+    Args:
+        name: Key name in the cache
+        destination: Destination directory (default: ~/.ssh/)
+        overwrite: Whether to overwrite existing files
+
+    Returns:
+        Tuple of (private_key_path, public_key_path) at destination
+
+    Raises:
+        MVMKeyError: If key not found in cache, or if files exist and overwrite=False
+    """
+    registry = _load_registry()
+    if name not in registry:
+        raise MVMKeyError(f"Key '{name}' not found in cache")
+
+    keys_dir = get_keys_dir()
+    source_private = keys_dir / name
+    source_public = keys_dir / f"{name}.pub"
+
+    if not source_private.exists():
+        raise MVMKeyError(f"Private key '{name}' not found in cache at {source_private}")
+    if not source_public.exists():
+        raise MVMKeyError(f"Public key '{name}.pub' not found in cache at {source_public}")
+
+    if destination is None:
+        destination = Path.home() / ".ssh"
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    dest_private = destination / name
+    dest_public = destination / f"{name}.pub"
+
+    if not overwrite:
+        existing_files = []
+        if dest_private.exists():
+            existing_files.append(str(dest_private))
+        if dest_public.exists():
+            existing_files.append(str(dest_public))
+        if existing_files:
+            raise MVMKeyError(
+                f"Key file(s) already exist at destination: {', '.join(existing_files)}. "
+                "Use --overwrite to replace."
+            )
+
+    shutil.copy2(source_private, dest_private)
+    shutil.copy2(source_public, dest_public)
+    dest_private.chmod(CONST_FILE_PERMS_PRIVATE_KEY)
+
+    registry[name]["private_key_path"] = str(dest_private)
+    registry[name]["public_key_path"] = str(dest_public)
+    _save_registry(registry)
+
+    logger.info("Exported key '%s' to %s", name, destination)
+    return dest_private, dest_public
+
+
 class KeyInspect(TypedDict):
     name: str
     fingerprint: str
@@ -298,6 +393,9 @@ class KeyInspect(TypedDict):
     comment: str
     added_at: str
     public_key: str
+    has_private_key: bool
+    private_key_path: str | None
+    public_key_path: str | None
 
 
 def inspect_key(name: str) -> KeyInspect:
@@ -319,4 +417,7 @@ def inspect_key(name: str) -> KeyInspect:
         comment=entry["comment"],
         added_at=entry["added_at"],
         public_key=public_key_content,
+        has_private_key=entry.get("has_private_key", False),
+        private_key_path=entry.get("private_key_path"),
+        public_key_path=entry.get("public_key_path"),
     )

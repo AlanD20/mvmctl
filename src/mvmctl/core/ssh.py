@@ -31,9 +31,11 @@ def _validate_ssh_username(user: str) -> None:
 
 
 def find_ssh_keys(keys_dir: Path | None = None) -> list[Path]:
-    """Find SSH private keys in the cache keys directory."""
+    """Find SSH private keys in the keys directory."""
     if keys_dir is None:
-        keys_dir = get_cache_dir() / "keys"
+        from mvmctl.utils.fs import get_keys_dir
+
+        keys_dir = get_keys_dir()
     if not keys_dir.exists():
         return []
     keys = []
@@ -158,7 +160,7 @@ def connect_to_vm(
     if not key_path:
         keys = find_ssh_keys()
         if not keys:
-            raise MVMKeyError("No SSH keys found in cache keys directory")
+            raise MVMKeyError("No SSH keys found in keys directory")
         key_path = keys[0]
 
     if not key_path.exists():
@@ -175,26 +177,25 @@ def connect_to_vm(
 
 
 def resolve_ssh_key(ssh_key: str | None) -> str | None:
-    """Resolve an SSH key from name (key cache) or file path.
+    """Resolve an SSH key from name (key store) or file path.
 
     Returns the public key content string, or None.
     When ssh_key is explicitly named but not found, raises MVMKeyError.
     """
+    from mvmctl.utils.fs import get_keys_dir
+
     if ssh_key is None:
-        # Fall back to any key in cache
-        keys_dir = get_cache_dir() / "keys"
+        keys_dir = get_keys_dir()
         if keys_dir.exists():
             for pub in keys_dir.glob("*.pub"):
                 return pub.read_text().strip()
         return None
 
-    # Check key cache first
-    keys_dir = get_cache_dir() / "keys"
-    cache_key = keys_dir / f"{ssh_key}.pub"
-    if cache_key.exists():
-        return cache_key.read_text().strip()
+    keys_dir = get_keys_dir()
+    store_key = keys_dir / f"{ssh_key}.pub"
+    if store_key.exists():
+        return store_key.read_text().strip()
 
-    # Treat as file path
     key_path = Path(ssh_key)
     if key_path.exists():
         return key_path.read_text().strip()
@@ -204,8 +205,8 @@ def resolve_ssh_key(ssh_key: str | None) -> str | None:
     available = list_keys()
     if available:
         names = ", ".join(k.name for k in available)
-        raise MVMKeyError(f"SSH key '{ssh_key}' not found.\\nAvailable keys: {names}")
+        raise MVMKeyError(f"SSH key '{ssh_key}' not found.\nAvailable keys: {names}")
     else:
         raise MVMKeyError(
-            f"SSH key '{ssh_key}' not found.\\nNo keys in cache. Add one with: mvm key add <name> <path>"
+            f"SSH key '{ssh_key}' not found.\nNo keys found. Add one with: mvm key add <name> <path>"
         )

@@ -8,6 +8,7 @@ import typer
 from mvmctl.api.keys import (
     add_key,
     create_key,
+    export_key,
     inspect_key,
     list_keys,
     remove_key,
@@ -15,6 +16,7 @@ from mvmctl.api.keys import (
 from mvmctl.cli._helpers import check_name_arg
 from mvmctl.exceptions import MVMKeyError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
+from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import validate_entity_name
 
 app = typer.Typer(
@@ -45,8 +47,6 @@ def ls(
         result = []
         for k in keys:
             d = asdict(k)
-            private_key_path = Path.home() / ".ssh" / k.name
-            d["has_private_key"] = private_key_path.exists()
             result.append(d)
         typer.echo(json.dumps(result, indent=2))
         return
@@ -55,20 +55,22 @@ def ls(
         print_info("No keys found. Add one with: mvm key add <name> <path>")
         return
 
-    rows = [
-        [
-            k.name,
-            k.fingerprint,
-            k.algorithm,
-            k.comment,
-            "yes" if (Path.home() / ".ssh" / k.name).exists() else "no",
-            k.added_at[:19] if k.added_at else "-",
-        ]
-        for k in keys
-    ]
+    rows = []
+    for k in keys:
+        status = "yes" if k.has_private_key else "no"
+        rows.append(
+            [
+                k.name,
+                k.fingerprint,
+                k.algorithm,
+                k.comment,
+                status,
+                human_readable_time(k.added_at) if k.added_at else "-",
+            ]
+        )
     print_table(
         title="SSH Keys",
-        columns=["Name", "Fingerprint", "Algorithm", "Comment", "Private Key", "Date Added"],
+        columns=["Name", "Fingerprint", "Algorithm", "Comment", "Private Key", "Added"],
         rows=rows,
     )
 
@@ -104,27 +106,39 @@ def create(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Name for the new keypair"),
     output: str | None = typer.Option(
-        None, "--output", help="Directory for private key (default: ~/.ssh/)"
+        None, "--out", "-o", help="Directory for private key (default: cache dir)"
     ),
     comment: str | None = typer.Option(None, "--comment", help="Comment for the key"),
-    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing key file"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing key files"),
 ) -> None:
     """Generate a new ED25519 keypair."""
+    from mvmctl.utils.fs import get_keys_dir
+
     name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
+
+    output_dir = Path(output) if output else get_keys_dir()
+    private_key_path = output_dir / name
+    pub_key_path = output_dir / f"{name}.pub"
+
+    if not force and (private_key_path.exists() or pub_key_path.exists()):
+        existing = private_key_path if private_key_path.exists() else pub_key_path
+        if not typer.confirm(f"Key file already exists: {existing}. Overwrite?"):
+            raise typer.Exit(code=0)
+
     try:
         info, private_key_path = create_key(
             name=name,
             output_dir=output,
             comment=comment,
-            overwrite=overwrite,
+            overwrite=force,
         )
     except MVMKeyError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 
     print_success(f"Key '{info.name}' created")
-    print_info(f"  Private key: {private_key_path}")
+    print_info(f"  Private key: {private_key_path} (cached)")
     print_info(f"  Algorithm:   {info.algorithm}")
     print_info(f"  Fingerprint: {info.fingerprint}")
 
@@ -165,6 +179,40 @@ def rm(
 ) -> None:
     """Alias for remove."""
     remove(ctx=ctx, name=name, force=force)
+
+
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def export(
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None, help="Key name to export"),
+    output: str | None = typer.Option(
+        None, "--out", "-o", help="Destination directory (default: ~/.ssh/)"
+    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing key files"),
+) -> None:
+    """Export a cached keypair to ~/.ssh/ or custom directory."""
+    name = check_name_arg(ctx, name)
+    validate_entity_name(name, "key")
+
+    if not force:
+        dest_dir = Path(output) if output else Path.home() / ".ssh"
+        dest_private = dest_dir / name
+        dest_public = dest_dir / f"{name}.pub"
+
+        if dest_private.exists() or dest_public.exists():
+            existing = dest_private if dest_private.exists() else dest_public
+            if not typer.confirm(f"Key file already exists: {existing}. Overwrite?"):
+                raise typer.Exit(code=0)
+
+    try:
+        private_path, public_path = export_key(name, output, overwrite=True)
+    except MVMKeyError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+    print_success(f"Key '{name}' exported")
+    print_info(f"  Private key: {private_path}")
+    print_info(f"  Public key:  {public_path}")
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

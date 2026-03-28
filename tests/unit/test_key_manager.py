@@ -45,6 +45,9 @@ def test_list_keys_with_entries(keys_dir):
             "algorithm": "ssh-ed25519",
             "comment": "me@host",
             "added_at": "2024-01-01T00:00:00",
+            "has_private_key": False,
+            "private_key_path": None,
+            "public_key_path": str(keys_dir / "mykey.pub"),
         }
     }
     (keys_dir / "registry.json").write_text(json.dumps(registry))
@@ -52,6 +55,9 @@ def test_list_keys_with_entries(keys_dir):
     assert len(result) == 1
     assert result[0].name == "mykey"
     assert result[0].fingerprint == "SHA256:abc"
+    assert result[0].has_private_key == False
+    assert result[0].private_key_path is None
+    assert result[0].public_key_path == str(keys_dir / "mykey.pub")
 
 
 # ---------------------------------------------------------------------------
@@ -67,12 +73,18 @@ def test_get_key_found(keys_dir):
             "algorithm": "ssh-ed25519",
             "comment": "me@host",
             "added_at": "2024-01-01T00:00:00",
+            "has_private_key": True,
+            "private_key_path": str(keys_dir / "mykey"),
+            "public_key_path": str(keys_dir / "mykey.pub"),
         }
     }
     (keys_dir / "registry.json").write_text(json.dumps(registry))
     result = get_key("mykey")
     assert result is not None
     assert result.name == "mykey"
+    assert result.has_private_key == True
+    assert result.private_key_path == str(keys_dir / "mykey")
+    assert result.public_key_path == str(keys_dir / "mykey.pub")
 
 
 @pytest.mark.parametrize("key_name", ["nonexistent", "ghost-key", "missing-123"])
@@ -95,6 +107,7 @@ def test_add_key_success(keys_dir, tmp_path):
     assert info.algorithm == "ssh-ed25519"
     assert "testuser@testhost" in info.comment
     assert info.fingerprint.startswith("SHA256:")
+    assert info.has_private_key == False  # No matching private key
 
     # Verify file stored in cache
     cached = keys_dir / "testkey.pub"
@@ -103,6 +116,7 @@ def test_add_key_success(keys_dir, tmp_path):
     # Verify registry
     registry = json.loads((keys_dir / "registry.json").read_text())
     assert "testkey" in registry
+    assert registry["testkey"]["has_private_key"] == False
 
 
 def test_add_key_file_not_found(keys_dir, tmp_path):
@@ -159,8 +173,13 @@ def test_create_key_success(keys_dir, tmp_path):
 
     assert info.name == "newkey"
     assert info.algorithm == "ssh-ed25519"
+    assert info.has_private_key == True  # create_key generates both keys
     assert private_path == output_dir / "newkey"
     assert (keys_dir / "newkey.pub").exists()
+
+    # Verify registry has has_private_key=True
+    registry = json.loads((keys_dir / "registry.json").read_text())
+    assert registry["newkey"]["has_private_key"] == True
 
 
 def test_create_key_file_exists_no_overwrite(keys_dir, tmp_path):
@@ -180,6 +199,9 @@ def test_create_key_name_exists_in_registry(keys_dir, tmp_path):
             "algorithm": "ssh-ed25519",
             "comment": "",
             "added_at": "2024-01-01T00:00:00",
+            "has_private_key": False,
+            "private_key_path": None,
+            "public_key_path": str(keys_dir / "dupkey.pub"),
         }
     }
     (keys_dir / "registry.json").write_text(json.dumps(registry))
@@ -391,3 +413,195 @@ def test_parse_comment_no_comment():
 
     result = _parse_comment("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI")
     assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# Export key tests
+# ---------------------------------------------------------------------------
+
+
+def test_export_key_success(keys_dir, tmp_path):
+    """Test successful export of keypair to destination."""
+    from mvmctl.core.key_manager import export_key
+
+    # Setup: Create key in cache
+    registry = {
+        "exportkey": {
+            "name": "exportkey",
+            "fingerprint": "SHA256:abc123",
+            "algorithm": "ssh-ed25519",
+            "comment": "test",
+            "added_at": "2024-01-01T00:00:00",
+            "has_private_key": True,
+            "private_key_path": str(keys_dir / "exportkey"),
+            "public_key_path": str(keys_dir / "exportkey.pub"),
+        }
+    }
+    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    (keys_dir / "exportkey").write_text("PRIVATE KEY CONTENT")
+    (keys_dir / "exportkey.pub").write_text(SAMPLE_PUB_KEY)
+
+    # Export to temp destination
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+
+    private_path, public_path = export_key("exportkey", dest_dir)
+
+    assert private_path == dest_dir / "exportkey"
+    assert public_path == dest_dir / "exportkey.pub"
+    assert private_path.read_text() == "PRIVATE KEY CONTENT"
+    assert public_path.read_text() == SAMPLE_PUB_KEY
+
+
+def test_export_key_not_in_registry(keys_dir, tmp_path):
+    """Test export fails when key not in registry."""
+    from mvmctl.core.key_manager import export_key
+
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+
+    with pytest.raises(MVMKeyError, match="not found in cache"):
+        export_key("nonexistent", dest_dir)
+
+
+def test_export_key_missing_private(keys_dir, tmp_path):
+    """Test export fails when private key file missing."""
+    from mvmctl.core.key_manager import export_key
+
+    registry = {
+        "badkey": {
+            "name": "badkey",
+            "fingerprint": "SHA256:abc",
+            "algorithm": "ssh-ed25519",
+            "comment": "test",
+            "added_at": "2024-01-01T00:00:00",
+            "has_private_key": True,
+            "private_key_path": str(keys_dir / "badkey"),
+            "public_key_path": str(keys_dir / "badkey.pub"),
+        }
+    }
+    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    # Only create public key, not private
+    (keys_dir / "badkey.pub").write_text(SAMPLE_PUB_KEY)
+
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+
+    with pytest.raises(MVMKeyError, match="Private key.*not found"):
+        export_key("badkey", dest_dir)
+
+
+def test_export_key_missing_public(keys_dir, tmp_path):
+    """Test export fails when public key file missing."""
+    from mvmctl.core.key_manager import export_key
+
+    registry = {
+        "badkey": {
+            "name": "badkey",
+            "fingerprint": "SHA256:abc",
+            "algorithm": "ssh-ed25519",
+            "comment": "test",
+            "added_at": "2024-01-01T00:00:00",
+            "has_private_key": True,
+            "private_key_path": str(keys_dir / "badkey"),
+            "public_key_path": str(keys_dir / "badkey.pub"),
+        }
+    }
+    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    # Only create private key, not public
+    (keys_dir / "badkey").write_text("PRIVATE KEY")
+
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+
+    with pytest.raises(MVMKeyError, match="Public key.*not found"):
+        export_key("badkey", dest_dir)
+
+
+def test_export_key_default_to_ssh(keys_dir, tmp_path, monkeypatch):
+    """Test export defaults to ~/.ssh when no destination provided."""
+    from mvmctl.core.key_manager import export_key
+
+    # Mock home directory
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    registry = {
+        "mykey": {
+            "name": "mykey",
+            "fingerprint": "SHA256:abc",
+            "algorithm": "ssh-ed25519",
+            "comment": "test",
+            "added_at": "2024-01-01T00:00:00",
+            "has_private_key": True,
+            "private_key_path": str(keys_dir / "mykey"),
+            "public_key_path": str(keys_dir / "mykey.pub"),
+        }
+    }
+    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    (keys_dir / "mykey").write_text("PRIVATE KEY")
+    (keys_dir / "mykey.pub").write_text(SAMPLE_PUB_KEY)
+
+    private_path, public_path = export_key("mykey")  # No destination
+
+    assert private_path == tmp_path / ".ssh" / "mykey"
+    assert public_path == tmp_path / ".ssh" / "mykey.pub"
+
+
+def test_export_key_overwrite(keys_dir, tmp_path):
+    """Test export with overwrite=True replaces existing files."""
+    from mvmctl.core.key_manager import export_key
+
+    registry = {
+        "oldkey": {
+            "name": "oldkey",
+            "fingerprint": "SHA256:abc",
+            "algorithm": "ssh-ed25519",
+            "comment": "test",
+            "added_at": "2024-01-01T00:00:00",
+            "has_private_key": True,
+            "private_key_path": str(keys_dir / "oldkey"),
+            "public_key_path": str(keys_dir / "oldkey.pub"),
+        }
+    }
+    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    (keys_dir / "oldkey").write_text("NEW PRIVATE")
+    (keys_dir / "oldkey.pub").write_text("NEW PUBLIC")
+
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    # Pre-create existing files
+    (dest_dir / "oldkey").write_text("OLD PRIVATE")
+    (dest_dir / "oldkey.pub").write_text("OLD PUBLIC")
+
+    private_path, public_path = export_key("oldkey", dest_dir, overwrite=True)
+
+    assert private_path.read_text() == "NEW PRIVATE"
+    assert public_path.read_text() == "NEW PUBLIC"
+
+
+def test_export_key_no_overwrite_raises(keys_dir, tmp_path):
+    """Test export without overwrite raises when files exist."""
+    from mvmctl.core.key_manager import export_key
+
+    registry = {
+        "existkey": {
+            "name": "existkey",
+            "fingerprint": "SHA256:abc",
+            "algorithm": "ssh-ed25519",
+            "comment": "test",
+            "added_at": "2024-01-01T00:00:00",
+            "has_private_key": True,
+            "private_key_path": str(keys_dir / "existkey"),
+            "public_key_path": str(keys_dir / "existkey.pub"),
+        }
+    }
+    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    (keys_dir / "existkey").write_text("PRIVATE")
+    (keys_dir / "existkey.pub").write_text("PUBLIC")
+
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    (dest_dir / "existkey").write_text("EXISTING")
+
+    with pytest.raises(MVMKeyError, match="already exist"):
+        export_key("existkey", dest_dir, overwrite=False)
