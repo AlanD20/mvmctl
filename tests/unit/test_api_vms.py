@@ -78,9 +78,11 @@ def test_get_logs(mock_show_logs):
 @patch("mvmctl.core.firewall.remove_nocloud_input_rule")
 @patch("os.kill")
 @patch("mvmctl.api.vms.check_privileges")
+@patch("mvmctl.api.vms.get_network")
 @patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms(
     mock_get_manager,
+    mock_get_network,
     mock_check_privs,
     mock_kill,
     mock_rm_nocloud,
@@ -96,10 +98,15 @@ def test_cleanup_vms(
         status=VMState.STOPPED,
         pid=123,
         tap_device="mvm-def-vm1-abc",
+        network_name="default",
     )
     vm2 = VMInstance(name="vm2", status=VMState.RUNNING, pid=456, tap_device="mvm-def-vm2-xyz")
     mock_manager.list_all.return_value = [vm1, vm2]
     mock_get_manager.return_value = mock_manager
+
+    mock_net_config = MagicMock()
+    mock_net_config.bridge = "mvm-default"
+    mock_get_network.return_value = mock_net_config
 
     # cleanup only stopped VMs
     with patch("mvmctl.api.vms.vm_cache_dir") as mock_cache_dir:
@@ -113,7 +120,7 @@ def test_cleanup_vms(
 
         mock_check_privs.assert_called_once_with("/usr/sbin/ip")
         mock_kill.assert_called_once_with(123, 9)
-        mock_rm_iptables.assert_called_once_with("mvm-def-vm1-abc")
+        mock_rm_iptables.assert_called_once_with("mvm-def-vm1-abc", bridge="mvm-default")
         mock_del_tap.assert_called_once_with("mvm-def-vm1-abc")
         mock_manager.deregister.assert_called_once()
         mock_rmtree.assert_called_once()

@@ -30,6 +30,8 @@ from mvmctl.core.console import (
     get_console_state as _get_console_state,
 )
 from mvmctl.core.logs import show_logs
+from mvmctl.core.network import teardown_nat
+from mvmctl.core.network_manager import get_network
 from mvmctl.core.ssh import connect_to_vm
 from mvmctl.core.vm_lifecycle import (
     _resolve_image_path as _core_resolve_image_path,
@@ -284,9 +286,15 @@ def cleanup_vms(
                 pass
 
         if tap_name:
-            remove_iptables_forward_rules(tap_name)
+            net_config = get_network(v.network_name or "")
+            bridge = net_config.bridge if net_config else ""
+            remove_iptables_forward_rules(tap_name, bridge=bridge)
             try:
                 delete_tap(tap_name)
+            except NetworkError:
+                pass
+            try:
+                teardown_nat(bridge)
             except NetworkError:
                 pass
 

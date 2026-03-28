@@ -324,7 +324,11 @@ def test_remove_vm_success(
     """remove_vm deletes everything correctly."""
     mock_manager = MagicMock()
     vm = VMInstance(
-        name="myvm", ip="10.20.0.5", pid=123, status=VMState.RUNNING, network_name="default"
+        name="myvm",
+        ip="10.20.0.5",
+        pid=123,
+        status=VMState.RUNNING,
+        network_name="default",
     )
     mock_manager.get.return_value = vm
     mock_mgr.return_value = mock_manager
@@ -375,7 +379,11 @@ def test_remove_vm_no_nat_skips_teardown(
 ):
     mock_manager = MagicMock()
     vm = VMInstance(
-        name="vm2", ip="10.20.0.6", pid=456, status=VMState.RUNNING, network_name="isolated"
+        name="vm2",
+        ip="10.20.0.6",
+        pid=456,
+        status=VMState.RUNNING,
+        network_name="isolated",
     )
     mock_manager.get.return_value = vm
     mock_mgr.return_value = mock_manager
@@ -420,7 +428,11 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
 ):
     mock_manager = MagicMock()
     vm = VMInstance(
-        name="shared", ip="10.20.0.7", pid=789, status=VMState.RUNNING, network_name="default"
+        name="shared",
+        ip="10.20.0.7",
+        pid=789,
+        status=VMState.RUNNING,
+        network_name="default",
     )
     mock_manager.get.return_value = vm
     mock_mgr.return_value = mock_manager

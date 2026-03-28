@@ -697,22 +697,39 @@ def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> N
 
     # Only try to remove rules if MVM chain exists
     if not chain_exists(forward_chain, "filter"):
+        logger.debug(
+            "%s chain does not exist, skipping rule removal for TAP %s", forward_chain, tap_name
+        )
         return
 
-    subprocess.run(
+    result1 = subprocess.run(
         _privileged_cmd(
             ["iptables", "-D", forward_chain, "-i", bridge, "-o", tap_name, "-j", "ACCEPT"]
         ),
         capture_output=True,
         check=False,
     )
-    subprocess.run(
+    if result1.returncode != 0:
+        logger.warning(
+            "Failed to remove iptables FORWARD rule (bridge->tap) for TAP %s: rc=%d",
+            tap_name,
+            result1.returncode,
+        )
+
+    result2 = subprocess.run(
         _privileged_cmd(
             ["iptables", "-D", forward_chain, "-i", tap_name, "-o", bridge, "-j", "ACCEPT"]
         ),
         capture_output=True,
         check=False,
     )
+    if result2.returncode != 0:
+        logger.warning(
+            "Failed to remove iptables FORWARD rule (tap->bridge) for TAP %s: rc=%d",
+            tap_name,
+            result2.returncode,
+        )
+
     logger.debug("FORWARD rules removed for TAP %s ↔ bridge %s", tap_name, bridge)
 
 
