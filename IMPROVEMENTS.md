@@ -58,4 +58,7 @@ Codebase Maintainability:
 
 
 NEW Features:
-- possibility of getting into VMs via serial cable? no ssh?
+- Console/serial access to VM without SSH: lets implement the interactive serial wrapper so that we can send commands to the vm. Also, The expected implementation is like this:
+    - user runs `mvm console <vm-sha-id>` or --name/-n for vm name, then it connects to an interactive console-like to the vm where user can send commands and it shows back the output.
+    - if user accesses the vm at the initial stage of vm creation `mvm console -n r1` then it must also output the initial streaming of the boot where firecracker exposes the serial output to this!
+    - the services/ layer, we need to understand how the implementation looks like. If it's an implementation where it spawns a subprocess with its own pid, then yes lets go with services/ layer implementation. But if it does not have any pid on its own, then we will go with the same paterrn where core -> api -> cli similar with other commands.
