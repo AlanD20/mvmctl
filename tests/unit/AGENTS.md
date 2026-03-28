@@ -87,7 +87,7 @@ Return: summary of changes made.
 
 # tests/unit/ — Unit Test Suite
 
-**Scope:** 41 test files covering all CLI, API, core, and utils modules  
+**Scope:** 54 test files covering all CLI, API, core, utils, models, and services modules  
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.  
 **Parent:** See `tests/AGENTS.md` for fixtures, mocking patterns, and CliRunner conventions — not repeated here
 

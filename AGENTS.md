@@ -91,9 +91,10 @@ Return: summary of changes made.
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
 **Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
-**Generated:** 2026-03-26T13:00Z  
-**Commit:** 7d72dbc  
+**Generated:** 2026-03-28T20:00Z  
+**Commit:** a20b3ed  
 **Branch:** main
+**Files:** 75 Python source, 64 test files
 
 ## STRUCTURE
 
@@ -108,11 +109,12 @@ mvmctl/
 │   ├── core/            # All business logic, subprocesses, and Firecracker interactions
 │   ├── models/          # Pure @dataclass objects containing domain data (VMInstance, VMConfig, etc.)
 │   ├── utils/           # Shared helpers (console, process, fs, http, audit, validation)
-│   └── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
+│   ├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
+│   └── services/        # Runtime subprocess services (console_relay, nocloud_server)
 ├── docs/                # Project documentation
 │   ├── DEPENDENCIES.md  # Detailed map of all binary and system dependencies per command
 │   └── RELEASE.md       # Release process and build instructions (Nuitka/PyInstaller)
-├── tests/               # 48 test_*.py (41 unit, 4 integration, 3 layer_compliance); see tests/AGENTS.md
+├── tests/               # 64 test files (unit, integration, layer_compliance); see tests/AGENTS.md
 └── pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
 ```
 
@@ -353,6 +355,8 @@ uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/m
 - `src/mvmctl/api/AGENTS.md` — API layer pattern, privilege boundary
 - `src/mvmctl/models/AGENTS.md` — Domain dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
 - `src/mvmctl/utils/AGENTS.md` — Shared helpers (console, fs, http, process, audit, validation)
+- `src/mvmctl/assets/AGENTS.md` — Bundled YAML configs and templates
+- `src/mvmctl/services/AGENTS.md` — Runtime subprocess services (console_relay, nocloud_server)
 - `tests/AGENTS.md` — Test fixtures, mock conventions, coverage
 
 ### Legacy

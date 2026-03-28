@@ -91,6 +91,7 @@ Return: summary of changes made.
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Coverage Gate:** 80% branch coverage (`pyproject.toml --cov-fail-under=80`)  
 **Rule:** Tests must NEVER require root, KVM, or real network stack
+**Files:** 64 total — 54 unit + 7 integration + 3 layer_compliance
 
 ## STRUCTURE
 
@@ -99,13 +100,16 @@ tests/
 ├── conftest.py              # Root: _isolate_iptables_rules, _mock_sudo_cache (autouse)
 ├── unit/
 │   ├── conftest.py          # Shared fixtures: isolate_config_and_cache (autouse), VM/network fixtures
-│   ├── test_cli_*.py        # CLI layer tests (CliRunner, no subprocess) — 7 files
-│   └── test_*.py            # Core/API unit tests — 34 other test_*.py (41 total in unit/)
+│   ├── test_cli_*.py        # CLI layer tests (CliRunner, no subprocess)
+│   └── test_*.py            # Core/API unit tests — 54 total in unit/
 ├── integration/
-│   ├── test_cli_smoke.py           # In-process CliRunner against `mvmctl.main.app` (NOT real subprocess)
-│   ├── test_host_init_reset.py     # Host init/reset workflow (mocked subprocess)
-│   ├── test_vm_lifecycle.py        # VM create/remove workflow (mocked subprocess)
-│   └── test_network_workflow.py    # Network create/inspect/remove workflow
+│   ├── test_cli_smoke.py           # In-process CliRunner against `mvmctl.main.app`
+│   ├── test_host_init_reset.py     # Host init/reset workflow
+│   ├── test_vm_lifecycle.py        # VM create/remove workflow
+│   ├── test_network_workflow.py    # Network create/inspect/remove workflow
+│   ├── test_nocloud_net_lifecycle.py  # Nocloud-net HTTP server lifecycle
+│   ├── test_cloud_init_iso.py      # Cloud-init ISO generation
+│   └── test_console_integration.py # Console/pty-over-vsock integration
 └── layer_compliance/
     ├── test_imports.py       # Enforces import boundaries (cli→api→core only)
     ├── test_constants.py    # Ensures constants.py is single source of truth
@@ -375,8 +379,10 @@ uv run pytest tests/ -n auto
 
 ## NOTES
 
-- **48 total test files**: 41 unit + 4 integration + 3 layer_compliance
+- **64 total test files**: 54 unit + 7 integration + 3 layer_compliance
 - mypy strict exempted for tests (`pyproject.toml` overrides: no `disallow_untyped_defs`)
 - All tests run as non-root; no KVM access required
+- Fixtures in `unit/conftest.py` auto-used for all unit tests
+- CliRunner invoked against `mvmctl.main.app` (Click group), NOT Typer app
 - Fixtures in `unit/conftest.py` auto-used for all unit tests
 - CliRunner invoked against `mvmctl.main.app` (Click group), NOT Typer app

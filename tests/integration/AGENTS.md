@@ -207,7 +207,7 @@ uv run pytest tests/integration/ -x -v
 
 ## NOTES
 
-- **9 test files**: Covering host, VM, network, nocloud-net, cloud-init, console
+- **7 test files**: Covering host, VM, network, nocloud-net, cloud-init, console, smoke tests
 - Tests are more coarse-grained than unit tests
 - Some tests may require root for network operations (marked accordingly)
 - Uses same mocking infrastructure as unit tests (see parent `tests/conftest.py`)
