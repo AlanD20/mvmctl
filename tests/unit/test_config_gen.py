@@ -405,7 +405,7 @@ def test_boot_args_nocloud_net_ds():
     generator = ConfigGenerator(vm_config)
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
-    assert "ds=nocloud-net;s=http://192.168.1.1:8123/" in boot_args
+    assert "ds=nocloud;seedfrom=http://192.168.1.1:8123/" in boot_args
 
 
 def test_boot_args_nocloud_net_requires_url():

@@ -52,6 +52,32 @@ def _validate_user_data(user_data: dict[str, Any]) -> None:
     )
 
 
+def _generate_network_config_v2(guest_ip: str, gateway: str, prefix_len: int) -> dict[str, Any]:
+    """Generate cloud-init network configuration version 2.
+
+    Version 2 is required for systemd-networkd compatibility in cloud-init 24.0+.
+
+    Args:
+        guest_ip: The guest VM IP address.
+        gateway: The gateway IP address.
+        prefix_len: The network prefix length (default 24).
+
+    Returns:
+        Network configuration dictionary in v2 format.
+    """
+    return {
+        "version": 2,
+        "ethernets": {
+            DEFAULT_GUEST_NETWORK_IFACE: {
+                "dhcp4": False,
+                "addresses": [f"{guest_ip}/{prefix_len}"],
+                "routes": [{"to": "default", "via": gateway}],
+                "nameservers": {"addresses": [gateway, *DEFAULT_DNS_NAMESERVERS]},
+            }
+        },
+    }
+
+
 def write_cloud_init(
     cloud_init_dir: Path,
     vm_name: str,
@@ -62,31 +88,32 @@ def write_cloud_init(
     ssh_pub_key: str | None = None,
     custom_user_data: Path | None = None,
     prefix_len: int = 24,
+    skip_network_config: bool = False,
 ) -> None:
-    """Write cloud-init seed files (meta-data, network-config, user-data)."""
+    """Write cloud-init seed files (meta-data, network-config, user-data).
+
+    Args:
+        cloud_init_dir: Directory to write cloud-init files to.
+        vm_name: Name of the VM (used for instance-id and local-hostname).
+        guest_ip: The guest VM IP address.
+        user: Default username for SSH access.
+        gateway: Gateway IP address for network configuration.
+        ssh_pub_key: SSH public key to inject (optional).
+        custom_user_data: Path to custom user-data YAML file (optional).
+        prefix_len: Network prefix length (default: 24).
+        skip_network_config: If True, skip writing network-config file.
+            Used for NO_CLOUD_NET mode where kernel ip= configures networking.
+    """
     meta_data = {"instance-id": vm_name, "local-hostname": vm_name}
     (cloud_init_dir / "meta-data").write_text(yaml.dump(meta_data, default_flow_style=False))
 
-    network_config = {
-        "version": 1,
-        "config": [
-            {
-                "type": "physical",
-                "name": DEFAULT_GUEST_NETWORK_IFACE,
-                "subnets": [
-                    {
-                        "type": "static",
-                        "address": f"{guest_ip}/{prefix_len}",
-                        "gateway": gateway,
-                        "dns_nameservers": DEFAULT_DNS_NAMESERVERS,
-                    }
-                ],
-            }
-        ],
-    }
-    (cloud_init_dir / "network-config").write_text(
-        yaml.dump(network_config, default_flow_style=False)
-    )
+    # Use v2 network config for systemd-networkd compatibility (cloud-init 24.0+)
+    # Skip for NO_CLOUD_NET mode - kernel ip= already configures networking
+    if not skip_network_config:
+        network_config = _generate_network_config_v2(guest_ip, gateway, prefix_len)
+        (cloud_init_dir / "network-config").write_text(
+            yaml.dump(network_config, default_flow_style=False)
+        )
 
     if custom_user_data is not None:
         ud: dict[str, Any] = {}
@@ -151,30 +178,37 @@ def create_cloud_init_iso(cloud_init_dir: Path, output_iso: Path) -> None:
     """Create a cloud-init ISO from the seed directory.
 
     Args:
-        cloud_init_dir: Directory containing meta-data, network-config, user-data
+        cloud_init_dir: Directory containing meta-data, user-data, and optionally network-config
         output_iso: Path where the ISO should be written
 
     Raises:
         CloudInitError: If ISO creation fails
     """
-    # Validate required files exist
-    required_files = ["meta-data", "network-config", "user-data"]
+    # Validate required files exist (network-config is optional for NO_CLOUD_NET mode)
+    required_files = ["meta-data", "user-data"]
     for filename in required_files:
         filepath = cloud_init_dir / filename
         if not filepath.exists():
             raise CloudInitError(f"Missing required cloud-init file: {filename}")
 
+    network_config_path = cloud_init_dir / "network-config"
+    has_network_config = network_config_path.exists()
+
     # Run cloud-localds to create ISO
-    # Use -N flag for network-config (compatible with older versions)
+    # Use -N flag for network-config only if it exists (compatible with older versions)
     cmd = [
         REQUIRED_ISO_TOOL,  # "cloud-localds"
         "-v",  # Verbose
-        "-N",
-        str(cloud_init_dir / "network-config"),
-        str(output_iso),
-        str(cloud_init_dir / "user-data"),
-        str(cloud_init_dir / "meta-data"),
     ]
+    if has_network_config:
+        cmd.extend(["-N", str(network_config_path)])
+    cmd.extend(
+        [
+            str(output_iso),
+            str(cloud_init_dir / "user-data"),
+            str(cloud_init_dir / "meta-data"),
+        ]
+    )
 
     from mvmctl.utils.process import run_cmd
 

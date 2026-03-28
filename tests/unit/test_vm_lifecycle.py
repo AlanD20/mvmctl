@@ -1620,9 +1620,6 @@ def test_firewall_failure_stops_server_and_raises(
 # ============================================================================
 
 
-@patch("mvmctl.core.vm_lifecycle.wait_for_cloud_init_done")
-@patch("mvmctl.core.vm_lifecycle.print_info")
-@patch("mvmctl.core.vm_lifecycle.print_warning")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -1644,7 +1641,7 @@ def test_firewall_failure_stops_server_and_raises(
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-def test_create_vm_waits_for_cloud_init_completion(
+def test_create_vm_returns_immediately_with_nocloud_net(
     mock_open,
     mock_resolve_fs_type,
     mock_resolve_fs_uuid,
@@ -1666,11 +1663,8 @@ def test_create_vm_waits_for_cloud_init_completion(
     mock_net_mgr,
     mock_setup_chain,
     mock_subprocess_run,
-    mock_print_warning,
-    mock_print_info,
-    mock_wait_for_done,
 ):
-    """Test that create_vm waits for cloud-init completion when mode=NO_CLOUD_NET and completes successfully."""
+    """Test that create_vm returns immediately without blocking when mode=NO_CLOUD_NET."""
     from mvmctl.core.vm_lifecycle import create_vm
     from mvmctl.models import CloudInitMode
 
@@ -1715,31 +1709,17 @@ def test_create_vm_waits_for_cloud_init_completion(
         test_port,
     )
 
-    # Mock wait_for_cloud_init_done to return True (completed successfully)
-    mock_wait_for_done.return_value = True
-
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
         cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
     )
 
-    # Verify wait_for_cloud_init_done was called
-    mock_wait_for_done.assert_called_once()
-
-    # Verify print_info was called (success case)
-    mock_print_info.assert_called_once()
-
-    # Verify print_warning was NOT called (success case)
-    mock_print_warning.assert_not_called()
-
-    # Verify VM was still created successfully
+    # Verify VM was created successfully (no blocking wait for cloud-init)
     assert isinstance(vm, VMInstance)
+    assert vm.nocloud_net_port == test_port
 
 
-@patch("mvmctl.core.vm_lifecycle.wait_for_cloud_init_done")
-@patch("mvmctl.core.vm_lifecycle.print_info")
-@patch("mvmctl.core.vm_lifecycle.print_warning")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -1761,7 +1741,7 @@ def test_create_vm_waits_for_cloud_init_completion(
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-def test_cloud_init_timeout_logs_warning(
+def test_create_vm_starts_nocloud_server(
     mock_open,
     mock_resolve_fs_type,
     mock_resolve_fs_uuid,
@@ -1783,11 +1763,8 @@ def test_cloud_init_timeout_logs_warning(
     mock_net_mgr,
     mock_setup_chain,
     mock_subprocess_run,
-    mock_print_warning,
-    mock_print_info,
-    mock_wait_for_done,
 ):
-    """Test that cloud-init timeout logs warning but VM creation still succeeds."""
+    """Test that create_vm starts nocloud-net server when mode=NO_CLOUD_NET."""
     from mvmctl.core.vm_lifecycle import create_vm
     from mvmctl.models import CloudInitMode
 
@@ -1832,24 +1809,15 @@ def test_cloud_init_timeout_logs_warning(
         test_port,
     )
 
-    # Mock wait_for_cloud_init_done to return False (timeout)
-    mock_wait_for_done.return_value = False
-
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
         cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
     )
 
-    # Verify wait_for_cloud_init_done was called
-    mock_wait_for_done.assert_called_once()
-
-    # Verify print_warning was called (timeout case)
-    mock_print_warning.assert_called_once()
-
-    # Verify print_info was NOT called (timeout case)
-    mock_print_info.assert_not_called()
-
-    # Verify VM was STILL created successfully despite timeout
+    # Verify VM was created successfully
     assert isinstance(vm, VMInstance)
     mock_manager.register.assert_called_once()
+
+    # Verify nocloud-net server was started
+    mock_net_mgr.return_value.start_server.assert_called_once()

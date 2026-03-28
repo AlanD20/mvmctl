@@ -14,7 +14,6 @@ from pathlib import Path
 from mvmctl.constants import (
     BRIDGE_NAME,
     CLI_NAME,
-    CONST_CLOUD_INIT_TIMEOUT_S,
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_PID_FILE,
     CONST_POLL_STEP_SECONDS,
@@ -42,7 +41,6 @@ from mvmctl.constants import (
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
-from mvmctl.core.cloud_init_status import wait_for_cloud_init_done
 from mvmctl.core.config_gen import ConfigGenerator, DriveConfig
 from mvmctl.core.firecracker import FirecrackerClient, get_vm_socket_path
 from mvmctl.core.firewall import (
@@ -66,12 +64,11 @@ from mvmctl.core.network_manager import (
     get_network,
     release_network_ip,
 )
-from mvmctl.core.nocloud_net_manager import NoCloudNetServerManager
 from mvmctl.core.ssh import resolve_ssh_key
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.exceptions import CloudInitError, MVMError, NetworkError, VMNotFoundError
 from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMState
-from mvmctl.utils.console import print_info, print_warning
+from mvmctl.services.nocloud_server import NoCloudNetServerManager
 from mvmctl.utils.fs import get_images_dir, get_kernels_dir, get_vm_dir
 
 
@@ -509,6 +506,7 @@ def create_vm(
     cloud_init_iso: Path | None = None
     extra_drives: list[DriveConfig] = []
     nocloud_net_url: str | None = None
+    nocloud_server_pid: int | None = None
     net_manager: NoCloudNetServerManager | None = None
 
     if effective_mode != CloudInitMode.DISABLED:
@@ -519,6 +517,7 @@ def create_vm(
 
         _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
 
+        # Skip network-config for NO_CLOUD_NET mode - kernel ip= configures networking early
         write_cloud_init(
             cloud_init_dir,
             name,
@@ -528,6 +527,7 @@ def create_vm(
             custom_user_data=user_data,
             gateway=net_config.gateway,
             prefix_len=_prefix_len,
+            skip_network_config=(effective_mode == CloudInitMode.NO_CLOUD_NET),
         )
 
         if effective_mode == CloudInitMode.CUSTOM:
@@ -544,6 +544,8 @@ def create_vm(
                 url, port = net_manager.start_server(name, cloud_init_dir, net_config.gateway)
                 nocloud_net_url = url
                 nocloud_net_port = port
+                # Capture the server PID for storage in VMInstance
+                nocloud_server_pid = net_manager.get_server_pid(name)
                 logger.info("NoCloud-net server started at %s", nocloud_net_url)
                 _server_started = True
                 # Add firewall rule - stop server if this fails
@@ -669,26 +671,9 @@ def create_vm(
         created_at=datetime.now(tz=timezone.utc),
         status=VMState.RUNNING,
         nocloud_net_port=nocloud_net_port,
+        nocloud_server_pid=nocloud_server_pid,
     )
     manager.register(vm_instance)
-
-    # Wait for cloud-init completion if using NO_CLOUD_NET mode
-    # This is OPTIONAL - VM creation succeeds regardless of timeout
-    if effective_mode == CloudInitMode.NO_CLOUD_NET:
-        try:
-            completed = wait_for_cloud_init_done(name, console_log_file, CONST_CLOUD_INIT_TIMEOUT_S)
-            if completed:
-                print_info(f"Cloud-init completed for VM '{name}'")
-            else:
-                print_warning(
-                    f"Cloud-init timeout ({CONST_CLOUD_INIT_TIMEOUT_S}s) reached for VM '{name}'. "
-                    "VM will continue running without cloud-init."
-                )
-        except Exception:
-            # Never block VM creation - just log and continue
-            print_warning(
-                f"Could not detect cloud-init completion for VM '{name}'. VM will continue running."
-            )
 
     return vm_instance
 

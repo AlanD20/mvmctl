@@ -64,12 +64,10 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
     @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
-    @patch("mvmctl.core.vm_lifecycle.wait_for_cloud_init_done")
     @patch("mvmctl.utils.fs.get_vm_dir")
     def test_full_nocloud_net_lifecycle(
         self,
         mock_get_vm_dir,
-        mock_wait_cloud_init,
         mock_write_pid,
         mock_resolve_kernel,
         mock_resolve_image,
@@ -95,7 +93,6 @@ class TestFullNocloudNetLifecycle:
         # Setup mocks
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
-        mock_wait_cloud_init.return_value = True
         mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Create fake image and kernel files
@@ -182,12 +179,10 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
     @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
-    @patch("mvmctl.core.vm_lifecycle.wait_for_cloud_init_done")
     @patch("mvmctl.utils.fs.get_vm_dir")
     def test_nocloud_net_remove_cleanup(
         self,
         mock_get_vm_dir,
-        mock_wait_cloud_init,
         mock_write_pid,
         mock_resolve_kernel,
         mock_resolve_image,
@@ -213,7 +208,6 @@ class TestFullNocloudNetLifecycle:
         # Setup mocks
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
-        mock_wait_cloud_init.return_value = True
         mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Create fake image and kernel files
@@ -297,14 +291,12 @@ class TestMultipleVMsDifferentPorts:
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-    @patch("mvmctl.core.vm_lifecycle.wait_for_cloud_init_done")
     @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
     @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
     def test_multiple_vms_different_ports(
         self,
         mock_resolve_kernel,
         mock_resolve_image,
-        mock_wait_cloud_init,
         mock_popen,
         mock_add_rule,
         mock_nocloud_mgr,
@@ -315,7 +307,6 @@ class TestMultipleVMsDifferentPorts:
         """Test that two VMs with nocloud-net mode get different ports."""
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
-        mock_wait_cloud_init.return_value = True
 
         # Create fake image and kernel files
         image_path = tmp_path / "ubuntu-24.04.ext4"

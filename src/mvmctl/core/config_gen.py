@@ -223,7 +223,7 @@ class ConfigGenerator:
             # For nocloud-net, validate URL is configured
             if not self.vm_config.nocloud_net_url:
                 raise ConfigError("nocloud_net_url must be set when using NO_CLOUD_NET mode")
-            ds_arg = f"ds=nocloud-net;s={self.vm_config.nocloud_net_url}"
+            ds_arg = f"ds=nocloud;seedfrom={self.vm_config.nocloud_net_url}"
         elif self.vm_config.cloud_init_mode == CloudInitMode.DISABLED:
             ds_arg = ""
         else:
