@@ -74,16 +74,30 @@ def test_get_logs(mock_show_logs):
 @patch("shutil.rmtree")
 @patch("mvmctl.core.network.delete_tap")
 @patch("mvmctl.core.network.remove_iptables_forward_rules")
+@patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
+@patch("mvmctl.core.firewall.remove_nocloud_input_rule")
 @patch("os.kill")
 @patch("mvmctl.api.vms.check_privileges")
 @patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms(
-    mock_get_manager, mock_check_privs, mock_kill, mock_rm_iptables, mock_del_tap, mock_rmtree
+    mock_get_manager,
+    mock_check_privs,
+    mock_kill,
+    mock_rm_nocloud,
+    mock_nocloud_mgr,
+    mock_rm_iptables,
+    mock_del_tap,
+    mock_rmtree,
 ):
-    """cleanup_vms cleans stopped vms properly."""
+    """cleanup_vms cleans stopped vms properly using persisted tap_device."""
     mock_manager = MagicMock()
-    vm1 = VMInstance(name="vm1", status=VMState.STOPPED, pid=123)
-    vm2 = VMInstance(name="vm2", status=VMState.RUNNING, pid=456)
+    vm1 = VMInstance(
+        name="vm1",
+        status=VMState.STOPPED,
+        pid=123,
+        tap_device="mvm-def-vm1-abc",
+    )
+    vm2 = VMInstance(name="vm2", status=VMState.RUNNING, pid=456, tap_device="mvm-def-vm2-xyz")
     mock_manager.list_all.return_value = [vm1, vm2]
     mock_get_manager.return_value = mock_manager
 
@@ -99,7 +113,7 @@ def test_cleanup_vms(
 
         mock_check_privs.assert_called_once_with("/usr/sbin/ip")
         mock_kill.assert_called_once_with(123, 9)
-        mock_rm_iptables.assert_called_with("mvm-tap-vm1-0")
-        mock_del_tap.assert_called_with("mvm-tap-vm1-0")
+        mock_rm_iptables.assert_called_once_with("mvm-def-vm1-abc")
+        mock_del_tap.assert_called_once_with("mvm-def-vm1-abc")
         mock_manager.deregister.assert_called_once()
         mock_rmtree.assert_called_once()

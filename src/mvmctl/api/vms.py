@@ -16,7 +16,6 @@ from mvmctl.constants import (
     DEFAULT_VM_MEM_MIB,
     DEFAULT_VM_SSH_USER,
     DEFAULT_VM_VCPU_COUNT,
-    TAP_PREFIX,
 )
 from mvmctl.core.logs import show_logs
 from mvmctl.core.ssh import connect_to_vm
@@ -212,12 +211,18 @@ def cleanup_vms(
 ) -> list[VMInstance]:
     """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules."""
     check_privileges("/usr/sbin/ip")
+    import logging
     import os
     import shutil
     import signal
 
+    from mvmctl.core.firewall import remove_nocloud_input_rule
     from mvmctl.core.network import delete_tap, remove_iptables_forward_rules
     from mvmctl.exceptions import NetworkError
+    from mvmctl.services.nocloud_server import NoCloudNetServerManager
+    from mvmctl.utils.fs import get_cache_dir
+
+    log = logging.getLogger(__name__)
 
     manager = vm_manager or get_vm_manager()
     vms = manager.list_all()
@@ -227,9 +232,26 @@ def cleanup_vms(
     if dry_run or not targets:
         return targets
 
+    cache_dir = Path(get_cache_dir())
+
     for v in targets:
         vm_dir = vm_cache_dir(v.name)
-        tap_name = f"{TAP_PREFIX}-{v.name}-0"
+
+        tap_name = v.tap_device
+        if not tap_name:
+            log.warning("VM %s has no tap_device in state, skipping TAP cleanup", v.name)
+
+        if v.nocloud_net_port is not None and v.ip is not None:
+            try:
+                nocloud_manager = NoCloudNetServerManager()
+                nocloud_manager.stop_server(v.name)
+            except (OSError, RuntimeError):
+                pass
+
+            try:
+                remove_nocloud_input_rule(v.ip, v.name, v.nocloud_net_port)
+            except NetworkError:
+                pass
 
         if v.pid:
             try:
@@ -237,13 +259,18 @@ def cleanup_vms(
             except (ProcessLookupError, PermissionError):
                 pass
 
-        remove_iptables_forward_rules(tap_name)
-        try:
-            delete_tap(tap_name)
-        except NetworkError:
-            pass
+        if tap_name:
+            remove_iptables_forward_rules(tap_name)
+            try:
+                delete_tap(tap_name)
+            except NetworkError:
+                pass
 
         manager.deregister(v.id if v.id else v.name)
+
+        nocloud_cache_dir = cache_dir / f"nocloud-{v.name}"
+        if nocloud_cache_dir.exists():
+            shutil.rmtree(nocloud_cache_dir)
 
         if vm_dir.exists():
             shutil.rmtree(vm_dir)

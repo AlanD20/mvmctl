@@ -704,7 +704,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
             nocloud_manager = NoCloudNetServerManager()
             nocloud_manager.stop_server(name)
             remove_nocloud_input_rule(vm.ip, name, vm.nocloud_net_port)
-        except Exception as e:
+        except (OSError, RuntimeError, NetworkError) as e:
             logger.warning("Failed to cleanup nocloud-net resources: %s", e)
 
     remove_iptables_forward_rules(tap_name, bridge=bridge)
