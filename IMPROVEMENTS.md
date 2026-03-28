@@ -34,6 +34,10 @@ CLI:
 - when user enters `rm` for any resources such as kernel, image, vm, keys, etc.. it shouldn't prompt y/n. It MUST PROCEED WITH REMOVAL.
 - DO NOT ALLOW REMOVAL OF networks, images, kernels, if they are used by an active VM. The CLI must utilize the metadata to ensure there isnt an active VM using these.
 
+Debugging: Complete overhaul of every single path of the CLI application and handle any user facing error gracefully as a friendly output. DO NOT SHOW EXCEPTIONS and STACK TRACES, unless DEBUG MODE is enabled. Every single path of the entire application must support this mode, ensure that every single path of the code has this particularly more emphasis on complex logics requiring sequential state in order to allow the cli application to perform an action.
+- introduce a new build type that enables debugging at finer grain for easier debugging issues. a value defined in constants.py file where it derives the DEBUG_MODE value from defaults.yaml file! this will enable debug mode throughout the cli application.
+- DEBUG MODE also introduces verbosity of errors, warnings, stack traces, etc.. to improve debugging throughout the application when an error occurs.
+
 
 Following UI errors must be more friendlier for user:
 - Running `mvm key add ~/.ssh/id_rsa.pub`
@@ -43,6 +47,7 @@ Networking:
 - prompt user to provide the interface that provides internet for routing
 - When a new network is created, this is effectively a new bridge with its own subnet and every rule. in `chain POSTROUTING` the target for this bridge must only allow `source` for the cidr provided only! and the `out` value must be the bridge interface name! for example a new network called `mvm-test` with cidr 175.39.0.0/24. the expected `source` value is 175.39.0.0/24 and `out` value is !mvm-test when the target is `MVM-POSTROUTING` chain.
 - when `--ip` is passed to `mvm vm create` the IP isnt being checked against if this ip is already leased or free. the application must show a friendly error that given ip on given network name is already reserved.
+- Explore fully isolated bridge networking mechanism for vms.
 
 
 Escalation:
