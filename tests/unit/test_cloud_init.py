@@ -64,6 +64,9 @@ def test_write_cloud_init_basic(tmp_path):
     assert myuser_entry is not None
     assert "ssh-rsa AAAAB3..." in myuser_entry["ssh-authorized-keys"]
 
+    # Default mode (skip_network_config=False) should NOT have network.config disabled
+    assert ud.get("network", {}).get("config") != "disabled"
+
 
 def test_write_cloud_init_custom_user_data(tmp_path):
     """write_cloud_init preserves custom user-data YAML."""
@@ -277,6 +280,9 @@ def test_write_cloud_init_skips_network_config_when_requested(tmp_path):
     assert myuser_entry is not None
     assert "ssh-rsa AAAAB3..." in myuser_entry["ssh-authorized-keys"]
 
+    # user-data should have network.config disabled for NO_CLOUD_NET mode
+    assert ud.get("network", {}).get("config") == "disabled"
+
 
 def test_write_cloud_init_includes_network_config_by_default(tmp_path):
     """write_cloud_init includes network-config by default (backward compatibility)."""
@@ -303,3 +309,74 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
     assert net["version"] == 2
     assert "eth0" in net["ethernets"]
     assert "10.20.0.10/24" in net["ethernets"]["eth0"]["addresses"]
+
+
+# ---------------------------------------------------------------------------
+# Custom user-data network disable injection (NO_CLOUD_NET mode)
+# ---------------------------------------------------------------------------
+
+
+def test_write_cloud_init_custom_user_data_injects_network_disable(tmp_path, monkeypatch):
+    """Custom user-data gets network.config disabled injected when skip_network_config=True."""
+    warnings_logged: list[str] = []
+
+    def _fake_logger_warning(msg: str, *args: object) -> None:
+        warnings_logged.append(str(msg) % args if args else msg)
+
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    custom_ud = tmp_path / "custom.yaml"
+    custom_ud.write_text("custom_key: custom_value\n")
+
+    import mvmctl.core.cloud_init as ci_module
+
+    monkeypatch.setattr(ci_module.logger, "warning", _fake_logger_warning)
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="testvm",
+        gateway="10.20.0.1",
+        guest_ip="10.20.0.10",
+        user="myuser",
+        skip_network_config=True,
+        custom_user_data=custom_ud,
+    )
+
+    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    assert ud.get("network", {}).get("config") == "disabled"
+    assert ud["custom_key"] == "custom_value"  # original content preserved
+
+
+def test_write_cloud_init_custom_user_data_with_network_key_warns(tmp_path, monkeypatch):
+    """Custom user-data with existing 'network' key logs a warning."""
+    warnings_logged: list[str] = []
+
+    def _fake_logger_warning(msg: str, *args: object) -> None:
+        warnings_logged.append(str(msg) % args if args else msg)
+
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    custom_ud = tmp_path / "custom.yaml"
+    custom_ud.write_text("network:\n  config: {}\n")
+
+    import mvmctl.core.cloud_init as ci_module
+
+    monkeypatch.setattr(ci_module.logger, "warning", _fake_logger_warning)
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="testvm",
+        gateway="10.20.0.1",
+        guest_ip="10.20.0.10",
+        user="myuser",
+        skip_network_config=True,
+        custom_user_data=custom_ud,
+    )
+
+    # Should NOT overwrite existing network key
+    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    assert "network" in ud  # original preserved
+    # Should log warning
+    assert any("network" in w.lower() for w in warnings_logged)

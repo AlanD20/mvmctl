@@ -147,6 +147,16 @@ def write_cloud_init(
                             break
                     if not user_found:
                         users_list.append({"name": user, "ssh-authorized-keys": [ssh_pub_key]})
+        # Inject network disable for NO_CLOUD_NET mode
+        if skip_network_config:
+            if "network" in ud:
+                logger.warning(
+                    "Custom user-data already contains 'network' key; "
+                    "cloud-init network stage may interfere with kernel ip= config. "
+                    "Consider setting network.config to 'disabled' in your custom user-data."
+                )
+            else:
+                ud["network"] = {"config": "disabled"}
         (cloud_init_dir / "user-data").write_text(
             "#cloud-config\n" + yaml.dump(ud, default_flow_style=False)
         )
@@ -158,6 +168,12 @@ def write_cloud_init(
             "runcmd": [DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD],
             "final_message": DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
         }
+        # For NO_CLOUD_NET mode: disable cloud-init's network stage so it doesn't
+        # overwrite the kernel's ip= static IP configuration with DHCP.
+        # The kernel's ip= parameter sets up networking early; cloud-init must not
+        # reconfigure the interface afterward.
+        if skip_network_config:
+            ud["network"] = {"config": "disabled"}
         if ssh_pub_key:
             ud["users"] = [
                 "default",
