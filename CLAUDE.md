@@ -32,8 +32,9 @@ src/mvmctl/
 ├── core/            # All business logic, subprocess, Firecracker interaction
 ├── models/          # Pure dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
 ├── utils/           # Shared helpers: console, process, fs, http, audit, validation
-└── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
-tests/               # Unit + integration test files
+├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
+└── services/        # Runtime subprocess services (console_relay, nocloud_server)
+tests/               # Unit + integration test files (64 total)
 docs/                # API and release docs
 legacy/              # Archived bash scripts (single-vm, multi-vm, assets)
 pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
@@ -92,4 +93,5 @@ Tests must NOT require root, KVM, or real network. Mock all subprocess calls.
 - `src/mvmctl/core/AGENTS.md` — Core module inventory
 - `src/mvmctl/cli/AGENTS.md` — CLI wiring, Typer patterns
 - `src/mvmctl/api/AGENTS.md` — API layer pattern
+- `src/mvmctl/services/AGENTS.md` — Runtime services (console_relay, nocloud_server)
 - `tests/AGENTS.md` — Test fixtures, mock conventions

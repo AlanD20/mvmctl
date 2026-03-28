@@ -14,13 +14,14 @@ It handles everything from downloading official kernels and root filesystem imag
 - **Testing & Linting:** `pytest`, `ruff`, `mypy`
 
 ## Architecture
-The project strictly adheres to a layered architecture to separate concerns. Data flows sequentially: `User -> mvm -> main.py -> cli/*.py -> api/*.py -> core/*.py -> models/ + utils/`.
+The project strictly adheres to a layered architecture to separate concerns. Data flows sequentially: `User -> mvm -> main.py -> cli/*.py -> api/*.py -> core/*.py -> models/ + utils/`. Runtime services in `services/` are spawned as subprocesses for console relay and cloud-init HTTP serving.
 
 - **`cli/`**: Command definitions, argument parsing, and formatting output. No business logic.
 - **`api/`**: Stable public Python API boundary. Performs privilege checks before delegating to `core/`.
 - **`core/`**: All business logic, filesystem operations, subprocesses, and Firecracker interactions. Returns data or raises typed exceptions (`MVMError`).
 - **`models/`**: Pure `@dataclass` objects containing domain data (e.g., `VMInstance`, `VMConfig`). No side effects.
 - **`utils/`**: Shared helpers (console, process, fs, http, audit, validation) with no domain knowledge.
+- **`services/`**: Runtime subprocess services — `console_relay/` (PTY-to-vsock bridge) and `nocloud_server/` (HTTP cloud-init datasource).
 
 ## Building and Running
 The project uses `uv` for dependency management.

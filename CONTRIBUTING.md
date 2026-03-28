@@ -36,10 +36,12 @@ mvmctl/
 │   ├── cli/          # Typer command groups (vm.py, network.py, key.py, asset.py, host.py)
 │   ├── core/         # Business logic (vm_lifecycle.py, network_manager.py, etc.)
 │   ├── models/       # Dataclass models (VMInstance, VMConfig, ImageSpec)
-│   └── utils/        # Shared helpers (fs.py, console.py, process.py)
+│   ├── utils/        # Shared helpers (fs.py, console.py, process.py)
+│   ├── assets/       # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
+│   └── services/     # Runtime subprocess services (console_relay, nocloud_server)
 ├── tests/
-│   ├── unit/         # Pure unit tests (no root, no KVM)
-│   └── integration/  # Tests that need system resources
+│   ├── unit/         # Pure unit tests (no root, no KVM) — 54 files
+│   └── integration/  # Workflow tests — 7 files
 ├── pyproject.toml
 └── README.md
 ```
