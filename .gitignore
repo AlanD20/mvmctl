@@ -94,3 +94,10 @@ legacy/**/*.log
 legacy/**/*.metrics
 legacy/**/*.pid
 legacy/**/*.socket
+
+# ========== AGENT WORK DIRECTORIES (preserve locally, exclude from git) ==========
+.sisyphus/
+docs/analyses/
+.full-review/
+MagicMock/
+.prompts/
