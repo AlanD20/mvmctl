@@ -675,7 +675,7 @@ def create_vm(
             proc = subprocess.Popen(
                 fc_cmd,
                 stdin=pty_slave_fd,
-                stdout=log_fp,
+                stdout=pty_slave_fd,
                 stderr=log_fp,
                 start_new_session=True,
                 pass_fds=[pty_slave_fd],

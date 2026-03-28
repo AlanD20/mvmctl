@@ -100,7 +100,7 @@ def read_console_output(sock: socket.socket) -> Generator[bytes]:
 def check_escape_sequence(buffer: bytearray) -> tuple[bool, str]:
     """Check if the buffer contains a console escape sequence.
 
-    Detects Ctrl+A followed by D for detach (like screen/tmux).
+    Detects Ctrl+X followed by D for detach.
 
     Args:
         buffer: Byte buffer to check
@@ -109,7 +109,7 @@ def check_escape_sequence(buffer: bytearray) -> tuple[bool, str]:
         Tuple of (matched, action) where action is "detach" if matched
     """
     if len(buffer) >= 2:
-        if buffer[-2:] == b"\x01d":
+        if buffer[-2:] == b"\x18d":
             return True, "detach"
     return False, ""
 

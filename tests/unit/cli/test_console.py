@@ -20,7 +20,7 @@ def _make_fake_stdin(extra_buffer_read=b""):
     fake_stdin = MagicMock()
     fake_stdin.fileno.return_value = 0
     fake_stdin.buffer = MagicMock()
-    reads = [b"\x01", b"d"]
+    reads = [b"\x18", b"d"]
     if extra_buffer_read:
         reads.insert(0, extra_buffer_read)
     fake_stdin.buffer.read.side_effect = reads
@@ -491,7 +491,7 @@ class TestDoAttachFunction:
                                 ):
                                     # Mock escape sequence detection
                                     def check_escape(seq):
-                                        if len(seq) >= 2 and seq[-2:] == b"\x01d":
+                                        if len(seq) >= 2 and seq[-2:] == b"\x18d":
                                             return (True, "detach")
                                         return (False, None)
 

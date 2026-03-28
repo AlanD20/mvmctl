@@ -132,7 +132,7 @@ def _do_attach(name: str) -> None:
         raise typer.Exit(1)
 
     print_info(f"Attaching to console of '{name}'...")
-    print_info("Press Ctrl+A then D to detach")
+    print_info("Press Ctrl+X then D to detach")
 
     try:
         sock = connect_to_relay(socket_path)
@@ -147,28 +147,51 @@ def _do_attach(name: str) -> None:
 
         input_buffer = bytearray()
         detach_requested = False
+        running = True
 
-        for output in read_console_output(sock):
-            sys.stdout.buffer.write(output)
-            sys.stdout.flush()
+        while running:
+            readable, _, _ = select.select([sys.stdin, sock], [], [], 0.05)
 
-            ready, _, _ = select.select([sys.stdin], [], [], 0)
-            if sys.stdin in ready:
+            if sock in readable:
+                try:
+                    data = sock.recv(4096)
+                    if data:
+                        sys.stdout.buffer.write(data)
+                        sys.stdout.flush()
+                    else:
+                        running = False
+                except BlockingIOError:
+                    pass
+                except (OSError, ConnectionResetError):
+                    running = False
+
+            if sys.stdin in readable:
                 char = sys.stdin.buffer.read(1)
                 if not char:
-                    break
+                    running = False
+                    continue
 
                 input_buffer.extend(char)
                 matched, action = check_escape_sequence(input_buffer)
                 if matched and action == "detach":
                     detach_requested = True
-                    break
+                    running = False
+                    continue
 
-                if len(input_buffer) > 2:
-                    to_send = bytes(input_buffer[:-2])
+                # Send immediately unless buffer starts with Ctrl+X (escape sequence prefix)
+                if input_buffer[0:1] != b"\x18":
+                    to_send = bytes(input_buffer)
                     if to_send:
                         send_console_input(sock, to_send)
-                    input_buffer = input_buffer[-2:]
+                    input_buffer = bytearray()
+                elif len(input_buffer) >= 2:
+                    # Have Ctrl+X + next char - check if it's the full sequence
+                    if input_buffer != b"\x18d":
+                        # Not detach sequence, send both chars
+                        to_send = bytes(input_buffer)
+                        if to_send:
+                            send_console_input(sock, to_send)
+                        input_buffer = bytearray()
 
         if detach_requested:
             if input_buffer:
