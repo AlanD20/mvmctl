@@ -7,11 +7,13 @@ Metadata:
     - binaries>defaults>firecracker>binary_path, binaries>defaults>firecracker>full_version
     - binaries>defaults>jailer>binary_path, binaries>defaults>jailer>full_version
 
+cloud-init:
+- cleanup_orphans function must be implemented in nocloud_net_manager.py file
+
 VM:
 - [x] when user fetches/imports an image via `mvm image fetch/import`, the process at the end it must run 'blkid -p -s UUID -o value' on the final image that has only rootfs content, and then store the `fs_uuid` in the image's metadata. And then later when user enters `mvm vm create ...` the command must pull the `fs_uuid` of the image from metadata and use it as boot arg with root=UUID={fs_uuid}
-- [x] DO NOT COPY rootfs into vm state file! use absolute file to cached imgaes
+- [x] DO NOT COPY rootfs into vm state file! use absolute file to cached imgaes. when creating a new vm via `mvm vm create` it copies the rootfs file into the vm's state folder! the kernel and the rootfs must use the absolute path of the kernel or rootfs provided or if default is chosen, then use default's absolute path of rootfs and kernel. do not copy rootfs or kernel into each vm's state!
 - [x] each image has `fs_type` in the metadata file, this type must be used in the boot arg of firecracker json file which `rootfstype={fs_type}`
-- when creating a new vm via `mvm vm create` it copies the rootfs file into the vm's state folder! the kernel and the rootfs must use the absolute path of the kernel or rootfs provided or if default is chosen, then use default's absolute path of rootfs and kernel. do not copy rootfs or kernel into each vm's state!
 - firecracker rootfs requires integrating the ssh key into the image! need to figure out a way to do this? perhaps create a copy of an image by integrating a file?
 - introduce --kernel-path and --image-path to `mvm vm create` to allow custom image and kernel path
 - when `mvm vm create` throws an exception, it leaves out the directory creation of the vm state!
@@ -25,7 +27,7 @@ Kernel:
 
 CLI:
 - implement progress bar when fetching kernel/image/binary
-- firecracker failure and exit codes arent caught by `mvm vm ls`, it should appropriately follow and track if pid exist or exit out!
+- firecracker failure and exit codes arent caught by `mvm vm ls`, it should appropriately follow and track if pid exist or exit out! each vm has `firecracker.pid` in the vm folder state. use this pid to track! and ideally a way to show the exit code in the `status` field.
 - when running `ls` on EVERY SUPPORTED commands such as `mvm image ls`, etc.. it must read through the metadata and check if it has a path, file exist? if no, add (X) mark to indicate it's deleted and only metadata left. if it's a network bridge, check if it's still there. etc.. the state check with actual environment depends on the command, for image, kernel, vm, key, bin, they are file state checks, but for network, it's a check with the actual bridge if it still exists!
 - when user enters `rm` for any resources such as kernel, image, vm, keys, etc.. it shouldn't prompt y/n. It MUST PROCEED WITH REMOVAL.
 - DO NOT ALLOW REMOVAL OF networks, images, kernels, if they are used by an active VM. The CLI must utilize the metadata to ensure there isnt an active VM using these.
