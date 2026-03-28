@@ -205,6 +205,7 @@ TAP_PREFIX: Final[str] = f"{CLI_NAME}-tap"
 # iptables chain names for MVM rules
 MVM_FORWARD_CHAIN: Final[str] = f"{CLI_NAME.upper()}-FORWARD"
 MVM_POSTROUTING_CHAIN: Final[str] = f"{CLI_NAME.upper()}-POSTROUTING"
+MVM_NO_CLOUD_INPUT_CHAIN: Final[str] = "MVM-NOCLOUD-INPUT"
 
 PROJECT_GROUP: Final[str] = CLI_NAME
 SUDOERS_DROP_IN_PATH: Final[str] = _require_str(
@@ -333,6 +334,8 @@ DEFAULT_CLOUD_INIT_ISO_NAME: Final[str] = "cloud-init.iso"
 DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL: Final[str] = "cidata"
 DEFAULT_CLOUD_INIT_DRIVE_ID: Final[str] = "cloud-init"
 REQUIRED_ISO_TOOL: Final[str] = "cloud-localds"
+
+# Cloud-init detection timeouts
 
 # ---------------------------------------------------------------------------
 # VM boot arg defaults (loaded from assets/defaults.yaml)
@@ -486,7 +489,14 @@ CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = _require_int(("http", "download_chunk_si
 CONST_BINARY_FETCH_TIMEOUT: Final[int] = 300
 CONST_SOCKET_TIMEOUT_SECONDS: Final[float] = 5.0
 CONST_POLL_STEP_SECONDS: Final[float] = 0.1
+
+# Cloud-init timeout constants (in seconds)
+CONST_CLOUD_INIT_TIMEOUT_S: Final[int] = 300  # 5 minutes max wait
+CONST_CLOUD_INIT_POLL_INTERVAL_S: Final[float] = 2.0  # Poll every 2 seconds
 CONST_NO_CLOUD_NET_SHUTDOWN_TIMEOUT_S: Final[float] = 5.0
+CONST_NO_CLOUD_NET_PORT_RANGE: Final[tuple[int, int]] = (8000, 9000)
+CONST_NO_CLOUD_NET_BIND_TIMEOUT_S: Final[float] = 5.0
+CONST_NO_CLOUD_NET_MAX_PORT_RETRIES: Final[int] = 100
 CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
 MAX_VMS: Final[int] = _require_int(("vm", "limits", "max_vms"))
 

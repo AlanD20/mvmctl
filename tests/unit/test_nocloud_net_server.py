@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.core.nocloud_net_server import NoCloudNetServer, _CloudInitRequestHandler
+from mvmctl.core.nocloud_net_server import NoCloudNetServer
 from mvmctl.exceptions import MVMError
 
 
@@ -424,7 +424,7 @@ def test_server_stop_handles_thread_timeout(tmp_path: Path, caplog):
     server.start()
 
     try:
-        with patch.object(server._thread, "join") as mock_join:
+        with patch.object(server._thread, "join") as _:
             with patch.object(server._thread, "is_alive", return_value=True):
                 caplog.set_level(logging.WARNING)
                 server.stop()

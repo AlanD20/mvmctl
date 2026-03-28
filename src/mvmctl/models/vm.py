@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mvmctl.core.config_gen import DriveConfig
@@ -31,6 +31,15 @@ class VMState(StrEnum):
     RUNNING = auto()
     STOPPED = auto()
     ERROR = auto()
+
+
+class CloudInitStatus(StrEnum):
+    """Cloud-init execution status based on console log detection."""
+
+    PENDING = auto()  # Console log file doesn't exist yet
+    RUNNING = auto()  # Console log exists but no "done" marker found
+    DONE = auto()  # Final message marker detected in console log
+    ERROR = auto()  # Error state (for future use)
 
 
 class CloudInitMode(StrEnum):
@@ -69,7 +78,6 @@ class VMConfig:
         enable_pci: Enable PCI device support.
         lsm_flags: Linux Security Module flags for the kernel cmdline.
         cloud_init_mode: Cloud-init configuration mode (auto/custom/disabled).
-        datasource_mode: Cloud-init datasource mode (auto/nocloud-net).
         cloud_init_iso_path: Path to custom cloud-init ISO (used when mode is CUSTOM).
         keep_cloud_init_iso: Retain the generated cloud-init ISO after boot.
         root_fs_type: Filesystem type of the root image (e.g. ext4, btrfs, xfs).
@@ -95,6 +103,7 @@ class VMConfig:
     enable_logging: bool = DEFAULT_VM_ENABLE_LOGGING
     enable_metrics: bool = DEFAULT_VM_ENABLE_METRICS
     cloud_init_mode: CloudInitMode = CloudInitMode.AUTO
+    # @deprecated: Use cloud_init_mode instead. Kept for backward compatibility.
     datasource_mode: CloudInitMode = CloudInitMode.AUTO
     cloud_init_iso_path: Path | None = None
     keep_cloud_init_iso: bool = False
@@ -111,6 +120,103 @@ class VMConfig:
                 f"mem_size_mib must be between 128 and 65536 (inclusive), got {self.mem_size_mib}"
             )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize VMConfig to a dictionary."""
+        return {
+            "name": self.name,
+            "vcpu_count": self.vcpu_count,
+            "mem_size_mib": self.mem_size_mib,
+            "kernel_path": str(self.kernel_path),
+            "rootfs_path": str(self.rootfs_path),
+            "guest_ip": self.guest_ip,
+            "guest_mac": self.guest_mac,
+            "gateway": self.gateway,
+            "subnet_mask": self.subnet_mask,
+            "tap_device": self.tap_device,
+            "boot_args": self.boot_args,
+            "root_uuid": self.root_uuid,
+            "root_fs_type": self.root_fs_type,
+            "enable_api_socket": self.enable_api_socket,
+            "enable_pci": self.enable_pci,
+            "lsm_flags": self.lsm_flags,
+            "extra_drives": [
+                {
+                    "path_on_host": d["path_on_host"],
+                    "drive_id": d["drive_id"],
+                    "is_root_device": d["is_root_device"],
+                }
+                for d in self.extra_drives
+            ],
+            "enable_logging": self.enable_logging,
+            "enable_metrics": self.enable_metrics,
+            "cloud_init_mode": self.cloud_init_mode.value,
+            "datasource_mode": self.datasource_mode.value,
+            "cloud_init_iso_path": str(self.cloud_init_iso_path)
+            if self.cloud_init_iso_path
+            else None,
+            "keep_cloud_init_iso": self.keep_cloud_init_iso,
+            "nocloud_net_url": self.nocloud_net_url,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VMConfig:
+        """Deserialize VMConfig from a dictionary."""
+        from typing import cast
+
+        from mvmctl.core.config_gen import DriveConfig
+
+        extra_drives = []
+        for d in data.get("extra_drives", []):
+            extra_drives.append(
+                cast(
+                    DriveConfig,
+                    {
+                        "drive_id": d.get("drive_id", ""),
+                        "path_on_host": d.get("path_on_host", ""),
+                        "is_root_device": d.get("is_root_device", False),
+                        "is_read_only": d.get("is_read_only", False),
+                        "partuuid": d.get("partuuid"),
+                        "cache_type": d.get("cache_type", ""),
+                        "io_engine": d.get("io_engine", ""),
+                        "rate_limiter": d.get("rate_limiter"),
+                        "socket": d.get("socket"),
+                    },
+                )
+            )
+
+        return cls(
+            name=data.get("name", ""),
+            vcpu_count=data.get("vcpu_count", DEFAULT_VM_VCPU_COUNT),
+            mem_size_mib=data.get("mem_size_mib", DEFAULT_VM_MEM_MIB),
+            kernel_path=Path(data.get("kernel_path", DEFAULT_VM_KERNEL_FILENAME)),
+            rootfs_path=Path(data.get("rootfs_path", DEFAULT_VM_ROOTFS_FILENAME)),
+            guest_ip=data.get("guest_ip"),
+            guest_mac=data.get("guest_mac"),
+            gateway=data.get("gateway"),
+            subnet_mask=data.get("subnet_mask", DEFAULT_VM_SUBNET_MASK),
+            tap_device=data.get("tap_device"),
+            boot_args=data.get("boot_args"),
+            root_uuid=data.get("root_uuid"),
+            root_fs_type=data.get("root_fs_type"),
+            enable_api_socket=data.get("enable_api_socket", DEFAULT_VM_ENABLE_API_SOCKET),
+            enable_pci=data.get("enable_pci", DEFAULT_VM_ENABLE_PCI),
+            lsm_flags=data.get("lsm_flags", DEFAULT_VM_LSM_FLAGS),
+            extra_drives=extra_drives,
+            enable_logging=data.get("enable_logging", DEFAULT_VM_ENABLE_LOGGING),
+            enable_metrics=data.get("enable_metrics", DEFAULT_VM_ENABLE_METRICS),
+            cloud_init_mode=CloudInitMode(data["cloud_init_mode"])
+            if data.get("cloud_init_mode")
+            else CloudInitMode.AUTO,
+            datasource_mode=CloudInitMode(data["datasource_mode"])
+            if data.get("datasource_mode")
+            else CloudInitMode.AUTO,
+            cloud_init_iso_path=Path(data["cloud_init_iso_path"])
+            if data.get("cloud_init_iso_path")
+            else None,
+            keep_cloud_init_iso=data.get("keep_cloud_init_iso", False),
+            nocloud_net_url=data.get("nocloud_net_url"),
+        )
+
 
 @dataclass
 class VMInstance:
@@ -124,9 +230,13 @@ class VMInstance:
         ip: Assigned guest IP address.
         mac: Assigned guest MAC address.
         network_name: Name of the attached named network (if any).
+        tap_device: TAP device name for this VM's network interface.
         created_at: Creation timestamp (UTC).
         status: Current lifecycle state.
         config: Original VM configuration used to launch this instance.
+        cloud_init_mode: Cloud-init configuration mode for this VM instance.
+        nocloud_net_port: HTTP port for nocloud-net datasource server (if enabled).
+        nocloud_server_pid: PID of the running nocloud-net HTTP server process (None if stopped).
     """
 
     name: str
@@ -140,3 +250,60 @@ class VMInstance:
     created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     status: VMState = VMState.STOPPED
     config: VMConfig | None = None
+    cloud_init_mode: CloudInitMode = CloudInitMode.AUTO
+    nocloud_net_port: int | None = None
+    nocloud_server_pid: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize VMInstance to a dictionary."""
+        return {
+            "name": self.name,
+            "id": self.id,
+            "pid": self.pid,
+            "socket_path": str(self.socket_path) if self.socket_path else None,
+            "ip": self.ip,
+            "mac": self.mac,
+            "network_name": self.network_name,
+            "tap_device": self.tap_device,
+            "created_at": self.created_at.isoformat(),
+            "status": self.status.value,
+            "config": self.config.to_dict() if self.config else None,
+            "cloud_init_mode": self.cloud_init_mode.value,
+            "nocloud_net_port": self.nocloud_net_port,
+            "nocloud_server_pid": self.nocloud_server_pid,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VMInstance:
+        """Deserialize VMInstance from a dictionary."""
+        config = None
+        if data.get("config") and isinstance(data["config"], dict):
+            config = VMConfig.from_dict(data["config"])
+
+        cloud_init_mode = CloudInitMode.AUTO
+        if data.get("cloud_init_mode"):
+            cloud_init_mode = CloudInitMode(data["cloud_init_mode"])
+
+        created_at = datetime.now(tz=timezone.utc)
+        if data.get("created_at"):
+            try:
+                created_at = datetime.fromisoformat(data["created_at"])
+            except ValueError:
+                pass
+
+        return cls(
+            name=data.get("name", ""),
+            id=data.get("id", ""),
+            pid=data.get("pid"),
+            socket_path=Path(data["socket_path"]) if data.get("socket_path") else None,
+            ip=data.get("ip"),
+            mac=data.get("mac"),
+            network_name=data.get("network_name"),
+            tap_device=data.get("tap_device"),
+            created_at=created_at,
+            status=VMState(data["status"]) if data.get("status") else VMState.STOPPED,
+            config=config,
+            cloud_init_mode=cloud_init_mode,
+            nocloud_net_port=data.get("nocloud_net_port"),
+            nocloud_server_pid=data.get("nocloud_server_pid"),
+        )

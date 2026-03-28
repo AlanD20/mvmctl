@@ -186,18 +186,9 @@ class VMManager:
             state = self._load_state()
             # Use vm.id as the key (full 64-char hash)
             vm_id = vm.id if vm.id else _generate_vm_id(vm.name, vm.created_at)
-            state["vms"][vm_id] = {
-                "id": vm_id,
-                "name": vm.name,
-                "pid": vm.pid,
-                "socket_path": str(vm.socket_path) if vm.socket_path else None,
-                "ip": vm.ip,
-                "mac": vm.mac,
-                "network_name": vm.network_name,
-                "tap_device": vm.tap_device,
-                "created_at": vm.created_at.isoformat(),
-                "status": vm.status.value,
-            }
+            vm_data = vm.to_dict()
+            vm_data["id"] = vm_id
+            state["vms"][vm_id] = vm_data
             self._save_state(state)
 
     def update_status(self, name: str, status: VMState) -> None:
@@ -220,7 +211,7 @@ class VMManager:
             state = self._load_state()
             for vm_id, vm_data in state["vms"].items():
                 if vm_data.get("name") == name:
-                    return self._vm_from_data(vm_id, vm_data)
+                    return VMInstance.from_dict(vm_data)
             return None
 
     def get_by_short_id(self, short_id: str) -> VMInstance | None:
@@ -237,7 +228,7 @@ class VMManager:
             ]
             if len(matches) == 1:
                 vm_id, vm_data = matches[0]
-                return self._vm_from_data(vm_id, vm_data)
+                return VMInstance.from_dict(vm_data)
             return None
 
     def find_by_short_id(self, short_id: str) -> list[VMInstance]:
@@ -247,7 +238,7 @@ class VMManager:
             results = []
             for vm_id, vm_data in state["vms"].items():
                 if vm_id.startswith(short_id):
-                    results.append(self._vm_from_data(vm_id, vm_data))
+                    results.append(VMInstance.from_dict(vm_data))
             return results
 
     def get_by_name(self, name: str) -> list[VMInstance]:
@@ -257,23 +248,8 @@ class VMManager:
             results = []
             for vm_id, vm_data in state["vms"].items():
                 if vm_data.get("name") == name:
-                    results.append(self._vm_from_data(vm_id, vm_data))
+                    results.append(VMInstance.from_dict(vm_data))
             return results
-
-    def _vm_from_data(self, vm_id: str, vm_data: dict[str, Any]) -> VMInstance:
-        """Create VMInstance from stored data."""
-        return VMInstance(
-            name=vm_data.get("name", ""),
-            id=vm_id,
-            pid=vm_data.get("pid"),
-            socket_path=Path(vm_data["socket_path"]) if vm_data.get("socket_path") else None,
-            ip=vm_data.get("ip"),
-            mac=vm_data.get("mac"),
-            network_name=vm_data.get("network_name"),
-            tap_device=vm_data.get("tap_device"),
-            created_at=datetime.fromisoformat(vm_data["created_at"]),
-            status=VMState(vm_data["status"]),
-        )
 
     def list_all(self) -> list[VMInstance]:
         """List all VMs."""
@@ -281,7 +257,7 @@ class VMManager:
             state = self._load_state()
             vms = []
             for vm_id, vm_data in state["vms"].items():
-                vms.append(self._vm_from_data(vm_id, vm_data))
+                vms.append(VMInstance.from_dict(vm_data))
             return vms
 
     def count_vms(self) -> int:

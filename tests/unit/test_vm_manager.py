@@ -140,7 +140,6 @@ def test_vm_manager_update_status_success(vm_manager: VMManager):
 
 def test_vm_manager_migration(tmp_path: Path):
     import json
-    from pathlib import Path
     from datetime import datetime, timezone
 
     vms_dir = tmp_path / "vms"
