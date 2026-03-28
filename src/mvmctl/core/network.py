@@ -492,35 +492,99 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
     forward_chain = MVM_FORWARD_CHAIN
     postrouting_chain = MVM_POSTROUTING_CHAIN
 
-    # Ensure MVM chains exist before adding rules
     setup_mvm_chains()
 
-    # Build rules for batch application via iptables-restore
-    rules: list[dict[str, str]] = [
-        {
-            "table": "nat",
-            "chain": postrouting_chain,
-            "rule": f"-o {host_iface} -j MASQUERADE",
-        },
-        {
-            "table": "filter",
-            "chain": forward_chain,
-            "rule": f"-i {bridge} -o {host_iface} -j ACCEPT",
-        },
-        {
-            "table": "filter",
-            "chain": forward_chain,
-            "rule": f"-i {host_iface} -o {bridge} -j ACCEPT",
-        },
+    masquerade_check = [
+        "iptables",
+        "-t",
+        "nat",
+        "-C",
+        postrouting_chain,
+        "-o",
+        host_iface,
+        "-j",
+        "MASQUERADE",
     ]
+    masquerade_add = [
+        "iptables",
+        "-t",
+        "nat",
+        "-A",
+        postrouting_chain,
+        "-o",
+        host_iface,
+        "-j",
+        "MASQUERADE",
+    ]
+    _ensure_iptables_rule(
+        masquerade_check,
+        masquerade_add,
+        f"Failed to add MASQUERADE rule for {bridge}",
+    )
 
-    try:
-        _apply_iptables_rules_batch(
-            rules,
-            f"Failed to setup NAT for {bridge} via {host_iface}",
-        )
-    except NetworkError:
-        raise
+    forward_out_check = [
+        "iptables",
+        "-t",
+        "filter",
+        "-C",
+        forward_chain,
+        "-i",
+        bridge,
+        "-o",
+        host_iface,
+        "-j",
+        "ACCEPT",
+    ]
+    forward_out_add = [
+        "iptables",
+        "-t",
+        "filter",
+        "-A",
+        forward_chain,
+        "-i",
+        bridge,
+        "-o",
+        host_iface,
+        "-j",
+        "ACCEPT",
+    ]
+    _ensure_iptables_rule(
+        forward_out_check,
+        forward_out_add,
+        f"Failed to add FORWARD rule for {bridge}",
+    )
+
+    forward_in_check = [
+        "iptables",
+        "-t",
+        "filter",
+        "-C",
+        forward_chain,
+        "-i",
+        host_iface,
+        "-o",
+        bridge,
+        "-j",
+        "ACCEPT",
+    ]
+    forward_in_add = [
+        "iptables",
+        "-t",
+        "filter",
+        "-A",
+        forward_chain,
+        "-i",
+        host_iface,
+        "-o",
+        bridge,
+        "-j",
+        "ACCEPT",
+    ]
+    _ensure_iptables_rule(
+        forward_in_check,
+        forward_in_add,
+        f"Failed to add FORWARD rule for {bridge}",
+    )
 
     logger.info("NAT rules configured for bridge %s via %s", bridge, host_iface)
 
@@ -652,36 +716,73 @@ def delete_tap(tap_name: str) -> None:
 
 
 def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
-    """Add iptables FORWARD rules for a specific TAP device to MVM chain.
-
-    Rules to add in MVM-FORWARD chain (idempotent via iptables-restore --noflush):
-    - `iptables -A MVM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
-    - `iptables -A MVM-FORWARD -i {tap_name} -o {bridge} -j ACCEPT`
-    """
     forward_chain = MVM_FORWARD_CHAIN
 
     setup_mvm_chains()
 
-    rules: list[dict[str, str]] = [
-        {
-            "table": "filter",
-            "chain": forward_chain,
-            "rule": f"-i {bridge} -o {tap_name} -j ACCEPT",
-        },
-        {
-            "table": "filter",
-            "chain": forward_chain,
-            "rule": f"-i {tap_name} -o {bridge} -j ACCEPT",
-        },
+    forward_out_check = [
+        "iptables",
+        "-t",
+        "filter",
+        "-C",
+        forward_chain,
+        "-i",
+        bridge,
+        "-o",
+        tap_name,
+        "-j",
+        "ACCEPT",
     ]
+    forward_out_add = [
+        "iptables",
+        "-t",
+        "filter",
+        "-A",
+        forward_chain,
+        "-i",
+        bridge,
+        "-o",
+        tap_name,
+        "-j",
+        "ACCEPT",
+    ]
+    _ensure_iptables_rule(
+        forward_out_check,
+        forward_out_add,
+        f"Failed to add FORWARD rule for {tap_name}",
+    )
 
-    try:
-        _apply_iptables_rules_batch(
-            rules,
-            f"Failed to add FORWARD rules for {tap_name}",
-        )
-    except NetworkError:
-        raise
+    forward_in_check = [
+        "iptables",
+        "-t",
+        "filter",
+        "-C",
+        forward_chain,
+        "-i",
+        tap_name,
+        "-o",
+        bridge,
+        "-j",
+        "ACCEPT",
+    ]
+    forward_in_add = [
+        "iptables",
+        "-t",
+        "filter",
+        "-A",
+        forward_chain,
+        "-i",
+        tap_name,
+        "-o",
+        bridge,
+        "-j",
+        "ACCEPT",
+    ]
+    _ensure_iptables_rule(
+        forward_in_check,
+        forward_in_add,
+        f"Failed to add FORWARD rule for {tap_name}",
+    )
 
     logger.debug("FORWARD rules added for TAP %s ↔ bridge %s", tap_name, bridge)
 
