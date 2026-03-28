@@ -179,7 +179,7 @@ def test_create_vm_core_success(
     assert vm_config_arg.cloud_init_mode == CloudInitMode.NO_CLOUD_NET
     assert vm_config_arg.extra_drives == []
     mock_manager.register.assert_called_once()
-    mock_popen.assert_called_once()
+    assert mock_popen.call_count == 2
     mock_write_pid.assert_called_once()
 
 
