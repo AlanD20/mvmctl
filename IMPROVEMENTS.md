@@ -1,3 +1,5 @@
+When making these changes. Ensure that there will be NO DEPRECATION messages/codes are left over. This project is under active development and IS NOT READY FOR PRODUCTION YET.
+
 Metadata:
 - the binaries>firecracker should not contain jailer_path
 - the binaries>firecracker should not contain active_binary_path
@@ -50,4 +52,6 @@ Codebase Maintainability:
 - move values from constants.py to defaults.yaml for cloud-init
 - add the entire cloud-init config to --output-config with cloud-init as the key, then under it all the user-data, meta-data, network-config
 - config_gen.py line 227 must come from defaults.yaml!!
-
+- move `mvm vm logs` to `mvm logs`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
+- move `mvm vm ssh` to `mvm ssh`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
+- change `cli/asset.py` to `cli/bin.py` to be consistent with the top command name, , DO NOT LEAVE DEPRECATION NOTES, project is in development state
