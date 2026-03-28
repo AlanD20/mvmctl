@@ -607,14 +607,14 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
     mvm_keys_dir = Path.home() / ".cache" / "mvmctl" / "keys"
     if mvm_keys_dir.exists():
         for f in sorted(mvm_keys_dir.iterdir()):
-            if f.is_file() and f.suffix != ".pub" and not f.name.startswith("."):
+            if f.is_file() and f.suffix not in (".pub", ".json") and not f.name.startswith("."):
                 return f
     ssh_dir = Path.home() / ".ssh"
     if ssh_dir.exists():
         for f in sorted(ssh_dir.iterdir()):
             if (
                 f.is_file()
-                and not f.name.endswith(".pub")
+                and not f.name.endswith((".pub", ".json"))
                 and not f.name.startswith(".")
                 and f.name not in ("known_hosts", "config", "authorized_keys")
             ):

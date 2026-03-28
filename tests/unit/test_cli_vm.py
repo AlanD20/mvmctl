@@ -5,7 +5,7 @@ from click.testing import CliRunner as ClickCliRunner
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mvmctl.cli.vm import app
+from mvmctl.cli.vm import app, _resolve_ssh_key_for_vm
 from mvmctl.exceptions import MVMError
 from mvmctl.main import app as main_app
 from mvmctl.models.vm import VMInstance, VMState
@@ -593,3 +593,41 @@ def test_prune_dry_run(mocker: MockerFixture):
     result = runner.invoke(app, ["prune", "--dry-run"])
     assert result.exit_code == 0
     assert "Dry run" in result.output
+
+
+
+
+def test_resolve_ssh_key_excludes_registry_json(tmp_path, monkeypatch):
+    """Verify that registry.json is excluded from SSH key auto-discovery.
+    
+    The _resolve_ssh_key_for_vm function should skip files with .json suffix
+    when auto-discovering SSH keys from the cache directory.
+    """
+    from pathlib import Path
+    
+    # Create the keys directory structure in the temp path
+    # The function looks in Path.home() / ".cache" / "mvmctl" / "keys"
+    # So we need to create: tmp_path/.cache/mvmctl/keys/
+    mvm_cache_dir = tmp_path / ".cache" / "mvmctl"
+    keys_dir = mvm_cache_dir / "keys"
+    keys_dir.mkdir(parents=True)
+    
+    # Create registry.json (metadata file - should be excluded due to .json suffix)
+    registry_file = keys_dir / "registry.json"
+    registry_file.write_text('{"metadata": "test"}')
+    
+    # Create id_test (mock private key - should be selected)
+    key_file = keys_dir / "id_test"
+    key_file.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n")
+    
+    # Patch Path.home() to return our temp directory
+    # This makes the function look in tmp_path/.cache/mvmctl/keys/
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    
+    # Call the function with None to trigger auto-discovery
+    result = _resolve_ssh_key_for_vm(None)
+    
+    # Assert that the returned path is id_test, NOT registry.json
+    assert result is not None, "Expected a key to be found"
+    assert result.name == "id_test", f"Expected 'id_test' but got '{result.name}'"
+    assert "registry.json" not in str(result), "registry.json should be excluded from auto-discovery"
