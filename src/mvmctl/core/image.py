@@ -23,7 +23,6 @@ from mvmctl.constants import (
 from mvmctl.exceptions import ConfigError, ImageError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.http import download_file as _download_file
-from mvmctl.utils.process import privileged_cmd
 from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
@@ -420,28 +419,11 @@ def create_ext4_from_tar(
             check=True,
         )
 
-        # Format as ext4
         subprocess.run(
-            ["mkfs.ext4", str(output_path)],
+            ["mkfs.ext4", "-d", str(tar_path), str(output_path)],
             capture_output=True,
             check=True,
         )
-
-        # Mount and extract
-        with tempfile.TemporaryDirectory() as mnt:
-            subprocess.run(
-                privileged_cmd(["mount", "-o", "loop", str(output_path), mnt]),
-                check=True,
-                capture_output=True,
-            )
-            try:
-                subprocess.run(
-                    ["tar", "-xf", str(tar_path), "-C", mnt],
-                    capture_output=True,
-                    check=True,
-                )
-            finally:
-                subprocess.run(privileged_cmd(["umount", mnt]), check=False, capture_output=True)
 
         logger.info("Created %s", output_path.name)
         return True
@@ -647,7 +629,6 @@ _FORMAT_HANDLERS: dict[str, Callable[[Path, Path, int, int | None, list[str] | N
 }
 
 
-
 def _validate_downloaded_file(download_path: Path, format: str) -> None:
     """Validate that a downloaded file is valid for its format.
 
@@ -668,6 +649,7 @@ def _validate_downloaded_file(download_path: Path, format: str) -> None:
 
     if format == "tar-rootfs":
         import subprocess
+
         try:
             subprocess.run(
                 ["tar", "-tf", str(download_path)],
@@ -684,6 +666,7 @@ def _validate_downloaded_file(download_path: Path, format: str) -> None:
 
     elif format == "squashfs":
         import subprocess
+
         try:
             subprocess.run(
                 ["unsquashfs", "-l", str(download_path)],
