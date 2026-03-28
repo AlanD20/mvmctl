@@ -1,12 +1,15 @@
+import functools
+import importlib.resources
 import logging
+import textwrap
 from pathlib import Path
 from typing import Any
 
 import yaml
+from jinja2 import StrictUndefined
+from jinja2.sandbox import SandboxedEnvironment
 
 from mvmctl.constants import (
-    DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD,
-    DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
     DEFAULT_DNS_NAMESERVERS,
     DEFAULT_GUEST_NETWORK_IFACE,
     REQUIRED_ISO_TOOL,
@@ -72,10 +75,83 @@ def _generate_network_config_v2(guest_ip: str, gateway: str, prefix_len: int) ->
                 "dhcp4": False,
                 "addresses": [f"{guest_ip}/{prefix_len}"],
                 "routes": [{"to": "default", "via": gateway}],
-                "nameservers": {"addresses": [gateway, *DEFAULT_DNS_NAMESERVERS]},
+                "nameservers": {"addresses": list(DEFAULT_DNS_NAMESERVERS)},
             }
         },
     }
+
+
+@functools.lru_cache(maxsize=1)
+def _load_cloud_init_template() -> str:
+    """Load the cloud-init template from the assets directory.
+
+    Returns:
+        The template string content.
+    """
+    template_path = importlib.resources.files("mvmctl.assets") / "cloud-init.template.yaml"
+    return template_path.read_text()
+
+
+def _render_cloud_init_template(
+    vm_name: str,
+    user: str,
+    guest_ip: str,
+    gateway: str,
+    prefix_len: int,
+    ssh_pub_key: str | None = None,
+) -> dict[str, str]:
+    """Render the cloud-init template with the given parameters.
+
+    Uses SandboxedEnvironment with StrictUndefined for security.
+
+    Args:
+        vm_name: VM name for hostname and instance-id.
+        user: SSH username.
+        guest_ip: Guest IP address.
+        gateway: Gateway IP address.
+        prefix_len: Network prefix length.
+        ssh_pub_key: Optional SSH public key.
+
+    Returns:
+        Dictionary with keys 'user_data', 'meta_data', 'network_config', 'nocloud_cfg'.
+    """
+    env = SandboxedEnvironment(undefined=StrictUndefined)
+    template_str = _load_cloud_init_template()
+    template = env.from_string(template_str)
+
+    rendered = template.render(
+        vm_name=vm_name,
+        user=user,
+        guest_ip=guest_ip,
+        gateway=gateway,
+        prefix_len=prefix_len,
+        ssh_pub_key=ssh_pub_key,
+    )
+
+    # Parse the rendered YAML sections
+    # The template uses literal block scalars (|) with indented content
+    result: dict[str, str] = {}
+    current_key: str | None = None
+    current_content: list[str] = []
+
+    for line in rendered.splitlines():
+        if line.endswith(": |") or line.endswith(":|>") or line.endswith(":|-"):
+            # Found a new section header (literal block scalar)
+            if current_key is not None:
+                # Preserve indentation by joining without stripping
+                result[current_key] = "\n".join(current_content)
+            current_key = line.rsplit(":", 1)[0]
+            current_content = []
+        elif current_key is not None:
+            current_content.append(line)
+
+    if current_key is not None:
+        result[current_key] = "\n".join(current_content)
+
+    for key, value in result.items():
+        result[key] = textwrap.dedent(value).lstrip("\n")
+
+    return result
 
 
 def write_cloud_init(
@@ -104,16 +180,22 @@ def write_cloud_init(
         skip_network_config: If True, skip writing network-config file.
             Used for NO_CLOUD_NET mode where kernel ip= configures networking.
     """
-    meta_data = {"instance-id": vm_name, "local-hostname": vm_name}
-    (cloud_init_dir / "meta-data").write_text(yaml.dump(meta_data, default_flow_style=False))
+    # Load and render template for meta-data and network-config
+    rendered = _render_cloud_init_template(
+        vm_name=vm_name,
+        user=user,
+        guest_ip=guest_ip,
+        gateway=gateway,
+        prefix_len=prefix_len,
+        ssh_pub_key=ssh_pub_key,
+    )
 
-    # Use v2 network config for systemd-networkd compatibility (cloud-init 24.0+)
-    # Skip for NO_CLOUD_NET mode - kernel ip= already configures networking
+    # Write meta-data from template (always)
+    (cloud_init_dir / "meta-data").write_text(rendered["meta_data"])
+
+    # Write network-config from template (unless skip_network_config=True)
     if not skip_network_config:
-        network_config = _generate_network_config_v2(guest_ip, gateway, prefix_len)
-        (cloud_init_dir / "network-config").write_text(
-            yaml.dump(network_config, default_flow_style=False)
-        )
+        (cloud_init_dir / "network-config").write_text(rendered["network_config"])
 
     if custom_user_data is not None:
         ud: dict[str, Any] = {}
@@ -147,47 +229,18 @@ def write_cloud_init(
                             break
                     if not user_found:
                         users_list.append({"name": user, "ssh-authorized-keys": [ssh_pub_key]})
-        # Inject network disable for NO_CLOUD_NET mode
-        if skip_network_config:
-            if "network" in ud:
-                logger.warning(
-                    "Custom user-data already contains 'network' key; "
-                    "cloud-init network stage may interfere with kernel ip= config. "
-                    "Consider setting network.config to 'disabled' in your custom user-data."
-                )
-            else:
-                ud["network"] = {"config": "disabled"}
+        if "network" in ud:
+            logger.warning(
+                "Custom user-data already contains 'network' key; "
+                "cloud-init network stage will apply it. "
+                "Ensure this is intentional."
+            )
         (cloud_init_dir / "user-data").write_text(
             "#cloud-config\n" + yaml.dump(ud, default_flow_style=False)
         )
     else:
-        ud = {
-            "users": ["default"],
-            "package_update": False,
-            "package_upgrade": False,
-            "runcmd": [DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD],
-            "final_message": DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
-        }
-        # For NO_CLOUD_NET mode: disable cloud-init's network stage so it doesn't
-        # overwrite the kernel's ip= static IP configuration with DHCP.
-        # The kernel's ip= parameter sets up networking early; cloud-init must not
-        # reconfigure the interface afterward.
-        if skip_network_config:
-            ud["network"] = {"config": "disabled"}
-        if ssh_pub_key:
-            ud["users"] = [
-                "default",
-                {
-                    "name": user,
-                    "groups": "sudo",
-                    "shell": "/bin/bash",
-                    "sudo": "ALL=(ALL) NOPASSWD:ALL",
-                    "ssh-authorized-keys": [ssh_pub_key],
-                },
-            ]
-        (cloud_init_dir / "user-data").write_text(
-            "#cloud-config\n" + yaml.dump(ud, default_flow_style=False)
-        )
+        # Use template for user-data when no custom user-data provided
+        (cloud_init_dir / "user-data").write_text(rendered["user_data"])
 
 
 def create_cloud_init_iso(cloud_init_dir: Path, output_iso: Path) -> None:

@@ -3,6 +3,19 @@
 
 user_data: |
   #cloud-config
+  # Hostname configuration (will be replaced by setup scripts)
+  hostname: {{vm_name}}
+  fqdn: {{vm_name}}.local
+
+  # DNS Configuration
+  manage_resolv_conf: true
+  resolv_conf:
+    nameservers:
+      - 1.1.1.1
+      - 8.8.8.8
+    searchdomains:
+      - local
+
   users:
     - default
     {% if ssh_pub_key %}
@@ -13,12 +26,30 @@ user_data: |
       ssh-authorized-keys:
         - {{ssh_pub_key}}
     {% endif %}
+
+  # Package installation
   package_update: false
   package_upgrade: false
+  packages:
+    - openssh-server
+    - curl
+    - wget
+    - git
+    - net-tools
+    - vim
+    - tmux
+    - netcat-openbsd
+    - iputils-ping
+    - htop
+    - cloud-init
+
   {% if ssh_pub_key %}
   runcmd:
+    - systemctl enable ssh
+    - systemctl start ssh
     - systemctl disable --now snapd.appliance.service 2>/dev/null || true
   {% endif %}
+
   final_message: "mvmctl VM provisioning complete"
 
 meta_data: |
@@ -26,17 +57,20 @@ meta_data: |
   local-hostname: {{vm_name}}
 
 network_config: |
-  version: 1
-  config:
-    - type: physical
-      name: eth0
-      subnets:
-        - type: static
-          address: {{guest_ip}}/{{prefix_len}}
-          gateway: {{gateway}}
-          dns_nameservers:
-            - 8.8.8.8
-            - 1.1.1.1
+  version: 2
+  ethernets:
+    eth0:
+      dhcp4: false
+      dhcp6: false
+      addresses:
+        - {{guest_ip}}/{{prefix_len}}
+      routes:
+        - to: default
+          via: {{gateway}}
+      nameservers:
+        addresses:
+          - 8.8.8.8
+          - 1.1.1.1
 
 nocloud_cfg: |
   datasource_list:

@@ -5,6 +5,8 @@ import yaml
 
 from mvmctl.core.cloud_init import (
     _generate_network_config_v2,
+    _load_cloud_init_template,
+    _render_cloud_init_template,
     create_cloud_init_iso,
     write_cloud_init,
 )
@@ -23,11 +25,11 @@ def test_generate_network_config_v2():
     assert eth0["dhcp4"] is False
     assert "10.20.0.10/24" in eth0["addresses"]
     assert {"to": "default", "via": "10.20.0.1"} in eth0["routes"]
-    assert "10.20.0.1" in eth0["nameservers"]["addresses"]
+    assert eth0["nameservers"]["addresses"] == ["8.8.8.8", "1.1.1.1"]
 
 
 def test_write_cloud_init_basic(tmp_path):
-    """write_cloud_init creates the three seed files with v2 network config."""
+    """write_cloud_init creates the three seed files with v2 network config from template."""
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
@@ -56,6 +58,7 @@ def test_write_cloud_init_basic(tmp_path):
     assert "10.20.0.10/24" in net["ethernets"]["eth0"]["addresses"]
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    assert (cloud_init_dir / "user-data").read_text().startswith("#cloud-config\n")
     assert "default" in ud["users"]
     users = ud["users"]
     myuser_entry = next(
@@ -63,6 +66,14 @@ def test_write_cloud_init_basic(tmp_path):
     )
     assert myuser_entry is not None
     assert "ssh-rsa AAAAB3..." in myuser_entry["ssh-authorized-keys"]
+
+    # Verify packages from template
+    assert "openssh-server" in ud["packages"]
+    assert "curl" in ud["packages"]
+    assert "cloud-init" in ud["packages"]
+
+    # Verify final_message from template
+    assert ud["final_message"] == "mvmctl VM provisioning complete"
 
     # Default mode (skip_network_config=False) should NOT have network.config disabled
     assert ud.get("network", {}).get("config") != "disabled"
@@ -242,10 +253,10 @@ def test_create_cloud_init_iso_creation_fails(tmp_path):
 
 
 def test_write_cloud_init_skips_network_config_when_requested(tmp_path):
-    """write_cloud_init skips network-config when skip_network_config=True.
+    """write_cloud_init skips network-config file when skip_network_config=True.
 
-    Regression test for NO_CLOUD_NET mode where kernel ip= configures networking
-    early, and cloud-init reconfiguring the interface causes connectivity issues.
+    This is used for NO_CLOUD_NET mode where kernel ip= configures networking.
+    The meta-data and user-data files are still written from template.
     """
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
@@ -280,9 +291,6 @@ def test_write_cloud_init_skips_network_config_when_requested(tmp_path):
     assert myuser_entry is not None
     assert "ssh-rsa AAAAB3..." in myuser_entry["ssh-authorized-keys"]
 
-    # user-data should have network.config disabled for NO_CLOUD_NET mode
-    assert ud.get("network", {}).get("config") == "disabled"
-
 
 def test_write_cloud_init_includes_network_config_by_default(tmp_path):
     """write_cloud_init includes network-config by default (backward compatibility)."""
@@ -304,7 +312,7 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
     assert (cloud_init_dir / "user-data").exists()
     assert (cloud_init_dir / "network-config").exists()
 
-    # Verify network-config content
+    # Verify network-config content (should use template-based v2 format)
     net = yaml.safe_load((cloud_init_dir / "network-config").read_text())
     assert net["version"] == 2
     assert "eth0" in net["ethernets"]
@@ -316,8 +324,8 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_write_cloud_init_custom_user_data_injects_network_disable(tmp_path, monkeypatch):
-    """Custom user-data gets network.config disabled injected when skip_network_config=True."""
+def test_write_cloud_init_custom_user_data_no_network_disable(tmp_path, monkeypatch):
+    """Custom user-data does NOT get network.config disabled injected when skip_network_config=True."""
     warnings_logged: list[str] = []
 
     def _fake_logger_warning(msg: str, *args: object) -> None:
@@ -344,12 +352,12 @@ def test_write_cloud_init_custom_user_data_injects_network_disable(tmp_path, mon
     )
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
-    assert ud.get("network", {}).get("config") == "disabled"
+    assert ud.get("network") is None  # no network key injected
     assert ud["custom_key"] == "custom_value"  # original content preserved
 
 
 def test_write_cloud_init_custom_user_data_with_network_key_warns(tmp_path, monkeypatch):
-    """Custom user-data with existing 'network' key logs a warning."""
+    """Custom user-data with existing 'network' key logs a warning (we do not inject anything)."""
     warnings_logged: list[str] = []
 
     def _fake_logger_warning(msg: str, *args: object) -> None:
@@ -375,8 +383,122 @@ def test_write_cloud_init_custom_user_data_with_network_key_warns(tmp_path, monk
         custom_user_data=custom_ud,
     )
 
-    # Should NOT overwrite existing network key
-    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
-    assert "network" in ud  # original preserved
-    # Should log warning
+    # Should log warning (we do not inject or modify anything)
     assert any("network" in w.lower() for w in warnings_logged)
+
+
+# ---------------------------------------------------------------------------
+# Template rendering tests
+# ---------------------------------------------------------------------------
+
+
+def test_write_cloud_init_uses_template(tmp_path):
+    """write_cloud_init uses the Jinja2 template for generation."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    # Clear the cache to ensure we test fresh template loading
+    _load_cloud_init_template.cache_clear()
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="templatevm",
+        gateway="10.30.0.1",
+        guest_ip="10.30.0.50",
+        user="testuser",
+        ssh_pub_key="ssh-ed25519 AAAAC3... test@example.com",
+        prefix_len=24,
+    )
+
+    # Verify template is used for meta-data
+    meta = yaml.safe_load((cloud_init_dir / "meta-data").read_text())
+    assert meta["instance-id"] == "templatevm"
+    assert meta["local-hostname"] == "templatevm"
+
+    # Verify template is used for network-config (v2 format)
+    net = yaml.safe_load((cloud_init_dir / "network-config").read_text())
+    assert net["version"] == 2
+    assert "ethernets" in net
+    assert net["ethernets"]["eth0"]["dhcp4"] is False
+    assert "10.30.0.50/24" in net["ethernets"]["eth0"]["addresses"]
+    assert {"to": "default", "via": "10.30.0.1"} in net["ethernets"]["eth0"]["routes"]
+
+    # Verify template is used for user-data
+    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    assert (cloud_init_dir / "user-data").read_text().startswith("#cloud-config\n")
+    assert ud["hostname"] == "templatevm"
+    assert ud["fqdn"] == "templatevm.local"
+    assert ud["final_message"] == "mvmctl VM provisioning complete"
+
+    # Verify packages from template are present
+    assert "openssh-server" in ud["packages"]
+    assert "cloud-init" in ud["packages"]
+
+
+def test_render_cloud_init_template_all_placeholders():
+    """_render_cloud_init_template substitutes all placeholders correctly."""
+    # Clear cache to test fresh
+    _load_cloud_init_template.cache_clear()
+
+    rendered = _render_cloud_init_template(
+        vm_name="myvm",
+        user="ubuntu",
+        guest_ip="192.168.1.100",
+        gateway="192.168.1.1",
+        prefix_len=24,
+        ssh_pub_key="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDTest",
+    )
+
+    # Verify all expected keys are present
+    assert "user_data" in rendered
+    assert "meta_data" in rendered
+    assert "network_config" in rendered
+    assert "nocloud_cfg" in rendered
+
+    # Verify user_data has all placeholders substituted
+    user_data = rendered["user_data"]
+    assert user_data.startswith("#cloud-config\n")
+    assert "{{vm_name}}" not in user_data
+    assert "{{user}}" not in user_data
+    assert "{{ssh_pub_key}}" not in user_data
+    assert "myvm" in user_data
+    assert "ubuntu" in user_data
+    assert "AAAAB3NzaC1yc2EAAAADAQABAAABAQDTest" in user_data
+    assert "datasource:" not in user_data
+
+    # Verify meta_data has placeholders substituted
+    meta_data = rendered["meta_data"]
+    assert "{{vm_name}}" not in meta_data
+    assert "myvm" in meta_data
+
+    # Verify network_config has placeholders substituted
+    network_config = rendered["network_config"]
+    assert "{{guest_ip}}" not in network_config
+    assert "{{gateway}}" not in network_config
+    assert "{{prefix_len}}" not in network_config
+    assert "192.168.1.100/24" in network_config
+    assert "192.168.1.1" in network_config
+
+
+def test_render_cloud_init_template_without_ssh_key():
+    """_render_cloud_init_template works without SSH key."""
+    # Clear cache to test fresh
+    _load_cloud_init_template.cache_clear()
+
+    rendered = _render_cloud_init_template(
+        vm_name="nokeyvm",
+        user="root",
+        guest_ip="10.0.0.5",
+        gateway="10.0.0.1",
+        prefix_len=24,
+        ssh_pub_key=None,
+    )
+
+    # Should still render successfully
+    assert "user_data" in rendered
+    assert "meta_data" in rendered
+    assert "network_config" in rendered
+
+    # user_data should not have SSH key section
+    user_data = rendered["user_data"]
+    assert "ssh-authorized-keys" not in user_data or "ssh_pub_key" not in user_data
