@@ -485,19 +485,6 @@ def test_boot_args_rootfstype_from_metadata():
     assert "rootfstype=xfs" in boot_args
 
 
-def test_boot_args_local_mode_explicit():
-    """LOCAL mode (explicit) uses file-based nocloud datasource."""
-    vm_config = VMConfig(
-        name="local-vm",
-        kernel_path=Path("/tmp/vmlinux"),
-        rootfs_path=Path("/tmp/rootfs.ext4"),
-        cloud_init_mode=CloudInitMode.LOCAL,
-    )
-    generator = ConfigGenerator(vm_config)
-    config = generator.generate()
-    boot_args = config["boot-source"]["boot_args"]
-    assert "ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/" in boot_args
-
 def test_boot_args_includes_net_ifnames_zero():
     """Boot args should include net.ifnames=0 to prevent interface renaming."""
     vm_config = VMConfig(
@@ -514,6 +501,7 @@ def test_boot_args_includes_net_ifnames_zero():
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "net.ifnames=0" in boot_args
+
 
 def test_boot_args_includes_eth0_none_when_guest_ip_set():
     """Boot args should include ::eth0:none when guest_ip is set."""

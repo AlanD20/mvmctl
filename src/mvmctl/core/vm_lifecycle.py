@@ -65,7 +65,6 @@ from mvmctl.core.network_manager import (
     get_network,
     release_network_ip,
 )
-from mvmctl.core.rootfs_seed import copy_rootfs_for_vm, inject_cloud_init_to_rootfs
 from mvmctl.core.ssh import resolve_ssh_key
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.exceptions import CloudInitError, MVMError, NetworkError, VMNotFoundError
@@ -504,14 +503,7 @@ def create_vm(
     tap_name = _generate_tap_name(network_name, name)
     bridge = net_config.bridge
 
-    # For LOCAL mode, create per-VM rootfs copy
-    # For other modes, use original image directly
-    if effective_mode == CloudInitMode.LOCAL:
-        # Copy rootfs to per-VM location (preserves original)
-        rootfs_path = copy_rootfs_for_vm(image_path, vm_dir, image_fs_type)
-    else:
-        # Use original image directly (for NO_CLOUD_NET, CUSTOM, DISABLED)
-        rootfs_path = image_path
+    rootfs_path = image_path
 
     # Handle cloud-init based on mode
     cloud_init_iso: Path | None = None
@@ -572,24 +564,6 @@ def create_vm(
                 except NetworkError:
                     pass
                 raise
-        elif effective_mode == CloudInitMode.LOCAL:
-            # Inject cloud-init seed into per-VM rootfs copy
-            try:
-                inject_cloud_init_to_rootfs(rootfs_path, cloud_init_dir, image_fs_type)
-                logger.info("Injected cloud-init seed into per-VM rootfs: %s", rootfs_path)
-            except MVMError as e:
-                # Cleanup on failure
-                shutil.rmtree(vm_dir, ignore_errors=True)
-                try:
-                    release_network_ip(network_name, name)
-                except NetworkError:
-                    pass
-                raise MVMError(f"Failed to inject cloud-init seed: {e}") from e
-
-            # No ISO needed for LOCAL mode - seed is in rootfs
-            cloud_init_iso = None
-            nocloud_net_url = None
-            nocloud_server_pid = None
         elif effective_mode == CloudInitMode.AUTO:
             # Fallback to ISO mode for AUTO (should not reach here due to default)
             cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
@@ -597,6 +571,10 @@ def create_vm(
                 create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
             except CloudInitError as e:
                 shutil.rmtree(vm_dir, ignore_errors=True)
+                try:
+                    release_network_ip(network_name, name)
+                except NetworkError:
+                    pass
                 raise MVMError(f"Failed to create cloud-init ISO: {e}") from e
 
     socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None

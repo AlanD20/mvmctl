@@ -226,9 +226,6 @@ class ConfigGenerator:
             ds_arg = f"ds=nocloud;seedfrom={self.vm_config.nocloud_net_url}"
         elif self.vm_config.cloud_init_mode == CloudInitMode.DISABLED:
             ds_arg = ""
-        elif self.vm_config.cloud_init_mode == CloudInitMode.LOCAL:
-            # Local rootfs seed: files injected at /var/lib/cloud/seed/nocloud/
-            ds_arg = "ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/"
         else:
             ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
 
