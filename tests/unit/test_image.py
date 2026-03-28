@@ -373,6 +373,7 @@ def test_fetch_image_already_exists(tmp_path: Path):
     assert result == final
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
 @patch("mvmctl.core.image.download_file")
@@ -380,6 +381,7 @@ def test_fetch_image_qcow2(
     mock_download: MagicMock,
     mock_convert: MagicMock,
     mock_extract: MagicMock,
+    mock_validate: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -834,11 +836,13 @@ def test_extract_partition_from_raw_unknown_fs_type(
     assert result.suffix == ".img"
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.create_ext4_from_tar")
 @patch("mvmctl.core.image.download_file")
 def test_fetch_image_tar_rootfs(
     mock_download: MagicMock,
     mock_create: MagicMock,
+    mock_validate: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -890,6 +894,7 @@ def test_fetch_image_tar_rootfs_failure(
         fetch_image(spec, tmp_path)
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
 @patch("mvmctl.core.image.download_file")
@@ -897,6 +902,7 @@ def test_fetch_image_force_re_download(
     mock_download: MagicMock,
     mock_convert: MagicMock,
     mock_extract: MagicMock,
+    mock_validate: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -948,11 +954,13 @@ def test_fetch_image_download_failure(
         fetch_image(spec, tmp_path)
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.download_file")
 def test_fetch_image_raw_format(
     mock_download: MagicMock,
     mock_extract: MagicMock,
+    mock_validate: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -1031,6 +1039,7 @@ def test_fetch_image_qcow2_convert_fails(
     mock_extract.assert_not_called()
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
 @patch("mvmctl.core.image.download_file")
@@ -1038,6 +1047,7 @@ def test_fetch_image_qcow2_extract_fails(
     mock_download: MagicMock,
     mock_convert: MagicMock,
     mock_extract: MagicMock,
+    mock_validate: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -1061,11 +1071,13 @@ def test_fetch_image_qcow2_extract_fails(
     assert result is None
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.download_file")
 def test_fetch_image_raw_extract_fails(
     mock_download: MagicMock,
     mock_extract: MagicMock,
+    mock_validate: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -1088,6 +1100,7 @@ def test_fetch_image_raw_extract_fails(
     assert result is None
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
 @patch("mvmctl.core.image.download_file")
@@ -1095,6 +1108,7 @@ def test_fetch_image_sha256_null_skips_verification(
     mock_download: MagicMock,
     mock_convert: MagicMock,
     mock_extract: MagicMock,
+    mock_validate: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -1494,6 +1508,7 @@ def test_resolve_source_template_no_matching_keys(
 # ---------------------------------------------------------------------------
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
 @patch("mvmctl.core.image.download_file")
@@ -1501,6 +1516,7 @@ def test_fetch_image_sha256_url_ignored_when_sha256_null(
     mock_download: MagicMock,
     mock_convert: MagicMock,
     mock_extract: MagicMock,
+    mock_validate: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -1530,6 +1546,7 @@ def test_fetch_image_sha256_url_ignored_when_sha256_null(
 
 
 @patch("mvmctl.core.image._fetch_sha256_from_url", return_value="cafebabe" * 8)
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
 @patch("mvmctl.core.image.download_file")
@@ -1537,6 +1554,7 @@ def test_fetch_image_uses_templated_sha256_url(
     mock_download: MagicMock,
     mock_convert: MagicMock,
     mock_extract: MagicMock,
+    mock_validate: MagicMock,
     mock_fetch_sha: MagicMock,
     tmp_path: Path,
 ):
@@ -1567,9 +1585,11 @@ def test_fetch_image_uses_templated_sha256_url(
 
 
 @patch("mvmctl.core.image._resolve_source_template")
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.download_file")
 def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
     mock_download: MagicMock,
+    mock_validate: MagicMock,
     mock_resolve: MagicMock,
     tmp_path: Path,
 ):
@@ -1610,9 +1630,11 @@ def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
 
 
 @patch("mvmctl.core.image._resolve_source_template")
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.download_file")
 def test_fetch_image_ubuntu_fc_resolves_source(
     mock_download: MagicMock,
+    mock_validate: MagicMock,
     mock_resolve: MagicMock,
     tmp_path: Path,
 ):
@@ -1953,8 +1975,9 @@ def test_extract_partition_from_raw_value_error(
 # ---------------------------------------------------------------------------
 
 
+@patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.download_file")
-def test_fetch_image_squashfs_format(mock_download: MagicMock, tmp_path: Path):
+def test_fetch_image_squashfs_format(mock_download: MagicMock, mock_validate: MagicMock, tmp_path: Path):
     """Test fetch_image handles squashfs format."""
     spec = ImageSpec(
         id="test-squashfs",
@@ -2249,3 +2272,450 @@ def test_fetch_sha256_network_error(mock_urlopen: MagicMock):
     result = _fetch_sha256_from_url("https://example.com/checksum.sha256")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _validate_downloaded_file
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.core.image.subprocess.run")
+def test_validate_downloaded_file_tar_success(mock_run: MagicMock, tmp_path: Path):
+    """Test _validate_downloaded_file passes for valid tar files."""
+    from mvmctl.core.image import _validate_downloaded_file
+
+    download_path = tmp_path / "image.tar"
+    download_path.write_bytes(b"tar content")
+
+    mock_run.return_value = MagicMock(returncode=0)
+
+    # Should not raise
+    _validate_downloaded_file(download_path, "tar-rootfs")
+
+    mock_run.assert_called_once_with(
+        ["tar", "-tf", str(download_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+@patch("mvmctl.core.image.subprocess.run")
+def test_validate_downloaded_file_tar_invalid(mock_run: MagicMock, tmp_path: Path):
+    """Test _validate_downloaded_file raises ImageError for invalid tar files."""
+    import subprocess
+    from mvmctl.core.image import _validate_downloaded_file
+
+    download_path = tmp_path / "image.tar"
+    download_path.write_bytes(b"invalid tar content")
+
+    mock_run.side_effect = subprocess.CalledProcessError(1, "tar", stderr="invalid tar")
+
+    with pytest.raises(ImageError, match="Invalid tar file"):
+        _validate_downloaded_file(download_path, "tar-rootfs")
+
+    # Should cleanup the file
+    assert not download_path.exists()
+
+
+@patch("mvmctl.core.image.subprocess.run")
+def test_validate_downloaded_file_tar_not_found(mock_run: MagicMock, tmp_path: Path):
+    """Test _validate_downloaded_file raises ImageError when tar command not found."""
+    from mvmctl.core.image import _validate_downloaded_file
+
+    download_path = tmp_path / "image.tar"
+    download_path.write_bytes(b"tar content")
+
+    mock_run.side_effect = FileNotFoundError("tar not found")
+
+    with pytest.raises(ImageError, match="tar command not found"):
+        _validate_downloaded_file(download_path, "tar-rootfs")
+
+    assert not download_path.exists()
+
+
+@patch("mvmctl.core.image.subprocess.run")
+def test_validate_downloaded_file_squashfs_success(mock_run: MagicMock, tmp_path: Path):
+    """Test _validate_downloaded_file passes for valid squashfs files."""
+    from mvmctl.core.image import _validate_downloaded_file
+
+    download_path = tmp_path / "image.squashfs"
+    download_path.write_bytes(b"squashfs content")
+
+    mock_run.return_value = MagicMock(returncode=0)
+
+    # Should not raise
+    _validate_downloaded_file(download_path, "squashfs")
+
+    mock_run.assert_called_once_with(
+        ["unsquashfs", "-l", str(download_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+
+@patch("mvmctl.core.image.subprocess.run")
+def test_validate_downloaded_file_squashfs_invalid(mock_run: MagicMock, tmp_path: Path):
+    """Test _validate_downloaded_file raises ImageError for invalid squashfs files."""
+    import subprocess
+    from mvmctl.core.image import _validate_downloaded_file
+
+    download_path = tmp_path / "image.squashfs"
+    download_path.write_bytes(b"invalid squashfs content")
+
+    mock_run.side_effect = subprocess.CalledProcessError(1, "unsquashfs", stderr="invalid squashfs")
+
+    with pytest.raises(ImageError, match="Invalid squashfs file"):
+        _validate_downloaded_file(download_path, "squashfs")
+
+    # Should cleanup the file
+    assert not download_path.exists()
+
+
+def test_validate_downloaded_file_squashfs_not_found(tmp_path: Path):
+    """Test _validate_downloaded_file raises ImageError when unsquashfs command not found."""
+    from mvmctl.core.image import _validate_downloaded_file
+
+    download_path = tmp_path / "image.squashfs"
+    download_path.write_bytes(b"squashfs content")
+
+    with patch("mvmctl.core.image.subprocess.run") as mock:
+        mock.side_effect = FileNotFoundError("unsquashfs not found")
+
+        with pytest.raises(ImageError, match="unsquashfs command not found"):
+            _validate_downloaded_file(download_path, "squashfs")
+
+        assert not download_path.exists()
+
+
+def test_validate_downloaded_file_empty(tmp_path: Path):
+    """Test _validate_downloaded_file raises ImageError for empty files."""
+    from mvmctl.core.image import _validate_downloaded_file
+
+    download_path = tmp_path / "image.tar"
+    download_path.write_bytes(b"")
+
+    with pytest.raises(ImageError, match="Downloaded file is empty"):
+        _validate_downloaded_file(download_path, "tar-rootfs")
+
+    # Should cleanup the file
+    assert not download_path.exists()
+
+
+def test_validate_downloaded_file_missing(tmp_path: Path):
+    """Test _validate_downloaded_file raises ImageError when file doesn't exist."""
+    from mvmctl.core.image import _validate_downloaded_file
+
+    download_path = tmp_path / "nonexistent.tar"
+
+    with pytest.raises(ImageError, match="Downloaded file not found"):
+        _validate_downloaded_file(download_path, "tar-rootfs")
+
+
+# ---------------------------------------------------------------------------
+# fetch_image stale artifact cleanup
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.core.image._validate_downloaded_file")
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_cleans_stale_download_on_force(
+    mock_download: MagicMock,
+    mock_convert: MagicMock,
+    mock_extract: MagicMock,
+    mock_validate: MagicMock,
+    tmp_path: Path,
+):
+    """Test that fetch_image removes stale .download file when force=True."""
+    from mvmctl.core.image import fetch_image
+
+    spec = ImageSpec(
+        id="ubuntu-24.04",
+        image_type="test",
+        version="test",
+        name="Ubuntu 24.04",
+        source="https://example.com/ubuntu.qcow2",
+        format="qcow2",
+        convert_to="ext4",
+        size_mib=4096,
+        sha256="a" * 64,
+    )
+
+    # Create a stale .download file
+    download_path = tmp_path / "ubuntu-24.04.download"
+    download_path.write_bytes(b"stale download data")
+
+    expected_output = tmp_path / "ubuntu-24.04.ext4"
+    mock_download.return_value = True
+    mock_convert.return_value = True
+    mock_extract.return_value = expected_output
+
+    result = fetch_image(spec, tmp_path, force=True)
+
+    assert result == expected_output
+    # Verify stale file was removed before download
+    mock_download.assert_called_once()
+    # Verify the .download file is cleaned up after success
+    assert not download_path.exists()
+
+
+@patch("mvmctl.core.image._validate_downloaded_file")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_validates_after_download(
+    mock_download: MagicMock,
+    mock_validate: MagicMock,
+    tmp_path: Path,
+):
+    """Test that fetch_image calls _validate_downloaded_file after successful download."""
+    from mvmctl.core.image import fetch_image
+
+    spec = ImageSpec(
+        id="alpine",
+        image_type="test",
+        version="test",
+        name="Alpine Linux",
+        source="https://example.com/alpine.tar.gz",
+        format="tar-rootfs",
+        convert_to="ext4",
+        size_mib=1024,
+        sha256="a" * 64,
+    )
+
+    expected_output = tmp_path / "alpine.ext4"
+    mock_download.return_value = True
+
+    # Mock handler
+    with patch("mvmctl.core.image._FORMAT_HANDLERS") as mock_handlers:
+        mock_handler = MagicMock(return_value=expected_output)
+        mock_handlers.get.return_value = mock_handler
+
+        result = fetch_image(spec, tmp_path)
+
+        assert result == expected_output
+        # Validation should be called after download
+        mock_validate.assert_called_once()
+        # Handler should be called after validation
+        mock_handler.assert_called_once()
+
+
+@patch("mvmctl.core.image._validate_downloaded_file")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_validates_before_handler(
+    mock_download: MagicMock,
+    mock_validate: MagicMock,
+    tmp_path: Path,
+):
+    """Test that validation happens before handler is called."""
+    from mvmctl.core.image import fetch_image
+
+    spec = ImageSpec(
+        id="alpine",
+        image_type="test",
+        version="test",
+        name="Alpine Linux",
+        source="https://example.com/alpine.tar.gz",
+        format="tar-rootfs",
+        convert_to="ext4",
+        size_mib=1024,
+        sha256="a" * 64,
+    )
+
+    mock_download.return_value = True
+    mock_validate.side_effect = ImageError("Validation failed")
+
+    with patch("mvmctl.core.image._FORMAT_HANDLERS") as mock_handlers:
+        mock_handler = MagicMock(return_value=tmp_path / "alpine.ext4")
+        mock_handlers.get.return_value = mock_handler
+
+        with pytest.raises(ImageError, match="Validation failed"):
+            fetch_image(spec, tmp_path)
+
+        # Handler should NOT be called if validation fails
+        mock_handler.assert_not_called()
+
+
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_cleans_download_on_handler_failure(
+    mock_download: MagicMock,
+    mock_convert: MagicMock,
+    mock_extract: MagicMock,
+    tmp_path: Path,
+):
+    """Test that .download file is cleaned up when handler fails."""
+    from mvmctl.core.image import fetch_image
+
+    spec = ImageSpec(
+        id="ubuntu-24.04",
+        image_type="test",
+        version="test",
+        name="Ubuntu 24.04",
+        source="https://example.com/ubuntu.qcow2",
+        format="qcow2",
+        convert_to="ext4",
+        size_mib=4096,
+        sha256="a" * 64,
+    )
+
+    download_path = tmp_path / "ubuntu-24.04.download"
+    download_path.write_bytes(b"download data")
+
+    mock_download.return_value = True
+    mock_convert.side_effect = ImageError("Conversion failed")
+
+    with pytest.raises(ImageError):
+        fetch_image(spec, tmp_path)
+
+    # .download file should be cleaned up
+    assert not download_path.exists()
+
+
+@patch("mvmctl.core.image.extract_partition_from_raw")
+@patch("mvmctl.core.image.convert_qcow2_to_raw")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_cleans_download_on_unknown_format(
+    mock_download: MagicMock,
+    mock_convert: MagicMock,
+    mock_extract: MagicMock,
+    tmp_path: Path,
+):
+    """Test that .download file is cleaned up when format is unknown."""
+    from mvmctl.core.image import fetch_image
+
+    spec = ImageSpec(
+        id="unknown",
+        image_type="test",
+        version="test",
+        name="Unknown",
+        source="https://example.com/image.xyz",
+        format="xyz",
+        convert_to="ext4",
+        size_mib=2048,
+        sha256="a" * 64,
+    )
+
+    download_path = tmp_path / "unknown.download"
+    download_path.write_bytes(b"download data")
+
+    mock_download.return_value = True
+
+    with pytest.raises(ImageError, match="Unknown format"):
+        fetch_image(spec, tmp_path)
+
+    # .download file should be cleaned up
+    assert not download_path.exists()
+
+
+def test_fetch_image_no_stale_cleanup_without_force(tmp_path: Path):
+    """Test that stale .download file is NOT cleaned when force=False."""
+    from mvmctl.core.image import fetch_image
+
+    spec = ImageSpec(
+        id="alpine",
+        image_type="test",
+        version="test",
+        name="Alpine Linux",
+        source="https://example.com/alpine.tar.gz",
+        format="tar-rootfs",
+        convert_to="ext4",
+        size_mib=1024,
+        sha256="a" * 64,
+    )
+
+    # Create a stale .download file and final image
+    download_path = tmp_path / "alpine.download"
+    download_path.write_bytes(b"stale download data")
+    final_path = tmp_path / "alpine.ext4"
+    final_path.write_bytes(b"existing image")
+
+    with patch("mvmctl.core.image.download_file") as mock_download:
+        result = fetch_image(spec, tmp_path, force=False)
+
+        # Should return early without downloading
+        assert result == final_path
+        mock_download.assert_not_called()
+        # Stale file should remain
+        assert download_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# fetch_image validation integration
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.core.image.subprocess.run")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_tar_validation_failure_cleans_up(
+    mock_download: MagicMock,
+    mock_run: MagicMock,
+    tmp_path: Path,
+):
+    """Test that failed tar validation cleans up the download file."""
+    import subprocess
+    from mvmctl.core.image import fetch_image
+
+    spec = ImageSpec(
+        id="alpine",
+        image_type="test",
+        version="test",
+        name="Alpine Linux",
+        source="https://example.com/alpine.tar.gz",
+        format="tar-rootfs",
+        convert_to="ext4",
+        size_mib=1024,
+        sha256="a" * 64,
+    )
+
+    download_path = tmp_path / "alpine.download"
+    download_path.write_bytes(b"invalid tar data")
+
+    mock_download.return_value = True
+    # tar validation fails
+    mock_run.side_effect = subprocess.CalledProcessError(1, "tar", stderr="corrupt")
+
+    with pytest.raises(ImageError, match="Invalid tar file"):
+        fetch_image(spec, tmp_path)
+
+    # Download file should be cleaned up
+    assert not download_path.exists()
+
+
+@patch("mvmctl.core.image.subprocess.run")
+@patch("mvmctl.core.image.download_file")
+def test_fetch_image_squashfs_validation_failure_cleans_up(
+    mock_download: MagicMock,
+    mock_run: MagicMock,
+    tmp_path: Path,
+):
+    """Test that failed squashfs validation cleans up the download file."""
+    import subprocess
+    from mvmctl.core.image import fetch_image
+
+    spec = ImageSpec(
+        id="ubuntu-fc",
+        image_type="test",
+        version="test",
+        name="Ubuntu FC",
+        source="https://example.com/ubuntu.squashfs",
+        format="squashfs",
+        convert_to="ext4",
+        size_mib=2048,
+        sha256="a" * 64,
+    )
+
+    download_path = tmp_path / "ubuntu-fc.download"
+    download_path.write_bytes(b"invalid squashfs data")
+
+    mock_download.return_value = True
+    # unsquashfs validation fails
+    mock_run.side_effect = subprocess.CalledProcessError(1, "unsquashfs", stderr="corrupt")
+
+    with pytest.raises(ImageError, match="Invalid squashfs file"):
+        fetch_image(spec, tmp_path)
+
+    # Download file should be cleaned up
+    assert not download_path.exists()

@@ -647,6 +647,58 @@ _FORMAT_HANDLERS: dict[str, Callable[[Path, Path, int, int | None, list[str] | N
 }
 
 
+
+def _validate_downloaded_file(download_path: Path, format: str) -> None:
+    """Validate that a downloaded file is valid for its format.
+
+    Args:
+        download_path: Path to the downloaded file
+        format: Format type (tar-rootfs, squashfs, etc.)
+
+    Raises:
+        ImageError: If validation fails
+    """
+    if not download_path.exists():
+        raise ImageError("Downloaded file not found")
+
+    file_size = download_path.stat().st_size
+    if file_size == 0:
+        download_path.unlink(missing_ok=True)
+        raise ImageError("Downloaded file is empty")
+
+    if format == "tar-rootfs":
+        import subprocess
+        try:
+            subprocess.run(
+                ["tar", "-tf", str(download_path)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            download_path.unlink(missing_ok=True)
+            raise ImageError("Invalid tar file: tar validation failed") from e
+        except FileNotFoundError as e:
+            download_path.unlink(missing_ok=True)
+            raise ImageError("tar command not found") from e
+
+    elif format == "squashfs":
+        import subprocess
+        try:
+            subprocess.run(
+                ["unsquashfs", "-l", str(download_path)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            download_path.unlink(missing_ok=True)
+            raise ImageError("Invalid squashfs file: unsquashfs validation failed") from e
+        except FileNotFoundError as e:
+            download_path.unlink(missing_ok=True)
+            raise ImageError("unsquashfs command not found") from e
+
+
 def fetch_image(
     spec: ImageSpec,
     output_dir: Path,
@@ -692,24 +744,38 @@ def fetch_image(
     no_checksum = resolved_sha256 is None
 
     download_path = output_dir / f"{spec.id}.download"
-    download_file(
-        source,
-        download_path,
-        expected_sha256=resolved_sha256,
-        allow_missing_checksum=no_checksum,
-        silent_missing_checksum=intentional_no_checksum,
-    )
 
-    handler = _FORMAT_HANDLERS.get(spec.format)
-    if handler is None:
+    # Clean up stale .download file if force=True
+    if force and download_path.exists():
+        logger.info("Removing stale download file: %s", download_path)
+        download_path.unlink()
+
+    try:
+        download_file(
+            source,
+            download_path,
+            expected_sha256=resolved_sha256,
+            allow_missing_checksum=no_checksum,
+            silent_missing_checksum=intentional_no_checksum,
+        )
+
+        # Validate downloaded file before processing
+        _validate_downloaded_file(download_path, spec.format)
+
+        handler = _FORMAT_HANDLERS.get(spec.format)
+        if handler is None:
+            download_path.unlink(missing_ok=True)
+            raise ImageError(f"Unknown format: {spec.format}")
+        actual_path = handler(download_path, final_path, spec.size_mib, partition, None)
+
+        # Cleanup download on success
         download_path.unlink(missing_ok=True)
-        raise ImageError(f"Unknown format: {spec.format}")
-    actual_path = handler(download_path, final_path, spec.size_mib, partition, None)
 
-    # Cleanup download
-    download_path.unlink(missing_ok=True)
-
-    return actual_path
+        return actual_path
+    except Exception:
+        # Cleanup download on any failure
+        download_path.unlink(missing_ok=True)
+        raise
 
 
 def load_images_config(config_path: Path) -> list[ImageSpec]:
