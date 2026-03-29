@@ -688,9 +688,8 @@ def create_vm(
         if net_config.nat_enabled:
             setup_nat(bridge)
     else:
-        # Bridge exists - reconcile NAT rules if enabled
-        if net_config.nat_enabled:
-            setup_nat(bridge)
+        # Bridge exists - NAT already configured when bridge was created; no-op
+        pass
 
     try:
         create_tap(tap_name, bridge=bridge)

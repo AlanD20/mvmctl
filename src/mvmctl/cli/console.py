@@ -15,8 +15,8 @@ from mvmctl.api.vms import (
     connect_to_relay,
     disconnect_from_relay,
     get_vm_manager,
-    send_console_input,
     read_console_output,  # noqa: F401 (exported for tests)
+    send_console_input,
 )
 from mvmctl.api.vms import (
     get_console_state as _get_console_state,

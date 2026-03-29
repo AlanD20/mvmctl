@@ -1,11 +1,12 @@
 """Integration tests for console workflow."""
 
-from pathlib import Path
 import signal
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mvmctl.constants import env_var
 from mvmctl.models import VMInstance
+
 
 class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
