@@ -4,8 +4,8 @@ import signal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from mvmctl.models import VMInstance
 from mvmctl.constants import env_var
+from mvmctl.models import VMInstance
 
 
 class TestConsoleWorkflow:
