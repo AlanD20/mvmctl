@@ -80,6 +80,7 @@ ALLOWED_STRINGS = {
 FILE_EXCEPTIONS = {
     # constants.py itself obviously has hardcoded values
     CONSTANTS_FILE: "constants definition file",
+    PROJECT_ROOT / "core" / "rootfs_injector.py": "rootfs_injector constant holder",
 }
 
 
