@@ -18,6 +18,7 @@ from mvmctl.constants import (
     DEFAULT_FC_LOG_LEVEL,
     DEFAULT_FC_METRICS_FILENAME,
     DEFAULT_GUEST_MAC_DEFAULT,
+    DEFAULT_GUEST_NETWORK_BOOT_MODE,
     DEFAULT_GUEST_NETWORK_IFACE,
     DEFAULT_LIBGUESTFS_SEED_DIR,
     DEFAULT_VM_ROOT_FS_TYPE,
@@ -216,7 +217,7 @@ class ConfigGenerator:
         # For NO_CLOUD_NET mode, also include kernel ip= for initial network bringup
         # cloud-init's network-config will ensure the IP stays consistent
         if self.vm_config.guest_ip:
-            ip_arg = f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:off"
+            ip_arg = f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:{DEFAULT_GUEST_NETWORK_BOOT_MODE}"
         else:
             ip_arg = ""
         lsm_flags = self.vm_config.lsm_flags or None

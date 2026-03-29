@@ -354,6 +354,7 @@ DEFAULT_BOOT_PCI_OFF: Final[str] = _require_str(("vm", "boot", "pci_off"))
 DEFAULT_GUEST_MAC_DEFAULT: Final[str] = _require_str(("vm", "network_guest", "mac_default"))
 DEFAULT_GUEST_MAC_PREFIX: Final[str] = _require_str(("vm", "network_guest", "mac_prefix"))
 DEFAULT_GUEST_NETWORK_IFACE: Final[str] = _require_str(("vm", "network_guest", "iface"))
+DEFAULT_GUEST_NETWORK_BOOT_MODE: Final[str] = _require_str(("vm", "network_guest", "boot_mode"))
 
 # ---------------------------------------------------------------------------
 # Firecracker driver defaults (loaded from assets/defaults.yaml)

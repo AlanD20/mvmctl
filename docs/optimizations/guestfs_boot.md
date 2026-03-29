@@ -101,12 +101,12 @@ Using a pre-built fixed appliance completely bypasses the `supermin` checking lo
 
 **Implementation:**
 ```bash
-# First, create the fixed appliance once:
-mkdir -p ~/.cache/mvmctl/appliance
-libguestfs-make-fixed-appliance ~/.cache/mvmctl/appliance
+# First, create the fixed appliance once: this is performed by mvm cache init
+mkdir -p $MVM_CACHE_DIR/appliance
+libguestfs-make-fixed-appliance $MVM_CACHE_DIR/appliance
 
 # Then, use it by setting LIBGUESTFS_PATH:
-export LIBGUESTFS_PATH=~/.cache/mvmctl/appliance
+export LIBGUESTFS_PATH=$MVM_CACHE_DIR/appliance
 ```
 
 ## Recommended Implementation Pattern

@@ -46,6 +46,7 @@ vm:
     mac_default: 02:FC:00:00:00:01
     mac_prefix: 02:FC
     iface: eth0
+    boot_mode: "off"  # Kernel IP boot parameter: "off" | "none" | "on"
   firecracker:
     log_level: Debug
     drive_cache_type: Unsafe

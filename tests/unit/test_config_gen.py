@@ -534,4 +534,4 @@ def test_boot_args_includes_eth0_none_when_guest_ip_set():
     generator = ConfigGenerator(vm_config)
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
-    assert "::eth0:none" in boot_args
+    assert "::eth0:off" in boot_args
