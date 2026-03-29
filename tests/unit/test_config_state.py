@@ -181,8 +181,8 @@ def test_get_assets_config_cache_dirs_under_cache(cache_dir: Path) -> None:
         "logs_dir",
     ):
         assert assets[key].startswith(str(cache_dir)), f"{key} not under cache dir"
-    # keys_dir should be derived from config_dir
-    assert assets["keys_dir"].startswith(str(get_config_dir()))
+    # keys_dir is cache-backed along with other asset dirs
+    assert assets["keys_dir"].startswith(str(cache_dir))
 
 
 def test_get_assets_config_persisted_as_nested_key(config_dir: Path) -> None:
