@@ -120,6 +120,10 @@ fallbacks:
   firecracker_bin: firecracker
   kernel_build_jobs: 1
   max_parallel_downloads: 4
+libguestfs:
+  launch_timeout: 4
+  fallback_root_device: /dev/sda1
+  seed_dir: /var/lib/cloud/seed/nocloud
 urls:
   firecracker:
     github_releases_api: https://api.github.com/repos/firecracker-microvm/firecracker/releases

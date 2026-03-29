@@ -449,14 +449,43 @@ Ports are allocated from the range **8000-9000** with automatic collision detect
 
 Produces a standalone single-file binary — no Python runtime required on the target machine:
 
+### Standard Build
+
 ```bash
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
-pip install -e ".[dev]" pyinstaller
-pyinstaller --onefile --name mvm src/mvmctl/main.py
+uv sync --group dev --group build
+uv run python -m nuitka --onefile --output-dir=dist --output-filename=mvm \
+  --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets \
+  --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
 # Output: dist/mvm
 ./dist/mvm --version
 ```
+
+### Build with Guestfs Support (Optional)
+
+For direct cloud-init injection mode (`--cloud-init-mode direct`), the binary must include the
+`guestfs` module. Because mvmctl imports it dynamically (`importlib.import_module("guestfs")`),
+you must pass `--include-package=guestfs` explicitly — static analysis cannot detect it.
+
+> **`guestfs` is not on PyPI.** There is no `--group guestfs` uv dependency group in this repo.
+> Install the Python bindings via your distro's package manager before building.
+
+```bash
+# 1. Install system libguestfs packages + Python bindings (distro only)
+sudo apt-get install libguestfs0 libguestfs-tools python3-libguestfs supermin
+
+# 2. Sync dev/build groups (no --group guestfs needed)
+uv sync --group dev --group build
+
+# 3. Build — explicitly include guestfs because of dynamic import
+uv run python -m nuitka --onefile --output-dir=dist --output-filename=mvm \
+  --include-package=mvmctl --include-package=guestfs \
+  --include-data-dir=src/mvmctl/assets=mvmctl/assets \
+  --lto=yes --enable-plugin=anti-bloat src/mvmctl/main.py
+```
+
+See [docs/RELEASE.md](docs/RELEASE.md) for detailed build instructions.
 
 ---
 

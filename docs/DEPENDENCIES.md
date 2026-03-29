@@ -42,7 +42,86 @@ These binaries are required for importing images, converting formats, and genera
 
 *Note: `mkisofs` and `genisoimage` are interchangeable; `mvmctl` will use whichever is available.*
 
-## 3. Kernel Build Dependencies (Optional)
+## 3. libguestfs Dependencies (Optional)
+
+For cloud-init injection into disk images via direct injection mode (`--cloud-init-mode direct`), mvmctl uses libguestfs. This requires both system libraries and Python bindings.
+
+### System Packages (Required for Runtime)
+
+These provide the libguestfs C library, appliance tools, and supermin:
+
+**Debian/Ubuntu:**
+```bash
+sudo apt-get install libguestfs0 libguestfs-tools supermin
+```
+
+**RHEL/CentOS/Fedora:**
+```bash
+sudo dnf install libguestfs libguestfs-tools supermin
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S libguestfs supermin
+```
+
+### Python Bindings (Required for Development/Builds)
+
+The Python `guestfs` module is needed when:
+- Running mvmctl from source with direct injection mode
+- Building standalone binaries with guestfs support
+
+**Install via system package manager (required — `guestfs` is not on PyPI):**
+
+**Debian/Ubuntu:**
+```bash
+sudo apt-get install python3-libguestfs
+```
+
+**RHEL/CentOS/Fedora:**
+```bash
+sudo dnf install python3-libguestfs
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S python-libguestfs
+```
+
+> **Note:** The `guestfs` Python package is **not available on PyPI** and cannot be installed via
+> `uv` or `pip`. There is no `--group guestfs` dependency group in this repository.
+> You must install the Python bindings through your distribution's package manager before
+> building or running mvmctl from source with direct injection mode.
+
+### Sudoers Configuration
+
+libguestfs uses `supermin` to build the appliance. Add to `/etc/sudoers.d/mvm`:
+
+```
+%mvm ALL=(ALL) NOPASSWD: /usr/bin/supermin
+```
+
+Or if supermin is in a different location:
+
+```
+%mvm ALL=(ALL) NOPASSWD: /usr/libexec/supermin/*
+```
+
+### Verification
+
+Check libguestfs is working:
+
+```bash
+python3 -c "import guestfs; print('libguestfs available')"
+```
+
+Check supermin sudoers entry:
+
+```bash
+sg mvm -c 'sudo -n /usr/bin/supermin --version'
+```
+
+## 4. Kernel Build Dependencies (Optional)
 
 These are only required if you intend to build custom kernels from source using `mvm kernel build`.
 
@@ -64,7 +143,7 @@ These are only required if you intend to build custom kernels from source using 
 - **openssl**: `libssl-dev` (Debian/Ubuntu), `openssl` (Arch)
 - **ncurses**: `libncurses-dev` (Debian/Ubuntu), `ncurses` (Arch)
 
-## 4. Command Dependency Mapping
+## 5. Command Dependency Mapping
 
 This section maps specific `mvm` commands to the external binaries they invoke.
 
@@ -88,7 +167,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | | `ssh` | `ssh` |
 | | `logs` | (Internal Python logic) |
 
-## 5. Host System Requirements
+## 6. Host System Requirements
 
 - **Kernel Modules**:
   - `kvm`: Required for hardware-accelerated virtualization.
