@@ -1,0 +1,121 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+tasks:
+  sync:
+    desc: Install development dependencies (uv sync --group dev)
+    cmds:
+      - uv sync --group dev
+  sync-all:
+    desc: Install dev and build dependencies (required before binary builds)
+    cmds:
+      - uv sync --group dev --group build
+  lint:
+    desc: Run ruff linter (line-length=100, py313, import sorting)
+    cmds:
+      - uv run ruff check src/
+  format-check:
+    desc: Check code formatting with ruff (does not modify files)
+    cmds:
+      - uv run ruff format --check src/
+  format:
+    desc: Apply code formatting with ruff (modifies files in src/)
+    cmds:
+      - uv run ruff format src/
+  typecheck:
+    desc: Run mypy in strict mode
+    cmds:
+      - uv run mypy src/
+  test:
+    desc: Run pytest with 80% branch coverage gate
+    cmds:
+      - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=80
+  test-fast:
+    desc: Run tests without coverage — stop on first failure (fast feedback)
+    cmds:
+      - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -x -q
+  check:
+    desc: Run all quality gates — lint, format-check, typecheck, test
+    cmds:
+      - uv run ruff check src/
+      - uv run ruff format --check src/
+      - uv run mypy src/
+      - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=80
+  build:
+    desc: Build Python wheel and sdist into dist/
+    cmds:
+      - uv build
+  build-pyinstaller:
+    desc: Build standalone binary with PyInstaller (faster build, slower startup)
+    deps: [sync-all]
+    cmds:
+      - uv run pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
+  build-nuitka:
+    desc: Build standalone binary with Nuitka — production build (compiled C++, fast startup)
+    deps: [sync-all]
+    cmds:
+      - |
+        uv run python -m nuitka \
+          --onefile \
+          --output-dir=dist \
+          --output-filename=mvm \
+          --include-package=mvmctl \
+          --include-data-dir=src/mvmctl/assets=mvmctl/assets \
+          --lto=yes \
+          --enable-plugin=anti-bloat \
+          --jobs=$(nproc) \
+          src/mvmctl/main.py
+  link-guestfs:
+    desc: Links libguestfs into uv .venv (Supports Arch, Debian, Fedora, Ubuntu)
+    vars:
+      HOST_PYTHON: /usr/bin/python3
+      # Find the site-packages path from the system python
+      HOST_SITE:
+        sh: /usr/bin/python3 -c "import site; print(site.getsitepackages()[0])"
+      # Find the site-packages path from the uv venv
+      VENV_SITE:
+        sh: uv run python -c "import site; print(site.getsitepackages()[0])"
+    cmds:
+      - |
+        # 1. Clean up any old broken links first
+        rm -rf "{{.VENV_SITE}}/guestfs" "{{.VENV_SITE}}/guestfs.py" "{{.VENV_SITE}}/libguestfsmod*"
+
+        # 2. Handle Directory Layout (Debian/Ubuntu/Fedora/RHEL)
+        if [ -d "{{.HOST_SITE}}/guestfs" ]; then
+          ln -sf "{{.HOST_SITE}}/guestfs" "{{.VENV_SITE}}/"
+          echo "🚀 Linked guestfs directory (Debian/Fedora style)"
+
+        # 3. Handle Flat Layout (Arch)
+        elif [ -f "{{.HOST_SITE}}/guestfs.py" ]; then
+          ln -sf "{{.HOST_SITE}}/guestfs.py" "{{.VENV_SITE}}/guestfs.py"
+          echo "🚀 Linked guestfs.py (Arch style)"
+        else
+          echo "❌ Error: Could not find guestfs in {{.HOST_SITE}}"
+          exit 1
+        fi
+
+        # 4. Handle the Binary Module (.so)
+        # We find the file and link it both as its original name AND the generic name
+        SRC_SO=$(ls {{.HOST_SITE}}/libguestfsmod.*.so 2>/dev/null | head -n 1)
+        if [ -n "$SRC_SO" ]; then
+          SO_NAME=$(basename "$SRC_SO")
+          ln -sf "$SRC_SO" "{{.VENV_SITE}}/$SO_NAME"
+          # Link generic name to ensure Python loader finds it regardless of ABI quirks
+          ln -sf "$SRC_SO" "{{.VENV_SITE}}/libguestfsmod.so"
+          echo "🚀 Linked $SO_NAME as libguestfsmod.so"
+        else
+          echo "⚠️ Warning: libguestfsmod.so not found. System bindings might be incomplete."
+        fi
+    silent: true
+  unlink-guestfs:
+    desc: Remove all guestfs symlinks
+    vars:
+      VENV_SITE:
+        sh: uv run python -c "import site; print(site.getsitepackages()[0])"
+    cmds:
+      - rm -rf "{{.VENV_SITE}}/guestfs" "{{.VENV_SITE}}/guestfs.py" "{{.VENV_SITE}}/libguestfsmod*"
+      - echo "✨ Unlinked."
+    silent: true
+  test-guestfs:
+    desc: Verify the link works within uv/pyenv
+    cmds:
+      - uv run python -c "import guestfs; print('✅ libguestfs is active in .venv')"

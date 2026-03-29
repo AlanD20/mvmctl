@@ -204,3 +204,27 @@ Yanking does not delete the release — it marks it so that `pip install mvmctl`
   ```
 
 After yanking, immediately publish a new patch release with the fix (see "Issuing a Hotfix" above).
+
+## Appendix: Dynamic Import Handling in Compiled Binaries
+
+mvmctl uses dynamic imports for optional dependencies to keep the core runtime lightweight:
+
+| Module | Import Pattern | Nuitka Flag | PyInstaller Hook |
+|--------|---------------|-------------|------------------|
+| `guestfs` | `importlib.import_module("guestfs")` | `--include-package=guestfs` | `--hidden-import=guestfs` |
+
+### Why Explicit Inclusion Is Required
+
+Nuitka and PyInstaller perform static analysis to detect dependencies. Because mvmctl imports `guestfs` dynamically only when `--cloud-init-mode direct` is used, static analysis cannot detect this dependency. Without explicit flags:
+
+- Nuitka: Module not included → `GuestfsNotAvailableError` at runtime
+- PyInstaller: Module not included → `ModuleNotFoundError` at runtime
+
+### Build Matrix
+
+| Build Type | Command | Guestfs Support |
+|------------|---------|-----------------|
+| Minimal | `uv sync --group dev --group build` | No (nocloud-net only) |
+| Full (with guestfs) | Install `python3-libguestfs` via distro package manager, then `uv sync --group dev --group build` | Yes — `guestfs` is a system/distro package only; there is no `--group guestfs` uv group in this repo |
+
+> **Note:** Even with guestfs included in the binary, the host system must still have libguestfs0 and supermin installed. The Python bindings are bundled; the C library and appliance are system dependencies.
