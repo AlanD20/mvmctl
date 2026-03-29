@@ -93,6 +93,7 @@ def test_cleanup_vms(
 ):
     """cleanup_vms cleans stopped vms properly using persisted tap_device."""
     mock_manager = MagicMock()
+    mock_nocloud_mgr.return_value.stop_server.return_value = None
     vm1 = VMInstance(
         name="vm1",
         status=VMState.STOPPED,

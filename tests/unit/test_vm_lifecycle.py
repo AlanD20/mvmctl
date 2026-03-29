@@ -2425,6 +2425,7 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
 
     mock_resolve_ssh_key.assert_called_once_with(None)
 
+
 @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
@@ -2443,7 +2444,9 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
 @patch("mvmctl.core.vm_lifecycle.release_network_ip")
+@patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 def test_create_vm_network_failure_cleans_up_tap_iptables(
+    mock_net_mgr,
     mock_release_ip,
     mock_rmtree,
     mock_add_rules,
@@ -2496,6 +2499,7 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
 
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     mock_create_tap.return_value = None
     mock_add_rules.side_effect = NetworkError("iptables failed")
@@ -2506,4 +2510,4 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     # cleanup_tap must be called to remove TAP and iptables rules
     mock_cleanup_tap.assert_called_once()
     called_args, called_kwargs = mock_cleanup_tap.call_args
-    assert called_kwargs.get('bridge') == mock_net.bridge
+    assert called_kwargs.get("bridge") == mock_net.bridge
