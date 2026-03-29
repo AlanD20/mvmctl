@@ -72,6 +72,7 @@ def test_get_logs(mock_show_logs):
 
 
 @patch("shutil.rmtree")
+@patch("mvmctl.api.vms.teardown_nat")
 @patch("mvmctl.core.network.delete_tap")
 @patch("mvmctl.core.network.remove_iptables_forward_rules")
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
@@ -89,6 +90,7 @@ def test_cleanup_vms(
     mock_nocloud_mgr,
     mock_rm_iptables,
     mock_del_tap,
+    mock_teardown_nat,
     mock_rmtree,
 ):
     """cleanup_vms cleans stopped vms properly using persisted tap_device."""
@@ -123,5 +125,6 @@ def test_cleanup_vms(
         mock_kill.assert_called_once_with(123, 9)
         mock_rm_iptables.assert_called_once_with("mvm-def-vm1-abc", bridge="mvm-default")
         mock_del_tap.assert_called_once_with("mvm-def-vm1-abc")
+        mock_teardown_nat.assert_called_once_with("mvm-default")
         mock_manager.deregister.assert_called_once()
         mock_rmtree.assert_called_once()
