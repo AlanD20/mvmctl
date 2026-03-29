@@ -606,6 +606,49 @@ cd mvmctl
 uv sync --group dev
 ```
 
+### Working with libguestfs (direct cloud-init mode)
+
+If you're developing or testing the **direct cloud-init injection** feature (`--cloud-init-mode direct`),
+you need the `guestfs` Python bindings available in your uv virtual environment.
+Since `guestfs` is not on PyPI and must come from your system package manager, use the
+Taskfile helper to symlink the system bindings into the uv venv:
+
+**1. Install system libguestfs packages:**
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install libguestfs0 libguestfs-tools python3-libguestfs supermin
+
+# Arch Linux
+sudo pacman -S libguestfs python-libguestfs supermin
+```
+
+**2. Link guestfs into the uv venv:**
+
+```bash
+task link-guestfs
+```
+
+This creates symlinks from the system Python site-packages into the uv virtual
+environment, making `import guestfs` work under `uv run`.
+
+**3. Verify the link:**
+
+```bash
+task test-guestfs
+# ✅ libguestfs is active in .venv
+```
+
+**4. Unlink when done (optional):**
+
+```bash
+task unlink-guestfs
+```
+
+> **Note:** This linking approach is only needed for local development. When building
+> a standalone binary with Nuitka, use `--include-package=guestfs` to bundle the
+> system bindings directly (see "Build with Guestfs Support" below).
+
 ### Running tests and linting
 
 ```bash
