@@ -155,6 +155,7 @@ def test_create_vm_core_success(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -265,6 +266,7 @@ def test_create_vm_auto_mode_defaults_to_nocloud_net(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1116,6 +1118,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1220,6 +1223,7 @@ def test_create_vm_nocloud_net_starts_server(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1327,6 +1331,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1431,6 +1436,7 @@ def test_create_vm_nocloud_net_success_sets_port(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1540,6 +1546,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1657,6 +1664,7 @@ def test_firewall_failure_stops_server_and_raises(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1774,6 +1782,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1878,6 +1887,7 @@ def test_create_vm_starts_nocloud_server(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -2214,6 +2224,7 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
@@ -2306,6 +2317,7 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
@@ -2399,6 +2411,7 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_net.cidr = "10.20.0.0/24"
     mock_net.gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
@@ -2411,3 +2424,84 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     create_vm(name="myvm", image="ubuntu-22.04")
 
     mock_resolve_ssh_key.assert_called_once_with(None)
+
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
+@patch("mvmctl.core.vm_lifecycle.subprocess.run")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.cleanup_tap")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
+@patch("mvmctl.core.vm_lifecycle.release_network_ip")
+def test_create_vm_network_failure_cleans_up_tap_iptables(
+    mock_release_ip,
+    mock_rmtree,
+    mock_add_rules,
+    mock_create_tap,
+    mock_cleanup_tap,
+    mock_config_gen,
+    mock_create_iso,
+    mock_write_ci,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_subprocess_run,
+    mock_copy2,
+):
+    """If add_iptables_forward_rules() fails after create_tap(), ensure cleanup_tap() is called."""
+    from mvmctl.core.vm_lifecycle import create_vm
+    from mvmctl.exceptions import NetworkError
+
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.exists.return_value = False
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    mock_kernel_dir = MagicMock()
+    vmlinux = MagicMock()
+    vmlinux.exists.return_value = True
+    mock_kernel_dir.__truediv__.return_value = vmlinux
+    mock_get_kernels.return_value = mock_kernel_dir
+
+    mock_img_dir = MagicMock()
+    img_ext4 = MagicMock()
+    img_ext4.exists.return_value = True
+    mock_img_dir.__truediv__.return_value = img_ext4
+    mock_get_images.return_value = mock_img_dir
+
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
+    mock_get_net.return_value = mock_net
+
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+
+    mock_create_tap.return_value = None
+    mock_add_rules.side_effect = NetworkError("iptables failed")
+
+    with pytest.raises(NetworkError, match="Network setup failed"):
+        create_vm(name="myvm", image="ubuntu-22.04")
+
+    # cleanup_tap must be called to remove TAP and iptables rules
+    mock_cleanup_tap.assert_called_once_with(mock.ANY, bridge=mock_net.bridge)

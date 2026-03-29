@@ -696,6 +696,8 @@ def create_vm(
         create_tap(tap_name, bridge=bridge)
         add_iptables_forward_rules(tap_name, bridge=bridge)
     except NetworkError as e:
+        # Ensure TAP and iptables rules are cleaned up when network setup partially fails
+        cleanup_tap(tap_name, bridge=bridge)
         shutil.rmtree(vm_dir, ignore_errors=True)
         try:
             release_network_ip(network_name, name)
