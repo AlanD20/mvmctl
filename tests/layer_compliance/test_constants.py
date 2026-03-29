@@ -334,10 +334,10 @@ class TestConstantsFile:
 def test_libguestfs_constants_defined():
     from mvmctl import constants
 
-    assert hasattr(constants, "FALLBACK_LIBGUESTFS_LAUNCH_TIMEOUT")
-    assert hasattr(constants, "FALLBACK_LIBGUESTFS_ROOT_DEVICE")
-    assert hasattr(constants, "FALLBACK_LIBGUESTFS_SEED_DIR")
+    assert hasattr(constants, "DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT")
+    assert hasattr(constants, "DEFAULT_LIBGUESTFS_ROOT_DEVICE")
+    assert hasattr(constants, "DEFAULT_LIBGUESTFS_SEED_DIR")
 
-    assert isinstance(constants.FALLBACK_LIBGUESTFS_LAUNCH_TIMEOUT, int)
+    assert isinstance(constants.DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT, int)
     assert isinstance(constants.DEFAULT_LIBGUESTFS_ROOT_DEVICE, str)
     assert isinstance(constants.DEFAULT_LIBGUESTFS_SEED_DIR, str)

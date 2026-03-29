@@ -6,7 +6,7 @@ from typing import Any
 
 from mvmctl.constants import (
     DEFAULT_LIBGUESTFS_ROOT_INDICATORS,
-    FALLBACK_LIBGUESTFS_LAUNCH_TIMEOUT,
+    DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT,
     DEFAULT_LIBGUESTFS_ROOT_DEVICE,
     DEFAULT_LIBGUESTFS_SEED_DIR,
 )
@@ -130,7 +130,7 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
 
         # Launch the appliance
         try:
-            g.set_timeout(FALLBACK_LIBGUESTFS_LAUNCH_TIMEOUT)
+            g.set_timeout(DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT)
             g.launch()
         except Exception as e:
             raise GuestfsLaunchError(f"Failed to launch guestfs appliance: {e}")

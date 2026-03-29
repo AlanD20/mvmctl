@@ -67,7 +67,7 @@ class TestDetectRootPartition:
         assert result == "/dev/sda1"
 
     def test_fallback_to_configured_device_when_no_clear_root(self):
-        """Test fallback to FALLBACK_LIBGUESTFS_ROOT_DEVICE when no root indicators found."""
+        """Test fallback to DEFAULT_LIBGUESTFS_ROOT_DEVICE when no root indicators found."""
         from mvmctl.constants import DEFAULT_LIBGUESTFS_ROOT_DEVICE
 
         mock_g = Mock()
@@ -314,7 +314,7 @@ class TestConstantsUsage:
         mock_g.mkdir_p.assert_called_once_with(DEFAULT_LIBGUESTFS_SEED_DIR)
 
     def test_launch_uses_timeout_constant(self, tmp_path):
-        from mvmctl.constants import FALLBACK_LIBGUESTFS_LAUNCH_TIMEOUT
+        from mvmctl.constants import DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT
 
         rootfs_path = tmp_path / "rootfs.img"
         rootfs_path.write_text("")
@@ -333,4 +333,4 @@ class TestConstantsUsage:
             with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
                 inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
 
-        mock_g.set_timeout.assert_called_once_with(FALLBACK_LIBGUESTFS_LAUNCH_TIMEOUT)
+        mock_g.set_timeout.assert_called_once_with(DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT)
