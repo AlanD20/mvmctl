@@ -19,13 +19,15 @@ When making these changes. Ensure that there will be NO DEPRECATION messages/cod
 
 - [x] when user fetches/imports an image via `mvm image fetch/import`, the process at the end it must run 'blkid -p -s UUID -o value' on the final image that has only rootfs content, and then store the `fs_uuid` in the image's metadata. And then later when user enters `mvm vm create ...` the command must pull the `fs_uuid` of the image from metadata and use it as boot arg with root=UUID={fs_uuid}
 - [x] DO NOT COPY rootfs into vm state file! use absolute file to cached imgaes. when creating a new vm via `mvm vm create` it copies the rootfs file into the vm's state folder! the kernel and the rootfs must use the absolute path of the kernel or rootfs provided or if default is chosen, then use default's absolute path of rootfs and kernel. do not copy rootfs or kernel into each vm's state! -- THIS MUST BE REVERTED, the actual rootfs is the system, that means the size is also the system's size. maybe expose flags to increase the size!!
+    - **DISK SIZE FLAG SPECIFICATION**: Use `--disk-size` with short flag `-s`. Support single letter units: `512M` for MB, `1G` for GB (e.g., `--disk-size 512M`, `-s 1G`)
 - [x] each image has `fs_type` in the metadata file, this type must be used in the boot arg of firecracker json file which `rootfstype={fs_type}`
-- firecracker rootfs requires integrating the ssh key into the image! need to figure out a way to do this? perhaps create a copy of an image by integrating a file?
+- ~~firecracker rootfs requires integrating the ssh key into the image! need to figure out a way to do this? perhaps create a copy of an image by integrating a file?~~ **REMOVED: Feature deferred to post-4-week timeline**
 - introduce --kernel-path and --image-path to `mvm vm create` to allow custom image and kernel path
 - when `mvm vm create` throws an exception, it leaves out the directory creation of the vm state!
 - ensure root partition detection is available on both `mvm image fetch` and `mvm image import`
 - nocloud-net port from the flag is not passed dynamically in the code.
-- The vm state folder per vm must be changed from vm name to full sha for the folder name to make it unique even if duplicate names are being used.
+- The vm state folder per vm must be changed from vm name to full sha for the folder name to make it unique even if duplicate names are being used. The full sha is the **64-character SHA256 hash** (not the 6-character short ID).
+    - **NOTE**: NO MIGRATION FROM LEGACY FOLDER NAME TO NEW FOLDER NAME IS REQUIRED. Project is under active development, changes will not break anything. When implemented, clear the cache and perform manual QA to ensure everything works.
 - Add `mvm vm inspect <id|--name|-n` to view the metadata of the target vm
 
 # Kernel
@@ -37,15 +39,27 @@ When making these changes. Ensure that there will be NO DEPRECATION messages/cod
 # CLI
 
 - implement progress bar when fetching kernel/image/binary
+    - **PROGRESS BAR REQUIREMENTS**: Must be **ASCII text-based**, do NOT use Rich Progress API or any graphical progress bars. Use simple text output like: `[####      ] 45%` or `Downloading... 45% (4.2MB/10MB)`
+    - In non-TTY environments (CI/scripts), progress bars should be disabled or show simple text progress
 - firecracker failure and exit codes arent caught by `mvm vm ls`, it should appropriately follow and track if pid exist or exit out! each vm has `firecracker.pid` in the vm folder state. use this pid to track! and ideally a way to show the exit code in the `status` field.
 - when running `ls` on EVERY SUPPORTED commands such as `mvm image ls`, etc.. it must read through the metadata and check if it has a path, file exist? if no, add (X) mark to indicate it's deleted and only metadata left. if it's a network bridge, check if it's still there. etc.. the state check with actual environment depends on the command, for image, kernel, vm, key, bin, they are file state checks, but for network, it's a check with the actual bridge if it still exists!
 - when user enters `rm` for any resources such as kernel, image, vm, keys, etc.. it shouldn't prompt y/n. It MUST PROCEED WITH REMOVAL.
 - DO NOT ALLOW REMOVAL OF networks, images, kernels, if they are used by an active VM. The CLI must utilize the metadata to ensure there isnt an active VM using these.
 - Add size to `kernel`, `image` ls commands
-- Add `*` to default resource names. This applies to `mvm kernel|image|key|network` commands! if there is a field for default when running `ls` remove it and use `* ` as a prefix for the name of the resource.
+- Add `*` to default resource names. This applies to `mvm kernel|image|key|network` commands! if there is a field for default when running `ls` remove it and use `* ` as a prefix for the name of the resource. **Format is asterisk + space prefix** (e.g., "* ubuntu-24.04").
 - introduce `mvm cache init` and `mvm cache prune` where the `cache_init` function executes functions. DO NOT IMPLEMENT caching within this function, each caching mechanism must have their own function to do the caching and clear the caching. This will make the cache_init more maintainable and exactly define what is being cached. Currently caching is only done for guestfs appliance.
+    - **MODULAR FUNCTION DEFINITION**: Define separate functions for each resource: `cache_init_guestfs_appliance()`, `cache_init_vms()`, `cache_init_images()`, `cache_init_kernels()`, `cache_init_networks()` for initialization. Define `cache_prune_guestfs_appliance()`, `cache_prune_vms()`, `cache_prune_networks()`, `cache_prune_images()`, `cache_prune_kernels()` for pruning.
     - the `mvm cache prune` must also call the invalidation of each cache by invoking their functions. NO DIRECT INVALIDATION IS IMPLEMENTED WITHIN THIS FUNCTION. currently cache pruning will remove: guestfs appliance from cache folder, remove all VMs that are not in `running` state, remove images that do not have any reference from an active vm, remove kernels that do not have any reference from an active vm, remove networks that do not have any reference from an active vm. Each of these must have their own function such as cache_prune_networks() to only prune stale networks, etc...
+    - **EXTENDED REQUIREMENTS**: 
+        - Add per-resource prune commands: `mvm cache prune vm` to only prune VMs, `mvm cache prune network` to prune unused networks, `mvm cache prune image` to prune unused images, `mvm cache prune kernel` to prune unused kernels
+        - Add `--include-stopped` flag to include stopped VMs in pruning (by default, only ERROR state VMs are pruned)
+        - Add `--include-running` flag to include running VMs (use with caution)
+        - Add `--all|-a` flag to prune everything (VMs, networks, images, kernels, guestfs) but shows user prompt to confirm before proceeding
 - the `mvm configure` command must be renamed to `mvm init`. and it must call `mvm host init` and `mvm cache init`, remove the user prompts to download image/kernel/keys. REMINDER, PROJECT IS UNDER ACTIVE DEVELOPMENT.
+    - **EXTENDED REQUIREMENTS**: 
+        - `mvm init` must be **interactive by default** - runs `mvm host init` and `mvm cache init`, then asks user which firecracker binary version to download
+        - If `--non-interactive` flag is passed, it downloads the **latest** firecracker binary version automatically without prompting
+        - This is designed for quick user onboarding
 
 # Implementation reviews
 
@@ -56,6 +70,14 @@ When making these changes. Ensure that there will be NO DEPRECATION messages/cod
 
 Complete overhaul of every single path of the CLI application and handle any user facing error gracefully as a friendly output. DO NOT SHOW EXCEPTIONS and STACK TRACES, unless DEBUG MODE is enabled. Every single path of the entire application must support this mode, ensure that every single path of the code has this particularly more emphasis on complex logics requiring sequential state in order to allow the cli application to perform an action.
 - introduce a new build type that enables debugging at finer grain for easier debugging issues. a value defined in constants.py file where it derives the DEBUG_MODE value from defaults.yaml file! this will enable debug mode throughout the cli application.
+    - **DEBUG_MODE DEFAULT STRUCTURE** (add to defaults.yaml):
+        ```yaml
+        debug:
+          enabled: false
+          verbose_errors: false
+          show_tracebacks: false
+        ```
+    - Debug mode is **OFF by default** (`enabled: false`)
 - DEBUG MODE also introduces verbosity of errors, warnings, stack traces, etc.. to improve debugging throughout the application when an error occurs.
 
 # Following UI errors must be more friendlier for user
@@ -79,7 +101,7 @@ Complete overhaul of every single path of the CLI application and handle any use
 - Ensure ALL 'yaml id' references in the code are replaced with internal id.
 - move values from constants.py to defaults.yaml for cloud-init
 - add the entire cloud-init config to --output-config with cloud-init as the key, then under it all the user-data, meta-data, network-config
-- config_gen.py line 227 must come from defaults.yaml!!
+- ~~config_gen.py line 227 must come from defaults.yaml!!~~ **REMOVED: Skip this requirement**
 - move `mvm vm logs` to `mvm logs`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
 - move `mvm vm ssh` to `mvm ssh`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
 - change `cli/asset.py` to `cli/bin.py` to be consistent with the top command name, , DO NOT LEAVE DEPRECATION NOTES, project is in development state
@@ -90,4 +112,5 @@ Complete overhaul of every single path of the CLI application and handle any use
     - user runs `mvm console <vm-sha-id>` or --name/-n for vm name, then it connects to an interactive console-like to the vm where user can send commands and it shows back the output.
     - if user accesses the vm at the initial stage of vm creation `mvm console -n r1` then it must also output the initial streaming of the boot where firecracker exposes the serial output to this!
     - the services/ layer, we need to understand how the implementation looks like. If it's an implementation where it spawns a subprocess with its own pid, then yes lets go with services/ layer implementation. But if it does not have any pid on its own, then we will go with the same paterrn where core -> api -> cli similar with other commands.
+    - **STATUS: ALREADY IMPLEMENTED** - Located in services/console_relay/, cli/console.py
 

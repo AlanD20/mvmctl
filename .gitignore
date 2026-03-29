@@ -97,6 +97,7 @@ legacy/**/*.socket
 
 # ========== AGENT WORK DIRECTORIES (preserve locally, exclude from git) ==========
 .opencode/
+.reports/
 .sisyphus/
 docs/analyses/
 .full-review/
