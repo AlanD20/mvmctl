@@ -253,14 +253,13 @@ class FirecrackerClient:
             return False
 
 
-def get_vm_socket_path(vm_name: str) -> Path | None:
-    """Get socket path for a VM from cache directory."""
-    from mvmctl.utils.fs import get_vm_dir
+def get_vm_socket_path(vm_hash: str) -> Path | None:
+    """Get socket path for a VM from cache directory by its hash."""
+    from mvmctl.utils.fs import get_vm_dir_by_hash
 
-    vm_dir = get_vm_dir(vm_name)
+    vm_dir = get_vm_dir_by_hash(vm_hash)
     for name in [
         DEFAULT_FC_API_SOCKET_FILENAME,
-        f"{vm_name}.socket",
         "firecracker.socket",
         "firecracker.sock",
         "socket",

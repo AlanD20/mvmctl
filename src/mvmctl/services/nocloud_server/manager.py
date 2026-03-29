@@ -93,35 +93,60 @@ class NoCloudNetServerManager:
             f"No available port found in range {port_min}-{port_max} after {max_retries} attempts"
         )
 
-    def _get_pid_file_path(self, vm_name: str) -> Path:
+    def _try_bind_specific_port(self, vm_name: str, gateway_ip: str, port: int) -> int | None:
+        """Try to bind to a specific port.
+
+        Args:
+            vm_name: Name of the VM (used for logging context)
+            gateway_ip: IP address to bind the port to
+            port: Specific port number to try
+
+        Returns:
+            The port number if successfully bound, None otherwise
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(CONST_NO_CLOUD_NET_BIND_TIMEOUT_S)
+                sock.bind((gateway_ip, port))
+                logger.debug(
+                    "Bound to requested port %d for VM %s on %s", port, vm_name, gateway_ip
+                )
+                return port
+        except OSError:
+            logger.debug(
+                "Requested port %d not available for VM %s on %s", port, vm_name, gateway_ip
+            )
+            return None
+
+    def _get_pid_file_path(self, vm_hash: str) -> Path:
         """Get the PID file path for a VM's nocloud server.
 
         Args:
-            vm_name: Name of the VM
+            vm_hash: VM hash (64-char SHA256)
 
         Returns:
             Path to the nocloud-server.pid file
         """
-        from mvmctl.utils.fs import get_vm_dir
+        from mvmctl.utils.fs import get_vm_dir_by_hash
 
-        return get_vm_dir(vm_name) / "nocloud-server.pid"
+        return get_vm_dir_by_hash(vm_hash) / "nocloud-server.pid"
 
-    def _stop_by_pid_file(self, vm_name: str) -> bool:
+    def _stop_by_pid_file(self, vm_hash: str) -> bool:
         """Stop a server using only its PID file (recovery path).
 
         This method is used when the server is not tracked in memory
         but a PID file exists from a previous manager instance.
 
         Args:
-            vm_name: Name of the VM whose server should be stopped
+            vm_hash: VM hash (64-char SHA256)
 
         Returns:
             True if a server was stopped using the PID file, False otherwise
         """
-        pid_file = self._get_pid_file_path(vm_name)
+        pid_file = self._get_pid_file_path(vm_hash)
 
         if not pid_file.exists():
-            logger.debug("No PID file found for VM %s", vm_name)
+            logger.debug("No PID file found for VM hash %s", vm_hash)
             return False
 
         try:
@@ -137,9 +162,9 @@ class NoCloudNetServerManager:
             # Process exists, send SIGTERM
             os.kill(pid, signal.SIGTERM)
             logger.info(
-                "Stopped NoCloud-net server via PID file recovery (PID: %d) for VM %s",
+                "Stopped NoCloud-net server via PID file recovery (PID: %d) for VM hash %s",
                 pid,
-                vm_name,
+                vm_hash,
             )
         except ProcessLookupError:
             logger.debug("NoCloud-net server process (PID: %d) already terminated", pid)
@@ -155,18 +180,27 @@ class NoCloudNetServerManager:
 
         return True
 
-    def start_server(self, vm_name: str, cloud_init_dir: Path, gateway_ip: str) -> tuple[str, int]:
+    def start_server(
+        self,
+        vm_name: str,
+        cloud_init_dir: Path,
+        gateway_ip: str,
+        vm_hash: str | None = None,
+        preferred_port: int = 0,
+    ) -> tuple[str, int]:
         """Start a NoCloud-net server for the specified VM.
 
         Allocates a port, creates a server subprocess bound to gateway_ip,
         and starts it as a persistent background process.
 
         Args:
-            vm_name: Unique name identifying the VM
+            vm_name: Unique name identifying the VM (for tracking)
             cloud_init_dir: Directory containing cloud-init files (meta-data,
                 user-data, network-config)
             gateway_ip: IP address to bind the server to (typically the
                 bridge gateway IP, e.g., "10.20.0.1")
+            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
+            preferred_port: Preferred port number (0 for auto-allocation)
 
         Returns:
             Tuple of (url, port) where url is the base URL for cloud-init
@@ -180,11 +214,16 @@ class NoCloudNetServerManager:
             if vm_name in self._servers:
                 raise MVMError(f"Server already running for VM: {vm_name}")
 
-            # Allocate port by binding to gateway_ip
-            port = self._allocate_port_for_gateway(vm_name, gateway_ip)
+            # Try preferred port first if specified, otherwise auto-allocate
+            port: int | None = None
+            if preferred_port > 0:
+                port = self._try_bind_specific_port(vm_name, gateway_ip, preferred_port)
+            if port is None:
+                port = self._allocate_port_for_gateway(vm_name, gateway_ip)
 
-            # Create PID file path in VM directory
-            pid_file = self._get_pid_file_path(vm_name)
+            # Create PID file path in VM directory (hash-based, fallback to name)
+            lookup_key = vm_hash if vm_hash is not None else vm_name
+            pid_file = self._get_pid_file_path(lookup_key)
 
             # Spawn subprocess via sys.executable -m mvmctl.services.nocloud_server.process
             server_cmd = [
@@ -230,7 +269,7 @@ class NoCloudNetServerManager:
 
             return f"http://{gateway_ip}:{port}/", port
 
-    def stop_server(self, vm_name: str) -> None:
+    def stop_server(self, vm_name: str, vm_hash: str | None = None) -> None:
         """Stop the server for the specified VM.
 
         Idempotent operation - safe to call multiple times. If no server
@@ -240,7 +279,8 @@ class NoCloudNetServerManager:
         instance by reading from the PID file on disk.
 
         Args:
-            vm_name: Name of the VM whose server should be stopped
+            vm_name: Name of the VM whose server should be stopped (for tracking)
+            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
         """
         with self._thread_lock:
             info = self._servers.get(vm_name)
@@ -275,7 +315,8 @@ class NoCloudNetServerManager:
                 logger.info("Stopped NoCloud-net server for VM %s", vm_name)
             else:
                 # Server not tracked in memory - try PID file recovery
-                self._stop_by_pid_file(vm_name)
+                lookup_key = vm_hash if vm_hash is not None else vm_name
+                self._stop_by_pid_file(lookup_key)
 
     def get_server(self, vm_name: str) -> None:
         """Get the running server info for the specified VM.
@@ -295,11 +336,12 @@ class NoCloudNetServerManager:
             # Server now runs as subprocess - return None
             return None
 
-    def get_server_pid(self, vm_name: str) -> int | None:
+    def get_server_pid(self, vm_name: str, vm_hash: str | None = None) -> int | None:
         """Get the PID of the running server for the specified VM.
 
         Args:
-            vm_name: Name of the VM
+            vm_name: Name of the VM (for tracking)
+            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
 
         Returns:
             The subprocess PID if running, None otherwise
@@ -308,19 +350,20 @@ class NoCloudNetServerManager:
             info = self._servers.get(vm_name)
             if info is None:
                 # Try to get PID from PID file
-                return self._get_pid_from_file(vm_name)
+                lookup_key = vm_hash if vm_hash is not None else vm_name
+                return self._get_pid_from_file(lookup_key)
             return info.get("pid")
 
-    def _get_pid_from_file(self, vm_name: str) -> int | None:
+    def _get_pid_from_file(self, vm_hash: str) -> int | None:
         """Get PID from PID file if it exists and process is running.
 
         Args:
-            vm_name: Name of the VM
+            vm_hash: VM hash (64-char SHA256)
 
         Returns:
             PID if file exists and process is running, None otherwise
         """
-        pid_file = self._get_pid_file_path(vm_name)
+        pid_file = self._get_pid_file_path(vm_hash)
         if not pid_file.exists():
             return None
 
@@ -332,11 +375,12 @@ class NoCloudNetServerManager:
         except (ValueError, OSError, ProcessLookupError, PermissionError):
             return None
 
-    def is_server_running(self, vm_name: str) -> bool:
+    def is_server_running(self, vm_name: str, vm_hash: str | None = None) -> bool:
         """Check if the server is currently running.
 
         Args:
-            vm_name: Name of the VM
+            vm_name: Name of the VM (for tracking)
+            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
 
         Returns:
             True if server is running, False otherwise
@@ -355,66 +399,89 @@ class NoCloudNetServerManager:
                     return False
 
             # Not in memory - check PID file
-            return self._get_pid_from_file(vm_name) is not None
+            lookup_key = vm_hash if vm_hash is not None else vm_name
+            return self._get_pid_from_file(lookup_key) is not None
 
-    def cleanup_orphans(self) -> None:
+    def cleanup_orphans(self) -> list[str]:
         """Clean up any orphaned servers from previous crashed sessions.
 
         This method is called during initialization to ensure no stale
         servers remain. It scans for nocloud-server.pid files where the
-        associated processes are no longer running and cleans them up.
+        associated VM is no longer running and stops those servers.
 
-        Note:
-            Only cleans up PID files for processes that have terminated.
-            Active servers started by other manager instances are left alone.
+        Returns:
+            List of VM hashes that were cleaned up
         """
+        from mvmctl.core.vm_manager import get_vm_manager
         from mvmctl.utils.fs import get_cache_dir
 
         logger.debug("Running orphan cleanup check")
+        cleaned_up: list[str] = []
 
         vms_dir = get_cache_dir() / "vms"
         if not vms_dir.exists():
-            return
+            return cleaned_up
+
+        # Get VM manager to check which VMs are running
+        vm_manager = get_vm_manager()
 
         for vm_entry in vms_dir.iterdir():
             if not vm_entry.is_dir():
                 continue
 
+            vm_hash = vm_entry.name
             pid_file = vm_entry / "nocloud-server.pid"
             if not pid_file.exists():
                 continue
 
-            try:
-                pid = int(pid_file.read_text().strip())
-                # Check if process still exists
-                os.kill(pid, 0)
-                # Process still running - don't clean up
-                logger.debug(
-                    "Skipping orphan cleanup for VM %s - process %d still running",
-                    vm_entry.name,
-                    pid,
-                )
-            except (ValueError, OSError):
-                # Can't read PID or PID file is invalid
+            # Check if VM is registered and running (lookup by hash)
+            vm = vm_manager.get_by_short_id(vm_hash[:6])
+            if vm is None or vm.status.value != "running":
+                # VM is not running - this is an orphan, stop it
+                if self._stop_by_pid_file(vm_hash):
+                    cleaned_up.append(vm_hash)
+                    logger.info("Cleaned up orphaned NoCloud-net server for VM hash %s", vm_hash)
+                else:
+                    # _stop_by_pid_file failed (e.g., invalid PID file)
+                    # Try to clean up the PID file directly
+                    try:
+                        if pid_file.exists():
+                            pid_file.unlink()
+                            logger.info("Cleaned up orphaned PID file for VM hash %s", vm_hash)
+                    except OSError:
+                        pass
+            else:
+                # VM is running - check if process actually exists
                 try:
-                    pid_file.unlink()
-                    logger.info("Cleaned up invalid PID file for VM %s", vm_entry.name)
-                except OSError:
-                    pass
-            except ProcessLookupError:
-                # Process no longer exists - clean up PID file
-                try:
-                    pid_file.unlink()
-                    logger.info(
-                        "Cleaned up stale PID file for VM %s (process terminated)",
-                        vm_entry.name,
+                    pid = int(pid_file.read_text().strip())
+                    # Check if process still exists
+                    os.kill(pid, 0)
+                    # Process exists and VM is running - not an orphan
+                    logger.debug(
+                        "Skipping orphan cleanup for VM hash %s - process %d still running",
+                        vm_hash,
+                        pid,
                     )
-                except OSError:
-                    pass
-            except PermissionError:
-                # Process exists but we can't signal it - leave it alone
-                logger.debug(
-                    "Skipping orphan cleanup for VM %s - permission denied on process %d",
-                    vm_entry.name,
-                    pid,
-                )
+                except (ValueError, OSError):
+                    # Can't read PID or PID file is invalid
+                    try:
+                        pid_file.unlink()
+                        logger.info("Cleaned up invalid PID file for VM hash %s", vm_hash)
+                    except OSError:
+                        pass
+                except ProcessLookupError:
+                    # Process no longer exists but VM is marked running - clean up
+                    try:
+                        pid_file.unlink()
+                        logger.info("Cleaned up stale PID file for VM hash %s", vm_hash)
+                    except OSError:
+                        pass
+                except PermissionError:
+                    # Process exists but we can't signal it - leave it alone
+                    logger.debug(
+                        "Skipping orphan cleanup for VM hash %s - permission denied on process %d",
+                        vm_hash,
+                        pid,
+                    )
+
+        return cleaned_up

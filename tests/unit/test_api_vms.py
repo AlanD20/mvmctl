@@ -1,15 +1,21 @@
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+from pytest_mock import MockerFixture
 
 from mvmctl.api.vms import (
     cleanup_vms,
     deregister_vm,
     get_logs,
     get_vm,
+    inspect_vm,
     list_vms,
     ssh_vm,
     vm_cache_dir,
 )
+from mvmctl.exceptions import MVMError, VMNotFoundError
 from mvmctl.models.vm import VMInstance, VMState
 
 
@@ -68,7 +74,7 @@ def test_get_logs(mock_show_logs):
     mock_show_logs.return_value = ["log1"]
     res = get_logs("vm1", log_type="console", lines=10)
     assert res == ["log1"]
-    mock_show_logs.assert_called_with(vm_name="vm1", log_type="console", lines=10, follow=False)
+    mock_show_logs.assert_called_with(vm_hash="vm1", log_type="console", lines=10, follow=False)
 
 
 @patch("shutil.rmtree")
@@ -128,3 +134,81 @@ def test_cleanup_vms(
         mock_teardown_nat.assert_called_once_with("mvm-default")
         mock_manager.deregister.assert_called_once()
         mock_rmtree.assert_called_once()
+
+
+def test_inspect_vm_by_short_id(mocker: MockerFixture):
+    """Test inspect_vm returns complete VM metadata by short ID."""
+    mock_vm = VMInstance(
+        name="test-vm",
+        id="abc123" + "x" * 58,  # 64-char hash
+        pid=1234,
+        ip="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        status=VMState.RUNNING,
+        network_name="default",
+        tap_device="mvm-def-abc-123",
+        created_at=datetime.now(),
+    )
+
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.get_by_short_id.return_value = mock_vm
+    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+
+    result = inspect_vm("abc123")
+
+    assert result["name"] == "test-vm"
+    assert result["id"] == mock_vm.id
+    assert result["status"] == "running"
+    assert result["pid"] == 1234
+    assert result["ip"] == "10.0.0.2"
+    assert result["short_id"] == "abc123"
+
+
+def test_inspect_vm_by_name(mocker: MockerFixture):
+    """Test inspect_vm returns VM metadata by name."""
+    mock_vm = VMInstance(
+        name="myvm",
+        id="def456" + "y" * 58,
+        pid=5678,
+        status=VMState.RUNNING,
+        created_at=datetime.now(),
+    )
+
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.get_by_short_id.return_value = None
+    mock_mgr.get_by_name.return_value = [mock_vm]
+    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+
+    result = inspect_vm("myvm")
+
+    assert result["name"] == "myvm"
+    assert result["pid"] == 5678
+
+
+def test_inspect_vm_ambiguous(mocker: MockerFixture):
+    """Test inspect_vm raises error for ambiguous name."""
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.get_by_short_id.return_value = None
+    mock_mgr.get_by_name.return_value = [
+        VMInstance(
+            name="myvm", id="abc123" + "x" * 58, status=VMState.RUNNING, created_at=datetime.now()
+        ),
+        VMInstance(
+            name="myvm", id="def456" + "y" * 58, status=VMState.RUNNING, created_at=datetime.now()
+        ),
+    ]
+    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+
+    with pytest.raises(MVMError, match="Multiple VMs match"):
+        inspect_vm("myvm")
+
+
+def test_inspect_vm_not_found(mocker: MockerFixture):
+    """Test inspect_vm raises error for non-existent VM."""
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.get_by_short_id.return_value = None
+    mock_mgr.get_by_name.return_value = []
+    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+
+    with pytest.raises(VMNotFoundError, match="not found"):
+        inspect_vm("nonexistent")

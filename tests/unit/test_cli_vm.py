@@ -16,6 +16,7 @@ runner = CliRunner()
 
 def _make_vm(name: str, status: VMState = VMState.RUNNING, ip: str = "10.20.0.2") -> VMInstance:
     return VMInstance(
+        id="a" * 64,  # Full 64-char SHA256 hex string
         name=name,
         ip=ip,
         mac="02:FC:aa:bb:cc:dd",
@@ -60,18 +61,18 @@ def test_rm_vm_not_found(mocker: MockerFixture):
     mock_mgr.find_by_short_id.return_value = []
     mocker.patch("mvmctl.core.vm_manager.get_vm_manager", return_value=mock_mgr)
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
-    result = runner.invoke(app, ["rm", "--name", "nonexistent", "--force"])
+    result = runner.invoke(app, ["rm", "--name", "nonexistent"])
     assert result.exit_code == 1
 
 
-def test_rm_force_running_vm(mocker: MockerFixture):
+def test_rm_running_vm(mocker: MockerFixture):
     vm = _make_vm("delvm", VMState.RUNNING)
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_name.return_value = [vm]
     mock_mgr.find_by_short_id.return_value = []
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     mocker.patch("mvmctl.cli.vm.remove_vm")
-    result = runner.invoke(app, ["rm", "--name", "delvm", "--force"])
+    result = runner.invoke(app, ["rm", "--name", "delvm"])
     assert result.exit_code == 0
     assert "removed" in result.output.lower()
 
@@ -87,7 +88,7 @@ def test_prune_with_vms(mocker: MockerFixture):
     stopped_vm = _make_vm("vm-stopped", VMState.STOPPED, "10.20.0.3")
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[stopped_vm])
     mocker.patch("mvmctl.cli.vm.cleanup_vms")
-    result = runner.invoke(app, ["prune", "--force"])
+    result = runner.invoke(app, ["prune"])
     assert result.exit_code == 0
     assert "Removed" in result.output
 
@@ -134,7 +135,7 @@ def test_create_vm_short_id_preserves_identifier_for_uuid_lookup(mocker: MockerF
     assert result.exit_code == 0
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["image"] == "1b0a"
-    assert mock_create.call_args.kwargs["kernel"] == "/tmp/vmlinux"
+    assert mock_create.call_args.kwargs["kernel"] == "def456"
 
     vm = _make_vm("newvm")
     mocker.patch("mvmctl.cli.vm.resolve_image_short_id_path", return_value="/tmp/image.ext4")
@@ -147,7 +148,7 @@ def test_create_vm_short_id_preserves_identifier_for_uuid_lookup(mocker: MockerF
     assert result.exit_code == 0
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["image"] == "abc123"
-    assert mock_create.call_args.kwargs["kernel"] == "/tmp/vmlinux"
+    assert mock_create.call_args.kwargs["kernel"] == "def456"
 
 
 def test_create_output_config_uses_resolved_absolute_paths(mocker: MockerFixture, tmp_path):
@@ -549,19 +550,19 @@ def test_ps_all_flag(mocker: MockerFixture):
     assert "stopped" in result.output
 
 
-def test_rm_by_short_id(mocker: MockerFixture):
+def test_rm_by_short_id(mocker: MockerFixture):  # No --force needed
     vm = _make_vm("myvm")
     mock_mgr = mocker.MagicMock()
     mock_mgr.find_by_short_id.return_value = [vm]
     mock_mgr.get_by_name.return_value = []
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     mocker.patch("mvmctl.cli.vm.remove_vm")
-    result = runner.invoke(app, ["rm", "abc123", "--force"])
+    result = runner.invoke(app, ["rm", "abc123"])
     assert result.exit_code == 0
     assert "myvm" in result.output
 
 
-def test_rm_multiple_names(mocker: MockerFixture):
+def test_rm_multiple_names(mocker: MockerFixture):  # No --force needed
     vm1 = _make_vm("vm1")
     vm2 = _make_vm("vm2")
     mock_mgr = mocker.MagicMock()
@@ -569,7 +570,7 @@ def test_rm_multiple_names(mocker: MockerFixture):
     mock_mgr.get_by_name.side_effect = lambda n: [vm1] if n == "vm1" else [vm2]
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     mocker.patch("mvmctl.cli.vm.remove_vm")
-    result = runner.invoke(app, ["rm", "--name", "vm1", "--name", "vm2", "--force"])
+    result = runner.invoke(app, ["rm", "--name", "vm1", "--name", "vm2"])
     assert result.exit_code == 0
 
 
@@ -578,7 +579,7 @@ def test_rm_no_targets(mocker: MockerFixture):
     mock_mgr.find_by_short_id.return_value = []
     mock_mgr.get_by_name.return_value = []
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
-    result = runner.invoke(app, ["rm", "--force"])
+    result = runner.invoke(app, ["rm"])
     assert result.exit_code == 1
 
 
@@ -630,3 +631,230 @@ def test_resolve_ssh_key_excludes_registry_json(tmp_path, monkeypatch):
     assert result is None, (
         "Expected no key to be resolved when only a private key and registry.json are present"
     )
+
+
+def test_inspect_vm_command(mocker: MockerFixture):
+    """Test mvm vm inspect command displays VM info."""
+    mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+    mock_inspect.return_value = {
+        "name": "myvm",
+        "id": "abc123" + "x" * 58,
+        "short_id": "abc123",
+        "status": "running",
+        "pid": 1234,
+        "ip": "10.0.0.2",
+        "mac": "02:FC:00:00:00:01",
+        "network_name": "default",
+        "tap_device": "mvm-def-abc-123",
+        "created_at": "2026-01-01T12:00:00",
+        "paths": {
+            "vm_dir": "/home/user/.cache/mvmctl/vms/abc123xxx",
+            "rootfs": "/home/user/.cache/mvmctl/vms/abc123xxx/rootfs.ext4",
+            "config": "/home/user/.cache/mvmctl/vms/abc123xxx/firecracker.json",
+        },
+        "features": {
+            "api_socket": True,
+            "console": False,
+            "nocloud_net": True,
+        },
+    }
+
+    result = runner.invoke(app, ["inspect", "--name", "myvm"])
+
+    assert result.exit_code == 0
+    assert "myvm" in result.output
+    assert "running" in result.output
+    assert "10.0.0.2" in result.output
+    mock_inspect.assert_called_once_with("myvm")
+
+
+def test_inspect_vm_json_output(mocker: MockerFixture):
+    """Test mvm vm inspect --json outputs valid JSON."""
+    mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+    mock_inspect.return_value = {
+        "name": "myvm",
+        "id": "abc123" + "x" * 58,
+        "short_id": "abc123",
+        "status": "running",
+        "pid": 1234,
+        "ip": "10.0.0.2",
+        "paths": {"vm_dir": "/tmp", "rootfs": None, "config": None},
+        "features": {"api_socket": True, "console": False, "nocloud_net": False},
+    }
+
+    result = runner.invoke(app, ["inspect", "--name", "myvm", "--json"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["name"] == "myvm"
+    assert data["status"] == "running"
+
+
+def test_inspect_vm_not_found(mocker: MockerFixture):
+    """Test inspect handles missing VM gracefully."""
+    mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+    mock_inspect.side_effect = MVMError("VM not found: missing-vm")
+
+    result = runner.invoke(app, ["inspect", "--name", "missing-vm"])
+
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# State Validation X marks (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_vm_ls_shows_x_mark_for_missing_directory(mocker: MockerFixture):
+    """Verify X prefix when VM directory missing."""
+    vm = _make_vm("testvm", VMState.STOPPED)
+
+    # Mock list_vms to return the VM
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
+
+    # Mock get_vm_dir().exists() -> False
+    mock_path = mocker.MagicMock()
+    mock_path.exists.return_value = False
+    mocker.patch("mvmctl.cli.vm.get_vm_dir", return_value=mock_path)
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "X " prefix in output
+    assert "X " in result.output
+
+
+def test_vm_ls_shows_x_mark_for_dead_process(mocker: MockerFixture):
+    """Verify X prefix when PID not running."""
+    vm = _make_vm("testvm", VMState.RUNNING)
+    vm.pid = 1234  # Set a PID
+
+    # Mock list_vms to return the VM
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
+
+    # Mock get_vm_dir().exists() -> True (directory exists)
+    mock_path = mocker.MagicMock()
+    mock_path.exists.return_value = True
+    mocker.patch("mvmctl.cli.vm.get_vm_dir", return_value=mock_path)
+
+    # Mock os.kill(pid, 0) raises ProcessLookupError (process not running)
+    mocker.patch("os.kill", side_effect=ProcessLookupError())
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "X " prefix in output
+    assert "X " in result.output
+
+
+def test_vm_ls_no_x_mark_for_running_vm(mocker: MockerFixture):
+    """Verify no X prefix when VM directory exists and PID running."""
+    vm = _make_vm("testvm", VMState.RUNNING)
+    vm.pid = 1234  # Set a PID
+
+    # Mock list_vms to return the VM
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
+
+    # Mock get_vm_dir().exists() -> True
+    mock_path = mocker.MagicMock()
+    mock_path.exists.return_value = True
+    mocker.patch("mvmctl.cli.vm.get_vm_dir", return_value=mock_path)
+
+    # Mock os.kill(pid, 0) succeeds (process running)
+    mocker.patch("os.kill", return_value=None)
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify no "X " prefix for running VM
+    lines = result.output.split("\n")
+    for line in lines:
+        if "testvm" in line and "Name" not in line:
+            assert not line.startswith("X ")
+
+
+def test_vm_ls_shows_x_mark_for_missing_pid_file(mocker: MockerFixture):
+    """Verify X prefix when PID file missing (can't verify process)."""
+    vm = _make_vm("testvm", VMState.RUNNING)
+    vm.pid = 1234
+
+    # Mock list_vms to return the VM
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
+
+    # Mock get_vm_dir() to return a path where pid file doesn't exist
+    mock_vm_dir = mocker.MagicMock()
+    mock_pid_file = mocker.MagicMock()
+    mock_pid_file.exists.return_value = False
+    mock_vm_dir.__truediv__ = lambda self, x: (
+        mock_pid_file if x == "firecracker.pid" else mocker.MagicMock()
+    )
+    mock_vm_dir.exists.return_value = True
+    mocker.patch("mvmctl.cli.vm.get_vm_dir", return_value=mock_vm_dir)
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "X " prefix in output
+    assert "X " in result.output
+
+
+# ---------------------------------------------------------------------------
+# Exit code tracking tests (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_vm_ls_shows_exit_code_in_status(mocker: MockerFixture):
+    """Verify vm ls displays 'exited(N)' format."""
+    vm = _make_vm("exitedvm", VMState.STOPPED)
+    vm.exit_code = 1
+
+    # Mock list_vms returning VM with exit_code
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
+
+    # Mock get_vm_status_with_exit_code returning tuple (status, exit_code)
+    mocker.patch("mvmctl.cli.vm.get_vm_status_with_exit_code", return_value=("exited(1)", 1))
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify output contains "exited(1)"
+    assert "exited(1)" in result.output or "exited" in result.output.lower()
+
+
+def test_vm_ls_shows_running_status(mocker: MockerFixture):
+    """Verify vm ls displays 'running' for active VMs."""
+    vm = _make_vm("runningvm", VMState.RUNNING)
+
+    # Mock list_vms returning running VM
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
+
+    # Mock get_vm_status_with_exit_code returning tuple (status, exit_code)
+    mocker.patch("mvmctl.cli.vm.get_vm_status_with_exit_code", return_value=("running", None))
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify output contains "running"
+    assert "running" in result.output.lower()
+
+
+def test_vm_ls_json_includes_exit_code(mocker: MockerFixture):
+    """Verify JSON output includes exit_code field."""
+    vm = _make_vm("testvm", VMState.STOPPED)
+    vm.exit_code = 1
+
+    # Mock list_vms returning VM with exit_code
+    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
+
+    # Mock get_vm_status_with_exit_code returning tuple with exit code
+    mocker.patch("mvmctl.cli.vm.get_vm_status_with_exit_code", return_value=("exited(1)", 1))
+
+    result = runner.invoke(app, ["ls", "--json"])
+
+    assert result.exit_code == 0
+    # Verify JSON contains exit_code field
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert "exit_code" in data[0]
+    assert data[0]["exit_code"] == 1

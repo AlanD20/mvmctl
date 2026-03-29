@@ -535,3 +535,130 @@ def test_boot_args_includes_eth0_none_when_guest_ip_set():
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "::eth0:off" in boot_args
+
+
+# ---------------------------------------------------------------------------
+# fs_uuid + fs_type validation in ConfigGenerator
+# ---------------------------------------------------------------------------
+
+
+def test_config_gen_validates_root_uuid_format():
+    """Test ConfigGenerator validates root_uuid format."""
+    from mvmctl.exceptions import MVMError
+
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        root_uuid="invalid-uuid",
+        root_fs_type="ext4",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+
+    with pytest.raises(MVMError, match="Invalid.*format"):
+        ConfigGenerator(vm_config).validate()
+
+
+def test_config_gen_validates_root_fs_type():
+    """Test ConfigGenerator validates root_fs_type."""
+    from mvmctl.exceptions import MVMError
+
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        root_uuid="123e4567-e89b-12d3-a456-426614174000",
+        root_fs_type="ntfs",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+
+    with pytest.raises(MVMError, match="Invalid.*fs_type"):
+        ConfigGenerator(vm_config).validate()
+
+
+def test_config_gen_accepts_valid_uuid_and_fs_type():
+    """Test ConfigGenerator accepts valid UUID and fs_type."""
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        root_uuid="123e4567-e89b-12d3-a456-426614174000",
+        root_fs_type="ext4",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+
+    # Should not raise
+    ConfigGenerator(vm_config).validate()
+
+
+def test_config_gen_accepts_btrfs_fs_type():
+    """Test ConfigGenerator accepts btrfs filesystem type."""
+    vm_config = VMConfig(
+        name="btrfs-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.btrfs"),
+        root_uuid="123e4567-e89b-12d3-a456-426614174000",
+        root_fs_type="btrfs",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+
+    # Should not raise
+    ConfigGenerator(vm_config).validate()
+    config = ConfigGenerator(vm_config).generate()
+    assert "rootfstype=btrfs" in config["boot-source"]["boot_args"]
+
+
+def test_config_gen_accepts_xfs_fs_type():
+    """Test ConfigGenerator accepts xfs filesystem type."""
+    vm_config = VMConfig(
+        name="xfs-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.xfs"),
+        root_uuid="123e4567-e89b-12d3-a456-426614174000",
+        root_fs_type="xfs",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+
+    # Should not raise
+    ConfigGenerator(vm_config).validate()
+    config = ConfigGenerator(vm_config).generate()
+    assert "rootfstype=xfs" in config["boot-source"]["boot_args"]
+
+
+def test_config_gen_validates_uuid_in_boot_args_generation():
+    """Test _build_default_boot_args validates UUID format."""
+    from mvmctl.exceptions import MVMError
+
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        root_uuid="not-a-valid-uuid",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+
+    with pytest.raises(MVMError, match="Invalid.*format"):
+        ConfigGenerator(vm_config).generate()
+
+
+def test_config_gen_validates_fs_type_in_boot_args_generation():
+    """Test _build_default_boot_args validates filesystem type."""
+    from mvmctl.exceptions import MVMError
+
+    vm_config = VMConfig(
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        root_fs_type="invalidfs",
+        gateway="10.0.0.1",
+        subnet_mask="255.255.255.0",
+    )
+
+    with pytest.raises(MVMError, match="Invalid.*fs_type"):
+        ConfigGenerator(vm_config).generate()

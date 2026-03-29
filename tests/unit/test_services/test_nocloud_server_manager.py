@@ -80,7 +80,7 @@ class TestStartServer:
     """Tests for start_server method."""
 
     @patch("mvmctl.services.nocloud_server.manager.subprocess.Popen")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_start_server_spawns_subprocess(
         self,
         mock_get_vm_dir: MagicMock,
@@ -115,7 +115,7 @@ class TestStartServer:
         assert gateway_ip in call_args
 
     @patch("mvmctl.services.nocloud_server.manager.subprocess.Popen")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_start_server_raises_if_already_running(
         self,
         mock_get_vm_dir: MagicMock,
@@ -143,7 +143,7 @@ class TestStopServer:
     """Tests for stop_server method."""
 
     @patch("mvmctl.services.nocloud_server.manager.subprocess.Popen")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_stop_server_is_idempotent(
         self,
         mock_get_vm_dir: MagicMock,
@@ -172,7 +172,7 @@ class TestStopServer:
         manager.stop_server(vm_name)
 
     @patch("mvmctl.services.nocloud_server.manager.subprocess.Popen")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_stop_server_sends_sigterm(
         self,
         mock_get_vm_dir: MagicMock,
@@ -211,7 +211,7 @@ class TestStopServerPIDFileRecovery:
     """Tests for stop_server PID file recovery path."""
 
     @patch("mvmctl.services.nocloud_server.manager.os.kill")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_stop_server_recovers_from_pid_file(
         self,
         mock_get_vm_dir: MagicMock,
@@ -246,7 +246,7 @@ class TestStopServerPIDFileRecovery:
         assert not pid_file.exists()
 
     @patch("mvmctl.services.nocloud_server.manager.os.kill")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_stop_server_handles_process_already_dead(
         self,
         mock_get_vm_dir: MagicMock,
@@ -275,7 +275,7 @@ class TestStopServerPIDFileRecovery:
         assert not pid_file.exists()
 
     @patch("mvmctl.services.nocloud_server.manager.os.kill")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_stop_server_no_pid_file_no_op(
         self,
         mock_get_vm_dir: MagicMock,
@@ -340,12 +340,14 @@ class TestCleanupOrphans:
         assert not pid_file1.exists()
         assert not pid_file2.exists()
 
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
     @patch("mvmctl.services.nocloud_server.manager.os.kill")
     @patch("mvmctl.utils.fs.get_cache_dir")
     def test_cleanup_orphans_leaves_running_processes(
         self,
         mock_get_cache_dir: MagicMock,
         mock_kill: MagicMock,
+        mock_get_vm_manager: MagicMock,
         tmp_path: Path,
     ) -> None:
         """Test that cleanup_orphans doesn't touch PID files for running processes."""
@@ -363,6 +365,13 @@ class TestCleanupOrphans:
         pid_file.write_text("88888")
 
         mock_get_cache_dir.return_value = cache_dir
+
+        # Mock VM manager to return a running VM
+        mock_vm_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status.value = "running"
+        mock_vm_manager.get_by_short_id.return_value = mock_vm
+        mock_get_vm_manager.return_value = mock_vm_manager
 
         # Process is still running (os.kill(pid, 0) succeeds)
         mock_kill.return_value = None
@@ -389,12 +398,14 @@ class TestCleanupOrphans:
         # Should not raise - creating a manager runs cleanup_orphans
         NoCloudNetServerManager()
 
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
     @patch("mvmctl.services.nocloud_server.manager.os.kill")
     @patch("mvmctl.utils.fs.get_cache_dir")
     def test_cleanup_orphans_handles_invalid_pid_file(
         self,
         mock_get_cache_dir: MagicMock,
         mock_kill: MagicMock,
+        mock_get_vm_manager: MagicMock,
         tmp_path: Path,
     ) -> None:
         """Test that cleanup_orphans handles invalid PID files gracefully."""
@@ -412,10 +423,15 @@ class TestCleanupOrphans:
 
         mock_get_cache_dir.return_value = cache_dir
 
+        # Mock VM manager to return None (VM not found)
+        mock_vm_manager = MagicMock()
+        mock_vm_manager.get.return_value = None
+        mock_get_vm_manager.return_value = mock_vm_manager
+
         # Should not raise - just log and continue
         NoCloudNetServerManager()
 
-        # PID file should be cleaned up
+        # PID file should be cleaned up (VM not running, so _stop_by_pid_file is called)
         assert not pid_file.exists()
 
 
@@ -428,7 +444,7 @@ class TestGetServer:
         assert manager.get_server("test-vm") is None
 
     @patch("mvmctl.services.nocloud_server.manager.subprocess.Popen")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_get_server_returns_none_even_when_running(
         self,
         mock_get_vm_dir: MagicMock,
@@ -456,7 +472,7 @@ class TestIsServerRunning:
     """Tests for is_server_running method."""
 
     @patch("mvmctl.services.nocloud_server.manager.subprocess.Popen")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_is_server_running_true(
         self,
         mock_get_vm_dir: MagicMock,

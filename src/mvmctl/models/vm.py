@@ -212,6 +212,7 @@ class VMInstance:
         cloud_init_mode: Cloud-init configuration mode for this VM instance.
         nocloud_net_port: HTTP port for nocloud-net datasource server (if enabled).
         nocloud_server_pid: PID of the running nocloud-net HTTP server process (None if stopped).
+        rootfs_suffix: File extension suffix of the rootfs image (e.g., '.ext4', '.btrfs').
     """
 
     name: str
@@ -230,6 +231,8 @@ class VMInstance:
     nocloud_server_pid: int | None = None
     console_relay_pid: int | None = None
     console_socket_path: Path | None = None
+    exit_code: int | None = None
+    rootfs_suffix: str = ".ext4"  # Default to .ext4 for backward compatibility
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize VMInstance to a dictionary."""
@@ -252,6 +255,8 @@ class VMInstance:
             "console_socket_path": str(self.console_socket_path)
             if self.console_socket_path
             else None,
+            "exit_code": self.exit_code,
+            "rootfs_suffix": self.rootfs_suffix,
         }
 
     @classmethod
@@ -291,4 +296,6 @@ class VMInstance:
             console_socket_path=Path(data["console_socket_path"])
             if data.get("console_socket_path")
             else None,
+            exit_code=data.get("exit_code"),
+            rootfs_suffix=data.get("rootfs_suffix", ".ext4"),
         )

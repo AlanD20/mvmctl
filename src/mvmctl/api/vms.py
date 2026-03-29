@@ -62,6 +62,7 @@ from mvmctl.models import CloudInitMode, VMInstance, VMState
 from mvmctl.services.console_relay import ConsoleRelayManager
 
 __all__ = [
+    "get_vm_status_with_exit_code",
     "list_vms",
     "get_vm",
     "deregister_vm",
@@ -84,6 +85,7 @@ __all__ = [
     "kill_console",
     "get_console_state",
     "check_escape_sequence",
+    "inspect_vm",
     "connect_to_relay",
     "disconnect_from_relay",
     "read_console_output",
@@ -111,8 +113,11 @@ def create_vm(
     name: str,
     image: str,
     kernel: str | None = None,
+    image_path: Path | None = None,
+    kernel_path: Path | None = None,
     vcpus: int = DEFAULT_VM_VCPU_COUNT,
     mem: int = DEFAULT_VM_MEM_MIB,
+    disk_size: str | None = None,
     ip: str | None = None,
     network_name: str = DEFAULT_NETWORK_NAME,
     mac: str | None = None,
@@ -134,8 +139,11 @@ def create_vm(
         name=name,
         image=image,
         kernel=kernel,
+        image_path=image_path,
+        kernel_path=kernel_path,
         vcpus=vcpus,
         mem=mem,
+        disk_size=disk_size,
         ip=ip,
         network_name=network_name,
         mac=mac,
@@ -224,8 +232,12 @@ def get_logs(
     follow: bool = DEFAULT_VM_LOG_FOLLOW,
 ) -> list[str]:
     """View VM logs. Returns log lines."""
+    manager = get_vm_manager()
+    vm = manager.get(name)
+    # Use VM hash if found, otherwise fall back to name (for backward compatibility)
+    vm_hash = vm.id if vm is not None else name
     return show_logs(
-        vm_name=name,
+        vm_hash=vm_hash,
         log_type=log_type,
         lines=lines,
         follow=follow,
@@ -270,7 +282,7 @@ def cleanup_vms(
         if v.nocloud_net_port is not None and v.ip is not None:
             try:
                 nocloud_manager = NoCloudNetServerManager()
-                nocloud_manager.stop_server(v.name)
+                nocloud_manager.stop_server(v.name, v.id)
             except (OSError, RuntimeError):
                 pass
 
@@ -307,6 +319,14 @@ def cleanup_vms(
         if vm_dir.exists():
             shutil.rmtree(vm_dir)
 
+    # Clean up any orphaned nocloud servers
+    try:
+        nocloud_manager = NoCloudNetServerManager()
+        nocloud_manager.cleanup_orphans()
+    except Exception:
+        # Don't fail cleanup if orphan cleanup fails
+        pass
+
     return targets
 
 
@@ -319,10 +339,11 @@ def attach_console(name: str) -> dict[str, Any]:
         raise VMNotFoundError(f"VM '{name}' not found")
 
     mgr = ConsoleRelayManager()
-    if not mgr.is_relay_running(name):
+    vm_hash = vm.id if vm.id else None
+    if not mgr.is_relay_running(name, vm_hash):
         raise MVMError(f"No console relay running for VM '{name}'")
 
-    socket_path = mgr.get_socket_path(name)
+    socket_path = mgr.get_socket_path(vm_hash if vm_hash else name)
     return {"socket_path": str(socket_path), "vm_name": name}
 
 
@@ -340,7 +361,8 @@ def kill_console(name: str) -> bool:
         raise VMNotFoundError(f"VM '{name}' not found")
 
     mgr = ConsoleRelayManager()
-    return mgr.kill_relay(name)
+    vm_hash = vm.id if vm.id else None
+    return mgr.kill_relay(name, vm_hash)
 
 
 def get_console_state(name: str) -> dict[str, Any]:
@@ -351,4 +373,156 @@ def get_console_state(name: str) -> dict[str, Any]:
     if vm is None:
         raise VMNotFoundError(f"VM '{name}' not found")
 
-    return _get_console_state(name)
+    vm_hash = vm.id if vm.id else None
+    return _get_console_state(name, vm_hash)
+
+
+def inspect_vm(name: str) -> dict[str, Any]:
+    """Get detailed VM information."""
+    from mvmctl.exceptions import MVMError, VMNotFoundError
+
+    manager = get_vm_manager()
+
+    # Try short ID first
+    vm = manager.get_by_short_id(name)
+    if vm:
+        return _gather_vm_details(vm)
+
+    # Fall back to name lookup
+    matches = manager.get_by_name(name)
+    if len(matches) == 1:
+        return _gather_vm_details(matches[0])
+    elif len(matches) > 1:
+        raise MVMError(f"Multiple VMs match name '{name}' — use short ID")
+
+    raise VMNotFoundError(f"VM '{name}' not found")
+
+
+def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
+    """Gather comprehensive VM details."""
+    from mvmctl.utils.fs import get_vm_dir_by_hash
+
+    vm_dir = get_vm_dir_by_hash(vm.id)
+
+    # Check file existence - use stored rootfs suffix or default to .ext4
+    rootfs_suffix = vm.rootfs_suffix or ".ext4"
+    rootfs_path = vm_dir / f"rootfs{rootfs_suffix}"
+    config_path = vm_dir / "firecracker.json"
+
+    info: dict[str, Any] = {
+        "id": vm.id,
+        "short_id": vm.id[:6] if vm.id else "-",
+        "name": vm.name,
+        "status": vm.status.value,
+        "created_at": vm.created_at.isoformat() if vm.created_at else None,
+        "pid": vm.pid,
+        "ip": vm.ip,
+        "mac": vm.mac,
+        "network_name": vm.network_name,
+        "tap_device": vm.tap_device,
+        "paths": {
+            "vm_dir": str(vm_dir),
+            "rootfs": str(rootfs_path) if rootfs_path.exists() else None,
+            "config": str(config_path) if config_path.exists() else None,
+        },
+        "features": {
+            "api_socket": vm.socket_path is not None,
+            "console": vm.console_socket_path is not None,
+            "nocloud_net": vm.nocloud_net_port is not None,
+        },
+    }
+
+    # Add cloud-init info if available
+    if vm.nocloud_net_port:
+        info["nocloud_net"] = {
+            "port": vm.nocloud_net_port,
+            "server_pid": vm.nocloud_server_pid,
+        }
+
+    if vm.console_socket_path:
+        info["console"] = {
+            "socket_path": str(vm.console_socket_path),
+            "relay_pid": vm.console_relay_pid,
+        }
+
+    return info
+
+
+def get_vm_status_with_exit_code(vm: VMInstance) -> tuple[str, int | None]:
+    """Get VM status with exit code if process has exited.
+
+    Args:
+        vm: VM instance to check
+
+    Returns:
+        Tuple of (status_string, exit_code_or_none)
+    """
+    import os
+
+    from mvmctl.models import VMState
+
+    # Check if process is running
+    if vm.pid is not None:
+        try:
+            os.kill(vm.pid, 0)
+            return "running", None
+        except (ProcessLookupError, OSError):
+            # Process exited - try to get exit code
+            pass
+
+    # Try to get exit code from various sources
+    exit_code = _get_exit_code_from_sources(vm)
+
+    if exit_code is not None:
+        return f"exited({exit_code})", exit_code
+
+    # Check VM state from metadata
+    if vm.status == VMState.RUNNING:
+        return "exited", None  # Was running but process died
+    return vm.status.value, None
+
+
+def _get_exit_code_from_sources(vm: VMInstance) -> int | None:
+    """Try to extract exit code from various sources.
+
+    Sources checked in order:
+    1. firecracker.exitcode file in VM directory
+    2. firecracker.log for exit code patterns
+    """
+    import re
+
+    from mvmctl.constants import DEFAULT_FC_EXITCODE_FILENAME, DEFAULT_FC_LOG_FILENAME
+    from mvmctl.utils.fs import get_vm_dir_by_hash
+
+    if not vm.id:
+        return None
+
+    vm_dir = get_vm_dir_by_hash(vm.id)
+
+    # Check for explicit exit code file
+    exitcode_path = vm_dir / DEFAULT_FC_EXITCODE_FILENAME
+    if exitcode_path.exists():
+        try:
+            return int(exitcode_path.read_text().strip())
+        except (ValueError, OSError):
+            pass
+
+    # Check firecracker.log for exit patterns
+    log_path = vm_dir / DEFAULT_FC_LOG_FILENAME
+    if log_path.exists():
+        try:
+            content = log_path.read_text()
+            # Look for common exit code patterns
+            patterns = [
+                r"exit(?:ed| code)[\s:]+(\d+)",
+                r"returned\s+(\d+)",
+                r"exit_status[=:\s]+(\d+)",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    return int(match.group(1))
+        except OSError:
+            pass
+
+    return None

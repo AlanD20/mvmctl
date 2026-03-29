@@ -169,3 +169,156 @@ def test_vm_manager_migration(tmp_path: Path):
     assert len(vms) == 1
     assert vms[0].name == "mylegacyvm"
     assert len(vms[0].id) == 64
+
+
+# ---------------------------------------------------------------------------
+# Exit code tracking tests (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_get_vm_status_with_exit_code_running(mocker, sample_vm):
+    """Verify 'running' status when process alive."""
+
+    sample_vm.pid = 1234
+    sample_vm.id = "a" * 64
+
+    # Mock os.kill(1234, 0) succeeds
+    mock_kill = mocker.patch("os.kill", return_value=None)
+
+    # Import and call the function
+    from mvmctl.api.vms import get_vm_status_with_exit_code
+
+    status, exit_code = get_vm_status_with_exit_code(sample_vm)
+
+    # Verify returns "running"
+    assert status == "running"
+    mock_kill.assert_called_once_with(1234, 0)
+
+
+def test_get_vm_status_with_exit_code_from_log(mocker, sample_vm, tmp_path):
+    """Verify 'exited(N)' when exit code found in log."""
+
+    sample_vm.pid = 1234
+    sample_vm.id = "a" * 64
+    sample_vm.name = "testvm"
+
+    # Mock os.kill raises ProcessLookupError (process not running)
+    mocker.patch("os.kill", side_effect=ProcessLookupError())
+
+    # Create firecracker.log with "exit code: 1"
+    vm_dir = tmp_path / "vms" / sample_vm.id
+    vm_dir.mkdir(parents=True)
+    log_file = vm_dir / "firecracker.log"
+    log_file.write_text("Some log line\nexit code: 1\nAnother line")
+
+    # Mock get_vm_dir to return our tmp path
+    mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir)
+
+    from mvmctl.api.vms import get_vm_status_with_exit_code
+
+    status, exit_code = get_vm_status_with_exit_code(sample_vm)
+
+    # Verify returns "exited(1)"
+    assert status == "exited(1)"
+
+
+def test_get_vm_status_with_exit_code_from_status_file(mocker, sample_vm, tmp_path):
+    """Verify 'exited(N)' when exit code in status file."""
+
+    sample_vm.pid = 1234
+    sample_vm.id = "a" * 64
+    sample_vm.name = "testvm"
+
+    # Mock os.kill raises ProcessLookupError
+    mocker.patch("os.kill", side_effect=ProcessLookupError())
+
+    # Create firecracker.exitcode file with "1"
+    vm_dir = tmp_path / "vms" / sample_vm.id
+    vm_dir.mkdir(parents=True)
+    exitcode_file = vm_dir / "firecracker.exitcode"
+    exitcode_file.write_text("1")
+
+    # Mock get_vm_dir to return our tmp path
+    mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir)
+
+    from mvmctl.api.vms import get_vm_status_with_exit_code
+
+    status, exit_code = get_vm_status_with_exit_code(sample_vm)
+
+    # Verify returns "exited(1)"
+    assert status == "exited(1)"
+
+
+def test_get_vm_status_exited_no_code(mocker, sample_vm, tmp_path):
+    """Verify 'exited' when no exit code available."""
+
+    sample_vm.pid = 1234
+    sample_vm.id = "a" * 64
+    sample_vm.name = "testvm"
+
+    # Mock os.kill raises ProcessLookupError
+    mocker.patch("os.kill", side_effect=ProcessLookupError())
+
+    # Create VM dir but NO log file, NO status file
+    vm_dir = tmp_path / "vms" / sample_vm.id
+    vm_dir.mkdir(parents=True)
+
+    # Mock get_vm_dir to return our tmp path
+    mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir)
+
+    from mvmctl.api.vms import get_vm_status_with_exit_code
+
+    status, exit_code = get_vm_status_with_exit_code(sample_vm)
+
+    # Verify returns "exited" (no code)
+    assert status == "exited"
+
+
+def test_get_vm_status_no_pid(mocker, sample_vm):
+    """Verify original status when PID is None."""
+    sample_vm.pid = None
+    sample_vm.status = VMState.STOPPED
+
+    from mvmctl.api.vms import get_vm_status_with_exit_code
+
+    status, exit_code = get_vm_status_with_exit_code(sample_vm)
+
+    # Verify returns sample_vm.status
+    assert status == VMState.STOPPED
+
+
+def test_get_exit_code_from_log_parses_various_formats(mocker, sample_vm, tmp_path):
+    """Verify log parsing handles multiple exit code formats."""
+    from mvmctl.core.vm_manager import _get_exit_code_from_log
+
+    test_cases = [
+        ("exit code: 1", 1),
+        ("exited: 1", 1),
+        ("exit 1", 1),
+        ("exit code: 255", 255),
+        ("exited: 0", 0),
+        ("Exit Code: 42", 42),
+        ("EXIT CODE: 99", 99),
+    ]
+
+    for log_content, expected_code in test_cases:
+        log_file = tmp_path / "firecracker.log"
+        log_file.write_text(f"Some log\n{log_content}\nMore log")
+
+        result = _get_exit_code_from_log(log_file)
+
+        assert result == expected_code, f"Failed for format: {log_content}"
+
+
+def test_get_exit_code_from_log_no_match(mocker, sample_vm, tmp_path):
+    """Verify None when log exists but no exit code pattern."""
+    from mvmctl.core.vm_manager import _get_exit_code_from_log
+
+    # Create firecracker.log without exit code
+    log_file = tmp_path / "firecracker.log"
+    log_file.write_text("Some log line\nAnother log line\nNo exit code here")
+
+    result = _get_exit_code_from_log(log_file)
+
+    # Verify returns None
+    assert result is None

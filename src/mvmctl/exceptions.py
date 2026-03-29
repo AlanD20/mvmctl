@@ -74,6 +74,16 @@ class CloudInitError(MVMError):
     """
 
 
+class VMCreateError(MVMError):
+    """VM creation failed - resources may have been partially created.
+
+    This error is raised when VM creation fails mid-way. The exception
+    handler performs best-effort cleanup of any resources that were
+    created before the failure (VM directory, TAP device, network IP,
+    firewall rules, nocloud server, console relay).
+    """
+
+
 class RootfsInjectionError(MVMError):
     """Raised when cloud-init injection into rootfs fails.
 

@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 import typer
 
@@ -12,6 +12,7 @@ from mvmctl.api.vms import (
     cleanup_vms,
     create_vm,
     get_logs,
+    get_vm_status_with_exit_code,
     list_vms,
     load_snapshot,
     remove_vm,
@@ -20,6 +21,7 @@ from mvmctl.api.vms import (
     snapshot_vm,
     ssh_vm,
 )
+from mvmctl.cli._helpers import get_state_marker, is_file_missing, is_vm_process_running
 from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BIN,
     DEFAULT_NETWORK_NAME,
@@ -31,6 +33,8 @@ from mvmctl.constants import (
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode, VMInstance, VMState
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
+from mvmctl.utils.fs import get_vm_dir_by_hash as get_vm_dir  # noqa: F401
+from mvmctl.utils.fs import get_vms_dir  # noqa: F401
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
@@ -143,11 +147,23 @@ def create(
         "--kernel",
         help="Kernel short ID (same discovery behavior as 'mvm kernel rm')",
     ),
+    image_path: Optional[Path] = typer.Option(
+        None, "--image-path", help="Direct path to rootfs image file (overrides --image)"
+    ),
+    kernel_path: Optional[Path] = typer.Option(
+        None, "--kernel-path", help="Direct path to vmlinux kernel file (overrides --kernel)"
+    ),
     vcpus: Optional[int] = typer.Option(
         None, "--vcpus", "--cpus", help="Number of vCPUs (default: from user config)"
     ),
     mem: Optional[int] = typer.Option(
         None, "--mem", "--memory", help="Memory in MiB (default: from user config)"
+    ),
+    disk_size: Optional[str] = typer.Option(
+        None,
+        "--disk-size",
+        "-s",
+        help="Rootfs disk size (e.g., 512M, 1G, 2.5GB). Default from config.",
     ),
     ip: Optional[str] = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
     network_name: Optional[str] = typer.Option(
@@ -181,7 +197,7 @@ def create(
     cloud_init_mode: Optional[str] = typer.Option(
         None,
         "--cloud-init-mode",
-        help="Cloud-init mode: 'auto' (default, uses nocloud-net), 'iso' (ISO mode), 'nocloud-net' (HTTP), 'disabled' (no cloud-init)",
+        help="Cloud-init mode: 'auto' (default, uses nocloud-net), 'iso' (ISO mode), 'nocloud-net' (HTTP), 'direct' (direct injection), 'disabled' (no cloud-init). Use --cloud-init-iso for custom ISO.",
     ),
     nocloud_net_port: Optional[int] = typer.Option(
         None,
@@ -287,6 +303,12 @@ def create(
     effective_vcpus: int = vcpus if vcpus is not None else _defaults.vcpu_count
     effective_mem: int = mem if mem is not None else _defaults.mem_size_mib
     effective_user: str = user if user is not None else _defaults.ssh_user
+
+    # Variables for path resolution
+    resolved_image_path: Path | None = None
+    image_id_for_lookup: str = ""
+    resolved_kernel_path: Path | None = None
+    kernel_id_for_lookup: str | None = None
     effective_api_socket: bool = (
         enable_api_socket if enable_api_socket is not None else _defaults.enable_api_socket
     )
@@ -300,7 +322,27 @@ def create(
         print_error("--no-cloud-init and --cloud-init-iso are mutually exclusive")
         raise typer.Exit(code=1)
 
-    if image is None:
+    # Mutual exclusivity check for image options
+    if image is not None and image_path is not None:
+        print_error("--image and --image-path are mutually exclusive")
+        raise typer.Exit(code=1)
+
+    # Mutual exclusivity check for kernel options
+    if kernel is not None and kernel_path is not None:
+        print_error("--kernel and --kernel-path are mutually exclusive")
+        raise typer.Exit(code=1)
+
+    # Path validation and resolution
+    if image_path is not None:
+        if not image_path.exists():
+            print_error(f"Image path not found: {image_path}")
+            raise typer.Exit(code=1)
+        if not image_path.is_file():
+            print_error(f"Image path is not a file: {image_path}")
+            raise typer.Exit(code=1)
+        resolved_image_path = image_path
+        image_id_for_lookup = image if image else str(image_path)
+    elif image is None:
         image = _resolve_default_image()
         if image is None:
             print_error(
@@ -309,9 +351,11 @@ def create(
             )
             raise typer.Exit(code=1)
         resolved_image_path = resolve_image_short_id_path(image)
+        image_id_for_lookup = image if image else str(resolved_image_path)
     else:
         try:
             resolved_image_path = resolve_image_short_id_path(image)
+            image_id_for_lookup = image if image else str(resolved_image_path)
         except MVMError:
             print_error(
                 f"Image short ID '{image}' was not found or is ambiguous. "
@@ -319,13 +363,24 @@ def create(
             )
             raise typer.Exit(code=1)
 
-    if kernel is None:
+    # Kernel path validation and resolution
+    if kernel_path is not None:
+        if not kernel_path.exists():
+            print_error(f"Kernel path not found: {kernel_path}")
+            raise typer.Exit(code=1)
+        if not kernel_path.is_file():
+            print_error(f"Kernel path is not a file: {kernel_path}")
+            raise typer.Exit(code=1)
+        resolved_kernel_path = kernel_path
+        kernel_id_for_lookup = kernel if kernel else str(kernel_path)
+    elif kernel is None:
         kernel = _resolve_default_kernel()
         resolved_kernel_path = Path(kernel) if kernel is not None else None
+        kernel_id_for_lookup = kernel
     else:
         try:
             resolved_kernel_path = resolve_kernel_short_id_path(kernel)
-            kernel = str(resolved_kernel_path)
+            kernel_id_for_lookup = kernel if kernel else str(resolved_kernel_path)
         except MVMError:
             print_error(
                 f"Kernel short ID '{kernel}' was not found or is ambiguous. "
@@ -386,7 +441,7 @@ def create(
     # Validate --cloud-init-mode if provided
     if cloud_init_mode is not None:
         mode_lower = cloud_init_mode.lower()
-        valid_modes = ["auto", "iso", "custom", "direct", "disabled", "nocloud-net"]
+        valid_modes = ["auto", "iso", "direct", "disabled", "nocloud-net"]
         if mode_lower not in valid_modes:
             print_error(
                 f"Invalid --cloud-init-mode '{cloud_init_mode}'. Valid modes: {', '.join(valid_modes)}"
@@ -433,10 +488,13 @@ def create(
     try:
         vm = create_vm(
             name=name,
-            image=image,
-            kernel=kernel,
+            image=image_id_for_lookup,
+            kernel=kernel_id_for_lookup,
+            image_path=resolved_image_path if image_path else None,
+            kernel_path=resolved_kernel_path if kernel_path else None,
             vcpus=effective_vcpus,
             mem=effective_mem,
+            disk_size=disk_size,
             ip=ip,
             network_name=effective_network,
             mac=mac,
@@ -469,7 +527,6 @@ def rm(
     name: List[str] = typer.Option(
         [], "--name", "-n", help="VM name to remove (can be specified multiple times)"
     ),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Stop and remove VMs by short ID or name.
 
@@ -536,14 +593,6 @@ def rm(
             unique_targets.append(vm)
     targets = unique_targets
 
-    if not force:
-        target_names = [
-            f"{vm.name} (ID: {vm.id[:6] if vm.id else '-'}, IP: {vm.ip or '-'})" for vm in targets
-        ]
-        typer.confirm(
-            f"Remove {len(targets)} VM(s):\n  " + "\n  ".join(target_names) + "?", abort=True
-        )
-
     removed_count = 0
     for vm in targets:
         try:
@@ -569,20 +618,23 @@ def ls_vms(
     vms = list_vms(include_stopped=all_vms)
 
     if json_output:
-        data = [
-            {
-                "id": v.id[:6] if v.id else "-",
-                "name": v.name,
-                "ip": v.ip,
-                "mac": v.mac,
-                "status": v.status.value,
-                "pid": v.pid,
-                "api_socket": v.socket_path is not None,
-                "network": v.network_name or "-",
-                "created_at": v.created_at.isoformat(),
-            }
-            for v in vms
-        ]
+        data = []
+        for v in vms:
+            status_str, exit_code = get_vm_status_with_exit_code(v)
+            data.append(
+                {
+                    "id": v.id[:6] if v.id else "-",
+                    "name": v.name,
+                    "ip": v.ip,
+                    "mac": v.mac,
+                    "status": status_str,
+                    "pid": v.pid,
+                    "exit_code": exit_code,
+                    "api_socket": v.socket_path is not None,
+                    "network": v.network_name or "-",
+                    "created_at": v.created_at.isoformat(),
+                }
+            )
         typer.echo(json.dumps(data, indent=2))
         return
 
@@ -590,21 +642,30 @@ def ls_vms(
         print_info("No VMs found." + (" Use --all to include stopped VMs." if not all_vms else ""))
         return
 
-    rows = [
-        [
-            v.id[:6] if v.id else "-",
-            v.name,
-            v.ip or "-",
-            v.status.value,
-            str(v.pid) if v.pid else "-",
-            "on" if v.socket_path else "off",
-            human_readable_time(v.created_at.isoformat()) if v.created_at else "-",
-        ]
-        for v in vms
-    ]
+    rows = []
+    for v in vms:
+        vm_dir = get_vm_dir(v.id) if v.id else None
+        dir_missing = is_file_missing(vm_dir)
+        process_running = is_vm_process_running(v.pid)
+        # VM is "missing" if directory missing OR (status says running but PID not running)
+        is_missing = dir_missing or (v.status.value == "running" and not process_running)
+        state_marker = get_state_marker(is_missing)
+        status_str, _ = get_vm_status_with_exit_code(v)
+        rows.append(
+            [
+                state_marker,
+                v.id[:6] if v.id else "-",
+                v.name,
+                v.ip or "-",
+                status_str,
+                str(v.pid) if v.pid else "-",
+                "on" if v.socket_path else "off",
+                human_readable_time(v.created_at.isoformat()) if v.created_at else "-",
+            ]
+        )
     print_table(
         title="Firecracker VMs",
-        columns=["ID", "Name", "IP", "Status", "PID", "API", "Created"],
+        columns=["State", "ID", "Name", "IP", "Status", "PID", "API", "Created"],
         rows=rows,
     )
 
@@ -711,7 +772,7 @@ def logs(
         raise typer.Exit(code=1)
 
 
-def _do_prune(all_vms: bool, dry_run: bool, force: bool) -> None:
+def _do_prune(all_vms: bool, dry_run: bool) -> None:
     manager = list_vms(include_stopped=True)
     targets = manager if all_vms else [v for v in manager if v.status != VMState.RUNNING]
 
@@ -727,9 +788,6 @@ def _do_prune(all_vms: bool, dry_run: bool, force: bool) -> None:
         print_info("Dry run — no changes made.")
         return
 
-    if not force:
-        typer.confirm(f"Remove {len(targets)} VM(s)?", abort=True)
-
     cleanup_vms(all_vms=all_vms, dry_run=False)
     for v in targets:
         print_success(f"Removed VM '{v.name}'")
@@ -741,10 +799,9 @@ def prune(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be removed without deleting"
     ),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove stopped VMs and stale directories."""
-    _do_prune(all_vms=all_vms, dry_run=dry_run, force=force)
+    _do_prune(all_vms=all_vms, dry_run=dry_run)
 
 
 @app.command()
@@ -802,3 +859,57 @@ def resume(
     """Resume a paused VM (not supported in this version)."""
     print_info("'vm resume' is not supported by Firecracker. Use 'vm load' instead.")
     raise typer.Exit(code=0)
+
+
+@app.command()
+def inspect(
+    name: str = typer.Option(..., "--name", "-n", help="VM name or short ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Show detailed information about a VM.
+
+    Examples:
+        mvm vm inspect --name myvm
+        mvm vm inspect --name myvm --json
+    """
+    from mvmctl.api.vms import inspect_vm
+
+    try:
+        vm_info = inspect_vm(name)
+    except MVMError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+    if json_output:
+        typer.echo(json.dumps(vm_info, indent=2, default=str))
+    else:
+        _print_vm_details(vm_info)
+
+
+def _print_vm_details(info: dict[str, Any]) -> None:
+    """Print formatted VM details."""
+    print_table(
+        title=f"VM: {info['name']}",
+        columns=["Property", "Value"],
+        rows=[
+            ["ID", info["short_id"]],
+            ["Full ID", info["id"]],
+            ["Status", info["status"]],
+            ["Created", info["created_at"]],
+            ["PID", str(info["pid"]) if info["pid"] else "-"],
+            ["IP", info["ip"] or "-"],
+            ["MAC", info["mac"] or "-"],
+            ["Network", info["network_name"] or "-"],
+            ["TAP Device", info["tap_device"] or "-"],
+            ["API Socket", "enabled" if info["features"]["api_socket"] else "disabled"],
+            ["Console", "enabled" if info["features"]["console"] else "disabled"],
+            ["NoCloud-net", "enabled" if info["features"]["nocloud_net"] else "disabled"],
+        ],
+    )
+
+    print_info("\nPaths:")
+    print_info(f"  VM Directory: {info['paths']['vm_dir']}")
+    if info["paths"]["rootfs"]:
+        print_info(f"  Rootfs: {info['paths']['rootfs']}")
+    if info["paths"]["config"]:
+        print_info(f"  Config: {info['paths']['config']}")

@@ -308,6 +308,7 @@ DEFAULT_FC_CONSOLE_LOG_FILENAME: Final[str] = "firecracker.console.log"
 DEFAULT_FC_METRICS_FILENAME: Final[str] = "firecracker.metrics"
 DEFAULT_FC_API_SOCKET_FILENAME: Final[str] = "firecracker.api.socket"
 DEFAULT_FC_PID_FILENAME: Final[str] = "firecracker.pid"
+DEFAULT_FC_EXITCODE_FILENAME: Final[str] = "firecracker.exitcode"
 DEFAULT_FC_CONFIG_FILENAME: Final[str] = "firecracker.json"
 DEFAULT_CONSOLE_SOCKET_FILENAME: Final[str] = "console.sock"
 DEFAULT_CONSOLE_PID_FILENAME: Final[str] = "console.pid"
@@ -488,6 +489,7 @@ CONST_VM_MEM_MAX_MIB: Final[int] = 65536
 CONST_VM_VCPU_MIN: Final[int] = 1
 CONST_VM_VCPU_MAX: Final[int] = 256
 CONST_IP_RANGE_SIZE: Final[int] = 256
+CONST_SIGNAL_EXIT_CODE_BASE: Final[int] = 128
 
 # Time constants (in seconds)
 CONST_SECONDS_PER_HOUR: Final[int] = 3600

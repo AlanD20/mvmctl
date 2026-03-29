@@ -17,6 +17,7 @@ from mvmctl.constants import (
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_PID_FILE,
     CONST_POLL_STEP_SECONDS,
+    CONST_SIGNAL_EXIT_CODE_BASE,
     CONST_VM_MEM_MAX_MIB,
     CONST_VM_MEM_MIN_MIB,
     DEFAULT_CLOUD_INIT_DIRNAME,
@@ -24,6 +25,7 @@ from mvmctl.constants import (
     DEFAULT_FC_API_SOCKET_FILENAME,
     DEFAULT_FC_CONFIG_FILENAME,
     DEFAULT_FC_CONSOLE_LOG_FILENAME,
+    DEFAULT_FC_EXITCODE_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
     DEFAULT_FC_PID_FILENAME,
     DEFAULT_FIRECRACKER_BIN_NAME,
@@ -73,12 +75,30 @@ from mvmctl.exceptions import (
     CloudInitError,
     MVMError,
     NetworkError,
+    VMCreateError,
     VMNotFoundError,
 )
 from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMState
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.services.nocloud_server import NoCloudNetServerManager
-from mvmctl.utils.fs import get_images_dir, get_kernels_dir, get_vm_dir
+from mvmctl.utils.fs import get_images_dir, get_kernels_dir
+
+
+def get_vm_dir(vm_hash: str) -> Path:
+    """Return the directory for a specific VM by its hash.
+
+    This is a compatibility shim for tests that patch get_vm_dir.
+    All internal code should use this function instead of get_vm_dir_by_hash.
+
+    Uses dynamic import to respect test patches on mvmctl.utils.fs.get_vm_dir_by_hash.
+    """
+    from mvmctl.utils.fs import get_vm_dir_by_hash
+
+    return get_vm_dir_by_hash(vm_hash)
+
+
+# Compatibility alias for tests that patch get_vm_dir_by_hash
+get_vm_dir_by_hash = get_vm_dir
 
 
 def _resolve_image_path(image: str) -> Path:
@@ -305,6 +325,15 @@ def _read_pid_file(pid_file: Path) -> int | None:
     return pid
 
 
+def _write_exit_code(vm_dir: Path, exit_code: int) -> None:
+    """Write exit code to firecracker.exitcode file."""
+    exitcode_file = vm_dir / DEFAULT_FC_EXITCODE_FILENAME
+    try:
+        exitcode_file.write_text(str(exit_code))
+    except OSError:
+        pass  # Best effort - don't fail if we can't write exit code
+
+
 def _secure_mkdir_vm(vm_dir: Path, name: str) -> None:
     """Atomically create VM directory with TOCTOU protection.
 
@@ -402,8 +431,11 @@ def create_vm(
     name: str,
     image: str,
     kernel: str | None = None,
+    image_path: Path | None = None,
+    kernel_path: Path | None = None,
     vcpus: int = DEFAULT_VM_VCPU_COUNT,
     mem: int = DEFAULT_VM_MEM_MIB,
+    disk_size: str | None = None,
     ip: str | None = None,
     network_name: str = DEFAULT_NETWORK_NAME,
     mac: str | None = None,
@@ -425,300 +457,300 @@ def create_vm(
 
     from mvmctl.utils.validation import validate_entity_name
 
-    validate_entity_name(name, "VM")
+    # Resource tracking for comprehensive cleanup
+    vm_dir: Path | None = None
+    resources_created = {
+        "vm_dir": False,
+        "tap": False,
+        "network_ip": False,
+        "nocloud_server": False,
+        "firewall_rule": False,
+        "console_relay": False,
+    }
 
-    manager = vm_manager or get_vm_manager()
-    if manager.count_vms() >= MAX_VMS:
-        raise MVMError(
-            f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
-        )
-
-    if not (1 <= vcpus <= 32):
-        raise MVMError(f"Invalid vcpus={vcpus}: must be between 1 and 32")
-    if not (CONST_VM_MEM_MIN_MIB <= mem <= CONST_VM_MEM_MAX_MIB):
-        raise MVMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
-
-    # Determine effective cloud-init mode
-    # ISO mode generates cloud-init ISO; AUTO defaults to NO_CLOUD_NET
-    if cloud_init_mode == CloudInitMode.AUTO:
-        effective_mode = CloudInitMode.NO_CLOUD_NET  # Default to HTTP mode
-    elif cloud_init_mode == CloudInitMode.ISO:
-        effective_mode = CloudInitMode.ISO  # Explicit ISO mode
-    else:
-        effective_mode = cloud_init_mode
-
-    # Setup nocloud firewall chain (idempotent - safe to call multiple times)
-    setup_nocloud_input_chain()
-
-    if mac is not None:
-        mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
-        if not mac_re.match(mac):
-            raise MVMError(
-                f"Invalid MAC address format: {mac!r}. Expected format: XX:XX:XX:XX:XX:XX"
-            )
-
-    vm_dir = get_vm_dir(name)
-    _secure_mkdir_vm(vm_dir, name)
-
-    kernel_path: Path
-    if kernel:
-        kernel_path = _resolve_kernel_path(kernel)
-    else:
-        env_kernel = os.environ.get("MVM_KERNEL")
-        if env_kernel:
-            kernel_path = _resolve_kernel_path(env_kernel)
-        else:
-            kernel_path = get_kernels_dir() / DEFAULT_VM_KERNEL_FILENAME
-
-    if not kernel_path.exists():
-        raise MVMError(f"Kernel not found: {kernel_path}")
-
-    fc_bin_path = Path(firecracker_bin)
-    if fc_bin_path.is_absolute() or "/" in firecracker_bin:
-        if not fc_bin_path.exists():
-            raise MVMError(f"Firecracker binary not found: {firecracker_bin}")
-        if not os.access(fc_bin_path, os.X_OK):
-            raise MVMError(f"Firecracker binary is not executable: {firecracker_bin}")
-
-    image_path = _resolve_image_path(image)
-    image_fs_uuid = _resolve_image_fs_uuid(image)
-    image_fs_type = _resolve_image_fs_type(image)
-
-    if user_data is not None and not user_data.exists():
-        raise MVMError(f"User-data file not found: {user_data}")
-
-    net_config = get_network(network_name)
-    if net_config is None:
-        if network_name == DEFAULT_NETWORK_NAME:
-            net_config = ensure_default_network()
-        else:
-            raise NetworkError(f"Network '{network_name}' not found")
-
-    if ip:
-        try:
-            ip_net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
-            if _ipaddress.IPv4Address(ip.split("/")[0]) not in ip_net:
-                raise NetworkError(
-                    f"IP {ip} is outside network '{network_name}' subnet {net_config.cidr}"
-                )
-        except ValueError as e:
-            raise NetworkError(f"Invalid IP address: {e}")
-        guest_ip = ip
-    else:
-        guest_ip = allocate_network_ip(network_name, name)
-
-    # P4 §3: use random MAC (02:FC:XX:XX:XX:XX prefix) — intentionally
-    # overrides P3's deterministic-from-name scheme per spec precedence rule.
-    guest_mac = mac if mac else generate_mac()
-    tap_name = _generate_tap_name(network_name, name)
-    bridge = net_config.bridge
-
-    # Copy rootfs image to VM directory to prevent corrupting the original
-    # The original image in ~/.cache/mvmctl/images/ is shared across VMs
-    rootfs_ext = image_path.suffix  # .ext4, .btrfs, etc.
-    rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
-    shutil.copy2(image_path, rootfs_path)
-
-    # Handle cloud-init based on mode
-    cloud_init_iso: Path | None = None
-    extra_drives: list[DriveConfig] = []
-    nocloud_net_url: str | None = None
-    nocloud_server_pid: int | None = None
+    # Variables needed for cleanup
+    tap_name: str = ""
+    guest_ip: str = ""
     net_manager: NoCloudNetServerManager | None = None
-
-    if effective_mode != CloudInitMode.DISABLED:
-        cloud_init_dir = vm_dir / DEFAULT_CLOUD_INIT_DIRNAME
-        cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
-
-        ssh_pub_key: list[str] | str | None
-        if ssh_key is not None:
-            ssh_pub_key = resolve_ssh_key(ssh_key)
-        else:
-            from mvmctl.core.key_manager import get_default_keys as _get_default_keys
-            from mvmctl.utils.fs import get_keys_dir as _get_keys_dir
-
-            default_names = _get_default_keys()
-            if default_names:
-                keys_dir = _get_keys_dir()
-                resolved: list[str] = []
-                for kname in default_names:
-                    pub_file = keys_dir / f"{kname}.pub"
-                    if pub_file.exists():
-                        content = pub_file.read_text().strip()
-                        if content:
-                            resolved.append(content)
-                    else:
-                        logger.warning(
-                            "Default key '%s' not found at %s — skipping", kname, pub_file
-                        )
-                ssh_pub_key = resolved if resolved else None
-            else:
-                ssh_pub_key = resolve_ssh_key(None)
-
-        _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
-
-        # Write cloud-init seed files for all modes
-        # Always generate network-config so cloud-init properly configures the network
-        # via netplan/systemd-networkd, ensuring the IP matches what's allocated
-        write_cloud_init(
-            cloud_init_dir,
-            name,
-            guest_ip,
-            user,
-            ssh_pub_key=ssh_pub_key,
-            custom_user_data=user_data,
-            gateway=net_config.gateway,
-            prefix_len=_prefix_len,
-            skip_network_config=False,  # Always generate network-config
-        )
-
-        if effective_mode == CloudInitMode.CUSTOM:
-            if cloud_init_iso_path is None:
-                raise MVMError("cloud_init_iso_path required when cloud_init_mode is CUSTOM")
-            if not cloud_init_iso_path.exists():
-                raise MVMError(f"Custom cloud-init ISO not found: {cloud_init_iso_path}")
-            cloud_init_iso = cloud_init_iso_path
-        elif effective_mode == CloudInitMode.NO_CLOUD_NET:
-            # Start HTTP server for nocloud-net datasource using manager
-            net_manager = NoCloudNetServerManager()
-            _server_started = False
-            try:
-                url, port = net_manager.start_server(name, cloud_init_dir, net_config.gateway)
-                nocloud_net_url = url
-                nocloud_net_port = port
-                # Capture the server PID for storage in VMInstance
-                nocloud_server_pid = net_manager.get_server_pid(name)
-                logger.info("NoCloud-net server started at %s", nocloud_net_url)
-                _server_started = True
-                # Add firewall rule - stop server if this fails
-                add_nocloud_input_rule(guest_ip, name, nocloud_net_port)
-            except MVMError:
-                if _server_started:
-                    # Firewall rule failed - stop the server and cleanup
-                    net_manager.stop_server(name)
-                shutil.rmtree(vm_dir, ignore_errors=True)
-                try:
-                    release_network_ip(network_name, name)
-                except NetworkError:
-                    pass
-                raise
-        elif effective_mode == CloudInitMode.DIRECT_INJECTION:
-            # Perform injection using libguestfs (filesystem-agnostic)
-            try:
-                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
-            except Exception as e:
-                shutil.rmtree(vm_dir, ignore_errors=True)
-                try:
-                    release_network_ip(network_name, name)
-                except NetworkError:
-                    pass
-                raise CloudInitError(f"Direct injection failed: {e}") from e
-        elif effective_mode in (CloudInitMode.AUTO, CloudInitMode.ISO):
-            # ISO mode: Generate cloud-init ISO from config files
-            cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
-            try:
-                create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
-            except CloudInitError as e:
-                shutil.rmtree(vm_dir, ignore_errors=True)
-                try:
-                    release_network_ip(network_name, name)
-                except NetworkError:
-                    pass
-                raise MVMError(f"Failed to create cloud-init ISO: {e}") from e
-
-    socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
-    _net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
-    _subnet_mask = str(_net.netmask)
-
-    vm_config = VMConfig(
-        name=name,
-        vcpu_count=vcpus,
-        mem_size_mib=mem,
-        kernel_path=kernel_path,
-        rootfs_path=rootfs_path,
-        guest_ip=guest_ip,
-        guest_mac=guest_mac,
-        gateway=net_config.gateway,
-        subnet_mask=_subnet_mask,
-        tap_device=tap_name,
-        root_uuid=image_fs_uuid,
-        root_fs_type=image_fs_type,
-        enable_api_socket=enable_api_socket,
-        enable_pci=enable_pci,
-        enable_console=enable_console,
-        cloud_init_mode=effective_mode,
-        cloud_init_iso_path=cloud_init_iso,
-        keep_cloud_init_iso=keep_cloud_init_iso,
-        nocloud_net_url=nocloud_net_url,
-        extra_drives=extra_drives,
-    )
-    config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
-    ConfigGenerator(vm_config).write_to_file(config_file)
-
+    relay_mgr: ConsoleRelayManager | None = None
     pty_master_fd: int | None = None
     pty_slave_fd: int | None = None
-    relay_mgr: ConsoleRelayManager | None = None
-    console_socket_path: Path | None = None
-    console_relay_pid: int | None = None
+    effective_mode: CloudInitMode = CloudInitMode.NO_CLOUD_NET
+    net_config = None
+    proc = None
+    log_fp = None
+    console_fp = None
+    vm_id: str | None = None
 
-    if enable_console:
-        try:
+    try:
+        validate_entity_name(name, "VM")
+
+        manager = vm_manager or get_vm_manager()
+        if manager.count_vms() >= MAX_VMS:
+            raise MVMError(
+                f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
+            )
+
+        if not (1 <= vcpus <= 32):
+            raise MVMError(f"Invalid vcpus={vcpus}: must be between 1 and 32")
+        if not (CONST_VM_MEM_MIN_MIB <= mem <= CONST_VM_MEM_MAX_MIB):
+            raise MVMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
+
+        # Determine effective cloud-init mode
+        if cloud_init_mode == CloudInitMode.AUTO:
+            effective_mode = CloudInitMode.NO_CLOUD_NET
+        elif cloud_init_mode == CloudInitMode.ISO:
+            effective_mode = CloudInitMode.ISO
+        else:
+            effective_mode = cloud_init_mode
+
+        # Setup nocloud firewall chain (idempotent)
+        setup_nocloud_input_chain()
+
+        if mac is not None:
+            mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
+            if not mac_re.match(mac):
+                raise MVMError(
+                    f"Invalid MAC address format: {mac!r}. Expected format: XX:XX:XX:XX:XX:XX"
+                )
+
+        vm_id = generate_vm_id(name)
+        vm_dir = get_vm_dir(vm_id)
+        _secure_mkdir_vm(vm_dir, name)
+        resources_created["vm_dir"] = True
+
+        # Kernel resolution with path override
+        kernel_path_resolved: Path
+        if kernel_path is not None:
+            kernel_path_resolved = kernel_path
+        elif kernel:
+            kernel_path_resolved = _resolve_kernel_path(kernel)
+        else:
+            env_kernel = os.environ.get("MVM_KERNEL")
+            if env_kernel:
+                kernel_path_resolved = _resolve_kernel_path(env_kernel)
+            else:
+                kernel_path_resolved = get_kernels_dir() / DEFAULT_VM_KERNEL_FILENAME
+
+        if not kernel_path_resolved.exists():
+            raise MVMError(f"Kernel not found: {kernel_path_resolved}")
+
+        fc_bin_path = Path(firecracker_bin)
+        if fc_bin_path.is_absolute() or "/" in firecracker_bin:
+            if not fc_bin_path.exists():
+                raise MVMError(f"Firecracker binary not found: {firecracker_bin}")
+            if not os.access(fc_bin_path, os.X_OK):
+                raise MVMError(f"Firecracker binary is not executable: {firecracker_bin}")
+
+        # Image resolution with path override
+        if image_path is not None:
+            resolved_image_path = image_path
+            # Still resolve metadata by image identifier for fs_uuid/fs_type
+            image_fs_uuid = _resolve_image_fs_uuid(image) if image else None
+            image_fs_type = _resolve_image_fs_type(image) if image else None
+        else:
+            resolved_image_path = _resolve_image_path(image)
+            image_fs_uuid = _resolve_image_fs_uuid(image)
+            image_fs_type = _resolve_image_fs_type(image)
+
+        # Validate resolved filesystem metadata
+        if image_fs_uuid:
+            from mvmctl.utils.validation import validate_fs_uuid
+
+            validate_fs_uuid(image_fs_uuid)
+        if image_fs_type:
+            from mvmctl.utils.validation import validate_fs_type
+
+            validate_fs_type(image_fs_type)
+
+        if user_data is not None and not user_data.exists():
+            raise MVMError(f"User-data file not found: {user_data}")
+
+        net_config = get_network(network_name)
+        if net_config is None:
+            if network_name == DEFAULT_NETWORK_NAME:
+                net_config = ensure_default_network()
+            else:
+                raise NetworkError(f"Network '{network_name}' not found")
+
+        if ip:
+            try:
+                ip_net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
+                if _ipaddress.IPv4Address(ip.split("/")[0]) not in ip_net:
+                    raise NetworkError(
+                        f"IP {ip} is outside network '{network_name}' subnet {net_config.cidr}"
+                    )
+            except ValueError as e:
+                raise NetworkError(f"Invalid IP address: {e}")
+            guest_ip = ip
+        else:
+            guest_ip = allocate_network_ip(network_name, name)
+            resources_created["network_ip"] = True
+
+        guest_mac = mac if mac else generate_mac()
+        tap_name = _generate_tap_name(network_name, name)
+        bridge = net_config.bridge
+
+        # Copy rootfs image to VM directory
+        rootfs_ext = resolved_image_path.suffix
+        rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
+        shutil.copy2(resolved_image_path, rootfs_path)
+
+        # Resize if disk_size specified
+        if disk_size is not None:
+            from mvmctl.utils.disk_size import parse_disk_size
+            from mvmctl.utils.resize import resize_rootfs
+
+            target_bytes = parse_disk_size(disk_size)
+            resize_rootfs(rootfs_path, target_bytes)
+
+        # Handle cloud-init based on mode
+        cloud_init_iso: Path | None = None
+        extra_drives: list[DriveConfig] = []
+        nocloud_net_url: str | None = None
+        nocloud_server_pid: int | None = None
+
+        if effective_mode != CloudInitMode.DISABLED:
+            cloud_init_dir = vm_dir / DEFAULT_CLOUD_INIT_DIRNAME
+            cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
+
+            ssh_pub_key: list[str] | str | None
+            if ssh_key is not None:
+                ssh_pub_key = resolve_ssh_key(ssh_key)
+            else:
+                from mvmctl.core.key_manager import get_default_keys as _get_default_keys
+                from mvmctl.utils.fs import get_keys_dir as _get_keys_dir
+
+                default_names = _get_default_keys()
+                if default_names:
+                    keys_dir = _get_keys_dir()
+                    resolved: list[str] = []
+                    for kname in default_names:
+                        pub_file = keys_dir / f"{kname}.pub"
+                        if pub_file.exists():
+                            content = pub_file.read_text().strip()
+                            if content:
+                                resolved.append(content)
+                        else:
+                            logger.warning(
+                                "Default key '%s' not found at %s — skipping", kname, pub_file
+                            )
+                    ssh_pub_key = resolved if resolved else None
+                else:
+                    ssh_pub_key = resolve_ssh_key(None)
+
+            _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
+
+            write_cloud_init(
+                cloud_init_dir,
+                name,
+                guest_ip,
+                user,
+                ssh_pub_key=ssh_pub_key,
+                custom_user_data=user_data,
+                gateway=net_config.gateway,
+                prefix_len=_prefix_len,
+                skip_network_config=False,
+            )
+
+            if effective_mode == CloudInitMode.CUSTOM:
+                if cloud_init_iso_path is None:
+                    raise MVMError("cloud_init_iso_path required when cloud_init_mode is CUSTOM")
+                if not cloud_init_iso_path.exists():
+                    raise MVMError(f"Custom cloud-init ISO not found: {cloud_init_iso_path}")
+                cloud_init_iso = cloud_init_iso_path
+            elif effective_mode == CloudInitMode.NO_CLOUD_NET:
+                net_manager = NoCloudNetServerManager()
+                url, port = net_manager.start_server(
+                    name, cloud_init_dir, net_config.gateway, vm_id, preferred_port=nocloud_net_port
+                )
+                nocloud_net_url = url
+                nocloud_net_port = port
+                nocloud_server_pid = net_manager.get_server_pid(name, vm_id)
+                resources_created["nocloud_server"] = True
+                logger.info("NoCloud-net server started at %s", nocloud_net_url)
+                add_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+                resources_created["firewall_rule"] = True
+            elif effective_mode == CloudInitMode.DIRECT_INJECTION:
+                try:
+                    inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+                except Exception as e:
+                    raise CloudInitError(f"Direct injection failed: {e}") from e
+            elif effective_mode in (CloudInitMode.AUTO, CloudInitMode.ISO):
+                cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
+                try:
+                    create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
+                except CloudInitError as e:
+                    raise MVMError(f"Failed to create cloud-init ISO: {e}") from e
+
+        socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
+        _net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
+        _subnet_mask = str(_net.netmask)
+
+        vm_config = VMConfig(
+            name=name,
+            vcpu_count=vcpus,
+            mem_size_mib=mem,
+            kernel_path=kernel_path_resolved,
+            rootfs_path=rootfs_path,
+            guest_ip=guest_ip,
+            guest_mac=guest_mac,
+            gateway=net_config.gateway,
+            subnet_mask=_subnet_mask,
+            tap_device=tap_name,
+            root_uuid=image_fs_uuid,
+            root_fs_type=image_fs_type,
+            enable_api_socket=enable_api_socket,
+            enable_pci=enable_pci,
+            enable_console=enable_console,
+            cloud_init_mode=effective_mode,
+            cloud_init_iso_path=cloud_init_iso,
+            keep_cloud_init_iso=keep_cloud_init_iso,
+            nocloud_net_url=nocloud_net_url,
+            extra_drives=extra_drives,
+        )
+        config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
+        ConfigGenerator(vm_config, vm_dir).write_to_file(config_file)
+
+        console_socket_path: Path | None = None
+        console_relay_pid: int | None = None
+
+        if enable_console:
             pty_master_fd, pty_slave_fd = os.openpty()
             relay_mgr = ConsoleRelayManager()
-        except OSError as e:
-            if effective_mode == CloudInitMode.NO_CLOUD_NET and net_manager is not None:
-                net_manager.stop_server(name)
-                remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
-            cleanup_tap(tap_name)
-            shutil.rmtree(vm_dir, ignore_errors=True)
-            try:
-                release_network_ip(network_name, name)
-            except NetworkError:
-                pass
-            raise MVMError(f"Failed to create PTY for console: {e}")
 
-    # AUDIT-4: Reconcile bridge if it has drifted (e.g. lost after reboot).
-    if not bridge_exists(bridge):
-        logger.info("Bridge %s not found — recreating for network '%s'", bridge, network_name)
-        _gw_cidr = (
-            f"{net_config.gateway}"
-            f"/{_ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen}"
-        )
-        setup_bridge(bridge, gateway_cidr=_gw_cidr)
-        if net_config.nat_enabled:
-            setup_nat(bridge)
-    else:
-        # Bridge exists - NAT already configured when bridge was created; no-op
-        pass
+        # AUDIT-4: Reconcile bridge if it has drifted
+        if not bridge_exists(bridge):
+            logger.info("Bridge %s not found — recreating for network '%s'", bridge, network_name)
+            _gw_cidr = (
+                f"{net_config.gateway}"
+                f"/{_ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen}"
+            )
+            setup_bridge(bridge, gateway_cidr=_gw_cidr)
+            if net_config.nat_enabled:
+                setup_nat(bridge)
 
-    try:
-        create_tap(tap_name, bridge=bridge)
-        add_iptables_forward_rules(tap_name, bridge=bridge)
-    except NetworkError as e:
-        # Ensure TAP and iptables rules are cleaned up when network setup partially fails
-        cleanup_tap(tap_name, bridge=bridge)
-        shutil.rmtree(vm_dir, ignore_errors=True)
         try:
-            release_network_ip(network_name, name)
-        except NetworkError:
-            pass
-        raise NetworkError(f"Network setup failed: {e}")
+            create_tap(tap_name, bridge=bridge)
+            resources_created["tap"] = True
+            add_iptables_forward_rules(tap_name, bridge=bridge)
+        except NetworkError as e:
+            raise NetworkError(f"Network setup failed: {e}") from e
 
-    log_file = vm_dir / DEFAULT_FC_LOG_FILENAME
-    console_log_file = vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
-    pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
+        log_file = vm_dir / DEFAULT_FC_LOG_FILENAME
+        console_log_file = vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
+        pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
 
-    fc_cmd = [firecracker_bin, "--no-api", "--config-file", str(config_file)]
-    if enable_api_socket and socket_path:
-        fc_cmd = [
-            firecracker_bin,
-            "--api-sock",
-            str(socket_path),
-            "--config-file",
-            str(config_file),
-        ]
+        fc_cmd = [firecracker_bin, "--no-api", "--config-file", str(config_file)]
+        if enable_api_socket and socket_path:
+            fc_cmd = [
+                firecracker_bin,
+                "--api-sock",
+                str(socket_path),
+                "--config-file",
+                str(config_file),
+            ]
 
-    try:
         log_fp = open(log_file, "w", buffering=1, encoding="utf-8")
         if enable_console and pty_slave_fd is not None:
             proc = subprocess.Popen(
@@ -738,80 +770,235 @@ def create_vm(
                 stderr=log_fp,
                 start_new_session=True,
             )
-    except FileNotFoundError:
-        if effective_mode == CloudInitMode.NO_CLOUD_NET and net_manager is not None:
-            net_manager.stop_server(name)
-            remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+
         if enable_console and pty_slave_fd is not None:
             try:
                 os.close(pty_slave_fd)
             except OSError:
                 pass
-        if enable_console and pty_master_fd is not None:
+
+        if enable_console and relay_mgr is not None and pty_master_fd is not None:
             try:
-                os.close(pty_master_fd)
-            except OSError:
+                console_socket_path, console_relay_pid = relay_mgr.start_relay(
+                    name, pty_master_fd, vm_dir
+                )
+                resources_created["console_relay"] = True
+            except MVMError as e:
+                logger.warning("Failed to start console relay: %s", e)
+                try:
+                    os.close(pty_master_fd)
+                except OSError:
+                    pass
+
+        _write_pid_file(pid_file, proc.pid)
+
+        vm_instance = VMInstance(
+            name=name,
+            id=vm_id,  # Use the pre-generated ID
+            pid=proc.pid,
+            socket_path=socket_path,
+            ip=guest_ip,
+            mac=guest_mac,
+            network_name=network_name,
+            tap_device=tap_name,
+            created_at=datetime.now(tz=timezone.utc),
+            status=VMState.RUNNING,
+            nocloud_net_port=nocloud_net_port,
+            nocloud_server_pid=nocloud_server_pid,
+            console_relay_pid=console_relay_pid,
+            console_socket_path=console_socket_path,
+            rootfs_suffix=rootfs_ext,
+        )
+        manager.register(vm_instance)
+
+        return vm_instance
+
+    except (VMCreateError, NetworkError, CloudInitError, MVMError):
+        logger.debug("VM creation failed with typed exception, performing cleanup")
+
+        if log_fp is not None:
+            try:
+                log_fp.close()
+            except Exception:
                 pass
-        cleanup_tap(tap_name)
-        shutil.rmtree(vm_dir, ignore_errors=True)
-        raise MVMError(f"Firecracker binary not found: {firecracker_bin!r}")
-    except OSError as e:
-        if effective_mode == CloudInitMode.NO_CLOUD_NET and net_manager is not None:
-            net_manager.stop_server(name)
-            remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
-        if enable_console and pty_slave_fd is not None:
+        if console_fp is not None:
+            try:
+                console_fp.close()
+            except Exception:
+                pass
+
+        if resources_created["nocloud_server"] and net_manager is not None and vm_id:
+            try:
+                net_manager.stop_server(name, vm_id)
+            except Exception:
+                pass
+
+        if resources_created["firewall_rule"] and guest_ip:
+            try:
+                remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+            except Exception:
+                pass
+
+        if resources_created["tap"] and tap_name:
+            try:
+                cleanup_tap(tap_name, bridge=net_config.bridge if net_config else None)
+            except Exception:
+                pass
+
+        if resources_created["network_ip"]:
+            try:
+                release_network_ip(network_name, name)
+            except Exception:
+                pass
+
+        if resources_created["console_relay"] and relay_mgr is not None and vm_id is not None:
+            try:
+                relay_mgr.stop_relay(name, vm_id)
+            except Exception:
+                pass
+
+        if pty_slave_fd is not None:
             try:
                 os.close(pty_slave_fd)
-            except OSError:
+            except Exception:
                 pass
-        if enable_console and pty_master_fd is not None:
+        if pty_master_fd is not None:
             try:
                 os.close(pty_master_fd)
-            except OSError:
+            except Exception:
                 pass
-        cleanup_tap(tap_name)
-        shutil.rmtree(vm_dir, ignore_errors=True)
-        raise MVMError(f"Failed to start Firecracker: {e}")
 
-    if enable_console and pty_slave_fd is not None:
-        try:
-            os.close(pty_slave_fd)
-        except OSError:
-            pass
+        if resources_created["vm_dir"] and vm_dir and vm_dir.exists():
+            try:
+                shutil.rmtree(vm_dir, ignore_errors=True)
+            except Exception:
+                pass
 
-    if enable_console and relay_mgr is not None and pty_master_fd is not None:
-        try:
-            console_socket_path, console_relay_pid = relay_mgr.start_relay(
-                name, pty_master_fd, vm_dir
-            )
-        except MVMError as e:
-            logger.warning("Failed to start console relay: %s", e)
+        raise
+    except FileNotFoundError as e:
+        logger.debug("VM creation failed with FileNotFoundError, performing cleanup: %s", e)
+
+        if log_fp is not None:
+            try:
+                log_fp.close()
+            except Exception:
+                pass
+        if console_fp is not None:
+            try:
+                console_fp.close()
+            except Exception:
+                pass
+
+        if resources_created["nocloud_server"] and net_manager is not None and vm_id:
+            try:
+                net_manager.stop_server(name, vm_id)
+            except Exception:
+                pass
+
+        if resources_created["firewall_rule"] and guest_ip:
+            try:
+                remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+            except Exception:
+                pass
+
+        if resources_created["tap"] and tap_name:
+            try:
+                cleanup_tap(tap_name, bridge=net_config.bridge if net_config else None)
+            except Exception:
+                pass
+
+        if resources_created["network_ip"]:
+            try:
+                release_network_ip(network_name, name)
+            except Exception:
+                pass
+
+        if resources_created["console_relay"] and relay_mgr is not None and vm_id is not None:
+            try:
+                relay_mgr.stop_relay(name, vm_id)
+            except Exception:
+                pass
+
+        if pty_slave_fd is not None:
+            try:
+                os.close(pty_slave_fd)
+            except Exception:
+                pass
+        if pty_master_fd is not None:
             try:
                 os.close(pty_master_fd)
-            except OSError:
+            except Exception:
                 pass
 
-    _write_pid_file(pid_file, proc.pid)
+        if resources_created["vm_dir"] and vm_dir and vm_dir.exists():
+            try:
+                shutil.rmtree(vm_dir, ignore_errors=True)
+            except Exception:
+                pass
 
-    vm_instance = VMInstance(
-        name=name,
-        id=generate_vm_id(name),
-        pid=proc.pid,
-        socket_path=socket_path,
-        ip=guest_ip,
-        mac=guest_mac,
-        network_name=network_name,
-        tap_device=tap_name,
-        created_at=datetime.now(tz=timezone.utc),
-        status=VMState.RUNNING,
-        nocloud_net_port=nocloud_net_port,
-        nocloud_server_pid=nocloud_server_pid,
-        console_relay_pid=console_relay_pid,
-        console_socket_path=console_socket_path,
-    )
-    manager.register(vm_instance)
+        raise MVMError(f"Firecracker binary not found: {firecracker_bin}") from e
+    except Exception as e:
+        logger.debug("VM creation failed with unexpected error, performing cleanup: %s", e)
 
-    return vm_instance
+        if log_fp is not None:
+            try:
+                log_fp.close()
+            except Exception:
+                pass
+        if console_fp is not None:
+            try:
+                console_fp.close()
+            except Exception:
+                pass
+
+        if resources_created["nocloud_server"] and net_manager is not None and vm_id:
+            try:
+                net_manager.stop_server(name, vm_id)
+            except Exception:
+                pass
+
+        if resources_created["firewall_rule"] and guest_ip:
+            try:
+                remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+            except Exception:
+                pass
+
+        if resources_created["tap"] and tap_name:
+            try:
+                cleanup_tap(tap_name, bridge=net_config.bridge if net_config else None)
+            except Exception:
+                pass
+
+        if resources_created["network_ip"]:
+            try:
+                release_network_ip(network_name, name)
+            except Exception:
+                pass
+
+        if resources_created["console_relay"] and relay_mgr is not None and vm_id is not None:
+            try:
+                relay_mgr.stop_relay(name, vm_id)
+            except Exception:
+                pass
+
+        if pty_slave_fd is not None:
+            try:
+                os.close(pty_slave_fd)
+            except Exception:
+                pass
+        if pty_master_fd is not None:
+            try:
+                os.close(pty_master_fd)
+            except Exception:
+                pass
+
+        if resources_created["vm_dir"] and vm_dir and vm_dir.exists():
+            try:
+                shutil.rmtree(vm_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+        raise VMCreateError(f"Failed to create VM: {e}") from e
 
 
 def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
@@ -820,7 +1007,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
 
-    vm_dir = get_vm_dir(name)
+    vm_dir = get_vm_dir(vm.id)
     net_name = vm.network_name or DEFAULT_NETWORK_NAME
     tap_name = vm.tap_device or _generate_tap_name(net_name, name)
 
@@ -834,10 +1021,25 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
 
     graceful_shutdown(pid, vm.socket_path)
 
+    # Try to capture exit code after shutdown
+    if pid is not None:
+        try:
+            # Try to get exit status if we're the parent
+            _, status = os.waitpid(pid, os.WNOHANG)
+            if os.WIFEXITED(status):
+                exit_code = os.WEXITSTATUS(status)
+                _write_exit_code(vm_dir, exit_code)
+            elif os.WIFSIGNALED(status):
+                sig = os.WTERMSIG(status)
+                _write_exit_code(vm_dir, CONST_SIGNAL_EXIT_CODE_BASE + sig)
+        except (ChildProcessError, OSError):
+            # Process not our child or already reaped - exit code unknown
+            pass
+
     if vm.console_relay_pid is not None:
         try:
             relay_mgr = ConsoleRelayManager()
-            relay_mgr.stop_relay(name)
+            relay_mgr.stop_relay(name, vm.id)
         except (OSError, RuntimeError) as e:
             logger.warning("Failed to cleanup console relay: %s", e)
 
@@ -845,7 +1047,10 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if vm.nocloud_net_port is not None and vm.ip is not None:
         try:
             nocloud_manager = NoCloudNetServerManager()
-            nocloud_manager.stop_server(name)
+            if vm.id:
+                nocloud_manager.stop_server(name, vm.id)
+            else:
+                nocloud_manager.stop_server(name)
             remove_nocloud_input_rule(vm.ip, name, vm.nocloud_net_port)
         except (OSError, RuntimeError, NetworkError) as e:
             logger.warning("Failed to cleanup nocloud-net resources: %s", e)
@@ -880,6 +1085,14 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
 
     if vm_dir.exists():
         shutil.rmtree(vm_dir)
+
+    # Clean up any orphaned nocloud servers
+    try:
+        nocloud_manager = NoCloudNetServerManager()
+        nocloud_manager.cleanup_orphans()
+    except Exception:
+        # Don't fail VM removal if orphan cleanup fails
+        pass
 
 
 def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:

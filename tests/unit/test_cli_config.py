@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -77,15 +77,22 @@ def test_dump_vm_success(tmp_path: Path):
     config_data = {"boot-source": {"kernel_image_path": "/vmlinux"}}
     (vm_dir / "firecracker.json").write_text(json.dumps(config_data))
 
-    with patch("mvmctl.cli.config.get_vm_dir", return_value=vm_dir):
-        result = runner.invoke(app, ["dump-vm", "--name", "test-vm"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["boot-source"]["kernel_image_path"] == "/vmlinux"
+    # Mock VM manager to return a VM with the expected ID
+    mock_vm = MagicMock()
+    mock_vm.id = "test-vm"
+    mock_manager = MagicMock()
+    mock_manager.get.return_value = mock_vm
+
+    with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir):
+        with patch("mvmctl.api.vms.get_vm_manager", return_value=mock_manager):
+            result = runner.invoke(app, ["dump-vm", "--name", "test-vm"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["boot-source"]["kernel_image_path"] == "/vmlinux"
 
 
 def test_dump_vm_not_found(tmp_path: Path):
-    with patch("mvmctl.cli.config.get_vm_dir", return_value=tmp_path / "nonexistent"):
+    with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=tmp_path / "nonexistent"):
         result = runner.invoke(app, ["dump-vm", "--name", "ghost"])
         assert result.exit_code == 1
 

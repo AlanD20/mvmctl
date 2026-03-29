@@ -19,7 +19,7 @@ from mvmctl.constants import (
     DEFAULT_CONSOLE_SOCKET_FILENAME,
 )
 from mvmctl.exceptions import MVMError
-from mvmctl.utils.fs import get_vm_dir
+from mvmctl.utils.fs import get_vm_dir_by_hash
 
 logger = logging.getLogger(__name__)
 
@@ -48,27 +48,27 @@ class ConsoleRelayManager:
             self._lock = threading.Lock()
         return self._lock
 
-    def _get_pid_file_path(self, vm_name: str) -> Path:
+    def _get_pid_file_path(self, vm_hash: str) -> Path:
         """Get the PID file path for a VM's console relay.
 
         Args:
-            vm_name: Name of the VM
+            vm_hash: VM hash (64-char SHA256)
 
         Returns:
             Path to the console.pid file
         """
-        return get_vm_dir(vm_name) / DEFAULT_CONSOLE_PID_FILENAME
+        return get_vm_dir_by_hash(vm_hash) / DEFAULT_CONSOLE_PID_FILENAME
 
-    def _get_socket_path(self, vm_name: str) -> Path:
+    def _get_socket_path(self, vm_hash: str) -> Path:
         """Get the socket path for a VM's console relay.
 
         Args:
-            vm_name: Name of the VM
+            vm_hash: VM hash (64-char SHA256)
 
         Returns:
             Path to the console.sock file
         """
-        return get_vm_dir(vm_name) / DEFAULT_CONSOLE_SOCKET_FILENAME
+        return get_vm_dir_by_hash(vm_hash) / DEFAULT_CONSOLE_SOCKET_FILENAME
 
     def start_relay(self, vm_name: str, pty_master_fd: int, vm_dir: Path) -> tuple[Path, int]:
         """Start a console relay for the specified VM.
@@ -77,9 +77,9 @@ class ConsoleRelayManager:
         writes to both the console.log file and a Unix socket.
 
         Args:
-            vm_name: Unique name identifying the VM
+            vm_name: Unique name identifying the VM (for tracking)
             pty_master_fd: File descriptor of the PTY master
-            vm_dir: Path to the VM directory
+            vm_dir: Path to the VM directory (hash-based)
 
         Returns:
             Tuple of (socket_path, pid)
@@ -91,8 +91,8 @@ class ConsoleRelayManager:
             if vm_name in self._relays:
                 raise MVMError(f"Console relay already running for VM: {vm_name}")
 
-            socket_path = self._get_socket_path(vm_name)
-            pid_file = self._get_pid_file_path(vm_name)
+            socket_path = vm_dir / DEFAULT_CONSOLE_SOCKET_FILENAME
+            pid_file = vm_dir / DEFAULT_CONSOLE_PID_FILENAME
             log_file = vm_dir / "firecracker.console.log"
 
             relay_cmd = [
@@ -137,14 +137,15 @@ class ConsoleRelayManager:
 
             return socket_path, proc.pid
 
-    def stop_relay(self, vm_name: str) -> None:
+    def stop_relay(self, vm_name: str, vm_hash: str | None = None) -> None:
         """Stop the console relay for the specified VM.
 
         Idempotent operation - safe to call multiple times. If no relay
         exists for the VM, this is a no-op.
 
         Args:
-            vm_name: Name of the VM whose relay should be stopped
+            vm_name: Name of the VM whose relay should be stopped (for tracking)
+            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
         """
         with self._thread_lock:
             info = self._relays.get(vm_name)
@@ -180,21 +181,23 @@ class ConsoleRelayManager:
                 del self._relays[vm_name]
                 logger.info("Stopped console relay for VM %s", vm_name)
             else:
-                self._stop_by_pid_file(vm_name)
+                # Try PID file recovery using hash if provided, otherwise use name
+                lookup_key = vm_hash if vm_hash is not None else vm_name
+                self._stop_by_pid_file(lookup_key)
 
-    def _stop_by_pid_file(self, vm_name: str) -> bool:
+    def _stop_by_pid_file(self, vm_hash: str) -> bool:
         """Stop a relay using only its PID file (recovery path).
 
         Args:
-            vm_name: Name of the VM whose relay should be stopped
+            vm_hash: VM hash (64-char SHA256)
 
         Returns:
             True if a relay was stopped using the PID file, False otherwise
         """
-        pid_file = self._get_pid_file_path(vm_name)
+        pid_file = self._get_pid_file_path(vm_hash)
 
         if not pid_file.exists():
-            logger.debug("No PID file found for VM %s", vm_name)
+            logger.debug("No PID file found for VM hash %s", vm_hash)
             return False
 
         try:
@@ -208,9 +211,9 @@ class ConsoleRelayManager:
             os.kill(pid, 0)
             os.kill(pid, signal.SIGTERM)
             logger.info(
-                "Stopped console relay via PID file recovery (PID: %d) for VM %s",
+                "Stopped console relay via PID file recovery (PID: %d) for VM hash %s",
                 pid,
-                vm_name,
+                vm_hash,
             )
         except ProcessLookupError:
             logger.debug("Console relay process (PID: %d) already terminated", pid)
@@ -222,7 +225,7 @@ class ConsoleRelayManager:
         except OSError:
             pass
 
-        socket_path = self._get_socket_path(vm_name)
+        socket_path = self._get_socket_path(vm_hash)
         if socket_path.exists():
             try:
                 socket_path.unlink()
@@ -231,14 +234,15 @@ class ConsoleRelayManager:
 
         return True
 
-    def kill_relay(self, vm_name: str) -> bool:
+    def kill_relay(self, vm_name: str, vm_hash: str | None = None) -> bool:
         """Forcefully kill the console relay for the specified VM.
 
         Sends SIGTERM first, waits up to CONST_CONSOLE_KILL_TIMEOUT_S seconds,
         then sends SIGKILL if still running.
 
         Args:
-            vm_name: Name of the VM whose relay should be killed
+            vm_name: Name of the VM whose relay should be killed (for tracking)
+            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
 
         Returns:
             True if a relay was killed, False if no relay was running
@@ -252,7 +256,9 @@ class ConsoleRelayManager:
                 pid = info["pid"]
                 pid_file = info["pid_file"]
             else:
-                pid_file = self._get_pid_file_path(vm_name)
+                # Use hash if provided, otherwise fall back to name
+                lookup_key = vm_hash if vm_hash is not None else vm_name
+                pid_file = self._get_pid_file_path(lookup_key)
                 if pid_file.exists():
                     try:
                         pid = int(pid_file.read_text().strip())
@@ -300,7 +306,9 @@ class ConsoleRelayManager:
                 except OSError:
                     pass
 
-            socket_path = self._get_socket_path(vm_name)
+            # Use hash if provided, otherwise fall back to name for socket path
+            lookup_key = vm_hash if vm_hash is not None else vm_name
+            socket_path = self._get_socket_path(lookup_key)
             if socket_path.exists():
                 try:
                     socket_path.unlink()
@@ -313,11 +321,12 @@ class ConsoleRelayManager:
             logger.info("Killed console relay for VM %s", vm_name)
             return True
 
-    def get_relay_pid(self, vm_name: str) -> int | None:
+    def get_relay_pid(self, vm_name: str, vm_hash: str | None = None) -> int | None:
         """Get the PID of the running relay for the specified VM.
 
         Args:
-            vm_name: Name of the VM
+            vm_name: Name of the VM (for tracking)
+            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
 
         Returns:
             The subprocess PID if running, None otherwise
@@ -326,18 +335,20 @@ class ConsoleRelayManager:
             info = self._relays.get(vm_name)
             if info is not None:
                 return int(info["pid"])
-            return self._get_pid_from_file(vm_name)
+            # If vm_hash not provided, try vm_name as fallback for backward compatibility
+            lookup_key = vm_hash if vm_hash is not None else vm_name
+            return self._get_pid_from_file(lookup_key)
 
-    def _get_pid_from_file(self, vm_name: str) -> int | None:
+    def _get_pid_from_file(self, vm_hash: str) -> int | None:
         """Get PID from PID file if it exists and process is running.
 
         Args:
-            vm_name: Name of the VM
+            vm_hash: VM hash (64-char SHA256)
 
         Returns:
             PID if file exists and process is running, None otherwise
         """
-        pid_file = self._get_pid_file_path(vm_name)
+        pid_file = self._get_pid_file_path(vm_hash)
         if not pid_file.exists():
             return None
 
@@ -348,11 +359,12 @@ class ConsoleRelayManager:
         except (ValueError, OSError, ProcessLookupError, PermissionError):
             return None
 
-    def is_relay_running(self, vm_name: str) -> bool:
+    def is_relay_running(self, vm_name: str, vm_hash: str | None = None) -> bool:
         """Check if the relay is currently running.
 
         Args:
-            vm_name: Name of the VM
+            vm_name: Name of the VM (for tracking)
+            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
 
         Returns:
             True if relay is running, False otherwise
@@ -368,18 +380,20 @@ class ConsoleRelayManager:
                     return True
                 except (ProcessLookupError, PermissionError):
                     return False
-            return self._get_pid_from_file(vm_name) is not None
+            # If vm_hash not provided, try vm_name as fallback for backward compatibility
+            lookup_key = vm_hash if vm_hash is not None else vm_name
+            return self._get_pid_from_file(lookup_key) is not None
 
-    def get_socket_path(self, vm_name: str) -> Path:
+    def get_socket_path(self, vm_hash: str) -> Path:
         """Get the socket path for a VM's console relay.
 
         Args:
-            vm_name: Name of the VM
+            vm_hash: VM hash (64-char SHA256)
 
         Returns:
             Path to the console.sock file
         """
-        return self._get_socket_path(vm_name)
+        return self._get_socket_path(vm_hash)
 
     def cleanup_orphans(self) -> None:
         """Clean up any orphaned relays from previous crashed sessions.
@@ -400,6 +414,7 @@ class ConsoleRelayManager:
             if not vm_entry.is_dir():
                 continue
 
+            vm_hash = vm_entry.name
             pid_file = vm_entry / DEFAULT_CONSOLE_PID_FILENAME
             if not pid_file.exists():
                 continue
@@ -408,22 +423,22 @@ class ConsoleRelayManager:
                 pid = int(pid_file.read_text().strip())
                 os.kill(pid, 0)
                 logger.debug(
-                    "Skipping orphan cleanup for VM %s - process %d still running",
-                    vm_entry.name,
+                    "Skipping orphan cleanup for VM hash %s - process %d still running",
+                    vm_hash,
                     pid,
                 )
             except (ValueError, OSError):
                 try:
                     pid_file.unlink()
-                    logger.info("Cleaned up invalid PID file for VM %s", vm_entry.name)
+                    logger.info("Cleaned up invalid PID file for VM hash %s", vm_hash)
                 except OSError:
                     pass
             except ProcessLookupError:
                 try:
                     pid_file.unlink()
                     logger.info(
-                        "Cleaned up stale PID file for VM %s (process terminated)",
-                        vm_entry.name,
+                        "Cleaned up stale PID file for VM hash %s (process terminated)",
+                        vm_hash,
                     )
                 except OSError:
                     pass
@@ -435,7 +450,7 @@ class ConsoleRelayManager:
                         pass
             except PermissionError:
                 logger.debug(
-                    "Skipping orphan cleanup for VM %s - permission denied on process %d",
-                    vm_entry.name,
+                    "Skipping orphan cleanup for VM hash %s - permission denied on process %d",
+                    vm_hash,
                     pid,
                 )

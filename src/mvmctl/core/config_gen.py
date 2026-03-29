@@ -26,7 +26,7 @@ from mvmctl.constants import (
 from mvmctl.exceptions import ConfigError, MVMError
 from mvmctl.models import CloudInitMode, VMConfig
 from mvmctl.utils.fs import get_vm_dir
-from mvmctl.utils.validation import validate_boot_arg_component
+from mvmctl.utils.validation import validate_boot_arg_component, validate_fs_type, validate_fs_uuid
 
 
 class BootSourceConfig(TypedDict):
@@ -89,13 +89,19 @@ FirecrackerConfig = TypedDict(
 class ConfigGenerator:
     """Generates Firecracker JSON configuration."""
 
-    def __init__(self, vm_config: VMConfig):
+    def __init__(self, vm_config: VMConfig, vm_dir: Path | None = None):
         self.vm_config = vm_config
+        self.vm_dir = vm_dir
 
     def validate(self) -> None:
         if self.vm_config.boot_args:
             for component in self.vm_config.boot_args.split():
                 validate_boot_arg_component(component, "boot_args")
+
+        # Validate root UUID and filesystem type
+        validate_fs_uuid(self.vm_config.root_uuid, "root_uuid")
+        validate_fs_type(self.vm_config.root_fs_type, "root_fs_type")
+
         self._validate_boot_components()
 
     def _validate_boot_components(self) -> None:
@@ -193,8 +199,10 @@ class ConfigGenerator:
     def _build_logger_config(self) -> LoggerConfig | None:
         if not self.vm_config.enable_logging:
             return None
+        # Use vm_dir if provided (hash-based), otherwise fall back to name-based lookup
+        vm_dir = self.vm_dir if self.vm_dir is not None else get_vm_dir(self.vm_config.name)
         return {
-            "log_path": str(get_vm_dir(self.vm_config.name) / DEFAULT_FC_LOG_FILENAME),
+            "log_path": str(vm_dir / DEFAULT_FC_LOG_FILENAME),
             "level": DEFAULT_FC_LOG_LEVEL,
             "show_level": True,
             "show_log_origin": True,
@@ -203,8 +211,10 @@ class ConfigGenerator:
     def _build_metrics_config(self) -> MetricsConfig | None:
         if not self.vm_config.enable_metrics:
             return None
+        # Use vm_dir if provided (hash-based), otherwise fall back to name-based lookup
+        vm_dir = self.vm_dir if self.vm_dir is not None else get_vm_dir(self.vm_config.name)
         return {
-            "metrics_path": str(get_vm_dir(self.vm_config.name) / DEFAULT_FC_METRICS_FILENAME),
+            "metrics_path": str(vm_dir / DEFAULT_FC_METRICS_FILENAME),
         }
 
     def _build_default_boot_args(self) -> str:
@@ -248,9 +258,17 @@ class ConfigGenerator:
             ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
             mask_arg = ""
 
-        root_arg = (
-            f"root=UUID={self.vm_config.root_uuid}" if self.vm_config.root_uuid else "root=/dev/vda"
-        )
+        # Build root argument with validation
+        if self.vm_config.root_uuid:
+            # Validate UUID format before using
+            validate_fs_uuid(self.vm_config.root_uuid)
+            root_arg = f"root=UUID={self.vm_config.root_uuid}"
+        else:
+            root_arg = "root=/dev/vda"
+
+        # Validate filesystem type
+        fs_type = self.vm_config.root_fs_type or DEFAULT_VM_ROOT_FS_TYPE
+        validate_fs_type(fs_type)
 
         parts = [
             DEFAULT_BOOT_CONSOLE,
@@ -262,7 +280,7 @@ class ConfigGenerator:
             root_arg,
             "rw",
             "rootwait",
-            f"rootfstype={self.vm_config.root_fs_type or DEFAULT_VM_ROOT_FS_TYPE}",
+            f"rootfstype={fs_type}",
             ds_arg,
             mask_arg,
             lsm_arg,

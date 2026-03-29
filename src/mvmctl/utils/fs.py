@@ -37,12 +37,14 @@ def get_cache_dir() -> Path:
         resolved = Path(override).resolve()
         home = Path.home().resolve()
         tmp = Path("/tmp").resolve()
+        var_tmp = Path("/var/tmp").resolve()
         under_home = resolved.is_relative_to(home)
         under_tmp = (os.getuid() != 0) and resolved.is_relative_to(tmp)
-        if not (under_home or under_tmp):
+        under_var_tmp = (os.getuid() != 0) and resolved.is_relative_to(var_tmp)
+        if not (under_home or under_tmp or under_var_tmp):
             raise MVMError(
                 f"Unsafe {env_var('CACHE_DIR')} path '{override}': "
-                f"must be under $HOME ({home}) or /tmp"
+                f"must be under $HOME ({home}), /tmp, or /var/tmp"
             )
         return resolved
     return _get_real_home() / ".cache" / PROJECT_NAME
@@ -59,12 +61,14 @@ def get_config_dir() -> Path:
         resolved = Path(override).resolve()
         home = Path.home().resolve()
         tmp = Path("/tmp").resolve()
+        var_tmp = Path("/var/tmp").resolve()
         under_home = resolved.is_relative_to(home)
         under_tmp = (os.getuid() != 0) and resolved.is_relative_to(tmp)
-        if not (under_home or under_tmp):
+        under_var_tmp = (os.getuid() != 0) and resolved.is_relative_to(var_tmp)
+        if not (under_home or under_tmp or under_var_tmp):
             raise MVMError(
                 f"Unsafe {env_var('CONFIG_DIR')} path '{override}': "
-                f"must be under $HOME ({home}) or /tmp"
+                f"must be under $HOME ({home}), /tmp, or /var/tmp"
             )
         return resolved
     return _get_real_home() / ".config" / PROJECT_NAME
@@ -83,6 +87,11 @@ def get_vms_dir() -> Path:
 def get_vm_dir(name: str) -> Path:
     """Return the directory for a specific VM."""
     return get_vms_dir() / name
+
+
+def get_vm_dir_by_hash(vm_hash: str) -> Path:
+    """Return the directory for a specific VM by its 64-char hash."""
+    return get_vms_dir() / vm_hash
 
 
 def get_images_dir() -> Path:

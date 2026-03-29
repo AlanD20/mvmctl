@@ -150,7 +150,7 @@ class TestVMLifecycleWorkflow:
         data = json.loads(result.output)
         assert any(v["name"] == "full-lifecycle-vm" for v in data)
 
-        result = runner.invoke(vm_app, ["rm", "--name", "full-lifecycle-vm", "--force"])
+        result = runner.invoke(vm_app, ["rm", "--name", "full-lifecycle-vm"])
         assert result.exit_code == 0
         mock_remove.assert_called_once_with("full-lifecycle-vm")
 
@@ -237,7 +237,7 @@ class TestVMLifecycleWorkflow:
         assert result.exit_code == 0
         mock_load.assert_called_once()
 
-        result = runner.invoke(vm_app, ["rm", "--name", "restore-vm", "--force"])
+        result = runner.invoke(vm_app, ["rm", "--name", "restore-vm"])
         assert result.exit_code == 0
 
 
@@ -253,7 +253,7 @@ class TestVMLifecycleEdgeCases:
         mock_manager.return_value.get_by_name.return_value = []
         mock_manager.return_value.find_by_short_id.return_value = []
 
-        result = runner.invoke(vm_app, ["rm", "--name", "missing-vm", "--force"])
+        result = runner.invoke(vm_app, ["rm", "--name", "missing-vm"])
         assert result.exit_code == 1
         assert "no vm found" in result.output.lower()
 
@@ -292,6 +292,6 @@ class TestVMLifecycleEdgeCases:
         result = runner.invoke(vm_app, ["create", "--name", "cleanup-vm", "--image", "abc123"])
         assert result.exit_code == 0
 
-        result = runner.invoke(vm_app, ["prune", "--force"])
+        result = runner.invoke(vm_app, ["prune"])
         assert result.exit_code == 0
         mock_cleanup.assert_called_once()

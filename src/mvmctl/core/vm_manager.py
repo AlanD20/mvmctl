@@ -281,3 +281,36 @@ class VMManager:
 
 def get_vm_manager(run_dir: Path | None = None) -> VMManager:
     return VMManager(run_dir=run_dir)
+
+
+def _get_exit_code_from_log(log_file: Path) -> int | None:
+    """Parse exit code from Firecracker log file.
+
+    Args:
+        log_file: Path to the Firecracker log file
+
+    Returns:
+        Exit code if found, None otherwise
+    """
+    if not log_file.exists():
+        return None
+
+    import re
+
+    content = log_file.read_text()
+
+    # Look for various exit code patterns
+    patterns = [
+        r"exit code:\s*(\d+)",
+        r"exited:\s*(\d+)",
+        r"exit\s+(\d+)",
+        r"Exit Code:\s*(\d+)",
+        r"EXIT CODE:\s*(\d+)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+
+    return None

@@ -26,6 +26,7 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_lifecycle.setup_nat")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
     @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+    @patch("mvmctl.core.cloud_init.write_cloud_init")
     @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.utils.process.require_mvm_group_membership")
@@ -33,14 +34,17 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.ConsoleRelayManager")
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
+    @patch("mvmctl.core.vm_lifecycle.shutil.which")
     def test_create_vm_with_console_starts_relay(
         self,
+        mock_which,
         mock_relay_popen,
         mock_console_mgr,
         mock_nocloud_mgr,
         mock_add_nocloud_rule,
         mock_require_group,
         mock_subprocess_run,
+        mock_write_ci2,
         mock_write_ci,
         mock_config_gen,
         mock_write_pid,
@@ -70,6 +74,11 @@ class TestConsoleWorkflow:
 
         # Patch shutil.copy2 to avoid MagicMock path objects reaching real copy2
         mock_copy2.return_value = None
+        # Mock shutil.which to return a valid firecracker binary path
+        mock_which.return_value = "/usr/bin/firecracker"
+
+        # Debug: Ensure subprocess.Popen mock is working
+        mock_fc_popen.side_effect = lambda *args, **kwargs: MagicMock(pid=1000)
 
         # Setup proper VM directory path (real Path, not mock)
         vm_dir = tmp_path / "testvm"
@@ -123,6 +132,32 @@ class TestConsoleWorkflow:
         mock_console_instance.start_relay.return_value = (vm_dir / "console.sock", 2000)
         mock_console_mgr.return_value = mock_console_instance
 
+        # Debug: Ensure write_cloud_init mock is working
+        def mock_write_ci_impl(*args, **kwargs):
+            print(f"write_cloud_init called with: {args}, {kwargs}")
+            return None
+
+        mock_write_ci.side_effect = mock_write_ci_impl
+        mock_write_ci2.side_effect = mock_write_ci_impl
+
+        # Debug: Print mock status
+        print(f"mock_write_ci: {mock_write_ci}")
+        print(f"mock_which: {mock_which}")
+        print(f"mock_fc_popen: {mock_fc_popen}")
+
+        # Add side_effect to track Popen calls
+        def track_popen(*args, **kwargs):
+            print(f"Popen called with: {args}, {kwargs}")
+            return MagicMock(pid=1000)
+
+        mock_fc_popen.side_effect = track_popen
+
+        # Verify mock is in the correct module
+        from mvmctl.core import cloud_init
+
+        print(f"cloud_init.write_cloud_init: {cloud_init.write_cloud_init}")
+        print(f"Is mock: {cloud_init.write_cloud_init is mock_write_ci}")
+
         # Create VM with console enabled (default)
         vm = create_vm(name="testvm", image="ubuntu-22.04")
 
@@ -152,13 +187,15 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_lifecycle.setup_nat")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
     @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
-    @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+    @patch("mvmctl.core.cloud_init.write_cloud_init")
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+    @patch("mvmctl.core.vm_lifecycle.shutil.which")
     def test_create_vm_without_console_skips_relay(
         self,
+        mock_which,
         mock_nocloud_mgr,
         mock_add_nocloud_rule,
         mock_require_group,
@@ -191,6 +228,12 @@ class TestConsoleWorkflow:
 
         # Patch shutil.copy2 to avoid MagicMock path objects reaching real copy2
         mock_copy2.return_value = None
+
+        # Mock shutil.which to return a valid firecracker binary path
+        mock_which.return_value = "/usr/bin/firecracker"
+
+        # Debug: Ensure write_cloud_init mock is working
+        mock_write_ci.side_effect = lambda *args, **kwargs: None
 
         # Setup proper VM directory path (real Path, not mock)
         vm_dir = tmp_path / "testvm"
@@ -258,16 +301,17 @@ class TestConsoleRelayLifecycle:
         mock_popen.return_value = mock_proc
 
         mgr = ConsoleRelayManager()
-        vm_dir = tmp_path / "vms" / "testvm"
+        vm_hash = "a" * 64  # Mock VM hash
+        vm_dir = tmp_path / "vms" / vm_hash
         vm_dir.mkdir(parents=True)
 
         # Start relay
         socket_path, pid = mgr.start_relay("testvm", 10, vm_dir)
         assert pid == 12345
-        assert mgr.is_relay_running("testvm") is True
+        assert mgr.is_relay_running("testvm", vm_hash) is True
 
         # Stop relay
-        mgr.stop_relay("testvm")
+        mgr.stop_relay("testvm", vm_hash)
         mock_kill.assert_any_call(12345, signal.SIGTERM)
         assert "testvm" not in mgr._relays
 
@@ -277,8 +321,9 @@ class TestConsoleRelayLifecycle:
 
         monkeypatch.setenv(env_var("CACHE_DIR"), str(tmp_path))
 
-        # Create a PID file for a "stuck" relay
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+        # Create a PID file for a "stuck" relay (using hash-based path)
+        vm_hash = "a" * 64  # Mock VM hash
+        pid_file = tmp_path / "vms" / vm_hash / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("99999")
 
@@ -296,7 +341,7 @@ class TestConsoleRelayLifecycle:
         mock_kill.side_effect = kill_side_effect
 
         mgr = ConsoleRelayManager()
-        result = mgr.kill_relay("testvm")
+        result = mgr.kill_relay("testvm", vm_hash)
 
         assert result is True
 
@@ -329,6 +374,7 @@ class TestConsoleAPI:
         from mvmctl.api.vms import kill_console
 
         mock_vm = MagicMock()
+        mock_vm.id = "a" * 64  # Mock VM hash
         mock_manager = MagicMock()
         mock_manager.get.return_value = mock_vm
         mock_get_mgr.return_value = mock_manager
@@ -340,7 +386,7 @@ class TestConsoleAPI:
         result = kill_console("testvm")
 
         assert result is True
-        mock_relay_mgr.kill_relay.assert_called_once_with("testvm")
+        mock_relay_mgr.kill_relay.assert_called_once_with("testvm", mock_vm.id)
 
     @patch("mvmctl.api.vms._get_console_state")
     @patch("mvmctl.api.vms.get_vm_manager")

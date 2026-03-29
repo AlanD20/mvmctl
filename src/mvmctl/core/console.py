@@ -113,19 +113,22 @@ def check_escape_sequence(buffer: bytearray) -> tuple[bool, str]:
     return False, ""
 
 
-def get_console_state(vm_name: str) -> dict[str, Any]:
-    """Get the state of the console relay for a VM.
+def get_console_state(vm_name: str, vm_hash: str | None = None) -> dict[str, Any]:
+    """Get console relay state for a VM.
 
     Args:
-        vm_name: Name of the VM
+        vm_name: Name of the VM (for tracking)
+        vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
 
     Returns:
         Dict with keys: running (bool), pid (int), socket_path (str)
     """
     mgr = ConsoleRelayManager()
-    running = mgr.is_relay_running(vm_name)
-    pid = mgr.get_relay_pid(vm_name)
-    socket_path = mgr.get_socket_path(vm_name)
+    running = mgr.is_relay_running(vm_name, vm_hash)
+    pid = mgr.get_relay_pid(vm_name, vm_hash)
+    # If vm_hash not provided, use vm_name as fallback for socket path
+    lookup_key = vm_hash if vm_hash is not None else vm_name
+    socket_path = mgr.get_socket_path(lookup_key)
 
     return {
         "running": running,

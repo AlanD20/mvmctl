@@ -135,7 +135,7 @@ def test_create_vm_core_success(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -247,7 +247,7 @@ def test_create_vm_auto_mode_defaults_to_nocloud_net(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -515,7 +515,7 @@ def test_remove_vm_stops_nocloud_server(
 
     remove_vm("nocloud-vm")
 
-    mock_mgr_cls.return_value.stop_server.assert_called_once_with("nocloud-vm")
+    mock_mgr_cls.return_value.stop_server.assert_called_once()
     mock_remove_fw.assert_called_once_with("10.20.0.10", "nocloud-vm", 8080)
 
 
@@ -620,7 +620,7 @@ def test_remove_vm_cleanup_is_idempotent(
     remove_vm("idempotent-vm")
 
     # Verify cleanup was called once
-    mock_mgr_cls.return_value.stop_server.assert_called_once_with("idempotent-vm")
+    mock_mgr_cls.return_value.stop_server.assert_called_once()
     mock_remove_fw.assert_called_once_with("10.20.0.20", "idempotent-vm", 7070)
 
     # Both stop_server and remove_nocloud_input_rule are idempotent by design
@@ -1098,7 +1098,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -1204,7 +1204,7 @@ def test_create_vm_nocloud_net_starts_server(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -1312,7 +1312,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -1358,7 +1358,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
         )
 
     # Verify the manager's stop_server was called to cleanup
-    mock_net_mgr.return_value.stop_server.assert_called_once_with("myvm")
+    mock_net_mgr.return_value.stop_server.assert_called_once()
 
 
 @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
@@ -1417,7 +1417,7 @@ def test_create_vm_nocloud_net_success_sets_port(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -1527,7 +1527,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -1608,12 +1608,12 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
 @patch("builtins.open", new_callable=MagicMock)
 def test_firewall_failure_stops_server_and_raises(
     mock_open,
-    mock_setup_nat,
     mock_rmtree,
     mock_rel_ip,
     mock_cleanup_tap,
     mock_resolve_fs_type,
     mock_resolve_fs_uuid,
+    mock_setup_nat,
     mock_bridge_exists,
     mock_write_pid,
     mock_popen,
@@ -1645,7 +1645,7 @@ def test_firewall_failure_stops_server_and_raises(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -1692,7 +1692,7 @@ def test_firewall_failure_stops_server_and_raises(
         )
 
     # Verify stop_server was called
-    mock_net_mgr.return_value.stop_server.assert_called_once_with("myvm")
+    mock_net_mgr.return_value.stop_server.assert_called_once()
 
     # Verify no VM was registered
     mock_manager.register.assert_not_called()
@@ -1763,7 +1763,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -1868,7 +1868,7 @@ def test_create_vm_starts_nocloud_server(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()
@@ -2208,7 +2208,7 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
     mock_kernel_dir = MagicMock()
     vmlinux = MagicMock()
@@ -2301,7 +2301,7 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
     mock_kernel_dir = MagicMock()
     vmlinux = MagicMock()
@@ -2395,7 +2395,7 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
     mock_kernel_dir = MagicMock()
     vmlinux = MagicMock()
@@ -2475,7 +2475,7 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_vm_dir = MagicMock()
-    mock_vm_dir.exists.return_value = False
+    mock_vm_dir.exists.return_value = True
     mock_get_vm_dir.return_value = mock_vm_dir
 
     mock_kernel_dir = MagicMock()

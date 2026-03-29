@@ -16,6 +16,7 @@ from mvmctl.constants import (
 from mvmctl.core.metadata import (
     get_default_binary_entry,
     get_default_image_entry,
+    read_metadata,
     set_default_binary_entry,
     set_default_image_by_internal_id,
     set_default_image_entry,
@@ -83,6 +84,16 @@ def get_config_value(key: str, default: Any = None) -> Any:
 
 def get_firecracker_config() -> dict[str, str]:
     cache_dir = get_cache_dir()
+    data = read_metadata(cache_dir)
+    binaries = data.get("binaries", {})
+    defaults = binaries.get("defaults", {}) if isinstance(binaries, dict) else {}
+
+    # Read default paths from new defaults section
+    fc_defaults = defaults.get("firecracker", {}) if isinstance(defaults, dict) else {}
+    default_binary_path = fc_defaults.get("binary_path") if isinstance(fc_defaults, dict) else None
+    if not default_binary_path:
+        default_binary_path = str(Path(get_bin_dir()) / "firecracker")
+
     default_binary = get_default_binary_entry(cache_dir)
     if default_binary is not None:
         version_key, entry = default_binary
@@ -93,9 +104,6 @@ def get_firecracker_config() -> dict[str, str]:
             normalized = version_key.removeprefix("v")
             parts = normalized.split(".")
             ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{normalized}"
-        default_binary_path = result.get("default_binary_path")
-        if not default_binary_path:
-            default_binary_path = str(Path(get_bin_dir()) / "firecracker")
 
         merged = {
             "full_version": full_version,
@@ -186,7 +194,6 @@ def update_firecracker_config(**fields: str) -> None:
     payload["ci_version"] = ci_version
     payload["default_version"] = payload.get("default_version", full_version)
     payload["default_binary_path"] = payload.get("default_binary_path", default_binary_path)
-    payload["active_binary_path"] = payload.get("active_binary_path", default_binary_path)
 
     update_binary_entry(
         cache_dir,

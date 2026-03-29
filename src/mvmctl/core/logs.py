@@ -14,7 +14,7 @@ from mvmctl.constants import (
     LOG_FOLLOW_POLL_INTERVAL_S,
 )
 from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
-from mvmctl.utils.fs import get_vm_dir
+from mvmctl.utils.fs import get_vm_dir_by_hash
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +25,13 @@ _LOG_TYPE_FILES: dict[str, str] = {
 
 
 def get_log_path(
-    vm_name: str,
+    vm_hash: str,
     log_type: str = DEFAULT_VM_LOG_TYPE,
 ) -> Path:
-    """Get log file path for a VM.
+    """Get log file path for a VM by its hash.
 
     Args:
-        vm_name: VM name
+        vm_hash: VM hash (64-char SHA256)
         log_type: 'boot' for console log, 'os' for firecracker log
 
     Returns:
@@ -41,10 +41,10 @@ def get_log_path(
         VMNotFoundError: If VM directory does not exist
         MVMError: If log type is unknown or log file not found
     """
-    vm_dir = get_vm_dir(vm_name)
+    vm_dir = get_vm_dir_by_hash(vm_hash)
 
     if not vm_dir.exists():
-        raise VMNotFoundError(f"VM '{vm_name}' not found at {vm_dir}")
+        raise VMNotFoundError(f"VM directory not found at {vm_dir}")
 
     log_filename = _LOG_TYPE_FILES.get(log_type)
     if log_filename is None:
@@ -53,7 +53,7 @@ def get_log_path(
     log_file = vm_dir / log_filename
 
     if not log_file.exists():
-        raise VMNotFoundError(f"Log file not found for VM '{vm_name}': {log_file}")
+        raise VMNotFoundError(f"Log file not found for VM: {log_file}")
 
     return log_file
 
@@ -107,7 +107,7 @@ def follow_log(
 
 
 def show_logs(
-    vm_name: str,
+    vm_hash: str,
     log_type: str = DEFAULT_VM_LOG_TYPE,
     lines: int = DEFAULT_VM_LOG_LINES,
     follow: bool = False,
@@ -120,7 +120,7 @@ def show_logs(
     the lines that were streamed before the caller interrupted (Ctrl-C).
 
     Args:
-        vm_name: VM name
+        vm_hash: VM hash (64-char SHA256)
         log_type: 'boot' or 'os'
         lines: Number of lines to show (non-follow mode)
         follow: If True, follow log output via *output* callback
@@ -133,10 +133,10 @@ def show_logs(
         VMNotFoundError: If VM not found
         MVMError: On log access errors
     """
-    log_file = get_log_path(vm_name, log_type)
+    log_file = get_log_path(vm_hash, log_type)
 
     log_type_label = "Boot" if log_type == "boot" else "OS"
-    logger.info("=== %s Log for %s ===", log_type_label, vm_name)
+    logger.info("=== %s Log ===", log_type_label)
     logger.info("File: %s", log_file)
 
     if follow:

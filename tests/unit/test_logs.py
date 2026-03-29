@@ -13,8 +13,8 @@ def test_get_log_path_boot(tmp_path: Path) -> None:
     log_file = vm_dir / "firecracker.console.log"
     log_file.write_text("boot output\n")
 
-    with patch("mvmctl.core.logs.get_vm_dir", return_value=vm_dir):
-        result = get_log_path("test-vm", log_type="boot")
+    with patch("mvmctl.core.logs.get_vm_dir_by_hash", return_value=vm_dir):
+        result = get_log_path("a" * 64, log_type="boot")
 
     assert result == log_file
 
@@ -25,8 +25,8 @@ def test_get_log_path_os(tmp_path: Path) -> None:
     log_file = vm_dir / "firecracker.log"
     log_file.write_text("os log\n")
 
-    with patch("mvmctl.core.logs.get_vm_dir", return_value=vm_dir):
-        result = get_log_path("test-vm", log_type="os")
+    with patch("mvmctl.core.logs.get_vm_dir_by_hash", return_value=vm_dir):
+        result = get_log_path("a" * 64, log_type="os")
 
     assert result == log_file
 
@@ -35,26 +35,26 @@ def test_get_log_path_unknown_type(tmp_path: Path) -> None:
     vm_dir = tmp_path / "test-vm"
     vm_dir.mkdir()
 
-    with patch("mvmctl.core.logs.get_vm_dir", return_value=vm_dir):
+    with patch("mvmctl.core.logs.get_vm_dir_by_hash", return_value=vm_dir):
         with pytest.raises(ConfigError, match="Unknown log type"):
-            get_log_path("test-vm", log_type="unknown")
+            get_log_path("a" * 64, log_type="unknown")
 
 
 def test_get_log_path_missing_vm(tmp_path: Path) -> None:
     nonexistent = tmp_path / "no-such-vm"
 
-    with patch("mvmctl.core.logs.get_vm_dir", return_value=nonexistent):
+    with patch("mvmctl.core.logs.get_vm_dir_by_hash", return_value=nonexistent):
         with pytest.raises(VMNotFoundError, match="not found"):
-            get_log_path("no-such-vm")
+            get_log_path("b" * 64)
 
 
 def test_get_log_path_missing_file(tmp_path: Path) -> None:
     vm_dir = tmp_path / "test-vm"
     vm_dir.mkdir()
 
-    with patch("mvmctl.core.logs.get_vm_dir", return_value=vm_dir):
+    with patch("mvmctl.core.logs.get_vm_dir_by_hash", return_value=vm_dir):
         with pytest.raises(VMNotFoundError, match="Log file not found"):
-            get_log_path("test-vm", log_type="boot")
+            get_log_path("a" * 64, log_type="boot")
 
 
 def test_read_log_lines_basic(tmp_path: Path) -> None:

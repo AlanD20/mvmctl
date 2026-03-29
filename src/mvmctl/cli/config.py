@@ -13,7 +13,7 @@ from mvmctl.api.config import (
 from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error, print_info, print_success
-from mvmctl.utils.fs import get_assets_dir, get_vm_dir
+from mvmctl.utils.fs import get_assets_dir
 
 app = typer.Typer(
     help="Configuration commands",
@@ -78,7 +78,16 @@ def dump_vm(
     name: str = typer.Option(..., "--name", help="VM name"),
 ) -> None:
     """Print the Firecracker JSON config for a VM."""
-    vm_dir = get_vm_dir(name)
+    from mvmctl.api.vms import get_vm_manager
+    from mvmctl.utils.fs import get_vm_dir_by_hash
+
+    manager = get_vm_manager()
+    vm = manager.get(name)
+    if vm is None:
+        print_error(f"VM '{name}' not found")
+        raise typer.Exit(code=1)
+
+    vm_dir = get_vm_dir_by_hash(vm.id)
     config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
 
     if not config_file.exists():

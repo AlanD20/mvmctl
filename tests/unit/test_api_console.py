@@ -37,7 +37,7 @@ class TestAttachConsole:
         assert result["vm_name"] == "testvm"
         assert result["socket_path"] == str(mock_socket_path)
         mock_manager.get.assert_called_once_with("testvm")
-        mock_mgr.is_relay_running.assert_called_once_with("testvm")
+        mock_mgr.is_relay_running.assert_called_once_with("testvm", None)
         mock_mgr.get_socket_path.assert_called_once_with("testvm")
 
     @patch("mvmctl.api.vms.ConsoleRelayManager")
@@ -109,7 +109,7 @@ class TestKillConsole:
 
         assert result is True
         mock_manager.get.assert_called_once_with("testvm")
-        mock_mgr.kill_relay.assert_called_once_with("testvm")
+        mock_mgr.kill_relay.assert_called_once_with("testvm", None)
 
     @patch("mvmctl.api.vms.ConsoleRelayManager")
     @patch("mvmctl.api.vms.get_vm_manager")
@@ -166,7 +166,7 @@ class TestGetConsoleState:
         assert result["pid"] == 12345
         assert result["socket_path"] == "/tmp/mvm-testvm/console.sock"
         mock_manager.get.assert_called_once_with("testvm")
-        mock_core_get_state.assert_called_once_with("testvm")
+        mock_core_get_state.assert_called_once_with("testvm", None)
 
     @patch("mvmctl.api.vms._get_console_state")
     @patch("mvmctl.api.vms.get_vm_manager")

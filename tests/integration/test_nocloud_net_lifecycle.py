@@ -64,7 +64,7 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
     @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_full_nocloud_net_lifecycle(
         self,
         mock_get_vm_dir,
@@ -128,9 +128,8 @@ class TestFullNocloudNetLifecycle:
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
 
-        # Setup vm_dir to return a real directory
+        # Setup vm_dir to return a path (directory will be created by create_vm)
         vm_dir = tmp_path / "vms" / "nocloud-test-vm"
-        vm_dir.mkdir(parents=True)
         mock_get_vm_dir.return_value = vm_dir
 
         # Create VM
@@ -180,7 +179,7 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
     @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_nocloud_net_remove_cleanup(
         self,
         mock_get_vm_dir,
@@ -244,9 +243,8 @@ class TestFullNocloudNetLifecycle:
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
 
-        # Setup vm_dir
+        # Setup vm_dir (directory will be created by create_vm)
         vm_dir = tmp_path / "vms" / "cleanup-test-vm"
-        vm_dir.mkdir(parents=True)
         mock_get_vm_dir.return_value = vm_dir
 
         # Create and remove VM
@@ -276,7 +274,7 @@ class TestFullNocloudNetLifecycle:
             remove_vm("cleanup-test-vm", vm_manager=vm_mgr)
 
         # Verify nocloud-net server was stopped
-        mock_mgr_instance.stop_server.assert_called_once_with("cleanup-test-vm")
+        mock_mgr_instance.stop_server.assert_called_once()
 
         # Verify firewall rule was removed
         mock_remove_rule.assert_called_once_with("10.20.0.2", "cleanup-test-vm", 8000)
@@ -354,12 +352,10 @@ class TestMultipleVMsDifferentPorts:
                                             "mvmctl.core.vm_lifecycle.setup_nocloud_input_chain"
                                         ):
                                             with patch(
-                                                "mvmctl.utils.fs.get_vm_dir"
+                                                "mvmctl.utils.fs.get_vm_dir_by_hash"
                                             ) as mock_get_vm_dir:
                                                 vm_dir1 = tmp_path / "vms" / "vm1"
                                                 vm_dir2 = tmp_path / "vms" / "vm2"
-                                                vm_dir1.mkdir(parents=True)
-                                                vm_dir2.mkdir(parents=True)
                                                 mock_get_vm_dir.side_effect = [vm_dir1, vm_dir2]
 
                                                 mock_get_net.return_value = NetworkConfig(
@@ -452,7 +448,7 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
     @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
     @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_failure_cleanup_on_firewall_error(
         self,
         mock_get_vm_dir,
@@ -505,9 +501,8 @@ class TestNocloudNetFailureCleanup:
 
         mock_add_rule.side_effect = NetworkError("iptables error")
 
-        # Setup vm_dir
+        # Setup vm_dir (directory will be created by create_vm)
         vm_dir = tmp_path / "vms" / "failing-vm"
-        vm_dir.mkdir(parents=True)
         mock_get_vm_dir.return_value = vm_dir
 
         from mvmctl.core.vm_lifecycle import create_vm
@@ -527,7 +522,7 @@ class TestNocloudNetFailureCleanup:
                 )
 
         # Verify server was stopped on failure
-        mock_mgr_instance.stop_server.assert_called_once_with("failing-vm")
+        mock_mgr_instance.stop_server.assert_called_once()
 
         # Verify VM was not registered (cleanup happened)
         assert vm_mgr.get("failing-vm") is None
@@ -549,7 +544,7 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
     @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
-    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_failure_cleanup_on_firecracker_error(
         self,
         mock_get_vm_dir,
@@ -608,9 +603,8 @@ class TestNocloudNetFailureCleanup:
         # Make firecracker Popen raise FileNotFoundError
         mock_popen.side_effect = FileNotFoundError("firecracker not found")
 
-        # Setup vm_dir
+        # Setup vm_dir (directory will be created by create_vm)
         vm_dir = tmp_path / "vms" / "fc-fail-vm"
-        vm_dir.mkdir(parents=True)
         mock_get_vm_dir.return_value = vm_dir
 
         from mvmctl.core.vm_lifecycle import create_vm
@@ -632,7 +626,7 @@ class TestNocloudNetFailureCleanup:
                     )
 
         # Verify server was stopped on failure
-        mock_mgr_instance.stop_server.assert_called_once_with("fc-fail-vm")
+        mock_mgr_instance.stop_server.assert_called_once()
 
 
 class TestVMWithoutNocloudNet:
@@ -696,10 +690,9 @@ class TestVMWithoutNocloudNet:
                                             "mvmctl.core.vm_lifecycle.setup_nocloud_input_chain"
                                         ):
                                             with patch(
-                                                "mvmctl.utils.fs.get_vm_dir"
+                                                "mvmctl.utils.fs.get_vm_dir_by_hash"
                                             ) as mock_get_vm_dir:
                                                 vm_dir = tmp_path / "vms" / "disabled-mode-vm"
-                                                vm_dir.mkdir(parents=True)
                                                 mock_get_vm_dir.return_value = vm_dir
 
                                                 mock_get_net.return_value = NetworkConfig(

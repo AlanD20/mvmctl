@@ -65,3 +65,53 @@ def is_ip_address(value: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def validate_fs_uuid(uuid: str | None, field_name: str = "fs_uuid") -> None:
+    """Validate filesystem UUID format.
+
+    Supports standard UUID formats:
+    - 11111111-2222-3333-4444-555555555555
+
+    Args:
+        uuid: UUID string to validate
+        field_name: Field name for error messages
+
+    Raises:
+        MVMError: If UUID format is invalid
+    """
+    if uuid is None:
+        return
+
+    # Standard UUID pattern: 8-4-4-4-12 hex digits
+    uuid_pattern = re.compile(
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+
+    if not uuid_pattern.match(uuid):
+        raise MVMError(
+            f"Invalid {field_name} format: '{uuid}'. "
+            "Expected format: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+        )
+
+
+def validate_fs_type(fs_type: str | None, field_name: str = "fs_type") -> None:
+    """Validate filesystem type.
+
+    Args:
+        fs_type: Filesystem type string
+        field_name: Field name for error messages
+
+    Raises:
+        MVMError: If filesystem type is invalid
+    """
+    if fs_type is None:
+        return
+
+    supported_types = {"ext4", "btrfs", "xfs", "ext3", "ext2"}
+
+    if fs_type.lower() not in supported_types:
+        raise MVMError(
+            f"Invalid {field_name}: '{fs_type}'. "
+            f"Supported types: {', '.join(sorted(supported_types))}"
+        )
