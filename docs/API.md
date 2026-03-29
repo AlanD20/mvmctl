@@ -416,6 +416,95 @@ os_lines = vms.get_logs("my-vm", log_type="os")
 
 ---
 
+#### `cleanup_vms(all_vms: bool = False, dry_run: bool = False, vm_manager: VMManager | None = None) -> list[VMInstance]`
+
+Remove stopped (or all) VMs and clean up their resources. Used by `mvm vm prune`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `all_vms` | `bool` | `False` | Remove all VMs, not just stopped ones |
+| `dry_run` | `bool` | `False` | Show what would be removed without actually removing |
+| `vm_manager` | `VMManager \| None` | `None` | Override state manager |
+
+**Returns:** List of `VMInstance` objects that were (or would be) processed.
+
+---
+
+#### `snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None`
+
+Create a snapshot of a running VM. Pauses the VM, dumps memory to `mem_out`, saves VM state to `state_out`, then resumes.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name |
+| `mem_out` | `Path` | — | Output path for memory snapshot file |
+| `state_out` | `Path` | — | Output path for VM state file |
+
+**Raises:** `VMNotFoundError` if VM doesn't exist. `FirecrackerError` if snapshot fails.
+
+---
+
+#### `load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = True) -> None`
+
+Restore a VM from a snapshot created by `snapshot_vm`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name to restore |
+| `mem_in` | `Path` | — | Path to memory snapshot file |
+| `state_in` | `Path` | — | Path to VM state file |
+| `resume_after` | `bool` | `True` | Resume VM immediately after loading |
+
+**Raises:** `VMNotFoundError` if VM doesn't exist. `FirecrackerError` if load fails.
+
+---
+
+### Console API (`mvmctl.api.vms`)
+
+Console functions provide PTY-over-vsock access to VMs without SSH.
+
+#### `attach_console(name: str) -> dict[str, Any]`
+
+Attach to a VM console. Ensures the console relay is running and returns connection info.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name |
+
+**Returns:** Dict with `socket_path` and `vm_name`.
+
+**Raises:** `VMNotFoundError` if VM doesn't exist. `MVMError` if console relay is not running.
+
+---
+
+#### `get_console_state(name: str) -> dict[str, Any]`
+
+Get the current state of a VM's console relay without attaching.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name |
+
+**Returns:** Dict with console state info (running status, PID, socket path).
+
+**Raises:** `VMNotFoundError` if VM doesn't exist.
+
+---
+
+#### `kill_console(name: str) -> bool`
+
+Kill the console relay for a VM.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | — | VM name |
+
+**Returns:** `True` if relay was killed, `False` if not running.
+
+**Raises:** `VMNotFoundError` if VM doesn't exist.
+
+---
+
 ### `mvmctl.api.network`
 
 #### `list_networks() -> list[NetworkConfig]`
@@ -647,6 +736,27 @@ Run the full kernel build pipeline: download source, extract, configure, compile
 **Returns:** `KernelPipelineResult` describing the build outcome.
 
 **Raises:** `KernelError` on any build step failure.
+
+---
+
+#### `list_assets() -> list[AssetInfo]`
+
+List all assets (binaries, kernels, images) in a consolidated inventory.
+
+**Returns:** List of `AssetInfo` TypedDict with fields for each asset type.
+
+---
+
+#### `remove_asset(asset_type: Literal["binary", "kernel", "image"], name: str) -> None`
+
+Remove an asset from the cache.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `asset_type` | `Literal["binary", "kernel", "image"]` | — | Type of asset to remove |
+| `name` | `str` | — | Asset name/version/ID |
+
+**Raises:** `AssetNotFoundError` if asset not found. `FileNotFoundError` if kernel/image file missing.
 
 ---
 
