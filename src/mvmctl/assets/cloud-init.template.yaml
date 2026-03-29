@@ -3,6 +3,9 @@
 
 user_data: |
   #cloud-config
+  datasource:
+    NoCloud:
+      seedfrom: /
   # Hostname configuration (will be replaced by setup scripts)
   hostname: {{vm_name}}
   fqdn: {{vm_name}}.local
@@ -27,6 +30,18 @@ user_data: |
         - {{ssh_pub_key}}
     {% endif %}
 
+  {% if ssh_pub_key %}
+    - name: human
+      sudo: ALL=(ALL) NOPASSWD:ALL
+      groups: users, admin
+      home: /home/human
+      shell: /bin/bash
+      lock_passwd: false
+      passwd: "$6$z7g1munt3fJycblB$cCzLDdjCdNUkNr2il4kTXy2.FZsY2qMvwmMoNGiIUaXOjTGRoX.5E.NbZH.eYe9ksxdqEQ5YU/rPCU1ga2KD40"
+      ssh-authorized-keys:
+        - {{ssh_pub_key}}
+    {% endif %}
+
   # Package installation
   package_update: false
   package_upgrade: false
@@ -43,162 +58,15 @@ user_data: |
     - htop
     - cloud-init
 
-  # Early boot debugging - captures state before cloud-init modules run
-  bootcmd:
-    - |
-      # Mask systemd-networkd-wait-online to prevent 120s boot delay
-      # We use static IP via kernel ip= parameter, so no need to wait for DHCP
-      systemctl mask systemd-networkd-wait-online.service || true
-    - |
-      echo "=== MVMCTL Early Boot Debug ===" > /var/log/mvmctl-debug.log
-      echo "Timestamp: $(date -Iseconds)" >> /var/log/mvmctl-debug.log
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== IP Address ===" >> /var/log/mvmctl-debug.log
-      ip addr >> /var/log/mvmctl-debug.log 2>&1
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== IP Route ===" >> /var/log/mvmctl-debug.log
-      ip route >> /var/log/mvmctl-debug.log 2>&1
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== networkctl status ===" >> /var/log/mvmctl-debug.log
-      networkctl status >> /var/log/mvmctl-debug.log 2>&1
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Service Status: systemd-networkd ===" >> /var/log/mvmctl-debug.log
-      systemctl status systemd-networkd >> /var/log/mvmctl-debug.log 2>&1
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== cloud-init status ===" >> /var/log/mvmctl-debug.log
-      cloud-init status >> /var/log/mvmctl-debug.log 2>&1
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== cloud-init log locations ===" >> /var/log/mvmctl-debug.log
-      ls -la /var/log/cloud-init*.log /var/lib/cloud/* 2>&1 >> /var/log/mvmctl-debug.log || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Enhanced Early Boot Diagnostics ===" >> /var/log/mvmctl-debug.log
-      echo "=== Interface Names (ip link show) ===" >> /var/log/mvmctl-debug.log
-      ip link show >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Kernel Network Devices (/sys/class/net) ===" >> /var/log/mvmctl-debug.log
-      ls -la /sys/class/net/ >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Kernel Boot Parameters (/proc/cmdline) ===" >> /var/log/mvmctl-debug.log
-      cat /proc/cmdline >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== IPv4 Addresses (ip -4 addr) ===" >> /var/log/mvmctl-debug.log
-      ip -4 addr >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Routing Table (ip route) ===" >> /var/log/mvmctl-debug.log
-      ip route >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Network Interfaces (networkctl list) ===" >> /var/log/mvmctl-debug.log
-      networkctl list >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== All Network Status (networkctl status --all) ===" >> /var/log/mvmctl-debug.log
-      networkctl status --all >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      # Serial console output for early boot visibility
-      echo "[mvmctl] Early boot network interfaces:"
-      ip link show | grep -E "^[0-9]+:" || true
-      echo "[mvmctl] Early boot IPv4 addresses:"
-      ip -4 addr show | grep "inet " || true
-
-  # Persistent network configuration via systemd-networkd
-  write_files:
-    - path: /run/systemd/network/10-mvmctl-eth0.network
-      permissions: '0644'
-      owner: root:root
-      content: |
-        [Match]
-        Name=eth0
-
-        [Network]
-        Address={{guest_ip}}/{{prefix_len}}
-        Gateway={{gateway}}
-        DNS=8.8.8.8
-        DNS=1.1.1.1
-
-    - path: /var/log/mvmctl-debug.log
-      permissions: '0644'
-      owner: root:root
-      content: ""
-
   {% if ssh_pub_key %}
-  # SSH service setup and late-boot debug
+  # SSH service setup and disable systemd-networkd to prevent IP override
+  # The kernel ip= parameter already configures the network correctly
   runcmd:
-    - systemctl enable sshd
-    - systemctl start sshd
+    - systemctl stop systemd-networkd 2>/dev/null || true
+    - systemctl disable --now systemd-networkd 2>/dev/null || true
+    - systemctl mask systemd-networkd 2>/dev/null || true
+    - systemctl enable --now sshd || systemctl enable --now ssh
     - systemctl disable --now snapd.appliance.service 2>/dev/null || true
-    - |
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== MVMCTL Late Boot Debug ===" >> /var/log/mvmctl-debug.log
-      echo "Timestamp: $(date -Iseconds)" >> /var/log/mvmctl-debug.log
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Service Status: sshd ===" >> /var/log/mvmctl-debug.log
-      systemctl status sshd >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Service Status: cloud-init ===" >> /var/log/mvmctl-debug.log
-      systemctl status cloud-init >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Final cloud-init status ===" >> /var/log/mvmctl-debug.log
-      cloud-init status >> /var/log/mvmctl-debug.log 2>&1
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Enhanced Late Boot Diagnostics ===" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: Interface Names (ip link show) ===" >> /var/log/mvmctl-debug.log
-      ip link show >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: IPv4 Addresses (ip -4 addr) ===" >> /var/log/mvmctl-debug.log
-      ip -4 addr >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: Routing Table (ip route) ===" >> /var/log/mvmctl-debug.log
-      ip route >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: Network Interfaces (networkctl list) ===" >> /var/log/mvmctl-debug.log
-      networkctl list >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: All Network Status (networkctl status --all) ===" >> /var/log/mvmctl-debug.log
-      networkctl status --all >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      # Serial console output for late boot visibility
-      echo "[mvmctl] Late boot network interfaces:"
-      ip link show | grep -E "^[0-9]+:" || true
-      echo "[mvmctl] Late boot IPv4 addresses:"
-      ip -4 addr show | grep "inet " || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== /var/log/mvmctl-debug.log complete ===" >> /var/log/mvmctl-debug.log
-  {% else %}
-  # Late-boot debug only (no SSH key provided)
-  runcmd:
-    - |
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== MVMCTL Late Boot Debug ===" >> /var/log/mvmctl-debug.log
-      echo "Timestamp: $(date -Iseconds)" >> /var/log/mvmctl-debug.log
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Service Status: cloud-init ===" >> /var/log/mvmctl-debug.log
-      systemctl status cloud-init >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Final cloud-init status ===" >> /var/log/mvmctl-debug.log
-      cloud-init status >> /var/log/mvmctl-debug.log 2>&1
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Enhanced Late Boot Diagnostics ===" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: Interface Names (ip link show) ===" >> /var/log/mvmctl-debug.log
-      ip link show >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: IPv4 Addresses (ip -4 addr) ===" >> /var/log/mvmctl-debug.log
-      ip -4 addr >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: Routing Table (ip route) ===" >> /var/log/mvmctl-debug.log
-      ip route >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: Network Interfaces (networkctl list) ===" >> /var/log/mvmctl-debug.log
-      networkctl list >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== Late Boot: All Network Status (networkctl status --all) ===" >> /var/log/mvmctl-debug.log
-      networkctl status --all >> /var/log/mvmctl-debug.log 2>&1 || true
-      echo "" >> /var/log/mvmctl-debug.log
-      # Serial console output for late boot visibility
-      echo "[mvmctl] Late boot network interfaces:"
-      ip link show | grep -E "^[0-9]+:" || true
-      echo "[mvmctl] Late boot IPv4 addresses:"
-      ip -4 addr show | grep "inet " || true
-      echo "" >> /var/log/mvmctl-debug.log
-      echo "=== /var/log/mvmctl-debug.log complete ===" >> /var/log/mvmctl-debug.log
   {% endif %}
 
   final_message: "mvmctl VM provisioning complete"
@@ -207,6 +75,8 @@ meta_data: |
   instance-id: {{vm_name}}
   local-hostname: {{vm_name}}
 
+# Network configuration for cloud-init netplan/systemd-networkd
+# This ensures the VM gets the correct static IP that matches the kernel ip= parameter
 network_config: |
   version: 2
   ethernets:
