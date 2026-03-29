@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -9,12 +10,9 @@ import pytest
 @pytest.fixture(autouse=True)
 def isolate_config_and_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure tests never write to real config or cache directories."""
-    # Use a path under /tmp to satisfy path validation requirements
-    import tempfile
-
-    test_base = Path(tempfile.mkdtemp(prefix="mvmctl-test-", dir="/tmp"))
-    config_dir = test_base / "config"
-    cache_dir = test_base / "cache"
+    # Use tmp_path which pytest automatically cleans up after each test
+    config_dir = tmp_path / "config"
+    cache_dir = tmp_path / "cache"
     config_dir.mkdir(parents=True, exist_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("MVM_CONFIG_DIR", str(config_dir))
@@ -68,3 +66,43 @@ def _block_real_sudo_invocations(monkeypatch: pytest.MonkeyPatch) -> None:
         return real_run(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", guarded_run)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Clean up this pytest session's temp directory.
+
+    Removes only the temp directory created for the current pytest session.
+    Errors are silently ignored to ensure cleanup never fails the test run.
+    """
+    # Get the session's base temp directory from pytest internals
+    tmp_path_factory = getattr(session.config, "_tmp_path_factory", None)
+    if tmp_path_factory is None:
+        return
+
+    basetemp = getattr(tmp_path_factory, "_basetemp", None)
+    if basetemp is None:
+        return
+
+    target = Path(basetemp)
+
+    # Safety constraints
+    if not target.exists():
+        return
+    if not target.is_dir():
+        return
+    if target.is_symlink():
+        return
+
+    # Must be under /tmp (or system temp dir)
+    temp_root = Path(os.environ.get("TMPDIR", "/tmp"))
+    try:
+        target.relative_to(temp_root)
+    except ValueError:
+        return  # Not under temp dir, skip
+
+    # Must look like a pytest temp dir
+    if not target.name.startswith("pytest-"):
+        return
+
+    # Safe to remove
+    shutil.rmtree(target, ignore_errors=True)
