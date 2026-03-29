@@ -1,0 +1,407 @@
+"""Cache management — modular init and prune functions for all cache resources."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from mvmctl.constants import DEFAULT_NETWORK_NAME, SUPPORTED_IMAGE_EXTENSIONS
+from mvmctl.core.metadata import (
+    get_default_image_entry,
+    get_default_kernel_entry,
+    list_image_entries,
+    list_kernel_entries,
+    remove_image_entry,
+    remove_kernel_entry,
+)
+from mvmctl.core.network_manager import (
+    get_network_leases,
+    list_networks,
+    remove_network,
+)
+from mvmctl.core.vm_lifecycle import remove_vm
+from mvmctl.core.vm_manager import get_vm_manager
+from mvmctl.models.vm import VMState
+from mvmctl.utils.fs import (
+    get_cache_dir,
+    get_images_dir,
+    get_kernels_dir,
+    get_vms_dir,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Init Functions
+# =============================================================================
+
+
+def cache_init_guestfs_appliance() -> None:
+    """Initialize guestfs appliance cache.
+
+    Currently a no-op placeholder since libguestfs manages its own appliance.
+    Future: Could pre-download appliance for offline use.
+    """
+    pass
+
+
+def cache_init_vms() -> Path:
+    """Initialize VM directory structure.
+
+    Creates vms/ directory and ensures state.json exists.
+    Returns the vms directory path.
+    """
+    vms_dir = get_vms_dir()
+    vms_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure state.json exists (empty but valid)
+    state_file = vms_dir / "state.json"
+    if not state_file.exists():
+        state_file.write_text('{"vms": {}, "schema_version": 1}')
+
+    return vms_dir
+
+
+def cache_init_images() -> Path:
+    """Initialize images directory."""
+    images_dir = get_images_dir()
+    images_dir.mkdir(parents=True, exist_ok=True)
+    return images_dir
+
+
+def cache_init_kernels() -> Path:
+    """Initialize kernels directory."""
+    kernels_dir = get_kernels_dir()
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+    return kernels_dir
+
+
+def cache_init_networks() -> Path:
+    """Initialize networks directory."""
+    cache_dir = get_cache_dir()
+    networks_dir = cache_dir / "networks"
+    networks_dir.mkdir(parents=True, exist_ok=True)
+    return networks_dir
+
+
+def cache_init_all() -> dict[str, Path | None]:
+    """Initialize all cache resources.
+
+    Returns dict mapping resource names to their directory paths.
+    """
+    return {
+        "guestfs": None,  # Placeholder - no directory for guestfs
+        "vms": cache_init_vms(),
+        "images": cache_init_images(),
+        "kernels": cache_init_kernels(),
+        "networks": cache_init_networks(),
+    }
+
+
+# =============================================================================
+# Helper Functions (internal)
+# =============================================================================
+
+
+def _get_image_references() -> set[str]:
+    """Get set of image paths referenced by all VMs."""
+    vm_manager = get_vm_manager()
+    vms = vm_manager.list_all()
+
+    referenced: set[str] = set()
+    for vm in vms:
+        if vm.config and vm.config.rootfs_path:
+            referenced.add(str(vm.config.rootfs_path))
+
+    return referenced
+
+
+def _get_kernel_references() -> set[str]:
+    """Get set of kernel paths referenced by all VMs."""
+    vm_manager = get_vm_manager()
+    vms = vm_manager.list_all()
+
+    referenced: set[str] = set()
+    for vm in vms:
+        if vm.config and vm.config.kernel_path:
+            referenced.add(str(vm.config.kernel_path))
+
+    return referenced
+
+
+def _get_network_references() -> set[str]:
+    """Get set of network names referenced by all VMs."""
+    vm_manager = get_vm_manager()
+    vms = vm_manager.list_all()
+
+    referenced: set[str] = set()
+    for vm in vms:
+        if vm.network_name:
+            referenced.add(vm.network_name)
+
+    return referenced
+
+
+# =============================================================================
+# Prune Functions
+# =============================================================================
+
+
+def cache_prune_vms(
+    include_stopped: bool = False,
+    include_running: bool = False,
+    dry_run: bool = False,
+) -> list[str]:
+    """Prune VMs based on status.
+
+    By default (no flags), only prunes VMs in ERROR state.
+
+    Args:
+        include_stopped: Also prune STOPPED VMs
+        include_running: Also prune RUNNING VMs (use with caution)
+        dry_run: If True, only report what would be removed
+
+    Returns:
+        List of VM names that were (or would be) removed
+    """
+    vm_manager = get_vm_manager()
+    vms = vm_manager.list_all()
+
+    removed: list[str] = []
+    for vm in vms:
+        should_remove = False
+
+        if vm.status == VMState.ERROR:
+            should_remove = True
+        elif vm.status == VMState.STOPPED and include_stopped:
+            should_remove = True
+        elif vm.status == VMState.RUNNING and include_running:
+            should_remove = True
+
+        if should_remove:
+            if not dry_run:
+                try:
+                    remove_vm(vm.name)
+                    removed.append(vm.name)
+                except Exception as e:
+                    logger.warning(f"Failed to remove VM {vm.name}: {e}")
+            else:
+                removed.append(vm.name)
+
+    return removed
+
+
+def cache_prune_networks(dry_run: bool = False) -> list[str]:
+    """Prune networks not referenced by any VM.
+
+    A network is considered "unused" if:
+    - No VMs have network_name referencing it
+    - No active leases exist for it
+
+    The default network is NEVER pruned.
+
+    Args:
+        dry_run: If True, only report what would be removed
+
+    Returns:
+        List of network names that were (or would be) removed
+    """
+    referenced_networks = _get_network_references()
+    all_networks = list_networks()
+
+    removed: list[str] = []
+    for network in all_networks:
+        # Never remove default network
+        if network.name == DEFAULT_NETWORK_NAME:
+            continue
+
+        # Check if referenced by any VM
+        if network.name in referenced_networks:
+            continue
+
+        # Check if has active leases
+        leases = get_network_leases(network.name)
+        if leases:
+            continue
+
+        if not dry_run:
+            try:
+                remove_network(network.name)
+                removed.append(network.name)
+            except Exception as e:
+                logger.warning(f"Failed to remove network {network.name}: {e}")
+        else:
+            removed.append(network.name)
+
+    return removed
+
+
+def cache_prune_images(dry_run: bool = False) -> list[str]:
+    """Prune images not referenced by any VM.
+
+    An image is considered "unused" if:
+    - No VM's config.rootfs_path points to it
+    - Not the default image (unless --force logic added later)
+
+    Args:
+        dry_run: If True, only report what would be removed
+
+    Returns:
+        List of image IDs (short form) that were (or would be) removed
+    """
+    cache_dir = get_cache_dir()
+    images_dir = get_images_dir()
+
+    referenced_paths = _get_image_references()
+    all_images = list_image_entries(cache_dir, images_dir)
+
+    # Get default image to protect it
+    default_entry = get_default_image_entry(cache_dir)
+    default_id = default_entry[0] if default_entry else None
+
+    removed: list[str] = []
+    for image_id, meta in all_images.items():
+        # Protect default image
+        if image_id == default_id:
+            continue
+
+        # Check if referenced by path
+        filename = str(meta.get("filename", ""))
+        if filename:
+            image_path = str(images_dir / filename)
+            if image_path in referenced_paths:
+                continue
+
+        # Also check by internal_id
+        internal_id = str(meta.get("internal_id", ""))
+        if internal_id:
+            is_referenced = False
+            for ref_path in referenced_paths:
+                if internal_id in ref_path:
+                    is_referenced = True
+                    break
+            if is_referenced:
+                continue
+
+        # Not referenced - can remove
+        if not dry_run:
+            try:
+                # Remove file(s)
+                if filename:
+                    (images_dir / filename).unlink(missing_ok=True)
+                else:
+                    # Try by ID
+                    for ext in SUPPORTED_IMAGE_EXTENSIONS:
+                        (images_dir / f"{image_id}{ext}").unlink(missing_ok=True)
+
+                # Remove metadata entry
+                remove_image_entry(cache_dir, image_id)
+                removed.append(image_id[:6])  # Short ID
+            except Exception as e:
+                logger.warning(f"Failed to remove image {image_id}: {e}")
+        else:
+            removed.append(image_id[:6])
+
+    return removed
+
+
+def cache_prune_kernels(dry_run: bool = False) -> list[str]:
+    """Prune kernels not referenced by any VM.
+
+    A kernel is considered "unused" if:
+    - No VM's config.kernel_path points to it
+    - Not the default kernel (unless --force logic added later)
+
+    Args:
+        dry_run: If True, only report what would be removed
+
+    Returns:
+        List of kernel IDs (short form) that were (or would be) removed
+    """
+    cache_dir = get_cache_dir()
+    kernels_dir = get_kernels_dir()
+
+    referenced_paths = _get_kernel_references()
+    all_kernels = list_kernel_entries(cache_dir, kernels_dir)
+
+    # Get default kernel to protect it
+    default_entry = get_default_kernel_entry(cache_dir)
+    default_id = default_entry[0] if default_entry else None
+
+    removed: list[str] = []
+    for kernel_id, meta in all_kernels.items():
+        # Protect default kernel
+        if kernel_id == default_id:
+            continue
+
+        # Check if referenced by path
+        filename = str(meta.get("filename", ""))
+        if filename:
+            kernel_path = str(kernels_dir / filename)
+            if kernel_path in referenced_paths:
+                continue
+
+        # Not referenced - can remove
+        if not dry_run:
+            try:
+                # Remove file(s)
+                if filename:
+                    (kernels_dir / filename).unlink(missing_ok=True)
+                else:
+                    # Try by ID
+                    (kernels_dir / kernel_id).unlink(missing_ok=True)
+
+                # Remove metadata entry
+                remove_kernel_entry(cache_dir, kernel_id)
+                removed.append(kernel_id[:6])  # Short ID
+            except Exception as e:
+                logger.warning(f"Failed to remove kernel {kernel_id}: {e}")
+        else:
+            removed.append(kernel_id[:6])
+
+    return removed
+
+
+def cache_prune_guestfs_appliance(dry_run: bool = False) -> bool:
+    """Remove guestfs appliance cache.
+
+    Currently a no-op placeholder. Future: clear appliance download cache.
+
+    Args:
+        dry_run: If True, only report what would be removed
+
+    Returns:
+        True if appliance cache was (or would be) cleared
+    """
+    # Placeholder - no actual cache to clear currently
+    return False
+
+
+def cache_prune_all(
+    include_stopped: bool = False,
+    include_running: bool = False,
+    dry_run: bool = False,
+) -> dict[str, list[str] | bool]:
+    """Prune all cache resources.
+
+    Args:
+        include_stopped: Also prune STOPPED VMs
+        include_running: Also prune RUNNING VMs (use with caution)
+        dry_run: If True, only report what would be removed
+
+    Returns:
+        Dict with results per resource type:
+        - "vms": list of removed VM names
+        - "networks": list of removed network names
+        - "images": list of removed image IDs (short)
+        - "kernels": list of removed kernel IDs (short)
+        - "guestfs": bool indicating if guestfs was cleared
+    """
+    return {
+        "vms": cache_prune_vms(include_stopped, include_running, dry_run),
+        "networks": cache_prune_networks(dry_run),
+        "images": cache_prune_images(dry_run),
+        "kernels": cache_prune_kernels(dry_run),
+        "guestfs": cache_prune_guestfs_appliance(dry_run),
+    }

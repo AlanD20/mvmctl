@@ -22,6 +22,7 @@ if getattr(importlib.util, "find_spec", lambda x: None)("sys") and getattr(
     # PyInstaller to see the dependencies, but they also ensure that when we are
     # frozen, all commands are readily available in memory.
     import mvmctl.cli.asset  # noqa: F401
+    import mvmctl.cli.cache  # noqa: F401
     import mvmctl.cli.config  # noqa: F401
     import mvmctl.cli.configure  # noqa: F401
     import mvmctl.cli.console  # noqa: F401
@@ -60,6 +61,7 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "kernel": _LazyCommandSpec("mvmctl.cli.asset", "kernel_app", "Kernel management"),
     "image": _LazyCommandSpec("mvmctl.cli.asset", "image_app", "Image management"),
     "bin": _LazyCommandSpec("mvmctl.cli.asset", "bin_app", "Binary management"),
+    "cache": _LazyCommandSpec("mvmctl.cli.cache", "app", "Cache management"),
 }
 
 _STATIC_COMMAND_HELP: dict[str, str] = {
@@ -80,6 +82,7 @@ _COMMAND_ORDER = [
     "kernel",
     "image",
     "bin",
+    "cache",
     "clear",
     "version",
     "help",
