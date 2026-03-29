@@ -606,10 +606,10 @@ def test_resolve_ssh_key_excludes_registry_json(tmp_path, monkeypatch):
     from pathlib import Path
     
     # Create the keys directory structure in the temp path
-    # The function looks in Path.home() / ".cache" / "mvmctl" / "keys"
-    # So we need to create: tmp_path/.cache/mvmctl/keys/
-    mvm_cache_dir = tmp_path / ".cache" / "mvmctl"
-    keys_dir = mvm_cache_dir / "keys"
+    # _resolve_ssh_key_for_vm looks in Path.home() / ".config" / "mvmctl" / "keys"
+    # (get_keys_dir() uses the config dir), so create that path here.
+    mvm_config_dir = tmp_path / ".config" / "mvmctl"
+    keys_dir = mvm_config_dir / "keys"
     keys_dir.mkdir(parents=True)
     
     # Create registry.json (metadata file - should be excluded due to .json suffix)
