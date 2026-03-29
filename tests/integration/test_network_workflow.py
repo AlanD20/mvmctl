@@ -116,7 +116,7 @@ class TestNetworkLifecycleWorkflow:
         assert "lifecycle-net" in result.output
 
         mock_list.return_value = []
-        result = runner.invoke(network_app, ["remove", "lifecycle-net", "--force"])
+        result = runner.invoke(network_app, ["remove", "lifecycle-net"])
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
         mock_remove.assert_called_once_with("lifecycle-net")
@@ -191,7 +191,7 @@ class TestNetworkWorkflowEdgeCases:
         mock_check_priv.return_value = None
         mock_remove.side_effect = NetworkError("Network 'missing-net' not found")
 
-        result = runner.invoke(network_app, ["remove", "missing-net", "--force"])
+        result = runner.invoke(network_app, ["remove", "missing-net"])
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
 

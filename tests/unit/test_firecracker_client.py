@@ -164,7 +164,7 @@ def test_get_vm_socket_path_found(tmp_path: Path):
     sock = vm_dir / "firecracker.socket"
     sock.touch()
 
-    with patch("mvmctl.utils.fs.get_vm_dir", return_value=vm_dir):
+    with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir):
         result = get_vm_socket_path("myvm")
 
     assert result == sock
@@ -174,7 +174,7 @@ def test_get_vm_socket_path_not_found(tmp_path: Path):
     vm_dir = tmp_path / "myvm"
     vm_dir.mkdir()
 
-    with patch("mvmctl.utils.fs.get_vm_dir", return_value=vm_dir):
+    with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir):
         result = get_vm_socket_path("myvm")
 
     assert result is None

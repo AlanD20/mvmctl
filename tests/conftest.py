@@ -9,8 +9,12 @@ import pytest
 @pytest.fixture(autouse=True)
 def isolate_config_and_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure tests never write to real config or cache directories."""
-    config_dir = tmp_path / "config"
-    cache_dir = tmp_path / "cache"
+    # Use a path under /tmp to satisfy path validation requirements
+    import tempfile
+
+    test_base = Path(tempfile.mkdtemp(prefix="mvmctl-test-", dir="/tmp"))
+    config_dir = test_base / "config"
+    cache_dir = test_base / "cache"
     config_dir.mkdir(parents=True, exist_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("MVM_CONFIG_DIR", str(config_dir))

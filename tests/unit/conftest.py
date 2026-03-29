@@ -150,6 +150,67 @@ def sample_key_info() -> KeyInfo:
     )
 
 
+@pytest.fixture
+def mock_tty(mocker):
+    """Mock sys.stdout.isatty() return value.
+
+    Returns a factory function that accepts is_tty parameter.
+    Usage: mock_tty(is_tty=True) or mock_tty(is_tty=False)
+    """
+
+    def _mock_tty(is_tty: bool = True):
+        return mocker.patch("sys.stdout.isatty", return_value=is_tty)
+
+    return _mock_tty
+
+
+@pytest.fixture
+def mock_file_exists(mocker):
+    """Mock Path.exists() return value.
+
+    Returns a factory function that accepts exists parameter.
+    Usage: mock_file_exists(exists=True) or mock_file_exists(exists=False)
+    """
+
+    def _mock_file_exists(exists: bool = True):
+        return mocker.patch("pathlib.Path.exists", return_value=exists)
+
+    return _mock_file_exists
+
+
+@pytest.fixture
+def mock_process_running(mocker):
+    """Mock os.kill() for process existence check.
+
+    Returns a factory function that accepts running parameter.
+    Usage: mock_process_running(running=True) or mock_process_running(running=False)
+    """
+
+    def _mock_process_running(running: bool = True):
+        if running:
+            return mocker.patch("os.kill", return_value=None)
+        else:
+            return mocker.patch("os.kill", side_effect=ProcessLookupError())
+
+    return _mock_process_running
+
+
+@pytest.fixture
+def mock_stat_size(mocker):
+    """Mock Path.stat().st_size return value.
+
+    Returns a factory function that accepts size_bytes parameter.
+    Usage: mock_stat_size(size_bytes=1024)
+    """
+
+    def _mock_stat_size(size_bytes: int = 1024):
+        mock_stat = mocker.MagicMock()
+        mock_stat.st_size = size_bytes
+        return mocker.patch("pathlib.Path.stat", return_value=mock_stat)
+
+    return _mock_stat_size
+
+
 @pytest.fixture(autouse=True)
 def _mock_kernel_build_dependencies(request):
     if not request.node.name.startswith("test_build_kernel_pipeline"):
