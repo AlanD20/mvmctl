@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mvmctl.models import VMInstance
+from mvmctl.constants import env_var
 
 
 class TestConsoleWorkflow:
@@ -240,7 +241,7 @@ class TestConsoleRelayLifecycle:
     def test_relay_start_stop_lifecycle(self, mock_popen, mock_kill, tmp_path: Path, monkeypatch):
         from mvmctl.services.console_relay import ConsoleRelayManager
 
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv(env_var("CACHE_DIR"), str(tmp_path))
 
         mock_proc = MagicMock()
         mock_proc.pid = 12345
@@ -264,7 +265,7 @@ class TestConsoleRelayLifecycle:
     def test_relay_kill_recovery(self, mock_kill, tmp_path: Path, monkeypatch):
         from mvmctl.services.console_relay import ConsoleRelayManager
 
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv(env_var("CACHE_DIR"), str(tmp_path))
 
         # Create a PID file for a "stuck" relay
         pid_file = tmp_path / "vms" / "testvm" / "console.pid"
