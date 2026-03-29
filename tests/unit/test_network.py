@@ -1169,7 +1169,8 @@ def test_require_mvm_group_raises_when_session_not_active():
 # ---------------------------------------------------------------------------
 
 
-def test_build_iptables_restore_input_single_table():
+@patch("mvmctl.core.network.chain_exists", return_value=False)
+def test_build_iptables_restore_input_single_table(mock_chain_exists):
     """_build_iptables_restore_input should format single table rules correctly."""
     from mvmctl.core.network import _build_iptables_restore_input
 
@@ -1186,7 +1187,8 @@ def test_build_iptables_restore_input_single_table():
     assert "COMMIT" in result
 
 
-def test_build_iptables_restore_input_multiple_tables():
+@patch("mvmctl.core.network.chain_exists", return_value=False)
+def test_build_iptables_restore_input_multiple_tables(mock_chain_exists):
     """_build_iptables_restore_input should group rules by table."""
     from mvmctl.core.network import _build_iptables_restore_input
 
@@ -1203,7 +1205,8 @@ def test_build_iptables_restore_input_multiple_tables():
     assert result.count("COMMIT") == 2
 
 
-def test_build_iptables_restore_input_default_table():
+@patch("mvmctl.core.network.chain_exists", return_value=False)
+def test_build_iptables_restore_input_default_table(mock_chain_exists):
     """_build_iptables_restore_input should default to filter table."""
     from mvmctl.core.network import _build_iptables_restore_input
 
