@@ -105,6 +105,31 @@ Before finishing any implementation, you MUST verify:
 
 ---
 
+### Commit Authorship (MANDATORY)
+
+**DO NOT add `Co-authored-by` trailers unless the co-author actually contributed to that specific change.**
+
+- Only add co-authors when they **directly contributed code, review, or significant input** to that specific commit
+- Do NOT add co-authors as a blanket practice on every commit
+- Do NOT add co-authors just because they are part of the project or team
+- When in doubt, **omit the co-author trailer entirely**
+
+**Correct:**
+```
+feat: add new VM snapshot feature
+
+Co-authored-by: Alice <alice@example.com>  # Alice wrote part of this feature
+```
+
+**Incorrect:**
+```
+style: fix formatting
+
+Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this change
+```
+
+---
+
 ### Agent CLI Execution
  
 To execute the `mvm` CLI with proper group privileges, use:

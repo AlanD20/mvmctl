@@ -59,7 +59,7 @@ def test_list_keys_with_entries(keys_dir):
     assert len(result) == 1
     assert result[0].name == "mykey"
     assert result[0].fingerprint == "SHA256:abc"
-    assert result[0].has_private_key == False
+    assert not result[0].has_private_key
     assert result[0].private_key_path is None
     assert result[0].public_key_path == str(keys_dir / "mykey.pub")
 
@@ -86,7 +86,7 @@ def test_get_key_found(keys_dir):
     result = get_key("mykey")
     assert result is not None
     assert result.name == "mykey"
-    assert result.has_private_key == True
+    assert result.has_private_key
     assert result.private_key_path == str(keys_dir / "mykey")
     assert result.public_key_path == str(keys_dir / "mykey.pub")
 
@@ -111,7 +111,7 @@ def test_add_key_success(keys_dir, tmp_path):
     assert info.algorithm == "ssh-ed25519"
     assert "testuser@testhost" in info.comment
     assert info.fingerprint.startswith("SHA256:")
-    assert info.has_private_key == False  # No matching private key
+    assert not info.has_private_key  # No matching private key
 
     # Verify file stored in cache
     cached = keys_dir / "testkey.pub"
@@ -120,7 +120,7 @@ def test_add_key_success(keys_dir, tmp_path):
     # Verify registry
     registry = json.loads((keys_dir / "registry.json").read_text())
     assert "testkey" in registry["keys"]
-    assert registry["keys"]["testkey"]["has_private_key"] == False
+    assert not registry["keys"]["testkey"]["has_private_key"]
 
 
 def test_add_key_file_not_found(keys_dir, tmp_path):
@@ -177,13 +177,13 @@ def test_create_key_success(keys_dir, tmp_path):
 
     assert info.name == "newkey"
     assert info.algorithm == "ssh-ed25519"
-    assert info.has_private_key == True  # create_key generates both keys
+    assert info.has_private_key  # create_key generates both keys
     assert private_path == output_dir / "newkey"
     assert (keys_dir / "newkey.pub").exists()
 
     # Verify registry has has_private_key=True
     registry = json.loads((keys_dir / "registry.json").read_text())
-    assert registry["keys"]["newkey"]["has_private_key"] == True
+    assert registry["keys"]["newkey"]["has_private_key"]
 
 
 def test_create_key_file_exists_no_overwrite(keys_dir, tmp_path):

@@ -72,6 +72,29 @@ uv run mypy src/
 
 *Note: A minimum of 80% branch coverage is strictly enforced.*
 
+## Commit Authorship (MANDATORY)
+
+**DO NOT add `Co-authored-by` trailers unless the co-author actually contributed to that specific change.**
+
+- Only add co-authors when they **directly contributed code, review, or significant input** to that specific commit
+- Do NOT add co-authors as a blanket practice on every commit
+- Do NOT add co-authors just because they are part of the project or team
+- When in doubt, **omit the co-author trailer entirely**
+
+**Correct:**
+```
+feat: add new VM snapshot feature
+
+Co-authored-by: Alice <alice@example.com>  # Alice wrote part of this feature
+```
+
+**Incorrect:**
+```
+style: fix formatting
+
+Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this change
+```
+
 ## Development Conventions
 - **Defaults:** Never hardcode defaults in function parameters. Fallback defaults reside in `constants.py` with a `FALLBACK_` prefix. User-facing asset defaults are resolved from `~/.cache/mvmctl/metadata.json` (`is_default` markers) and `MVM_*` environment variables.
 - **Privilege Model:** `sudo mvm host init` is run once to set up the host (mvm group, sudoers). Normal commands run rootless and validate privileges via the `mvm` group.
