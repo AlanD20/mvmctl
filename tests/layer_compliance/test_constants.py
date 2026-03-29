@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """Test that no hardcoded values exist in core/api/cli layers.
 
 Architecture Rule: All defaults must be in constants.py
@@ -97,7 +98,7 @@ def _extract_string_literals(file_path: Path) -> list[tuple[str, int, str]]:
     Returns list of (string_value, line_number, context) tuples.
     """
     content = file_path.read_text()
-    strings = []
+    strings: list[tuple[str, int, str]] = []
 
     try:
         tree = ast.parse(content)
@@ -106,11 +107,13 @@ def _extract_string_literals(file_path: Path) -> list[tuple[str, int, str]]:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value.lower() not in ALLOWED_STRINGS:
-                strings.append((node.value, node.lineno, "string literal"))
+            value = node.value
+            if value.lower() not in ALLOWED_STRINGS:
+                strings.append((value, node.lineno, "string literal"))
         elif isinstance(node, ast.Str):  # For older Python AST
-            if node.s.lower() not in ALLOWED_STRINGS:
-                strings.append((node.s, node.lineno, "string literal"))
+            value = str(node.s)
+            if value.lower() not in ALLOWED_STRINGS:
+                strings.append((value, node.lineno, "string literal"))
 
     return strings
 
@@ -118,7 +121,7 @@ def _extract_string_literals(file_path: Path) -> list[tuple[str, int, str]]:
 def _extract_number_literals(file_path: Path) -> list[tuple[int | float, int, str]]:
     """Extract numeric literals from a Python file."""
     content = file_path.read_text()
-    numbers = []
+    numbers: list[tuple[int | float, int, str]] = []
 
     try:
         tree = ast.parse(content)

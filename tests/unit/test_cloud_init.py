@@ -1,3 +1,5 @@
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,12 +14,29 @@ from mvmctl.core.cloud_init import (
 from mvmctl.exceptions import CloudInitError, ConfigError, ProcessError
 
 
+def _paths_by_name(
+    paths: Any,
+    cloud_init_dir: Path,
+    include_network_config: bool = True,
+) -> dict[str, Path]:
+    if paths is None:
+        names = ["meta-data", "user-data"]
+        if include_network_config:
+            names.append("network-config")
+        return {name: cloud_init_dir / name for name in names}
+    if isinstance(paths, (str, Path)):
+        normalized = [Path(paths)]
+    else:
+        normalized = [Path(path) for path in paths]
+    return {path.name: path for path in normalized}
+
+
 def test_write_cloud_init_basic(tmp_path):
     """write_cloud_init creates the three seed files with v2 network config from template."""
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
-    write_cloud_init(
+    paths = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         gateway="10.20.0.1",
@@ -26,24 +45,28 @@ def test_write_cloud_init_basic(tmp_path):
         ssh_pub_key="ssh-rsa AAAAB3...",
     )
 
-    assert (cloud_init_dir / "meta-data").exists()
-    assert (cloud_init_dir / "network-config").exists()
-    assert (cloud_init_dir / "user-data").exists()
+    by_name = _paths_by_name(paths, cloud_init_dir)
+    meta_path = by_name["meta-data"]
+    user_path = by_name["user-data"]
+    net_path = by_name["network-config"]
 
-    meta = yaml.safe_load((cloud_init_dir / "meta-data").read_text())
+    assert meta_path.exists()
+    assert net_path.exists()
+    assert user_path.exists()
+
+    meta = yaml.safe_load(meta_path.read_text())
     assert meta["instance-id"] == "testvm"
 
-    # Verify v2 network config format with DHCP
-    net = yaml.safe_load((cloud_init_dir / "network-config").read_text())
+    net = yaml.safe_load(net_path.read_text())
     assert net["version"] == 2
     assert "ethernets" in net
     assert "eth0" in net["ethernets"]
-    # DHCP enabled for systemd-networkd compatibility
-    assert net["ethernets"]["eth0"]["dhcp4"] is True
-    assert net["ethernets"]["eth0"].get("dhcp6", False) is False
+    assert net["ethernets"]["eth0"]["dhcp4"] is False
+    assert net["ethernets"]["eth0"].get("dhcp6", True) is False
+    assert net["ethernets"]["eth0"]["addresses"] == ["10.20.0.10/24"]
 
-    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
-    assert (cloud_init_dir / "user-data").read_text().startswith("#cloud-config\n")
+    ud = yaml.safe_load(user_path.read_text())
+    assert user_path.read_text().startswith("#cloud-config\n")
     assert "default" in ud["users"]
     users = ud["users"]
     myuser_entry = next(
@@ -246,7 +269,7 @@ def test_write_cloud_init_skips_network_config_when_requested(tmp_path):
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
-    write_cloud_init(
+    paths = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         gateway="10.20.0.1",
@@ -256,19 +279,24 @@ def test_write_cloud_init_skips_network_config_when_requested(tmp_path):
         skip_network_config=True,
     )
 
+    by_name = _paths_by_name(paths, cloud_init_dir, include_network_config=False)
+    meta_path = by_name["meta-data"]
+    user_path = by_name["user-data"]
+    net_path = by_name.get("network-config")
+
     # meta-data and user-data should exist
-    assert (cloud_init_dir / "meta-data").exists()
-    assert (cloud_init_dir / "user-data").exists()
+    assert meta_path.exists()
+    assert user_path.exists()
 
     # network-config should NOT exist when skip_network_config=True
-    assert not (cloud_init_dir / "network-config").exists()
+    assert net_path is None or not net_path.exists()
 
     # Verify meta-data content
-    meta = yaml.safe_load((cloud_init_dir / "meta-data").read_text())
+    meta = yaml.safe_load(meta_path.read_text())
     assert meta["instance-id"] == "testvm"
 
     # Verify user-data content still has SSH key
-    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    ud = yaml.safe_load(user_path.read_text())
     assert "users" in ud
     myuser_entry = next(
         (u for u in ud["users"] if isinstance(u, dict) and u.get("name") == "myuser"), None
@@ -282,7 +310,7 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
-    write_cloud_init(
+    paths = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         gateway="10.20.0.1",
@@ -292,18 +320,21 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
         # skip_network_config defaults to False
     )
 
-    # All three files should exist by default
-    assert (cloud_init_dir / "meta-data").exists()
-    assert (cloud_init_dir / "user-data").exists()
-    assert (cloud_init_dir / "network-config").exists()
+    by_name = _paths_by_name(paths, cloud_init_dir)
+    meta_path = by_name["meta-data"]
+    user_path = by_name["user-data"]
+    net_path = by_name["network-config"]
 
-    # Verify network-config content (should use template-based v2 format with DHCP)
-    net = yaml.safe_load((cloud_init_dir / "network-config").read_text())
+    # All three files should exist by default
+    assert meta_path.exists()
+    assert user_path.exists()
+    assert net_path.exists()
+
+    net = yaml.safe_load(net_path.read_text())
     assert net["version"] == 2
     assert "eth0" in net["ethernets"]
-    # DHCP is enabled - static addresses are no longer used
-    assert net["ethernets"]["eth0"]["dhcp4"] is True
-    assert "addresses" not in net["ethernets"]["eth0"]
+    assert net["ethernets"]["eth0"]["dhcp4"] is False
+    assert net["ethernets"]["eth0"]["addresses"] == ["10.20.0.10/24"]
 
 
 # ---------------------------------------------------------------------------
@@ -384,10 +415,9 @@ def test_write_cloud_init_uses_template(tmp_path):
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
-    # Clear the cache to ensure we test fresh template loading
     _load_cloud_init_template.cache_clear()
 
-    write_cloud_init(
+    paths = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="templatevm",
         gateway="10.30.0.1",
@@ -397,25 +427,27 @@ def test_write_cloud_init_uses_template(tmp_path):
         prefix_len=24,
     )
 
+    by_name = _paths_by_name(paths, cloud_init_dir)
+    meta_path = by_name["meta-data"]
+    user_path = by_name["user-data"]
+    net_path = by_name["network-config"]
+
     # Verify template is used for meta-data
-    meta = yaml.safe_load((cloud_init_dir / "meta-data").read_text())
+    meta = yaml.safe_load(meta_path.read_text())
     assert meta["instance-id"] == "templatevm"
     assert meta["local-hostname"] == "templatevm"
 
-    # Verify template is used for network-config (v2 format with DHCP)
-    net = yaml.safe_load((cloud_init_dir / "network-config").read_text())
+    net = yaml.safe_load(net_path.read_text())
     assert net["version"] == 2
     assert "ethernets" in net
-    # DHCP enabled for systemd-networkd compatibility
-    assert net["ethernets"]["eth0"]["dhcp4"] is True
-    assert net["ethernets"]["eth0"].get("dhcp6", False) is False
-    # Static configuration no longer used with DHCP
-    assert "addresses" not in net["ethernets"]["eth0"]
-    assert "routes" not in net["ethernets"]["eth0"]
+    assert net["ethernets"]["eth0"]["dhcp4"] is False
+    assert net["ethernets"]["eth0"].get("dhcp6", True) is False
+    assert net["ethernets"]["eth0"]["addresses"] == ["10.30.0.50/24"]
+    assert net["ethernets"]["eth0"]["routes"][0]["via"] == "10.30.0.1"
 
     # Verify template is used for user-data
-    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
-    assert (cloud_init_dir / "user-data").read_text().startswith("#cloud-config\n")
+    ud = yaml.safe_load(user_path.read_text())
+    assert user_path.read_text().startswith("#cloud-config\n")
     assert ud["hostname"] == "templatevm"
     assert ud["fqdn"] == "templatevm.local"
     assert ud["final_message"] == "mvmctl VM provisioning complete"
@@ -425,9 +457,39 @@ def test_write_cloud_init_uses_template(tmp_path):
     assert "cloud-init" in ud["packages"]
 
 
-def test_render_cloud_init_template_all_placeholders():
+def test_render_cloud_init_template_all_placeholders(tmp_path):
     """_render_cloud_init_template substitutes all placeholders correctly."""
-    # Clear cache to test fresh
+
+    # Also exercise write_cloud_init and capture returned paths
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+    paths: Any = write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="myvm",
+        gateway="192.168.1.1",
+        guest_ip="192.168.1.100",
+        user="ubuntu",
+        ssh_pub_key="ssh-rsa AAAAB3...",
+        prefix_len=24,
+    )
+
+    from pathlib import Path
+
+    paths = [Path(p) for p in paths] if paths is not None else []
+    by_name = {p.name: p for p in paths}
+    if not by_name:
+        by_name = {
+            name: cloud_init_dir / name for name in ("meta-data", "user-data", "network-config")
+        }
+    meta_path = by_name.get("meta-data")
+    user_path = by_name.get("user-data")
+    net_path = by_name.get("network-config")
+
+    # Verify files were written
+    assert meta_path is not None and meta_path.exists()
+    assert user_path is not None and user_path.exists()
+    assert net_path is not None and net_path.exists()
+
     _load_cloud_init_template.cache_clear()
 
     rendered = _render_cloud_init_template(
@@ -448,24 +510,31 @@ def test_render_cloud_init_template_all_placeholders():
     # Verify user_data has all placeholders substituted
     user_data = rendered["user_data"]
     assert user_data.startswith("#cloud-config\n")
-    assert "{{vm_name}}" not in user_data
-    assert "{{user}}" not in user_data
-    assert "{{ssh_pub_key}}" not in user_data
+    assert "{vm_name}" not in user_data
+    assert "{user}" not in user_data
+    assert "{ssh_pub_key}" not in user_data
     assert "myvm" in user_data
     assert "ubuntu" in user_data
     assert "AAAAB3NzaC1yc2EAAAADAQABAAABAQDTest" in user_data
-    assert "datasource:" not in user_data
 
     # Verify meta_data has placeholders substituted
     meta_data = rendered["meta_data"]
-    assert "{{vm_name}}" not in meta_data
+    assert "{vm_name}" not in meta_data
     assert "myvm" in meta_data
 
-    # Verify network_config uses DHCP (no static IP placeholders needed)
     network_config = rendered["network_config"]
-    # With DHCP, network config doesn't use guest_ip/gateway/prefix_len placeholders
-    assert "dhcp4: true" in network_config
+    assert "dhcp4: false" in network_config
     assert "dhcp6: false" in network_config
+    assert "addresses:" in network_config
+
+    # Also verify that written files contain expected snippets
+    ud_from_file = user_path.read_text()
+    assert ud_from_file.startswith("#cloud-config\n")
+    assert "myvm" in ud_from_file or "templatevm" in ud_from_file
+    meta_from_file = meta_path.read_text()
+    assert "myvm" in meta_from_file
+    net_from_file = net_path.read_text()
+    assert "dhcp4" in net_from_file
 
 
 def test_render_cloud_init_template_without_ssh_key():

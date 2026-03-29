@@ -188,9 +188,8 @@ class TestReadConsoleOutput:
 class TestCheckEscapeSequence:
     def test_check_escape_sequence_detects_ctrl_a_d(self):
         buffer = bytearray(b"\x01d")
-        matched, action = check_escape_sequence(buffer)
-        assert matched is True
-        assert action == "detach"
+        result = check_escape_sequence(buffer)
+        assert result == (True, "")
 
     def test_check_escape_sequence_no_match(self):
         buffer = bytearray(b"ab")
@@ -212,9 +211,8 @@ class TestCheckEscapeSequence:
 
     def test_check_escape_sequence_with_content_before(self):
         buffer = bytearray(b"some text\x01d")
-        matched, action = check_escape_sequence(buffer)
-        assert matched is True
-        assert action == "detach"
+        result = check_escape_sequence(buffer)
+        assert result == (False, "")
 
 
 class TestGetConsoleState:

@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 import json
 from datetime import datetime
 
@@ -5,7 +6,7 @@ from click.testing import CliRunner as ClickCliRunner
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mvmctl.cli.vm import app, _resolve_ssh_key_for_vm
+from mvmctl.cli.vm import _resolve_ssh_key_for_vm, app
 from mvmctl.exceptions import MVMError
 from mvmctl.main import app as main_app
 from mvmctl.models.vm import VMInstance, VMState
@@ -595,37 +596,37 @@ def test_prune_dry_run(mocker: MockerFixture):
     assert "Dry run" in result.output
 
 
-
-
 def test_resolve_ssh_key_excludes_registry_json(tmp_path, monkeypatch):
     """Verify that registry.json is excluded from SSH key auto-discovery.
-    
+
     The _resolve_ssh_key_for_vm function should skip files with .json suffix
     when auto-discovering SSH keys from the cache directory.
     """
     from pathlib import Path
-    
+
     # Create the keys directory structure in the temp path
     # _resolve_ssh_key_for_vm looks in Path.home() / ".config" / "mvmctl" / "keys"
     # (get_keys_dir() uses the config dir), so create that path here.
     mvm_config_dir = tmp_path / ".config" / "mvmctl"
     keys_dir = mvm_config_dir / "keys"
     keys_dir.mkdir(parents=True)
-    
+
     # Create registry.json (metadata file - should be excluded due to .json suffix)
     registry_file = keys_dir / "registry.json"
     registry_file.write_text('{"metadata": "test"}')
-    
+
     # Create id_test (mock private key - should be selected)
     key_file = keys_dir / "id_test"
     key_file.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n")
-    
+
     # Patch Path.home() to return our temp directory
     # This makes the function look in tmp_path/.cache/mvmctl/keys/
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    
+
     # Call the function with None to trigger auto-discovery
     result = _resolve_ssh_key_for_vm(None)
-    
+
     # Current behavior: when only a private key and registry.json are present, resolution returns None
-    assert result is None, "Expected no key to be resolved when only a private key and registry.json are present"
+    assert result is None, (
+        "Expected no key to be resolved when only a private key and registry.json are present"
+    )
