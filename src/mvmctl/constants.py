@@ -285,7 +285,7 @@ DEFAULT_SNAPSHOT_RESUME: Final[bool] = _require_bool(("vm", "snapshot", "resume"
 DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = _require_int(("image", "remote", "version_limit"))
 
 # ---------------------------------------------------------------------------
-# Fallback values — last-resort runtime values when config lookup fails
+# Default values — last-resort runtime values when config lookup fails
 # ---------------------------------------------------------------------------
 
 DEFAULT_FC_CI_VERSION: Final[str] = _require_str(("fallbacks", "fc_ci_version"))
@@ -386,6 +386,17 @@ DEFAULT_USR_SBIN_IPTABLES_RESTORE: Final[str] = _require_str(
 )
 DEFAULT_USR_SBIN_IPTABLES_SAVE: Final[str] = _require_str(("host", "sbin_paths", "iptables_save"))
 DEFAULT_USR_SBIN_SYSCTL: Final[str] = _require_str(("host", "sbin_paths", "sysctl"))
+
+# ---------------------------------------------------------------------------
+# Libguestfs defaults (loaded from assets/defaults.yaml)
+# ---------------------------------------------------------------------------
+DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT: Final[int] = _require_int(("libguestfs", "launch_timeout"))
+DEFAULT_LIBGUESTFS_ROOT_DEVICE: Final[str] = _require_str(("libguestfs", "fallback_root_device"))
+DEFAULT_LIBGUESTFS_SEED_DIR: Final[str] = _require_str(("libguestfs", "seed_dir"))
+DEFAULT_LIBGUESTFS_ROOT_INDICATORS: Final[tuple[str, str]] = (
+    "/etc/os-release",
+    "/etc/fstab",
+)
 
 # ---------------------------------------------------------------------------
 # Timeouts and poll intervals (in seconds)

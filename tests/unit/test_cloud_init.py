@@ -4,28 +4,12 @@ import pytest
 import yaml
 
 from mvmctl.core.cloud_init import (
-    _generate_network_config_v2,
     _load_cloud_init_template,
     _render_cloud_init_template,
     create_cloud_init_iso,
     write_cloud_init,
 )
 from mvmctl.exceptions import CloudInitError, ConfigError, ProcessError
-
-
-def test_generate_network_config_v2():
-    """_generate_network_config_v2 produces correct v2 format."""
-    config = _generate_network_config_v2("10.20.0.10", "10.20.0.1", 24)
-
-    assert config["version"] == 2
-    assert "ethernets" in config
-    assert "eth0" in config["ethernets"]
-
-    eth0 = config["ethernets"]["eth0"]
-    assert eth0["dhcp4"] is False
-    assert "10.20.0.10/24" in eth0["addresses"]
-    assert {"to": "default", "via": "10.20.0.1"} in eth0["routes"]
-    assert eth0["nameservers"]["addresses"] == ["8.8.8.8", "1.1.1.1"]
 
 
 def test_write_cloud_init_basic(tmp_path):
@@ -49,13 +33,14 @@ def test_write_cloud_init_basic(tmp_path):
     meta = yaml.safe_load((cloud_init_dir / "meta-data").read_text())
     assert meta["instance-id"] == "testvm"
 
-    # Verify v2 network config format
+    # Verify v2 network config format with DHCP
     net = yaml.safe_load((cloud_init_dir / "network-config").read_text())
     assert net["version"] == 2
     assert "ethernets" in net
     assert "eth0" in net["ethernets"]
-    assert net["ethernets"]["eth0"]["dhcp4"] is False
-    assert "10.20.0.10/24" in net["ethernets"]["eth0"]["addresses"]
+    # DHCP enabled for systemd-networkd compatibility
+    assert net["ethernets"]["eth0"]["dhcp4"] is True
+    assert net["ethernets"]["eth0"].get("dhcp6", False) is False
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
     assert (cloud_init_dir / "user-data").read_text().startswith("#cloud-config\n")
@@ -312,11 +297,13 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
     assert (cloud_init_dir / "user-data").exists()
     assert (cloud_init_dir / "network-config").exists()
 
-    # Verify network-config content (should use template-based v2 format)
+    # Verify network-config content (should use template-based v2 format with DHCP)
     net = yaml.safe_load((cloud_init_dir / "network-config").read_text())
     assert net["version"] == 2
     assert "eth0" in net["ethernets"]
-    assert "10.20.0.10/24" in net["ethernets"]["eth0"]["addresses"]
+    # DHCP is enabled - static addresses are no longer used
+    assert net["ethernets"]["eth0"]["dhcp4"] is True
+    assert "addresses" not in net["ethernets"]["eth0"]
 
 
 # ---------------------------------------------------------------------------
@@ -415,13 +402,16 @@ def test_write_cloud_init_uses_template(tmp_path):
     assert meta["instance-id"] == "templatevm"
     assert meta["local-hostname"] == "templatevm"
 
-    # Verify template is used for network-config (v2 format)
+    # Verify template is used for network-config (v2 format with DHCP)
     net = yaml.safe_load((cloud_init_dir / "network-config").read_text())
     assert net["version"] == 2
     assert "ethernets" in net
-    assert net["ethernets"]["eth0"]["dhcp4"] is False
-    assert "10.30.0.50/24" in net["ethernets"]["eth0"]["addresses"]
-    assert {"to": "default", "via": "10.30.0.1"} in net["ethernets"]["eth0"]["routes"]
+    # DHCP enabled for systemd-networkd compatibility
+    assert net["ethernets"]["eth0"]["dhcp4"] is True
+    assert net["ethernets"]["eth0"].get("dhcp6", False) is False
+    # Static configuration no longer used with DHCP
+    assert "addresses" not in net["ethernets"]["eth0"]
+    assert "routes" not in net["ethernets"]["eth0"]
 
     # Verify template is used for user-data
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
@@ -471,13 +461,11 @@ def test_render_cloud_init_template_all_placeholders():
     assert "{{vm_name}}" not in meta_data
     assert "myvm" in meta_data
 
-    # Verify network_config has placeholders substituted
+    # Verify network_config uses DHCP (no static IP placeholders needed)
     network_config = rendered["network_config"]
-    assert "{{guest_ip}}" not in network_config
-    assert "{{gateway}}" not in network_config
-    assert "{{prefix_len}}" not in network_config
-    assert "192.168.1.100/24" in network_config
-    assert "192.168.1.1" in network_config
+    # With DHCP, network config doesn't use guest_ip/gateway/prefix_len placeholders
+    assert "dhcp4: true" in network_config
+    assert "dhcp6: false" in network_config
 
 
 def test_render_cloud_init_template_without_ssh_key():
@@ -503,8 +491,8 @@ def test_render_cloud_init_template_without_ssh_key():
     user_data = rendered["user_data"]
     assert "ssh-authorized-keys" not in user_data or "ssh_pub_key" not in user_data
 
-def test_write_cloud_init_uses_run_systemd_network(tmp_path):
-    """write_cloud_init should use /run/systemd/network for .network file."""
+def test_write_cloud_init_dhcp_no_systemd_network_workaround(tmp_path):
+    """With DHCP, no systemd-networkd workaround files should be created."""
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
@@ -520,14 +508,15 @@ def test_write_cloud_init_uses_run_systemd_network(tmp_path):
         ssh_pub_key="ssh-rsa AAAAB3...",
     )
 
-    # Read user-data and verify write_files uses /run/systemd/network
+    # With DHCP configuration, we don't need to create systemd .network files
+    # because systemd-networkd properly manages DHCP interfaces
     user_data_text = (cloud_init_dir / "user-data").read_text()
-    assert "/run/systemd/network/10-mvmctl-eth0.network" in user_data_text
+    assert "/run/systemd/network/10-mvmctl-eth0.network" not in user_data_text
     assert "/etc/systemd/network/10-mvmctl-eth0.network" not in user_data_text
 
 
-def test_write_cloud_init_masks_systemd_networkd_wait_online(tmp_path):
-    """write_cloud_init should mask systemd-networkd-wait-online in bootcmd."""
+def test_write_cloud_init_dhcp_no_wait_online_masking(tmp_path):
+    """With DHCP, systemd-networkd-wait-online should not need masking."""
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
@@ -543,6 +532,7 @@ def test_write_cloud_init_masks_systemd_networkd_wait_online(tmp_path):
         ssh_pub_key="ssh-rsa AAAAB3...",
     )
 
-    # Read user-data and verify bootcmd masks systemd-networkd-wait-online
+    # With DHCP configuration, systemd-networkd-wait-online completes successfully
+    # because systemd-networkd properly manages the DHCP interface
     user_data_text = (cloud_init_dir / "user-data").read_text()
-    assert "systemctl mask systemd-networkd-wait-online" in user_data_text
+    assert "systemctl mask systemd-networkd-wait-online" not in user_data_text

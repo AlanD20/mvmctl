@@ -81,6 +81,7 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
     mock_client.return_value.send_ctrl_alt_del.assert_called_once()
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
@@ -126,6 +127,7 @@ def test_create_vm_core_success(
     mock_setup_chain,
     mock_net_mgr,
     mock_add_firewall_rule,
+    mock_copy2,
 ):
     """Test core create_vm() runs through successfully and registers VM with nocloud-net (default)."""
     mock_manager = MagicMock()
@@ -190,6 +192,7 @@ def test_create_vm_core_success(
 # ============================================================================
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
@@ -235,6 +238,7 @@ def test_create_vm_auto_mode_defaults_to_nocloud_net(
     mock_setup_chain,
     mock_net_mgr,
     mock_add_firewall_rule,
+    mock_copy2,
 ):
     """Test that AUTO cloud_init_mode defaults to NO_CLOUD_NET mode."""
     mock_manager = MagicMock()
@@ -1039,6 +1043,7 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
             create_vm(name="attackvm", image="ubuntu-24.04")
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
@@ -1084,8 +1089,8 @@ def test_create_vm_uses_cached_image_path_not_copy(
     mock_setup_chain,
     mock_net_mgr,
     mock_add_firewall_rule,
+    mock_copy2,
 ):
-    """create_vm sets VMConfig.rootfs_path to the cached image path, not a copy."""
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
@@ -1126,9 +1131,13 @@ def test_create_vm_uses_cached_image_path_not_copy(
 
     create_vm(name="myvm", image="ubuntu-22.04")
 
+    mock_copy2.assert_called_once()
+    copy_src, copy_dst = mock_copy2.call_args.args[:2]
+    assert copy_src == img_ext4
+    assert copy_dst == mock_vm_dir.__truediv__.return_value
+
     vm_config_arg = mock_config_gen.call_args.args[0]
-    # Verify that rootfs_path is the cached image path (not copied to vm_dir)
-    assert vm_config_arg.rootfs_path == img_ext4
+    assert vm_config_arg.rootfs_path == mock_vm_dir.__truediv__.return_value
 
 
 # ============================================================================
@@ -1136,6 +1145,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
 # ============================================================================
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -1181,6 +1191,7 @@ def test_create_vm_nocloud_net_starts_server(
     mock_net_mgr,
     mock_setup_chain,
     mock_subprocess_run,
+    mock_copy2,
 ):
     """Test that NoCloudNetServerManager.start_server() is called when cloud_init_mode=NO_CLOUD_NET."""
     from mvmctl.core.vm_lifecycle import create_vm
@@ -1235,6 +1246,7 @@ def test_create_vm_nocloud_net_starts_server(
     assert isinstance(vm, VMInstance)
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.network.get_default_interface")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
@@ -1286,6 +1298,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_setup_chain,
     mock_subprocess_run,
     mock_get_default_interface,
+    mock_copy2,
 ):
     """Test that nocloud server is stopped when Firecracker fails to start."""
     from mvmctl.core.vm_lifecycle import create_vm
@@ -1343,6 +1356,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_net_mgr.return_value.stop_server.assert_called_once_with("myvm")
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -1388,6 +1402,7 @@ def test_create_vm_nocloud_net_success_sets_port(
     mock_net_mgr,
     mock_setup_chain,
     mock_subprocess_run,
+    mock_copy2,
 ):
     """Test that VMInstance.nocloud_net_port is set correctly when NO_CLOUD_NET mode succeeds."""
     from mvmctl.core.vm_lifecycle import create_vm
@@ -1448,6 +1463,7 @@ def test_create_vm_nocloud_net_success_sets_port(
 # ============================================================================
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
@@ -1495,6 +1511,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     mock_setup_chain,
     mock_add_firewall_rule,
     mock_subprocess_run,
+    mock_copy2,
 ):
     """Test that add_nocloud_input_rule() is called when NO_CLOUD_NET mode succeeds."""
     from mvmctl.core.vm_lifecycle import create_vm
@@ -1554,6 +1571,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     assert vm.nocloud_net_port == test_port
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.remove_nocloud_input_rule")
 @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
@@ -1609,6 +1627,7 @@ def test_firewall_failure_stops_server_and_raises(
     mock_add_firewall_rule,
     mock_remove_firewall_rule,
     mock_subprocess_run,
+    mock_copy2,
 ):
     """Test that firewall failure stops server and re-raises exception."""
     from mvmctl.core.vm_lifecycle import create_vm
@@ -1679,6 +1698,7 @@ def test_firewall_failure_stops_server_and_raises(
 # ============================================================================
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -1724,6 +1744,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     mock_net_mgr,
     mock_setup_chain,
     mock_subprocess_run,
+    mock_copy2,
 ):
     """Test that create_vm returns immediately without blocking when mode=NO_CLOUD_NET."""
     from mvmctl.core.vm_lifecycle import create_vm
@@ -1781,6 +1802,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     assert vm.nocloud_net_port == test_port
 
 
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -1826,6 +1848,7 @@ def test_create_vm_starts_nocloud_server(
     mock_net_mgr,
     mock_setup_chain,
     mock_subprocess_run,
+    mock_copy2,
 ):
     """Test that create_vm starts nocloud-net server when mode=NO_CLOUD_NET."""
     from mvmctl.core.vm_lifecycle import create_vm
@@ -1884,3 +1907,220 @@ def test_create_vm_starts_nocloud_server(
 
     # Verify nocloud-net server was started
     mock_net_mgr.return_value.start_server.assert_called_once()
+
+
+@patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("builtins.open", new_callable=MagicMock)
+@patch("mvmctl.core.vm_lifecycle.setup_nat")
+@patch("mvmctl.core.vm_lifecycle.inject_cloud_init")
+def test_direct_injection_uses_vm_local_copied_rootfs(
+    mock_inject,
+    mock_setup_nat,
+    mock_open,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_write_ci,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_secure_mkdir,
+    tmp_path,
+):
+    images_dir = tmp_path / "images"
+    images_dir.mkdir(parents=True)
+    cached_image = images_dir / "ubuntu-22.04.ext4"
+    cached_image.write_bytes(b"fake rootfs content")
+
+    vm_name = "t-direct"
+    vm_dir = tmp_path / "vms" / vm_name
+    vm_dir.mkdir(parents=True)
+
+    mock_get_images.return_value = images_dir
+    mock_get_vm_dir.return_value = vm_dir
+
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir(parents=True)
+    (kernels_dir / "vmlinux").write_text("fake kernel")
+    mock_get_kernels.return_value = kernels_dir
+
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = True
+    mock_get_net.return_value = mock_net
+
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = None
+    mock_resolve_fs_type.return_value = None
+    mock_bridge_exists.return_value = True
+    mock_popen.return_value.pid = 12345
+
+    call_log: list[str] = []
+
+    def spy_copy2(src: str | Path, dst: str | Path, **kw: object) -> str | None:
+        call_log.append(f"copy2:{src}:{dst}")
+        return str(dst)
+
+    def spy_inject(rootfs_path: str, cloud_init_dir: str) -> None:
+        call_log.append(f"inject:{rootfs_path}")
+
+    with patch("mvmctl.core.vm_lifecycle.shutil.copy2", side_effect=spy_copy2):
+        mock_inject.side_effect = spy_inject
+        create_vm(
+            name=vm_name,
+            image="ubuntu-22.04",
+            cloud_init_mode=CloudInitMode.DIRECT_INJECTION,
+        )
+
+    copy_calls = [e for e in call_log if e.startswith("copy2:")]
+    assert copy_calls, "shutil.copy2 was never called"
+    copy_dst = Path(copy_calls[0].split(":", 2)[2])
+    assert copy_dst.parent == vm_dir
+    assert copy_dst.name.startswith("rootfs")
+    copy_src = Path(copy_calls[0].split(":", 2)[1])
+    assert copy_src == cached_image
+
+    inject_calls = [e for e in call_log if e.startswith("inject:")]
+    assert inject_calls, "inject_cloud_init was never called"
+    injected_path = Path(inject_calls[0][len("inject:") :])
+
+    expected_vm_rootfs = vm_dir / "rootfs.ext4"
+    assert injected_path == expected_vm_rootfs
+    assert injected_path != cached_image
+
+    copy_idx = next(i for i, e in enumerate(call_log) if e.startswith("copy2:"))
+    inject_idx = next(i for i, e in enumerate(call_log) if e.startswith("inject:"))
+    assert copy_idx < inject_idx
+
+
+@patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("builtins.open", new_callable=MagicMock)
+@patch("mvmctl.core.vm_lifecycle.setup_nat")
+@patch("mvmctl.core.vm_lifecycle.inject_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.release_network_ip")
+@patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
+def test_direct_injection_cleanup_on_injection_failure(
+    mock_rmtree,
+    mock_release_ip,
+    mock_inject,
+    mock_setup_nat,
+    mock_open,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_write_ci,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_secure_mkdir,
+    tmp_path,
+):
+    from mvmctl.exceptions import CloudInitError
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir(parents=True)
+    (images_dir / "ubuntu-22.04.ext4").write_bytes(b"fake")
+
+    vm_name = "t-fail"
+    vm_dir = tmp_path / "vms" / vm_name
+    vm_dir.mkdir(parents=True)
+    mock_get_vm_dir.return_value = vm_dir
+    mock_get_images.return_value = images_dir
+
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir(parents=True)
+    (kernels_dir / "vmlinux").write_text("fake kernel")
+    mock_get_kernels.return_value = kernels_dir
+
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = True
+    mock_get_net.return_value = mock_net
+
+    mock_alloc_ip.return_value = "10.20.0.2"
+    mock_gen_mac.return_value = "02:fc:aa:bb:cc:dd"
+    mock_resolve_fs_uuid.return_value = None
+    mock_resolve_fs_type.return_value = None
+    mock_bridge_exists.return_value = True
+
+    mock_inject.side_effect = RuntimeError("simulated guestfs failure")
+
+    with (
+        patch("mvmctl.core.vm_lifecycle.shutil.copy2"),
+        pytest.raises(CloudInitError, match="Direct injection failed"),
+    ):
+        create_vm(
+            name=vm_name,
+            image="ubuntu-22.04",
+            cloud_init_mode=CloudInitMode.DIRECT_INJECTION,
+        )
+
+    mock_rmtree.assert_called_once_with(vm_dir, ignore_errors=True)
+    mock_release_ip.assert_called_once_with("default", vm_name)

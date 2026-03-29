@@ -178,6 +178,11 @@ def create(
         "--nocloud-net",
         help="Use nocloud-net HTTP datasource (default mode; use --cloud-init-iso for ISO mode)",
     ),
+    cloud_init_mode: Optional[str] = typer.Option(
+        None,
+        "--cloud-init-mode",
+        help="Cloud-init mode: 'auto' (default, uses nocloud-net), 'iso' (ISO mode), 'nocloud-net' (HTTP), 'disabled' (no cloud-init)",
+    ),
     nocloud_net_port: Optional[int] = typer.Option(
         None,
         "--nocloud-net-port",
@@ -369,18 +374,47 @@ def create(
             cloud_init_iso is not None and cloud_init_iso != USE_ISO_AUTO,  # type: ignore[comparison-overlap]
             cloud_init_iso == USE_ISO_AUTO,  # type: ignore[comparison-overlap]
             nocloud_net,
+            cloud_init_mode is not None,
         ]
     )
     if cloud_init_flags > 1:
         print_error(
-            "Only one of --no-cloud-init, --cloud-init-iso, or --nocloud-net can be specified"
+            "Only one of --cloud-init-mode, --no-cloud-init, --cloud-init-iso, or --nocloud-net can be specified"
         )
         raise typer.Exit(code=1)
 
+    # Validate --cloud-init-mode if provided
+    if cloud_init_mode is not None:
+        mode_lower = cloud_init_mode.lower()
+        valid_modes = ["auto", "iso", "custom", "direct", "disabled", "nocloud-net"]
+        if mode_lower not in valid_modes:
+            print_error(
+                f"Invalid --cloud-init-mode '{cloud_init_mode}'. Valid modes: {', '.join(valid_modes)}"
+            )
+            raise typer.Exit(code=1)
+
     # Determine cloud_init_mode based on flags
-    if no_cloud_init:
+    if cloud_init_mode is not None:
+        # New --cloud-init-mode flag takes precedence
+        mode_lower = cloud_init_mode.lower()
+        if mode_lower == "disabled":
+            effective_cloud_init_mode = CloudInitMode.DISABLED
+            effective_cloud_init_iso_path: Path | None = None
+        elif mode_lower == "iso":
+            effective_cloud_init_mode = CloudInitMode.ISO
+            effective_cloud_init_iso_path = None  # Auto-generate ISO
+        elif mode_lower == "nocloud-net":
+            effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
+            effective_cloud_init_iso_path = None
+        elif mode_lower == "direct":
+            effective_cloud_init_mode = CloudInitMode.DIRECT_INJECTION
+            effective_cloud_init_iso_path = None
+        else:  # "auto"
+            effective_cloud_init_mode = CloudInitMode.AUTO
+            effective_cloud_init_iso_path = None
+    elif no_cloud_init:
         effective_cloud_init_mode = CloudInitMode.DISABLED
-        effective_cloud_init_iso_path: Path | None = None
+        effective_cloud_init_iso_path = None
     elif cloud_init_iso is not None:
         effective_cloud_init_mode = CloudInitMode.CUSTOM
         # USE_ISO_AUTO means auto-generate (None path), otherwise use custom path

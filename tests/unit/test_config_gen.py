@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from mvmctl.constants import DEFAULT_LIBGUESTFS_SEED_DIR
 from mvmctl.core.config_gen import ConfigGenerator
 from mvmctl.models import CloudInitMode
 from mvmctl.models.vm import VMConfig
@@ -406,6 +407,21 @@ def test_boot_args_nocloud_net_ds():
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "ds=nocloud;seedfrom=http://192.168.1.1:8123/" in boot_args
+
+
+def test_boot_args_direct_injection_seed_dir_uses_constant():
+    vm_config = VMConfig(
+        name="direct-injection-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        cloud_init_mode=CloudInitMode.DIRECT_INJECTION,
+    )
+
+    config = ConfigGenerator(vm_config).generate()
+
+    assert (
+        f"ds=nocloud;s=file://{DEFAULT_LIBGUESTFS_SEED_DIR}/" in config["boot-source"]["boot_args"]
+    )
 
 
 def test_boot_args_nocloud_net_requires_url():

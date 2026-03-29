@@ -10,8 +10,6 @@ from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
 from mvmctl.constants import (
-    DEFAULT_DNS_NAMESERVERS,
-    DEFAULT_GUEST_NETWORK_IFACE,
     REQUIRED_ISO_TOOL,
 )
 from mvmctl.exceptions import CloudInitError, ConfigError, ProcessError
@@ -40,7 +38,9 @@ def _validate_user_data(user_data: dict[str, Any]) -> None:
         ConfigError: If dangerous directives are found without proper safeguards.
     """
     dangerous_directives = [
-        directive for directive in _DANGEROUS_CLOUD_INIT_DIRECTIVES if directive in user_data
+        directive
+        for directive in _DANGEROUS_CLOUD_INIT_DIRECTIVES
+        if directive in user_data
     ]
     if not dangerous_directives:
         return
@@ -55,32 +55,6 @@ def _validate_user_data(user_data: dict[str, Any]) -> None:
     )
 
 
-def _generate_network_config_v2(guest_ip: str, gateway: str, prefix_len: int) -> dict[str, Any]:
-    """Generate cloud-init network configuration version 2.
-
-    Version 2 is required for systemd-networkd compatibility in cloud-init 24.0+.
-
-    Args:
-        guest_ip: The guest VM IP address.
-        gateway: The gateway IP address.
-        prefix_len: The network prefix length (default 24).
-
-    Returns:
-        Network configuration dictionary in v2 format.
-    """
-    return {
-        "version": 2,
-        "ethernets": {
-            DEFAULT_GUEST_NETWORK_IFACE: {
-                "dhcp4": False,
-                "addresses": [f"{guest_ip}/{prefix_len}"],
-                "routes": [{"to": "default", "via": gateway}],
-                "nameservers": {"addresses": list(DEFAULT_DNS_NAMESERVERS)},
-            }
-        },
-    }
-
-
 @functools.lru_cache(maxsize=1)
 def _load_cloud_init_template() -> str:
     """Load the cloud-init template from the assets directory.
@@ -88,7 +62,9 @@ def _load_cloud_init_template() -> str:
     Returns:
         The template string content.
     """
-    template_path = importlib.resources.files("mvmctl.assets") / "cloud-init.template.yaml"
+    template_path = (
+        importlib.resources.files("mvmctl.assets") / "cloud-init.template.yaml"
+    )
     return template_path.read_text()
 
 
@@ -213,7 +189,9 @@ def write_cloud_init(
     if custom_user_data is not None:
         ud: dict[str, Any] = {}
         content = custom_user_data.read_text()
-        if not (content.startswith("#cloud-config") or content.startswith("Content-Type:")):
+        if not (
+            content.startswith("#cloud-config") or content.startswith("Content-Type:")
+        ):
             logger.warning(
                 "user-data file does not start with '#cloud-config' or MIME boundary header"
             )
@@ -223,7 +201,9 @@ def write_cloud_init(
                 ud = loaded
                 _validate_user_data(ud)
             elif loaded is not None:
-                raise ConfigError("Custom user-data must parse to a YAML mapping/object")
+                raise ConfigError(
+                    "Custom user-data must parse to a YAML mapping/object"
+                )
         except yaml.YAMLError as exc:
             raise ConfigError(f"Invalid YAML in user-data file: {exc}") from exc
         if ssh_pub_key:
@@ -241,7 +221,9 @@ def write_cloud_init(
                             user_found = True
                             break
                     if not user_found:
-                        users_list.append({"name": user, "ssh-authorized-keys": [ssh_pub_key]})
+                        users_list.append(
+                            {"name": user, "ssh-authorized-keys": [ssh_pub_key]}
+                        )
         if "network" in ud:
             logger.warning(
                 "Custom user-data already contains 'network' key; "

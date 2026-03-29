@@ -12,14 +12,18 @@ class CloudInitMode(StrEnum):
     """Cloud-init configuration mode.
 
     Attributes:
-        AUTO: Generate cloud-init ISO from config files (default).
+        AUTO: Use default mode (currently nocloud-net).
+        ISO: Generate cloud-init ISO from config files.
         CUSTOM: Use a pre-existing custom cloud-init ISO.
+        DIRECT_INJECTION: Inject cloud-init files directly into rootfs using libguestfs (filesystem-agnostic).
         DISABLED: Skip cloud-init entirely (no ISO mounted).
         NO_CLOUD_NET: Serve cloud-init files via HTTP (nocloud-net datasource).
     """
 
     AUTO = "auto"
+    ISO = "iso"
     CUSTOM = "custom"
+    DIRECT_INJECTION = "direct"  # Inject cloud-init files directly into rootfs using libguestfs (filesystem-agnostic)
     DISABLED = "disabled"
     NO_CLOUD_NET = "nocloud-net"
 

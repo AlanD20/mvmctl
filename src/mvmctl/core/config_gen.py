@@ -12,6 +12,7 @@ from mvmctl.constants import (
     DEFAULT_BOOT_REBOOT,
     DEFAULT_CLOUD_INIT_DRIVE_ID,
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD,
+    DEFAULT_LIBGUESTFS_SEED_DIR,
     DEFAULT_FC_DRIVE_CACHE_TYPE,
     DEFAULT_FC_DRIVE_IO_ENGINE,
     DEFAULT_FC_LOG_FILENAME,
@@ -126,11 +127,15 @@ class ConfigGenerator:
             "metrics": json.dumps(self._build_metrics_config()),
         }
 
-        template_path = Path(__file__).parent.parent / "assets" / "firecracker.template.json"
+        template_path = (
+            Path(__file__).parent.parent / "assets" / "firecracker.template.json"
+        )
         try:
             template_str = template_path.read_text(encoding="utf-8")
         except OSError as exc:
-            raise MVMError(f"Failed to load Firecracker config template: {template_path}") from exc
+            raise MVMError(
+                f"Failed to load Firecracker config template: {template_path}"
+            ) from exc
 
         filled = template_str
         for key, value in context.items():
@@ -144,7 +149,9 @@ class ConfigGenerator:
         try:
             config: FirecrackerConfig = json.loads(filled)
         except json.JSONDecodeError as exc:
-            raise MVMError(f"Generated Firecracker config is not valid JSON: {exc}") from exc
+            raise MVMError(
+                f"Generated Firecracker config is not valid JSON: {exc}"
+            ) from exc
 
         return config
 
@@ -202,7 +209,9 @@ class ConfigGenerator:
         if not self.vm_config.enable_metrics:
             return None
         return {
-            "metrics_path": str(get_vm_dir(self.vm_config.name) / DEFAULT_FC_METRICS_FILENAME),
+            "metrics_path": str(
+                get_vm_dir(self.vm_config.name) / DEFAULT_FC_METRICS_FILENAME
+            ),
         }
 
     def _build_default_boot_args(self) -> str:
@@ -210,11 +219,14 @@ class ConfigGenerator:
         gateway = self.vm_config.gateway or ""
         subnet_mask = self.vm_config.subnet_mask or ""
 
-        ip_arg = (
-            f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:none"
-            if self.vm_config.guest_ip
-            else ""
-        )
+        # Use static kernel ip= parameter for early network bringup
+        # This ensures network is ready before cloud-init runs
+        # For NO_CLOUD_NET mode, also include kernel ip= for initial network bringup
+        # cloud-init's network-config will ensure the IP stays consistent
+        if self.vm_config.guest_ip:
+            ip_arg = f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:off"
+        else:
+            ip_arg = ""
         lsm_flags = self.vm_config.lsm_flags or None
         lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
 
@@ -222,15 +234,33 @@ class ConfigGenerator:
         if self.vm_config.cloud_init_mode == CloudInitMode.NO_CLOUD_NET:
             # For nocloud-net, validate URL is configured
             if not self.vm_config.nocloud_net_url:
-                raise ConfigError("nocloud_net_url must be set when using NO_CLOUD_NET mode")
+                raise ConfigError(
+                    "nocloud_net_url must be set when using NO_CLOUD_NET mode"
+                )
             ds_arg = f"ds=nocloud;seedfrom={self.vm_config.nocloud_net_url}"
+            # Mask systemd-networkd-wait-online to prevent 2+ minute boot delay
+            # The kernel ip= parameter already configures the network; this service
+            # would block waiting for systemd-networkd to mark it as "online"
+            mask_arg = "systemd.mask=systemd-networkd-wait-online.service"
+        elif self.vm_config.cloud_init_mode == CloudInitMode.DIRECT_INJECTION:
+            ds_arg = f"ds=nocloud;s=file://{DEFAULT_LIBGUESTFS_SEED_DIR}/"
+            mask_arg = "systemd.mask=systemd-networkd-wait-online.service"
+        elif self.vm_config.cloud_init_mode == CloudInitMode.ISO:
+            # ISO mode: local nocloud datasource
+            ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
+            # Also mask systemd-networkd-wait-online for ISO mode
+            mask_arg = "systemd.mask=systemd-networkd-wait-online.service"
         elif self.vm_config.cloud_init_mode == CloudInitMode.DISABLED:
             ds_arg = ""
+            mask_arg = ""
         else:
             ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
+            mask_arg = ""
 
         root_arg = (
-            f"root=UUID={self.vm_config.root_uuid}" if self.vm_config.root_uuid else "root=/dev/vda"
+            f"root=UUID={self.vm_config.root_uuid}"
+            if self.vm_config.root_uuid
+            else "root=/dev/vda"
         )
 
         parts = [
@@ -245,6 +275,7 @@ class ConfigGenerator:
             "rootwait",
             f"rootfstype={self.vm_config.root_fs_type or DEFAULT_VM_ROOT_FS_TYPE}",
             ds_arg,
+            mask_arg,
             lsm_arg,
         ]
         return " ".join(p for p in parts if p).strip()
