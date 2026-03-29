@@ -45,47 +45,11 @@ def _registry_path() -> Path:
     return get_keys_dir() / "registry.json"
 
 
-def _maybe_migrate_registry(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate a legacy flat registry to the wrapped format.
-
-    Legacy format: { "keyname": { ...KeyInfo fields... }, ... }
-    New format:    { "keys": { "keyname": { ... } }, "defaults": { "ssh": [...] } }
-
-    Migration is triggered when the loaded data does not contain the sentinel
-    ``"keys"`` or ``"defaults"`` top-level field.  All existing entries are
-    moved into ``data["keys"]`` and an empty ``defaults.ssh`` list is created.
-
-    Args:
-        data: Raw dict loaded from registry.json.
-
-    Returns:
-        dict in the new wrapped format (may be the same object if already new).
-    """
-    if _REGISTRY_KEYS_FIELD in data or _REGISTRY_DEFAULTS_FIELD in data:
-        # Already in new format — ensure defaults.ssh exists
-        if _REGISTRY_DEFAULTS_FIELD not in data:
-            data[_REGISTRY_DEFAULTS_FIELD] = {_REGISTRY_SSH_DEFAULTS_FIELD: []}
-        if _REGISTRY_SSH_DEFAULTS_FIELD not in data[_REGISTRY_DEFAULTS_FIELD]:
-            data[_REGISTRY_DEFAULTS_FIELD][_REGISTRY_SSH_DEFAULTS_FIELD] = []
-        return data
-
-    # Legacy flat format — wrap it
-    logger.debug("Migrating key registry from legacy flat format to wrapped format")
-    wrapped: dict[str, Any] = {
-        _REGISTRY_KEYS_FIELD: data,
-        _REGISTRY_DEFAULTS_FIELD: {_REGISTRY_SSH_DEFAULTS_FIELD: []},
-    }
-    return wrapped
-
-
 def _load_registry() -> dict[str, dict[str, Any]]:
-    """Load the key registry from disk, returning an empty registry if missing or corrupt.
-
-    Handles both legacy (flat) and new (wrapped) registry formats transparently.
-    Legacy registries are auto-migrated to the wrapped format.
+    """Load the key registry from disk, returning an empty wrapped registry if missing or corrupt.
 
     Returns:
-        Wrapped registry dict with ``"keys"`` and ``"defaults"`` top-level fields.
+        Wrapped registry dict with "keys" and "defaults" top-level fields.
     """
     path = _registry_path()
     if not path.exists():
@@ -94,14 +58,31 @@ def _load_registry() -> dict[str, dict[str, Any]]:
             _REGISTRY_DEFAULTS_FIELD: {_REGISTRY_SSH_DEFAULTS_FIELD: []},
         }
     try:
-        raw: dict[str, Any] = json.loads(path.read_text())
+        raw = json.loads(path.read_text())
     except (json.JSONDecodeError, ValueError):
-        logger.warning("Corrupt key registry at %s — resetting to empty", path)
+        logger.warning("Corrupt key registry at %s  resetting to empty wrapped registry", path)
         return {
             _REGISTRY_KEYS_FIELD: {},
             _REGISTRY_DEFAULTS_FIELD: {_REGISTRY_SSH_DEFAULTS_FIELD: []},
         }
-    return _maybe_migrate_registry(raw)
+
+    # Expect the wrapped format only; do not perform legacy migration.
+    if isinstance(raw, dict) and _REGISTRY_KEYS_FIELD in raw and _REGISTRY_DEFAULTS_FIELD in raw:
+        defaults = raw.get(_REGISTRY_DEFAULTS_FIELD) or {}
+        if _REGISTRY_SSH_DEFAULTS_FIELD not in defaults:
+            defaults[_REGISTRY_SSH_DEFAULTS_FIELD] = []
+            raw[_REGISTRY_DEFAULTS_FIELD] = defaults
+        return raw
+
+    logger.warning(
+        "Unsupported key registry format at %s  found legacy or unexpected shape. Resetting to empty wrapped registry. "
+        "If you need to preserve keys, please migrate manually.",
+        path,
+    )
+    return {
+        _REGISTRY_KEYS_FIELD: {},
+        _REGISTRY_DEFAULTS_FIELD: {_REGISTRY_SSH_DEFAULTS_FIELD: []},
+    }
 
 
 def _save_registry(registry: dict[str, Any]) -> None:
