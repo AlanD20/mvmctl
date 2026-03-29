@@ -249,6 +249,7 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | `--nocloud-net` | Use nocloud-net HTTP datasource (default: auto) | false |
 | `--nocloud-net-port PORT` | Port for nocloud-net HTTP server (0=auto) | 0 (auto) |
 | `--no-cloud-init` | Disable cloud-init entirely | false |
+| `--cloud-init-mode MODE` | Cloud-init mode: `auto`, `nocloud-net`, `iso`, `custom`, `direct`, `disabled` | auto |
 | `--import-config PATH` | Load all settings from a JSON config file | — |
 | `--output-config PATH` | Write resolved config to a JSON file | — |
 | `--enable-api-socket` | Expose Firecracker API socket | false |
@@ -262,6 +263,59 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | `--type TYPE` | `boot` (serial console) or `os` (Firecracker process log) | `boot` |
 | `--follow, -f` | Stream log output | false |
 | `--lines N` | Last N lines | 50 |
+
+**Additional VM commands:**
+
+| Command | Description |
+|---------|-------------|
+| `mvm vm prune` | Remove all stopped VMs (cleanup) |
+| `mvm vm snapshot --name NAME --mem-out PATH --state-out PATH` | Create a snapshot of a running VM |
+| `mvm vm load --name NAME --mem-in PATH --state-in PATH` | Restore a VM from a snapshot |
+
+**`vm prune` flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--all` | Remove all VMs, not just stopped ones | false |
+| `--dry-run` | Show what would be removed without deleting | false |
+| `--force, -f` | Skip confirmation | false |
+
+---
+
+### `mvm console` — VM console access
+
+Interactive serial console access to VMs without SSH. Uses a PTY-over-vsock relay for lightweight terminal access.
+
+| Command | Description |
+|---------|-------------|
+| `mvm console attach` | Attach to a VM console interactively |
+| `mvm console attach --state` | Show console state without attaching |
+| `mvm console attach --kill` | Kill the console relay for a VM |
+
+**`console attach` flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `VM_ID` (positional) | VM short ID (first 6 chars) or name | — |
+| `--name, -n NAME` | VM name | — |
+| `--state` | Show console state and exit | false |
+| `--kill` | Kill the console relay | false |
+
+**Examples:**
+
+```bash
+# Attach to a VM by name
+mvm console attach --name myvm
+
+# Attach by short ID
+mvm console attach 3df
+
+# Check if console is running
+mvm console attach --name myvm --state
+
+# Kill the console relay
+mvm console attach --name myvm --kill
+```
 
 ---
 
@@ -285,6 +339,15 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | `mvm key create NAME` | Generate a new ED25519 keypair |
 | `mvm key rm NAME` | Remove a key from the cache |
 | `mvm key inspect NAME` | Show fingerprint and public key content |
+| `mvm key use NAME` | Set a key as the default for SSH |
+| `mvm key export NAME` | Export a key to ~/.ssh or a custom directory |
+
+**`key export` flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--out, -o DIR` | Destination directory | `~/.ssh` |
+| `--force, -f` | Overwrite existing files | false |
 
 ---
 
@@ -394,18 +457,33 @@ When you create a VM with cloud-init enabled (the default):
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| **nocloud-net (default)** | `--nocloud-net` or auto | Serves cloud-init files via HTTP server |
-| **ISO** | `--cloud-init-iso PATH` | Uses a pre-existing ISO file |
-| **Disabled** | `--no-cloud-init` | Skips cloud-init entirely |
+| **auto (default)** | `--cloud-init-mode auto` | Automatically selects best mode (currently nocloud-net) |
+| **nocloud-net** | `--cloud-init-mode nocloud-net` or `--nocloud-net` | Serves cloud-init files via HTTP server |
+| **ISO** | `--cloud-init-mode iso` or `--cloud-init-iso PATH` | Uses a pre-existing ISO file |
+| **Custom ISO** | `--cloud-init-mode custom` with `--cloud-init-iso PATH` | Uses a custom ISO you provide |
+| **Direct Injection** | `--cloud-init-mode direct` | Injects cloud-init directly into rootfs using libguestfs (requires guestfs) |
+| **Disabled** | `--cloud-init-mode disabled` or `--no-cloud-init` | Skips cloud-init entirely |
+
+> **Note:** `--cloud-init-mode` takes precedence over individual mode flags. Only one cloud-init flag can be specified at a time.
+
+**Example: Auto mode (default)**
+```bash
+mvm vm create --name myvm --image ubuntu-24.04
+```
 
 **Example: Force ISO mode**
 ```bash
-mvm vm create --name myvm --image ubuntu-24.04 --cloud-init-iso /path/to/cloud-init.iso
+mvm vm create --name myvm --image ubuntu-24.04 --cloud-init-mode iso --cloud-init-iso /path/to/cloud-init.iso
+```
+
+**Example: Direct injection mode (requires libguestfs)**
+```bash
+mvm vm create --name myvm --image ubuntu-24.04 --cloud-init-mode direct
 ```
 
 **Example: Explicit nocloud-net mode**
 ```bash
-mvm vm create --name myvm --image ubuntu-24.04 --nocloud-net
+mvm vm create --name myvm --image ubuntu-24.04 --cloud-init-mode nocloud-net
 ```
 
 ### Security Architecture
