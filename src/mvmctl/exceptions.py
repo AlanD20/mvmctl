@@ -74,6 +74,39 @@ class CloudInitError(MVMError):
     """
 
 
+class RootfsInjectionError(MVMError):
+    """Raised when cloud-init injection into rootfs fails.
+
+    This error indicates a failure during direct filesystem injection
+    using libguestfs. Common causes include missing libguestfs Python
+    bindings, inability to mount the rootfs, or filesystem corruption.
+    """
+
+
+class GuestfsNotAvailableError(RootfsInjectionError):
+    """Raised when libguestfs Python bindings are not available."""
+
+    pass
+
+
+class GuestfsLaunchError(RootfsInjectionError):
+    """Raised when guestfs appliance fails to launch."""
+
+    pass
+
+
+class GuestfsMountError(RootfsInjectionError):
+    """Raised when unable to mount rootfs in guestfs."""
+
+    pass
+
+
+class GuestfsWriteError(RootfsInjectionError):
+    """Raised when writing files to guestfs fails."""
+
+    pass
+
+
 class RootPartitionDetectionError(MVMError):
     """Root partition could not be detected."""
 

@@ -1,5 +1,6 @@
 """Unit tests for libguestfs-based rootfs injection."""
 
+import os
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -313,9 +314,147 @@ class TestConstantsUsage:
 
         mock_g.mkdir_p.assert_called_once_with(DEFAULT_LIBGUESTFS_SEED_DIR)
 
-    def test_launch_uses_timeout_constant(self, tmp_path):
+    def test_launch_uses_timeout_via_environment(self, tmp_path, monkeypatch):
+        """Timeout is configured via LIBGUESTFS_BACKEND_SETTINGS environment variable."""
         from mvmctl.constants import DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT
 
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        captured_settings = []
+
+        def capture_env(*args, **kwargs):
+            captured_settings.append(os.environ.get("LIBGUESTFS_BACKEND_SETTINGS"))
+            return mock_g
+
+        mock_guestfs = Mock()
+        mock_g = Mock()
+        mock_guestfs.GuestFS.side_effect = capture_env
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        env_vars = {}
+        monkeypatch.setattr(os, "environ", env_vars)
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        expected_settings = f"timeout={DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT}"
+        assert captured_settings[0] == expected_settings
+        mock_g.set_timeout.assert_not_called()
+
+    def test_skips_optional_methods_when_unavailable(self, tmp_path, monkeypatch):
+        """Launch succeeds when optional optimization methods are missing."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        mock_guestfs = Mock()
+        mock_g = Mock(
+            spec=[
+                "add_drive",
+                "launch",
+                "shutdown",
+                "close",
+                "list_filesystems",
+                "mount",
+                "umount",
+                "exists",
+                "mkdir_p",
+                "write",
+            ]
+        )
+        mock_guestfs.GuestFS.return_value = mock_g
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        monkeypatch.setattr(os, "environ", {})
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        mock_g.launch.assert_called_once()
+        mock_g.shutdown.assert_called_once()
+        mock_g.close.assert_called_once()
+
+
+class TestEnvironmentVariables:
+    """Tests for LIBGUESTFS_BACKEND environment variable configuration."""
+
+    def test_sets_libguestfs_backend_to_direct(self, tmp_path, monkeypatch):
+        """LIBGUESTFS_BACKEND is set to 'direct' before handle creation."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        captured_backend = []
+
+        def capture_env(*args, **kwargs):
+            captured_backend.append(os.environ.get("LIBGUESTFS_BACKEND"))
+            return mock_g
+
+        mock_guestfs = Mock()
+        mock_g = Mock()
+        mock_guestfs.GuestFS.side_effect = capture_env
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        env_vars = {}
+        monkeypatch.setattr(os, "environ", env_vars)
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        assert captured_backend[0] == "direct"
+
+    def test_sets_libguestfs_backend_settings_timeout(self, tmp_path, monkeypatch):
+        """LIBGUESTFS_BACKEND_SETTINGS includes timeout value."""
+        from mvmctl.constants import DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT
+
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        captured_settings = []
+
+        def capture_env(*args, **kwargs):
+            captured_settings.append(os.environ.get("LIBGUESTFS_BACKEND_SETTINGS"))
+            return mock_g
+
+        mock_guestfs = Mock()
+        mock_g = Mock()
+        mock_guestfs.GuestFS.side_effect = capture_env
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        env_vars = {}
+        monkeypatch.setattr(os, "environ", env_vars)
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        expected_settings = f"timeout={DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT}"
+        assert captured_settings[0] == expected_settings
+
+    def test_restores_original_env_values_after_handle_creation(self, tmp_path, monkeypatch):
+        """Original environment values are restored after GuestFS handle creation."""
         rootfs_path = tmp_path / "rootfs.img"
         rootfs_path.write_text("")
         cloud_init_dir = tmp_path / "cloud-init"
@@ -329,8 +468,224 @@ class TestConstantsUsage:
         mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
         mock_g.exists.return_value = True
 
+        env_vars = {"LIBGUESTFS_BACKEND": "libvirt", "LIBGUESTFS_BACKEND_SETTINGS": "timeout=60"}
+        monkeypatch.setattr(os, "environ", env_vars)
+
         with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
             with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
                 inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
 
-        mock_g.set_timeout.assert_called_once_with(DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT)
+        assert env_vars.get("LIBGUESTFS_BACKEND") == "libvirt"
+        assert env_vars.get("LIBGUESTFS_BACKEND_SETTINGS") == "timeout=60"
+
+    def test_cleans_up_env_when_no_original_values(self, tmp_path, monkeypatch):
+        """Environment variables are removed if they were not originally set."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        mock_guestfs = Mock()
+        mock_g = Mock()
+        mock_guestfs.GuestFS.return_value = mock_g
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        env_vars = {}
+        monkeypatch.setattr(os, "environ", env_vars)
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        assert "LIBGUESTFS_BACKEND" not in env_vars
+        assert "LIBGUESTFS_BACKEND_SETTINGS" not in env_vars
+
+
+class TestOptimizationMethods:
+    """Tests for guestfs boot optimization method calls."""
+
+    def test_calls_set_network_false_when_available(self, tmp_path, monkeypatch):
+        """set_network(False) is called when method exists."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        mock_guestfs = Mock()
+        mock_g = Mock()
+        mock_guestfs.GuestFS.return_value = mock_g
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        monkeypatch.setattr(os, "environ", {})
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        mock_g.set_network.assert_called_once_with(False)
+
+    def test_calls_set_smp_1_when_available(self, tmp_path, monkeypatch):
+        """set_smp(1) is called when method exists."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        mock_guestfs = Mock()
+        mock_g = Mock()
+        mock_guestfs.GuestFS.return_value = mock_g
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        monkeypatch.setattr(os, "environ", {})
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        mock_g.set_smp.assert_called_once_with(1)
+
+    def test_calls_set_memsize_256_when_available(self, tmp_path, monkeypatch):
+        """set_memsize(256) is called when method exists."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        mock_guestfs = Mock()
+        mock_g = Mock()
+        mock_guestfs.GuestFS.return_value = mock_g
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        monkeypatch.setattr(os, "environ", {})
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        mock_g.set_memsize.assert_called_once_with(256)
+
+    def test_skips_set_network_when_unavailable(self, tmp_path, monkeypatch):
+        """Missing set_network method is handled gracefully."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        mock_guestfs = Mock()
+        mock_g = Mock(
+            spec=[
+                "add_drive",
+                "launch",
+                "shutdown",
+                "close",
+                "list_filesystems",
+                "mount",
+                "umount",
+                "exists",
+                "mkdir_p",
+                "write",
+                "set_smp",
+                "set_memsize",
+            ]
+        )
+        mock_guestfs.GuestFS.return_value = mock_g
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        monkeypatch.setattr(os, "environ", {})
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        mock_g.launch.assert_called_once()
+
+    def test_skips_set_smp_when_unavailable(self, tmp_path, monkeypatch):
+        """Missing set_smp method is handled gracefully."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        mock_guestfs = Mock()
+        mock_g = Mock(
+            spec=[
+                "add_drive",
+                "launch",
+                "shutdown",
+                "close",
+                "list_filesystems",
+                "mount",
+                "umount",
+                "exists",
+                "mkdir_p",
+                "write",
+                "set_network",
+                "set_memsize",
+            ]
+        )
+        mock_guestfs.GuestFS.return_value = mock_g
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        monkeypatch.setattr(os, "environ", {})
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        mock_g.launch.assert_called_once()
+
+    def test_skips_set_memsize_when_unavailable(self, tmp_path, monkeypatch):
+        """Missing set_memsize method is handled gracefully."""
+        rootfs_path = tmp_path / "rootfs.img"
+        rootfs_path.write_text("")
+        cloud_init_dir = tmp_path / "cloud-init"
+        cloud_init_dir.mkdir()
+        (cloud_init_dir / "meta-data").write_text("instance-id: test")
+        (cloud_init_dir / "user-data").write_text("#cloud-config\n")
+
+        mock_guestfs = Mock()
+        mock_g = Mock(
+            spec=[
+                "add_drive",
+                "launch",
+                "shutdown",
+                "close",
+                "list_filesystems",
+                "mount",
+                "umount",
+                "exists",
+                "mkdir_p",
+                "write",
+                "set_network",
+                "set_smp",
+            ]
+        )
+        mock_guestfs.GuestFS.return_value = mock_g
+        mock_g.list_filesystems.return_value = {"/dev/sda1": "ext4"}
+        mock_g.exists.return_value = True
+
+        monkeypatch.setattr(os, "environ", {})
+
+        with patch.dict("sys.modules", {"guestfs": mock_guestfs}):
+            with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
+                inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
+
+        mock_g.launch.assert_called_once()

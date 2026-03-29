@@ -1,13 +1,14 @@
 """Rootfs injection using libguestfs for reliable cloud-init seeding."""
 
 import importlib
+import os
 from pathlib import Path
 from typing import Any
 
 from mvmctl.constants import (
-    DEFAULT_LIBGUESTFS_ROOT_INDICATORS,
     DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT,
     DEFAULT_LIBGUESTFS_ROOT_DEVICE,
+    DEFAULT_LIBGUESTFS_ROOT_INDICATORS,
     DEFAULT_LIBGUESTFS_SEED_DIR,
 )
 from mvmctl.exceptions import (
@@ -122,15 +123,44 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
 
     guestfs = importlib.import_module("guestfs")
 
-    g: Any = guestfs.GuestFS(python_return_dict=True)
+    # Configure libguestfs backend via environment variables (must be set before handle creation)
+    # Save original values to restore after handle creation
+    orig_backend = os.environ.get("LIBGUESTFS_BACKEND")
+    orig_backend_settings = os.environ.get("LIBGUESTFS_BACKEND_SETTINGS")
+
+    os.environ["LIBGUESTFS_BACKEND"] = "direct"
+    os.environ["LIBGUESTFS_BACKEND_SETTINGS"] = f"timeout={DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT}"
 
     try:
+        g: Any = guestfs.GuestFS(python_return_dict=True)
+    finally:
+        # Restore original environment values
+        if orig_backend is not None:
+            os.environ["LIBGUESTFS_BACKEND"] = orig_backend
+        elif "LIBGUESTFS_BACKEND" in os.environ:
+            del os.environ["LIBGUESTFS_BACKEND"]
+
+        if orig_backend_settings is not None:
+            os.environ["LIBGUESTFS_BACKEND_SETTINGS"] = orig_backend_settings
+        elif "LIBGUESTFS_BACKEND_SETTINGS" in os.environ:
+            del os.environ["LIBGUESTFS_BACKEND_SETTINGS"]
+
+    try:
+        # Apply boot-time optimizations with compatibility guards
+        if hasattr(g, "set_network"):
+            g.set_network(False)
+
+        if hasattr(g, "set_smp"):
+            g.set_smp(1)
+
+        if hasattr(g, "set_memsize"):
+            g.set_memsize(256)
+
         # Add the disk image
         g.add_drive(rootfs_path, readonly=False)
 
         # Launch the appliance
         try:
-            g.set_timeout(DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT)
             g.launch()
         except Exception as e:
             raise GuestfsLaunchError(f"Failed to launch guestfs appliance: {e}")
