@@ -181,7 +181,7 @@ class TestNoHardcodedValues:
                 # Check for absolute paths
                 if re.search(r'["\']/(?:usr|etc|var|opt|tmp|root)/[^"\']+["\']', line):
                     # Skip if it's using a constant
-                    if "constants." in line or "FALLBACK_" in line or "DEFAULT_" in line:
+                    if "constants." in line or "DEFAULT_" in line:
                         continue
                     violations.append(
                         {
@@ -237,7 +237,9 @@ class TestNoHardcodedValues:
                     "constants." in line
                     or "FALLBACK_" in line
                     or "DEFAULT_" in line
-                    or (file_path.name == "rootfs_injector.py" and "set_memsize" in line)
+                    or (
+                        file_path.name == "rootfs_injector.py" and "set_memsize" in line
+                    )
                 ):
                     continue
 
@@ -253,7 +255,9 @@ class TestNoHardcodedValues:
         if violations:
             violation_msgs = []
             for v in violations[:10]:  # Limit output
-                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['type']}: {v['value']}")
+                violation_msgs.append(
+                    f"  {v['file']}:{v['line']} - {v['type']}: {v['value']}"
+                )
 
             if len(violations) > 10:
                 violation_msgs.append(f"  ... and {len(violations) - 10} more")
@@ -289,7 +293,9 @@ class TestNoHardcodedValues:
                     "constants." in line
                     or "FALLBACK_" in line
                     or "DEFAULT_" in line
-                    or (file_path.name == "rootfs_injector.py" and "set_memsize" in line)
+                    or (
+                        file_path.name == "rootfs_injector.py" and "set_memsize" in line
+                    )
                 ):
                     continue
 
@@ -305,7 +311,9 @@ class TestNoHardcodedValues:
         if violations:
             violation_msgs = []
             for v in violations[:5]:
-                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['type']}: {v['value']}")
+                violation_msgs.append(
+                    f"  {v['file']}:{v['line']} - {v['type']}: {v['value']}"
+                )
 
             if len(violations) > 5:
                 violation_msgs.append(f"  ... and {len(violations) - 5} more")

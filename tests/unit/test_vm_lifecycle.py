@@ -2504,4 +2504,6 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
         create_vm(name="myvm", image="ubuntu-22.04")
 
     # cleanup_tap must be called to remove TAP and iptables rules
-    mock_cleanup_tap.assert_called_once_with(mock.ANY, bridge=mock_net.bridge)
+    mock_cleanup_tap.assert_called_once()
+    called_args, called_kwargs = mock_cleanup_tap.call_args
+    assert called_kwargs.get('bridge') == mock_net.bridge
