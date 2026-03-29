@@ -46,11 +46,13 @@ def test_get_vm_and_deregister(mock_get_manager):
     mock_manager.deregister.assert_called_once()
 
 
-@patch("mvmctl.utils.fs.get_vms_dir")
-def test_vm_cache_dir(mock_get_vms_dir):
-    """vm_cache_dir returns the vm path."""
-    mock_get_vms_dir.return_value = Path("/tmp/vms")
-    assert vm_cache_dir("testvm") == Path("/tmp/vms/testvm")
+@patch("mvmctl.utils.fs.get_vm_dir_by_hash")
+def test_vm_cache_dir(mock_get_vm_dir_by_hash):
+    """vm_cache_dir returns the vm path using hash-based lookup."""
+    mock_get_vm_dir_by_hash.return_value = Path("/tmp/vms/abc123")
+    vm = VMInstance(name="testvm", id="abc123" + "x" * 58, status=VMState.STOPPED)
+    assert vm_cache_dir(vm) == Path("/tmp/vms/abc123")
+    mock_get_vm_dir_by_hash.assert_called_once_with(vm.id)
 
 
 @patch("mvmctl.api.vms.connect_to_vm")
@@ -104,12 +106,19 @@ def test_cleanup_vms(
     mock_nocloud_mgr.return_value.stop_server.return_value = None
     vm1 = VMInstance(
         name="vm1",
+        id="vm1" + "a" * 60,  # Full 64-char hash
         status=VMState.STOPPED,
         pid=123,
         tap_device="mvm-def-vm1-abc",
         network_name="default",
     )
-    vm2 = VMInstance(name="vm2", status=VMState.RUNNING, pid=456, tap_device="mvm-def-vm2-xyz")
+    vm2 = VMInstance(
+        name="vm2",
+        id="vm2" + "b" * 60,
+        status=VMState.RUNNING,
+        pid=456,
+        tap_device="mvm-def-vm2-xyz",
+    )
     mock_manager.list_all.return_value = [vm1, vm2]
     mock_get_manager.return_value = mock_manager
 
@@ -118,10 +127,10 @@ def test_cleanup_vms(
     mock_get_network.return_value = mock_net_config
 
     # cleanup only stopped VMs
-    with patch("mvmctl.api.vms.vm_cache_dir") as mock_cache_dir:
-        mock_dir = MagicMock()
-        mock_dir.exists.return_value = True
-        mock_cache_dir.return_value = mock_dir
+    with patch("mvmctl.utils.fs.get_vm_dir_by_hash") as mock_get_vm_dir:
+        mock_vm_dir = MagicMock()
+        mock_vm_dir.exists.return_value = True
+        mock_get_vm_dir.return_value = mock_vm_dir
 
         res = cleanup_vms(all_vms=False)
         assert len(res) == 1
@@ -133,7 +142,110 @@ def test_cleanup_vms(
         mock_del_tap.assert_called_once_with("mvm-def-vm1-abc")
         mock_teardown_nat.assert_called_once_with("mvm-default")
         mock_manager.deregister.assert_called_once()
-        mock_rmtree.assert_called_once()
+        mock_rmtree.assert_called_once_with(mock_vm_dir)
+
+
+@patch("shutil.rmtree")
+@patch("mvmctl.api.vms.teardown_nat")
+@patch("mvmctl.core.network.delete_tap")
+@patch("mvmctl.core.network.remove_iptables_forward_rules")
+@patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
+@patch("mvmctl.core.firewall.remove_nocloud_input_rule")
+@patch("os.kill")
+@patch("mvmctl.api.vms.check_privileges")
+@patch("mvmctl.api.vms.get_network")
+@patch("mvmctl.api.vms.get_vm_manager")
+def test_cleanup_vms_removes_hash_based_dir(
+    mock_get_manager,
+    mock_get_network,
+    mock_check_privs,
+    mock_kill,
+    mock_rm_nocloud,
+    mock_nocloud_mgr,
+    mock_rm_iptables,
+    mock_del_tap,
+    mock_teardown_nat,
+    mock_rmtree,
+):
+    """cleanup_vms removes VM directories using hash-based paths."""
+    mock_manager = MagicMock()
+    mock_nocloud_mgr.return_value.stop_server.return_value = None
+    vm_id = "abc123" + "x" * 58
+    vm1 = VMInstance(
+        name="vm1",
+        id=vm_id,
+        status=VMState.STOPPED,
+        pid=123,
+        tap_device="mvm-def-vm1-abc",
+        network_name="default",
+    )
+    mock_manager.list_all.return_value = [vm1]
+    mock_get_manager.return_value = mock_manager
+
+    mock_net_config = MagicMock()
+    mock_net_config.bridge = "mvm-default"
+    mock_get_network.return_value = mock_net_config
+
+    with patch("mvmctl.utils.fs.get_vm_dir_by_hash") as mock_get_vm_dir:
+        mock_vm_dir = MagicMock()
+        mock_vm_dir.exists.return_value = True
+        mock_get_vm_dir.return_value = mock_vm_dir
+
+        res = cleanup_vms(all_vms=False)
+        assert len(res) == 1
+        assert res[0].name == "vm1"
+
+        # Verify hash-based directory lookup was used
+        mock_get_vm_dir.assert_called_once_with(vm_id)
+        mock_rmtree.assert_called_once_with(mock_vm_dir)
+
+
+@patch("shutil.rmtree")
+@patch("mvmctl.api.vms.teardown_nat")
+@patch("mvmctl.core.network.delete_tap")
+@patch("mvmctl.core.network.remove_iptables_forward_rules")
+@patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
+@patch("mvmctl.core.firewall.remove_nocloud_input_rule")
+@patch("os.kill")
+@patch("mvmctl.api.vms.check_privileges")
+@patch("mvmctl.api.vms.get_network")
+@patch("mvmctl.api.vms.get_vm_manager")
+def test_cleanup_vms_handles_missing_vm_id(
+    mock_get_manager,
+    mock_get_network,
+    mock_check_privs,
+    mock_kill,
+    mock_rm_nocloud,
+    mock_nocloud_mgr,
+    mock_rm_iptables,
+    mock_del_tap,
+    mock_teardown_nat,
+    mock_rmtree,
+):
+    """cleanup_vms handles VMs with missing ID gracefully."""
+    mock_manager = MagicMock()
+    mock_nocloud_mgr.return_value.stop_server.return_value = None
+    vm1 = VMInstance(
+        name="vm1",
+        id="",  # Empty ID simulates missing hash
+        status=VMState.STOPPED,
+        pid=123,
+        tap_device="mvm-def-vm1-abc",
+        network_name="default",
+    )
+    mock_manager.list_all.return_value = [vm1]
+    mock_get_manager.return_value = mock_manager
+
+    mock_net_config = MagicMock()
+    mock_net_config.bridge = "mvm-default"
+    mock_get_network.return_value = mock_net_config
+
+    # Should not raise even with missing ID
+    res = cleanup_vms(all_vms=False)
+    assert len(res) == 1
+
+    # Verify deregister was still called with name when id is None
+    mock_manager.deregister.assert_called_once_with(vm1.name)
 
 
 def test_inspect_vm_by_short_id(mocker: MockerFixture):
@@ -212,3 +324,106 @@ def test_inspect_vm_not_found(mocker: MockerFixture):
 
     with pytest.raises(VMNotFoundError, match="not found"):
         inspect_vm("nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# Rootfs path resolution tests (Issue 2 fix)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_rootfs_path_from_config(mocker: MockerFixture, tmp_path: Path):
+    """Test _resolve_rootfs_path uses config.rootfs_path when available."""
+    from mvmctl.api.vms import _resolve_rootfs_path
+
+    config_path = tmp_path / "shared" / "image.ext4"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("dummy")
+
+    vm_config = MagicMock()
+    vm_config.rootfs_path = config_path
+
+    vm = VMInstance(
+        name="test-vm",
+        id="abc123" + "x" * 58,
+        status=VMState.RUNNING,
+        config=vm_config,
+    )
+
+    vm_dir = tmp_path / "vm_dir"
+    vm_dir.mkdir()
+
+    path, source = _resolve_rootfs_path(vm, vm_dir)
+
+    assert path == config_path
+    assert source == "config"
+
+
+def test_resolve_rootfs_path_local_fallback(mocker: MockerFixture, tmp_path: Path):
+    """Test _resolve_rootfs_path falls back to local rootfs file."""
+    from mvmctl.api.vms import _resolve_rootfs_path
+
+    vm = VMInstance(
+        name="test-vm",
+        id="abc123" + "x" * 58,
+        status=VMState.RUNNING,
+        config=None,
+        rootfs_suffix=".ext4",
+    )
+
+    vm_dir = tmp_path / "vm_dir"
+    vm_dir.mkdir()
+    local_rootfs = vm_dir / "rootfs.ext4"
+    local_rootfs.write_text("dummy")
+
+    path, source = _resolve_rootfs_path(vm, vm_dir)
+
+    assert path == local_rootfs
+    assert source == "local"
+
+
+def test_resolve_rootfs_path_none_when_missing(mocker: MockerFixture, tmp_path: Path):
+    """Test _resolve_rootfs_path returns None when no rootfs found."""
+    from mvmctl.api.vms import _resolve_rootfs_path
+
+    vm = VMInstance(
+        name="test-vm",
+        id="abc123" + "x" * 58,
+        status=VMState.RUNNING,
+        config=None,
+    )
+
+    vm_dir = tmp_path / "vm_dir"
+    vm_dir.mkdir()
+
+    path, source = _resolve_rootfs_path(vm, vm_dir)
+
+    assert path is None
+    assert source == "none"
+
+
+def test_inspect_vm_rootfs_source_field(mocker: MockerFixture, tmp_path: Path):
+    """Test inspect_vm includes rootfs_source in output."""
+    mock_vm = VMInstance(
+        name="test-vm",
+        id="abc123" + "x" * 58,
+        pid=1234,
+        status=VMState.RUNNING,
+        created_at=datetime.now(),
+        rootfs_suffix=".ext4",
+    )
+
+    mock_mgr = mocker.MagicMock()
+    mock_mgr.get_by_short_id.return_value = mock_vm
+    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+
+    # Mock the VM directory with a local rootfs
+    with patch("mvmctl.utils.fs.get_vm_dir_by_hash") as mock_get_dir:
+        vm_dir = tmp_path / "vms" / mock_vm.id
+        vm_dir.mkdir(parents=True)
+        (vm_dir / "rootfs.ext4").write_text("dummy")
+        mock_get_dir.return_value = vm_dir
+
+        result = inspect_vm("abc123")
+
+    assert "paths" in result
+    assert result["paths"]["rootfs_source"] == "local"

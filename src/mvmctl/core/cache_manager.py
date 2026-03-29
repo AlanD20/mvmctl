@@ -37,15 +37,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-def cache_init_guestfs_appliance() -> None:
-    """Initialize guestfs appliance cache.
-
-    Currently a no-op placeholder since libguestfs manages its own appliance.
-    Future: Could pre-download appliance for offline use.
-    """
-    pass
-
-
 def cache_init_vms() -> Path:
     """Initialize VM directory structure.
 
@@ -91,7 +82,6 @@ def cache_init_all() -> dict[str, Path | None]:
     Returns dict mapping resource names to their directory paths.
     """
     return {
-        "guestfs": None,  # Placeholder - no directory for guestfs
         "vms": cache_init_vms(),
         "images": cache_init_images(),
         "kernels": cache_init_kernels(),
@@ -363,21 +353,6 @@ def cache_prune_kernels(dry_run: bool = False) -> list[str]:
     return removed
 
 
-def cache_prune_guestfs_appliance(dry_run: bool = False) -> bool:
-    """Remove guestfs appliance cache.
-
-    Currently a no-op placeholder. Future: clear appliance download cache.
-
-    Args:
-        dry_run: If True, only report what would be removed
-
-    Returns:
-        True if appliance cache was (or would be) cleared
-    """
-    # Placeholder - no actual cache to clear currently
-    return False
-
-
 def cache_prune_all(
     include_stopped: bool = False,
     include_running: bool = False,
@@ -396,12 +371,10 @@ def cache_prune_all(
         - "networks": list of removed network names
         - "images": list of removed image IDs (short)
         - "kernels": list of removed kernel IDs (short)
-        - "guestfs": bool indicating if guestfs was cleared
     """
     return {
         "vms": cache_prune_vms(include_stopped, include_running, dry_run),
         "networks": cache_prune_networks(dry_run),
         "images": cache_prune_images(dry_run),
         "kernels": cache_prune_kernels(dry_run),
-        "guestfs": cache_prune_guestfs_appliance(dry_run),
     }

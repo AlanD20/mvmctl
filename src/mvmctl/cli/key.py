@@ -17,10 +17,10 @@ from mvmctl.api.keys import (
     resolve_key_inputs,
     set_default_keys,
 )
-from mvmctl.cli._helpers import check_name_arg, get_state_marker, is_file_missing
+from mvmctl.cli._helpers import check_name_arg, get_combined_marker, is_file_missing
 from mvmctl.exceptions import MVMKeyError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
-from mvmctl.utils.fs import get_keys_dir
+from mvmctl.utils.fs import get_keys_config_dir
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import validate_entity_name
 
@@ -62,15 +62,14 @@ def ls(
         return
 
     rows = []
-    keys_dir = get_keys_dir()
+    keys_dir = get_keys_config_dir()
     for k in keys:
         status = "yes" if k.has_private_key else "no"
         private_key_path = keys_dir / k.name
-        state_marker = get_state_marker(is_file_missing(private_key_path))
-        display_name = f"* {k.name}" if k.name in default_keys else k.name
+        is_missing = is_file_missing(private_key_path)
+        display_name = get_combined_marker(k.name in default_keys, is_missing) + k.name
         rows.append(
             [
-                state_marker,
                 display_name,
                 k.fingerprint,
                 k.algorithm,
@@ -81,7 +80,7 @@ def ls(
         )
     print_table(
         title="SSH Keys",
-        columns=["State", "Name", "Fingerprint", "Algorithm", "Comment", "Private Key", "Added"],
+        columns=["Name", "Fingerprint", "Algorithm", "Comment", "Private Key", "Added"],
         rows=rows,
     )
 
@@ -123,12 +122,10 @@ def create(
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing key files"),
 ) -> None:
     """Generate a new ED25519 keypair."""
-    from mvmctl.utils.fs import get_keys_dir
-
     name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
 
-    output_dir = Path(output) if output else get_keys_dir()
+    output_dir = Path(output) if output else get_keys_config_dir()
     private_key_path = output_dir / name
     pub_key_path = output_dir / f"{name}.pub"
 

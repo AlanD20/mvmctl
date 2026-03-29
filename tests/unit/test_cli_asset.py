@@ -1346,10 +1346,120 @@ def test_kernel_rm_no_args(tmp_path: Path):
     assert result.exit_code == 1
 
 
+def test_kernel_rm_blocked_when_referenced_by_vm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker
+):
+    """Test that kernel rm is blocked when kernel is referenced by a VM."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "a" * 64
+    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
+    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+    _write_kernel_meta(tmp_path, full_hash, kernel.name)
+
+    # Mock VM manager to return a VM using this kernel
+    mock_vm = mocker.MagicMock()
+    mock_vm.name = "test-vm"
+    mock_vm.config.kernel_path = kernel
+    mock_manager = mocker.MagicMock()
+    mock_manager.list_all.return_value = [mock_vm]
+    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+
+    result = click_runner.invoke(
+        main_app,
+        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 1
+    assert "referenced by" in result.output.lower() or "active vms" in result.output.lower()
+    assert kernel.exists()  # Kernel should NOT be removed
+
+
+def test_kernel_rm_with_force_removes_referenced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker
+):
+    """Test that kernel rm with --force removes kernel even when referenced."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "b" * 64
+    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
+    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+    _write_kernel_meta(tmp_path, full_hash, kernel.name)
+
+    # Mock VM manager to return a VM using this kernel
+    mock_vm = mocker.MagicMock()
+    mock_vm.name = "test-vm"
+    mock_vm.config.kernel_path = kernel
+    mock_manager = mocker.MagicMock()
+    mock_manager.list_all.return_value = [mock_vm]
+    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+
+    result = click_runner.invoke(
+        main_app,
+        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path), "--force"],
+    )
+    assert result.exit_code == 0
+    assert "Removed" in result.output
+    assert not kernel.exists()  # Kernel should be removed with --force
+
+
 def test_image_rm_no_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     result = click_runner.invoke(main_app, ["image", "rm", "--images-dir", str(tmp_path)])
     assert result.exit_code == 1
+
+
+def test_image_rm_blocked_when_referenced_by_vm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker
+):
+    """Test that image rm is blocked when image is referenced by a VM."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "a" * 64
+    (tmp_path / "images").mkdir(exist_ok=True)
+    img_file = tmp_path / "images" / f"{full_hash}.ext4"
+    img_file.write_text("fake")
+    _write_image_meta(tmp_path, full_hash, img_file.name)
+
+    # Mock VM manager to return a VM using this image
+    mock_vm = mocker.MagicMock()
+    mock_vm.name = "test-vm"
+    mock_vm.config.rootfs_path = img_file
+    mock_manager = mocker.MagicMock()
+    mock_manager.list_all.return_value = [mock_vm]
+    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+
+    result = click_runner.invoke(
+        main_app,
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images")],
+    )
+    assert result.exit_code == 1
+    assert "referenced by" in result.output.lower() or "active vms" in result.output.lower()
+    assert img_file.exists()  # Image should NOT be removed
+
+
+def test_image_rm_with_force_removes_referenced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker
+):
+    """Test that image rm with --force removes image even when referenced."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "b" * 64
+    (tmp_path / "images").mkdir(exist_ok=True)
+    img_file = tmp_path / "images" / f"{full_hash}.ext4"
+    img_file.write_text("fake")
+    _write_image_meta(tmp_path, full_hash, img_file.name)
+
+    # Mock VM manager to return a VM using this image
+    mock_vm = mocker.MagicMock()
+    mock_vm.name = "test-vm"
+    mock_vm.config.rootfs_path = img_file
+    mock_manager = mocker.MagicMock()
+    mock_manager.list_all.return_value = [mock_vm]
+    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+
+    result = click_runner.invoke(
+        main_app,
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images"), "--force"],
+    )
+    assert result.exit_code == 0
+    assert "Removed" in result.output
+    assert not img_file.exists()  # Image should be removed with --force
 
 
 def test_image_rm_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -2231,3 +2341,93 @@ def test_bin_ls_no_def_column(tmp_path: Path, mocker):
     assert result.exit_code == 0
     # Verify "Def" column not in output
     assert "Def" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# Asset removal protection tests with kernel_id/image_id (Issue 1 fix)
+# ---------------------------------------------------------------------------
+
+
+def test_kernel_rm_blocked_when_referenced_by_kernel_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker
+):
+    """Test that kernel rm is blocked when VM has kernel_id set but no config."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "c" * 64
+    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
+    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+    _write_kernel_meta(tmp_path, full_hash, kernel.name)
+
+    # Mock VM manager to return a VM using kernel_id (no config)
+    mock_vm = mocker.MagicMock()
+    mock_vm.name = "test-vm"
+    mock_vm.config = None  # No config persisted
+    mock_vm.kernel_id = str(kernel)  # But kernel_id is set
+    mock_manager = mocker.MagicMock()
+    mock_manager.list_all.return_value = [mock_vm]
+    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+
+    result = click_runner.invoke(
+        main_app,
+        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 1
+    assert "referenced by" in result.output.lower() or "active vms" in result.output.lower()
+    assert kernel.exists()  # Kernel should NOT be removed
+
+
+def test_image_rm_blocked_when_referenced_by_image_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker
+):
+    """Test that image rm is blocked when VM has image_id set but no config."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "d" * 64
+    (tmp_path / "images").mkdir(exist_ok=True)
+    img_file = tmp_path / "images" / f"{full_hash}.ext4"
+    img_file.write_text("fake")
+    _write_image_meta(tmp_path, full_hash, img_file.name)
+
+    # Mock VM manager to return a VM using image_id (no config)
+    mock_vm = mocker.MagicMock()
+    mock_vm.name = "test-vm"
+    mock_vm.config = None  # No config persisted
+    mock_vm.image_id = str(img_file)  # But image_id is set
+    mock_manager = mocker.MagicMock()
+    mock_manager.list_all.return_value = [mock_vm]
+    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+
+    result = click_runner.invoke(
+        main_app,
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images")],
+    )
+    assert result.exit_code == 1
+    assert "referenced by" in result.output.lower() or "active vms" in result.output.lower()
+    assert img_file.exists()  # Image should NOT be removed
+
+
+def test_kernel_rm_with_kernel_id_and_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker
+):
+    """Test that kernel rm with --force removes kernel even when referenced by kernel_id."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "e" * 64
+    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
+    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+    _write_kernel_meta(tmp_path, full_hash, kernel.name)
+
+    # Mock VM manager to return a VM using kernel_id (no config)
+    mock_vm = mocker.MagicMock()
+    mock_vm.name = "test-vm"
+    mock_vm.config = None
+    mock_vm.kernel_id = str(kernel)
+    mock_manager = mocker.MagicMock()
+    mock_manager.list_all.return_value = [mock_vm]
+    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+
+    result = click_runner.invoke(
+        main_app,
+        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path), "--force"],
+    )
+    assert result.exit_code == 0
+    assert "Removed" in result.output
+    assert not kernel.exists()  # Kernel should be removed with --force

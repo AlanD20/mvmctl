@@ -76,11 +76,12 @@ def test_subcommand_help_host() -> None:
     assert "init" in result.output
 
 
-def test_subcommand_help_configure() -> None:
-    result = invoke_cli(["configure", "--help"])
+def test_subcommand_help_init() -> None:
+    result = invoke_cli(["init", "--help"])
     assert result.exit_code == 0
     assert (
         "onboarding" in result.output.lower()
         or "setup" in result.output.lower()
         or "wizard" in result.output.lower()
+        or "initialize" in result.output.lower()
     )

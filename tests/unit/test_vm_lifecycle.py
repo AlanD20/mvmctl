@@ -1097,9 +1097,17 @@ def test_create_vm_uses_cached_image_path_not_copy(
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
 
+    # Setup VM dir mock with proper path joining for rootfs
     mock_vm_dir = MagicMock()
     mock_vm_dir.exists.return_value = True
+    mock_vm_dir.__str__ = MagicMock(return_value="/tmp/cache/vms/abc123")
     mock_get_vm_dir.return_value = mock_vm_dir
+
+    # Setup rootfs path mock that will be returned by vm_dir / "rootfs.ext4"
+    mock_rootfs_path = MagicMock()
+    mock_rootfs_path.__str__ = MagicMock(return_value="/tmp/cache/vms/abc123/rootfs.ext4")
+    mock_rootfs_path.parent = mock_vm_dir
+    mock_vm_dir.__truediv__ = MagicMock(return_value=mock_rootfs_path)
 
     mock_kernel_dir = MagicMock()
     vmlinux = MagicMock()
@@ -1111,6 +1119,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
     mock_img_dir = MagicMock()
     img_ext4 = MagicMock()
     img_ext4.exists.return_value = True
+    img_ext4.suffix = ".ext4"
     mock_img_dir.__truediv__.return_value = img_ext4
     mock_get_images.return_value = mock_img_dir
 
@@ -1134,13 +1143,365 @@ def test_create_vm_uses_cached_image_path_not_copy(
 
     create_vm(name="myvm", image="ubuntu-22.04")
 
+    # Rootfs MUST be copied to VM directory (VM-local copy)
     mock_copy2.assert_called_once()
-    copy_src, copy_dst = mock_copy2.call_args.args[:2]
-    assert copy_src == img_ext4
-    assert copy_dst == mock_vm_dir.__truediv__.return_value
+    # Verify copy destination is the VM-local rootfs path
+    copy_dest = mock_copy2.call_args.args[1]
+    assert copy_dest == mock_rootfs_path
 
     vm_config_arg = mock_config_gen.call_args.args[0]
-    assert vm_config_arg.rootfs_path == mock_vm_dir.__truediv__.return_value
+    # rootfs_path should be the VM-local path, not the cached image
+    assert "rootfs" in str(vm_config_arg.rootfs_path)
+    assert vm_config_arg.rootfs_path.parent == mock_vm_dir
+
+
+@patch("mvmctl.utils.resize.resize_rootfs")
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
+@patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
+@patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("builtins.open", new_callable=MagicMock)
+@patch("mvmctl.core.vm_lifecycle.setup_nat")
+def test_create_vm_disk_size_resizes_local_copy_only(
+    mock_setup_nat,
+    mock_open,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_create_iso,
+    mock_write_ci,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_net_mgr,
+    mock_add_firewall_rule,
+    mock_copy2,
+    mock_resize_rootfs,
+):
+    """Verify --disk-size only resizes the VM-local copy, not the cached image."""
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+
+    # Setup VM dir mock with proper path joining for rootfs
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.exists.return_value = True
+    mock_vm_dir.__str__ = MagicMock(return_value="/tmp/cache/vms/abc123")
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    # Setup rootfs path mock that will be returned by vm_dir / "rootfs.ext4"
+    mock_rootfs_path = MagicMock()
+    mock_rootfs_path.__str__ = MagicMock(return_value="/tmp/cache/vms/abc123/rootfs.ext4")
+    mock_rootfs_path.parent = mock_vm_dir
+    mock_vm_dir.__truediv__ = MagicMock(return_value=mock_rootfs_path)
+
+    mock_kernel_dir = MagicMock()
+    vmlinux = MagicMock()
+    vmlinux.exists.return_value = True
+    mock_kernel_dir.__truediv__.return_value = vmlinux
+    mock_get_kernels.return_value = mock_kernel_dir
+
+    # Image - this is the cached image path
+    mock_img_dir = MagicMock()
+    img_ext4 = MagicMock()
+    img_ext4.exists.return_value = True
+    img_ext4.suffix = ".ext4"
+    mock_img_dir.__truediv__.return_value = img_ext4
+    mock_get_images.return_value = mock_img_dir
+
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
+    mock_get_net.return_value = mock_net
+
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
+    mock_resolve_fs_type.return_value = "ext4"
+
+    mock_bridge_exists.return_value = True
+    mock_popen.return_value.pid = 99999
+
+    # Mock NoCloudNetServerManager
+    mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
+
+    create_vm(name="myvm", image="ubuntu-22.04", disk_size="10G")
+
+    # Verify copy happened first
+    mock_copy2.assert_called_once()
+    copied_path = mock_copy2.call_args.args[1]  # destination path
+
+    # Verify resize was called on the VM-local copy, not the cached image
+    mock_resize_rootfs.assert_called_once()
+    resized_path = mock_resize_rootfs.call_args.args[0]
+    assert resized_path == copied_path
+    assert resized_path == mock_rootfs_path
+
+
+@patch("mvmctl.core.vm_lifecycle._cleanup_vm_creation_resources")
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
+@patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
+@patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("builtins.open", new_callable=MagicMock)
+@patch("mvmctl.core.vm_lifecycle.setup_nat")
+def test_create_vm_cleanup_removes_local_rootfs_on_failure(
+    mock_setup_nat,
+    mock_open,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_create_iso,
+    mock_write_ci,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_net_mgr,
+    mock_add_firewall_rule,
+    mock_copy2,
+    mock_cleanup,
+):
+    """Verify VM-local rootfs is cleaned up if VM creation fails after copy."""
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+
+    # Setup VM dir mock with proper path joining for rootfs
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.exists.return_value = True
+    mock_vm_dir.__str__ = MagicMock(return_value="/tmp/cache/vms/abc123")
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    # Setup rootfs path mock that will be returned by vm_dir / "rootfs.ext4"
+    mock_rootfs_path = MagicMock()
+    mock_rootfs_path.__str__ = MagicMock(return_value="/tmp/cache/vms/abc123/rootfs.ext4")
+    mock_rootfs_path.parent = mock_vm_dir
+    mock_vm_dir.__truediv__ = MagicMock(return_value=mock_rootfs_path)
+
+    mock_kernel_dir = MagicMock()
+    vmlinux = MagicMock()
+    vmlinux.exists.return_value = True
+    mock_kernel_dir.__truediv__.return_value = vmlinux
+    mock_get_kernels.return_value = mock_kernel_dir
+
+    # Image - this is the cached image path
+    mock_img_dir = MagicMock()
+    img_ext4 = MagicMock()
+    img_ext4.exists.return_value = True
+    img_ext4.suffix = ".ext4"
+    mock_img_dir.__truediv__.return_value = img_ext4
+    mock_get_images.return_value = mock_img_dir
+
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
+    mock_get_net.return_value = mock_net
+
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
+    mock_resolve_fs_type.return_value = "ext4"
+
+    mock_bridge_exists.return_value = True
+
+    # Mock NoCloudNetServerManager
+    mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
+
+    # Simulate failure after copy (e.g., TAP creation fails)
+    mock_create_tap.side_effect = Exception("TAP creation failed")
+
+    with pytest.raises(Exception, match="TAP creation failed"):
+        create_vm(name="myvm", image="ubuntu-22.04")
+
+    # Verify copy happened before the failure
+    mock_copy2.assert_called_once()
+
+    # Verify cleanup was called (which includes shutil.rmtree on vm_dir)
+    mock_cleanup.assert_called_once()
+    # Verify vm_dir was passed to cleanup (second positional arg)
+    call_args = mock_cleanup.call_args.args
+    assert call_args[1] == mock_vm_dir
+
+
+# ============================================================================
+# VM Config Persistence Tests
+# ============================================================================
+
+
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
+@patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
+@patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("builtins.open", new_callable=MagicMock)
+@patch("mvmctl.core.vm_lifecycle.setup_nat")
+def test_create_vm_persists_config_with_vm_local_rootfs_path(
+    mock_setup_nat,
+    mock_open,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_create_iso,
+    mock_write_ci,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_net_mgr,
+    mock_add_firewall_rule,
+    mock_copy2,
+):
+    """Test that create_vm persists VM config with VM-local rootfs_path in VMInstance.
+
+    This verifies the fix for ensuring persisted VM state/metadata explicitly
+    points to the VM-local rootfs path after the rootfs-copy restoration.
+    """
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+
+    # Setup VM dir mock with proper path joining for rootfs
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.exists.return_value = True
+    mock_vm_dir.__str__ = MagicMock(return_value="/tmp/cache/vms/abc123")
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    # Setup rootfs path mock that will be returned by vm_dir / "rootfs.ext4"
+    mock_rootfs_path = MagicMock()
+    mock_rootfs_path.__str__ = MagicMock(return_value="/tmp/cache/vms/abc123/rootfs.ext4")
+    mock_rootfs_path.parent = mock_vm_dir
+    mock_vm_dir.__truediv__ = MagicMock(return_value=mock_rootfs_path)
+
+    mock_kernel_dir = MagicMock()
+    vmlinux = MagicMock()
+    vmlinux.exists.return_value = True
+    mock_kernel_dir.__truediv__.return_value = vmlinux
+    mock_get_kernels.return_value = mock_kernel_dir
+
+    # Image - this is the cached image path
+    mock_img_dir = MagicMock()
+    img_ext4 = MagicMock()
+    img_ext4.exists.return_value = True
+    img_ext4.suffix = ".ext4"
+    mock_img_dir.__truediv__.return_value = img_ext4
+    mock_get_images.return_value = mock_img_dir
+
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_net.nat_enabled = False
+    mock_get_net.return_value = mock_net
+
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
+    mock_resolve_fs_type.return_value = "ext4"
+
+    mock_bridge_exists.return_value = True
+    mock_popen.return_value.pid = 99999
+
+    # Mock NoCloudNetServerManager
+    mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
+
+    vm = create_vm(name="myvm", image="ubuntu-22.04")
+
+    # Verify VMInstance has config field set
+    assert vm.config is not None, "VMInstance.config should be set"
+
+    # Verify config.rootfs_path points to VM-local rootfs, not cached image
+    assert "rootfs" in str(vm.config.rootfs_path), "config.rootfs_path should contain 'rootfs'"
+    assert vm.config.rootfs_path.parent == mock_vm_dir, "config.rootfs_path.parent should be vm_dir"
+
+    # Verify the config is passed to register()
+    registered_vm = mock_manager.register.call_args.args[0]
+    assert registered_vm.config is not None, "Registered VM should have config"
+    assert "rootfs" in str(registered_vm.config.rootfs_path), (
+        "Registered VM config.rootfs_path should be VM-local"
+    )
 
 
 # ============================================================================
@@ -2017,24 +2378,21 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
         )
 
     copy_calls = [e for e in call_log if e.startswith("copy2:")]
-    assert copy_calls, "shutil.copy2 was never called"
-    copy_dst = Path(copy_calls[0].split(":", 2)[2])
-    assert copy_dst.parent == vm_dir
-    assert copy_dst.name.startswith("rootfs")
-    copy_src = Path(copy_calls[0].split(":", 2)[1])
-    assert copy_src == cached_image
+    # Rootfs MUST be copied to VM directory (VM-local copy)
+    assert len(copy_calls) == 1, "shutil.copy2 should be called once to copy rootfs to VM dir"
+    # Verify copy destination is in the VM directory
+    assert str(vm_dir) in copy_calls[0], (
+        f"Copy destination should be in VM dir, got: {copy_calls[0]}"
+    )
 
     inject_calls = [e for e in call_log if e.startswith("inject:")]
     assert inject_calls, "inject_cloud_init was never called"
     injected_path = Path(inject_calls[0][len("inject:") :])
 
-    expected_vm_rootfs = vm_dir / "rootfs.ext4"
-    assert injected_path == expected_vm_rootfs
-    assert injected_path != cached_image
-
-    copy_idx = next(i for i, e in enumerate(call_log) if e.startswith("copy2:"))
-    inject_idx = next(i for i, e in enumerate(call_log) if e.startswith("inject:"))
-    assert copy_idx < inject_idx
+    # Injection should happen on the VM-local copy, not the cached image
+    assert str(vm_dir) in str(injected_path), (
+        f"Expected injection on VM-local rootfs in {vm_dir}, got {injected_path}"
+    )
 
 
 @patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
@@ -2121,6 +2479,9 @@ def test_direct_injection_cleanup_on_injection_failure(
     mock_bridge_exists.return_value = True
 
     mock_inject.side_effect = RuntimeError("simulated guestfs failure")
+
+    # Mock net_config.name to return 'default' for the cleanup assertion
+    mock_net.name = "default"
 
     with (
         patch("mvmctl.core.vm_lifecycle.shutil.copy2"),

@@ -213,6 +213,8 @@ class VMInstance:
         nocloud_net_port: HTTP port for nocloud-net datasource server (if enabled).
         nocloud_server_pid: PID of the running nocloud-net HTTP server process (None if stopped).
         rootfs_suffix: File extension suffix of the rootfs image (e.g., '.ext4', '.btrfs').
+        kernel_id: Path or hash ID of the kernel used by this VM (for asset removal protection).
+        image_id: Path or hash ID of the image used by this VM (for asset removal protection).
     """
 
     name: str
@@ -233,6 +235,8 @@ class VMInstance:
     console_socket_path: Path | None = None
     exit_code: int | None = None
     rootfs_suffix: str = ".ext4"  # Default to .ext4 for backward compatibility
+    kernel_id: str | None = None  # Kernel path or hash for asset removal protection
+    image_id: str | None = None  # Image path or hash for asset removal protection
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize VMInstance to a dictionary."""
@@ -257,6 +261,8 @@ class VMInstance:
             else None,
             "exit_code": self.exit_code,
             "rootfs_suffix": self.rootfs_suffix,
+            "kernel_id": self.kernel_id,
+            "image_id": self.image_id,
         }
 
     @classmethod
@@ -298,4 +304,6 @@ class VMInstance:
             else None,
             exit_code=data.get("exit_code"),
             rootfs_suffix=data.get("rootfs_suffix", ".ext4"),
+            kernel_id=data.get("kernel_id"),
+            image_id=data.get("image_id"),
         )

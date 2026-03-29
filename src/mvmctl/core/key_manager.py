@@ -16,7 +16,7 @@ from typing import Any, TypedDict
 
 from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY
 from mvmctl.exceptions import MVMKeyError
-from mvmctl.utils.fs import get_keys_dir
+from mvmctl.utils.fs import get_keys_config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class KeyInfo:
 
 def _registry_path() -> Path:
     """Return the path to the key registry JSON file."""
-    return get_keys_dir() / "registry.json"
+    return get_keys_config_dir() / "registry.json"
 
 
 def _load_registry() -> dict[str, dict[str, Any]]:
@@ -263,14 +263,14 @@ def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> Key
     keys = registry[_REGISTRY_KEYS_FIELD]
     if name in keys:
         if overwrite:
-            old_pub = get_keys_dir() / f"{name}.pub"
+            old_pub = get_keys_config_dir() / f"{name}.pub"
             if old_pub.exists():
                 old_pub.unlink()
             del keys[name]
         else:
             raise MVMKeyError(f"Key '{name}' already exists. Remove it first to replace.")
 
-    key_dir = get_keys_dir()
+    key_dir = get_keys_config_dir()
     key_dir.mkdir(parents=True, exist_ok=True)
     dest = key_dir / f"{name}.pub"
     dest.write_text(content + "\n")
@@ -368,7 +368,7 @@ def _cache_public_key(name: str, pub_key_content: str) -> None:
         name: Logical key name (used as the filename stem).
         pub_key_content: Raw public key text to persist.
     """
-    keys_dir = get_keys_dir()
+    keys_dir = get_keys_config_dir()
     keys_dir.mkdir(parents=True, exist_ok=True)
     cache_pub = keys_dir / f"{name}.pub"
     cache_pub.write_text(pub_key_content + "\n")
@@ -385,7 +385,7 @@ def create_key(
     Returns (KeyInfo, private_key_path).
     """
     if output_dir is None:
-        output_dir = get_keys_dir()
+        output_dir = get_keys_config_dir()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -448,7 +448,7 @@ def remove_key(name: str) -> None:
 
     _save_registry(registry)
 
-    pub_file = get_keys_dir() / f"{name}.pub"
+    pub_file = get_keys_config_dir() / f"{name}.pub"
     if pub_file.exists():
         pub_file.unlink()
 
@@ -478,7 +478,7 @@ def export_key(
     if name not in keys:
         raise MVMKeyError(f"Key '{name}' not found in cache")
 
-    keys_dir = get_keys_dir()
+    keys_dir = get_keys_config_dir()
     source_private = keys_dir / name
     source_public = keys_dir / f"{name}.pub"
 
@@ -539,7 +539,7 @@ def inspect_key(name: str) -> KeyInspect:
         raise MVMKeyError(f"Key '{name}' not found in cache")
 
     entry = keys[name]
-    pub_file = get_keys_dir() / f"{name}.pub"
+    pub_file = get_keys_config_dir() / f"{name}.pub"
     public_key_content = ""
     if pub_file.exists():
         public_key_content = pub_file.read_text().strip()

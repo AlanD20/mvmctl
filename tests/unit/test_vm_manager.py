@@ -120,6 +120,53 @@ def test_vm_manager_get_by_short_id_unique(vm_manager: VMManager):
     assert result.name == "uniquevm"
 
 
+def test_vm_manager_get_by_full_id_exact_match(vm_manager: VMManager):
+    """Test that get_by_full_id returns exact match by full 64-char hash."""
+    vm = VMInstance(name="testvm", pid=1, status=VMState.RUNNING)
+    vm_manager.register(vm)
+    registered = vm_manager.get("testvm")
+    assert registered is not None
+
+    # Get by full ID should work
+    result = vm_manager.get_by_full_id(registered.id)
+    assert result is not None
+    assert result.name == "testvm"
+    assert result.id == registered.id
+
+
+def test_vm_manager_get_by_full_id_no_match(vm_manager: VMManager):
+    """Test that get_by_full_id returns None for non-existent hash."""
+    result = vm_manager.get_by_full_id("a" * 64)
+    assert result is None
+
+
+def test_vm_manager_get_by_full_id_collision_resistance(vm_manager: VMManager):
+    """Test that get_by_full_id handles VMs with same 6-char prefix correctly."""
+    # Create two VMs that might have same prefix (forced for test)
+    vm1 = VMInstance(name="vm1", pid=1, status=VMState.RUNNING, id="abc123" + "a" * 58)
+    vm2 = VMInstance(name="vm2", pid=2, status=VMState.RUNNING, id="abc123" + "b" * 58)
+
+    # Register directly to state to bypass ID generation
+    with vm_manager._locked():
+        state = vm_manager._load_state()
+        state["vms"][vm1.id] = vm1.to_dict()
+        state["vms"][vm2.id] = vm2.to_dict()
+        vm_manager._save_state(state)
+
+    # get_by_short_id should return None (ambiguous)
+    short_result = vm_manager.get_by_short_id("abc123")
+    assert short_result is None
+
+    # get_by_full_id should return correct VM for each full ID
+    result1 = vm_manager.get_by_full_id(vm1.id)
+    assert result1 is not None
+    assert result1.name == "vm1"
+
+    result2 = vm_manager.get_by_full_id(vm2.id)
+    assert result2 is not None
+    assert result2.name == "vm2"
+
+
 def test_vm_manager_get_by_name_multiple(vm_manager: VMManager):
     vm1 = VMInstance(name="dup", pid=1, status=VMState.RUNNING)
     vm2 = VMInstance(name="dup", pid=2, status=VMState.RUNNING)

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
-import importlib.util
 import logging
 import os
 from dataclasses import dataclass
@@ -14,29 +13,35 @@ import click
 import typer
 import typer.models
 
-if getattr(importlib.util, "find_spec", lambda x: None)("sys") and getattr(
-    importlib.import_module("sys"), "frozen", False
-):
-    # Help PyInstaller's static analysis find the subcommands that we lazy-load
-    # in the LazyMVMGroup.get_command method. These imports are only needed for
-    # PyInstaller to see the dependencies, but they also ensure that when we are
-    # frozen, all commands are readily available in memory.
-    import mvmctl.cli.asset  # noqa: F401
-    import mvmctl.cli.cache  # noqa: F401
-    import mvmctl.cli.config  # noqa: F401
-    import mvmctl.cli.configure  # noqa: F401
-    import mvmctl.cli.console  # noqa: F401
-    import mvmctl.cli.host  # noqa: F401
-    import mvmctl.cli.key  # noqa: F401
-    import mvmctl.cli.network  # noqa: F401
-    import mvmctl.cli.vm  # noqa: F401
+# Lazy imports from constants to avoid heavy import-time work
+# (parsing defaults.yaml, package metadata resolution)
 
-from mvmctl.constants import _BOOTSTRAP_NAME, CLI_NAME, env_var
+
+def _get_bootstrap_name() -> str:
+    """Get bootstrap name lazily to avoid import-time overhead."""
+    from mvmctl.constants import _BOOTSTRAP_NAME
+
+    return _BOOTSTRAP_NAME
+
+
+def _get_cli_name() -> str:
+    """Get CLI name lazily to avoid import-time overhead."""
+    from mvmctl.constants import CLI_NAME
+
+    return CLI_NAME
+
+
+def _get_env_var(suffix: str) -> str:
+    """Get env var name lazily to avoid import-time overhead."""
+    from mvmctl.constants import env_var
+
+    return env_var(suffix)
 
 
 def _get_version() -> str:
+    bootstrap_name = _get_bootstrap_name()
     try:
-        return importlib.metadata.version(_BOOTSTRAP_NAME)
+        return importlib.metadata.version(bootstrap_name)
     except importlib.metadata.PackageNotFoundError:
         from mvmctl import __version__
 
@@ -57,7 +62,7 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "network": _LazyCommandSpec("mvmctl.cli.network", "app", "Network management"),
     "key": _LazyCommandSpec("mvmctl.cli.key", "app", "SSH key management"),
     "config": _LazyCommandSpec("mvmctl.cli.config", "app", "Configuration commands"),
-    "configure": _LazyCommandSpec("mvmctl.cli.configure", "app", "Guided setup wizard"),
+    "init": _LazyCommandSpec("mvmctl.cli.init", "app", "Initialize mvm"),
     "kernel": _LazyCommandSpec("mvmctl.cli.asset", "kernel_app", "Kernel management"),
     "image": _LazyCommandSpec("mvmctl.cli.asset", "image_app", "Image management"),
     "bin": _LazyCommandSpec("mvmctl.cli.asset", "bin_app", "Binary management"),
@@ -78,7 +83,7 @@ _COMMAND_ORDER = [
     "network",
     "key",
     "config",
-    "configure",
+    "init",
     "kernel",
     "image",
     "bin",
@@ -92,7 +97,7 @@ _COMMAND_ORDER = [
 def _version_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
     if not value or ctx.resilient_parsing:
         return
-    click.echo(f"{CLI_NAME} {_get_version()}")
+    click.echo(f"{_get_cli_name()} {_get_version()}")
     ctx.exit()
 
 
@@ -102,7 +107,7 @@ def _configure_logging(*, verbose: bool, debug: bool) -> None:
     elif verbose:
         level = logging.INFO
     else:
-        env_level = os.environ.get(env_var("LOG_LEVEL"), "WARNING").upper()
+        env_level = os.environ.get(_get_env_var("LOG_LEVEL"), "WARNING").upper()
         level = getattr(logging, env_level, logging.WARNING)
 
     logging.basicConfig(
@@ -199,17 +204,30 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
         click.echo(ctx.get_help())
         ctx.exit()
 
-    if ctx.invoked_subcommand in {"help", "version"}:
+    if ctx.invoked_subcommand in {"help", "version", "init"}:
         return
 
     _warn_if_running_as_root()
     _configure_logging(verbose=verbose, debug=debug)
-    _reconcile_networks()
+    # Only reconcile networks for commands that need it
+    if ctx.invoked_subcommand not in {
+        "help",
+        "version",
+        "init",
+        "config",
+        "bin",
+        "kernel",
+        "image",
+        "key",
+        "cache",
+        "clear",
+    }:
+        _reconcile_networks()
 
 
 @click.command(name="version", help="Show the version and exit")
 def version_cmd() -> None:
-    click.echo(f"{CLI_NAME} {_get_version()}")
+    click.echo(f"{_get_cli_name()} {_get_version()}")
 
 
 @click.command(name="help", help="Show help for mvm or a subcommand")
@@ -223,7 +241,7 @@ def help_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
     root = ctx.find_root()
     command: click.Command = root.command
     current_ctx = root
-    command_path = [root.info_name or CLI_NAME]
+    command_path = [root.info_name or _get_cli_name()]
 
     for arg in args:
         if not isinstance(command, click.MultiCommand):

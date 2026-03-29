@@ -11,7 +11,6 @@ __all__ = [
     "prune_networks",
     "prune_images",
     "prune_kernels",
-    "prune_guestfs",
     "prune_all",
 ]
 
@@ -104,22 +103,6 @@ def prune_kernels(dry_run: bool = False) -> list[str]:
     return cache_manager.cache_prune_kernels(dry_run=dry_run)
 
 
-def prune_guestfs(dry_run: bool = False) -> bool:
-    """Prune guestfs appliance cache.
-
-    Currently a placeholder since libguestfs manages its own appliance.
-    Future implementation may clear pre-downloaded appliance cache.
-
-    Args:
-        dry_run: If True, only report what would be removed.
-
-    Returns:
-        True if guestfs appliance cache was cleared, False otherwise.
-    """
-    check_privileges("/usr/sbin/ip")
-    return cache_manager.cache_prune_guestfs_appliance(dry_run=dry_run)
-
-
 def prune_all(
     include_stopped: bool = False,
     include_running: bool = False,
@@ -128,7 +111,7 @@ def prune_all(
     """Prune all cache resources.
 
     Performs a complete prune operation across all resource types:
-    VMs, networks, images, kernels, and guestfs appliance cache.
+    VMs, networks, images, and kernels.
 
     Args:
         include_stopped: Include stopped VMs in pruning.
@@ -141,7 +124,6 @@ def prune_all(
         - "networks": list of removed network names
         - "images": list of removed image IDs
         - "kernels": list of removed kernel IDs
-        - "guestfs": bool indicating if guestfs cache was cleared
     """
     check_privileges("/usr/sbin/ip")
     return cache_manager.cache_prune_all(

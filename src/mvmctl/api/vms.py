@@ -80,6 +80,8 @@ __all__ = [
     "resolve_kernel_path",
     "resolve_image_short_id_path",
     "resolve_kernel_short_id_path",
+    "resolve_image_multi_strategy",
+    "resolve_kernel_multi_strategy",
     "attach_console",
     "detach_console",
     "kill_console",
@@ -107,6 +109,77 @@ def resolve_image_short_id_path(image: str) -> Path:
 
 def resolve_kernel_short_id_path(kernel: str) -> Path:
     return _core_resolve_kernel_short_id_path(kernel)
+
+
+def resolve_image_multi_strategy(value: str) -> Path:
+    """Resolve image value to path using multiple strategies.
+
+    Resolution order:
+    1. Direct path (if contains '/' or ends with .ext4/.btrfs)
+    2. YAML image name lookup (via metadata internal_id)
+    3. Short-ID resolution against metadata.json
+    """
+    from mvmctl.core.metadata import list_image_entries
+    from mvmctl.utils.fs import get_cache_dir, get_images_dir
+
+    images_dir = get_images_dir()
+    cache_dir = get_cache_dir()
+
+    # Direct path check
+    if "/" in value or value.endswith((".ext4", ".btrfs")):
+        path = Path(value)
+        if path.exists():
+            return path
+
+    # YAML image name lookup (check internal_id in metadata)
+    all_entries = list_image_entries(cache_dir)
+    for full_key, meta in all_entries.items():
+        internal_id = str(meta.get("internal_id", ""))
+        if internal_id == value:
+            filename = str(meta.get("filename", ""))
+            if filename:
+                candidate = images_dir / filename
+                if candidate.exists():
+                    return candidate
+            # Try full_key with extensions
+            for ext in (".ext4", ".btrfs"):
+                candidate = images_dir / f"{full_key}{ext}"
+                if candidate.exists():
+                    return candidate
+            # Try just the value name with extensions
+            for ext in (".ext4", ".btrfs"):
+                candidate = images_dir / f"{value}{ext}"
+                if candidate.exists():
+                    return candidate
+
+    # Short-ID resolution (existing behavior)
+    return _core_resolve_image_short_id_path(value)
+
+
+def resolve_kernel_multi_strategy(value: str) -> Path:
+    """Resolve kernel value to path using multiple strategies.
+
+    Resolution order:
+    1. Direct path (if contains '/')
+    2. Short-ID resolution against metadata.json
+    """
+    from mvmctl.utils.fs import get_kernels_dir
+
+    kernels_dir = get_kernels_dir()
+
+    # Direct path check
+    if "/" in value:
+        path = Path(value)
+        if path.exists():
+            return path
+
+    # Check if it's a direct filename in kernels dir
+    candidate = kernels_dir / value
+    if candidate.exists():
+        return candidate
+
+    # Short-ID resolution (existing behavior)
+    return _core_resolve_kernel_short_id_path(value)
 
 
 def create_vm(
@@ -202,11 +275,11 @@ def deregister_vm(name: str, vm_manager: VMManager | None = None) -> None:
         manager.deregister(name)
 
 
-def vm_cache_dir(name: str) -> Path:
-    """Return the cache directory path for a given VM name."""
-    from mvmctl.utils.fs import get_vms_dir
+def vm_cache_dir(vm: VMInstance) -> Path:
+    """Return the cache directory path for a VM using its hash ID."""
+    from mvmctl.utils.fs import get_vm_dir_by_hash
 
-    return get_vms_dir() / name
+    return get_vm_dir_by_hash(vm.id)
 
 
 def ssh_vm(
@@ -273,7 +346,7 @@ def cleanup_vms(
     cache_dir = Path(get_cache_dir())
 
     for v in targets:
-        vm_dir = vm_cache_dir(v.name)
+        vm_dir = vm_cache_dir(v) if v.id else None
 
         tap_name = v.tap_device
         if not tap_name:
@@ -312,11 +385,11 @@ def cleanup_vms(
 
         manager.deregister(v.id if v.id else v.name)
 
-        nocloud_cache_dir = cache_dir / f"nocloud-{v.name}"
-        if nocloud_cache_dir.exists():
+        nocloud_cache_dir = cache_dir / f"nocloud-{v.id}" if v.id else None
+        if nocloud_cache_dir is not None and nocloud_cache_dir.exists():
             shutil.rmtree(nocloud_cache_dir)
 
-        if vm_dir.exists():
+        if vm_dir is not None and vm_dir.exists():
             shutil.rmtree(vm_dir)
 
     # Clean up any orphaned nocloud servers
@@ -404,9 +477,9 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
 
     vm_dir = get_vm_dir_by_hash(vm.id)
 
-    # Check file existence - use stored rootfs suffix or default to .ext4
-    rootfs_suffix = vm.rootfs_suffix or ".ext4"
-    rootfs_path = vm_dir / f"rootfs{rootfs_suffix}"
+    # Resolve rootfs path from multiple sources (in priority order)
+    rootfs_path, rootfs_source = _resolve_rootfs_path(vm, vm_dir)
+
     config_path = vm_dir / "firecracker.json"
 
     info: dict[str, Any] = {
@@ -422,7 +495,8 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
         "tap_device": vm.tap_device,
         "paths": {
             "vm_dir": str(vm_dir),
-            "rootfs": str(rootfs_path) if rootfs_path.exists() else None,
+            "rootfs": str(rootfs_path) if rootfs_path else None,
+            "rootfs_source": rootfs_source,
             "config": str(config_path) if config_path.exists() else None,
         },
         "features": {
@@ -446,6 +520,37 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
         }
 
     return info
+
+
+def _resolve_rootfs_path(vm: VMInstance, vm_dir: Path) -> tuple[Path | None, str]:
+    """Resolve rootfs path from multiple sources.
+
+    Checks sources in priority order:
+    1. vm.config.rootfs_path - if config exists and path is set
+    2. VM-local rootfs{suffix} - fallback for legacy VMs
+
+    Args:
+        vm: VM instance to resolve rootfs for
+        vm_dir: Path to VM directory
+
+    Returns:
+        Tuple of (resolved_path, source_name) where source_name indicates
+        which source provided the path: "config", "local", or "none"
+    """
+    # Priority 1: Check config.rootfs_path if config exists
+    if vm.config is not None and vm.config.rootfs_path is not None:
+        config_path = Path(vm.config.rootfs_path)
+        if config_path.exists():
+            return config_path, "config"
+
+    # Priority 2: Fallback to VM-local rootfs file
+    rootfs_suffix = vm.rootfs_suffix or ".ext4"
+    local_path = vm_dir / f"rootfs{rootfs_suffix}"
+    if local_path.exists():
+        return local_path, "local"
+
+    # No rootfs found
+    return None, "none"
 
 
 def get_vm_status_with_exit_code(vm: VMInstance) -> tuple[str, int | None]:

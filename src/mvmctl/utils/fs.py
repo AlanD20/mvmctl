@@ -110,9 +110,18 @@ def get_state_file() -> Path:
 
 
 def get_keys_dir() -> Path:
-    """Return the directory for SSH key management."""
-    # Keys are runtime assets and belong under cache dir
-    return get_cache_dir() / "keys"
+    """Return the directory for SSH key management (in config dir)."""
+    # Keys are config data and belong under config dir
+    return get_config_dir() / "keys"
+
+
+def get_keys_config_dir() -> Path:
+    """Return the keys directory in config (not cache).
+
+    This is an alias for get_keys_dir() for clarity in code that
+    specifically needs the config-based keys location.
+    """
+    return get_keys_dir()
 
 
 def get_bin_dir() -> Path:

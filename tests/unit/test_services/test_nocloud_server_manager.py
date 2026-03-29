@@ -369,8 +369,10 @@ class TestCleanupOrphans:
         # Mock VM manager to return a running VM
         mock_vm_manager = MagicMock()
         mock_vm = MagicMock()
-        mock_vm.status.value = "running"
-        mock_vm_manager.get_by_short_id.return_value = mock_vm
+        from mvmctl.models.vm import VMState
+
+        mock_vm.status = VMState.RUNNING  # Use enum, not string
+        mock_vm_manager.get_by_full_id.return_value = mock_vm
         mock_get_vm_manager.return_value = mock_vm_manager
 
         # Process is still running (os.kill(pid, 0) succeeds)
@@ -432,6 +434,135 @@ class TestCleanupOrphans:
         NoCloudNetServerManager()
 
         # PID file should be cleaned up (VM not running, so _stop_by_pid_file is called)
+        assert not pid_file.exists()
+
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.services.nocloud_server.manager.os.kill")
+    @patch("mvmctl.utils.fs.get_cache_dir")
+    def test_cleanup_orphans_skips_running_vms(
+        self,
+        mock_get_cache_dir: MagicMock,
+        mock_kill: MagicMock,
+        mock_get_vm_manager: MagicMock,
+        tmp_path: Path,
+    ):
+        """Test that VMs with status=VMState.RUNNING are not cleaned up."""
+        from mvmctl.models.vm import VMState
+
+        cache_dir = tmp_path / "cache_running"
+        cache_dir.mkdir(exist_ok=True)
+        vms_dir = cache_dir / "vms"
+        vms_dir.mkdir(exist_ok=True)
+
+        vm_dir = vms_dir / "running-vm-hash"
+        vm_dir.mkdir(exist_ok=True)
+
+        # Create PID file
+        pid_file = vm_dir / "nocloud-server.pid"
+        pid_file.write_text("88888")
+
+        mock_get_cache_dir.return_value = cache_dir
+
+        # Mock VM manager to return a RUNNING VM (using VMState enum)
+        mock_vm_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status = VMState.RUNNING  # Use enum, not string
+        mock_vm_manager.get_by_full_id.return_value = mock_vm
+        mock_get_vm_manager.return_value = mock_vm_manager
+
+        # Process is still running
+        mock_kill.return_value = None
+
+        # Creating a manager runs cleanup_orphans
+        NoCloudNetServerManager()
+
+        # PID file should NOT be removed - VM is running
+        assert pid_file.exists()
+
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.services.nocloud_server.manager.os.kill")
+    @patch("mvmctl.utils.fs.get_cache_dir")
+    def test_cleanup_orphans_removes_stopped_vms(
+        self,
+        mock_get_cache_dir: MagicMock,
+        mock_kill: MagicMock,
+        mock_get_vm_manager: MagicMock,
+        tmp_path: Path,
+    ):
+        """Test that VMs with status=VMState.STOPPED are properly cleaned up."""
+        from mvmctl.models.vm import VMState
+
+        cache_dir = tmp_path / "cache_stopped"
+        cache_dir.mkdir(exist_ok=True)
+        vms_dir = cache_dir / "vms"
+        vms_dir.mkdir(exist_ok=True)
+
+        vm_dir = vms_dir / "stopped-vm-hash"
+        vm_dir.mkdir(exist_ok=True)
+
+        # Create PID file
+        pid_file = vm_dir / "nocloud-server.pid"
+        pid_file.write_text("88888")
+
+        mock_get_cache_dir.return_value = cache_dir
+
+        # Mock VM manager to return a STOPPED VM
+        mock_vm_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status = VMState.STOPPED  # Use enum
+        mock_vm_manager.get_by_full_id.return_value = mock_vm
+        mock_get_vm_manager.return_value = mock_vm_manager
+
+        # Process doesn't exist anymore
+        mock_kill.side_effect = ProcessLookupError
+
+        # Creating a manager runs cleanup_orphans
+        NoCloudNetServerManager()
+
+        # PID file should be removed - VM is stopped
+        assert not pid_file.exists()
+
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.services.nocloud_server.manager.os.kill")
+    @patch("mvmctl.utils.fs.get_cache_dir")
+    def test_cleanup_orphans_removes_error_vms(
+        self,
+        mock_get_cache_dir: MagicMock,
+        mock_kill: MagicMock,
+        mock_get_vm_manager: MagicMock,
+        tmp_path: Path,
+    ):
+        """Test that VMs with status=VMState.ERROR are properly cleaned up."""
+        from mvmctl.models.vm import VMState
+
+        cache_dir = tmp_path / "cache_error"
+        cache_dir.mkdir(exist_ok=True)
+        vms_dir = cache_dir / "vms"
+        vms_dir.mkdir(exist_ok=True)
+
+        vm_dir = vms_dir / "error-vm-hash"
+        vm_dir.mkdir(exist_ok=True)
+
+        # Create PID file
+        pid_file = vm_dir / "nocloud-server.pid"
+        pid_file.write_text("88888")
+
+        mock_get_cache_dir.return_value = cache_dir
+
+        # Mock VM manager to return an ERROR VM
+        mock_vm_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status = VMState.ERROR  # Use enum
+        mock_vm_manager.get_by_full_id.return_value = mock_vm
+        mock_get_vm_manager.return_value = mock_vm_manager
+
+        # Process doesn't exist anymore
+        mock_kill.side_effect = ProcessLookupError
+
+        # Creating a manager runs cleanup_orphans
+        NoCloudNetServerManager()
+
+        # PID file should be removed - VM is in error state
         assert not pid_file.exists()
 
 

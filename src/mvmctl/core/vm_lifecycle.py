@@ -10,6 +10,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from mvmctl.constants import (
     BRIDGE_NAME,
@@ -288,6 +289,89 @@ def generate_vm_id(name: str) -> str:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _cleanup_vm_creation_resources(
+    resources_created: dict[str, bool],
+    vm_dir: Path | None,
+    net_manager: NoCloudNetServerManager | None,
+    relay_mgr: ConsoleRelayManager | None,
+    net_config: Any,
+    name: str,
+    vm_id: str | None,
+    guest_ip: str,
+    nocloud_net_port: int,
+    tap_name: str,
+    pty_master_fd: int | None,
+    pty_slave_fd: int | None,
+    log_fp: Any,
+    console_fp: Any,
+) -> None:
+    """Clean up resources during failed VM creation.
+
+    Logs warnings for cleanup failures instead of silently swallowing.
+    Never raises - cleanup is best-effort.
+    """
+    if log_fp is not None:
+        try:
+            log_fp.close()
+        except OSError as e:
+            logger.warning("Failed to close log file during cleanup: %s", e)
+
+    if console_fp is not None:
+        try:
+            console_fp.close()
+        except OSError as e:
+            logger.warning("Failed to close console file during cleanup: %s", e)
+
+    if resources_created.get("nocloud_server") and net_manager is not None and vm_id:
+        try:
+            net_manager.stop_server(name, vm_id)
+        except Exception as e:
+            logger.warning("Failed to stop nocloud server during cleanup: %s", e)
+
+    if resources_created.get("firewall_rule") and guest_ip:
+        try:
+            remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
+        except NetworkError as e:
+            logger.warning("Failed to remove firewall rule during cleanup: %s", e)
+
+    if resources_created.get("tap") and tap_name:
+        try:
+            cleanup_tap(tap_name, bridge=net_config.bridge if net_config else None)
+        except NetworkError as e:
+            logger.warning("Failed to cleanup TAP device during cleanup: %s", e)
+
+    if resources_created.get("network_ip"):
+        try:
+            release_network_ip(net_config.name if net_config else DEFAULT_NETWORK_NAME, name)
+        except (NetworkError, TypeError) as e:
+            # TypeError can occur when builtins.open is mocked (e.g., in tests)
+            logger.warning("Failed to release network IP during cleanup: %s", e)
+
+    if resources_created.get("console_relay") and relay_mgr is not None and vm_id is not None:
+        try:
+            relay_mgr.stop_relay(name, vm_id)
+        except Exception as e:
+            logger.warning("Failed to stop console relay during cleanup: %s", e)
+
+    if pty_slave_fd is not None:
+        try:
+            os.close(pty_slave_fd)
+        except OSError:
+            pass
+
+    if pty_master_fd is not None:
+        try:
+            os.close(pty_master_fd)
+        except OSError:
+            pass
+
+    if resources_created.get("vm_dir") and vm_dir and vm_dir.exists():
+        try:
+            shutil.rmtree(vm_dir, ignore_errors=True)
+        except OSError as e:
+            logger.warning("Failed to remove VM directory during cleanup: %s", e)
 
 
 def _generate_tap_name(network_name: str, vm_name: str) -> str:
@@ -591,18 +675,19 @@ def create_vm(
         tap_name = _generate_tap_name(network_name, name)
         bridge = net_config.bridge
 
-        # Copy rootfs image to VM directory
+        # Copy image to VM directory (VM-local rootfs)
         rootfs_ext = resolved_image_path.suffix
-        rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
-        shutil.copy2(resolved_image_path, rootfs_path)
+        vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
+        shutil.copy2(resolved_image_path, vm_rootfs_path)
+        rootfs_path = vm_rootfs_path
 
-        # Resize if disk_size specified
+        # Resize if disk_size specified (only the VM-local copy)
         if disk_size is not None:
             from mvmctl.utils.disk_size import parse_disk_size
             from mvmctl.utils.resize import resize_rootfs
 
             target_bytes = parse_disk_size(disk_size)
-            resize_rootfs(rootfs_path, target_bytes)
+            resize_rootfs(vm_rootfs_path, target_bytes)  # Correct: modifies VM-local copy only
 
         # Handle cloud-init based on mode
         cloud_init_iso: Path | None = None
@@ -803,11 +888,14 @@ def create_vm(
             tap_device=tap_name,
             created_at=datetime.now(tz=timezone.utc),
             status=VMState.RUNNING,
+            config=vm_config,  # Persist VM config with VM-local rootfs_path
             nocloud_net_port=nocloud_net_port,
             nocloud_server_pid=nocloud_server_pid,
             console_relay_pid=console_relay_pid,
             console_socket_path=console_socket_path,
             rootfs_suffix=rootfs_ext,
+            kernel_id=str(kernel_path_resolved),
+            image_id=str(resolved_image_path),
         )
         manager.register(vm_instance)
 
@@ -815,189 +903,60 @@ def create_vm(
 
     except (VMCreateError, NetworkError, CloudInitError, MVMError):
         logger.debug("VM creation failed with typed exception, performing cleanup")
-
-        if log_fp is not None:
-            try:
-                log_fp.close()
-            except Exception:
-                pass
-        if console_fp is not None:
-            try:
-                console_fp.close()
-            except Exception:
-                pass
-
-        if resources_created["nocloud_server"] and net_manager is not None and vm_id:
-            try:
-                net_manager.stop_server(name, vm_id)
-            except Exception:
-                pass
-
-        if resources_created["firewall_rule"] and guest_ip:
-            try:
-                remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
-            except Exception:
-                pass
-
-        if resources_created["tap"] and tap_name:
-            try:
-                cleanup_tap(tap_name, bridge=net_config.bridge if net_config else None)
-            except Exception:
-                pass
-
-        if resources_created["network_ip"]:
-            try:
-                release_network_ip(network_name, name)
-            except Exception:
-                pass
-
-        if resources_created["console_relay"] and relay_mgr is not None and vm_id is not None:
-            try:
-                relay_mgr.stop_relay(name, vm_id)
-            except Exception:
-                pass
-
-        if pty_slave_fd is not None:
-            try:
-                os.close(pty_slave_fd)
-            except Exception:
-                pass
-        if pty_master_fd is not None:
-            try:
-                os.close(pty_master_fd)
-            except Exception:
-                pass
-
-        if resources_created["vm_dir"] and vm_dir and vm_dir.exists():
-            try:
-                shutil.rmtree(vm_dir, ignore_errors=True)
-            except Exception:
-                pass
-
+        _cleanup_vm_creation_resources(
+            resources_created,
+            vm_dir,
+            net_manager,
+            relay_mgr,
+            net_config,
+            name,
+            vm_id,
+            guest_ip,
+            nocloud_net_port,
+            tap_name,
+            pty_master_fd,
+            pty_slave_fd,
+            log_fp,
+            console_fp,
+        )
         raise
     except FileNotFoundError as e:
         logger.debug("VM creation failed with FileNotFoundError, performing cleanup: %s", e)
-
-        if log_fp is not None:
-            try:
-                log_fp.close()
-            except Exception:
-                pass
-        if console_fp is not None:
-            try:
-                console_fp.close()
-            except Exception:
-                pass
-
-        if resources_created["nocloud_server"] and net_manager is not None and vm_id:
-            try:
-                net_manager.stop_server(name, vm_id)
-            except Exception:
-                pass
-
-        if resources_created["firewall_rule"] and guest_ip:
-            try:
-                remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
-            except Exception:
-                pass
-
-        if resources_created["tap"] and tap_name:
-            try:
-                cleanup_tap(tap_name, bridge=net_config.bridge if net_config else None)
-            except Exception:
-                pass
-
-        if resources_created["network_ip"]:
-            try:
-                release_network_ip(network_name, name)
-            except Exception:
-                pass
-
-        if resources_created["console_relay"] and relay_mgr is not None and vm_id is not None:
-            try:
-                relay_mgr.stop_relay(name, vm_id)
-            except Exception:
-                pass
-
-        if pty_slave_fd is not None:
-            try:
-                os.close(pty_slave_fd)
-            except Exception:
-                pass
-        if pty_master_fd is not None:
-            try:
-                os.close(pty_master_fd)
-            except Exception:
-                pass
-
-        if resources_created["vm_dir"] and vm_dir and vm_dir.exists():
-            try:
-                shutil.rmtree(vm_dir, ignore_errors=True)
-            except Exception:
-                pass
-
+        _cleanup_vm_creation_resources(
+            resources_created,
+            vm_dir,
+            net_manager,
+            relay_mgr,
+            net_config,
+            name,
+            vm_id,
+            guest_ip,
+            nocloud_net_port,
+            tap_name,
+            pty_master_fd,
+            pty_slave_fd,
+            log_fp,
+            console_fp,
+        )
         raise MVMError(f"Firecracker binary not found: {firecracker_bin}") from e
     except Exception as e:
         logger.debug("VM creation failed with unexpected error, performing cleanup: %s", e)
-
-        if log_fp is not None:
-            try:
-                log_fp.close()
-            except Exception:
-                pass
-        if console_fp is not None:
-            try:
-                console_fp.close()
-            except Exception:
-                pass
-
-        if resources_created["nocloud_server"] and net_manager is not None and vm_id:
-            try:
-                net_manager.stop_server(name, vm_id)
-            except Exception:
-                pass
-
-        if resources_created["firewall_rule"] and guest_ip:
-            try:
-                remove_nocloud_input_rule(guest_ip, name, nocloud_net_port)
-            except Exception:
-                pass
-
-        if resources_created["tap"] and tap_name:
-            try:
-                cleanup_tap(tap_name, bridge=net_config.bridge if net_config else None)
-            except Exception:
-                pass
-
-        if resources_created["network_ip"]:
-            try:
-                release_network_ip(network_name, name)
-            except Exception:
-                pass
-
-        if resources_created["console_relay"] and relay_mgr is not None and vm_id is not None:
-            try:
-                relay_mgr.stop_relay(name, vm_id)
-            except Exception:
-                pass
-
-        if pty_slave_fd is not None:
-            try:
-                os.close(pty_slave_fd)
-            except Exception:
-                pass
-        if pty_master_fd is not None:
-            try:
-                os.close(pty_master_fd)
-            except Exception:
-                pass
-
-        if resources_created["vm_dir"] and vm_dir and vm_dir.exists():
-            try:
-                shutil.rmtree(vm_dir, ignore_errors=True)
-            except Exception:
-                pass
-
+        _cleanup_vm_creation_resources(
+            resources_created,
+            vm_dir,
+            net_manager,
+            relay_mgr,
+            net_config,
+            name,
+            vm_id,
+            guest_ip,
+            nocloud_net_port,
+            tap_name,
+            pty_master_fd,
+            pty_slave_fd,
+            log_fp,
+            console_fp,
+        )
         raise VMCreateError(f"Failed to create VM: {e}") from e
 
 

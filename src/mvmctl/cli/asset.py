@@ -37,7 +37,8 @@ from mvmctl.api.metadata import (
     set_default_image_entry,
     update_image_entry,
 )
-from mvmctl.cli._helpers import get_state_marker, is_file_missing
+from mvmctl.api.vms import get_vm_manager
+from mvmctl.cli._helpers import get_combined_marker, is_file_missing
 from mvmctl.constants import (
     DEFAULT_FC_CI_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
@@ -164,6 +165,46 @@ def _prompt_for_partition_selection(
             print_error(f"Invalid input. Please enter a number between 1 and {num_partitions}")
 
 
+def _get_vms_using_kernel(kernel_path: Path) -> list[str]:
+    """Get list of VM names that reference the given kernel path.
+
+    Checks both vm.config.kernel_path (legacy) and vm.kernel_id (new field)
+    to ensure VMs without persisted config are still protected.
+    """
+    vm_manager = get_vm_manager()
+    vms = vm_manager.list_all()
+    kernel_path_str = str(kernel_path)
+    result = []
+    for vm in vms:
+        # Check config.kernel_path (legacy VMs with full config)
+        if vm.config and vm.config.kernel_path == kernel_path:
+            result.append(vm.name)
+        # Check kernel_id field (new field for VMs without full config)
+        elif vm.kernel_id and vm.kernel_id == kernel_path_str:
+            result.append(vm.name)
+    return result
+
+
+def _get_vms_using_image(image_path: Path) -> list[str]:
+    """Get list of VM names that reference the given image path.
+
+    Checks both vm.config.rootfs_path (legacy) and vm.image_id (new field)
+    to ensure VMs without persisted config are still protected.
+    """
+    vm_manager = get_vm_manager()
+    vms = vm_manager.list_all()
+    image_path_str = str(image_path)
+    result = []
+    for vm in vms:
+        # Check config.rootfs_path (legacy VMs with full config)
+        if vm.config and vm.config.rootfs_path == image_path:
+            result.append(vm.name)
+        # Check image_id field (new field for VMs without full config)
+        elif vm.image_id and vm.image_id == image_path_str:
+            result.append(vm.name)
+    return result
+
+
 kernel_app = typer.Typer(
     help="Kernel management",
     no_args_is_help=False,
@@ -239,16 +280,15 @@ def kernel_ls(
     rows: list[list[str]] = []
     for k in kernels:
         is_default = k.get("is_default") == "true"
-        display_id = f"* {k.get('id', '')}" if is_default else k.get("id", "")
         last_modified_display = human_readable_time(k.get("last_modified", "-"))
         filename = k.get("filename", "")
         path = kernels_dir / filename if filename else None
-        state_marker = get_state_marker(is_file_missing(path))
+        is_missing = is_file_missing(path)
+        display_id = get_combined_marker(is_default, is_missing) + k.get("id", "")
         size = path.stat().st_size if path and path.exists() else 0
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
         rows.append(
             [
-                state_marker,
                 display_id,
                 k.get("name", "-"),
                 k.get("version", ""),
@@ -260,7 +300,7 @@ def kernel_ls(
         )
     print_table(
         title="Downloaded Kernels",
-        columns=["State", "ID", "Name", "Version", "Arch", "Type", "Last Modified", "Size"],
+        columns=["ID", "Name", "Version", "Arch", "Type", "Last Modified", "Size"],
         rows=rows,
     )
 
@@ -464,6 +504,7 @@ def kernel_rm(
         None, help="Kernel short IDs (6 chars) to remove"
     ),
     kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Remove even if referenced by VMs"),
 ) -> None:
     """Remove cached kernels by short ID.
 
@@ -501,6 +542,16 @@ def kernel_rm(
                 f"Kernel file not found for ID '{short_id}' (metadata exists but file missing)"
             )
             remove_kernel_entry(cache_dir, full_id)
+            exit_code = 1
+            continue
+
+        # Check if kernel is referenced by any VMs
+        referencing_vms = _get_vms_using_kernel(path)
+        if referencing_vms and not force:
+            print_warning(
+                f"Kernel '{short_id}' is referenced by active VMs: {', '.join(referencing_vms)}"
+            )
+            print_info("Use --force to remove anyway (this may break those VMs)")
             exit_code = 1
             continue
 
@@ -582,10 +633,11 @@ def image_ls(
                 None,
             )
             downloaded = "✓" if found_path else " "
-            state_marker = get_state_marker(is_file_missing(found_path))
+            is_missing = is_file_missing(found_path)
+            display_id = get_combined_marker(False, is_missing) + img.id
             size = found_path.stat().st_size if found_path else 0
             size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-            rows.append([state_marker, downloaded, img.id, img.name, img.convert_to, size_str])
+            rows.append([display_id, downloaded, img.name, img.convert_to, size_str])
         if json_output:
             typer.echo(
                 json.dumps(
@@ -604,7 +656,7 @@ def image_ls(
         else:
             print_table(
                 title="Available Images (Remote)",
-                columns=["State", "Downloaded", "Image ID", "Name", "FS Type", "Size"],
+                columns=["Image ID", "Downloaded", "Name", "FS Type", "Size"],
                 rows=rows,
             )
         return
@@ -676,7 +728,7 @@ def image_ls(
             entry = _find_meta_for_internal_id(img.id)
         if entry:
             meta_key, meta = entry
-            display_id = meta_key[:6]
+            display_id_base = meta_key[:6]
             added = (
                 human_readable_time(str(meta.get("pulled_at", "")))
                 if meta.get("pulled_at")
@@ -686,16 +738,15 @@ def image_ls(
                 meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
             )
         else:
-            display_id = "-"
+            display_id_base = "-"
             added = "-"
             fs_type = found_path.suffix.lstrip(".") if found_path else "unknown"
         is_default = img.id == default_img
-        if is_default and display_id != "-":
-            display_id = f"* {display_id}"
-        state_marker = get_state_marker(is_file_missing(found_path))
+        is_missing = is_file_missing(found_path)
+        display_id = get_combined_marker(is_default, is_missing) + display_id_base
         size = found_path.stat().st_size if found_path and found_path.exists() else 0
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-        rows_local.append([state_marker, display_id, img.name, fs_type, added, size_str])
+        rows_local.append([display_id, img.name, fs_type, added, size_str])
 
     for meta_id, meta in _all_meta.items():
         if str(meta.get("internal_id", meta_id)) in yaml_ids:
@@ -721,20 +772,20 @@ def image_ls(
         )
         os_name = str(meta.get("os_name", meta_id))
         is_default = meta_id == default_img
-        display_id = meta_id[:6] if len(meta_id) >= 6 else meta_id
-        if is_default:
-            display_id = f"* {display_id}"
-        state_marker = get_state_marker(is_file_missing(found_path))
+        is_missing = is_file_missing(found_path)
+        display_id = get_combined_marker(is_default, is_missing) + (
+            meta_id[:6] if len(meta_id) >= 6 else meta_id
+        )
         size = found_path.stat().st_size if found_path and found_path.exists() else 0
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-        rows_local.append([state_marker, display_id, os_name, fs_type, added, size_str])
+        rows_local.append([display_id, os_name, fs_type, added, size_str])
 
     if not rows_local:
         print_info("No images downloaded. Use 'mvm image fetch <id>' to download one.")
         return
     print_table(
         title="Downloaded Images",
-        columns=["State", "ID", "OS Name", "FS Type", "Added", "Size"],
+        columns=["ID", "OS Name", "FS Type", "Added", "Size"],
         rows=rows_local,
     )
 
@@ -943,6 +994,7 @@ def image_rm(
         None, help="Image short IDs (6 chars) to remove"
     ),
     images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
+    force: bool = typer.Option(False, "--force", "-f", help="Remove even if referenced by VMs"),
 ) -> None:
     """Remove cached images by short ID.
 
@@ -995,14 +1047,26 @@ def image_rm(
             exit_code = 1
             continue
 
+        # Check if image is referenced by any VMs
         for path in files_to_remove:
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
-            print_success(f"Removed: {path}")
+            referencing_vms = _get_vms_using_image(path)
+            if referencing_vms and not force:
+                print_warning(
+                    f"Image '{short_id}' is referenced by active VMs: {', '.join(referencing_vms)}"
+                )
+                print_info("Use --force to remove anyway (this may break those VMs)")
+                exit_code = 1
+                break
+        else:
+            # No referencing VMs found (or force is True) - proceed with removal
+            for path in files_to_remove:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                print_success(f"Removed: {path}")
 
-        remove_image_entry(cache_dir, full_key)
+            remove_image_entry(cache_dir, full_key)
 
     raise typer.Exit(code=exit_code)
 
@@ -1145,10 +1209,8 @@ def image_import(
 
 
 def _format_bin_row(bv: BinaryVersion, is_missing: bool = False) -> list[str]:
-    version_prefix = "* " if bv.is_active else ""
-    version = f"{version_prefix}{bv.version}"
-    state_marker = "X " if is_missing else "  "
-    return [state_marker, version, str(bv.firecracker_path)]
+    version = get_combined_marker(bv.is_active, is_missing) + bv.version
+    return [version, str(bv.firecracker_path)]
 
 
 @bin_app.command(name="ls")
@@ -1208,8 +1270,8 @@ def bin_ls(
         rows = [_format_bin_row(bv, is_missing=False) for bv in local]
         # Add missing binaries with X mark
         for version, path in missing_binaries:
-            rows.append(["X ", version, str(path)])
-        print_table(title="Local Binaries", columns=["State", "Version", "Path"], rows=rows)
+            rows.append([get_combined_marker(False, True) + version, str(path)])
+        print_table(title="Local Binaries", columns=["Version", "Path"], rows=rows)
     else:
         # Check if there are any binaries in metadata with existing files
         # that might not be in the standard bin directory
@@ -1223,12 +1285,10 @@ def bin_ls(
                     found_in_meta = True
                     version = entry.get("full_version", "").lstrip("v")
                     is_default = entry.get("is_default") == 1
-                    version_str = f"* {version}" if is_default else version
-                    meta_rows.append(["  ", version_str, str(path)])
+                    version_str = get_combined_marker(is_default, False) + version
+                    meta_rows.append([version_str, str(path)])
         if found_in_meta:
-            print_table(
-                title="Local Binaries", columns=["State", "Version", "Path"], rows=meta_rows
-            )
+            print_table(title="Local Binaries", columns=["Version", "Path"], rows=meta_rows)
         else:
             print_warning("No local binaries found")
 

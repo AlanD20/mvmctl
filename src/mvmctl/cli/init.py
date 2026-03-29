@@ -27,7 +27,7 @@ from mvmctl.utils.console import print_info, print_success, print_warning
 from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
 
 app = typer.Typer(
-    help="Guided onboarding",
+    help="Initialize mvm",
     rich_markup_mode=None,
     add_completion=False,
 )
@@ -35,7 +35,7 @@ app = typer.Typer(
 
 @app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
-    """Show help for the configure command."""
+    """Show help for the init command."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
     raise typer.Exit()
 
@@ -353,17 +353,17 @@ def _step_summary() -> None:
         key_flag = f" --ssh-key {keys[0].name}" if keys else ""
         print_info(f"  mvm vm create --name my-vm --image <image-id>{key_flag}")
     else:
-        print_warning("\nSome components are missing. Fix them and run 'mvm configure' again.")
+        print_warning("\nSome components are missing. Fix them and run 'mvm init' again.")
 
 
 @app.callback(invoke_without_command=True)
-def configure(
+def init(
     non_interactive: bool = typer.Option(
         False, "--non-interactive", help="Use defaults, skip prompts"
     ),
     skip_host: bool = typer.Option(False, "--skip-host", help="Skip host init step"),
 ) -> None:
-    """Guided setup wizard -- run this to get started.
+    """Initialize mvm — run this to get started.
 
     Walks through six steps: host privilege setup, Firecracker binary
     download, kernel build, root filesystem image download, SSH key
@@ -374,9 +374,9 @@ def configure(
     CI environments.
 
     Examples:
-        mvm configure
-        mvm configure --non-interactive
-        mvm configure --skip-host --non-interactive
+        mvm init
+        mvm init --non-interactive
+        mvm init --skip-host --non-interactive
     """
     print_info("mvm — Setup Wizard")
     print_info("=" * 40)

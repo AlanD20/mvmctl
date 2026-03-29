@@ -169,7 +169,7 @@ def test_get_assets_config_no_temp_build_dirs(cache_dir: Path) -> None:
     assert "image_import_dir" not in assets
 
 
-def test_get_assets_config_cache_dirs_under_cache(cache_dir: Path) -> None:
+def test_get_assets_config_cache_dirs_under_cache(cache_dir: Path, config_dir: Path) -> None:
     assets = get_assets_config()
     # keys_dir is expected to be under the config dir (user-managed keys),
     # while the other asset dirs live under the cache dir.
@@ -181,8 +181,8 @@ def test_get_assets_config_cache_dirs_under_cache(cache_dir: Path) -> None:
         "logs_dir",
     ):
         assert assets[key].startswith(str(cache_dir)), f"{key} not under cache dir"
-    # keys_dir is cache-backed along with other asset dirs
-    assert assets["keys_dir"].startswith(str(cache_dir))
+    # keys_dir is now config-backed (not cache-backed) per key management semantics
+    assert assets["keys_dir"].startswith(str(config_dir))
 
 
 def test_get_assets_config_persisted_as_nested_key(config_dir: Path) -> None:

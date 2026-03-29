@@ -115,37 +115,8 @@ def test_cache_prune_kernel_subcommand(mocker: MockerFixture):
     mock_prune.assert_called_once_with(False)
 
 
-def test_cache_prune_guestfs_subcommand(mocker: MockerFixture):
-    """Test mvm cache prune guestfs subcommand."""
-    mock_prune = mocker.patch(
-        "mvmctl.cli.cache.cache_api.prune_guestfs",
-        return_value=True,
-    )
-    result = runner.invoke(app, ["prune", "guestfs"])
-    assert result.exit_code == 0
-    assert "pruned" in result.output.lower()
-    assert "guestfs" in result.output.lower()
-    mock_prune.assert_called_once_with(False)
-
-
-def test_cache_prune_all_subcommand(mocker: MockerFixture):
-    """Test mvm cache prune all subcommand with confirmation."""
-    mock_prune = mocker.patch(
-        "mvmctl.cli.cache.cache_api.prune_all",
-        return_value={
-            "vms": ["vm1"],
-            "networks": ["net1"],
-            "images": ["img1"],
-            "kernels": ["kern1"],
-            "guestfs": True,
-        },
-    )
-    result = runner.invoke(app, ["prune", "all"], input="y\n")
-    assert result.exit_code == 0
-    assert "pruned" in result.output.lower()
-    mock_prune.assert_called_once_with(False, False, False)
-
-
+# -----------------------------------------------------------------------------
+# Cache Prune Confirmation Tests
 # -----------------------------------------------------------------------------
 # Cache Prune Confirmation Tests
 # -----------------------------------------------------------------------------
@@ -160,7 +131,6 @@ def test_cache_prune_all_confirmation_yes(mocker: MockerFixture):
             "networks": [],
             "images": ["img1"],
             "kernels": [],
-            "guestfs": True,
         },
     )
     result = runner.invoke(app, ["prune", "all"], input="y\n")
@@ -187,7 +157,6 @@ def test_cache_prune_all_force_flag(mocker: MockerFixture):
             "networks": ["net1"],
             "images": ["img1"],
             "kernels": ["kern1"],
-            "guestfs": True,
         },
     )
     result = runner.invoke(app, ["prune", "all", "--force"])
@@ -324,17 +293,6 @@ def test_cache_prune_kernel_no_kernels(mocker: MockerFixture):
     assert "no kernels" in result.output.lower() or "nothing" in result.output.lower()
 
 
-def test_cache_prune_guestfs_no_cache(mocker: MockerFixture):
-    """Test prune guestfs when nothing to prune."""
-    mocker.patch(
-        "mvmctl.cli.cache.cache_api.prune_guestfs",
-        return_value=False,
-    )
-    result = runner.invoke(app, ["prune", "guestfs"])
-    assert result.exit_code == 0
-    assert "no guestfs" in result.output.lower() or "nothing" in result.output.lower()
-
-
 def test_cache_prune_all_with_flags(mocker: MockerFixture):
     """Test prune all with --include-stopped and --include-running flags."""
     mock_prune = mocker.patch(
@@ -344,7 +302,6 @@ def test_cache_prune_all_with_flags(mocker: MockerFixture):
             "networks": [],
             "images": [],
             "kernels": [],
-            "guestfs": False,
         },
     )
     result = runner.invoke(
@@ -363,7 +320,6 @@ def test_cache_prune_all_dry_run(mocker: MockerFixture):
             "networks": ["net1"],
             "images": [],
             "kernels": [],
-            "guestfs": True,
         },
     )
     result = runner.invoke(app, ["prune", "all", "--dry-run", "--force"])
@@ -413,7 +369,6 @@ def test_cache_prune_all_empty_result(mocker: MockerFixture):
             "networks": [],
             "images": [],
             "kernels": [],
-            "guestfs": False,
         },
     )
     result = runner.invoke(app, ["prune", "all", "--force"])
@@ -430,7 +385,6 @@ def test_cache_prune_using_all_flag(mocker: MockerFixture):
             "networks": [],
             "images": [],
             "kernels": [],
-            "guestfs": False,
         },
     )
     result = runner.invoke(app, ["prune", "--all", "--force"])

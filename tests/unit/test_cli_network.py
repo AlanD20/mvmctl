@@ -267,7 +267,8 @@ def test_network_ls_no_x_mark_for_existing_bridge(mock_leases, mock_list, mocker
 
 @patch("mvmctl.cli.network.list_networks")
 @patch("mvmctl.cli.network.get_network_leases")
-def test_network_ls_shows_default_prefix(mock_leases, mock_list):
+@patch("mvmctl.cli.network.is_bridge_alive")
+def test_network_ls_shows_default_prefix(mock_bridge_alive, mock_leases, mock_list):
     """Verify * prefix shown for default network."""
     # Mock list_networks returning network with is_default=True
     net = NetworkConfig(
@@ -281,12 +282,43 @@ def test_network_ls_shows_default_prefix(mock_leases, mock_list):
     )
     mock_list.return_value = [net]
     mock_leases.return_value = []
+    mock_bridge_alive.return_value = True
 
     result = runner.invoke(app, ["ls"])
 
     assert result.exit_code == 0
-    # Verify "* " prefix in output
-    assert "* " in result.output
+    # Verify "* " prefix (default marker) in output
+    assert "* default" in result.output
+
+
+@patch("mvmctl.cli.network.list_networks")
+@patch("mvmctl.cli.network.get_network_leases")
+@patch("mvmctl.cli.network.is_bridge_alive")
+def test_network_ls_default_prefix_takes_priority_over_missing_bridge(
+    mock_bridge_alive, mock_leases, mock_list
+):
+    """Verify * prefix takes priority over X when default network's bridge is missing."""
+    # Mock list_networks returning default network with missing bridge
+    net = NetworkConfig(
+        name="default",
+        cidr="10.0.0.0/24",
+        gateway="10.0.0.1",
+        bridge="mvm-default",
+        nat_enabled=True,
+        created_at="2024-01-01T00:00:00+00:00",
+        is_default=True,
+    )
+    mock_list.return_value = [net]
+    mock_leases.return_value = []
+    mock_bridge_alive.return_value = False  # Bridge is missing
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "* default" is shown, not "*X default"
+    assert "* default" in result.output
+    # Verify "*X" is NOT in output (X should not be leading)
+    assert "*X" not in result.output
 
 
 @patch("mvmctl.cli.network.list_networks")

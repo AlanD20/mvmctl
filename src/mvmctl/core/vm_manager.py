@@ -231,6 +231,30 @@ class VMManager:
                 return VMInstance.from_dict(vm_data)
             return None
 
+    def get_by_full_id(self, full_hash: str) -> VMInstance | None:
+        """Find VM by full 64-character hash ID.
+
+        Performs exact-match lookup for collision-free VM identification.
+        Returns None if no VM with the exact hash exists.
+
+        Args:
+            full_hash: Full 64-character SHA256 hash ID of the VM
+
+        Returns:
+            VMInstance if found, None otherwise
+        """
+        with self._locked(exclusive=False):
+            state = self._load_state()
+            vm_data = state["vms"].get(full_hash)
+            if vm_data is None:
+                return None
+            vm = VMInstance.from_dict(vm_data)
+            # Defense-in-depth: verify the ID matches exactly
+            if vm.id != full_hash:
+                logger.warning("VM ID mismatch: looked up %s but got %s", full_hash, vm.id)
+                return None
+            return vm
+
     def find_by_short_id(self, short_id: str) -> list[VMInstance]:
         """Return all VMs whose ID starts with short_id."""
         with self._locked(exclusive=False):

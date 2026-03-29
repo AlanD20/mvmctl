@@ -40,7 +40,7 @@ class TestVMLifecycleWorkflow:
     """Test complete VM lifecycle workflow end-to-end."""
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.list_vms")
     def test_create_and_list_vm(
@@ -66,7 +66,7 @@ class TestVMLifecycleWorkflow:
         assert data[0]["name"] == "lifecycle-vm"
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.ssh_vm")
     def test_create_and_ssh_vm(self, mock_ssh, mock_create_vm, mock_resolve_image, mock_check_priv):
@@ -86,7 +86,7 @@ class TestVMLifecycleWorkflow:
         mock_ssh.assert_called_once()
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.snapshot_vm")
     def test_create_snapshot_and_remove(
@@ -122,7 +122,7 @@ class TestVMLifecycleWorkflow:
             name="snapshot-vm", mem_out=mem_path, state_out=state_path
         )
 
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.cli.vm.remove_vm")
@@ -155,7 +155,7 @@ class TestVMLifecycleWorkflow:
         mock_remove.assert_called_once_with("full-lifecycle-vm")
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.get_logs")
     def test_create_and_check_logs(
@@ -177,7 +177,7 @@ class TestVMLifecycleWorkflow:
         assert "Boot log line 1" in result.output
         mock_logs.assert_called_once()
 
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.snapshot_vm")
     @patch("mvmctl.cli.vm.load_snapshot")
@@ -258,7 +258,7 @@ class TestVMLifecycleEdgeCases:
         assert "no vm found" in result.output.lower()
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_duplicate_vm_name(self, mock_create, mock_resolve_image, mock_check_priv):
         """Test attempting to create a VM with a duplicate name."""
@@ -273,7 +273,7 @@ class TestVMLifecycleEdgeCases:
         assert "already exists" in result.output.lower()
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.cleanup_vms")
     @patch("mvmctl.cli.vm.list_vms")

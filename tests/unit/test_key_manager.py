@@ -28,7 +28,7 @@ def keys_dir(tmp_path, monkeypatch):
     """Set up a temporary keys directory."""
     kd = tmp_path / "keys"
     kd.mkdir()
-    monkeypatch.setattr("mvmctl.core.key_manager.get_keys_dir", lambda: kd)
+    monkeypatch.setattr("mvmctl.core.key_manager.get_keys_config_dir", lambda: kd)
     return kd
 
 

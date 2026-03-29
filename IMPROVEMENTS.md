@@ -18,8 +18,7 @@ When making these changes. Ensure that there will be NO DEPRECATION messages/cod
 # VM
 
 - [x] when user fetches/imports an image via `mvm image fetch/import`, the process at the end it must run 'blkid -p -s UUID -o value' on the final image that has only rootfs content, and then store the `fs_uuid` in the image's metadata. And then later when user enters `mvm vm create ...` the command must pull the `fs_uuid` of the image from metadata and use it as boot arg with root=UUID={fs_uuid}
-- [x] DO NOT COPY rootfs into vm state file! use absolute file to cached imgaes. when creating a new vm via `mvm vm create` it copies the rootfs file into the vm's state folder! the kernel and the rootfs must use the absolute path of the kernel or rootfs provided or if default is chosen, then use default's absolute path of rootfs and kernel. do not copy rootfs or kernel into each vm's state! -- THIS MUST BE REVERTED, the actual rootfs is the system, that means the size is also the system's size. maybe expose flags to increase the size!!
-    - **DISK SIZE FLAG SPECIFICATION**: Use `--disk-size` with short flag `-s`. Support single letter units: `512M` for MB, `1G` for GB (e.g., `--disk-size 512M`, `-s 1G`)
+- **DISK SIZE FLAG SPECIFICATION**: Use `--disk-size` with short flag `-s`. Support single letter units: `512M` for MB, `1G` for GB (e.g., `--disk-size 512M`, `-s 1G`)
 - [x] each image has `fs_type` in the metadata file, this type must be used in the boot arg of firecracker json file which `rootfstype={fs_type}`
 - ~~firecracker rootfs requires integrating the ssh key into the image! need to figure out a way to do this? perhaps create a copy of an image by integrating a file?~~ **REMOVED: Feature deferred to post-4-week timeline**
 - introduce --kernel-path and --image-path to `mvm vm create` to allow custom image and kernel path
@@ -105,6 +104,10 @@ Complete overhaul of every single path of the CLI application and handle any use
 - move `mvm vm logs` to `mvm logs`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
 - move `mvm vm ssh` to `mvm ssh`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
 - change `cli/asset.py` to `cli/bin.py` to be consistent with the top command name, , DO NOT LEAVE DEPRECATION NOTES, project is in development state
+
+# Guestfs
+
+apply the aggressive optimization at docs/optimizatoins/guestfs_boot.md
 
 # NEW Features
 

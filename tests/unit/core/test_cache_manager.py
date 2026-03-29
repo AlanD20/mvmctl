@@ -11,13 +11,11 @@ from pytest_mock import MockerFixture
 
 from mvmctl.core.cache_manager import (
     cache_init_all,
-    cache_init_guestfs_appliance,
     cache_init_images,
     cache_init_kernels,
     cache_init_networks,
     cache_init_vms,
     cache_prune_all,
-    cache_prune_guestfs_appliance,
     cache_prune_images,
     cache_prune_kernels,
     cache_prune_networks,
@@ -28,22 +26,6 @@ from mvmctl.models.vm import VMInstance
 # =============================================================================
 # Init Tests
 # =============================================================================
-
-
-class TestCacheInitGuestfsAppliance:
-    """Tests for cache_init_guestfs_appliance function."""
-
-    def test_cache_init_guestfs_appliance_success(self):
-        """Test guestfs appliance initialization when available."""
-        # Currently a placeholder - should complete silently
-        result = cache_init_guestfs_appliance()
-        assert result is None
-
-    def test_cache_init_guestfs_appliance_not_available(self):
-        """Test graceful handling when guestfs not available."""
-        # Currently a placeholder - should complete silently
-        result = cache_init_guestfs_appliance()
-        assert result is None
 
 
 class TestCacheInitVms:
@@ -128,19 +110,18 @@ class TestCacheInitAll:
 
         result = cache_init_all()
 
-        assert "guestfs" in result
         assert "vms" in result
         assert "images" in result
         assert "kernels" in result
         assert "networks" in result
+        # guestfs is not included (removed)
+        assert "guestfs" not in result
 
         # Verify directories were created
         assert result["vms"].exists()
         assert result["images"].exists()
         assert result["kernels"].exists()
         assert result["networks"].exists()
-        # guestfs is None (placeholder)
-        assert result["guestfs"] is None
 
 
 # =============================================================================
@@ -551,27 +532,6 @@ class TestCachePruneKernels:
 
 
 # =============================================================================
-# Prune Tests - Guestfs
-# =============================================================================
-
-
-class TestCachePruneGuestfs:
-    """Tests for cache_prune_guestfs_appliance function."""
-
-    def test_cache_prune_guestfs_appliance(self):
-        """Remove guestfs cache."""
-        # Currently a placeholder - should return False
-        result = cache_prune_guestfs_appliance()
-        assert result is False
-
-    def test_cache_prune_guestfs_appliance_dry_run(self):
-        """Guestfs prune dry-run."""
-        # Currently a placeholder - should return False even in dry-run
-        result = cache_prune_guestfs_appliance(dry_run=True)
-        assert result is False
-
-
-# =============================================================================
 # Prune Tests - All
 # =============================================================================
 
@@ -593,10 +553,6 @@ class TestCachePruneAll:
         mock_prune_kernels = mocker.patch(
             "mvmctl.core.cache_manager.cache_prune_kernels", return_value=["kern1"]
         )
-        mock_prune_guestfs = mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_guestfs_appliance",
-            return_value=False,
-        )
 
         result = cache_prune_all()
 
@@ -604,19 +560,18 @@ class TestCachePruneAll:
         assert "networks" in result
         assert "images" in result
         assert "kernels" in result
-        assert "guestfs" in result
+        # guestfs is not included (removed)
+        assert "guestfs" not in result
 
         assert result["vms"] == ["vm1"]
         assert result["networks"] == ["net1"]
         assert result["images"] == ["img1"]
         assert result["kernels"] == ["kern1"]
-        assert result["guestfs"] is False
 
         mock_prune_vms.assert_called_once()
         mock_prune_networks.assert_called_once()
         mock_prune_images.assert_called_once()
         mock_prune_kernels.assert_called_once()
-        mock_prune_guestfs.assert_called_once()
 
     def test_cache_prune_all_respects_flags(self, mocker: MockerFixture):
         """Pass flags to sub-prunes."""
@@ -629,10 +584,6 @@ class TestCachePruneAll:
         )
         mock_prune_kernels = mocker.patch(
             "mvmctl.core.cache_manager.cache_prune_kernels", return_value=[]
-        )
-        mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_guestfs_appliance",
-            return_value=False,
         )
 
         cache_prune_all(include_stopped=True, include_running=True, dry_run=True)

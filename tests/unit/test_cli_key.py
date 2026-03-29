@@ -334,7 +334,7 @@ def test_export_help_arg_shows_help():
 
 @patch("mvmctl.cli.key.list_keys")
 @patch("mvmctl.cli.key.get_default_keys")
-@patch("mvmctl.cli._helpers.is_file_missing")
+@patch("mvmctl.cli.key.is_file_missing")
 def test_key_ls_shows_x_mark_for_missing_key_file(mock_is_missing, mock_get_defaults, mock_list):
     """Verify X prefix when key file missing."""
     # Mock KeyInfo
@@ -359,7 +359,7 @@ def test_key_ls_shows_x_mark_for_missing_key_file(mock_is_missing, mock_get_defa
 
 @patch("mvmctl.cli.key.list_keys")
 @patch("mvmctl.cli.key.get_default_keys")
-@patch("mvmctl.cli._helpers.is_file_missing")
+@patch("mvmctl.cli.key.is_file_missing")
 def test_key_ls_no_x_mark_for_existing_key_file(mock_is_missing, mock_get_defaults, mock_list):
     """Verify no X prefix when key file exists."""
     # Mock KeyInfo
@@ -388,7 +388,7 @@ def test_key_ls_no_x_mark_for_existing_key_file(mock_is_missing, mock_get_defaul
 
 @patch("mvmctl.cli.key.list_keys")
 @patch("mvmctl.cli.key.get_default_keys")
-@patch("mvmctl.cli._helpers.is_file_missing")
+@patch("mvmctl.cli.key.is_file_missing")
 def test_key_ls_shows_default_prefix(mock_is_missing, mock_get_defaults, mock_list):
     """Verify * prefix shown for default key."""
     # Mock list_keys returning key
@@ -407,13 +407,13 @@ def test_key_ls_shows_default_prefix(mock_is_missing, mock_get_defaults, mock_li
     result = runner.invoke(app, ["ls"])
 
     assert result.exit_code == 0
-    # Verify "* " prefix in output for default key
-    assert "* default-key" in result.output
+    # Verify "*  " prefix (combined marker: default + exists) in output for default key
+    assert "*  default-key" in result.output
 
 
 @patch("mvmctl.cli.key.list_keys")
 @patch("mvmctl.cli.key.get_default_keys")
-@patch("mvmctl.cli._helpers.is_file_missing")
+@patch("mvmctl.cli.key.is_file_missing")
 def test_key_ls_no_prefix_for_non_default(mock_is_missing, mock_get_defaults, mock_list):
     """Verify no * prefix for non-default key."""
     # Mock list_keys returning key
@@ -438,7 +438,7 @@ def test_key_ls_no_prefix_for_non_default(mock_is_missing, mock_get_defaults, mo
 
 @patch("mvmctl.cli.key.list_keys")
 @patch("mvmctl.cli.key.get_default_keys")
-@patch("mvmctl.cli._helpers.is_file_missing")
+@patch("mvmctl.cli.key.is_file_missing")
 def test_key_ls_no_def_column(mock_is_missing, mock_get_defaults, mock_list):
     """Verify 'Def' column removed from key ls."""
     mock_key = KeyInfo(

@@ -21,7 +21,6 @@ def test_init_all_calls_core_functions(mock_init_all, mock_check_privs):
         "networks": Path("/tmp/cache/networks"),
         "images": Path("/tmp/cache/images"),
         "kernels": Path("/tmp/cache/kernels"),
-        "guestfs": None,
     }
 
     result = cache_api.init_all()
@@ -31,7 +30,8 @@ def test_init_all_calls_core_functions(mock_init_all, mock_check_privs):
     assert result["networks"] == "/tmp/cache/networks"
     assert result["images"] == "/tmp/cache/images"
     assert result["kernels"] == "/tmp/cache/kernels"
-    assert result["guestfs"] == ""
+    # guestfs is not included (removed)
+    assert "guestfs" not in result
 
 
 @patch("mvmctl.api.cache.check_privileges")
@@ -143,24 +143,6 @@ def test_prune_kernels_privilege_check(mock_prune_kernels, mock_check_privs):
 
 
 # =============================================================================
-# prune_guestfs tests
-# =============================================================================
-
-
-@patch("mvmctl.api.cache.check_privileges")
-@patch("mvmctl.core.cache_manager.cache_prune_guestfs_appliance")
-def test_prune_guestfs_privilege_check(mock_prune_guestfs, mock_check_privs):
-    """Verify privilege check is called for prune_guestfs."""
-    mock_prune_guestfs.return_value = True
-
-    result = cache_api.prune_guestfs()
-
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip")
-    mock_prune_guestfs.assert_called_once()
-    assert result is True
-
-
-# =============================================================================
 # prune_all tests
 # =============================================================================
 
@@ -174,7 +156,6 @@ def test_prune_all_privilege_check(mock_prune_all, mock_check_privs):
         "networks": ["net1"],
         "images": ["img1"],
         "kernels": ["kern1"],
-        "guestfs": True,
     }
 
     result = cache_api.prune_all()
@@ -184,7 +165,8 @@ def test_prune_all_privilege_check(mock_prune_all, mock_check_privs):
     assert result["networks"] == ["net1"]
     assert result["images"] == ["img1"]
     assert result["kernels"] == ["kern1"]
-    assert result["guestfs"] is True
+    # guestfs is not included (removed)
+    assert "guestfs" not in result
 
 
 @patch("mvmctl.api.cache.check_privileges")
@@ -196,7 +178,6 @@ def test_prune_all_passes_flags(mock_prune_all, mock_check_privs):
         "networks": [],
         "images": [],
         "kernels": [],
-        "guestfs": False,
     }
 
     # Test with include_stopped=True
@@ -213,7 +194,6 @@ def test_prune_all_passes_flags(mock_prune_all, mock_check_privs):
         "networks": [],
         "images": [],
         "kernels": [],
-        "guestfs": False,
     }
 
     result = cache_api.prune_all(include_stopped=False, include_running=True)

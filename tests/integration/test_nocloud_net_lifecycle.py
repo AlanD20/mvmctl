@@ -726,7 +726,7 @@ class TestNocloudNetCLIAuthoring:
     """Test CLI integration for nocloud-net VMs."""
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_vm_with_nocloud_net_flag(
         self, mock_create_vm, mock_resolve_image, mock_check_priv
@@ -751,7 +751,7 @@ class TestNocloudNetCLIAuthoring:
         assert call_kwargs.get("cloud_init_mode") == CloudInitMode.NO_CLOUD_NET
 
     @patch("mvmctl.api.vms.check_privileges")
-    @patch("mvmctl.cli.vm.resolve_image_short_id_path")
+    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_vm_with_custom_nocloud_port(
         self, mock_create_vm, mock_resolve_image, mock_check_priv

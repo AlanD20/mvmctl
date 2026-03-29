@@ -16,8 +16,8 @@ from mvmctl.api.vms import (
     list_vms,
     load_snapshot,
     remove_vm,
-    resolve_image_short_id_path,
-    resolve_kernel_short_id_path,
+    resolve_image_multi_strategy,
+    resolve_kernel_multi_strategy,
     snapshot_vm,
     ssh_vm,
 )
@@ -140,12 +140,12 @@ def create(
     image: Optional[str] = typer.Option(
         None,
         "--image",
-        help="Image short ID (same discovery behavior as 'mvm image rm')",
+        help="Image name (e.g., ubuntu-24.04), short ID, or path to .ext4 file",
     ),
     kernel: Optional[str] = typer.Option(
         None,
         "--kernel",
-        help="Kernel short ID (same discovery behavior as 'mvm kernel rm')",
+        help="Kernel short ID or path to vmlinux file",
     ),
     image_path: Optional[Path] = typer.Option(
         None, "--image-path", help="Direct path to rootfs image file (overrides --image)"
@@ -350,16 +350,15 @@ def create(
                 "Use 'mvm image fetch <name>' then 'mvm image set-default <name>', or pass --image."
             )
             raise typer.Exit(code=1)
-        resolved_image_path = resolve_image_short_id_path(image)
+        resolved_image_path = resolve_image_multi_strategy(image)
         image_id_for_lookup = image if image else str(resolved_image_path)
     else:
         try:
-            resolved_image_path = resolve_image_short_id_path(image)
+            resolved_image_path = resolve_image_multi_strategy(image)
             image_id_for_lookup = image if image else str(resolved_image_path)
         except MVMError:
             print_error(
-                f"Image short ID '{image}' was not found or is ambiguous. "
-                "Use the same short ID format accepted by 'mvm image rm'."
+                f"Image '{image}' was not found. Provide a valid image name (e.g., ubuntu-24.04), short ID, or direct path."
             )
             raise typer.Exit(code=1)
 
@@ -379,12 +378,11 @@ def create(
         kernel_id_for_lookup = kernel
     else:
         try:
-            resolved_kernel_path = resolve_kernel_short_id_path(kernel)
+            resolved_kernel_path = resolve_kernel_multi_strategy(kernel)
             kernel_id_for_lookup = kernel if kernel else str(resolved_kernel_path)
         except MVMError:
             print_error(
-                f"Kernel short ID '{kernel}' was not found or is ambiguous. "
-                "Use the same short ID format accepted by 'mvm kernel rm'."
+                f"Kernel '{kernel}' was not found. Provide a valid kernel short ID or direct path."
             )
             raise typer.Exit(code=1)
 

@@ -23,6 +23,7 @@ from mvmctl.constants import (
     CONST_NO_CLOUD_NET_PORT_RANGE,
 )
 from mvmctl.exceptions import MVMError
+from mvmctl.models.vm import VMState
 
 logger = logging.getLogger(__name__)
 
@@ -434,9 +435,9 @@ class NoCloudNetServerManager:
             if not pid_file.exists():
                 continue
 
-            # Check if VM is registered and running (lookup by hash)
-            vm = vm_manager.get_by_short_id(vm_hash[:6])
-            if vm is None or vm.status.value != "running":
+            # Check if VM is registered and running (lookup by full hash to avoid collision risk)
+            vm = vm_manager.get_by_full_id(vm_hash)
+            if vm is None or vm.status != VMState.RUNNING:
                 # VM is not running - this is an orphan, stop it
                 if self._stop_by_pid_file(vm_hash):
                     cleaned_up.append(vm_hash)

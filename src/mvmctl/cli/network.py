@@ -13,7 +13,7 @@ from mvmctl.api.network import (
     remove_network,
     set_default_network,
 )
-from mvmctl.cli._helpers import check_name_arg, get_state_marker, is_bridge_alive
+from mvmctl.cli._helpers import check_name_arg, is_bridge_alive
 from mvmctl.exceptions import NetworkError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.time import human_readable_time
@@ -64,11 +64,16 @@ def ls(
 
     rows = []
     for n in networks:
-        state_marker = get_state_marker(not is_bridge_alive(n.bridge))
-        name_col = f"* {n.name}" if n.is_default else f"  {n.name}"
+        is_bridge_missing = not is_bridge_alive(n.bridge)
+        # Treat network named "default" as default regardless of is_default flag
+        is_default = n.is_default or n.name == "default"
+        # Prioritize default marker (*) over missing marker (X) for consistent UX
+        if is_default:
+            name_col = "* " + n.name
+        else:
+            name_col = ("X " if is_bridge_missing else "  ") + n.name
         rows.append(
             [
-                state_marker,
                 name_col,
                 n.cidr,
                 n.gateway,
@@ -80,7 +85,7 @@ def ls(
         )
     print_table(
         title="Networks",
-        columns=["State", "Name", "CIDR", "Gateway", "Bridge", "NAT", "VMs", "Created"],
+        columns=["Name", "CIDR", "Gateway", "Bridge", "NAT", "VMs", "Created"],
         rows=rows,
     )
 
