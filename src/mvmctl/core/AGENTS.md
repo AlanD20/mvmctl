@@ -77,11 +77,29 @@ Return: summary of changes made.
 ✅ Run terminal commands  
  
 ### What YOU DON'T Do
- 
+
 ❌ Read files (use subagent)  
 ❌ Edit/create code (use subagent)  
 ❌ Use `agentName: "Plan"` (always omit it)  
 ❌ "Quick look" at files before delegating
+
+---
+
+### CI Verification (MANDATORY)
+
+**ALL code changes MUST pass CI checks before completion.**
+
+Before finishing any implementation, you MUST verify:
+
+1. **Ruff Linting** — `uv run ruff check src/` must be clean
+2. **Ruff Formatting** — `uv run ruff format --check src/` must pass  
+3. **Type Checking** — `uv run mypy src/` must pass (strict mode)
+4. **Tests** — `uv run pytest tests/ -q --cov=src/mvmctl --cov-fail-under=80` must pass
+
+**If checks fail:**
+- Fix linting/formatting issues with `uv run ruff check src/ --fix` and `uv run ruff format src/`
+- Fix type errors with proper type annotations
+- Fix failing tests — NEVER delete tests to make them pass
 
 ---
 
