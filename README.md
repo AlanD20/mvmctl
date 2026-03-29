@@ -242,7 +242,7 @@ One-time, machine-global setup for Firecracker. Pre-change state is snapshotted 
 | `--ip ADDRESS` | Guest IP | auto-assigned |
 | `--network, --net NAME` | Named network | `default` |
 | `--mac ADDRESS` | Guest MAC | auto-generated |
-| `--ssh-key NAME_OR_PATH` | SSH public key (cache name or file path) | auto-detected |
+| `--ssh-key NAME_OR_PATH` | SSH public key (cache name or file path). When not provided, all default keys (set via `mvm key set-default`) are used. | auto-detected |
 | `--user USER` | Default SSH user (cloud-init) | `root` |
 | `--user-data PATH` | Custom cloud-init user-data file | — |
 | `--cloud-init-iso PATH` | Path to custom cloud-init ISO file | — |
@@ -339,8 +339,30 @@ mvm console attach --name myvm --kill
 | `mvm key create NAME` | Generate a new ED25519 keypair |
 | `mvm key rm NAME` | Remove a key from the cache |
 | `mvm key inspect NAME` | Show fingerprint and public key content |
-| `mvm key use NAME` | Set a key as the default for SSH |
+| `mvm key set-default KEY1 [KEY2...]` | Set one or more keys as defaults for new VMs |
+| `mvm key set-default --clear` | Clear all default keys |
 | `mvm key export NAME` | Export a key to ~/.ssh or a custom directory |
+
+**`key set-default` flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--clear` | Remove all default keys instead of setting |
+
+**Examples:**
+
+```bash
+# Set a single default key
+mvm key set-default mykey
+
+# Set multiple default keys (all will be injected into new VMs)
+mvm key set-default work-key personal-key ci-key
+
+# Clear all default keys
+mvm key set-default --clear
+```
+
+When you create a VM without `--ssh-key`, all default keys are automatically injected into the VM via cloud-init.
 
 **`key export` flags:**
 

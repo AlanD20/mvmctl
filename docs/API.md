@@ -842,6 +842,50 @@ Return detailed info about a named key, including the full public key content.
 
 ---
 
+#### `set_default_keys(names: list[str]) -> None`
+
+Set one or more keys as the default keys for new VMs. When creating a VM without `--ssh-key`, all default keys are injected via cloud-init.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `names` | `list[str]` | — | List of key names to set as defaults |
+
+**Raises:** `MVMKeyError` if any key name does not exist in the registry.
+
+**Example:**
+```python
+from mvmctl.api.keys import set_default_keys
+set_default_keys(["work-key", "personal-key"])
+```
+
+---
+
+#### `get_default_keys() -> list[str]`
+
+Get the list of default key names.
+
+**Returns:** List of key names set as defaults. Empty list if no defaults are set.
+
+**Example:**
+```python
+from mvmctl.api.keys import get_default_keys
+defaults = get_default_keys()  # ["work-key", "personal-key"]
+```
+
+---
+
+#### `clear_default_keys() -> None`
+
+Clear all default keys. After calling this, no keys will be automatically injected into new VMs.
+
+**Example:**
+```python
+from mvmctl.api.keys import clear_default_keys
+clear_default_keys()
+```
+
+---
+
 ### `mvmctl.api.host`
 
 #### `init_host(cache_dir: Path) -> list[HostChange]`
