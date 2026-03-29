@@ -491,6 +491,7 @@ def test_render_cloud_init_template_without_ssh_key():
     user_data = rendered["user_data"]
     assert "ssh-authorized-keys" not in user_data or "ssh_pub_key" not in user_data
 
+
 def test_write_cloud_init_dhcp_no_systemd_network_workaround(tmp_path):
     """With DHCP, no systemd-networkd workaround files should be created."""
     cloud_init_dir = tmp_path / "cloud-init"
@@ -536,3 +537,154 @@ def test_write_cloud_init_dhcp_no_wait_online_masking(tmp_path):
     # because systemd-networkd properly manages the DHCP interface
     user_data_text = (cloud_init_dir / "user-data").read_text()
     assert "systemctl mask systemd-networkd-wait-online" not in user_data_text
+
+
+# ---------------------------------------------------------------------------
+# Multi-key injection tests
+# ---------------------------------------------------------------------------
+
+
+def test_write_cloud_init_with_multiple_keys_template(tmp_path):
+    """write_cloud_init with a list of keys injects all keys into ssh-authorized-keys."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+    _load_cloud_init_template.cache_clear()
+
+    keys = [
+        "ssh-rsa AAAAB3NzaC1yc2E key1@example.com",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key2@example.com",
+    ]
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="multivm",
+        gateway="10.0.0.1",
+        guest_ip="10.0.0.10",
+        user="ubuntu",
+        ssh_pub_key=keys,
+    )
+
+    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    users = ud["users"]
+    ubuntu_entry = next(
+        (u for u in users if isinstance(u, dict) and u.get("name") == "ubuntu"), None
+    )
+    assert ubuntu_entry is not None
+    authorized = ubuntu_entry["ssh-authorized-keys"]
+    assert "ssh-rsa AAAAB3NzaC1yc2E key1@example.com" in authorized
+    assert "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key2@example.com" in authorized
+
+
+def test_write_cloud_init_with_empty_key_list_omits_ssh_section(tmp_path):
+    """write_cloud_init with empty list produces user-data without ssh-authorized-keys."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+    _load_cloud_init_template.cache_clear()
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="nokeyvm",
+        gateway="10.0.0.1",
+        guest_ip="10.0.0.10",
+        user="ubuntu",
+        ssh_pub_key=[],
+    )
+
+    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    users = ud.get("users", [])
+    ubuntu_entry = next(
+        (u for u in users if isinstance(u, dict) and u.get("name") == "ubuntu"), None
+    )
+    if ubuntu_entry is not None:
+        assert "ssh-authorized-keys" not in ubuntu_entry
+
+
+def test_write_cloud_init_custom_userdata_appends_multiple_keys(tmp_path):
+    """Custom user-data gets all keys from list appended to ssh-authorized-keys."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    custom_ud = tmp_path / "custom.yaml"
+    custom_ud.write_text("custom_key: custom_value\n")
+
+    keys = [
+        "ssh-rsa AAAA key-alpha",
+        "ssh-ed25519 AAAC key-beta",
+    ]
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="testvm",
+        gateway="10.0.0.1",
+        guest_ip="10.0.0.10",
+        user="ubuntu",
+        ssh_pub_key=keys,
+        custom_user_data=custom_ud,
+    )
+
+    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    assert ud["custom_key"] == "custom_value"
+    users = ud["users"]
+    ubuntu_entry = next(
+        (u for u in users if isinstance(u, dict) and u.get("name") == "ubuntu"), None
+    )
+    assert ubuntu_entry is not None
+    authorized = ubuntu_entry["ssh-authorized-keys"]
+    assert "ssh-rsa AAAA key-alpha" in authorized
+    assert "ssh-ed25519 AAAC key-beta" in authorized
+
+
+def test_write_cloud_init_custom_userdata_existing_user_appends_keys(tmp_path):
+    """Custom user-data with pre-existing user entry gets new keys appended (no duplicates)."""
+    cloud_init_dir = tmp_path / "cloud-init"
+    cloud_init_dir.mkdir()
+
+    custom_ud = tmp_path / "custom.yaml"
+    custom_ud.write_text(
+        "users:\n  - name: ubuntu\n    ssh-authorized-keys:\n      - ssh-rsa AAAA existing-key\n"
+    )
+
+    new_key = "ssh-ed25519 AAAC new-key"
+
+    write_cloud_init(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="testvm",
+        gateway="10.0.0.1",
+        guest_ip="10.0.0.10",
+        user="ubuntu",
+        ssh_pub_key=["ssh-rsa AAAA existing-key", new_key],
+        custom_user_data=custom_ud,
+    )
+
+    ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
+    ubuntu_entry = next(
+        (u for u in ud["users"] if isinstance(u, dict) and u.get("name") == "ubuntu"), None
+    )
+    assert ubuntu_entry is not None
+    authorized = ubuntu_entry["ssh-authorized-keys"]
+    assert "ssh-rsa AAAA existing-key" in authorized
+    assert new_key in authorized
+    assert authorized.count("ssh-rsa AAAA existing-key") == 1
+
+
+def test_render_cloud_init_template_with_multiple_keys():
+    """_render_cloud_init_template with list of keys renders all in user-data."""
+    _load_cloud_init_template.cache_clear()
+
+    keys = [
+        "ssh-rsa AAAAB3 key1",
+        "ssh-ed25519 AAAAC key2",
+    ]
+    rendered = _render_cloud_init_template(
+        vm_name="multivm",
+        user="ubuntu",
+        guest_ip="10.0.0.5",
+        gateway="10.0.0.1",
+        prefix_len=24,
+        ssh_pub_key=keys,
+    )
+
+    user_data = rendered["user_data"]
+    assert "ssh-rsa AAAAB3 key1" in user_data
+    assert "ssh-ed25519 AAAAC key2" in user_data
+    assert "ssh-authorized-keys" in user_data

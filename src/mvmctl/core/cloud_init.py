@@ -38,9 +38,7 @@ def _validate_user_data(user_data: dict[str, Any]) -> None:
         ConfigError: If dangerous directives are found without proper safeguards.
     """
     dangerous_directives = [
-        directive
-        for directive in _DANGEROUS_CLOUD_INIT_DIRECTIVES
-        if directive in user_data
+        directive for directive in _DANGEROUS_CLOUD_INIT_DIRECTIVES if directive in user_data
     ]
     if not dangerous_directives:
         return
@@ -62,10 +60,19 @@ def _load_cloud_init_template() -> str:
     Returns:
         The template string content.
     """
-    template_path = (
-        importlib.resources.files("mvmctl.assets") / "cloud-init.template.yaml"
-    )
+    template_path = importlib.resources.files("mvmctl.assets") / "cloud-init.template.yaml"
     return template_path.read_text()
+
+
+def _normalize_ssh_pub_keys(
+    ssh_pub_key: "str | list[str] | None",
+) -> list[str]:
+    if ssh_pub_key is None:
+        return []
+    if isinstance(ssh_pub_key, str):
+        stripped = ssh_pub_key.strip()
+        return [stripped] if stripped else []
+    return [k.strip() for k in ssh_pub_key if k.strip()]
 
 
 def _render_cloud_init_template(
@@ -74,26 +81,13 @@ def _render_cloud_init_template(
     guest_ip: str,
     gateway: str,
     prefix_len: int,
-    ssh_pub_key: str | None = None,
+    ssh_pub_key: "str | list[str] | None" = None,
 ) -> dict[str, str]:
-    """Render the cloud-init template with the given parameters.
-
-    Uses SandboxedEnvironment with StrictUndefined for security.
-
-    Args:
-        vm_name: VM name for hostname and instance-id.
-        user: SSH username.
-        guest_ip: Guest IP address.
-        gateway: Gateway IP address.
-        prefix_len: Network prefix length.
-        ssh_pub_key: Optional SSH public key.
-
-    Returns:
-        Dictionary with keys 'user_data', 'meta_data', 'network_config', 'nocloud_cfg'.
-    """
     env = SandboxedEnvironment(undefined=StrictUndefined)
     template_str = _load_cloud_init_template()
     template = env.from_string(template_str)
+
+    ssh_pub_keys = _normalize_ssh_pub_keys(ssh_pub_key)
 
     rendered = template.render(
         vm_name=vm_name,
@@ -101,7 +95,7 @@ def _render_cloud_init_template(
         guest_ip=guest_ip,
         gateway=gateway,
         prefix_len=prefix_len,
-        ssh_pub_key=ssh_pub_key,
+        ssh_pub_keys=ssh_pub_keys,
     )
 
     # Parse the rendered YAML sections
@@ -150,48 +144,31 @@ def write_cloud_init(
     user: str,
     *,
     gateway: str,
-    ssh_pub_key: str | None = None,
+    ssh_pub_key: "str | list[str] | None" = None,
     custom_user_data: Path | None = None,
     prefix_len: int = 24,
     skip_network_config: bool = False,
 ) -> None:
-    """Write cloud-init seed files (meta-data, network-config, user-data).
+    ssh_pub_keys = _normalize_ssh_pub_keys(ssh_pub_key)
 
-    Args:
-        cloud_init_dir: Directory to write cloud-init files to.
-        vm_name: Name of the VM (used for instance-id and local-hostname).
-        guest_ip: The guest VM IP address.
-        user: Default username for SSH access.
-        gateway: Gateway IP address for network configuration.
-        ssh_pub_key: SSH public key to inject (optional).
-        custom_user_data: Path to custom user-data YAML file (optional).
-        prefix_len: Network prefix length (default: 24).
-        skip_network_config: If True, skip writing network-config file.
-            Used for NO_CLOUD_NET mode where kernel ip= configures networking.
-    """
-    # Load and render template for meta-data and network-config
     rendered = _render_cloud_init_template(
         vm_name=vm_name,
         user=user,
         guest_ip=guest_ip,
         gateway=gateway,
         prefix_len=prefix_len,
-        ssh_pub_key=ssh_pub_key,
+        ssh_pub_key=ssh_pub_keys,
     )
 
-    # Write meta-data from template (always)
     (cloud_init_dir / "meta-data").write_text(rendered["meta_data"])
 
-    # Write network-config from template (unless skip_network_config=True)
     if not skip_network_config:
         (cloud_init_dir / "network-config").write_text(rendered["network_config"])
 
     if custom_user_data is not None:
         ud: dict[str, Any] = {}
         content = custom_user_data.read_text()
-        if not (
-            content.startswith("#cloud-config") or content.startswith("Content-Type:")
-        ):
+        if not (content.startswith("#cloud-config") or content.startswith("Content-Type:")):
             logger.warning(
                 "user-data file does not start with '#cloud-config' or MIME boundary header"
             )
@@ -201,29 +178,26 @@ def write_cloud_init(
                 ud = loaded
                 _validate_user_data(ud)
             elif loaded is not None:
-                raise ConfigError(
-                    "Custom user-data must parse to a YAML mapping/object"
-                )
+                raise ConfigError("Custom user-data must parse to a YAML mapping/object")
         except yaml.YAMLError as exc:
             raise ConfigError(f"Invalid YAML in user-data file: {exc}") from exc
-        if ssh_pub_key:
+        if ssh_pub_keys:
             if "users" not in ud:
-                ud["users"] = [{"name": user, "ssh-authorized-keys": [ssh_pub_key]}]
+                ud["users"] = [{"name": user, "ssh-authorized-keys": list(ssh_pub_keys)}]
             else:
                 users_list = ud["users"]
                 if isinstance(users_list, list):
                     user_found = False
                     for u in users_list:
                         if isinstance(u, dict) and u.get("name") == user:
-                            keys = u.setdefault("ssh-authorized-keys", [])
-                            if ssh_pub_key not in keys:
-                                keys.append(ssh_pub_key)
+                            existing_keys: list[str] = u.setdefault("ssh-authorized-keys", [])
+                            for k in ssh_pub_keys:
+                                if k not in existing_keys:
+                                    existing_keys.append(k)
                             user_found = True
                             break
                     if not user_found:
-                        users_list.append(
-                            {"name": user, "ssh-authorized-keys": [ssh_pub_key]}
-                        )
+                        users_list.append({"name": user, "ssh-authorized-keys": list(ssh_pub_keys)})
         if "network" in ud:
             logger.warning(
                 "Custom user-data already contains 'network' key; "
@@ -234,7 +208,6 @@ def write_cloud_init(
             "#cloud-config\n" + yaml.dump(ud, default_flow_style=False)
         )
     else:
-        # Use template for user-data when no custom user-data provided
         (cloud_init_dir / "user-data").write_text(rendered["user_data"])
 
 

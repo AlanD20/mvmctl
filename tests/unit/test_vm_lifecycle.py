@@ -2124,3 +2124,290 @@ def test_direct_injection_cleanup_on_injection_failure(
 
     mock_rmtree.assert_called_once_with(vm_dir, ignore_errors=True)
     mock_release_ip.assert_called_once_with("default", vm_name)
+
+
+# ============================================================================
+# Multi-default-key injection tests
+# ============================================================================
+
+
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
+@patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
+@patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("builtins.open", new_callable=MagicMock)
+@patch("mvmctl.core.vm_lifecycle.setup_nat")
+@patch("mvmctl.core.key_manager.get_default_keys")
+def test_create_vm_without_ssh_key_injects_default_keys(
+    mock_get_default_keys,
+    mock_setup_nat,
+    mock_open,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_create_iso,
+    mock_write_ci,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_net_mgr,
+    mock_add_firewall_rule,
+    mock_copy2,
+    tmp_path,
+    monkeypatch,
+):
+    """create_vm without ssh_key reads default keys from registry and passes list to write_cloud_init."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+
+    keys_dir = tmp_path / "keys"
+    keys_dir.mkdir()
+    (keys_dir / "mykey.pub").write_text("ssh-rsa AAAA key1")
+    (keys_dir / "otherkey.pub").write_text("ssh-ed25519 AAAC key2")
+
+    mock_get_default_keys.return_value = ["mykey", "otherkey"]
+    monkeypatch.setattr("mvmctl.utils.fs.get_keys_dir", lambda: keys_dir)
+
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.exists.return_value = False
+    mock_get_vm_dir.return_value = mock_vm_dir
+    mock_kernel_dir = MagicMock()
+    vmlinux = MagicMock()
+    vmlinux.exists.return_value = True
+    mock_kernel_dir.__truediv__.return_value = vmlinux
+    mock_get_kernels.return_value = mock_kernel_dir
+    mock_img_dir = MagicMock()
+    img_ext4 = MagicMock()
+    img_ext4.exists.return_value = True
+    mock_img_dir.__truediv__.return_value = img_ext4
+    mock_get_images.return_value = mock_img_dir
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_get_net.return_value = mock_net
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
+    mock_resolve_fs_type.return_value = "ext4"
+    mock_bridge_exists.return_value = True
+    mock_popen.return_value.pid = 99999
+    mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
+
+    create_vm(name="myvm", image="ubuntu-22.04")
+
+    mock_write_ci.assert_called_once()
+    _, kwargs = mock_write_ci.call_args
+    injected_key = kwargs["ssh_pub_key"]
+    assert isinstance(injected_key, list)
+    assert "ssh-rsa AAAA key1" in injected_key
+    assert "ssh-ed25519 AAAC key2" in injected_key
+
+
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
+@patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
+@patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("builtins.open", new_callable=MagicMock)
+@patch("mvmctl.core.vm_lifecycle.setup_nat")
+@patch("mvmctl.core.vm_lifecycle.resolve_ssh_key")
+def test_create_vm_with_explicit_ssh_key_takes_precedence(
+    mock_resolve_ssh_key,
+    mock_setup_nat,
+    mock_open,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_create_iso,
+    mock_write_ci,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_net_mgr,
+    mock_add_firewall_rule,
+    mock_copy2,
+):
+    """When --ssh-key is explicitly passed, resolve_ssh_key is called (not default key lookup)."""
+    mock_resolve_ssh_key.return_value = "ssh-rsa AAAA explicit-key"
+
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.exists.return_value = False
+    mock_get_vm_dir.return_value = mock_vm_dir
+    mock_kernel_dir = MagicMock()
+    vmlinux = MagicMock()
+    vmlinux.exists.return_value = True
+    mock_kernel_dir.__truediv__.return_value = vmlinux
+    mock_get_kernels.return_value = mock_kernel_dir
+    mock_img_dir = MagicMock()
+    img_ext4 = MagicMock()
+    img_ext4.exists.return_value = True
+    mock_img_dir.__truediv__.return_value = img_ext4
+    mock_get_images.return_value = mock_img_dir
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_get_net.return_value = mock_net
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
+    mock_resolve_fs_type.return_value = "ext4"
+    mock_bridge_exists.return_value = True
+    mock_popen.return_value.pid = 99999
+    mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
+
+    create_vm(name="myvm", image="ubuntu-22.04", ssh_key="mykey")
+
+    mock_resolve_ssh_key.assert_called_once_with("mykey")
+    mock_write_ci.assert_called_once()
+    _, kwargs = mock_write_ci.call_args
+    assert kwargs["ssh_pub_key"] == "ssh-rsa AAAA explicit-key"
+
+
+@patch("mvmctl.core.vm_lifecycle.shutil.copy2")
+@patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
+@patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+@patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
+@patch("mvmctl.core.vm_lifecycle.get_network")
+@patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
+@patch("mvmctl.core.vm_lifecycle.generate_mac")
+@patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+@patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
+@patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+@patch("mvmctl.core.vm_lifecycle.create_tap")
+@patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.bridge_exists")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
+@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("builtins.open", new_callable=MagicMock)
+@patch("mvmctl.core.vm_lifecycle.setup_nat")
+@patch("mvmctl.core.key_manager.get_default_keys")
+@patch("mvmctl.core.vm_lifecycle.resolve_ssh_key")
+def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
+    mock_resolve_ssh_key,
+    mock_get_default_keys,
+    mock_setup_nat,
+    mock_open,
+    mock_resolve_fs_type,
+    mock_resolve_fs_uuid,
+    mock_bridge_exists,
+    mock_write_pid,
+    mock_popen,
+    mock_add_rules,
+    mock_create_tap,
+    mock_config_gen,
+    mock_create_iso,
+    mock_write_ci,
+    mock_gen_mac,
+    mock_alloc_ip,
+    mock_get_net,
+    mock_get_kernels,
+    mock_get_images,
+    mock_get_vm_dir,
+    mock_get_vm_mgr,
+    mock_setup_chain,
+    mock_net_mgr,
+    mock_add_firewall_rule,
+    mock_copy2,
+):
+    """With no defaults and no --ssh-key, falls back to resolve_ssh_key(None) (auto-detect)."""
+    mock_get_default_keys.return_value = []
+    mock_resolve_ssh_key.return_value = None
+
+    mock_manager = MagicMock()
+    mock_manager.count_vms.return_value = 0
+    mock_get_vm_mgr.return_value = mock_manager
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.exists.return_value = False
+    mock_get_vm_dir.return_value = mock_vm_dir
+    mock_kernel_dir = MagicMock()
+    vmlinux = MagicMock()
+    vmlinux.exists.return_value = True
+    mock_kernel_dir.__truediv__.return_value = vmlinux
+    mock_get_kernels.return_value = mock_kernel_dir
+    mock_img_dir = MagicMock()
+    img_ext4 = MagicMock()
+    img_ext4.exists.return_value = True
+    mock_img_dir.__truediv__.return_value = img_ext4
+    mock_get_images.return_value = mock_img_dir
+    mock_net = MagicMock()
+    mock_net.cidr = "10.20.0.0/24"
+    mock_net.gateway = "10.20.0.1"
+    mock_net.bridge = "mvm-br0"
+    mock_get_net.return_value = mock_net
+    mock_alloc_ip.return_value = "10.20.0.5"
+    mock_gen_mac.return_value = "02:fc:11:22:33:44"
+    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
+    mock_resolve_fs_type.return_value = "ext4"
+    mock_bridge_exists.return_value = True
+    mock_popen.return_value.pid = 99999
+    mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
+
+    create_vm(name="myvm", image="ubuntu-22.04")
+
+    mock_resolve_ssh_key.assert_called_once_with(None)

@@ -8,11 +8,15 @@ import pytest
 
 from mvmctl.core.key_manager import (
     add_key,
+    clear_default_keys,
     create_key,
+    get_default_keys,
     get_key,
     inspect_key,
     list_keys,
     remove_key,
+    resolve_key_input,
+    set_default_keys,
 )
 from mvmctl.exceptions import MVMKeyError
 
@@ -115,8 +119,8 @@ def test_add_key_success(keys_dir, tmp_path):
 
     # Verify registry
     registry = json.loads((keys_dir / "registry.json").read_text())
-    assert "testkey" in registry
-    assert registry["testkey"]["has_private_key"] == False
+    assert "testkey" in registry["keys"]
+    assert registry["keys"]["testkey"]["has_private_key"] == False
 
 
 def test_add_key_file_not_found(keys_dir, tmp_path):
@@ -179,7 +183,7 @@ def test_create_key_success(keys_dir, tmp_path):
 
     # Verify registry has has_private_key=True
     registry = json.loads((keys_dir / "registry.json").read_text())
-    assert registry["newkey"]["has_private_key"] == True
+    assert registry["keys"]["newkey"]["has_private_key"] == True
 
 
 def test_create_key_file_exists_no_overwrite(keys_dir, tmp_path):
@@ -243,7 +247,7 @@ def test_remove_key_success(keys_dir, tmp_path):
 
     assert not (keys_dir / "rmkey.pub").exists()
     registry = json.loads((keys_dir / "registry.json").read_text())
-    assert "rmkey" not in registry
+    assert "rmkey" not in registry["keys"]
 
 
 @pytest.mark.parametrize("key_name", ["nonexistent", "ghost-key", "never-added"])
@@ -332,7 +336,7 @@ def test_add_key_overwrite_existing(keys_dir, tmp_path):
     assert info.name == "overwrite-me"
 
     registry = json.loads((keys_dir / "registry.json").read_text())
-    assert "overwrite-me" in registry
+    assert "overwrite-me" in registry["keys"]
 
 
 def test_remove_key_not_in_registry(keys_dir):
@@ -605,3 +609,210 @@ def test_export_key_no_overwrite_raises(keys_dir, tmp_path):
 
     with pytest.raises(MVMKeyError, match="already exist"):
         export_key("existkey", dest_dir, overwrite=False)
+
+
+SAMPLE_KEY_ENTRY = {
+    "name": "alice",
+    "fingerprint": "SHA256:alicefingerprint",
+    "algorithm": "ssh-ed25519",
+    "comment": "alice@host",
+    "added_at": "2024-01-01T00:00:00",
+    "has_private_key": False,
+    "private_key_path": None,
+    "public_key_path": None,
+}
+
+SAMPLE_KEY_ENTRY_CI = {
+    "name": "ci",
+    "fingerprint": "SHA256:cifingerprint",
+    "algorithm": "ssh-ed25519",
+    "comment": "ci@runner",
+    "added_at": "2024-01-01T00:00:00",
+    "has_private_key": False,
+    "private_key_path": None,
+    "public_key_path": None,
+}
+
+
+def _write_wrapped_registry(keys_dir: Path, keys: dict, defaults_ssh: list | None = None) -> None:
+    wrapped = {
+        "keys": keys,
+        "defaults": {"ssh": defaults_ssh or []},
+    }
+    (keys_dir / "registry.json").write_text(json.dumps(wrapped))
+
+
+def _write_legacy_registry(keys_dir: Path, keys: dict) -> None:
+    (keys_dir / "registry.json").write_text(json.dumps(keys))
+
+
+# ---------------------------------------------------------------------------
+# Migration tests
+# ---------------------------------------------------------------------------
+
+
+def test_load_registry_handles_legacy_flat(keys_dir):
+    _write_legacy_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY})
+    from mvmctl.core.key_manager import _load_registry
+
+    registry = _load_registry()
+    assert "keys" in registry
+    assert "defaults" in registry
+    assert "ssh" in registry["defaults"]
+    assert "alice" in registry["keys"]
+    assert registry["defaults"]["ssh"] == []
+
+
+def test_load_registry_handles_new_wrapped(keys_dir):
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY}, defaults_ssh=["alice"])
+    from mvmctl.core.key_manager import _load_registry
+
+    registry = _load_registry()
+    assert registry["keys"]["alice"]["name"] == "alice"
+    assert registry["defaults"]["ssh"] == ["alice"]
+
+
+def test_load_registry_missing_defaults_field_is_added(keys_dir):
+    partial = {"keys": {"alice": SAMPLE_KEY_ENTRY}}
+    (keys_dir / "registry.json").write_text(json.dumps(partial))
+    from mvmctl.core.key_manager import _load_registry
+
+    registry = _load_registry()
+    assert registry["defaults"]["ssh"] == []
+
+
+# ---------------------------------------------------------------------------
+# set_default_keys / get_default_keys / clear_default_keys
+# ---------------------------------------------------------------------------
+
+
+def test_set_default_keys_success(keys_dir):
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY, "ci": SAMPLE_KEY_ENTRY_CI})
+
+    set_default_keys(["alice", "ci"])
+
+    registry = json.loads((keys_dir / "registry.json").read_text())
+    assert registry["defaults"]["ssh"] == ["alice", "ci"]
+
+
+def test_set_default_keys_rejects_unknown(keys_dir):
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY})
+
+    with pytest.raises(MVMKeyError, match="not found"):
+        set_default_keys(["alice", "ghost"])
+
+
+def test_get_default_keys_returns_names(keys_dir):
+    _write_wrapped_registry(
+        keys_dir,
+        {"alice": SAMPLE_KEY_ENTRY, "ci": SAMPLE_KEY_ENTRY_CI},
+        defaults_ssh=["alice", "ci"],
+    )
+
+    result = get_default_keys()
+    assert result == ["alice", "ci"]
+
+
+def test_get_default_keys_empty(keys_dir):
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY})
+
+    assert get_default_keys() == []
+
+
+def test_clear_default_keys(keys_dir):
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY}, defaults_ssh=["alice"])
+
+    clear_default_keys()
+
+    assert get_default_keys() == []
+    registry = json.loads((keys_dir / "registry.json").read_text())
+    assert registry["defaults"]["ssh"] == []
+
+
+def test_clear_default_keys_when_already_empty(keys_dir):
+    _write_wrapped_registry(keys_dir, {})
+
+    clear_default_keys()
+
+    assert get_default_keys() == []
+
+
+def test_remove_key_removes_from_defaults(keys_dir, tmp_path):
+    pub_file = tmp_path / "id_ed25519.pub"
+    pub_file.write_text(SAMPLE_PUB_KEY)
+    add_key("alice", pub_file)
+    set_default_keys(["alice"])
+    assert get_default_keys() == ["alice"]
+
+    remove_key("alice")
+
+    assert get_default_keys() == []
+
+
+# ---------------------------------------------------------------------------
+# resolve_key_input
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_key_input_by_name(keys_dir):
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY})
+
+    assert resolve_key_input("alice") == "alice"
+
+
+def test_resolve_key_input_by_fingerprint(keys_dir):
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY})
+
+    assert resolve_key_input("SHA256:alicefingerprint") == "alice"
+
+
+def test_resolve_key_input_by_fingerprint_prefix(keys_dir):
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY})
+
+    assert resolve_key_input("SHA256:alice") == "alice"
+
+
+def test_resolve_key_input_ambiguous_fingerprint(keys_dir):
+    _write_wrapped_registry(
+        keys_dir,
+        {
+            "alice": {**SAMPLE_KEY_ENTRY, "fingerprint": "SHA256:shared_prefix_a"},
+            "bob": {
+                "name": "bob",
+                "fingerprint": "SHA256:shared_prefix_b",
+                "algorithm": "ssh-ed25519",
+                "comment": "bob@host",
+                "added_at": "2024-01-01T00:00:00",
+                "has_private_key": False,
+                "private_key_path": None,
+                "public_key_path": None,
+            },
+        },
+    )
+
+    with pytest.raises(MVMKeyError, match="Ambiguous"):
+        resolve_key_input("SHA256:shared_prefix")
+
+
+def test_resolve_key_input_by_pub_file_in_cache(keys_dir, tmp_path):
+    pub_file = tmp_path / "alice.pub"
+    pub_file.write_text(SAMPLE_PUB_KEY)
+    _write_wrapped_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY})
+
+    assert resolve_key_input(str(pub_file)) == "alice"
+
+
+def test_resolve_key_input_pub_file_not_in_cache(keys_dir, tmp_path):
+    pub_file = tmp_path / "newkey.pub"
+    pub_file.write_text(SAMPLE_PUB_KEY)
+    _write_wrapped_registry(keys_dir, {})
+
+    with pytest.raises(MVMKeyError, match="not in the cache"):
+        resolve_key_input(str(pub_file))
+
+
+def test_resolve_key_input_unknown_raises(keys_dir):
+    _write_wrapped_registry(keys_dir, {})
+
+    with pytest.raises(MVMKeyError, match="Key not found"):
+        resolve_key_input("nonexistent")

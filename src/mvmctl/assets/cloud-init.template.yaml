@@ -21,16 +21,17 @@ user_data: |
 
   users:
     - default
-    {% if ssh_pub_key %}
+    {% if ssh_pub_keys %}
     - name: {{user}}
       groups: sudo
       shell: /bin/bash
       sudo: ALL=(ALL) NOPASSWD:ALL
       ssh-authorized-keys:
-        - {{ssh_pub_key}}
+        {% for key in ssh_pub_keys %}- {{key}}
+        {% endfor %}
     {% endif %}
 
-  {% if ssh_pub_key %}
+  {% if ssh_pub_keys %}
     - name: human
       sudo: ALL=(ALL) NOPASSWD:ALL
       groups: users, admin
@@ -39,10 +40,10 @@ user_data: |
       lock_passwd: false
       passwd: "$6$z7g1munt3fJycblB$cCzLDdjCdNUkNr2il4kTXy2.FZsY2qMvwmMoNGiIUaXOjTGRoX.5E.NbZH.eYe9ksxdqEQ5YU/rPCU1ga2KD40"
       ssh-authorized-keys:
-        - {{ssh_pub_key}}
+        {% for key in ssh_pub_keys %}- {{key}}
+        {% endfor %}
     {% endif %}
 
-  # Package installation
   package_update: false
   package_upgrade: false
   packages:
@@ -58,9 +59,7 @@ user_data: |
     - htop
     - cloud-init
 
-  {% if ssh_pub_key %}
-  # SSH service setup and disable systemd-networkd to prevent IP override
-  # The kernel ip= parameter already configures the network correctly
+  {% if ssh_pub_keys %}
   runcmd:
     - systemctl stop systemd-networkd 2>/dev/null || true
     - systemctl disable --now systemd-networkd 2>/dev/null || true

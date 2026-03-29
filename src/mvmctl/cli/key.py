@@ -7,11 +7,14 @@ import typer
 
 from mvmctl.api.keys import (
     add_key,
+    clear_default_keys,
     create_key,
     export_key,
     inspect_key,
     list_keys,
     remove_key,
+    resolve_key_inputs,
+    set_default_keys,
 )
 from mvmctl.cli._helpers import check_name_arg
 from mvmctl.exceptions import MVMKeyError
@@ -240,3 +243,37 @@ def inspect(
     print_info(f"  Comment:     {info['comment']}")
     print_info(f"  Added:       {info['added_at']}")
     print_info(f"  Public key:  {info['public_key']}")
+
+
+@app.command(
+    name="set-default",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def set_default(
+    ctx: typer.Context,
+    keys: list[str] | None = typer.Argument(None, help="Key names, paths, or fingerprints"),
+    clear: bool = typer.Option(False, "--clear", help="Clear all default keys instead of setting"),
+) -> None:
+    """Set one or more keys as the default for SSH connections."""
+    if clear:
+        try:
+            clear_default_keys()
+        except MVMKeyError as e:
+            print_error(str(e))
+            raise typer.Exit(code=1)
+        print_success("Cleared all default keys")
+        return
+
+    effective_keys = list(keys) if keys else []
+    if not effective_keys:
+        print_error("Provide at least one key name")
+        raise typer.Exit(code=1)
+
+    try:
+        resolved = resolve_key_inputs(effective_keys)
+        set_default_keys(resolved)
+    except MVMKeyError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+
+    print_success(f"Default keys set: {', '.join(resolved)}")

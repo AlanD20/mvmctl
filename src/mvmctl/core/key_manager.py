@@ -20,6 +20,11 @@ from mvmctl.utils.fs import get_keys_dir
 
 logger = logging.getLogger(__name__)
 
+# Registry format sentinel keys — presence of these means we have the new wrapped format
+_REGISTRY_KEYS_FIELD = "keys"
+_REGISTRY_DEFAULTS_FIELD = "defaults"
+_REGISTRY_SSH_DEFAULTS_FIELD = "ssh"
+
 
 @dataclass
 class KeyInfo:
@@ -40,24 +45,72 @@ def _registry_path() -> Path:
     return get_keys_dir() / "registry.json"
 
 
-def _load_registry() -> dict[str, dict[str, Any]]:
-    """Load the key registry from disk, returning an empty dict if missing or corrupt."""
-    path = _registry_path()
-    if not path.exists():
-        return {}
-    try:
-        data: dict[str, dict[str, Any]] = json.loads(path.read_text())
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Corrupt key registry at %s — resetting to empty", path)
-        return {}
-    return data
+def _maybe_migrate_registry(data: dict[str, Any]) -> dict[str, Any]:
+    """Migrate a legacy flat registry to the wrapped format.
 
+    Legacy format: { "keyname": { ...KeyInfo fields... }, ... }
+    New format:    { "keys": { "keyname": { ... } }, "defaults": { "ssh": [...] } }
 
-def _save_registry(registry: dict[str, dict[str, Any]]) -> None:
-    """Persist the key registry to disk with mode 0o600.
+    Migration is triggered when the loaded data does not contain the sentinel
+    ``"keys"`` or ``"defaults"`` top-level field.  All existing entries are
+    moved into ``data["keys"]`` and an empty ``defaults.ssh`` list is created.
 
     Args:
-        registry: Mapping of key name to key metadata dict.
+        data: Raw dict loaded from registry.json.
+
+    Returns:
+        dict in the new wrapped format (may be the same object if already new).
+    """
+    if _REGISTRY_KEYS_FIELD in data or _REGISTRY_DEFAULTS_FIELD in data:
+        # Already in new format — ensure defaults.ssh exists
+        if _REGISTRY_DEFAULTS_FIELD not in data:
+            data[_REGISTRY_DEFAULTS_FIELD] = {_REGISTRY_SSH_DEFAULTS_FIELD: []}
+        if _REGISTRY_SSH_DEFAULTS_FIELD not in data[_REGISTRY_DEFAULTS_FIELD]:
+            data[_REGISTRY_DEFAULTS_FIELD][_REGISTRY_SSH_DEFAULTS_FIELD] = []
+        return data
+
+    # Legacy flat format — wrap it
+    logger.debug("Migrating key registry from legacy flat format to wrapped format")
+    wrapped: dict[str, Any] = {
+        _REGISTRY_KEYS_FIELD: data,
+        _REGISTRY_DEFAULTS_FIELD: {_REGISTRY_SSH_DEFAULTS_FIELD: []},
+    }
+    return wrapped
+
+
+def _load_registry() -> dict[str, dict[str, Any]]:
+    """Load the key registry from disk, returning an empty registry if missing or corrupt.
+
+    Handles both legacy (flat) and new (wrapped) registry formats transparently.
+    Legacy registries are auto-migrated to the wrapped format.
+
+    Returns:
+        Wrapped registry dict with ``"keys"`` and ``"defaults"`` top-level fields.
+    """
+    path = _registry_path()
+    if not path.exists():
+        return {
+            _REGISTRY_KEYS_FIELD: {},
+            _REGISTRY_DEFAULTS_FIELD: {_REGISTRY_SSH_DEFAULTS_FIELD: []},
+        }
+    try:
+        raw: dict[str, Any] = json.loads(path.read_text())
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("Corrupt key registry at %s — resetting to empty", path)
+        return {
+            _REGISTRY_KEYS_FIELD: {},
+            _REGISTRY_DEFAULTS_FIELD: {_REGISTRY_SSH_DEFAULTS_FIELD: []},
+        }
+    return _maybe_migrate_registry(raw)
+
+
+def _save_registry(registry: dict[str, Any]) -> None:
+    """Persist the key registry to disk with mode 0o600.
+
+    Always writes in the new wrapped format.
+
+    Args:
+        registry: Wrapped registry dict with ``"keys"`` and ``"defaults"`` fields.
     """
     path = _registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,16 +145,109 @@ def _parse_comment(pub_key_content: str) -> str:
     return ""
 
 
+def set_default_keys(names: list[str]) -> None:
+    """Set the default SSH keys list used when creating VMs without --ssh-key.
+
+    Args:
+        names: List of cached key names to set as defaults.
+
+    Raises:
+        MVMKeyError: If any name does not exist in the registry.
+    """
+    registry = _load_registry()
+    keys = registry[_REGISTRY_KEYS_FIELD]
+    missing = [n for n in names if n not in keys]
+    if missing:
+        raise MVMKeyError(
+            f"Key(s) not found in cache: {', '.join(missing)}. "
+            "Add them first with 'mvm key add' or 'mvm key create'."
+        )
+    registry[_REGISTRY_DEFAULTS_FIELD][_REGISTRY_SSH_DEFAULTS_FIELD] = list(names)
+    _save_registry(registry)
+    logger.info("Set default SSH keys: %s", names)
+
+
+def get_default_keys() -> list[str]:
+    """Get the list of default SSH key names.
+
+    Returns:
+        List of cached key names that are marked as defaults (may be empty).
+    """
+    registry = _load_registry()
+    return list(registry[_REGISTRY_DEFAULTS_FIELD][_REGISTRY_SSH_DEFAULTS_FIELD])
+
+
+def clear_default_keys() -> None:
+    """Clear all default SSH keys."""
+    registry = _load_registry()
+    registry[_REGISTRY_DEFAULTS_FIELD][_REGISTRY_SSH_DEFAULTS_FIELD] = []
+    _save_registry(registry)
+    logger.info("Cleared default SSH keys")
+
+
+def resolve_key_input(input_str: str) -> str:
+    """Resolve a key name, file path, or fingerprint to a cached key name.
+
+    Resolution order:
+    1. If ``input_str`` matches a cached key name exactly → return it.
+    2. If ``input_str`` is a path to an existing ``.pub`` file → return the stem.
+    3. If ``input_str`` looks like a fingerprint prefix → search by fingerprint.
+
+    Args:
+        input_str: Key name, public key file path, or fingerprint (prefix) string.
+
+    Returns:
+        Canonical cached key name.
+
+    Raises:
+        MVMKeyError: If the input cannot be resolved, or is ambiguous.
+    """
+    registry = _load_registry()
+    keys = registry[_REGISTRY_KEYS_FIELD]
+
+    if input_str in keys:
+        return input_str
+
+    candidate = Path(input_str)
+    if candidate.exists() and candidate.suffix == ".pub":
+        stem = candidate.stem
+        if stem in keys:
+            return stem
+        raise MVMKeyError(
+            f"Public key file '{input_str}' found on disk but key '{stem}' is not in the cache. "
+            f"Import it first with: mvm key add {stem} {input_str}"
+        )
+
+    matches = [
+        name
+        for name, entry in keys.items()
+        if entry.get("fingerprint", "").startswith(input_str)
+        or entry.get("fingerprint", "").endswith(input_str)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise MVMKeyError(
+            f"Ambiguous fingerprint '{input_str}' matches multiple keys: {', '.join(matches)}. "
+            "Provide a longer prefix or use the key name directly."
+        )
+
+    raise MVMKeyError(
+        f"Key not found: '{input_str}' is not a cached key name, "
+        "a readable .pub file path, or a resolvable fingerprint."
+    )
+
+
 def list_keys() -> list[KeyInfo]:
     """List all keys in the cache."""
     registry = _load_registry()
-    return [KeyInfo(**entry) for entry in registry.values()]
+    return [KeyInfo(**entry) for entry in registry[_REGISTRY_KEYS_FIELD].values()]
 
 
 def get_key(name: str) -> KeyInfo | None:
     """Get a key by name, or None if not found."""
     registry = _load_registry()
-    entry = registry.get(name)
+    entry = registry[_REGISTRY_KEYS_FIELD].get(name)
     if entry is None:
         return None
     return KeyInfo(**entry)
@@ -133,25 +279,23 @@ def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> Key
         )
 
     registry = _load_registry()
-    if name in registry:
+    keys = registry[_REGISTRY_KEYS_FIELD]
+    if name in keys:
         if overwrite:
-            # Remove old .pub file and registry entry before re-adding
             old_pub = get_keys_dir() / f"{name}.pub"
             if old_pub.exists():
                 old_pub.unlink()
-            del registry[name]
+            del keys[name]
         else:
             raise MVMKeyError(f"Key '{name}' already exists. Remove it first to replace.")
 
-    keys_dir = get_keys_dir()
-    keys_dir.mkdir(parents=True, exist_ok=True)
-    dest = keys_dir / f"{name}.pub"
+    key_dir = get_keys_dir()
+    key_dir.mkdir(parents=True, exist_ok=True)
+    dest = key_dir / f"{name}.pub"
     dest.write_text(content + "\n")
 
-    # Check if there's a matching private key in the same directory
     private_key_path = pub_key_path.with_suffix("")
     if private_key_path == pub_key_path:
-        # If pub_key_path has no .pub extension, check for .pub removed
         private_key_path = Path(str(pub_key_path).replace(".pub", ""))
     has_private_key = private_key_path.exists() and private_key_path != pub_key_path
 
@@ -165,7 +309,7 @@ def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> Key
         private_key_path=str(private_key_path) if has_private_key else None,
         public_key_path=str(dest),
     )
-    registry[name] = asdict(info)
+    keys[name] = asdict(info)
     _save_registry(registry)
 
     logger.info("Added key '%s' to cache", name)
@@ -272,10 +416,10 @@ def create_key(
         raise MVMKeyError(f"Key file already exists: {existing}. Use --overwrite to replace.")
 
     registry = _load_registry()
-    if name in registry:
+    keys = registry[_REGISTRY_KEYS_FIELD]
+    if name in keys:
         if overwrite:
-            # Silently remove existing registry entry before proceeding
-            del registry[name]
+            del keys[name]
             _save_registry(registry)
         else:
             raise MVMKeyError(f"Key '{name}' already exists in cache. Remove it first.")
@@ -299,7 +443,7 @@ def create_key(
         public_key_path=str(pub_key_path),
     )
 
-    registry[name] = asdict(info)
+    registry[_REGISTRY_KEYS_FIELD][name] = asdict(info)
     _save_registry(registry)
 
     logger.info("Created key '%s', private key at %s", name, private_key_path)
@@ -309,13 +453,20 @@ def create_key(
 def remove_key(name: str) -> None:
     """Remove a key from the cache (does not delete key files from disk)."""
     registry = _load_registry()
-    if name not in registry:
+    keys = registry[_REGISTRY_KEYS_FIELD]
+    if name not in keys:
         raise MVMKeyError(f"Key '{name}' not found in cache")
 
-    del registry[name]
+    del keys[name]
+
+    defaults = registry[_REGISTRY_DEFAULTS_FIELD][_REGISTRY_SSH_DEFAULTS_FIELD]
+    if name in defaults:
+        registry[_REGISTRY_DEFAULTS_FIELD][_REGISTRY_SSH_DEFAULTS_FIELD] = [
+            n for n in defaults if n != name
+        ]
+
     _save_registry(registry)
 
-    # Remove cached public key file
     pub_file = get_keys_dir() / f"{name}.pub"
     if pub_file.exists():
         pub_file.unlink()
@@ -342,7 +493,8 @@ def export_key(
         MVMKeyError: If key not found in cache, or if files exist and overwrite=False
     """
     registry = _load_registry()
-    if name not in registry:
+    keys = registry[_REGISTRY_KEYS_FIELD]
+    if name not in keys:
         raise MVMKeyError(f"Key '{name}' not found in cache")
 
     keys_dir = get_keys_dir()
@@ -378,8 +530,8 @@ def export_key(
     shutil.copy2(source_public, dest_public)
     dest_private.chmod(CONST_FILE_PERMS_PRIVATE_KEY)
 
-    registry[name]["private_key_path"] = str(dest_private)
-    registry[name]["public_key_path"] = str(dest_public)
+    keys[name]["private_key_path"] = str(dest_private)
+    keys[name]["public_key_path"] = str(dest_public)
     _save_registry(registry)
 
     logger.info("Exported key '%s' to %s", name, destination)
@@ -401,10 +553,11 @@ class KeyInspect(TypedDict):
 def inspect_key(name: str) -> KeyInspect:
     """Return detailed info about a named key."""
     registry = _load_registry()
-    if name not in registry:
+    keys = registry[_REGISTRY_KEYS_FIELD]
+    if name not in keys:
         raise MVMKeyError(f"Key '{name}' not found in cache")
 
-    entry = registry[name]
+    entry = keys[name]
     pub_file = get_keys_dir() / f"{name}.pub"
     public_key_content = ""
     if pub_file.exists():

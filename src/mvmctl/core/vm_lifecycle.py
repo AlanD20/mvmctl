@@ -530,7 +530,30 @@ def create_vm(
         cloud_init_dir = vm_dir / DEFAULT_CLOUD_INIT_DIRNAME
         cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
 
-        ssh_pub_key = resolve_ssh_key(ssh_key)
+        ssh_pub_key: list[str] | str | None
+        if ssh_key is not None:
+            ssh_pub_key = resolve_ssh_key(ssh_key)
+        else:
+            from mvmctl.core.key_manager import get_default_keys as _get_default_keys
+            from mvmctl.utils.fs import get_keys_dir as _get_keys_dir
+
+            default_names = _get_default_keys()
+            if default_names:
+                keys_dir = _get_keys_dir()
+                resolved: list[str] = []
+                for kname in default_names:
+                    pub_file = keys_dir / f"{kname}.pub"
+                    if pub_file.exists():
+                        content = pub_file.read_text().strip()
+                        if content:
+                            resolved.append(content)
+                    else:
+                        logger.warning(
+                            "Default key '%s' not found at %s — skipping", kname, pub_file
+                        )
+                ssh_pub_key = resolved if resolved else None
+            else:
+                ssh_pub_key = resolve_ssh_key(None)
 
         _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
 
