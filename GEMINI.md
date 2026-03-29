@@ -49,6 +49,8 @@ uv run --group build python -m nuitka --onefile --output-dir=dist --output-filen
 *Note: Binaries are located in the `dist/` directory.*
 
 ## Testing and Quality Gates
+**ALL code changes MUST pass CI checks before completion.**
+
 All checks are enforced in CI and must pass before opening a PR.
 
 ```bash
@@ -62,6 +64,12 @@ uv run ruff format --check src/
 # Type Checking (Strict Mode - no `type: ignore` allowed)
 uv run mypy src/
 ```
+
+**If checks fail:**
+- Fix linting/formatting issues with `uv run ruff check src/ --fix` and `uv run ruff format src/`
+- Fix type errors with proper type annotations  
+- Fix failing tests — NEVER delete tests to make them pass
+
 *Note: A minimum of 80% branch coverage is strictly enforced.*
 
 ## Development Conventions

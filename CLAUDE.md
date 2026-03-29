@@ -78,12 +78,19 @@ User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + u
 
 ## Code Quality Gates (CI-enforced)
 
+**ALL code changes MUST pass CI checks before completion.**
+
 ```bash
 uv run ruff check src/          # Must be clean
 uv run ruff format --check src/ # Must be clean
 uv run mypy src/                # Strict mode — no type: ignore allowed
 uv run pytest tests/ -q         # 80% branch coverage minimum
 ```
+
+**If checks fail:**
+- Fix linting/formatting issues with `uv run ruff check src/ --fix` and `uv run ruff format src/`
+- Fix type errors with proper type annotations
+- Fix failing tests — NEVER delete tests to make them pass
 
 Tests must NOT require root, KVM, or real network. Mock all subprocess calls.
 
