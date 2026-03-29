@@ -1,4 +1,5 @@
-When making these changes. Ensure that there will be NO DEPRECATION messages/codes are left over. This project is under active development and IS NOT READY FOR PRODUCTION YET.
+# MANDATORY INSTRUCTIONS TO BE FOLLOWED
+When making these changes. Ensure that there will be NO DEPRECATION messages/codes are left over. This project is under active development and IS NOT READY FOR PRODUCTION YET. THEREFORE any changes that causes regression such as renaming a command to something else, it's fine to proceed so long as all references/tests/docs are updated. You do not have to add codes that allows migration from old to new approach.
 
 # Metadata
 
@@ -41,9 +42,15 @@ When making these changes. Ensure that there will be NO DEPRECATION messages/cod
 - when user enters `rm` for any resources such as kernel, image, vm, keys, etc.. it shouldn't prompt y/n. It MUST PROCEED WITH REMOVAL.
 - DO NOT ALLOW REMOVAL OF networks, images, kernels, if they are used by an active VM. The CLI must utilize the metadata to ensure there isnt an active VM using these.
 - Add size to `kernel`, `image` ls commands
-- Add `*` to default values. This applies to `mvm kernel|image|key|network` commands! if there is a field for default when running `ls` remove it and use `* ` as a prefix for the name of the resource.
-- introduce `mvm cache init` and `mvm cache prune` where the `cache_init` function executes functions. DO NOT IMPLEMENT caching within this function, each caching mechanism must have their own function to do the caching and clear the caching. This will make the cache_init more maintainable and exactly define what is being cached
+- Add `*` to default resource names. This applies to `mvm kernel|image|key|network` commands! if there is a field for default when running `ls` remove it and use `* ` as a prefix for the name of the resource.
+- introduce `mvm cache init` and `mvm cache prune` where the `cache_init` function executes functions. DO NOT IMPLEMENT caching within this function, each caching mechanism must have their own function to do the caching and clear the caching. This will make the cache_init more maintainable and exactly define what is being cached. Currently caching is only done for guestfs appliance.
+    - the `mvm cache prune` must also call the invalidation of each cache by invoking their functions. NO DIRECT INVALIDATION IS IMPLEMENTED WITHIN THIS FUNCTION. currently cache pruning will remove: guestfs appliance from cache folder, remove all VMs that are not in `running` state, remove images that do not have any reference from an active vm, remove kernels that do not have any reference from an active vm, remove networks that do not have any reference from an active vm. Each of these must have their own function such as cache_prune_networks() to only prune stale networks, etc...
 - the `mvm configure` command must be renamed to `mvm init`. and it must call `mvm host init` and `mvm cache init`, remove the user prompts to download image/kernel/keys. REMINDER, PROJECT IS UNDER ACTIVE DEVELOPMENT.
+
+# Implementation reviews
+
+- the constants.py file is the source of entire application's global configuration, this global configuration is looking into $MVM_CONFIG_DIR/config.json file, if the variable does not exist there, it resolves the defaults.yaml file! This is very critical to have because later the `mvm config set|get` will need to modify $MVM_CONFIG_DIR/config.json file to override these global configuration values.
+- The `mvm config set|get` must modify values coming from constants.py file! any constants defined in the constants.py file, their value can be override by using `mvm config set|get <config_key>` where <config_key> is the variable defined in constants.py but in lowercase. These overrides are done in $MVM_CONFIG_DIR/config.json
 
 # Debugging
 
