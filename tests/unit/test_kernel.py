@@ -570,7 +570,8 @@ def test_build_kernel_vmlinux_not_found(tmp_path: Path):
             build_kernel(kernel_dir, output_path, jobs=2)
 
 
-def test_build_kernel_pipeline_cached(tmp_path: Path):
+@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
+def test_build_kernel_pipeline_cached(mock_check_deps, tmp_path: Path):
     output_path = tmp_path / "vmlinux"
     output_path.write_bytes(b"cached-kernel")
 
@@ -592,7 +593,9 @@ def test_build_kernel_pipeline_cached(tmp_path: Path):
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
 @patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_ignores_cache_when_disabled(
+    mock_check_deps: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
     mock_configure: MagicMock,
@@ -637,7 +640,8 @@ def test_build_kernel_pipeline_ignores_cache_when_disabled(
     assert output_path.read_bytes() == b"rebuilt-kernel"
 
 
-def test_build_kernel_pipeline_download_fails(tmp_path: Path):
+@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
+def test_build_kernel_pipeline_download_fails(mock_check_deps, tmp_path: Path):
     output_path = tmp_path / "vmlinux"
     build_dir = tmp_path / "build"
     build_dir.mkdir()
@@ -657,8 +661,12 @@ def test_build_kernel_pipeline_download_fails(tmp_path: Path):
 
 @patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value=None)
 @patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value=None)
+@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_requires_checksum(
-    mock_fetch_sha256: MagicMock, mock_fetch_sha256_url: MagicMock, tmp_path: Path
+    mock_check_deps: MagicMock,
+    mock_fetch_sha256: MagicMock,
+    mock_fetch_sha256_url: MagicMock,
+    tmp_path: Path,
 ):
     from mvmctl.models.kernel import KernelSpec
 
@@ -694,7 +702,9 @@ def test_build_kernel_pipeline_requires_checksum(
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
 @patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_full_success(
+    mock_check_deps: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
     mock_configure: MagicMock,

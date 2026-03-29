@@ -148,3 +148,13 @@ def sample_key_info() -> KeyInfo:
         comment="testuser@testhost",
         added_at="2026-01-01T00:00:00+00:00",
     )
+
+
+@pytest.fixture(autouse=True)
+def _mock_kernel_build_dependencies(request):
+    if not request.node.name.startswith("test_build_kernel_pipeline"):
+        yield None
+        return
+
+    with patch("mvmctl.core.kernel.check_build_dependencies", return_value=[]):
+        yield
