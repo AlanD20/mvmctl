@@ -12,7 +12,6 @@ from mvmctl.constants import (
     DEFAULT_BOOT_REBOOT,
     DEFAULT_CLOUD_INIT_DRIVE_ID,
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD,
-    DEFAULT_LIBGUESTFS_SEED_DIR,
     DEFAULT_FC_DRIVE_CACHE_TYPE,
     DEFAULT_FC_DRIVE_IO_ENGINE,
     DEFAULT_FC_LOG_FILENAME,
@@ -20,6 +19,7 @@ from mvmctl.constants import (
     DEFAULT_FC_METRICS_FILENAME,
     DEFAULT_GUEST_MAC_DEFAULT,
     DEFAULT_GUEST_NETWORK_IFACE,
+    DEFAULT_LIBGUESTFS_SEED_DIR,
     DEFAULT_VM_ROOT_FS_TYPE,
 )
 from mvmctl.exceptions import ConfigError, MVMError
@@ -127,15 +127,11 @@ class ConfigGenerator:
             "metrics": json.dumps(self._build_metrics_config()),
         }
 
-        template_path = (
-            Path(__file__).parent.parent / "assets" / "firecracker.template.json"
-        )
+        template_path = Path(__file__).parent.parent / "assets" / "firecracker.template.json"
         try:
             template_str = template_path.read_text(encoding="utf-8")
         except OSError as exc:
-            raise MVMError(
-                f"Failed to load Firecracker config template: {template_path}"
-            ) from exc
+            raise MVMError(f"Failed to load Firecracker config template: {template_path}") from exc
 
         filled = template_str
         for key, value in context.items():
@@ -149,9 +145,7 @@ class ConfigGenerator:
         try:
             config: FirecrackerConfig = json.loads(filled)
         except json.JSONDecodeError as exc:
-            raise MVMError(
-                f"Generated Firecracker config is not valid JSON: {exc}"
-            ) from exc
+            raise MVMError(f"Generated Firecracker config is not valid JSON: {exc}") from exc
 
         return config
 
@@ -209,9 +203,7 @@ class ConfigGenerator:
         if not self.vm_config.enable_metrics:
             return None
         return {
-            "metrics_path": str(
-                get_vm_dir(self.vm_config.name) / DEFAULT_FC_METRICS_FILENAME
-            ),
+            "metrics_path": str(get_vm_dir(self.vm_config.name) / DEFAULT_FC_METRICS_FILENAME),
         }
 
     def _build_default_boot_args(self) -> str:
@@ -234,9 +226,7 @@ class ConfigGenerator:
         if self.vm_config.cloud_init_mode == CloudInitMode.NO_CLOUD_NET:
             # For nocloud-net, validate URL is configured
             if not self.vm_config.nocloud_net_url:
-                raise ConfigError(
-                    "nocloud_net_url must be set when using NO_CLOUD_NET mode"
-                )
+                raise ConfigError("nocloud_net_url must be set when using NO_CLOUD_NET mode")
             ds_arg = f"ds=nocloud;seedfrom={self.vm_config.nocloud_net_url}"
             # Mask systemd-networkd-wait-online to prevent 2+ minute boot delay
             # The kernel ip= parameter already configures the network; this service
@@ -258,9 +248,7 @@ class ConfigGenerator:
             mask_arg = ""
 
         root_arg = (
-            f"root=UUID={self.vm_config.root_uuid}"
-            if self.vm_config.root_uuid
-            else "root=/dev/vda"
+            f"root=UUID={self.vm_config.root_uuid}" if self.vm_config.root_uuid else "root=/dev/vda"
         )
 
         parts = [

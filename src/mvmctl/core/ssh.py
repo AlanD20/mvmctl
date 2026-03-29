@@ -9,7 +9,6 @@ from pathlib import Path
 from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY, DEFAULT_VM_SSH_USER
 from mvmctl.core.vm_manager import VMManager
 from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
-from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.validation import is_ip_address
 
 logger = logging.getLogger(__name__)

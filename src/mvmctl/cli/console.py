@@ -15,7 +15,6 @@ from mvmctl.api.vms import (
     connect_to_relay,
     disconnect_from_relay,
     get_vm_manager,
-    read_console_output,
     send_console_input,
 )
 from mvmctl.api.vms import (

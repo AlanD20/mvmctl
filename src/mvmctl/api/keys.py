@@ -5,15 +5,21 @@ from __future__ import annotations
 from mvmctl.core.key_manager import (
     KeyInfo,
     add_key,
-    clear_default_keys as _core_clear_default_keys,
     create_key,
     export_key,
-    get_default_keys as _core_get_default_keys,
     get_key,
     inspect_key,
     list_keys,
     remove_key,
     resolve_key_input,
+)
+from mvmctl.core.key_manager import (
+    clear_default_keys as _core_clear_default_keys,
+)
+from mvmctl.core.key_manager import (
+    get_default_keys as _core_get_default_keys,
+)
+from mvmctl.core.key_manager import (
     set_default_keys as _core_set_default_keys,
 )
 

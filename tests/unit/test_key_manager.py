@@ -54,7 +54,7 @@ def test_list_keys_with_entries(keys_dir):
             "public_key_path": str(keys_dir / "mykey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
     result = list_keys()
     assert len(result) == 1
     assert result[0].name == "mykey"
@@ -82,7 +82,7 @@ def test_get_key_found(keys_dir):
             "public_key_path": str(keys_dir / "mykey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
     result = get_key("mykey")
     assert result is not None
     assert result.name == "mykey"
@@ -208,7 +208,7 @@ def test_create_key_name_exists_in_registry(keys_dir, tmp_path):
             "public_key_path": str(keys_dir / "dupkey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
 
     output_dir = tmp_path / "ssh"
     output_dir.mkdir()
@@ -441,7 +441,7 @@ def test_export_key_success(keys_dir, tmp_path):
             "public_key_path": str(keys_dir / "exportkey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
     (keys_dir / "exportkey").write_text("PRIVATE KEY CONTENT")
     (keys_dir / "exportkey.pub").write_text(SAMPLE_PUB_KEY)
 
@@ -484,7 +484,7 @@ def test_export_key_missing_private(keys_dir, tmp_path):
             "public_key_path": str(keys_dir / "badkey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
     # Only create public key, not private
     (keys_dir / "badkey.pub").write_text(SAMPLE_PUB_KEY)
 
@@ -511,7 +511,7 @@ def test_export_key_missing_public(keys_dir, tmp_path):
             "public_key_path": str(keys_dir / "badkey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
     # Only create private key, not public
     (keys_dir / "badkey").write_text("PRIVATE KEY")
 
@@ -541,7 +541,7 @@ def test_export_key_default_to_ssh(keys_dir, tmp_path, monkeypatch):
             "public_key_path": str(keys_dir / "mykey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
     (keys_dir / "mykey").write_text("PRIVATE KEY")
     (keys_dir / "mykey.pub").write_text(SAMPLE_PUB_KEY)
 
@@ -567,7 +567,7 @@ def test_export_key_overwrite(keys_dir, tmp_path):
             "public_key_path": str(keys_dir / "oldkey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
     (keys_dir / "oldkey").write_text("NEW PRIVATE")
     (keys_dir / "oldkey.pub").write_text("NEW PUBLIC")
 
@@ -599,7 +599,7 @@ def test_export_key_no_overwrite_raises(keys_dir, tmp_path):
             "public_key_path": str(keys_dir / "existkey.pub"),
         }
     }
-    (keys_dir / "registry.json").write_text(json.dumps(registry))
+    _write_wrapped_registry(keys_dir, registry)
     (keys_dir / "existkey").write_text("PRIVATE")
     (keys_dir / "existkey.pub").write_text("PUBLIC")
 
@@ -655,11 +655,13 @@ def test_load_registry_handles_legacy_flat(keys_dir):
     _write_legacy_registry(keys_dir, {"alice": SAMPLE_KEY_ENTRY})
     from mvmctl.core.key_manager import _load_registry
 
+    # Legacy flat registries are no longer supported and are treated as corrupt/reset.
     registry = _load_registry()
     assert "keys" in registry
     assert "defaults" in registry
     assert "ssh" in registry["defaults"]
-    assert "alice" in registry["keys"]
+    # Legacy entries should NOT be migrated; registry should be empty
+    assert registry["keys"] == {}
     assert registry["defaults"]["ssh"] == []
 
 
