@@ -9,6 +9,7 @@ from mvmctl.constants import env_var
 
 
 class TestConsoleWorkflow:
+    @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
     @patch("mvmctl.core.vm_lifecycle.os.openpty")
     @patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
@@ -57,6 +58,7 @@ class TestConsoleWorkflow:
         mock_secure_mkdir,
         mock_openpty,
         mock_fc_popen,
+        mock_copy2,
         tmp_path: Path,
     ):
         from mvmctl.core.vm_lifecycle import create_vm
@@ -65,6 +67,9 @@ class TestConsoleWorkflow:
         mock_run_result = MagicMock()
         mock_run_result.returncode = 0
         mock_subprocess_run.return_value = mock_run_result
+
+        # Patch shutil.copy2 to avoid MagicMock path objects reaching real copy2
+        mock_copy2.return_value = None
 
         # Setup proper VM directory path (real Path, not mock)
         vm_dir = tmp_path / "testvm"
@@ -131,6 +136,7 @@ class TestConsoleWorkflow:
         # Verify console relay manager was called to start relay
         assert mock_console_instance.start_relay.call_count == 1
 
+    @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
     @patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
     @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
@@ -173,6 +179,7 @@ class TestConsoleWorkflow:
         mock_get_vm_mgr,
         mock_secure_mkdir,
         mock_popen,
+        mock_copy2,
         tmp_path: Path,
     ):
         from mvmctl.core.vm_lifecycle import create_vm
@@ -181,6 +188,9 @@ class TestConsoleWorkflow:
         mock_run_result = MagicMock()
         mock_run_result.returncode = 0
         mock_subprocess_run.return_value = mock_run_result
+
+        # Patch shutil.copy2 to avoid MagicMock path objects reaching real copy2
+        mock_copy2.return_value = None
 
         # Setup proper VM directory path (real Path, not mock)
         vm_dir = tmp_path / "testvm"
