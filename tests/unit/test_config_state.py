@@ -171,15 +171,18 @@ def test_get_assets_config_no_temp_build_dirs(cache_dir: Path) -> None:
 
 def test_get_assets_config_cache_dirs_under_cache(cache_dir: Path) -> None:
     assets = get_assets_config()
+    # keys_dir is expected to be under the config dir (user-managed keys),
+    # while the other asset dirs live under the cache dir.
     for key in (
         "kernels_dir",
         "images_dir",
         "bin_dir",
         "vms_dir",
-        "keys_dir",
         "logs_dir",
     ):
         assert assets[key].startswith(str(cache_dir)), f"{key} not under cache dir"
+    # keys_dir should be derived from config_dir
+    assert assets["keys_dir"].startswith(str(get_config_dir()))
 
 
 def test_get_assets_config_persisted_as_nested_key(config_dir: Path) -> None:
