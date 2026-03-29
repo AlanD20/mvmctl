@@ -1,3 +1,10 @@
+from pathlib import Path
+import signal
+from unittest.mock import MagicMock, patch
+
+from mvmctl.constants import env_var
+from mvmctl.models import VMInstance
+
 """Integration tests for console workflow."""
 
 from pathlib import Path
