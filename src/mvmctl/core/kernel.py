@@ -20,6 +20,7 @@ import yaml
 
 from mvmctl.constants import (
     CONST_FILE_PERMS_EXECUTABLE,
+    CONST_HTTP_TIMEOUT_SECONDS,
     CONST_MEBIBYTE_BYTES,
     DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_KERNEL_BUILD_JOBS,
@@ -42,7 +43,7 @@ from mvmctl.core.metadata import (
 from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
 from mvmctl.models.kernel import KernelSpec
 from mvmctl.utils.fs import get_cache_dir
-from mvmctl.utils.http import download_file
+from mvmctl.utils.progress import download_with_progress
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
     optional_int,
@@ -51,6 +52,36 @@ from mvmctl.utils.yaml import (
     require_str,
     require_str_list,
 )
+
+
+# Compatibility wrapper: download_file now uses download_with_progress internally
+# This allows tests that patch download_file to still work
+def download_file(
+    url: str,
+    dest: Path,
+    expected_sha256: str | None = None,
+    show_progress: bool = True,
+    timeout: int = CONST_HTTP_TIMEOUT_SECONDS,
+    allow_missing_checksum: bool = False,
+    resume: bool = False,
+    silent_missing_checksum: bool = False,
+    title: str = "Downloading",
+) -> bool:
+    """Download file wrapper that delegates to download_with_progress.
+
+    This maintains compatibility with the old download_file signature
+    while using the new progress-based implementation.
+    """
+    return download_with_progress(
+        url=url,
+        dest=dest,
+        title=title,
+        expected_sha256=expected_sha256,
+        timeout=timeout,
+        allow_missing_checksum=allow_missing_checksum,
+        silent_missing_checksum=silent_missing_checksum,
+    )
+
 
 logger = logging.getLogger(__name__)
 
@@ -929,12 +960,12 @@ def build_kernel_pipeline(
 
     try:
         if not tarball.exists():
-            download_kernel_source(
+            download_file(
                 resolved_source_url,
                 tarball,
-                sha256,
-                allow_missing_checksum=intentional_no_checksum,
-                silent_missing_checksum=intentional_no_checksum,
+                title="Downloading kernel source",
+                expected_sha256=sha256,
+                timeout=HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
             )
         else:
             logger.info("Using cached tarball: %s", tarball)
@@ -1036,17 +1067,17 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
     cache_dir = get_cache_dir()
 
-    entries = list_kernel_entries(cache_dir, kernels_dir)
+    entries = list_kernel_entries(cache_dir, kernels_dir, include_missing=True)
 
     results: list[dict[str, str]] = []
 
     for entry_id, meta in sorted(entries.items()):
         filename = str(meta.get("filename", entry_id))
         path = kernels_dir / filename
-        if not path.is_file():
-            continue
+        # Include entries even if file is missing - CLI will show X mark
+        file_exists = path.is_file()
 
-        size_mb = path.stat().st_size / CONST_MEBIBYTE_BYTES
+        size_mb = path.stat().st_size / CONST_MEBIBYTE_BYTES if file_exists else 0
 
         last_modified = meta.get("last_modified")
         if not last_modified:
@@ -1064,12 +1095,14 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
             arch = parsed.arch
             kernel_type = KERNEL_TYPE_UNKNOWN
 
-        is_default_flag = "true" if str(meta.get("is_default", 0)) == "1" else "false"
+        is_default_val = meta.get("is_default", 0)
+        is_default_flag = "true" if str(is_default_val) in ("1", "true") else "false"
 
         results.append(
             {
                 "id": entry_id[:6],
                 "name": base_name,
+                "filename": filename,
                 "full_name": filename,
                 "version": version,
                 "type": kernel_type,
@@ -1195,10 +1228,11 @@ def download_firecracker_kernel(
         download_file(
             download_url,
             resolved_output_path,
+            title=f"Downloading kernel {ci_version}",
             expected_sha256=expected_sha256,
             timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
-            allow_missing_checksum=intentional_no_checksum,
-            silent_missing_checksum=intentional_no_checksum,
+            allow_missing_checksum=True,
+            silent_missing_checksum=True,
         )
     except MVMError as exc:
         raise KernelError(f"Failed to download Firecracker CI kernel: {exc}") from exc

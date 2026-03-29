@@ -14,7 +14,6 @@ from mvmctl.api.assets import (
     download_firecracker_kernel,
     fetch_binary,
     fetch_image,
-    get_filesystem_uuid,
     human_readable_time,
     import_image,
     list_kernels,
@@ -38,6 +37,7 @@ from mvmctl.api.metadata import (
     set_default_image_entry,
     update_image_entry,
 )
+from mvmctl.cli._helpers import get_state_marker, is_file_missing
 from mvmctl.constants import (
     DEFAULT_FC_CI_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
@@ -66,7 +66,12 @@ from mvmctl.utils.console import (
     print_table,
     print_warning,
 )
-from mvmctl.utils.fs import get_assets_dir, get_cache_dir, get_images_dir, get_kernels_dir
+from mvmctl.utils.fs import (
+    get_assets_dir,
+    get_cache_dir,
+    get_images_dir,
+    get_kernels_dir,
+)
 from mvmctl.utils.short_id import resolve_single_by_short_id
 
 
@@ -79,6 +84,25 @@ def _format_size_human_readable(size_sectors: int) -> str:
     if size_mib >= 1024:
         return f"{size_mib / 1024:.1f} GiB"
     return f"{size_mib:.1f} MiB"
+
+
+def _format_bytes_human_readable(size_bytes: int) -> str:
+    """Format bytes to human readable string using binary units.
+
+    Args:
+        size_bytes: Size in bytes
+
+    Returns:
+        Formatted string like "4.2 MiB", "1.5 GiB", "512 KiB"
+    """
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    size_float = float(size_bytes)
+    for unit in ["KiB", "MiB", "GiB"]:
+        size_float /= 1024
+        if size_float < 1024:
+            return f"{size_float:.1f} {unit}"
+    return f"{size_float:.1f} TiB"
 
 
 def _prompt_for_partition_selection(
@@ -214,23 +238,29 @@ def kernel_ls(
 
     rows: list[list[str]] = []
     for k in kernels:
-        default_marker = "✓" if k.get("is_default") == "true" else " "
+        is_default = k.get("is_default") == "true"
+        display_id = f"* {k.get('id', '')}" if is_default else k.get("id", "")
         last_modified_display = human_readable_time(k.get("last_modified", "-"))
+        filename = k.get("filename", "")
+        path = kernels_dir / filename if filename else None
+        state_marker = get_state_marker(is_file_missing(path))
+        size = path.stat().st_size if path and path.exists() else 0
+        size_str = _format_bytes_human_readable(size) if size > 0 else "-"
         rows.append(
             [
-                default_marker,
-                k.get("id", ""),
+                state_marker,
+                display_id,
                 k.get("name", "-"),
                 k.get("version", ""),
                 k.get("arch", "-"),
                 k.get("type", ""),
                 last_modified_display,
-                k.get("size", "-"),
+                size_str,
             ]
         )
     print_table(
         title="Downloaded Kernels",
-        columns=["Def", "ID", "Name", "Version", "Arch", "Type", "Last Modified", "Size"],
+        columns=["State", "ID", "Name", "Version", "Arch", "Type", "Last Modified", "Size"],
         rows=rows,
     )
 
@@ -338,10 +368,8 @@ def kernel_fetch(
         print_success(f"Firecracker kernel ready: {result}")
 
     elif spec.kernel_type == KERNEL_TYPE_OFFICIAL:
-        import platform
-
         effective_version = spec.version or DEFAULT_KERNEL_VERSION
-        effective_arch = arch if arch != DEFAULT_FC_KERNEL_ARCH else platform.machine() or "x86_64"
+        effective_arch = arch or DEFAULT_FC_KERNEL_ARCH
         output_path = (
             out
             if out is not None
@@ -436,7 +464,6 @@ def kernel_rm(
         None, help="Kernel short IDs (6 chars) to remove"
     ),
     kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove cached kernels by short ID.
 
@@ -477,10 +504,6 @@ def kernel_rm(
             exit_code = 1
             continue
 
-        display_name = str(meta.get("name", filename))
-        if not force:
-            typer.confirm(f"Remove kernel '{display_name}' ({short_id})?", abort=True)
-
         path.unlink()
 
         version = str(meta.get("version", ""))
@@ -503,15 +526,25 @@ def _load_image_meta(images_dir: Path, image_id: str) -> dict[str, str]:
 
 
 def _save_image_meta(
-    images_dir: Path, image_id: str, image_path: Path, meta: dict[str, str]
+    images_dir: Path,
+    image_id: str,
+    image_path: Path,
+    meta: dict[str, str],
+    fs_type: str | None = None,
+    fs_uuid: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
 
     cache_dir = get_cache_dir()
     fields: dict[str, object] = dict(meta)
     fields.setdefault("pulled_at", datetime.now(tz=timezone.utc).isoformat())
-    fields.setdefault("fs_type", image_path.suffix.lstrip(".") if image_path.suffix else "unknown")
-    fs_uuid = get_filesystem_uuid(image_path)
+    # Use detected fs_type if provided, otherwise fall back to extension
+    if fs_type:
+        fields.setdefault("fs_type", fs_type)
+    else:
+        fields.setdefault(
+            "fs_type", image_path.suffix.lstrip(".") if image_path.suffix else "unknown"
+        )
     if fs_uuid:
         fields.setdefault("fs_uuid", fs_uuid)
     update_image_entry(cache_dir, image_id, **fields)
@@ -549,7 +582,10 @@ def image_ls(
                 None,
             )
             downloaded = "✓" if found_path else " "
-            rows.append([downloaded, img.id, img.name, img.convert_to])
+            state_marker = get_state_marker(is_file_missing(found_path))
+            size = found_path.stat().st_size if found_path else 0
+            size_str = _format_bytes_human_readable(size) if size > 0 else "-"
+            rows.append([state_marker, downloaded, img.id, img.name, img.convert_to, size_str])
         if json_output:
             typer.echo(
                 json.dumps(
@@ -568,7 +604,7 @@ def image_ls(
         else:
             print_table(
                 title="Available Images (Remote)",
-                columns=["Downloaded", "Image ID", "Name", "FS Type"],
+                columns=["State", "Downloaded", "Image ID", "Name", "FS Type", "Size"],
                 rows=rows,
             )
         return
@@ -576,7 +612,7 @@ def image_ls(
     default_img = _get_default_image()
     yaml_ids = {img.id for img in images}
 
-    _all_meta = list_image_entries(get_cache_dir())
+    _all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
 
     def _find_meta_for_internal_id(internal_id: str) -> tuple[str, dict[str, object]] | None:
         for _k, _v in _all_meta.items():
@@ -631,9 +667,13 @@ def image_ls(
             ),
             None,
         )
-        if found_path is None:
-            continue
-        entry = _find_meta_for_internal_id(img.id)
+        # Check metadata first - show metadata-only entries even if file missing
+        entry = _find_meta_for_internal_id(img.id) if found_path is None else None
+        if found_path is None and entry is None:
+            continue  # No file and no metadata - skip entirely
+        # If file missing but metadata exists, we will show it with X marker below
+        if entry is None:
+            entry = _find_meta_for_internal_id(img.id)
         if entry:
             meta_key, meta = entry
             display_id = meta_key[:6]
@@ -642,13 +682,20 @@ def image_ls(
                 if meta.get("pulled_at")
                 else "-"
             )
-            fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
+            fs_type = str(
+                meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
+            )
         else:
             display_id = "-"
             added = "-"
-            fs_type = found_path.suffix.lstrip(".")
-        default_marker = "✓" if img.id == default_img else " "
-        rows_local.append([default_marker, display_id, img.name, fs_type, added])
+            fs_type = found_path.suffix.lstrip(".") if found_path else "unknown"
+        is_default = img.id == default_img
+        if is_default and display_id != "-":
+            display_id = f"* {display_id}"
+        state_marker = get_state_marker(is_file_missing(found_path))
+        size = found_path.stat().st_size if found_path and found_path.exists() else 0
+        size_str = _format_bytes_human_readable(size) if size > 0 else "-"
+        rows_local.append([state_marker, display_id, img.name, fs_type, added, size_str])
 
     for meta_id, meta in _all_meta.items():
         if str(meta.get("internal_id", meta_id)) in yaml_ids:
@@ -665,23 +712,29 @@ def image_ls(
             filename = str(meta.get("filename", ""))
             if filename:
                 found_path = images_dir / filename
-        if found_path is None or not found_path.exists():
-            continue
+        # Include entries even if file is missing - show X mark
         added = (
             human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
         )
-        fs_type = str(meta.get("fs_type", found_path.suffix.lstrip(".")))
+        fs_type = str(
+            meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
+        )
         os_name = str(meta.get("os_name", meta_id))
-        default_marker = "✓" if meta_id == default_img else " "
+        is_default = meta_id == default_img
         display_id = meta_id[:6] if len(meta_id) >= 6 else meta_id
-        rows_local.append([default_marker, display_id, os_name, fs_type, added])
+        if is_default:
+            display_id = f"* {display_id}"
+        state_marker = get_state_marker(is_file_missing(found_path))
+        size = found_path.stat().st_size if found_path and found_path.exists() else 0
+        size_str = _format_bytes_human_readable(size) if size > 0 else "-"
+        rows_local.append([state_marker, display_id, os_name, fs_type, added, size_str])
 
     if not rows_local:
         print_info("No images downloaded. Use 'mvm image fetch <id>' to download one.")
         return
     print_table(
         title="Downloaded Images",
-        columns=["Def", "ID", "OS Name", "FS Type", "Added"],
+        columns=["State", "ID", "OS Name", "FS Type", "Added", "Size"],
         rows=rows_local,
     )
 
@@ -817,27 +870,32 @@ def image_fetch(
         import hashlib
         import time
 
+        result_path = result.path
+        result_fs_type = result.fs_type
+        result_fs_uuid = result.fs_uuid
+
         try:
-            file_bytes = result.read_bytes()
+            file_bytes = result_path.read_bytes()
             file_hash = hashlib.sha256(file_bytes).hexdigest()
         except OSError:
-            file_hash = hashlib.sha256(str(result).encode()).hexdigest()
+            file_hash = hashlib.sha256(str(result_path).encode()).hexdigest()
         timestamp = str(time.time())
         full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()
 
         _save_image_meta(
             out,
             full_id,
-            result,
+            result_path,
             {
                 "os_name": spec.name,
                 "internal_id": spec.id,
-                "fs_type": result.suffix.lstrip("."),
                 "full_hash": full_id,
-                "filename": result.name,
+                "filename": result_path.name,
             },
+            fs_type=result_fs_type,
+            fs_uuid=result_fs_uuid,
         )
-        print_success(f"Image ready: {result}")
+        print_success(f"Image ready: {result_path}")
         print_info(f"  ID: {full_id[:6]}")
         if set_default:
             set_default_image_by_internal_id(get_cache_dir(), spec.id)
@@ -885,7 +943,6 @@ def image_rm(
         None, help="Image short IDs (6 chars) to remove"
     ),
     images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove cached images by short ID.
 
@@ -937,12 +994,6 @@ def image_rm(
             remove_image_entry(cache_dir, full_key)
             exit_code = 1
             continue
-
-        if not force:
-            typer.confirm(
-                f"Remove image '{meta.get('os_name', short_id)}' ({short_id})? [{len(files_to_remove)} file(s)]",
-                abort=True,
-            )
 
         for path in files_to_remove:
             if path.is_dir():
@@ -1066,18 +1117,23 @@ def image_import(
         print_error(str(exc))
         raise typer.Exit(code=1)
 
+    result_path = result.path
+    result_fs_type = result.fs_type
+    result_fs_uuid = result.fs_uuid
+
     _save_image_meta(
         images_dir,
         image_id,
-        result,
+        result_path,
         {
             "os_name": name,
-            "fs_type": result.suffix.lstrip("."),
             "full_hash": full_id_hash,
-            "filename": result.name,
+            "filename": result_path.name,
         },
+        fs_type=result_fs_type,
+        fs_uuid=result_fs_uuid,
     )
-    print_success(f"Image imported: {result}")
+    print_success(f"Image imported: {result_path}")
     print_info(f"  Name: {name}")
     print_info(f"  ID:   {short_id}")
 
@@ -1088,9 +1144,11 @@ def image_import(
     raise typer.Exit(code=0)
 
 
-def _format_bin_row(bv: BinaryVersion) -> list[str]:
-    active = "✓" if bv.is_active else " "
-    return [active, bv.version, str(bv.firecracker_path)]
+def _format_bin_row(bv: BinaryVersion, is_missing: bool = False) -> list[str]:
+    version_prefix = "* " if bv.is_active else ""
+    version = f"{version_prefix}{bv.version}"
+    state_marker = "X " if is_missing else "  "
+    return [state_marker, version, str(bv.firecracker_path)]
 
 
 @bin_app.command(name="ls")
@@ -1102,8 +1160,24 @@ def bin_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List local (and optionally remote) Firecracker versions."""
+    from mvmctl.api.metadata import list_binary_entries
+
     local = list_local_versions()
     local_versions = {bv.version for bv in local}
+
+    # Also check metadata for binaries with missing files
+    binary_meta = list_binary_entries(get_cache_dir())
+    missing_binaries: list[tuple[str, Path]] = []
+
+    for name, entry in binary_meta.items():
+        binary_path = entry.get("binary_path", "")
+        if binary_path:
+            path = Path(binary_path)
+            if not path.exists():
+                # Extract version from path or entry
+                version = entry.get("full_version", "").lstrip("v")
+                if version and version not in local_versions:
+                    missing_binaries.append((version, path))
 
     if json_output:
         import json
@@ -1113,17 +1187,50 @@ def bin_ls(
                 "active": bv.is_active,
                 "version": bv.version,
                 "path": str(bv.firecracker_path) if bv.firecracker_path else "",
+                "missing": False,
             }
             for bv in local
         ]
+        # Add missing binaries
+        for version, path in missing_binaries:
+            data.append(
+                {
+                    "active": False,
+                    "version": version,
+                    "path": str(path),
+                    "missing": True,
+                }
+            )
         print(json.dumps(data, indent=2))
         return
 
-    if local:
-        rows = [_format_bin_row(bv) for bv in local]
-        print_table(title="Local Binaries", columns=["Active", "Version", "Path"], rows=rows)
+    if local or missing_binaries:
+        rows = [_format_bin_row(bv, is_missing=False) for bv in local]
+        # Add missing binaries with X mark
+        for version, path in missing_binaries:
+            rows.append(["X ", version, str(path)])
+        print_table(title="Local Binaries", columns=["State", "Version", "Path"], rows=rows)
     else:
-        print_warning("No local binaries found")
+        # Check if there are any binaries in metadata with existing files
+        # that might not be in the standard bin directory
+        meta_rows: list[list[str]] = []
+        found_in_meta = False
+        for name, entry in binary_meta.items():
+            binary_path = entry.get("binary_path", "")
+            if binary_path:
+                path = Path(binary_path)
+                if path.exists():
+                    found_in_meta = True
+                    version = entry.get("full_version", "").lstrip("v")
+                    is_default = entry.get("is_default") == 1
+                    version_str = f"* {version}" if is_default else version
+                    meta_rows.append(["  ", version_str, str(path)])
+        if found_in_meta:
+            print_table(
+                title="Local Binaries", columns=["State", "Version", "Path"], rows=meta_rows
+            )
+        else:
+            print_warning("No local binaries found")
 
     if remote:
         try:
@@ -1170,7 +1277,6 @@ def bin_set_default(
 @bin_app.command(name="rm")
 def bin_rm(
     versions: Optional[List[str]] = typer.Argument(None, help="Version(s) to remove"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove one or more cached Firecracker versions."""
     effective_versions: list[str] = list(versions) if versions else []
@@ -1180,8 +1286,6 @@ def bin_rm(
 
     exit_code = 0
     for version in effective_versions:
-        if not force:
-            typer.confirm(f"Remove Firecracker v{version}?", abort=True)
         try:
             remove_version(version)
             print_success(f"Removed v{version}")

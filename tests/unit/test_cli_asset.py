@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.asset import kernel_app
 from mvmctl.core.binary_manager import BinaryVersion
+from mvmctl.core.image import ImageImportResult
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, KernelError
 from mvmctl.main import app as main_app
 from mvmctl.models.image import ImageSpec
@@ -575,7 +576,7 @@ def test_kernel_rm_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _write_kernel_meta(tmp_path, full_hash, kernel.name)
     result = click_runner.invoke(
         main_app,
-        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path), "--force"],
+        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path)],
     )
     assert result.exit_code == 0
     assert "Removed" in result.output
@@ -586,39 +587,9 @@ def test_kernel_rm_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path / "cache"))
     result = click_runner.invoke(
         main_app,
-        ["kernel", "rm", "abcdef", "--kernels-dir", str(tmp_path), "--force"],
+        ["kernel", "rm", "abcdef", "--kernels-dir", str(tmp_path)],
     )
     assert result.exit_code == 1
-
-
-def test_kernel_rm_with_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    full_hash = "b" * 64
-    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
-    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
-    _write_kernel_meta(tmp_path, full_hash, kernel.name)
-    result = click_runner.invoke(
-        main_app,
-        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path)],
-        input="y\n",
-    )
-    assert result.exit_code == 0
-    assert not kernel.exists()
-
-
-def test_kernel_rm_abort_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path / "cache"))
-    full_hash = "c" * 64
-    kernel = tmp_path / "vmlinux-fc-6.1.9-x86_64"
-    kernel.write_bytes(b"\x7fELF" + b"\x00" * 1024)
-    _write_kernel_meta(tmp_path, full_hash, kernel.name)
-    result = click_runner.invoke(
-        main_app,
-        ["kernel", "rm", full_hash[:6], "--kernels-dir", str(tmp_path)],
-        input="n\n",
-    )
-    assert result.exit_code != 0
-    assert kernel.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -672,10 +643,20 @@ def test_image_ls_shows_cached_marker(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+@patch("pathlib.Path.read_bytes", return_value=b"mocked")
+@patch("mvmctl.cli.asset._save_image_meta")
 @patch("mvmctl.cli.asset.fetch_image")
 @patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
-def test_image_fetch_success(mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path):
-    mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
+def test_image_fetch_success(
+    mock_config: MagicMock,
+    mock_fetch: MagicMock,
+    mock_save_meta: MagicMock,
+    mock_read_bytes: MagicMock,
+    tmp_path: Path,
+):
+    mock_fetch.return_value = ImageImportResult(
+        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    )
     result = click_runner.invoke(
         main_app, ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path)]
     )
@@ -690,10 +671,16 @@ def test_image_fetch_not_found(mock_config: MagicMock):
     assert result.exit_code == 1
 
 
+@patch("pathlib.Path.read_bytes", return_value=b"mocked")
+@patch("mvmctl.cli.asset._save_image_meta")
 @patch("mvmctl.cli.asset.fetch_image")
 @patch("mvmctl.cli.asset.load_images_config")
 def test_image_fetch_by_type_and_version(
-    mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path
+    mock_config: MagicMock,
+    mock_fetch: MagicMock,
+    mock_save_meta: MagicMock,
+    mock_read_bytes: MagicMock,
+    tmp_path: Path,
 ):
     mock_config.return_value = [
         ImageSpec(
@@ -719,7 +706,9 @@ def test_image_fetch_by_type_and_version(
             sha256=None,
         ),
     ]
-    mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
+    mock_fetch.return_value = ImageImportResult(
+        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    )
 
     result = click_runner.invoke(
         main_app,
@@ -762,10 +751,16 @@ def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
     assert "Provide --version" in result.output
 
 
+@patch("pathlib.Path.read_bytes", return_value=b"mocked")
+@patch("mvmctl.cli.asset._save_image_meta")
 @patch("mvmctl.cli.asset.fetch_image")
 @patch("mvmctl.cli.asset.load_images_config")
 def test_image_fetch_with_type_option(
-    mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path
+    mock_config: MagicMock,
+    mock_fetch: MagicMock,
+    mock_save_meta: MagicMock,
+    mock_read_bytes: MagicMock,
+    tmp_path: Path,
 ):
     mock_config.return_value = [
         ImageSpec(
@@ -780,7 +775,9 @@ def test_image_fetch_with_type_option(
             sha256=None,
         )
     ]
-    mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
+    mock_fetch.return_value = ImageImportResult(
+        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    )
 
     result = click_runner.invoke(
         main_app,
@@ -808,10 +805,20 @@ def test_image_fetch_failure(mock_config: MagicMock, mock_fetch: MagicMock, tmp_
     assert result.exit_code == 1
 
 
+@patch("pathlib.Path.read_bytes", return_value=b"mocked")
+@patch("mvmctl.cli.asset._save_image_meta")
 @patch("mvmctl.cli.asset.fetch_image")
 @patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
-def test_image_fetch_with_force(mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path):
-    mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
+def test_image_fetch_with_force(
+    mock_config: MagicMock,
+    mock_fetch: MagicMock,
+    mock_save_meta: MagicMock,
+    mock_read_bytes: MagicMock,
+    tmp_path: Path,
+):
+    mock_fetch.return_value = ImageImportResult(
+        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    )
     result = click_runner.invoke(
         main_app,
         ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path), "--force"],
@@ -826,11 +833,9 @@ def test_image_fetch_with_force(mock_config: MagicMock, mock_fetch: MagicMock, t
 
 
 @patch("mvmctl.cli.asset.fetch_image")
-@patch("mvmctl.cli.asset.get_filesystem_uuid", return_value="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 @patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_saves_fs_uuid_in_metadata(
     mock_config: MagicMock,
-    mock_get_uuid: MagicMock,
     mock_fetch: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -841,7 +846,10 @@ def test_image_fetch_saves_fs_uuid_in_metadata(
     image_path = tmp_path / "images" / "ubuntu-24.04.ext4"
     image_path.parent.mkdir(parents=True, exist_ok=True)
     image_path.write_bytes(b"image")
-    mock_fetch.return_value = image_path
+    # fs_uuid is now returned in ImageImportResult from core layer
+    mock_fetch.return_value = ImageImportResult(
+        path=image_path, fs_type="ext4", fs_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    )
 
     result = click_runner.invoke(
         main_app,
@@ -857,9 +865,7 @@ def test_image_fetch_saves_fs_uuid_in_metadata(
 
 
 @patch("mvmctl.cli.asset.import_image")
-@patch("mvmctl.cli.asset.get_filesystem_uuid", return_value="ffffffff-1111-2222-3333-444444444444")
 def test_image_import_saves_fs_uuid_in_metadata(
-    mock_get_uuid: MagicMock,
     mock_import: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -872,7 +878,10 @@ def test_image_import_saves_fs_uuid_in_metadata(
     imported = tmp_path / "images" / "imported.ext4"
     imported.parent.mkdir(parents=True, exist_ok=True)
     imported.write_bytes(b"image")
-    mock_import.return_value = imported
+    # fs_uuid is now returned in ImageImportResult from core layer
+    mock_import.return_value = ImageImportResult(
+        path=imported, fs_type="ext4", fs_uuid="ffffffff-1111-2222-3333-444444444444"
+    )
 
     result = click_runner.invoke(
         main_app,
@@ -929,7 +938,7 @@ def test_image_rm_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _write_image_meta(tmp_path, full_hash, img_file.name)
     result = click_runner.invoke(
         main_app,
-        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images"), "--force"],
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images")],
     )
     assert result.exit_code == 0
     assert "Removed" in result.output
@@ -940,28 +949,13 @@ def test_image_rm_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     result = click_runner.invoke(
         main_app,
-        ["image", "rm", "abcdef", "--images-dir", str(tmp_path), "--force"],
+        ["image", "rm", "abcdef", "--images-dir", str(tmp_path)],
     )
     assert result.exit_code == 1
 
 
-def test_image_rm_with_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    full_hash = "b" * 64
-    (tmp_path / "images").mkdir(exist_ok=True)
-    img_file = tmp_path / "images" / f"{full_hash}.ext4"
-    img_file.write_text("fake")
-    _write_image_meta(tmp_path, full_hash, img_file.name)
-    result = click_runner.invoke(
-        main_app,
-        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images")],
-        input="y\n",
-    )
-    assert result.exit_code == 0
-    assert not img_file.exists()
-
-
-def test_image_rm_abort_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_image_rm_proceeds_without_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test that image rm proceeds without confirmation prompt."""
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "c" * 64
     (tmp_path / "images").mkdir(exist_ok=True)
@@ -971,13 +965,13 @@ def test_image_rm_abort_confirmation(tmp_path: Path, monkeypatch: pytest.MonkeyP
     result = click_runner.invoke(
         main_app,
         ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path / "images")],
-        input="n\n",
     )
-    assert result.exit_code != 0
-    assert img_file.exists()
+    assert result.exit_code == 0
+    assert not img_file.exists()
 
 
 def test_image_rm_multiple_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test that image rm removes multiple images without confirmation."""
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     (tmp_path / "images").mkdir(exist_ok=True)
     hashes = ["d" * 64, "e" * 64]
@@ -994,7 +988,6 @@ def test_image_rm_multiple_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             hashes[1][:6],
             "--images-dir",
             str(tmp_path / "images"),
-            "--force",
         ],
     )
     assert result.exit_code == 0
@@ -1122,7 +1115,7 @@ def test_bin_set_default_not_found():
 
 def test_bin_rm_success():
     with patch("mvmctl.cli.asset.remove_version") as mock_rm:
-        result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0", "--force"])
+        result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0"])
     assert result.exit_code == 0
     assert "Removed" in result.output
     mock_rm.assert_called_once_with("1.5.0")
@@ -1133,22 +1126,16 @@ def test_bin_rm_not_found():
         "mvmctl.cli.asset.remove_version",
         side_effect=AssetNotFoundError("not found"),
     ):
-        result = click_runner.invoke(main_app, ["bin", "rm", "9.9.9", "--force"])
+        result = click_runner.invoke(main_app, ["bin", "rm", "9.9.9"])
     assert result.exit_code == 1
 
 
-def test_bin_rm_with_confirmation():
+def test_bin_rm_proceeds_without_confirmation():
+    """Test that bin rm proceeds without confirmation prompt."""
     with patch("mvmctl.cli.asset.remove_version") as mock_rm:
-        result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0"], input="y\n")
+        result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0"])
     assert result.exit_code == 0
-    mock_rm.assert_called_once()
-
-
-def test_bin_rm_abort_confirmation():
-    with patch("mvmctl.cli.asset.remove_version") as mock_rm:
-        result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0"], input="n\n")
-    assert result.exit_code != 0
-    mock_rm.assert_not_called()
+    mock_rm.assert_called_once_with("1.5.0")
 
 
 # ---------------------------------------------------------------------------
@@ -1312,7 +1299,9 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     ]
     # Pre-create existing image file
     (tmp_path / "ubuntu-24.04.ext4").touch()
-    mock_fetch.return_value = tmp_path / "ubuntu-24.04.ext4"
+    mock_fetch.return_value = ImageImportResult(
+        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    )
 
     # User says NO to re-download
     result = _ClickRunner().invoke(
@@ -1326,13 +1315,13 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
 
 def test_bin_rm_multiple_versions():
     with patch("mvmctl.cli.asset.remove_version") as mock_rm:
-        result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0", "1.6.0", "--force"])
+        result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0", "1.6.0"])
     assert result.exit_code == 0
     assert mock_rm.call_count == 2
 
 
 def test_bin_rm_no_args():
-    result = click_runner.invoke(main_app, ["bin", "rm", "--force"])
+    result = click_runner.invoke(main_app, ["bin", "rm"])
     assert result.exit_code == 1
 
 
@@ -1345,7 +1334,7 @@ def test_kernel_rm_multiple(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _write_kernel_meta(tmp_path, hash_b, "vmlinux-fc-6.1.102-x86_64", version="6.1.102")
     result = runner.invoke(
         kernel_app,
-        ["rm", hash_a[:6], hash_b[:6], "--kernels-dir", str(tmp_path), "--force"],
+        ["rm", hash_a[:6], hash_b[:6], "--kernels-dir", str(tmp_path)],
     )
     assert result.exit_code == 0
     assert not (tmp_path / "vmlinux-official-6.19.9-x86_64").exists()
@@ -1353,15 +1342,13 @@ def test_kernel_rm_multiple(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_kernel_rm_no_args(tmp_path: Path):
-    result = runner.invoke(kernel_app, ["rm", "--kernels-dir", str(tmp_path), "--force"])
+    result = runner.invoke(kernel_app, ["rm", "--kernels-dir", str(tmp_path)])
     assert result.exit_code == 1
 
 
 def test_image_rm_no_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    result = click_runner.invoke(
-        main_app, ["image", "rm", "--images-dir", str(tmp_path), "--force"]
-    )
+    result = click_runner.invoke(main_app, ["image", "rm", "--images-dir", str(tmp_path)])
     assert result.exit_code == 1
 
 
@@ -1392,7 +1379,7 @@ def test_image_rm_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for key in meta["images"]:
         (tmp_path / "images" / f"{key}.ext4").write_text("fake")
     result = click_runner.invoke(
-        main_app, ["image", "rm", "f", "--images-dir", str(tmp_path / "images"), "--force"]
+        main_app, ["image", "rm", "f", "--images-dir", str(tmp_path / "images")]
     )
     assert result.exit_code == 1
     assert (
@@ -1408,7 +1395,7 @@ def test_image_rm_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _write_image_meta(tmp_path, full_hash, f"{full_hash}.ext4")
     result = click_runner.invoke(
         main_app,
-        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path), "--force"],
+        ["image", "rm", full_hash[:6], "--images-dir", str(tmp_path)],
     )
     assert result.exit_code == 1
     assert "not found" in result.output.lower() or "missing" in result.output.lower()
@@ -1442,3 +1429,805 @@ def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert result.exit_code == 0
     assert full_hash[:6] in result.output
     assert "Ubuntu 24.04 LTS" in result.output
+
+
+# ---------------------------------------------------------------------------
+# State Validation X marks (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_kernel_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):
+    """Verify X prefix shown when kernel file missing."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    # Create metadata entry for kernel but NOT the actual file
+    full_hash = "a" * 64
+    meta = {
+        "kernels": {
+            full_hash: {
+                "filename": "vmlinux-fc-6.1.9-x86_64",
+                "name": "vmlinux-fc-6.1.9-x86_64",
+                "full_hash": full_hash,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify "X " prefix in output (X mark for missing file)
+    assert "X " in result.output
+
+
+def test_kernel_ls_no_x_mark_for_existing_file(tmp_path: Path, mocker):
+    """Verify no X prefix when kernel file exists."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    # Create metadata entry AND kernel file
+    full_hash = "b" * 64
+    kernel_file = kernels_dir / "vmlinux-fc-6.1.9-x86_64"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+
+    meta = {
+        "kernels": {
+            full_hash: {
+                "filename": "vmlinux-fc-6.1.9-x86_64",
+                "name": "vmlinux-fc-6.1.9-x86_64",
+                "full_hash": full_hash,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify no "X " prefix when file exists
+    # The output should show normal spacing, not X mark
+    lines = result.output.split("\n")
+    for line in lines:
+        if "vmlinux-fc" in line:
+            # Should not have X prefix for existing file
+            assert not line.startswith("X ")
+
+
+def test_image_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):
+    """Verify X prefix shown when image file missing."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # Create metadata entry but NOT the actual file
+    full_hash = "c" * 64
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T12:00:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with (
+        patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
+        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+    ):
+        result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
+
+    assert result.exit_code == 0
+    # Verify "X " prefix in output
+    assert "X " in result.output
+
+
+def test_image_ls_no_x_mark_for_existing_file(tmp_path: Path, mocker):
+    """Verify no X prefix when image file exists."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # Create metadata entry AND image file
+    full_hash = "d" * 64
+    img_file = images_dir / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T12:00:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with (
+        patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
+        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+    ):
+        result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
+
+    assert result.exit_code == 0
+    # Verify no X mark for existing file
+    lines = result.output.split("\n")
+    for line in lines:
+        if "ubuntu-24.04" in line.lower():
+            assert not line.startswith("X ")
+
+
+def test_bin_ls_shows_x_mark_for_missing_binary(tmp_path: Path, mocker):
+    """Verify X prefix shown when binary file missing."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    # Create metadata entry without binary file
+    meta = {
+        "binaries": {
+            "firecracker": {
+                "binary_name": "firecracker",
+                "binary_path": str(bin_dir / "firecracker-v1.15.0"),
+                "full_version": "v1.15.0",
+                "ci_version": "v1.15",
+                "default_binary_path": str(bin_dir / "firecracker"),
+                "is_default": 1,
+            }
+        },
+        "kernels": {},
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["bin", "ls"])
+
+    assert result.exit_code == 0
+    # Verify "X " prefix in output
+    assert "X " in result.output
+
+
+def test_bin_ls_no_x_mark_for_existing_binary(tmp_path: Path, mocker):
+    """Verify no X prefix when binary file exists."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    # Create metadata entry AND binary file
+    fc_bin = bin_dir / "firecracker-v1.15.0"
+    fc_bin.write_bytes(b"fake binary")
+
+    meta = {
+        "binaries": {
+            "firecracker": {
+                "binary_name": "firecracker",
+                "binary_path": str(fc_bin),
+                "full_version": "v1.15.0",
+                "ci_version": "v1.15",
+                "default_binary_path": str(bin_dir / "firecracker"),
+                "is_default": 1,
+            }
+        },
+        "kernels": {},
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["bin", "ls"])
+
+    assert result.exit_code == 0
+    # Verify no X mark for existing file
+    lines = result.output.split("\n")
+    for line in lines:
+        if "1.15.0" in line:
+            assert not line.startswith("X ")
+
+
+# ---------------------------------------------------------------------------
+# Size column tests (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_kernel_ls_shows_size_column(tmp_path: Path, mocker):
+    """Verify kernel ls displays size column."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    # Create kernel file with known size (~10MB)
+    kernel_file = kernels_dir / "vmlinux-fc-6.1.9-x86_64"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * (10 * 1024 * 1024))
+
+    meta = {
+        "kernels": {
+            "a" * 64: {
+                "filename": "vmlinux-fc-6.1.9-x86_64",
+                "name": "vmlinux-fc-6.1.9-x86_64",
+                "full_hash": "a" * 64,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify size column shows formatted size (e.g., "10.0 MiB")
+    assert "MiB" in result.output or "GiB" in result.output or "B" in result.output
+
+
+def test_kernel_ls_size_format_bytes(tmp_path: Path, mocker):
+    """Verify size formatting for small files (bytes)."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    # Create small kernel file (< 1 MiB)
+    kernel_file = kernels_dir / "vmlinux-small"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 512)  # 516 bytes
+
+    meta = {
+        "kernels": {
+            "b" * 64: {
+                "filename": "vmlinux-small",
+                "name": "vmlinux-small",
+                "full_hash": "b" * 64,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify size shown in bytes or appropriate unit
+    assert "B" in result.output
+
+
+def test_kernel_ls_size_format_mib(tmp_path: Path, mocker):
+    """Verify size formatting for medium files (MiB)."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    # Create kernel file (1-1024 MiB)
+    kernel_file = kernels_dir / "vmlinux-medium"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * (100 * 1024 * 1024))  # ~100 MiB
+
+    meta = {
+        "kernels": {
+            "c" * 64: {
+                "filename": "vmlinux-medium",
+                "name": "vmlinux-medium",
+                "full_hash": "c" * 64,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify size shown in MiB
+    assert "MiB" in result.output
+
+
+def test_kernel_ls_size_format_gib(tmp_path: Path, mocker):
+    """Verify size formatting for large files (GiB)."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    # Create large kernel file (> 1024 MiB = 1 GiB)
+    kernel_file = kernels_dir / "vmlinux-large"
+    # Write in chunks to avoid memory issues
+    with open(kernel_file, "wb") as f:
+        f.write(b"\x7fELF")
+        chunk = b"\x00" * (1024 * 1024)  # 1 MiB chunk
+        for _ in range(1025):  # Just over 1 GiB
+            f.write(chunk)
+
+    meta = {
+        "kernels": {
+            "d" * 64: {
+                "filename": "vmlinux-large",
+                "name": "vmlinux-large",
+                "full_hash": "d" * 64,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify size shown in GiB
+    assert "GiB" in result.output
+
+
+def test_image_ls_shows_size_column(tmp_path: Path, mocker):
+    """Verify image ls displays size column."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # Create image file with known size
+    img_file = images_dir / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * (2 * 1024 * 1024 * 1024))  # 2 GiB
+
+    full_hash = "e" * 64
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T12:00:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with (
+        patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
+        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+    ):
+        result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
+
+    assert result.exit_code == 0
+    # Verify size column shows formatted size
+    assert "GiB" in result.output or "MiB" in result.output
+
+
+def test_image_ls_size_various_units(tmp_path: Path, mocker):
+    """Verify image ls shows sizes in various units."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # Create multiple images with different sizes
+    # Small image (< 1 MiB)
+    small_img = images_dir / "small.ext4"
+    small_img.write_bytes(b"\x00" * 512)
+
+    # Medium image (1-1024 MiB)
+    medium_img = images_dir / "medium.ext4"
+    medium_img.write_bytes(b"\x00" * (100 * 1024 * 1024))
+
+    meta = {
+        "images": {
+            "f" * 64: {
+                "os_name": "Small Image",
+                "filename": "small.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T12:00:00+00:00",
+                "full_hash": "f" * 64,
+            },
+            "g" * 64: {
+                "os_name": "Medium Image",
+                "filename": "medium.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T12:00:00+00:00",
+                "full_hash": "g" * 64,
+            },
+        },
+        "kernels": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    fake_images = [
+        ImageSpec(
+            id="small",
+            image_type="test",
+            version="1.0",
+            name="Small Image",
+            source="https://example.com/small.qcow2",
+            format="qcow2",
+            convert_to="ext4",
+            size_mib=1,
+            sha256=None,
+        ),
+        ImageSpec(
+            id="medium",
+            image_type="test",
+            version="1.0",
+            name="Medium Image",
+            source="https://example.com/medium.qcow2",
+            format="qcow2",
+            convert_to="ext4",
+            size_mib=100,
+            sha256=None,
+        ),
+    ]
+
+    with (
+        patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
+        patch("mvmctl.cli.asset.load_images_config", return_value=fake_images),
+    ):
+        result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
+
+    assert result.exit_code == 0
+    # Verify size units are shown
+    assert "B" in result.output or "MiB" in result.output or "GiB" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Default prefix tests (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_kernel_ls_shows_default_prefix(tmp_path: Path, mocker):
+    """Verify * prefix shown for default kernel."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    # Create kernel with is_default=true
+    kernel_file = kernels_dir / "vmlinux-fc-6.1.9-x86_64"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+
+    full_hash = "h" * 64
+    meta = {
+        "kernels": {
+            full_hash: {
+                "filename": "vmlinux-fc-6.1.9-x86_64",
+                "name": "vmlinux-fc-6.1.9-x86_64",
+                "full_hash": full_hash,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+                "is_default": "true",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify "* " prefix in output for default kernel
+    assert "* " in result.output
+    # Verify NO "Def" column in output
+    assert "Def" not in result.output
+
+
+def test_kernel_ls_no_prefix_for_non_default(tmp_path: Path, mocker):
+    """Verify no * prefix for non-default kernel."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    # Create kernel with is_default=false
+    kernel_file = kernels_dir / "vmlinux-fc-6.1.9-x86_64"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+
+    full_hash = "i" * 64
+    meta = {
+        "kernels": {
+            full_hash: {
+                "filename": "vmlinux-fc-6.1.9-x86_64",
+                "name": "vmlinux-fc-6.1.9-x86_64",
+                "full_hash": full_hash,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+                "is_default": "false",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify no "* " prefix for non-default kernel
+    # The line should start with "  " (two spaces) instead
+    lines = result.output.split("\n")
+    for line in lines:
+        if "vmlinux-fc" in line and "Name" not in line:
+            assert not line.startswith("* ")
+
+
+def test_image_ls_shows_default_prefix(tmp_path: Path, mocker):
+    """Verify * prefix shown for default image."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # Create image with is_default=true
+    img_file = images_dir / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    full_hash = "j" * 64
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T12:00:00+00:00",
+                "full_hash": full_hash,
+                "is_default": "true",
+            }
+        },
+        "kernels": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with (
+        patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
+        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+    ):
+        result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
+
+    assert result.exit_code == 0
+    # Verify "* " prefix in output
+    assert "* " in result.output
+
+
+def test_bin_ls_shows_default_prefix(tmp_path: Path, mocker):
+    """Verify * prefix shown for default binary."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    # Create binary with is_default=true
+    fc_bin = bin_dir / "firecracker-v1.15.0"
+    fc_bin.write_bytes(b"fake binary")
+
+    meta = {
+        "binaries": {
+            "firecracker": {
+                "binary_name": "firecracker",
+                "binary_path": str(fc_bin),
+                "full_version": "v1.15.0",
+                "ci_version": "v1.15",
+                "default_binary_path": str(bin_dir / "firecracker"),
+                "is_default": 1,
+            }
+        },
+        "kernels": {},
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["bin", "ls"])
+
+    assert result.exit_code == 0
+    # Verify "* " prefix in output
+    assert "* " in result.output
+
+
+def test_kernel_ls_no_def_column(tmp_path: Path, mocker):
+    """Verify 'Def' column removed from kernel ls."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    kernel_file = kernels_dir / "vmlinux"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+
+    meta = {
+        "kernels": {
+            "k" * 64: {
+                "filename": "vmlinux",
+                "name": "vmlinux",
+                "full_hash": "k" * 64,
+                "version": "6.1.9",
+                "type": "firecracker",
+                "arch": "x86_64",
+                "last_modified": "2026-01-01T12:00:00+00:00",
+            }
+        },
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    # Verify "Def" column not in output
+    assert "Def" not in result.output
+
+
+def test_image_ls_no_def_column(tmp_path: Path, mocker):
+    """Verify 'Def' column removed from image ls."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    img_file = images_dir / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    full_hash = "l" * 64
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-01T12:00:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with (
+        patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
+        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+    ):
+        result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
+
+    assert result.exit_code == 0
+    # Verify "Def" column not in output
+    assert "Def" not in result.output
+
+
+def test_bin_ls_no_def_column(tmp_path: Path, mocker):
+    """Verify 'Def' column removed from bin ls."""
+    import json
+    import os
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    fc_bin = bin_dir / "firecracker-v1.15.0"
+    fc_bin.write_bytes(b"fake binary")
+
+    meta = {
+        "binaries": {
+            "firecracker": {
+                "binary_name": "firecracker",
+                "binary_path": str(fc_bin),
+                "full_version": "v1.15.0",
+                "ci_version": "v1.15",
+                "default_binary_path": str(bin_dir / "firecracker"),
+                "is_default": 1,
+            }
+        },
+        "kernels": {},
+        "images": {},
+    }
+    (cache_dir / "metadata.json").write_text(json.dumps(meta))
+
+    with patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}):
+        result = click_runner.invoke(main_app, ["bin", "ls"])
+
+    assert result.exit_code == 0
+    # Verify "Def" column not in output
+    assert "Def" not in result.output

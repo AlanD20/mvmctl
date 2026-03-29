@@ -217,22 +217,37 @@ def test_update_binary_entry(tmp_path: Path):
         firecracker_path="/bin/firecracker-v1.15.0",
         jailer_path="/bin/jailer-v1.15.0",
         default_binary_path="/bin/firecracker",
-        active_binary_path="/bin/firecracker",
+        default_jailer_path="/bin/jailer",
     )
     raw = read_metadata(tmp_path)
     assert "binaries" in raw
-    assert set(raw["binaries"].keys()) == {"firecracker", "jailer"}
+    # Check for firecracker, jailer, and defaults keys
+    assert set(raw["binaries"].keys()) == {"firecracker", "jailer", "defaults"}
 
+    # Check individual binary entries (no default_binary_path or active_binary_path)
     firecracker = raw["binaries"]["firecracker"]
     jailer = raw["binaries"]["jailer"]
     assert firecracker["binary_name"] == "firecracker"
     assert jailer["binary_name"] == "jailer"
     assert firecracker["binary_path"] == "/bin/firecracker-v1.15.0"
     assert jailer["binary_path"] == "/bin/jailer-v1.15.0"
-    assert firecracker["default_binary_path"] == "/bin/firecracker"
-    assert jailer["default_binary_path"] == "/bin/jailer"
     assert firecracker["package_version"] == "1.15.0"
     assert jailer["package_version"] == "1.15.0"
+    # default_binary_path should NOT be in individual entries
+    assert "default_binary_path" not in firecracker
+    assert "default_binary_path" not in jailer
+    # active_binary_path should NOT be in individual entries
+    assert "active_binary_path" not in firecracker
+    assert "active_binary_path" not in jailer
+
+    # Check defaults section
+    defaults = raw["binaries"]["defaults"]
+    assert "firecracker" in defaults
+    assert "jailer" in defaults
+    assert defaults["firecracker"]["binary_path"] == "/bin/firecracker"
+    assert defaults["jailer"]["binary_path"] == "/bin/jailer"
+    assert defaults["firecracker"]["full_version"] == "v1.15.0"
+    assert defaults["jailer"]["full_version"] == "v1.15.0"
 
     entry = get_binary_entry(tmp_path, "1.15.0")
     assert entry["package_version"] == "1.15.0"

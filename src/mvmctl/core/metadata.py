@@ -295,15 +295,17 @@ def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
 
 
 def list_kernel_entries(
-    cache_dir: Path, kernels_dir: Path | None = None
+    cache_dir: Path, kernels_dir: Path | None = None, include_missing: bool = False
 ) -> dict[str, dict[str, Any]]:
     """Return all kernel entries dict keyed by filename.
 
-    Validates that entries correspond to actual files and removes orphaned entries.
+    Validates that entries correspond to actual files and removes orphaned entries
+    unless include_missing is True.
 
     Args:
         cache_dir: Directory containing metadata.json
         kernels_dir: Optional directory to validate kernel files exist
+        include_missing: If True, include entries even if file is missing (for X mark display)
     """
     data = read_metadata(cache_dir)
     kernels = data.get("kernels", {})
@@ -323,10 +325,14 @@ def list_kernel_entries(
             kernel_path = kernels_dir / str(filename)
             if kernel_path.exists():
                 valid_kernels[kernel_id] = dict(kernel_data)
+            elif include_missing:
+                # Include missing files for X mark display in CLI
+                valid_kernels[kernel_id] = dict(kernel_data)
             else:
                 orphaned.append(kernel_id)
 
-        if orphaned:
+        # Only clean up orphaned entries if we're not including missing
+        if orphaned and not include_missing:
             logger.debug("Removing %d orphaned kernel entries: %s", len(orphaned), orphaned)
             for kernel_id in orphaned:
                 del data["kernels"][kernel_id]
@@ -373,15 +379,17 @@ def get_image_entry(cache_dir: Path, image_id: str) -> dict[str, Any]:
 
 
 def list_image_entries(
-    cache_dir: Path, images_dir: Path | None = None
+    cache_dir: Path, images_dir: Path | None = None, include_missing: bool = False
 ) -> dict[str, dict[str, Any]]:
     """Return all image entries dict keyed by image ID.
 
-    Validates that entries correspond to actual files and removes orphaned entries.
+    Validates that entries correspond to actual files and removes orphaned entries
+    unless include_missing is True.
 
     Args:
         cache_dir: Directory containing metadata.json
         images_dir: Optional directory to validate image files exist
+        include_missing: If True, include entries even if file is missing (for X mark display)
     """
     data = read_metadata(cache_dir)
     images = data.get("images", {})
@@ -399,11 +407,14 @@ def list_image_entries(
                 image_path = images_dir / filename
                 if image_path.exists():
                     valid_images[image_id] = dict(image_data)
+                elif include_missing:
+                    # Include missing files for X mark display in CLI
+                    valid_images[image_id] = dict(image_data)
                 else:
                     orphaned.append(image_id)
 
-        # Remove orphaned entries
-        if orphaned:
+        # Only clean up orphaned entries if we're not including missing
+        if orphaned and not include_missing:
             logger.debug("Removing %d orphaned image entries: %s", len(orphaned), orphaned)
             for image_id in orphaned:
                 del data["images"][image_id]
@@ -508,6 +519,19 @@ def _derive_peer_binary_path(path_value: str, target_binary_name: str) -> str:
 
 
 def update_binary_entry(cache_dir: Path, version: str, **fields: Any) -> None:
+    """Update binary entry in metadata with new structure.
+
+    New structure:
+    - binaries>defaults>firecracker: {binary_path, full_version}
+    - binaries>defaults>jailer: {binary_path, full_version}
+    - binaries>firecracker: {binary_name, binary_path, full_version, ci_version, is_default}
+    - binaries>jailer: {binary_name, binary_path, full_version, ci_version, is_default}
+
+    Removed fields from individual entries:
+    - jailer_path (was never actually stored in firecracker entry)
+    - active_binary_path
+    - default_binary_path
+    """
     normalized_version = _normalized_package_version(version)
     data = read_metadata(cache_dir)
     if "binaries" not in data or not isinstance(data.get("binaries"), dict):
@@ -518,54 +542,79 @@ def update_binary_entry(cache_dir: Path, version: str, **fields: Any) -> None:
     payload["full_version"] = str(payload.get("full_version") or f"v{normalized_version}")
     payload["ci_version"] = str(payload.get("ci_version") or _derive_ci_version(normalized_version))
 
+    # Extract paths for individual binary entries
     firecracker_path = payload.get("firecracker_path")
     jailer_path = payload.get("jailer_path")
-    default_binary_path = payload.get("default_binary_path")
-    active_binary_path = payload.get("active_binary_path")
-    default_jailer_path = payload.get("default_jailer_path")
-    active_jailer_path = payload.get("active_jailer_path")
 
+    # Extract paths for defaults section
+    default_binary_path = payload.get("default_binary_path")
+    default_jailer_path = payload.get("default_jailer_path")
+
+    # Derive jailer default path from binary default path if not provided
     if not isinstance(default_jailer_path, str) and isinstance(default_binary_path, str):
         default_jailer_path = _derive_peer_binary_path(default_binary_path, "jailer")
-    if not isinstance(active_jailer_path, str) and isinstance(active_binary_path, str):
-        active_jailer_path = _derive_peer_binary_path(active_binary_path, "jailer")
 
+    # Build shared payload excluding path-related and defaults fields
     shared_payload = {
         k: v
         for k, v in payload.items()
         if k
         not in {
+            "firecracker_path",
+            "jailer_path",
             "default_binary_path",
-            "active_binary_path",
             "default_jailer_path",
-            "active_jailer_path",
             "binary_name",
             "binary_path",
         }
     }
 
+    # Build per-binary payloads (individual entries - no default/active paths)
     per_binary_payloads: dict[str, dict[str, Any]] = {
         "firecracker": {
             **shared_payload,
             "binary_name": "firecracker",
             "binary_path": firecracker_path,
-            "default_binary_path": default_binary_path,
-            "active_binary_path": active_binary_path,
         },
         "jailer": {
             **shared_payload,
             "binary_name": "jailer",
             "binary_path": jailer_path,
-            "default_binary_path": default_jailer_path,
-            "active_binary_path": active_jailer_path,
         },
     }
 
+    # Update individual binary entries
     for binary_name, binary_payload in per_binary_payloads.items():
         existing = data["binaries"].get(binary_name, {})
         binary_data = dict(existing) if isinstance(existing, dict) else {}
         binary_data.update({k: v for k, v in binary_payload.items() if v is not None})
         data["binaries"][binary_name] = binary_data
+
+    # Update defaults section with default paths and versions
+    full_version = payload.get("full_version")
+    if isinstance(default_binary_path, str) or isinstance(default_jailer_path, str):
+        if "defaults" not in data["binaries"] or not isinstance(
+            data["binaries"].get("defaults"), dict
+        ):
+            data["binaries"]["defaults"] = {}
+
+        defaults = data["binaries"]["defaults"]
+
+        # Firecracker default entry
+        if isinstance(default_binary_path, str):
+            if "firecracker" not in defaults or not isinstance(defaults.get("firecracker"), dict):
+                defaults["firecracker"] = {}
+            defaults["firecracker"]["binary_path"] = default_binary_path
+            if isinstance(full_version, str):
+                defaults["firecracker"]["full_version"] = full_version
+
+        # Jailer default entry
+        if isinstance(default_jailer_path, str):
+            if "jailer" not in defaults or not isinstance(defaults.get("jailer"), dict):
+                defaults["jailer"] = {}
+            defaults["jailer"]["binary_path"] = default_jailer_path
+            if isinstance(full_version, str):
+                defaults["jailer"]["full_version"] = full_version
 
     write_metadata(cache_dir, data)
 

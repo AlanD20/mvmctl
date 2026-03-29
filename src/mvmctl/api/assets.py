@@ -186,7 +186,8 @@ def pull_image(
     if not spec:
         raise ImageError(f"Image ID '{image_id}' not found in {images_yaml}")
 
-    return fetch_image(spec, output_dir, force=force)
+    result = fetch_image(spec, output_dir, force=force)
+    return result.path
 
 
 def fetch_images_parallel(
@@ -220,7 +221,8 @@ def fetch_images_parallel(
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
             try:
-                results[idx] = future.result()
+                import_result = future.result()
+                results[idx] = import_result.path
             except Exception as exc:
                 errors.append(f"{specs[idx].id}: {exc}")
 

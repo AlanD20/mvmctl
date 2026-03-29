@@ -10,15 +10,17 @@ from mvmctl.api.keys import (
     clear_default_keys,
     create_key,
     export_key,
+    get_default_keys,
     inspect_key,
     list_keys,
     remove_key,
     resolve_key_inputs,
     set_default_keys,
 )
-from mvmctl.cli._helpers import check_name_arg
+from mvmctl.cli._helpers import check_name_arg, get_state_marker, is_file_missing
 from mvmctl.exceptions import MVMKeyError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
+from mvmctl.utils.fs import get_keys_dir
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import validate_entity_name
 
@@ -43,6 +45,7 @@ def ls(
 ) -> None:
     """List all keys in the cache."""
     keys = list_keys()
+    default_keys = get_default_keys()
 
     if json_output:
         from dataclasses import asdict
@@ -59,11 +62,16 @@ def ls(
         return
 
     rows = []
+    keys_dir = get_keys_dir()
     for k in keys:
         status = "yes" if k.has_private_key else "no"
+        private_key_path = keys_dir / k.name
+        state_marker = get_state_marker(is_file_missing(private_key_path))
+        display_name = f"* {k.name}" if k.name in default_keys else k.name
         rows.append(
             [
-                k.name,
+                state_marker,
+                display_name,
                 k.fingerprint,
                 k.algorithm,
                 k.comment,
@@ -73,7 +81,7 @@ def ls(
         )
     print_table(
         title="SSH Keys",
-        columns=["Name", "Fingerprint", "Algorithm", "Comment", "Private Key", "Added"],
+        columns=["State", "Name", "Fingerprint", "Algorithm", "Comment", "Private Key", "Added"],
         rows=rows,
     )
 
@@ -154,13 +162,10 @@ def create(
 def remove(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Key name"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Remove a key from the cache."""
     name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
-    if not force:
-        typer.confirm(f"Remove key '{name}' from cache?", abort=True)
 
     try:
         remove_key(name)
@@ -178,10 +183,9 @@ def remove(
 def rm(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Key name"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Alias for remove."""
-    remove(ctx=ctx, name=name, force=force)
+    remove(ctx=ctx, name=name)
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

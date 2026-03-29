@@ -25,7 +25,7 @@ from mvmctl.constants import (
 from mvmctl.core.metadata import set_default_binary_entry, update_binary_entry
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, MVMError
 from mvmctl.utils.fs import get_bin_dir, get_cache_dir
-from mvmctl.utils.http import download_file
+from mvmctl.utils.progress import download_with_progress
 
 logger = logging.getLogger(__name__)
 
@@ -177,9 +177,10 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
 
     tgz_path = d / f"firecracker-v{version}-x86_64.tgz"
     try:
-        download_file(
+        download_with_progress(
             tgz_url,
             tgz_path,
+            title=f"Downloading Firecracker v{version}",
             expected_sha256=expected_sha256,
             timeout=CONST_HTTP_TIMEOUT_SECONDS,
         )
@@ -272,7 +273,7 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
         ci_version=ci_version,
         default_version=full_version,
         default_binary_path=str(d / "firecracker"),
-        active_binary_path=str(d / "firecracker"),
+        default_jailer_path=str(d / "jailer"),
         firecracker_path=str(fc_src),
         jailer_path=str(jl_src),
         is_default=1,

@@ -378,13 +378,13 @@ def test_fetch_image_already_exists(tmp_path: Path):
 
     result = fetch_image(spec, tmp_path)
 
-    assert result == final
+    assert result.path == final
 
 
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_qcow2(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -411,7 +411,7 @@ def test_fetch_image_qcow2(
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_download.assert_called_once()
     mock_convert.assert_called_once()
     mock_extract.assert_called_once()
@@ -846,7 +846,7 @@ def test_extract_partition_from_raw_unknown_fs_type(
 
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.create_ext4_from_tar")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_tar_rootfs(
     mock_download: MagicMock,
     mock_create: MagicMock,
@@ -871,13 +871,13 @@ def test_fetch_image_tar_rootfs(
 
     result = fetch_image(spec, tmp_path)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_download.assert_called_once()
     mock_create.assert_called_once()
 
 
 @patch("mvmctl.core.image.create_ext4_from_tar")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_tar_rootfs_failure(
     mock_download: MagicMock,
     mock_create: MagicMock,
@@ -905,7 +905,7 @@ def test_fetch_image_tar_rootfs_failure(
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_force_re_download(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -935,11 +935,11 @@ def test_fetch_image_force_re_download(
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_download.assert_called_once()
 
 
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_download_failure(
     mock_download: MagicMock,
     tmp_path: Path,
@@ -964,7 +964,7 @@ def test_fetch_image_download_failure(
 
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_raw_format(
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -989,12 +989,12 @@ def test_fetch_image_raw_format(
 
     result = fetch_image(spec, tmp_path)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_download.assert_called_once()
     mock_extract.assert_called_once()
 
 
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_unknown_format(
     mock_download: MagicMock,
     tmp_path: Path,
@@ -1019,7 +1019,7 @@ def test_fetch_image_unknown_format(
 
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_qcow2_convert_fails(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -1050,7 +1050,7 @@ def test_fetch_image_qcow2_convert_fails(
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_qcow2_extract_fails(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -1072,16 +1072,15 @@ def test_fetch_image_qcow2_extract_fails(
 
     mock_download.return_value = True
     mock_convert.return_value = True
-    mock_extract.return_value = None
+    mock_extract.side_effect = ImageError("extraction failed")
 
-    result = fetch_image(spec, tmp_path)
-
-    assert result is None
+    with pytest.raises(ImageError, match="extraction failed"):
+        fetch_image(spec, tmp_path, force=True)
 
 
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_raw_extract_fails(
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -1101,17 +1100,16 @@ def test_fetch_image_raw_extract_fails(
     )
 
     mock_download.return_value = True
-    mock_extract.return_value = None
+    mock_extract.side_effect = ImageError("extraction failed")
 
-    result = fetch_image(spec, tmp_path)
-
-    assert result is None
+    with pytest.raises(ImageError, match="extraction failed"):
+        fetch_image(spec, tmp_path, force=True)
 
 
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_sha256_null_skips_verification(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -1138,7 +1136,7 @@ def test_fetch_image_sha256_null_skips_verification(
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_download.assert_called_once()
     call_kwargs = mock_download.call_args.kwargs
     assert call_kwargs["expected_sha256"] is None
@@ -1519,7 +1517,7 @@ def test_resolve_source_template_no_matching_keys(
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_sha256_url_ignored_when_sha256_null(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -1546,7 +1544,7 @@ def test_fetch_image_sha256_url_ignored_when_sha256_null(
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_download.assert_called_once()
     call_kwargs = mock_download.call_args.kwargs
     assert call_kwargs["expected_sha256"] is None
@@ -1557,7 +1555,7 @@ def test_fetch_image_sha256_url_ignored_when_sha256_null(
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_uses_templated_sha256_url(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -1585,7 +1583,7 @@ def test_fetch_image_uses_templated_sha256_url(
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result == expected_output
+    assert result.path == expected_output
     called_sha_url = mock_fetch_sha.call_args.args[0]
     assert called_sha_url == "https://example.com/ubuntu/24.04.sha256"
     assert mock_download.call_args.kwargs["expected_sha256"] == ("cafebabe" * 8)
@@ -1594,7 +1592,7 @@ def test_fetch_image_uses_templated_sha256_url(
 
 @patch("mvmctl.core.image._resolve_source_template")
 @patch("mvmctl.core.image._validate_downloaded_file")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
     mock_download: MagicMock,
     mock_validate: MagicMock,
@@ -1628,7 +1626,7 @@ def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
-        assert result == expected_output
+        assert result.path == expected_output
         call_kwargs = mock_download.call_args.kwargs
         assert call_kwargs["expected_sha256"] is None
         assert call_kwargs["allow_missing_checksum"] is True
@@ -1639,7 +1637,7 @@ def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
 
 @patch("mvmctl.core.image._resolve_source_template")
 @patch("mvmctl.core.image._validate_downloaded_file")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_ubuntu_fc_resolves_source(
     mock_download: MagicMock,
     mock_validate: MagicMock,
@@ -1675,7 +1673,7 @@ def test_fetch_image_ubuntu_fc_resolves_source(
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
-        assert result == expected_output
+        assert result.path == expected_output
         mock_resolve.assert_called_once()
         mock_download.assert_called_once()
         call_args = mock_download.call_args
@@ -1747,7 +1745,7 @@ def test_import_image_raw_format(mock_copy: MagicMock, tmp_path: Path):
 
     result = import_image(spec, output_dir)
 
-    assert result == output_dir / "my-image.ext4"
+    assert result.path == output_dir / "my-image.ext4"
     mock_copy.assert_called_once()
 
 
@@ -1778,7 +1776,7 @@ def test_import_image_qcow2_format(
 
     result = import_image(spec, output_dir)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_convert.assert_called_once()
     mock_extract.assert_called_once()
     mock_move.assert_called_once()
@@ -1811,7 +1809,7 @@ def test_import_image_qcow2_cleans_up_raw(
 
     result = import_image(spec, output_dir)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_move.assert_called_once()
 
 
@@ -1863,7 +1861,7 @@ def test_import_image_tar_rootfs_format(mock_create: MagicMock, tmp_path: Path):
 
     result = import_image(spec, output_dir)
 
-    assert result == expected_output
+    assert result.path == expected_output
     mock_create.assert_called_once()
 
 
@@ -1909,7 +1907,7 @@ def test_import_image_force_overwrite(mock_copy: MagicMock, tmp_path: Path):
 
     result = import_image(spec, output_dir, force=True)
 
-    assert result == final_path
+    assert result.path == final_path
     mock_copy.assert_called_once()
 
 
@@ -1984,7 +1982,7 @@ def test_extract_partition_from_raw_value_error(
 
 
 @patch("mvmctl.core.image._validate_downloaded_file")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_squashfs_format(
     mock_download: MagicMock, mock_validate: MagicMock, tmp_path: Path
 ):
@@ -2011,7 +2009,7 @@ def test_fetch_image_squashfs_format(
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
-        assert result == expected_output
+        assert result.path == expected_output
         mock_download.assert_called_once()
     finally:
         mvmctl.core.image._FORMAT_HANDLERS.clear()
@@ -2078,7 +2076,7 @@ def test_import_image_qcow2_uses_tempfile_context_manager(
     with patch.object(tempfile, "mkdtemp", side_effect=tracking_mkdtemp):
         result = import_image(spec, output_dir)
 
-    assert result == expected_output
+    assert result.path == expected_output
     # Verify temp directory was created and cleaned up
     assert len(temp_dirs_created) > 0
 
@@ -2122,7 +2120,7 @@ def test_import_image_qcow2_cleans_up_on_exception(
 # ---------------------------------------------------------------------------
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_single_entry_backward_compat(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url returns first token for single-entry checksum (backward compat)."""
     mock_response = MagicMock()
@@ -2136,7 +2134,7 @@ def test_fetch_sha256_single_entry_backward_compat(mock_urlopen: MagicMock):
     assert result == "abc123def456789"
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_multi_entry_exact_match(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url matches filename exactly in multi-entry checksum file."""
     checksum_content = "abc111  file1.tar.xz\nabc222  file2.img\nabc333  file3.raw\n"
@@ -2151,7 +2149,7 @@ def test_fetch_sha256_multi_entry_exact_match(mock_urlopen: MagicMock):
     assert result == "abc222"
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_multi_entry_basename_match(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url matches basename when full path provided."""
     checksum_content = (
@@ -2168,7 +2166,7 @@ def test_fetch_sha256_multi_entry_basename_match(mock_urlopen: MagicMock):
     assert result == "abc222"
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_multi_entry_first_line_selected(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url returns correct hash when filename is first entry."""
     checksum_content = (
@@ -2187,7 +2185,7 @@ def test_fetch_sha256_multi_entry_first_line_selected(mock_urlopen: MagicMock):
     assert result == "abc111"
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_filename_not_found(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url returns None when filename not in checksum file."""
     checksum_content = "abc111  file1.tar.xz\nabc222  file2.img\n"
@@ -2204,7 +2202,7 @@ def test_fetch_sha256_filename_not_found(mock_urlopen: MagicMock):
     assert result is None
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_bsd_format(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url handles BSD checksum format with asterisks."""
     # BSD format: hash *filename
@@ -2220,7 +2218,7 @@ def test_fetch_sha256_bsd_format(mock_urlopen: MagicMock):
     assert result == "abc222"
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_multiple_spaces_between_hash_and_file(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url handles multiple spaces between hash and filename."""
     checksum_content = (
@@ -2240,7 +2238,7 @@ def test_fetch_sha256_multiple_spaces_between_hash_and_file(mock_urlopen: MagicM
     assert result == "abc111"
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_empty_file(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url returns None for empty checksum file."""
     mock_response = MagicMock()
@@ -2254,7 +2252,7 @@ def test_fetch_sha256_empty_file(mock_urlopen: MagicMock):
     assert result is None
 
 
-@patch("mvmctl.core.image.urllib.request.urlopen")
+@patch("urllib.request.urlopen")
 def test_fetch_sha256_network_error(mock_urlopen: MagicMock):
     """Test _fetch_sha256_from_url returns None on network error."""
     mock_urlopen.side_effect = URLError("Connection refused")
@@ -2409,7 +2407,7 @@ def test_validate_downloaded_file_missing(tmp_path: Path):
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_cleans_stale_download_on_force(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -2443,7 +2441,7 @@ def test_fetch_image_cleans_stale_download_on_force(
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result == expected_output
+    assert result.path == expected_output
     # Verify stale file was removed before download
     mock_download.assert_called_once()
     # Verify the .download file is cleaned up after success
@@ -2451,7 +2449,7 @@ def test_fetch_image_cleans_stale_download_on_force(
 
 
 @patch("mvmctl.core.image._validate_downloaded_file")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_validates_after_download(
     mock_download: MagicMock,
     mock_validate: MagicMock,
@@ -2482,7 +2480,7 @@ def test_fetch_image_validates_after_download(
 
         result = fetch_image(spec, tmp_path)
 
-        assert result == expected_output
+        assert result.path == expected_output
         # Validation should be called after download
         mock_validate.assert_called_once()
         # Handler should be called after validation
@@ -2490,7 +2488,7 @@ def test_fetch_image_validates_after_download(
 
 
 @patch("mvmctl.core.image._validate_downloaded_file")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_validates_before_handler(
     mock_download: MagicMock,
     mock_validate: MagicMock,
@@ -2527,7 +2525,7 @@ def test_fetch_image_validates_before_handler(
 
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_cleans_download_on_handler_failure(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -2564,7 +2562,7 @@ def test_fetch_image_cleans_download_on_handler_failure(
 
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_cleans_download_on_unknown_format(
     mock_download: MagicMock,
     mock_convert: MagicMock,
@@ -2624,7 +2622,7 @@ def test_fetch_image_no_stale_cleanup_without_force(tmp_path: Path):
         result = fetch_image(spec, tmp_path, force=False)
 
         # Should return early without downloading
-        assert result == final_path
+        assert result.path == final_path
         mock_download.assert_not_called()
         # Stale file should remain
         assert download_path.exists()
@@ -2636,7 +2634,7 @@ def test_fetch_image_no_stale_cleanup_without_force(tmp_path: Path):
 
 
 @patch("mvmctl.core.image.subprocess.run")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_tar_validation_failure_cleans_up(
     mock_download: MagicMock,
     mock_run: MagicMock,
@@ -2672,7 +2670,7 @@ def test_fetch_image_tar_validation_failure_cleans_up(
 
 
 @patch("mvmctl.core.image.subprocess.run")
-@patch("mvmctl.core.image.download_file")
+@patch("mvmctl.core.image.download_with_progress")
 def test_fetch_image_squashfs_validation_failure_cleans_up(
     mock_download: MagicMock,
     mock_run: MagicMock,

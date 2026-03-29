@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import URLError
 
@@ -23,9 +24,20 @@ from mvmctl.constants import (
 from mvmctl.exceptions import ConfigError, ImageError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.http import download_file as _download_file
+from mvmctl.utils.progress import download_with_progress
 from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ImageImportResult:
+    """Result of image fetch/import operation with filesystem metadata."""
+
+    path: "Path"
+    fs_type: str | None
+    fs_uuid: str | None
+
 
 _SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
 
@@ -258,6 +270,28 @@ def get_filesystem_uuid(image_path: Path) -> str | None:
 
     fs_uuid = blkid_result.stdout.strip()
     return fs_uuid if fs_uuid else None
+
+
+def detect_filesystem_type(image_path: Path) -> str | None:
+    """Detect filesystem type using blkid.
+
+    Args:
+        image_path: Path to the image file
+
+    Returns:
+        Filesystem type string (e.g., 'ext4', 'btrfs', 'xfs') or None if detection fails
+    """
+    try:
+        blkid_result = subprocess.run(
+            ["blkid", "-o", "value", "-s", "TYPE", str(image_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        fs_type = blkid_result.stdout.strip()
+        return fs_type if fs_type else None
+    except FileNotFoundError:
+        return None
 
 
 _COPY_CHUNK_SIZE = CONST_MEBIBYTE_BYTES  # 1 MiB
@@ -687,7 +721,7 @@ def fetch_image(
     output_dir: Path,
     force: bool = False,
     partition: int | None = None,
-) -> Path:
+) -> ImageImportResult:
     """Fetch and convert an image.
 
     Args:
@@ -709,22 +743,21 @@ def fetch_image(
 
     if final_path.exists() and not force:
         logger.info("Image already exists: %s", final_path)
-        return final_path
+        # Detect filesystem info for existing image
+        fs_type = detect_filesystem_type(final_path)
+        fs_uuid = get_filesystem_uuid(final_path)
+        return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
     template_vars = _get_template_variables(spec)
     source = spec.source
     if "{" in spec.source:
         source = _resolve_source_template(spec)
 
-    intentional_no_checksum = spec.sha256 is None and spec.sha256_url is None
-
     resolved_sha256 = spec.sha256.lower() if spec.sha256 is not None else None
     sha256_url = render_optional_template(spec.sha256_url, template_vars)
     if resolved_sha256 is None and sha256_url is not None:
         source_basename = source.rsplit("/", 1)[-1] if source else None
         resolved_sha256 = _fetch_sha256_from_url(sha256_url, source_filename=source_basename)
-
-    no_checksum = resolved_sha256 is None
 
     download_path = output_dir / f"{spec.id}.download"
 
@@ -734,12 +767,13 @@ def fetch_image(
         download_path.unlink()
 
     try:
-        download_file(
+        download_with_progress(
             source,
             download_path,
+            title=f"Downloading image {spec.id}",
             expected_sha256=resolved_sha256,
-            allow_missing_checksum=no_checksum,
-            silent_missing_checksum=intentional_no_checksum,
+            timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
+            allow_missing_checksum=resolved_sha256 is None,
         )
 
         # Validate downloaded file before processing
@@ -754,7 +788,11 @@ def fetch_image(
         # Cleanup download on success
         download_path.unlink(missing_ok=True)
 
-        return actual_path
+        # Detect filesystem type and UUID
+        fs_type = detect_filesystem_type(actual_path)
+        fs_uuid = get_filesystem_uuid(actual_path)
+
+        return ImageImportResult(path=actual_path, fs_type=fs_type, fs_uuid=fs_uuid)
     except Exception:
         # Cleanup download on any failure
         download_path.unlink(missing_ok=True)
@@ -807,7 +845,7 @@ def import_image(
     output_dir: Path,
     force: bool = False,
     partition: int | None = None,
-) -> Path:
+) -> ImageImportResult:
     """Import a local image file into the image cache.
 
     Args:
@@ -862,16 +900,31 @@ def import_image(
                 destination_path.unlink()
 
             shutil.move(str(actual_path), destination_path)
-            return destination_path
+
+            # Detect filesystem type and UUID
+            fs_type = detect_filesystem_type(destination_path)
+            fs_uuid = get_filesystem_uuid(destination_path)
+
+            return ImageImportResult(path=destination_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
     elif spec.format == "raw":
         shutil.copy2(spec.source_path, final_path)
-        return final_path
+
+        # Detect filesystem type and UUID
+        fs_type = detect_filesystem_type(final_path)
+        fs_uuid = get_filesystem_uuid(final_path)
+
+        return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
     elif spec.format == "tar-rootfs":
         size_str = f"{spec.size_mib}M"
         create_ext4_from_tar(spec.source_path, final_path, size=size_str)
-        return final_path
+
+        # Detect filesystem type and UUID for tar-rootfs (always ext4)
+        fs_type = detect_filesystem_type(final_path)
+        fs_uuid = get_filesystem_uuid(final_path)
+
+        return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
     else:
         raise ImageError(f"Unsupported import format: {spec.format}")

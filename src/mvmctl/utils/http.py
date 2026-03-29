@@ -10,10 +10,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from urllib.request import urlopen as urlopen
 
 from mvmctl.constants import CONST_DOWNLOAD_CHUNK_SIZE, HTTP_USER_AGENT
 from mvmctl.exceptions import ChecksumMismatchError, MVMError
+
+__all__ = ["download_file", "urlopen"]
 
 logger = logging.getLogger(__name__)
 _CONTENT_RANGE_PATTERN = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+|\*)$")

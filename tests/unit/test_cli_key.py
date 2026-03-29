@@ -116,7 +116,8 @@ def test_create_error(mock_create):
 
 @patch("mvmctl.cli.key.remove_key")
 def test_remove_success(mock_remove):
-    result = runner.invoke(app, ["remove", "testkey", "--force"])
+    """Remove without --force - proceeds immediately."""
+    result = runner.invoke(app, ["remove", "testkey"])
     assert result.exit_code == 0
     assert "removed" in result.output.lower()
     mock_remove.assert_called_once_with("testkey")
@@ -124,14 +125,15 @@ def test_remove_success(mock_remove):
 
 @patch("mvmctl.cli.key.remove_key", side_effect=MVMKeyError("not found"))
 def test_remove_error(mock_remove):
-    result = runner.invoke(app, ["remove", "testkey", "--force"])
+    result = runner.invoke(app, ["remove", "testkey"])
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
 
 
 @patch("mvmctl.cli.key.remove_key")
 def test_rm_alias(mock_remove):
-    result = runner.invoke(app, ["rm", "testkey", "--force"])
+    """Rm alias without --force - proceeds immediately."""
+    result = runner.invoke(app, ["rm", "testkey"])
     assert result.exit_code == 0
     mock_remove.assert_called_once_with("testkey")
 
@@ -233,7 +235,7 @@ def test_create_rejects_invalid_name():
 
 def test_remove_rejects_invalid_name():
     """Key name with semicolon should be rejected."""
-    result = runner.invoke(app, ["remove", "bad;name", "--force"])
+    result = runner.invoke(app, ["remove", "bad;name"])
     assert result.exit_code == 1
 
 
@@ -323,3 +325,135 @@ def test_export_help_arg_shows_help():
     result = runner.invoke(app, ["export", "--help"])
     assert result.exit_code == 0
     assert "export" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# State Validation X marks (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.key.list_keys")
+@patch("mvmctl.cli.key.get_default_keys")
+@patch("mvmctl.cli._helpers.is_file_missing")
+def test_key_ls_shows_x_mark_for_missing_key_file(mock_is_missing, mock_get_defaults, mock_list):
+    """Verify X prefix when key file missing."""
+    # Mock KeyInfo
+    mock_key = KeyInfo(
+        name="missing-key",
+        fingerprint="SHA256:abc123",
+        algorithm="ssh-ed25519",
+        comment="test",
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    mock_list.return_value = [mock_key]
+    mock_get_defaults.return_value = []  # Not a default key
+    # Mock is_file_missing to return True (file is missing)
+    mock_is_missing.return_value = True
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "X " prefix in output
+    assert "X " in result.output
+
+
+@patch("mvmctl.cli.key.list_keys")
+@patch("mvmctl.cli.key.get_default_keys")
+@patch("mvmctl.cli._helpers.is_file_missing")
+def test_key_ls_no_x_mark_for_existing_key_file(mock_is_missing, mock_get_defaults, mock_list):
+    """Verify no X prefix when key file exists."""
+    # Mock KeyInfo
+    mock_key = KeyInfo(
+        name="existing-key",
+        fingerprint="SHA256:def456",
+        algorithm="ssh-ed25519",
+        comment="test",
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    mock_list.return_value = [mock_key]
+    mock_get_defaults.return_value = []  # Not a default key
+    # Mock is_file_missing to return False (file exists)
+    mock_is_missing.return_value = False
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify no "X " prefix for existing key
+
+
+# ---------------------------------------------------------------------------
+# Default prefix tests (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.key.list_keys")
+@patch("mvmctl.cli.key.get_default_keys")
+@patch("mvmctl.cli._helpers.is_file_missing")
+def test_key_ls_shows_default_prefix(mock_is_missing, mock_get_defaults, mock_list):
+    """Verify * prefix shown for default key."""
+    # Mock list_keys returning key
+    mock_key = KeyInfo(
+        name="default-key",
+        fingerprint="SHA256:default",
+        algorithm="ssh-ed25519",
+        comment="test",
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    mock_list.return_value = [mock_key]
+    # Mock get_default_keys to return this key as default
+    mock_get_defaults.return_value = ["default-key"]
+    mock_is_missing.return_value = False
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "* " prefix in output for default key
+    assert "* default-key" in result.output
+
+
+@patch("mvmctl.cli.key.list_keys")
+@patch("mvmctl.cli.key.get_default_keys")
+@patch("mvmctl.cli._helpers.is_file_missing")
+def test_key_ls_no_prefix_for_non_default(mock_is_missing, mock_get_defaults, mock_list):
+    """Verify no * prefix for non-default key."""
+    # Mock list_keys returning key
+    mock_key = KeyInfo(
+        name="non-default-key",
+        fingerprint="SHA256:nondefault",
+        algorithm="ssh-ed25519",
+        comment="test",
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    mock_list.return_value = [mock_key]
+    # Mock get_default_keys to return empty (no defaults)
+    mock_get_defaults.return_value = []
+    mock_is_missing.return_value = False
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify no "* " prefix for non-default key
+    assert "non-default-key" in result.output
+
+
+@patch("mvmctl.cli.key.list_keys")
+@patch("mvmctl.cli.key.get_default_keys")
+@patch("mvmctl.cli._helpers.is_file_missing")
+def test_key_ls_no_def_column(mock_is_missing, mock_get_defaults, mock_list):
+    """Verify 'Def' column removed from key ls."""
+    mock_key = KeyInfo(
+        name="test-key",
+        fingerprint="SHA256:test",
+        algorithm="ssh-ed25519",
+        comment="test",
+        added_at="2026-01-01T00:00:00+00:00",
+    )
+    mock_list.return_value = [mock_key]
+    mock_get_defaults.return_value = []
+    mock_is_missing.return_value = False
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "Def" column not in output
+    assert "Def" not in result.output

@@ -17,6 +17,7 @@ from mvmctl.core.metadata import find_images_by_short_id as _find_images_by_shor
 from mvmctl.core.metadata import get_default_image_entry as _get_default_image_entry
 from mvmctl.core.metadata import get_default_network_entry as _get_default_network_entry
 from mvmctl.core.metadata import get_image_entry as _get_image_entry
+from mvmctl.core.metadata import list_binary_entries as _list_binary_entries
 from mvmctl.core.metadata import list_image_entries as _list_image_entries
 from mvmctl.core.metadata import list_kernel_entries as _list_kernel_entries
 from mvmctl.core.metadata import remove_image_entry as _remove_image_entry
@@ -29,6 +30,7 @@ from mvmctl.core.metadata import update_image_entry as _update_image_entry
 
 __all__ = [
     "list_image_entries",
+    "list_binary_entries",
     "get_image_entry",
     "find_images_by_short_id",
     "find_kernels_by_short_id",
@@ -43,7 +45,7 @@ __all__ = [
 
 
 def list_image_entries(
-    cache_dir: Path, images_dir: Path | None = None
+    cache_dir: Path, images_dir: Path | None = None, include_missing: bool = False
 ) -> dict[str, dict[str, Any]]:
     """Return all image entries dict keyed by image ID.
 
@@ -52,11 +54,24 @@ def list_image_entries(
     Args:
         cache_dir: Directory containing metadata.json
         images_dir: Optional directory to validate image files exist
+        include_missing: If True, include entries even if file is missing (for X mark display)
 
     Returns:
         Dictionary mapping image IDs to their metadata
     """
-    return _list_image_entries(cache_dir, images_dir)
+    return _list_image_entries(cache_dir, images_dir, include_missing=include_missing)
+
+
+def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
+    """Return all binary entries dict keyed by binary name.
+
+    Args:
+        cache_dir: Directory containing metadata.json
+
+    Returns:
+        Dictionary mapping binary names to their metadata
+    """
+    return _list_binary_entries(cache_dir)
 
 
 def get_image_entry(cache_dir: Path, image_id: str) -> dict[str, Any]:

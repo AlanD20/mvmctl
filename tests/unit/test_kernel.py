@@ -570,8 +570,11 @@ def test_build_kernel_vmlinux_not_found(tmp_path: Path):
             build_kernel(kernel_dir, output_path, jobs=2)
 
 
+@patch("mvmctl.core.kernel.update_kernel_entry")
 @patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
-def test_build_kernel_pipeline_cached(mock_check_deps, tmp_path: Path):
+def test_build_kernel_pipeline_cached(
+    mock_update_kernel_entry: MagicMock, mock_check_deps: MagicMock, tmp_path: Path
+):
     output_path = tmp_path / "vmlinux"
     output_path.write_bytes(b"cached-kernel")
 
@@ -592,9 +595,11 @@ def test_build_kernel_pipeline_cached(mock_check_deps, tmp_path: Path):
 
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
+@patch("mvmctl.core.kernel.update_kernel_entry")
 @patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_ignores_cache_when_disabled(
+    mock_update_kernel_entry: MagicMock,
     mock_check_deps: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -640,14 +645,17 @@ def test_build_kernel_pipeline_ignores_cache_when_disabled(
     assert output_path.read_bytes() == b"rebuilt-kernel"
 
 
+@patch("mvmctl.core.kernel.update_kernel_entry")
 @patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
-def test_build_kernel_pipeline_download_fails(mock_check_deps, tmp_path: Path):
+def test_build_kernel_pipeline_download_fails(
+    mock_update_kernel_entry: MagicMock, mock_check_deps, tmp_path: Path
+):
     output_path = tmp_path / "vmlinux"
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
     with patch(
-        "mvmctl.core.kernel.download_kernel_source",
+        "mvmctl.core.kernel.download_with_progress",
         side_effect=KernelError("download failed"),
     ):
         with pytest.raises(KernelError):
@@ -661,8 +669,10 @@ def test_build_kernel_pipeline_download_fails(mock_check_deps, tmp_path: Path):
 
 @patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value=None)
 @patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value=None)
+@patch("mvmctl.core.kernel.update_kernel_entry")
 @patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_requires_checksum(
+    mock_update_kernel_entry: MagicMock,
     mock_check_deps: MagicMock,
     mock_fetch_sha256: MagicMock,
     mock_fetch_sha256_url: MagicMock,
@@ -701,9 +711,11 @@ def test_build_kernel_pipeline_requires_checksum(
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
+@patch("mvmctl.core.kernel.update_kernel_entry")
 @patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_full_success(
+    mock_update_kernel_entry: MagicMock,
     mock_check_deps: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -744,8 +756,10 @@ def test_build_kernel_pipeline_full_success(
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_file")
+@patch("mvmctl.core.kernel.update_kernel_entry")
 def test_build_kernel_pipeline_uses_templated_sha256_url(
+    mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
     mock_configure: MagicMock,
@@ -779,12 +793,12 @@ def test_build_kernel_pipeline_uses_templated_sha256_url(
     called_sha_url = mock_fetch_sha256_url.call_args.args[0]
     assert called_sha_url == "https://example.com/linux-6.1.102.sha256"
     assert mock_download.call_args.args[0] == "https://example.com/linux-6.1.102.tar.xz"
-    assert mock_download.call_args.args[2] == ("b" * 64)
+    assert mock_download.call_args.kwargs["expected_sha256"] == ("b" * 64)
     mock_fetch_sha256.assert_not_called()
 
 
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
 def test_build_kernel_pipeline_extract_fails(
     mock_download: MagicMock, mock_extract: MagicMock, tmp_path: Path
 ):
@@ -809,7 +823,7 @@ def test_build_kernel_pipeline_extract_fails(
 
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
 def test_build_kernel_pipeline_configure_fails(
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -839,7 +853,7 @@ def test_build_kernel_pipeline_configure_fails(
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
 def test_build_kernel_pipeline_build_fails(
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -873,8 +887,10 @@ def test_build_kernel_pipeline_build_fails(
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
+@patch("mvmctl.core.kernel.update_kernel_entry")
 def test_build_kernel_pipeline_cached_tarball(
+    mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
     mock_configure: MagicMock,
@@ -913,8 +929,10 @@ def test_build_kernel_pipeline_cached_tarball(
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
+@patch("mvmctl.core.kernel.update_kernel_entry")
 def test_build_kernel_pipeline_cached_tarball_needs_extract(
+    mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
     mock_configure: MagicMock,
@@ -1090,8 +1108,10 @@ def test_compute_config_hash_with_user_config(tmp_path: Path):
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
+@patch("mvmctl.core.kernel.update_kernel_entry")
 def test_build_kernel_pipeline_uses_cache_marker(
+    mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
     mock_configure: MagicMock,
@@ -1133,7 +1153,7 @@ def test_build_kernel_pipeline_uses_cache_marker(
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
-@patch("mvmctl.core.kernel.download_kernel_source")
+@patch("mvmctl.core.kernel.download_with_progress")
 def test_build_kernel_pipeline_skips_build_if_cache_matches(
     mock_download: MagicMock,
     mock_extract: MagicMock,

@@ -86,7 +86,8 @@ def test_create_missing_cidr():
 
 @patch("mvmctl.cli.network.remove_network")
 def test_remove_success(mock_remove):
-    result = runner.invoke(app, ["remove", "testnet", "--force"])
+    """Remove without --force - proceeds immediately."""
+    result = runner.invoke(app, ["remove", "testnet"])
     assert result.exit_code == 0
     assert "removed" in result.output.lower()
     mock_remove.assert_called_once_with("testnet")
@@ -94,14 +95,15 @@ def test_remove_success(mock_remove):
 
 @patch("mvmctl.cli.network.remove_network", side_effect=NetworkError("not found"))
 def test_remove_error(mock_remove):
-    result = runner.invoke(app, ["remove", "testnet", "--force"])
+    result = runner.invoke(app, ["remove", "testnet"])
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
 
 
 @patch("mvmctl.cli.network.remove_network")
 def test_rm_alias(mock_remove):
-    result = runner.invoke(app, ["rm", "testnet", "--force"])
+    """Rm alias without --force - proceeds immediately."""
+    result = runner.invoke(app, ["rm", "testnet"])
     assert result.exit_code == 0
     mock_remove.assert_called_once_with("testnet")
 
@@ -188,7 +190,7 @@ def test_create_rejects_invalid_name():
 
 def test_remove_rejects_invalid_name():
     """Uppercase network name should be rejected."""
-    result = runner.invoke(app, ["remove", "UPPER", "--force"])
+    result = runner.invoke(app, ["remove", "UPPER"])
     assert result.exit_code == 1
 
 
@@ -196,3 +198,119 @@ def test_inspect_rejects_invalid_name():
     """Network name with semicolon should be rejected."""
     result = runner.invoke(app, ["inspect", "bad;name"])
     assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# State Validation X marks (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.network.list_networks")
+@patch("mvmctl.cli.network.get_network_leases")
+def test_network_ls_shows_x_mark_for_missing_bridge(mock_leases, mock_list, mocker):
+    """Verify X prefix when bridge interface missing."""
+    # Mock NetworkConfig with bridge
+    net = NetworkConfig(
+        name="testnet",
+        cidr="192.168.100.0/24",
+        gateway="192.168.100.1",
+        bridge="mvm-testnet",
+        nat_enabled=True,
+        created_at="2024-01-01T00:00:00+00:00",
+    )
+    mock_list.return_value = [net]
+    mock_leases.return_value = []
+
+    # Mock bridge_exists check -> False
+    mocker.patch("mvmctl.cli.network.is_bridge_alive", return_value=False)
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "X " prefix in output
+    assert "X " in result.output
+
+
+@patch("mvmctl.cli.network.list_networks")
+@patch("mvmctl.cli.network.get_network_leases")
+def test_network_ls_no_x_mark_for_existing_bridge(mock_leases, mock_list, mocker):
+    """Verify no X prefix when bridge exists."""
+    # Mock NetworkConfig with bridge
+    net = NetworkConfig(
+        name="testnet",
+        cidr="192.168.100.0/24",
+        gateway="192.168.100.1",
+        bridge="mvm-testnet",
+        nat_enabled=True,
+        created_at="2024-01-01T00:00:00+00:00",
+    )
+    mock_list.return_value = [net]
+    mock_leases.return_value = []
+
+    # Mock bridge_exists check -> True
+    mocker.patch("mvmctl.cli.network.is_bridge_alive", return_value=True)
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify no "X " prefix for existing bridge
+    lines = result.output.split("\n")
+    for line in lines:
+        if "testnet" in line and "Name" not in line:
+            assert not line.startswith("X ")
+
+
+# ---------------------------------------------------------------------------
+# Default prefix tests (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.network.list_networks")
+@patch("mvmctl.cli.network.get_network_leases")
+def test_network_ls_shows_default_prefix(mock_leases, mock_list):
+    """Verify * prefix shown for default network."""
+    # Mock list_networks returning network with is_default=True
+    net = NetworkConfig(
+        name="default",
+        cidr="10.0.0.0/24",
+        gateway="10.0.0.1",
+        bridge="mvm-default",
+        nat_enabled=True,
+        created_at="2024-01-01T00:00:00+00:00",
+        is_default=True,
+    )
+    mock_list.return_value = [net]
+    mock_leases.return_value = []
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify "* " prefix in output
+    assert "* " in result.output
+
+
+@patch("mvmctl.cli.network.list_networks")
+@patch("mvmctl.cli.network.get_network_leases")
+def test_network_ls_no_prefix_for_non_default(mock_leases, mock_list):
+    """Verify no * prefix for non-default network."""
+    # Mock list_networks returning network with is_default=False
+    net = NetworkConfig(
+        name="custom",
+        cidr="192.168.1.0/24",
+        gateway="192.168.1.1",
+        bridge="mvm-custom",
+        nat_enabled=True,
+        created_at="2024-01-01T00:00:00+00:00",
+        is_default=False,
+    )
+    mock_list.return_value = [net]
+    mock_leases.return_value = []
+
+    result = runner.invoke(app, ["ls"])
+
+    assert result.exit_code == 0
+    # Verify no "* " prefix for non-default network
+    lines = result.output.split("\n")
+    for line in lines:
+        if "custom" in line and "Name" not in line:
+            assert not line.startswith("* ")

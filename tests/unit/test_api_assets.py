@@ -18,6 +18,7 @@ from mvmctl.api.assets import (
     setup_assets,
 )
 from mvmctl.core.binary_manager import BinaryVersion
+from mvmctl.core.image import ImageImportResult
 from mvmctl.exceptions import AssetNotFoundError, ConfigError, ImageError
 from mvmctl.models.image import ImageSpec
 
@@ -164,7 +165,10 @@ def test_pull_image_success(tmp_path: Path, mocker: MockerFixture):
     output_dir.mkdir()
 
     expected_path = output_dir / "ubuntu-24.04.ext4"
-    mock_fetch = mocker.patch("mvmctl.api.assets.fetch_image", return_value=expected_path)
+    mock_fetch = mocker.patch(
+        "mvmctl.api.assets.fetch_image",
+        return_value=ImageImportResult(path=expected_path, fs_type="ext4", fs_uuid="test-uuid"),
+    )
     mocker.patch("mvmctl.api.assets.get_assets_dir", return_value=tmp_path)
     mocker.patch("mvmctl.api.assets.get_images_dir", return_value=output_dir)
 
@@ -211,7 +215,10 @@ def test_pull_image_force_re_download(tmp_path: Path, mocker: MockerFixture):
     output_dir.mkdir()
 
     mock_fetch = mocker.patch(
-        "mvmctl.api.assets.fetch_image", return_value=output_dir / "alpine.ext4"
+        "mvmctl.api.assets.fetch_image",
+        return_value=ImageImportResult(
+            path=output_dir / "alpine.ext4", fs_type="ext4", fs_uuid=None
+        ),
     )
 
     pull_image("alpine", force=True, images_yaml=images_yaml, output_dir=output_dir)
@@ -268,7 +275,8 @@ def test_pull_image_uses_default_paths(tmp_path: Path, mocker: MockerFixture):
     mocker.patch("mvmctl.api.assets.get_assets_dir", return_value=assets_dir)
     mocker.patch("mvmctl.api.assets.get_images_dir", return_value=images_dir)
     mock_fetch = mocker.patch(
-        "mvmctl.api.assets.fetch_image", return_value=images_dir / "test.ext4"
+        "mvmctl.api.assets.fetch_image",
+        return_value=ImageImportResult(path=images_dir / "test.ext4", fs_type="ext4", fs_uuid=None),
     )
 
     pull_image("test")
@@ -301,8 +309,8 @@ def test_fetch_images_parallel_success(tmp_path: Path, mocker: MockerFixture):
         ),
     ]
 
-    def mock_fetch(spec: ImageSpec, output_dir: Path, force: bool = False) -> Path:
-        return output_dir / f"{spec.id}.ext4"
+    def mock_fetch(spec: ImageSpec, output_dir: Path, force: bool = False) -> ImageImportResult:
+        return ImageImportResult(path=output_dir / f"{spec.id}.ext4", fs_type="ext4", fs_uuid=None)
 
     mocker.patch("mvmctl.api.assets.fetch_image", side_effect=mock_fetch)
 
@@ -332,7 +340,7 @@ def test_fetch_images_parallel_with_force(tmp_path: Path, mocker: MockerFixture)
 
     def mock_fetch_with_capture(spec, output_dir, force=False):
         captured_force.append(force)
-        return output_dir / f"{spec.id}.ext4"
+        return ImageImportResult(path=output_dir / f"{spec.id}.ext4", fs_type="ext4", fs_uuid=None)
 
     mocker.patch("mvmctl.api.assets.fetch_image", side_effect=mock_fetch_with_capture)
 
@@ -357,7 +365,10 @@ def test_fetch_images_parallel_custom_workers(tmp_path: Path, mocker: MockerFixt
         for i in range(3)
     ]
 
-    mock_fetch = mocker.patch("mvmctl.api.assets.fetch_image", return_value=tmp_path / "test.ext4")
+    mock_fetch = mocker.patch(
+        "mvmctl.api.assets.fetch_image",
+        return_value=ImageImportResult(path=tmp_path / "test.ext4", fs_type="ext4", fs_uuid=None),
+    )
 
     results = fetch_images_parallel(specs, tmp_path, max_workers=2)
 

@@ -244,7 +244,9 @@ def test_fetch_binary_downloads_and_extracts(tmp_path: Path, mocker: MockerFixtu
     sha_resp.__exit__ = MagicMock(return_value=False)
 
     mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
+    mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
     mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
+    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
     result = fetch_binary("1.5.0", bin_dir=tmp_path)
 
     assert result.version == "1.5.0"
@@ -263,7 +265,7 @@ def test_fetch_binary_download_failure_cleans_up(tmp_path: Path, mocker: MockerF
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
     mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
-    
+
     # Mock actual download to fail
     mocker.patch("mvmctl.utils.http.urlopen", side_effect=URLError("network error"))
     with pytest.raises(BinaryError, match="Failed to download"):
@@ -293,6 +295,7 @@ def test_fetch_binary_missing_binaries_in_archive(tmp_path: Path, mocker: Mocker
     sha_resp.__enter__ = lambda s: s
     sha_resp.__exit__ = MagicMock(return_value=False)
 
+    mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
     mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
     mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
     with pytest.raises(BinaryError, match="missing expected binaries"):
@@ -327,9 +330,11 @@ def test_fetch_binary_corrupt_archive(tmp_path: Path, mocker: MockerFixture):
 # ---------------------------------------------------------------------------
 
 
-def test_set_active_version_creates_symlinks(tmp_path: Path):
+def test_set_active_version_creates_symlinks(tmp_path: Path, mocker: MockerFixture):
     (tmp_path / "firecracker-v1.0.0").touch()
     (tmp_path / "jailer-v1.0.0").touch()
+    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
+    mocker.patch("mvmctl.core.binary_manager.set_default_binary_entry")
     set_active_version("1.0.0", bin_dir=tmp_path)
     fc_link = tmp_path / "firecracker"
     jl_link = tmp_path / "jailer"
@@ -339,18 +344,22 @@ def test_set_active_version_creates_symlinks(tmp_path: Path):
     assert os.readlink(jl_link) == "jailer-v1.0.0"
 
 
-def test_set_active_version_normalizes_version(tmp_path: Path):
+def test_set_active_version_normalizes_version(tmp_path: Path, mocker: MockerFixture):
     (tmp_path / "firecracker-v1.0.0").touch()
     (tmp_path / "jailer-v1.0.0").touch()
+    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
+    mocker.patch("mvmctl.core.binary_manager.set_default_binary_entry")
     set_active_version("v1.0.0", bin_dir=tmp_path)
     assert (tmp_path / "firecracker").is_symlink()
 
 
-def test_set_active_version_replaces_existing_symlinks(tmp_path: Path):
+def test_set_active_version_replaces_existing_symlinks(tmp_path: Path, mocker: MockerFixture):
     (tmp_path / "firecracker-v1.0.0").touch()
     (tmp_path / "jailer-v1.0.0").touch()
     (tmp_path / "firecracker-v2.0.0").touch()
     (tmp_path / "jailer-v2.0.0").touch()
+    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
+    mocker.patch("mvmctl.core.binary_manager.set_default_binary_entry")
     set_active_version("1.0.0", bin_dir=tmp_path)
     set_active_version("2.0.0", bin_dir=tmp_path)
     assert os.readlink(tmp_path / "firecracker") == "firecracker-v2.0.0"
@@ -536,7 +545,9 @@ def test_fetch_binary_sha256_sidecar_unavailable(tmp_path: Path, mocker: MockerF
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
 
-    mock_download = mocker.patch("mvmctl.core.binary_manager.download_file", return_value=True)
+    mock_download = mocker.patch(
+        "mvmctl.core.binary_manager.download_with_progress", return_value=True
+    )
     mocker.patch("mvmctl.core.binary_manager.urlopen", side_effect=URLError("404"))
     with pytest.raises(BinaryError, match="Checksum required"):
         fetch_binary("1.6.0", bin_dir=tmp_path)
