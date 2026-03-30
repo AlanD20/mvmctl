@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import tempfile
 import time
 from functools import wraps
@@ -192,7 +193,7 @@ def download_file(
                 )
             logger.info("Checksum verified")
 
-        os.replace(temp_path, dest)
+        shutil.move(str(temp_path), str(dest))
         temp_path = None
         return True
 

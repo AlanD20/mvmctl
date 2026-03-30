@@ -7,6 +7,7 @@ in CI/script environments.
 
 import hashlib
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -135,24 +136,6 @@ def download_with_progress(
     allow_missing_checksum: bool = False,
     silent_missing_checksum: bool = False,
 ) -> bool:
-    """Download file with ASCII progress bar.
-
-    Args:
-        url: URL to download
-        dest: Destination path
-        title: Progress bar title
-        expected_sha256: Optional SHA256 for verification
-        timeout: Download timeout in seconds
-        allow_missing_checksum: If True, skip verification when sha256 is None
-        silent_missing_checksum: If True, skip warnings when checksum is missing (compatibility)
-
-    Returns:
-        True if successful
-
-    Raises:
-        MVMError: If download fails
-        ChecksumMismatchError: If SHA256 verification fails
-    """
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     sha256_hash = hashlib.sha256() if expected_sha256 else None
@@ -184,14 +167,14 @@ def download_with_progress(
             progress.finish()
 
         if expected_sha256 and sha256_hash:
-            actual = sha256_hash.hexdigest()
-            if actual.lower() != expected_sha256.lower():
+            actual_sha256 = sha256_hash.hexdigest()
+            if actual_sha256.lower() != expected_sha256.lower():
                 temp_path.unlink(missing_ok=True)
                 raise ChecksumMismatchError(
-                    f"Checksum mismatch! Expected {expected_sha256}, got {actual}"
+                    f"Checksum mismatch! Expected {expected_sha256}, got {actual_sha256}"
                 )
 
-        os.replace(temp_path, dest)
+        shutil.move(str(temp_path), str(dest))
         temp_path = None
         return True
 
