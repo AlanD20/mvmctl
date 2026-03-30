@@ -643,7 +643,6 @@ def ls_vms(
 
     if not vms:
         print_info("No VMs found." + (" Use --all to include stopped VMs." if not all_vms else ""))
-        return
 
     rows = []
     for v in vms:

@@ -62,7 +62,6 @@ def ls(
 
     if not networks:
         print_info("No networks found. Create one with: mvm network create <name>")
-        return
 
     rows = []
     for n in networks:

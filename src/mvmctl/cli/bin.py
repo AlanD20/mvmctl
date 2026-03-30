@@ -275,7 +275,6 @@ def kernel_ls(
         from mvmctl.utils.console import print_info
 
         print_info("No kernels found. Use 'mvm kernel fetch --type firecracker' to download one.")
-        return
 
     rows: list[list[str]] = []
     for k in kernels:

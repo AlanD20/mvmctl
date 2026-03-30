@@ -59,7 +59,6 @@ def ls(
 
     if not keys:
         print_info("No keys found. Add one with: mvm key add <name> <path>")
-        return
 
     rows = []
     keys_dir = get_keys_config_dir()
@@ -294,12 +293,19 @@ def inspect(
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
+    from datetime import datetime
+
+    added_formatted = datetime.fromisoformat(info["added_at"]).strftime("%Y/%m/%d %H:%M:%S")
     print_info(f"Key: {info['name']}")
     print_info(f"  Algorithm:   {info['algorithm']}")
     print_info(f"  Fingerprint: {info['fingerprint']}")
     print_info(f"  Comment:     {info['comment']}")
-    print_info(f"  Added:       {info['added_at']}")
+    print_info(f"  Added:       {added_formatted}")
     print_info(f"  Public key:  {info['public_key']}")
+    if info.get("private_key_path"):
+        print_info(f"  Private key path: {info['private_key_path']}")
+    if info.get("public_key_path"):
+        print_info(f"  Public key path:  {info['public_key_path']}")
 
 
 @app.command(
