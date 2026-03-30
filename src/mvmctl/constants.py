@@ -536,3 +536,20 @@ FIRECRACKER_GITHUB_RAW_URL: Final[str] = _require_str(("urls", "firecracker", "g
 
 # Fallback temp directory for download staging
 FALLBACK_TEMP_DIR: Final[Path] = Path("/tmp/mvmctl")
+
+# ---------------------------------------------------------------------------
+# Debug mode constants (loaded from assets/defaults.yaml)
+# ---------------------------------------------------------------------------
+
+# Debug mode master switch - enables verbose logging and detailed error output
+DEBUG_MODE: Final[bool] = _load_defaults_yaml().get("debug", {}).get("enabled", False)
+
+# When True, show detailed error messages with context
+DEBUG_VERBOSE_ERRORS: Final[bool] = (
+    _load_defaults_yaml().get("debug", {}).get("verbose_errors", True)
+)
+
+# When True, include full Python tracebacks in error output
+DEBUG_SHOW_TRACEBACKS: Final[bool] = (
+    _load_defaults_yaml().get("debug", {}).get("show_tracebacks", False)
+)

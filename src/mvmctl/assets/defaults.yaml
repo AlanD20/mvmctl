@@ -159,3 +159,8 @@ detectors:
   thresholds:
     MIN_ROOT_SIZE_MB: 500
     SIZE_TOO_SMALL_MB: 100
+
+debug:
+  enabled: false
+  verbose_errors: true
+  show_tracebacks: false

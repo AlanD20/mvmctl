@@ -155,3 +155,20 @@ class DownloadError(MVMError):
     """Raised when a download operation fails."""
 
     pass
+
+
+def format_exception_debug(exc: Exception, debug: bool = False) -> str:
+    """Format an exception for display, with optional debug details.
+
+    Args:
+        exc: The exception to format.
+        debug: If True, include full traceback and exception class name.
+
+    Returns:
+        Formatted exception string suitable for user display.
+    """
+    if debug:
+        import traceback
+
+        return f"{exc.__class__.__name__}: {exc}\n{traceback.format_exc()}"
+    return str(exc)

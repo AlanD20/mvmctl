@@ -208,6 +208,9 @@ class LazyMVMGroup(click.Group):
 )
 @click.pass_context
 def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
+    # Store debug state in context for exception handling
+    ctx.obj = {"debug": debug}
+
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
         ctx.exit()
