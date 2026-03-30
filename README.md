@@ -253,82 +253,22 @@ See [docs/RELEASE.md](docs/RELEASE.md) for detailed build instructions.
 
 ## Troubleshooting
 
-**`Permission denied: /dev/kvm`**
-```bash
-sudo usermod -aG kvm $USER
-# Log out and back in, then verify: groups | grep kvm
-```
+Common issues and quick fixes:
 
-**`Bridge mvm-default not found` / `No such device`**
+| Issue | Solution |
+|-------|----------|
+| **Permission denied: /dev/kvm** | `sudo usermod -aG kvm $USER` then log out/back in |
+| **Bridge not found** | Run `sudo mvm host init` once |
+| **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs --name myvm --type boot --follow` |
+| **Kernel not found** | `mvm kernel fetch` |
+| **Image not found** | `mvm image fetch ubuntu-24.04` |
+| **NoCloud server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
 
-Run `sudo mvm host init` once; the bridge is auto-created when you create a VM.
-
-**`Kernel not found`**
-```bash
-mvm kernel fetch
-```
-
-**VM won't boot / SSH times out**
-
-Cloud-init runs on first boot and takes 30–60 s. Follow the console log:
-```bash
-mvm vm logs --name myvm --type boot --follow
-```
-If it never reaches a `login:` prompt, check the Firecracker process log:
-```bash
-mvm vm logs --name myvm --type os
-```
-
-**`Image not found: ubuntu-24.04`**
-```bash
-mvm image fetch ubuntu-24.04
-mvm image ls   # ✓ should appear
-```
-
-**`Firecracker binary not found`**
-```bash
-mvm bin fetch 1.15.0
-mvm bin use 1.15.0
-```
-
-**`host init has not been run`**
-
-`mvm host reset` requires a prior snapshot. Run `sudo mvm host init` first.
-
-**`NoCloud-net server failed to start`**
-
-The port range (8000-9000) may be exhausted. Check for stale servers:
-```bash
-# List processes using nocloud ports
-sudo ss -tlnp | grep -E ':(8[0-9]{3}|9[0-9]{3})'
-# Kill any orphaned mvm processes
-pkill -f nocloud-net-server
-```
-
-**`VM can't fetch cloud-init data via nocloud-net`**
-
-Verify firewall rules are configured:
-```bash
-sudo iptables -L MVM-NOCLOUD-INPUT -n -v
-# Should show rules allowing source IP to destination ports
-```
-
-Check that the VM's network is correctly set up:
-```bash
-# From within the VM, test connectivity to the gateway
-ping -c 1 10.0.0.1
-# Test HTTP access to nocloud server
-curl -v http://10.0.0.1:8080/
-```
-
-**`Cloud-init seems slow`**
-
-nocloud-net is faster than ISO mode because it avoids ISO generation, but cloud-init
-inside the VM still takes 30-60 seconds on first boot. To monitor progress:
-```bash
-mvm vm logs --name myvm --type boot --follow
-```
-Look for cloud-init status messages like `Cloud-init v. X.X.X running modules...`
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for complete troubleshooting guide including:
+- Debug mode
+- Console relay issues
+- Network permission problems
+- Cache corruption fixes
 
 ---
 
