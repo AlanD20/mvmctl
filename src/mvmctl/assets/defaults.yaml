@@ -128,7 +128,7 @@ host:
         table: filter
         built_in: INPUT
 http:
-  download_chunk_size: 262144  # 256KB - optimal for smooth progress updates
+  download_chunk_size: 1048576  # 1MB - optimal balance for high-speed throughput
   download_max_retries: 3
   download_retry_delay: 1.0  # seconds
   download_retry_backoff: 2.0  # exponential multiplier
