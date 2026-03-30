@@ -1,7 +1,7 @@
 [project]
 name = "mvmctl"
 version = "0.1.0"
-description = "A CLI for managing Firecracker microVMs"
+description = "A CLI for managing microVMs"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.13"

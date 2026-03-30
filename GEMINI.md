@@ -1,7 +1,7 @@
 # mvmctl
 
 ## Project Overview
-`mvmctl` (`mvm`) is a production-grade Python CLI application for managing the complete lifecycle of [Firecracker](https://firecracker-microvm.github.io/) microVMs on Linux.
+`mvmctl` (`mvm`) is a production-grade Python CLI application for managing the complete lifecycle of microVMs on Linux.
 
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 
@@ -18,7 +18,7 @@ The project strictly adheres to a layered architecture to separate concerns. Dat
 
 - **`cli/`**: Command definitions, argument parsing, and formatting output. No business logic.
 - **`api/`**: Stable public Python API boundary. Performs privilege checks before delegating to `core/`.
-- **`core/`**: All business logic, filesystem operations, subprocesses, and Firecracker interactions. Returns data or raises typed exceptions (`MVMError`).
+- **`core/`**: All business logic, filesystem operations, subprocesses, and VM interactions. Returns data or raises typed exceptions (`MVMError`).
 - **`models/`**: Pure `@dataclass` objects containing domain data (e.g., `VMInstance`, `VMConfig`). No side effects.
 - **`utils/`**: Shared helpers (console, process, fs, http, audit, validation) with no domain knowledge.
 - **`services/`**: Runtime subprocess services — `console_relay/` (PTY-to-vsock bridge) and `nocloud_server/` (HTTP cloud-init datasource).
