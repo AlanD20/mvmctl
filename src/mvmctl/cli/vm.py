@@ -770,6 +770,7 @@ def inspect(
     selector: Optional[str] = typer.Argument(None, help="VM short ID or name"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or short ID"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
     """Show detailed information about a VM.
 
@@ -777,6 +778,7 @@ def inspect(
         mvm vm inspect myvm
         mvm vm inspect --name myvm
         mvm vm inspect myvm --json
+        mvm vm inspect myvm --tree
     """
     from mvmctl.api.vms import inspect_vm
 
@@ -792,6 +794,8 @@ def inspect(
 
     if json_output:
         typer.echo(json.dumps(vm_info, indent=2, default=str))
+    elif tree:
+        _print_vm_details_tree(vm_info)
     else:
         _print_vm_details(vm_info)
 
@@ -801,6 +805,9 @@ def _print_vm_details(info: dict[str, Any]) -> None:
 
     from mvmctl.api.metadata import find_images_by_short_id, find_kernels_by_short_id
     from mvmctl.utils.fs import get_cache_dir
+
+    name = info.get("name", "-")
+    status = info.get("status", "-")
 
     created_at = info.get("created_at")
     if created_at:
@@ -823,59 +830,158 @@ def _print_vm_details(info: dict[str, Any]) -> None:
             pass
 
     cloud_init_mode = info.get("cloud_init_mode", "auto").lower()
+    features = info.get("features", {})
 
-    rows = [
-        [info.get("name", "-"), "", ""],
-        ["Full ID", info.get("id", "-"), ""],
-        ["Status", info.get("status", "-"), ""],
-        ["Created", created_str, ""],
-        ["PID", str(info.get("pid")) if info.get("pid") else "-", ""],
-        ["IP", info.get("ip") or "-", ""],
-        ["MAC", info.get("mac") or "-", ""],
-        ["Network", info.get("network_name") or "-", ""],
-        ["TAP Device", info.get("tap_device") or "-", ""],
-        ["Disk Size", disk_size_str, ""],
-        ["cloud-init Mode", cloud_init_mode, ""],
-        ["API Socket", "enabled" if info.get("features", {}).get("api_socket") else "disabled", ""],
-        ["Console", "enabled" if info.get("features", {}).get("console") else "disabled", ""],
-    ]
+    print(f"VM: {name} ({status})")
+    print("=" * (len(name) + len(status) + 8))
 
-    print_table(
-        title=f"VM: {info['name']}",
-        columns=["", "", ""],
-        rows=rows,
-    )
+    print("\nBASIC INFO")
+    print(f"  Name:       {name}")
+    print(f"  Full ID:    {info.get('id', '-')[0:16]}...")
+    print(f"  Created:    {created_str}")
+    print(f"  PID:        {info.get('pid') or '-'}")
+    print(f"  IP:         {info.get('ip') or '-'}")
+    print(f"  MAC:        {info.get('mac') or '-'}")
+    print(f"  Network:    {info.get('network_name') or '-'}")
+    print(f"  TAP Device: {info.get('tap_device') or '-'}")
 
-    print_info(f"\nState Directory: {info['paths']['vm_dir']}")
+    print("\nRESOURCES")
+    print(f"  Disk Size:  {disk_size_str}")
+    print(f"  Cloud-init: {cloud_init_mode}")
+    print(f"  API Socket: {'enabled' if features.get('api_socket') else 'disabled'}")
+    print(f"  Console:    {'enabled' if features.get('console') else 'disabled'}")
+
+    print("\nASSETS")
 
     image_id = info.get("image_id")
     if image_id:
-        print_info("\nImage:")
-        print_info(f"  ID:   {image_id[:6] if len(image_id) > 6 else image_id}")
+        image_short = image_id[:6] if len(image_id) > 6 else image_id
+        image_name = image_id
         try:
-            matches = find_images_by_short_id(get_cache_dir(), image_id[:6])
+            matches = find_images_by_short_id(get_cache_dir(), image_short)
             if matches:
                 _, meta = matches[0]
-                internal_id = meta.get("internal_id", "-")
-                print_info(f"  Name: {internal_id}")
+                internal_id = meta.get("internal_id")
+                if internal_id:
+                    image_name = internal_id
         except Exception:
             pass
+        print(f"  Image:      {image_name} ({image_short})")
 
     kernel_id = info.get("kernel_id")
     if kernel_id:
-        print_info("\nKernel:")
         kernel_short = kernel_id[:6] if len(kernel_id) > 6 else kernel_id
-        print_info(f"  ID:   {kernel_short}")
+        kernel_name = kernel_id
         try:
             matches = find_kernels_by_short_id(get_cache_dir(), kernel_short)
             if matches:
                 _, meta = matches[0]
-                version = meta.get("version", "-")
-                print_info(f"  Name: {version}")
+                version = meta.get("version")
+                if version:
+                    kernel_name = version
         except Exception:
             pass
+        print(f"  Kernel:     {kernel_name} ({kernel_short})")
 
-    if info["paths"].get("rootfs"):
-        print_info(f"\nRootfs: {info['paths']['rootfs']}")
-    if info["paths"].get("config"):
-        print_info(f"Config: {info['paths']['config']}")
+    print("\nPATHS")
+    paths = info.get("paths", {})
+    vm_dir = paths.get("vm_dir", "-")
+    print(f"  State Dir:  {vm_dir}")
+    if paths.get("rootfs"):
+        print(f"  Rootfs:     {paths['rootfs']}")
+    if paths.get("config"):
+        print(f"  Config:     {paths['config']}")
+
+
+def _print_vm_details_tree(info: dict[str, Any]) -> None:
+    from datetime import datetime
+
+    from mvmctl.api.metadata import find_images_by_short_id, find_kernels_by_short_id
+    from mvmctl.utils.fs import get_cache_dir
+
+    name = info.get("name", "-")
+    status = info.get("status", "-")
+
+    created_at = info.get("created_at")
+    if created_at:
+        try:
+            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            created_str = dt.strftime("%Y/%m/%d %H:%M:%S")
+        except (ValueError, AttributeError):
+            created_str = str(created_at)
+    else:
+        created_str = "-"
+
+    disk_size_str = "-"
+    rootfs_path = info.get("paths", {}).get("rootfs")
+    if rootfs_path:
+        try:
+            rootfs_size = Path(rootfs_path).stat().st_size
+            disk_size_gb = rootfs_size / (1024**3)
+            disk_size_str = f"{disk_size_gb:.1f}G"
+        except (OSError, ValueError):
+            pass
+
+    cloud_init_mode = info.get("cloud_init_mode", "auto").lower()
+    features = info.get("features", {})
+
+    print(f"{name} ({status})")
+
+    tree_lines = [
+        f"├── Status:     {status}",
+        f"├── Created:    {created_str}",
+        f"├── PID:        {info.get('pid') or '-'}",
+    ]
+
+    tree_lines.append("├── Network")
+    tree_lines.append(f"│   ├── IP:     {info.get('ip') or '-'}")
+    tree_lines.append(f"│   ├── MAC:    {info.get('mac') or '-'}")
+    tree_lines.append(f"│   └── TAP:    {info.get('tap_device') or '-'}")
+
+    tree_lines.append("├── Resources")
+    tree_lines.append(f"│   ├── Disk:   {disk_size_str}")
+    tree_lines.append(f"│   ├── Cloud:  {cloud_init_mode}")
+    tree_lines.append(f"│   ├── API:    {'enabled' if features.get('api_socket') else 'disabled'}")
+    tree_lines.append(f"│   └── Console: {'enabled' if features.get('console') else 'disabled'}")
+
+    image_id = info.get("image_id")
+    if image_id:
+        image_short = image_id[:6] if len(image_id) > 6 else image_id
+        image_name = image_id
+        try:
+            matches = find_images_by_short_id(get_cache_dir(), image_short)
+            if matches:
+                _, meta = matches[0]
+                internal_id = meta.get("internal_id")
+                if internal_id:
+                    image_name = internal_id
+        except Exception:
+            pass
+        tree_lines.append(f"├── Image:      {image_name} ({image_short})")
+
+    kernel_id = info.get("kernel_id")
+    if kernel_id:
+        kernel_short = kernel_id[:6] if len(kernel_id) > 6 else kernel_id
+        kernel_name = kernel_id
+        try:
+            matches = find_kernels_by_short_id(get_cache_dir(), kernel_short)
+            if matches:
+                _, meta = matches[0]
+                version = meta.get("version")
+                if version:
+                    kernel_name = version
+        except Exception:
+            pass
+        tree_lines.append(f"├── Kernel:     {kernel_name} ({kernel_short})")
+
+    paths = info.get("paths", {})
+    vm_dir = paths.get("vm_dir", "-")
+    tree_lines.append("└── Paths")
+    tree_lines.append(f"    ├── State:  {vm_dir}")
+    if paths.get("rootfs"):
+        tree_lines.append(f"    ├── Rootfs: {paths['rootfs']}")
+    if paths.get("config"):
+        tree_lines.append(f"    └── Config: {paths['config']}")
+
+    for line in tree_lines:
+        print(line)
