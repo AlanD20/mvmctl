@@ -98,14 +98,14 @@ def test_dump_vm_not_found(tmp_path: Path):
 
 
 def test_config_set(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("MVM_CONFIG", str(tmp_path / "config.yaml"))
+    monkeypatch.setenv("MVM_CONFIG", str(tmp_path / "config.json"))
     result = runner.invoke(app, ["set", "network_interface", "wlo0"])
     assert result.exit_code == 0
     assert "wlo0" in result.output
 
 
 def test_config_get_existing(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("MVM_CONFIG", str(tmp_path / "config.yaml"))
+    monkeypatch.setenv("MVM_CONFIG", str(tmp_path / "config.json"))
     runner.invoke(app, ["set", "network_interface", "eth0"])
     result = runner.invoke(app, ["get", "network_interface"])
     assert result.exit_code == 0
@@ -113,7 +113,7 @@ def test_config_get_existing(tmp_path: Path, monkeypatch):
 
 
 def test_config_get_missing(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("MVM_CONFIG", str(tmp_path / "config.yaml"))
+    monkeypatch.setenv("MVM_CONFIG", str(tmp_path / "config.json"))
     result = runner.invoke(app, ["get", "nonexistent_key"])
     assert result.exit_code == 0
     assert "not set" in result.output

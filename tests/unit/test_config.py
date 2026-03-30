@@ -34,6 +34,16 @@ def test_load_yaml_valid_file(tmp_path: Path) -> None:
 
 
 def test_load_config_defaults(tmp_path: Path) -> None:
+    from mvmctl.constants import (
+        DEFAULT_NETWORK_CIDR,
+        DEFAULT_NETWORK_GATEWAY,
+        DEFAULT_NETWORK_NAME,
+        DEFAULT_VM_DISK_SIZE,
+        DEFAULT_VM_MEM_MIB,
+        DEFAULT_VM_NETWORK_INTERFACE,
+        DEFAULT_VM_VCPU_COUNT,
+    )
+
     config = load_config(tmp_path)
 
     assert config.firecracker.binary == "/usr/local/bin/firecracker"
@@ -41,16 +51,16 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.firecracker.run_dir == ""
     assert config.firecracker.log_dir == ""
 
-    assert config.vm_defaults.vcpu_count == 2
-    assert config.vm_defaults.mem_size_mib == 2048
-    assert config.vm_defaults.network_interface == "eth0"
-    assert config.vm_defaults.disk_size == "2G"
+    assert config.vm_defaults.vcpu_count == DEFAULT_VM_VCPU_COUNT
+    assert config.vm_defaults.mem_size_mib == DEFAULT_VM_MEM_MIB
+    assert config.vm_defaults.network_interface == DEFAULT_VM_NETWORK_INTERFACE
+    assert config.vm_defaults.disk_size == DEFAULT_VM_DISK_SIZE
     assert config.vm_defaults.enable_api_socket is False
     assert config.vm_defaults.enable_pci is False
 
-    assert config.network.defaults.name == "default"
-    assert config.network.defaults.cidr == "172.35.0.0/24"
-    assert config.network.defaults.gateway == "172.35.0.1"
+    assert config.network.defaults.name == DEFAULT_NETWORK_NAME
+    assert config.network.defaults.cidr == DEFAULT_NETWORK_CIDR
+    assert config.network.defaults.gateway == DEFAULT_NETWORK_GATEWAY
 
     assert config.paths.assets_dir != ""
 

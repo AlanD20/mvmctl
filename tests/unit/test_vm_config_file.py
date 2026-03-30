@@ -12,6 +12,11 @@ from mvmctl.api.vm_config import (
     merge_cli_overrides,
     save_vm_config_file,
 )
+from mvmctl.constants import (
+    DEFAULT_VM_MEM_MIB,
+    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_VCPU_COUNT,
+)
 from mvmctl.models.vm_config_file import VMCreateConfigFile
 
 
@@ -36,9 +41,9 @@ def test_vm_create_config_file_from_dict_ignores_unknown():
 
 def test_vm_create_config_file_from_dict_uses_defaults():
     cfg = VMCreateConfigFile.from_dict({"name": "vm", "image": "img"})
-    assert cfg.vcpus == 2
-    assert cfg.mem == 2048
-    assert cfg.user == "root"
+    assert cfg.vcpus == DEFAULT_VM_VCPU_COUNT
+    assert cfg.mem == DEFAULT_VM_MEM_MIB
+    assert cfg.user == DEFAULT_VM_SSH_USER
     assert cfg.enable_api_socket is False
 
 

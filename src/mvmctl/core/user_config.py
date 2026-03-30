@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from mvmctl.constants import CLI_NAME, CONST_FILE_PERMS_CONFIG
 
@@ -17,7 +16,7 @@ def _user_config_path() -> Path:
     override = os.environ.get(f"{CLI_NAME.upper()}_CONFIG")
     if override:
         return Path(override)
-    return Path.home() / ".config" / CLI_NAME / "config.yaml"
+    return Path.home() / ".config" / CLI_NAME / "config.json"
 
 
 def _load_user_config() -> dict[str, Any]:
@@ -25,11 +24,11 @@ def _load_user_config() -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        data = yaml.safe_load(path.read_text()) or {}
+        data = json.loads(path.read_text()) or {}
         if not isinstance(data, dict):
             return {}
         return data
-    except yaml.YAMLError as exc:
+    except json.JSONDecodeError as exc:
         logger.warning("Could not parse user config at %s: %s", path, exc)
         return {}
 
@@ -37,7 +36,7 @@ def _load_user_config() -> dict[str, Any]:
 def _save_user_config(data: dict[str, Any]) -> None:
     path = _user_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, default_flow_style=False))
+    path.write_text(json.dumps(data, indent=2))
     path.chmod(CONST_FILE_PERMS_CONFIG)
 
 

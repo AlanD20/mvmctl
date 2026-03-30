@@ -4,6 +4,7 @@ import functools
 import importlib.metadata
 import importlib.resources
 import ipaddress
+import json
 from pathlib import Path
 from typing import Any, Final
 
@@ -36,6 +37,68 @@ def _resolve_cli_name() -> str:
 
 def _format_path(path: tuple[str, ...]) -> str:
     return ".".join(path)
+
+
+@functools.lru_cache(maxsize=1)
+def _load_user_config_json() -> dict[str, Any]:
+    """Lazy load user config from config.json."""
+    config_path = Path.home() / ".config" / _resolve_cli_name() / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+                return {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def _get_user_config_value(key: str, default: Any) -> Any:
+    """Get value from config.json or return default."""
+    config = _load_user_config_json()
+    return config.get(key, default)
+
+
+# Mapping: constants.py variable name -> config.json key
+_CONFIG_KEY_MAP: Final[dict[str, str]] = {
+    "DEFAULT_VM_VCPU_COUNT": "default_vm_vcpu_count",
+    "DEFAULT_VM_MEM_MIB": "default_vm_mem_mib",
+    "DEFAULT_VM_SSH_USER": "default_vm_ssh_user",
+    "DEFAULT_VM_ROOT_FS_TYPE": "default_vm_root_fs_type",
+    "DEFAULT_VM_ENABLE_API_SOCKET": "default_vm_enable_api_socket",
+    "DEFAULT_VM_ENABLE_PCI": "default_vm_enable_pci",
+    "DEFAULT_VM_ENABLE_LOGGING": "default_vm_enable_logging",
+    "DEFAULT_VM_ENABLE_METRICS": "default_vm_enable_metrics",
+    "DEFAULT_VM_ENABLE_CONSOLE": "default_vm_enable_console",
+    "DEFAULT_VM_SUBNET_MASK": "default_vm_subnet_mask",
+    "DEFAULT_VM_NETWORK_INTERFACE": "default_vm_network_interface",
+    "DEFAULT_VM_BOOT_ARGS": "default_vm_boot_args",
+    "DEFAULT_VM_LSM_FLAGS": "default_vm_lsm_flags",
+    "DEFAULT_VM_DISK_SIZE": "default_vm_disk_size",
+    "DEFAULT_NETWORK_CIDR": "default_network_cidr",
+    "DEFAULT_NETWORK_GATEWAY": "default_network_gateway",
+    "DEFAULT_IMAGE_CONVERT_TO": "default_image_convert_to",
+    "DEFAULT_IMAGE_IMPORT_FORMAT": "default_image_import_format",
+    "DEFAULT_IMAGE_IMPORT_SIZE_MIB": "default_image_import_size_mib",
+    "DEFAULT_VM_LOG_TYPE": "default_vm_log_type",
+    "DEFAULT_VM_LOG_LINES": "default_vm_log_lines",
+    "DEFAULT_VM_LOG_FOLLOW": "default_vm_log_follow",
+    "DEFAULT_SNAPSHOT_RESUME": "default_snapshot_resume",
+    "DEFAULT_REMOTE_VERSION_LIMIT": "default_remote_version_limit",
+    "DEFAULT_FIRECRACKER_BINARY_PATH": "default_firecracker_binary_path",
+    "DEFAULT_KERNEL_VERSION": "default_kernel_version",
+    "DEFAULT_FC_KERNEL_ARCH": "default_fc_kernel_arch",
+}
+
+
+def _resolve_with_config_override(constant_name: str, yaml_fallback: Any) -> Any:
+    """Resolve constant value, preferring config.json over defaults.yaml."""
+    config_key = _CONFIG_KEY_MAP.get(constant_name)
+    if config_key is None:
+        return yaml_fallback
+    return _get_user_config_value(config_key, yaml_fallback)
 
 
 @functools.lru_cache(maxsize=1)
@@ -134,10 +197,14 @@ def _gateway_cidr(gateway: str, cidr: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Default kernel version for official upstream builds.
-DEFAULT_KERNEL_VERSION: Final[str] = _require_str(("kernel", "defaults", "version"))
+DEFAULT_KERNEL_VERSION: Final[str] = _resolve_with_config_override(
+    "DEFAULT_KERNEL_VERSION", _require_str(("kernel", "defaults", "version"))
+)
 
 # Default architecture for Firecracker CI kernel downloads.
-DEFAULT_FC_KERNEL_ARCH: Final[str] = _require_str(("kernel", "defaults", "arch"))
+DEFAULT_FC_KERNEL_ARCH: Final[str] = _resolve_with_config_override(
+    "DEFAULT_FC_KERNEL_ARCH", _require_str(("kernel", "defaults", "arch"))
+)
 
 # Base URL for the Firecracker CI S3 kernel bucket.
 FIRECRACKER_CI_KERNEL_S3_BASE: Final[str] = _require_str(
@@ -225,36 +292,70 @@ ISO_BINARIES: Final[list[str]] = _require_str_list(("host", "iso_binaries"))
 # ---------------------------------------------------------------------------
 
 
-DEFAULT_VM_VCPU_COUNT: Final[int] = _require_int(("vm_defaults", "vcpu_count"))
-DEFAULT_VM_MEM_MIB: Final[int] = _require_int(("vm_defaults", "mem_size_mib"))
-DEFAULT_VM_SSH_USER: Final[str] = _require_str(("vm_defaults", "ssh_user"))
-DEFAULT_VM_ROOT_FS_TYPE: Final[str] = _require_str(("vm_defaults", "root_fs_type"))
+DEFAULT_VM_VCPU_COUNT: Final[int] = _resolve_with_config_override(
+    "DEFAULT_VM_VCPU_COUNT", _require_int(("vm_defaults", "vcpu_count"))
+)
+DEFAULT_VM_MEM_MIB: Final[int] = _resolve_with_config_override(
+    "DEFAULT_VM_MEM_MIB", _require_int(("vm_defaults", "mem_size_mib"))
+)
+DEFAULT_VM_SSH_USER: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_SSH_USER", _require_str(("vm_defaults", "ssh_user"))
+)
+DEFAULT_VM_ROOT_FS_TYPE: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_ROOT_FS_TYPE", _require_str(("vm_defaults", "root_fs_type"))
+)
 DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = _require_str(("vm", "firecracker_bin_name"))
 
 # VM feature flags
-DEFAULT_VM_ENABLE_API_SOCKET: Final[bool] = _require_bool(("vm_defaults", "enable_api_socket"))
-DEFAULT_VM_ENABLE_PCI: Final[bool] = _require_bool(("vm_defaults", "enable_pci"))
-DEFAULT_VM_ENABLE_LOGGING: Final[bool] = _require_bool(("vm_defaults", "enable_logging"))
-DEFAULT_VM_ENABLE_METRICS: Final[bool] = _require_bool(("vm_defaults", "enable_metrics"))
-DEFAULT_VM_ENABLE_CONSOLE: Final[bool] = _require_bool(("vm_defaults", "enable_console"))
+DEFAULT_VM_ENABLE_API_SOCKET: Final[bool] = _resolve_with_config_override(
+    "DEFAULT_VM_ENABLE_API_SOCKET", _require_bool(("vm_defaults", "enable_api_socket"))
+)
+DEFAULT_VM_ENABLE_PCI: Final[bool] = _resolve_with_config_override(
+    "DEFAULT_VM_ENABLE_PCI", _require_bool(("vm_defaults", "enable_pci"))
+)
+DEFAULT_VM_ENABLE_LOGGING: Final[bool] = _resolve_with_config_override(
+    "DEFAULT_VM_ENABLE_LOGGING", _require_bool(("vm_defaults", "enable_logging"))
+)
+DEFAULT_VM_ENABLE_METRICS: Final[bool] = _resolve_with_config_override(
+    "DEFAULT_VM_ENABLE_METRICS", _require_bool(("vm_defaults", "enable_metrics"))
+)
+DEFAULT_VM_ENABLE_CONSOLE: Final[bool] = _resolve_with_config_override(
+    "DEFAULT_VM_ENABLE_CONSOLE", _require_bool(("vm_defaults", "enable_console"))
+)
 
 # VM network defaults
-DEFAULT_VM_SUBNET_MASK: Final[str] = _require_str(("vm_defaults", "subnet_mask"))
-DEFAULT_VM_NETWORK_INTERFACE: Final[str] = _require_str(("vm_defaults", "network_interface"))
-DEFAULT_VM_BOOT_ARGS: Final[str] = _require_str(("vm_defaults", "boot_args"))
-DEFAULT_VM_LSM_FLAGS: Final[str] = _require_str(("vm_defaults", "lsm_flags"))
-DEFAULT_VM_DISK_SIZE: Final[str] = _require_str(("vm_defaults", "disk_size"))
+DEFAULT_VM_SUBNET_MASK: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_SUBNET_MASK", _require_str(("vm_defaults", "subnet_mask"))
+)
+DEFAULT_VM_NETWORK_INTERFACE: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_NETWORK_INTERFACE", _require_str(("vm_defaults", "network_interface"))
+)
+DEFAULT_VM_BOOT_ARGS: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_BOOT_ARGS", _require_str(("vm_defaults", "boot_args"))
+)
+DEFAULT_VM_LSM_FLAGS: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_LSM_FLAGS", _require_str(("vm_defaults", "lsm_flags"))
+)
+DEFAULT_VM_DISK_SIZE: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_DISK_SIZE", _require_str(("vm_defaults", "disk_size"))
+)
 
 # VM model structural defaults (internal path names)
 DEFAULT_VM_KERNEL_FILENAME: Final[str] = _require_str(("vm", "files", "kernel_filename"))
 DEFAULT_VM_ROOTFS_FILENAME: Final[str] = _require_str(("vm", "files", "rootfs_filename"))
 
 # Firecracker binary path default
-DEFAULT_FIRECRACKER_BINARY_PATH: Final[str] = _require_str(("firecracker", "binary"))
+DEFAULT_FIRECRACKER_BINARY_PATH: Final[str] = _resolve_with_config_override(
+    "DEFAULT_FIRECRACKER_BINARY_PATH", _require_str(("firecracker", "binary"))
+)
 
 # Network bridge defaults
-DEFAULT_NETWORK_CIDR: Final[str] = _require_str(("network", "defaults", "cidr"))
-DEFAULT_NETWORK_GATEWAY: Final[str] = _require_str(("network", "defaults", "gateway"))
+DEFAULT_NETWORK_CIDR: Final[str] = _resolve_with_config_override(
+    "DEFAULT_NETWORK_CIDR", _require_str(("network", "defaults", "cidr"))
+)
+DEFAULT_NETWORK_GATEWAY: Final[str] = _resolve_with_config_override(
+    "DEFAULT_NETWORK_GATEWAY", _require_str(("network", "defaults", "gateway"))
+)
 DEFAULT_BRIDGE_NAME: Final[str] = _default_bridge_name(DEFAULT_NETWORK_NAME)
 DEFAULT_NETWORK_BRIDGE_IP: Final[str] = _gateway_cidr(
     gateway=DEFAULT_NETWORK_GATEWAY,
@@ -262,9 +363,15 @@ DEFAULT_NETWORK_BRIDGE_IP: Final[str] = _gateway_cidr(
 )
 
 # Image defaults
-DEFAULT_IMAGE_CONVERT_TO: Final[str] = _require_str(("image", "defaults", "convert_to"))
-DEFAULT_IMAGE_IMPORT_FORMAT: Final[str] = _require_str(("image", "defaults", "import_format"))
-DEFAULT_IMAGE_IMPORT_SIZE_MIB: Final[int] = _require_int(("image", "defaults", "import_size_mib"))
+DEFAULT_IMAGE_CONVERT_TO: Final[str] = _resolve_with_config_override(
+    "DEFAULT_IMAGE_CONVERT_TO", _require_str(("image", "defaults", "convert_to"))
+)
+DEFAULT_IMAGE_IMPORT_FORMAT: Final[str] = _resolve_with_config_override(
+    "DEFAULT_IMAGE_IMPORT_FORMAT", _require_str(("image", "defaults", "import_format"))
+)
+DEFAULT_IMAGE_IMPORT_SIZE_MIB: Final[int] = _resolve_with_config_override(
+    "DEFAULT_IMAGE_IMPORT_SIZE_MIB", _require_int(("image", "defaults", "import_size_mib"))
+)
 SUPPORTED_IMAGE_EXTENSIONS: Final[list[str]] = _require_str_list(
     ("image", "defaults", "supported_extensions")
 )
@@ -274,15 +381,25 @@ IMAGE_IMPORT_FORMAT_MAP: Final[dict[str, str]] = _require_str_dict(
 )
 
 # VM log defaults
-DEFAULT_VM_LOG_TYPE: Final[str] = _require_str(("vm", "logging", "type"))
-DEFAULT_VM_LOG_LINES: Final[int] = _require_int(("vm", "logging", "lines"))
-DEFAULT_VM_LOG_FOLLOW: Final[bool] = _require_bool(("vm", "logging", "follow"))
+DEFAULT_VM_LOG_TYPE: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_LOG_TYPE", _require_str(("vm", "logging", "type"))
+)
+DEFAULT_VM_LOG_LINES: Final[int] = _resolve_with_config_override(
+    "DEFAULT_VM_LOG_LINES", _require_int(("vm", "logging", "lines"))
+)
+DEFAULT_VM_LOG_FOLLOW: Final[bool] = _resolve_with_config_override(
+    "DEFAULT_VM_LOG_FOLLOW", _require_bool(("vm", "logging", "follow"))
+)
 
 # Snapshot defaults
-DEFAULT_SNAPSHOT_RESUME: Final[bool] = _require_bool(("vm", "snapshot", "resume"))
+DEFAULT_SNAPSHOT_RESUME: Final[bool] = _resolve_with_config_override(
+    "DEFAULT_SNAPSHOT_RESUME", _require_bool(("vm", "snapshot", "resume"))
+)
 
 # Binary management defaults
-DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = _require_int(("image", "remote", "version_limit"))
+DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = _resolve_with_config_override(
+    "DEFAULT_REMOTE_VERSION_LIMIT", _require_int(("image", "remote", "version_limit"))
+)
 
 # ---------------------------------------------------------------------------
 # Default values — last-resort runtime values when config lookup fails

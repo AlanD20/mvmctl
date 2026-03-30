@@ -11,7 +11,7 @@ from mvmctl.core.user_config import (
 
 
 def test_set_and_get_simple(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "config.yaml"
+    config_file = tmp_path / "config.json"
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("network_interface", "wlo0")
@@ -20,7 +20,7 @@ def test_set_and_get_simple(tmp_path: Path, monkeypatch):
 
 
 def test_set_and_get_nested(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "config.yaml"
+    config_file = tmp_path / "config.json"
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("network.bridge_cidr", "192.168.0.0/24")
@@ -29,7 +29,7 @@ def test_set_and_get_nested(tmp_path: Path, monkeypatch):
 
 
 def test_get_missing_key(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "config.yaml"
+    config_file = tmp_path / "config.json"
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     val = get_config_value("nonexistent.key")
@@ -37,7 +37,7 @@ def test_get_missing_key(tmp_path: Path, monkeypatch):
 
 
 def test_get_full_config_empty(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "missing.yaml"
+    config_file = tmp_path / "missing.json"
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     config = get_full_user_config()
@@ -45,7 +45,7 @@ def test_get_full_config_empty(tmp_path: Path, monkeypatch):
 
 
 def test_get_full_config_with_data(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "config.yaml"
+    config_file = tmp_path / "config.json"
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("foo", "bar")
@@ -54,7 +54,7 @@ def test_get_full_config_with_data(tmp_path: Path, monkeypatch):
 
 
 def test_set_overwrites_existing(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "config.yaml"
+    config_file = tmp_path / "config.json"
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("key", "first")
@@ -85,7 +85,7 @@ def test_coerce_value_string():
 
 
 def test_config_persists_to_file(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "config.yaml"
+    config_file = tmp_path / "config.json"
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     set_config_value("test_key", "test_value")
@@ -95,8 +95,8 @@ def test_config_persists_to_file(tmp_path: Path, monkeypatch):
 
 
 def test_corrupt_config_returns_empty(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "config.yaml"
-    config_file.write_text("{invalid: yaml: [}")
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{invalid: json: [}")
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     config = get_full_user_config()
@@ -104,8 +104,8 @@ def test_corrupt_config_returns_empty(tmp_path: Path, monkeypatch):
 
 
 def test_non_dict_config_returns_empty(tmp_path: Path, monkeypatch):
-    config_file = tmp_path / "config.yaml"
-    config_file.write_text("- item1\n- item2\n")
+    config_file = tmp_path / "config.json"
+    config_file.write_text('["item1", "item2"]')
     monkeypatch.setenv("MVM_CONFIG", str(config_file))
 
     config = get_full_user_config()
