@@ -212,8 +212,10 @@ class LazyMVMGroup(click.Group):
 )
 @click.pass_context
 def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
-    # Store debug state in context for exception handling
+    from mvmctl.utils.debug_state import set_debug_mode
+
     ctx.obj = {"debug": debug}
+    set_debug_mode(debug)
 
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
