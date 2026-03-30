@@ -130,7 +130,7 @@ Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this chang
 
 ### Agent CLI Execution
  
-To execute the `mvm` CLI with proper group privileges, use:
+To execute the `mvmctl` CLI with proper group privileges, use:
 `sg mvm -c 'mvm ...'`
 
 ---

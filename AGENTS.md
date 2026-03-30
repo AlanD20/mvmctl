@@ -132,18 +132,18 @@ Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this chang
 
 ### Agent CLI Execution
  
-To execute the `mvm` CLI with proper group privileges, use:
+To execute the `mvmctl` CLI with proper group privileges, use:
 `sg mvm -c 'mvm ...'`
 
 ---
 
 # mvmctl
 
-**Scope:** Production-grade Python CLI for managing Firecracker microVMs
+**Scope:** Production-grade Python CLI for managing microVMs
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
 **Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
-**Generated:** 2026-03-28T20:00Z  
+**Generated:** 2026-03-30  
 **Commit:** a20b3ed  
 **Branch:** main
 **Files:** 75 Python source, 64 test files
