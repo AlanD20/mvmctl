@@ -12,8 +12,12 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 from urllib.error import HTTPError, URLError
-from urllib.request import Request
-from urllib.request import urlopen as urlopen
+from urllib.request import (
+    HTTPHandler,
+    HTTPSHandler,
+    Request,
+    build_opener,
+)
 
 from mvmctl.constants import (
     CONST_DOWNLOAD_CHUNK_SIZE,
@@ -30,6 +34,19 @@ logger = logging.getLogger(__name__)
 _CONTENT_RANGE_PATTERN = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+|\*)$")
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+# Shared opener with HTTP keep-alive for connection reuse
+_http_opener = build_opener(
+    HTTPHandler(),
+    HTTPSHandler(),
+)
+_http_opener.addheaders = [("User-Agent", HTTP_USER_AGENT)]
+
+
+def urlopen(req, timeout=300):
+    """Open URL with connection pooling via HTTP keep-alive."""
+    return _http_opener.open(req, timeout=timeout)
 
 
 def _with_retry(
