@@ -314,4 +314,4 @@ class ConfigGenerator:
         config = self.generate()
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
-            json.dump(config, f, indent=2)
+            json.dump(config, f)

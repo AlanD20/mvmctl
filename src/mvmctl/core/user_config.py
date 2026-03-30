@@ -36,7 +36,7 @@ def _load_user_config() -> dict[str, Any]:
 def _save_user_config(data: dict[str, Any]) -> None:
     path = _user_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(data))
     path.chmod(CONST_FILE_PERMS_CONFIG)
 
 

@@ -151,7 +151,7 @@ class VMManager:
         """Save state to JSON file and update cache."""
         state["schema_version"] = _STATE_SCHEMA_VERSION
         with open(self.state_file, "w") as f:
-            json.dump(state, f, indent=2, default=str)
+            json.dump(state, f, default=str)
         self.state_file.chmod(CONST_FILE_PERMS_VM_STATE)
         self._cache = state
 

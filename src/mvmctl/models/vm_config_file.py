@@ -71,4 +71,4 @@ class VMCreateConfigFile:
 
     def to_json_file(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2, default=str))
+        path.write_text(json.dumps(self.to_dict(), default=str))

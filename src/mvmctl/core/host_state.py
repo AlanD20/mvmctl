@@ -99,7 +99,7 @@ def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
         "changes": [asdict(c) for c in state.changes],
     }
     sf = _state_file(cache_dir)
-    sf.write_text(json.dumps(data, indent=2) + "\n")
+    sf.write_text(json.dumps(data) + "\n")
     os.chmod(sf, CONST_FILE_PERMS_CONFIG)
     # Chown the entire cache root so the real user can write to all subdirs
     # (bin/, kernels/, images/, …) after a sudo-elevated init run.

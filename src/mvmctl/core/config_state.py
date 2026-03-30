@@ -54,7 +54,7 @@ def _write_raw(state: dict[str, Any]) -> None:
     path = _config_path()
     path.parent.mkdir(parents=True, exist_ok=True, mode=CONST_DIR_PERMS_CACHE)
     path.parent.chmod(CONST_DIR_PERMS_CACHE)
-    path.write_text(json.dumps(state, indent=2))
+    path.write_text(json.dumps(state))
     path.chmod(CONST_FILE_PERMS_CONFIG)
 
 

@@ -95,7 +95,7 @@ def _save_registry(registry: dict[str, Any]) -> None:
     """
     path = _registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(registry, indent=2))
+    path.write_text(json.dumps(registry))
     path.chmod(CONST_FILE_PERMS_PRIVATE_KEY)
 
 
