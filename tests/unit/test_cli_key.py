@@ -56,18 +56,54 @@ def test_ls_json(mock_list):
 
 
 @patch("mvmctl.cli.key.add_key", return_value=_FAKE_KEY)
-def test_add_success(mock_add):
-    result = runner.invoke(app, ["add", "testkey", "/tmp/id.pub"])
+def test_add_success(mock_add, tmp_path):
+    key_file = tmp_path / "id.pub"
+    key_file.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtest test@host")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
     assert result.exit_code == 0
     assert "added" in result.output.lower()
-    mock_add.assert_called_once_with("testkey", "/tmp/id.pub", overwrite=False)
+    mock_add.assert_called_once_with("testkey", str(key_file), overwrite=False)
 
 
 @patch("mvmctl.cli.key.add_key", side_effect=MVMKeyError("not found"))
-def test_add_error(mock_add):
-    result = runner.invoke(app, ["add", "testkey", "/tmp/bad.pub"])
+def test_add_error(mock_add, tmp_path):
+    key_file = tmp_path / "bad.pub"
+    key_file.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtest test@host")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
+
+
+def test_add_missing_path():
+    result = runner.invoke(app, ["add", "testkey"])
+    assert result.exit_code == 1
+    assert "Missing argument" in result.output or "PUBLIC_KEY_PATH" in result.output
+
+
+def test_add_file_not_found():
+    result = runner.invoke(app, ["add", "testkey", "/nonexistent/path/id_rsa.pub"])
+    assert result.exit_code == 1
+    assert "File not found" in result.output or "not found" in result.output.lower()
+
+
+def test_add_not_a_pub_file(tmp_path):
+    key_file = tmp_path / "id_rsa"
+    key_file.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtest test@host")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
+    assert result.exit_code == 1
+    assert "public key" in result.output.lower()
+
+
+def test_add_not_readable(tmp_path):
+    key_file = tmp_path / "test_key.pub"
+    key_file.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHtest test@host")
+    key_file.chmod(0o000)
+    try:
+        result = runner.invoke(app, ["add", "testkey", str(key_file)])
+        assert result.exit_code == 1
+        assert "Cannot read" in result.output or "permission" in result.output.lower()
+    finally:
+        key_file.chmod(0o644)
 
 
 # ---------------------------------------------------------------------------

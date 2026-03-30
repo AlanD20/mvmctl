@@ -78,6 +78,19 @@ def test_create_error(mock_create, mock_interfaces):
     assert "already exists" in result.output.lower()
 
 
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
+@patch(
+    "mvmctl.cli.network.create_network",
+    side_effect=NetworkError(
+        "Subnet 192.168.100.0/24 overlaps with network 'default' (192.168.100.0/24)"
+    ),
+)
+def test_create_error_subnet_overlap(mock_create, mock_interfaces):
+    result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
+    assert result.exit_code == 1
+    assert "overlaps" in result.output.lower()
+
+
 def test_create_missing_cidr():
     result = runner.invoke(app, ["create", "testnet"])
     assert result.exit_code == 1

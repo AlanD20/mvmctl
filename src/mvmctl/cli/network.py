@@ -161,7 +161,28 @@ def create(
             internet_iface=internet_iface,
         )
     except NetworkError as e:
-        print_error(str(e))
+        error_msg = str(e)
+        print_error(error_msg)
+        print_info("")
+        if "already exists" in error_msg.lower():
+            print_info("To view existing networks:")
+            print_info("  mvm network ls")
+            print_info("")
+            print_info("To remove the existing network:")
+            print_info(f"  mvm network rm {name}")
+        elif "overlaps" in error_msg.lower():
+            print_info("Choose a different CIDR that doesn't conflict with existing networks.")
+            print_info("Common private ranges:")
+            print_info("  10.0.0.0/8     (very large)")
+            print_info("  172.16.0.0/12  (large)")
+            print_info("  192.168.0.0/16 (medium)")
+            print_info("  192.168.100.0/24 (small, good for testing)")
+        elif "bridge" in error_msg.lower() and "conflicts" in error_msg.lower():
+            print_info("Try using a different network name.")
+        elif "privilege" in error_msg.lower() or "permission" in error_msg.lower():
+            print_info("Run with sudo or configure persistent access:")
+            print_info("  sudo mvm host init")
+            print_info("  (then log out and back in)")
         raise typer.Exit(code=1)
 
     print_success(f"Network '{config.name}' created")

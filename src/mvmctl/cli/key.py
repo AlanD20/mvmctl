@@ -93,15 +93,71 @@ def add(
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing key"),
 ) -> None:
     """Import an existing public key into the cache."""
+    import os
+
     name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
     if public_key_path is None:
         print_error("Missing argument 'PUBLIC_KEY_PATH'")
+        print_info("Usage: mvm key add <name> <path-to-public-key>")
+        print_info("Example: mvm key add mykey ~/.ssh/id_rsa.pub")
         raise typer.Exit(code=1)
+
+    path_obj = Path(public_key_path)
+
+    if not path_obj.exists():
+        print_error(f"File not found: {public_key_path}")
+        print_info("Check the path and ensure the file exists:")
+        print_info(f"  ls -la {public_key_path}")
+        print_info("Common locations for SSH keys:")
+        print_info("  ~/.ssh/id_rsa.pub")
+        print_info("  ~/.ssh/id_ed25519.pub")
+        raise typer.Exit(code=1)
+
+    if not public_key_path.endswith(".pub"):
+        pub_path = Path(public_key_path + ".pub")
+        if pub_path.exists():
+            print_error(f"File does not appear to be a public key: {public_key_path}")
+            print_info("Public keys typically end in .pub")
+            print_info(f"Did you mean: {pub_path}")
+            print_info(f"Try: mvm key add {name} {pub_path}")
+        else:
+            print_error(f"File does not appear to be a public key: {public_key_path}")
+            print_info("Public keys typically end in .pub")
+            print_info("Example: ~/.ssh/id_rsa.pub")
+            print_info("")
+            print_info("If this is a private key, the public key may be at:")
+            print_info(f"  {public_key_path}.pub")
+        raise typer.Exit(code=1)
+
+    if not os.access(path_obj, os.R_OK):
+        print_error(f"Cannot read file: {public_key_path}")
+        print_info("Check file permissions:")
+        print_info(f"  ls -l {public_key_path}")
+        print_info("")
+        print_info("To fix permissions, run:")
+        print_info(f"  chmod 644 {public_key_path}")
+        raise typer.Exit(code=1)
+
     try:
         info = add_key(name, public_key_path, overwrite=overwrite)
     except MVMKeyError as e:
-        print_error(str(e))
+        error_msg = str(e)
+        print_error(f"Failed to add key: {error_msg}")
+        print_info("")
+        print_info("Common issues:")
+        if "already exists" in error_msg.lower():
+            print_info("  - Key name already in cache: Use --overwrite to replace")
+            print_info(f"    mvm key add {name} {public_key_path} --overwrite")
+        elif "private key" in error_msg.lower():
+            print_info("  - You provided a private key instead of a public key")
+            print_info("  - Public keys end in .pub and contain 'ssh-rsa', 'ssh-ed25519', etc.")
+        elif "not found" in error_msg.lower():
+            print_info("  - File doesn't exist: Check the path")
+        else:
+            print_info("  - File doesn't exist: Check the path")
+            print_info("  - Permission denied: Check file permissions")
+            print_info("  - Not a valid public key: Ensure the file contains a valid SSH key")
         raise typer.Exit(code=1)
 
     print_success(f"Key '{info.name}' added")
