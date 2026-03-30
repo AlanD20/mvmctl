@@ -134,11 +134,6 @@ def _extract_number_literals(file_path: Path) -> list[tuple[int | float, int, st
                 numbers.append((node.value, node.lineno, "integer literal"))
             elif isinstance(node.value, float):
                 numbers.append((node.value, node.lineno, "float literal"))
-        elif isinstance(node, ast.Num):  # For older Python AST
-            if isinstance(node.n, int) and node.n >= 100:
-                numbers.append((node.n, node.lineno, "integer literal"))
-            elif isinstance(node.n, float):
-                numbers.append((node.n, node.lineno, "float literal"))
 
     return numbers
 
