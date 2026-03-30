@@ -862,6 +862,17 @@ def create_vm(
             except OSError:
                 pass
 
+        # Close file handles after subprocess inherits them (success path only)
+        try:
+            log_fp.close()
+        except OSError:
+            pass
+        if console_fp is not None:
+            try:
+                console_fp.close()
+            except OSError:
+                pass
+
         if enable_console and relay_mgr is not None and pty_master_fd is not None:
             try:
                 console_socket_path, console_relay_pid = relay_mgr.start_relay(
