@@ -160,6 +160,34 @@ def _require_str_list(path: tuple[str, ...]) -> list[str]:
     raise RuntimeError(f"defaults key must be list[str]: {_format_path(path)}")
 
 
+def _require_str_tuple(path: tuple[str, ...]) -> tuple[str, ...]:
+    """Require a tuple of strings from defaults.yaml (loaded as list)."""
+    value = _get_required(path)
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return tuple(str(item) for item in value)
+    raise RuntimeError(f"defaults key must be list[str]: {_format_path(path)}")
+
+
+def _require_chain_list(path: tuple[str, ...]) -> list[tuple[str, str, str]]:
+    """Load list of iptables chains from defaults.yaml.
+
+    Each chain is a dict with 'name', 'table', and 'built_in' keys.
+    Returns list of (name, table, built_in) tuples.
+    """
+    value = _get_required(path)
+    if isinstance(value, list):
+        result: list[tuple[str, str, str]] = []
+        for item in value:
+            if isinstance(item, dict) and all(k in item for k in ("name", "table", "built_in")):
+                result.append((str(item["name"]), str(item["table"]), str(item["built_in"])))
+            else:
+                raise RuntimeError(
+                    f"defaults key must be list of dicts with name/table/built_in: {_format_path(path)}"
+                )
+        return result
+    raise RuntimeError(f"defaults key must be list of chain dicts: {_format_path(path)}")
+
+
 def _require_str_dict(path: tuple[str, ...]) -> dict[str, str]:
     value = _get_required(path)
     if isinstance(value, dict) and all(
@@ -272,16 +300,14 @@ TAP_PREFIX: Final[str] = f"{CLI_NAME}-tap"
 # iptables chain names for MVM rules
 MVM_FORWARD_CHAIN: Final[str] = f"{CLI_NAME.upper()}-FORWARD"
 MVM_POSTROUTING_CHAIN: Final[str] = f"{CLI_NAME.upper()}-POSTROUTING"
-MVM_NO_CLOUD_INPUT_CHAIN: Final[str] = "MVM-NOCLOUD-INPUT"
+MVM_NO_CLOUD_INPUT_CHAIN: Final[str] = f"{CLI_NAME.upper()}-NOCLOUD-INPUT"
 
 # Centralized registry of all iptables chains created by mvmctl
-# Each tuple is (chain_name, table_name)
+# Each tuple is (chain_name, table_name, built_in_chain)
 # Used for cleanup, validation, and bulk operations on MVM network rules
-IPTABLES_CHAINS: Final[list[tuple[str, str]]] = [
-    (MVM_FORWARD_CHAIN, "filter"),
-    (MVM_POSTROUTING_CHAIN, "nat"),
-    (MVM_NO_CLOUD_INPUT_CHAIN, "filter"),
-]
+IPTABLES_CHAINS: Final[list[tuple[str, str, str]]] = _require_chain_list(
+    ("host", "system_files", "iptables_chains")
+)
 
 PROJECT_GROUP: Final[str] = CLI_NAME
 SUDOERS_DROP_IN_PATH: Final[str] = _require_str(
@@ -420,12 +446,6 @@ DEFAULT_KERNEL_BUILD_JOBS: Final[int] = _require_int(("fallbacks", "kernel_build
 DEFAULT_MAX_PARALLEL_DOWNLOADS: Final[int] = _require_int(("fallbacks", "max_parallel_downloads"))
 
 # ---------------------------------------------------------------------------
-# Network defaults (fallback values)
-# ---------------------------------------------------------------------------
-
-DEFAULT_DNS_NAMESERVERS: Final[list[str]] = ["8.8.8.8", "1.1.1.1"]
-
-# ---------------------------------------------------------------------------
 # Firecracker file names
 # ---------------------------------------------------------------------------
 
@@ -525,9 +545,8 @@ DEFAULT_USR_SBIN_SYSCTL: Final[str] = _require_str(("host", "sbin_paths", "sysct
 DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT: Final[int] = _require_int(("libguestfs", "launch_timeout"))
 DEFAULT_LIBGUESTFS_ROOT_DEVICE: Final[str] = _require_str(("libguestfs", "fallback_root_device"))
 DEFAULT_LIBGUESTFS_SEED_DIR: Final[str] = _require_str(("libguestfs", "seed_dir"))
-DEFAULT_LIBGUESTFS_ROOT_INDICATORS: Final[tuple[str, str]] = (
-    "/etc/os-release",
-    "/etc/fstab",
+DEFAULT_LIBGUESTFS_ROOT_INDICATORS: Final[tuple[str, ...]] = _require_str_tuple(
+    ("libguestfs", "root_indicators")
 )
 
 # ---------------------------------------------------------------------------

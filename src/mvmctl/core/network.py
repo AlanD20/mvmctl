@@ -20,7 +20,6 @@ from mvmctl.constants import (
     DEFAULT_NETWORK_GATEWAY,
     IPTABLES_CHAINS,
     MVM_FORWARD_CHAIN,
-    MVM_NO_CLOUD_INPUT_CHAIN,
     MVM_POSTROUTING_CHAIN,
 )
 from mvmctl.exceptions import NetworkError
@@ -528,17 +527,7 @@ def teardown_all_mvm_chains() -> None:
     Safe to call even if chains don't exist.
     Raises NetworkError on failure.
     """
-    for chain_name, table in IPTABLES_CHAINS:
-        # Determine the built-in chain to remove jump from
-        if chain_name == MVM_FORWARD_CHAIN:
-            built_in = "FORWARD"
-        elif chain_name == MVM_POSTROUTING_CHAIN:
-            built_in = "POSTROUTING"
-        elif chain_name == MVM_NO_CLOUD_INPUT_CHAIN:
-            built_in = "INPUT"
-        else:
-            continue
-
+    for chain_name, table, built_in in IPTABLES_CHAINS:
         # Check if chain exists
         if not chain_exists(chain_name, table):
             continue
@@ -596,17 +585,7 @@ def teardown_all_mvm_chains_with_status() -> list[str]:
     """
     status: list[str] = []
 
-    for chain_name, table in IPTABLES_CHAINS:
-        # Determine the built-in chain to remove jump from
-        if chain_name == MVM_FORWARD_CHAIN:
-            built_in = "FORWARD"
-        elif chain_name == MVM_POSTROUTING_CHAIN:
-            built_in = "POSTROUTING"
-        elif chain_name == MVM_NO_CLOUD_INPUT_CHAIN:
-            built_in = "INPUT"
-        else:
-            continue
-
+    for chain_name, table, built_in in IPTABLES_CHAINS:
         if not chain_exists(chain_name, table):
             status.append(f"MVM Networking: chain {chain_name} already deleted, skipping")
             continue

@@ -42,6 +42,9 @@ vm:
     iso_volume_label: "cidata"
     drive_id: "cloud-init"
     required_iso_tool: "cloud-localds"
+    default_dns_servers:
+      - 1.1.1.1
+      - 8.8.8.8
   boot:
     console: console=ttyS0
     reboot: reboot=k
@@ -71,10 +74,10 @@ image:
     import_format: auto
     import_size_mib: 2048
     supported_extensions:
-    - .ext4
-    - .btrfs
-    - .img
-    - .raw
+      - .ext4
+      - .btrfs
+      - .img
+      - .raw
     import_format_map:
       .qcow2: qcow2
       .raw: raw
@@ -97,23 +100,33 @@ host:
     iptables_save: /usr/sbin/iptables-save
     sysctl: /usr/sbin/sysctl
   privileged_binaries:
-  - /usr/sbin/ip
-  - /usr/sbin/iptables
-  - /usr/sbin/iptables-restore
-  - /usr/sbin/iptables-save
-  - /usr/sbin/sysctl
-  - /usr/bin/mount
-  - /usr/bin/umount
+    - /usr/sbin/ip
+    - /usr/sbin/iptables
+    - /usr/sbin/iptables-restore
+    - /usr/sbin/iptables-save
+    - /usr/sbin/sysctl
+    - /usr/bin/mount
+    - /usr/bin/umount
   required_binaries:
-  - ip
-  - iptables
-  - qemu-img
+    - ip
+    - iptables
+    - qemu-img
   iso_binaries:
-  - mkisofs
-  - genisoimage
+    - mkisofs
+    - genisoimage
   system_files:
     sudoers_drop_in_template: /etc/sudoers.d/{cli_name}
     iptables_rules_v4: /etc/iptables/rules.v4
+    iptables_chains:
+      - name: MVM-FORWARD
+        table: filter
+        built_in: FORWARD
+      - name: MVM-POSTROUTING
+        table: nat
+        built_in: POSTROUTING
+      - name: MVM-NOCLOUD-INPUT
+        table: filter
+        built_in: INPUT
 http:
   download_chunk_size: 100485760
 kernel:
@@ -130,6 +143,9 @@ libguestfs:
   launch_timeout: 4
   fallback_root_device: /dev/sda1
   seed_dir: /var/lib/cloud/seed/nocloud
+  root_indicators:
+    - /etc/os-release
+    - /etc/fstab
 urls:
   firecracker:
     github_releases_api: https://api.github.com/repos/firecracker-microvm/firecracker/releases
