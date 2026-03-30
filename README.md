@@ -1,12 +1,27 @@
 # mvmctl (mvm)
 
-A production-grade Python CLI for managing [Firecracker](https://firecracker-microvm.github.io/) microVMs on Linux.
+> **Container speed, VM isolation.**
 
 [![CI](https://github.com/AlanD20/mvmctl/actions/workflows/ci.yml/badge.svg)](https://github.com/AlanD20/mvmctl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)](https://www.python.org/downloads/)
 
-`mvm` handles the full Firecracker VM lifecycle — downloading kernels and images, setting up bridge networking, creating and destroying VMs, SSH access, log streaming, snapshots, and cleanup. Built with Python 3.13, Typer, and Rich. Usable as a standalone binary, a pip package, or an importable Python library.
+**mvm** is the modern way to run microVMs — get the startup speed of containers with the security and isolation of traditional VMs. Built for developers who need lightweight, fast-booting virtual machines without the overhead.
+
+## Why mvm?
+
+- **🚀 Blazing fast** — VMs boot in milliseconds, not minutes
+- **🔒 Secure by default** — Hardware-level isolation with KVM
+- **📦 Works with your images** — Ubuntu, Debian, Arch, and more
+- **⚡ Simple CLI** — One command to create, start, and SSH into a VM
+- **💻 Console access** — Interactive serial console without SSH (via `mvm console`)
+- **🎯 Production ready** — Built for cloud-native and serverless workloads
+
+```bash
+# Create and SSH into a VM in under 60 seconds
+mvm vm create --name myvm --image ubuntu-24.04
+mvm vm ssh --name myvm
+```
 
 ---
 
