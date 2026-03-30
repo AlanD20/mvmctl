@@ -22,6 +22,9 @@ from mvmctl.api.vms import (
 )
 from mvmctl.cli._helpers import get_state_marker, is_file_missing, is_vm_process_running
 from mvmctl.constants import (
+    DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
+    DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
+    DEFAULT_CLOUD_INIT_SEED_PATH,
     DEFAULT_FIRECRACKER_BIN,
     DEFAULT_NETWORK_NAME,
     DEFAULT_SNAPSHOT_RESUME,
@@ -386,8 +389,54 @@ def create(
 
     effective_bin = firecracker_bin or _resolve_active_firecracker_bin()
 
+    # Determine cloud_init_mode based on flags (must be before output_config handling)
+    if cloud_init_mode is not None:
+        mode_lower = cloud_init_mode.lower()
+        if mode_lower == "disabled":
+            effective_cloud_init_mode = CloudInitMode.DISABLED
+            effective_cloud_init_iso_path: Path | None = None
+        elif mode_lower == "iso":
+            effective_cloud_init_mode = CloudInitMode.ISO
+            effective_cloud_init_iso_path = None
+        elif mode_lower == "nocloud-net":
+            effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
+            effective_cloud_init_iso_path = None
+        elif mode_lower == "direct":
+            effective_cloud_init_mode = CloudInitMode.DIRECT_INJECTION
+            effective_cloud_init_iso_path = None
+        else:  # "auto"
+            effective_cloud_init_mode = CloudInitMode.AUTO
+            effective_cloud_init_iso_path = None
+    elif no_cloud_init:
+        effective_cloud_init_mode = CloudInitMode.DISABLED
+        effective_cloud_init_iso_path = None
+    elif cloud_init_iso is not None:
+        effective_cloud_init_mode = CloudInitMode.CUSTOM
+        effective_cloud_init_iso_path = (
+            None
+            if cloud_init_iso == USE_ISO_AUTO  # type: ignore[comparison-overlap]
+            else Path(cloud_init_iso)
+        )
+    elif nocloud_net:
+        effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
+        effective_cloud_init_iso_path = None
+    else:
+        effective_cloud_init_mode = CloudInitMode.AUTO
+        effective_cloud_init_iso_path = None
+
     if output_config is not None:
         # Keep this at the end of config computation so we provide the latest configuration to the user.
+        cloud_init_config: dict[str, Any] = {
+            "mode": effective_cloud_init_mode.value,
+            "seed_path": str(DEFAULT_CLOUD_INIT_SEED_PATH),
+            "kernel_cmdline_ds": DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
+            "final_message": DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
+            "user_data": str(user_data) if user_data else None,
+            "iso_path": str(effective_cloud_init_iso_path)
+            if effective_cloud_init_iso_path
+            else None,
+            "enabled": not no_cloud_init,
+        }
         vm_config = build_vm_config_file(
             name=name,
             image=str(resolved_image_path),
@@ -406,6 +455,7 @@ def create(
             gateway=None,
             subnet_mask=None,
             tap_device=None,
+            cloud_init=cloud_init_config,
         )
         vm_config.to_json_file(output_config)
         print_info(f"VM config written to: {output_config}")
@@ -443,43 +493,6 @@ def create(
                 f"Invalid --cloud-init-mode '{cloud_init_mode}'. Valid modes: {', '.join(valid_modes)}"
             )
             raise typer.Exit(code=1)
-
-    # Determine cloud_init_mode based on flags
-    if cloud_init_mode is not None:
-        # New --cloud-init-mode flag takes precedence
-        mode_lower = cloud_init_mode.lower()
-        if mode_lower == "disabled":
-            effective_cloud_init_mode = CloudInitMode.DISABLED
-            effective_cloud_init_iso_path: Path | None = None
-        elif mode_lower == "iso":
-            effective_cloud_init_mode = CloudInitMode.ISO
-            effective_cloud_init_iso_path = None  # Auto-generate ISO
-        elif mode_lower == "nocloud-net":
-            effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
-            effective_cloud_init_iso_path = None
-        elif mode_lower == "direct":
-            effective_cloud_init_mode = CloudInitMode.DIRECT_INJECTION
-            effective_cloud_init_iso_path = None
-        else:  # "auto"
-            effective_cloud_init_mode = CloudInitMode.AUTO
-            effective_cloud_init_iso_path = None
-    elif no_cloud_init:
-        effective_cloud_init_mode = CloudInitMode.DISABLED
-        effective_cloud_init_iso_path = None
-    elif cloud_init_iso is not None:
-        effective_cloud_init_mode = CloudInitMode.CUSTOM
-        # USE_ISO_AUTO means auto-generate (None path), otherwise use custom path
-        effective_cloud_init_iso_path = (
-            None
-            if cloud_init_iso == USE_ISO_AUTO  # type: ignore[comparison-overlap]
-            else Path(cloud_init_iso)
-        )
-    elif nocloud_net:
-        effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
-        effective_cloud_init_iso_path = None
-    else:
-        effective_cloud_init_mode = CloudInitMode.AUTO
-        effective_cloud_init_iso_path = None
 
     try:
         vm = create_vm(

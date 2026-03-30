@@ -30,6 +30,7 @@ class VMCreateConfigFile:
     enable_pci: bool = False
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME
     firecracker_config: dict[str, Any] | None = None
+    cloud_init: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -51,6 +52,7 @@ class VMCreateConfigFile:
             "enable_pci",
             "firecracker_bin",
             "firecracker_config",
+            "cloud_init",
         }
         filtered = {k: v for k, v in data.items() if k in known}
         return cls(**filtered)

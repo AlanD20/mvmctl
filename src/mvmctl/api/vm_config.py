@@ -51,6 +51,7 @@ def build_vm_config_file(
     gateway: str | None = None,
     subnet_mask: str | None = None,
     tap_device: str | None = None,
+    cloud_init: dict[str, Any] | None = None,
 ) -> VMCreateConfigFile:
     from mvmctl.models.vm import VMConfig
 
@@ -105,6 +106,7 @@ def build_vm_config_file(
         enable_pci=effective_pci,
         firecracker_bin=effective_bin,
         firecracker_config=firecracker_config,
+        cloud_init=cloud_init,
     )
 
 

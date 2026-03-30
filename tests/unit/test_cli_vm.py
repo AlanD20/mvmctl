@@ -978,3 +978,154 @@ class TestInspectCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["name"] == "myvm"
+
+
+def test_create_output_config_with_cloud_init_mode(mocker: MockerFixture, tmp_path):
+    """Test --output-config passes cloud_init mode when specified."""
+    image_path = tmp_path / "rootfs.ext4"
+    kernel_path = tmp_path / "vmlinux"
+    output_path = tmp_path / "vm.json"
+
+    mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
+    mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
+    mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
+    mock_build = mocker.patch("mvmctl.cli.vm.build_vm_config_file")
+    mock_config = mocker.MagicMock()
+    mock_config.cloud_init = {"mode": "nocloud-net", "enabled": True}
+    mock_build.return_value = mock_config
+
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--name",
+            "newvm",
+            "--image",
+            "abc123",
+            "--kernel",
+            "def456",
+            "--cloud-init-mode",
+            "nocloud-net",
+            "--output-config",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["cloud_init"] is not None
+    assert mock_build.call_args.kwargs["cloud_init"]["mode"] == "nocloud-net"
+    mock_create.assert_not_called()
+    mock_config.to_json_file.assert_called_once_with(output_path)
+
+
+def test_create_output_config_with_no_cloud_init(mocker: MockerFixture, tmp_path):
+    """Test --output-config with --no-cloud-init flag."""
+    image_path = tmp_path / "rootfs.ext4"
+    kernel_path = tmp_path / "vmlinux"
+    output_path = tmp_path / "vm.json"
+
+    mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
+    mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
+    mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
+    mock_build = mocker.patch("mvmctl.cli.vm.build_vm_config_file")
+    mock_config = mocker.MagicMock()
+    mock_config.cloud_init = {"mode": "disabled", "enabled": False}
+    mock_build.return_value = mock_config
+
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--name",
+            "newvm",
+            "--image",
+            "abc123",
+            "--kernel",
+            "def456",
+            "--no-cloud-init",
+            "--output-config",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["cloud_init"] is not None
+    assert mock_build.call_args.kwargs["cloud_init"]["enabled"] is False
+    assert mock_build.call_args.kwargs["cloud_init"]["mode"] == "disabled"
+    mock_create.assert_not_called()
+
+
+def test_create_output_config_with_user_data(mocker: MockerFixture, tmp_path):
+    """Test --output-config with --user-data option."""
+    image_path = tmp_path / "rootfs.ext4"
+    kernel_path = tmp_path / "vmlinux"
+    output_path = tmp_path / "vm.json"
+    user_data_path = tmp_path / "user-data.yaml"
+    user_data_path.write_text("#cloud-config\n")
+
+    mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
+    mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
+    mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
+    mock_build = mocker.patch("mvmctl.cli.vm.build_vm_config_file")
+    mock_config = mocker.MagicMock()
+    mock_config.cloud_init = {"mode": "auto", "enabled": True, "user_data": str(user_data_path)}
+    mock_build.return_value = mock_config
+
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--name",
+            "newvm",
+            "--image",
+            "abc123",
+            "--kernel",
+            "def456",
+            "--user-data",
+            str(user_data_path),
+            "--output-config",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["cloud_init"] is not None
+    assert mock_build.call_args.kwargs["cloud_init"]["user_data"] == str(user_data_path)
+    mock_create.assert_not_called()
+
+
+def test_create_output_config_with_nocloud_net_flag(mocker: MockerFixture, tmp_path):
+    """Test --output-config with --nocloud-net flag."""
+    image_path = tmp_path / "rootfs.ext4"
+    kernel_path = tmp_path / "vmlinux"
+    output_path = tmp_path / "vm.json"
+
+    mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
+    mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
+    mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
+    mock_build = mocker.patch("mvmctl.cli.vm.build_vm_config_file")
+    mock_config = mocker.MagicMock()
+    mock_config.cloud_init = {"mode": "nocloud-net", "enabled": True}
+    mock_build.return_value = mock_config
+
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            "--name",
+            "newvm",
+            "--image",
+            "abc123",
+            "--kernel",
+            "def456",
+            "--nocloud-net",
+            "--output-config",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_build.call_args.kwargs["cloud_init"] is not None
+    assert mock_build.call_args.kwargs["cloud_init"]["mode"] == "nocloud-net"
+    assert mock_build.call_args.kwargs["cloud_init"]["enabled"] is True
+    mock_create.assert_not_called()

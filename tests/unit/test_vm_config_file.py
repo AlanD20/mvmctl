@@ -185,3 +185,96 @@ def test_build_vm_config_file_with_firecracker_config_error(
         cfg = build_vm_config_file(name="vm", image="img")
 
     assert cfg.firecracker_config == {}
+
+
+def test_vm_create_config_file_cloud_init_to_dict():
+    """Test that cloud_init field can be set and retrieved via to_dict()."""
+    cloud_init_data = {"mode": "nocloud-net", "enabled": True}
+    cfg = VMCreateConfigFile(
+        name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data
+    )
+    d = cfg.to_dict()
+    assert d["cloud_init"] == cloud_init_data
+    assert d["name"] == "myvm"
+    assert d["image"] == "ubuntu-24.04"
+
+
+def test_vm_create_config_file_cloud_init_serialization(tmp_path: Path):
+    """Test that cloud_init is properly serialized to JSON."""
+    cloud_init_data = {"mode": "iso", "enabled": False, "iso_path": "/path/to/cloud-init.iso"}
+    cfg = VMCreateConfigFile(
+        name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data
+    )
+    cfg.to_json_file(tmp_path / "out.json")
+    data = json.loads((tmp_path / "out.json").read_text())
+    assert data["cloud_init"] == cloud_init_data
+
+
+def test_vm_create_config_file_cloud_init_deserialization():
+    """Test that cloud_init is properly deserialized from JSON via from_dict()."""
+    cloud_init_data = {"mode": "auto", "enabled": True}
+    cfg = VMCreateConfigFile.from_dict({
+        "name": "myvm",
+        "image": "ubuntu-24.04",
+        "cloud_init": cloud_init_data,
+    })
+    assert cfg.cloud_init == cloud_init_data
+
+
+def test_vm_create_config_file_cloud_init_roundtrip():
+    """Test full roundtrip: create -> to_dict -> from_dict -> verify."""
+    original_cloud_init = {"mode": "nocloud-net", "enabled": True, "user_data": "/tmp/user-data"}
+    cfg = VMCreateConfigFile(
+        name="testvm", image="ubuntu-24.04", cloud_init=original_cloud_init
+    )
+    d = cfg.to_dict()
+    cfg2 = VMCreateConfigFile.from_dict(d)
+    assert cfg2.cloud_init == original_cloud_init
+    assert cfg2.name == "testvm"
+    assert cfg2.image == "ubuntu-24.04"
+
+
+def test_vm_create_config_file_cloud_init_none_default():
+    """Test that cloud_init defaults to None when not provided."""
+    cfg = VMCreateConfigFile.from_dict({"name": "vm", "image": "img"})
+    assert cfg.cloud_init is None
+
+
+def test_vm_create_config_file_cloud_init_in_json_file_roundtrip(tmp_path: Path):
+    """Test cloud_init survives a to_json_file/from_json_file roundtrip."""
+    cloud_init_data = {"mode": "disabled", "enabled": False}
+    cfg = VMCreateConfigFile(
+        name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data
+    )
+    cfg.to_json_file(tmp_path / "vm.json")
+    cfg2 = VMCreateConfigFile.from_json_file(tmp_path / "vm.json")
+    assert cfg2.cloud_init == cloud_init_data
+
+
+def test_build_vm_config_file_includes_cloud_init(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Test that build_vm_config_file includes cloud_init in returned config."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
+
+    cloud_init_data = {"mode": "nocloud-net", "enabled": True}
+
+    with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen_cls:
+        mock_gen = MagicMock()
+        mock_gen.generate.return_value = {
+            "boot-source": {"kernel_image_path": "/k", "boot_args": "console=ttyS0"},
+            "machine-config": {"vcpu_count": 2, "mem_size_mib": 2048},
+        }
+        mock_gen_cls.return_value = mock_gen
+
+        cfg = build_vm_config_file(
+            name="myvm",
+            image="ubuntu-24.04",
+            vcpus=2,
+            mem=2048,
+            cloud_init=cloud_init_data,
+        )
+
+    assert cfg.name == "myvm"
+    assert cfg.cloud_init == cloud_init_data
