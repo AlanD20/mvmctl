@@ -1,7 +1,5 @@
 """Unit tests for IP lease checking functions in network_manager module."""
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 from pytest_mock import MockerFixture
 
@@ -26,9 +24,9 @@ class TestIsIpAvailable:
                 NetworkLease(vm_name="vm2", ip="10.0.0.3"),
             ],
         )
-        
+
         result = is_ip_available("default", "10.0.0.5")
-        
+
         assert result is True
 
     def test_is_ip_available_false(self, mocker: MockerFixture):
@@ -41,9 +39,9 @@ class TestIsIpAvailable:
                 NetworkLease(vm_name="vm2", ip="10.0.0.5"),  # This is the IP we're checking
             ],
         )
-        
+
         result = is_ip_available("default", "10.0.0.5")
-        
+
         assert result is False
 
 
@@ -59,7 +57,7 @@ class TestCheckIpAvailable:
                 NetworkLease(vm_name="vm1", ip="10.0.0.5"),
             ],
         )
-        
+
         with pytest.raises(NetworkError, match="10.0.0.5 is already in use"):
             check_ip_available("default", "10.0.0.5")
 
@@ -70,6 +68,6 @@ class TestCheckIpAvailable:
             "mvmctl.core.network_manager.get_network_leases",
             return_value=[],
         )
-        
+
         # Should not raise any exception
         check_ip_available("default", "10.0.0.5")

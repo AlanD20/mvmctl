@@ -190,9 +190,7 @@ def test_build_vm_config_file_with_firecracker_config_error(
 def test_vm_create_config_file_cloud_init_to_dict():
     """Test that cloud_init field can be set and retrieved via to_dict()."""
     cloud_init_data = {"mode": "nocloud-net", "enabled": True}
-    cfg = VMCreateConfigFile(
-        name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data
-    )
+    cfg = VMCreateConfigFile(name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data)
     d = cfg.to_dict()
     assert d["cloud_init"] == cloud_init_data
     assert d["name"] == "myvm"
@@ -202,9 +200,7 @@ def test_vm_create_config_file_cloud_init_to_dict():
 def test_vm_create_config_file_cloud_init_serialization(tmp_path: Path):
     """Test that cloud_init is properly serialized to JSON."""
     cloud_init_data = {"mode": "iso", "enabled": False, "iso_path": "/path/to/cloud-init.iso"}
-    cfg = VMCreateConfigFile(
-        name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data
-    )
+    cfg = VMCreateConfigFile(name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data)
     cfg.to_json_file(tmp_path / "out.json")
     data = json.loads((tmp_path / "out.json").read_text())
     assert data["cloud_init"] == cloud_init_data
@@ -213,20 +209,20 @@ def test_vm_create_config_file_cloud_init_serialization(tmp_path: Path):
 def test_vm_create_config_file_cloud_init_deserialization():
     """Test that cloud_init is properly deserialized from JSON via from_dict()."""
     cloud_init_data = {"mode": "auto", "enabled": True}
-    cfg = VMCreateConfigFile.from_dict({
-        "name": "myvm",
-        "image": "ubuntu-24.04",
-        "cloud_init": cloud_init_data,
-    })
+    cfg = VMCreateConfigFile.from_dict(
+        {
+            "name": "myvm",
+            "image": "ubuntu-24.04",
+            "cloud_init": cloud_init_data,
+        }
+    )
     assert cfg.cloud_init == cloud_init_data
 
 
 def test_vm_create_config_file_cloud_init_roundtrip():
     """Test full roundtrip: create -> to_dict -> from_dict -> verify."""
     original_cloud_init = {"mode": "nocloud-net", "enabled": True, "user_data": "/tmp/user-data"}
-    cfg = VMCreateConfigFile(
-        name="testvm", image="ubuntu-24.04", cloud_init=original_cloud_init
-    )
+    cfg = VMCreateConfigFile(name="testvm", image="ubuntu-24.04", cloud_init=original_cloud_init)
     d = cfg.to_dict()
     cfg2 = VMCreateConfigFile.from_dict(d)
     assert cfg2.cloud_init == original_cloud_init
@@ -243,17 +239,13 @@ def test_vm_create_config_file_cloud_init_none_default():
 def test_vm_create_config_file_cloud_init_in_json_file_roundtrip(tmp_path: Path):
     """Test cloud_init survives a to_json_file/from_json_file roundtrip."""
     cloud_init_data = {"mode": "disabled", "enabled": False}
-    cfg = VMCreateConfigFile(
-        name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data
-    )
+    cfg = VMCreateConfigFile(name="myvm", image="ubuntu-24.04", cloud_init=cloud_init_data)
     cfg.to_json_file(tmp_path / "vm.json")
     cfg2 = VMCreateConfigFile.from_json_file(tmp_path / "vm.json")
     assert cfg2.cloud_init == cloud_init_data
 
 
-def test_build_vm_config_file_includes_cloud_init(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+def test_build_vm_config_file_includes_cloud_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Test that build_vm_config_file includes cloud_init in returned config."""
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))

@@ -1,5 +1,5 @@
-import typer
 import pytest
+import typer
 
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.debug_state import is_debug_mode, set_debug_mode

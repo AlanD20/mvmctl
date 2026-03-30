@@ -1,8 +1,7 @@
 """Unit tests for NAT/POSTROUTING rules in network module."""
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
-import pytest
 from pytest_mock import MockerFixture
 
 from mvmctl.core.network import (
@@ -10,7 +9,6 @@ from mvmctl.core.network import (
     setup_nat,
     teardown_nat,
 )
-from mvmctl.exceptions import NetworkError
 
 
 class TestSetupNat:
@@ -26,15 +24,12 @@ class TestSetupNat:
         mocker.patch("mvmctl.core.network._iptables_rule_exists", return_value=False)
         # Mock subprocess.run for the iptables command
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
-        
+
         setup_nat(bridge="mvm-test", cidr="10.0.0.0/24")
-        
+
         # Verify subprocess.run was called with the MASQUERADE rule containing -s CIDR
         calls = mock_run.call_args_list
-        masquerade_calls = [
-            c for c in calls 
-            if "MASQUERADE" in str(c) and "-s" in str(c)
-        ]
+        masquerade_calls = [c for c in calls if "MASQUERADE" in str(c) and "-s" in str(c)]
         assert len(masquerade_calls) > 0
         # Check the CIDR is in the command
         assert any("10.0.0.0/24" in str(c) for c in masquerade_calls)
@@ -47,9 +42,9 @@ class TestSetupNat:
         mocker.patch("mvmctl.core.network._iptables_rule_exists", return_value=False)
         # Mock subprocess.run
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
-        
+
         setup_nat(bridge="mvm-test", internet_iface="eth1")
-        
+
         # Verify -o eth1 appears in MASQUERADE rule
         calls = mock_run.call_args_list
         masquerade_calls = [c for c in calls if "MASQUERADE" in str(c)]
@@ -66,9 +61,9 @@ class TestSetupNat:
         mocker.patch("mvmctl.core.network._iptables_rule_exists", return_value=False)
         # Mock subprocess.run
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
-        
+
         setup_nat(bridge="mvm-test")
-        
+
         # Verify comment appears in the rule
         calls = mock_run.call_args_list
         comment_calls = [c for c in calls if "--comment" in str(c)]
@@ -91,9 +86,9 @@ class TestTeardownNat:
         mocker.patch("mvmctl.core.network._detect_cidr_for_bridge", return_value="10.0.0.0/24")
         # Mock subprocess.run
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
-        
+
         teardown_nat(bridge="mvm-test", force=True)
-        
+
         # Verify -s CIDR appears in delete command
         calls = mock_run.call_args_list
         delete_calls = [c for c in calls if "-D" in str(c) and "POSTROUTING" in str(c)]
@@ -110,7 +105,7 @@ num   packets   bytes target     prot opt in     out     source               de
 1        0        0 MASQUERADE  all  --  *      eth0    10.0.0.0/24           0.0.0.0/0           /* mvm-nat:mvm-test */
 """
         mocker.patch("subprocess.run", return_value=mock_result)
-        
+
         result = _detect_cidr_for_bridge("mvm-test")
-        
+
         assert result == "10.0.0.0/24"
