@@ -2872,3 +2872,159 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_cleanup_tap.assert_called_once()
     called_args, called_kwargs = mock_cleanup_tap.call_args
     assert called_kwargs.get("bridge") == mock_net.bridge
+
+
+class TestRemoveVMNATOrdering:
+    """Tests for CRITICAL vm rm NAT teardown ordering fix.
+
+    This test class verifies that teardown_nat is called BEFORE delete_tap,
+    ensuring the NAT guard check can see remaining TAPs on the bridge.
+    """
+
+    @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+    @patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+    @patch("mvmctl.core.vm_lifecycle.get_network")
+    @patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+    @patch("mvmctl.core.vm_lifecycle.cleanup_tap")
+    @patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules")
+    @patch("mvmctl.core.vm_lifecycle.teardown_nat")
+    @patch("mvmctl.core.vm_lifecycle.delete_tap")
+    @patch("mvmctl.core.vm_lifecycle.release_network_ip")
+    @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
+    @patch("mvmctl.core.vm_lifecycle.ConsoleRelayManager")
+    @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+    def test_remove_vm_calls_teardown_nat_before_delete_tap(
+        self,
+        mock_nocloud_mgr,
+        mock_console_mgr,
+        mock_rmtree,
+        mock_release_ip,
+        mock_delete_tap,
+        mock_teardown_nat,
+        mock_remove_rules,
+        mock_cleanup_tap,
+        mock_graceful_shutdown,
+        mock_get_net_info,
+        mock_get_vm_dir,
+        mock_get_vm_mgr,
+    ):
+        """CRITICAL: teardown_nat must be called before delete_tap.
+
+        If delete_tap is called before teardown_nat, the guard check in
+        teardown_nat will see zero TAPs and incorrectly tear down shared
+        NAT rules, breaking connectivity for all remaining VMs on the bridge.
+        """
+        from mvmctl.core.vm_lifecycle import remove_vm
+        from mvmctl.models.vm import VMInstance, VMState
+
+        # Create a mock VM
+        vm = VMInstance(
+            id="a" * 64,
+            name="testvm",
+            ip="10.0.0.2",
+            mac="02:FC:00:00:00:01",
+            pid=1234,
+            status=VMState.STOPPED,
+            tap_device="mvm-def-tes-123",
+            network_name="default",
+        )
+
+        # Setup mocks
+        mock_manager = MagicMock()
+        mock_manager.get_by_short_id.return_value = []
+        mock_manager.get_by_name.return_value = [vm]
+        mock_get_vm_mgr.return_value = mock_manager
+
+        mock_vm_dir = MagicMock()
+        mock_vm_dir.exists.return_value = True
+        mock_get_vm_dir.return_value = mock_vm_dir
+
+        # Mock network config with bridge attribute
+        mock_net_config = MagicMock()
+        mock_net_config.bridge = "mvm-default"
+        mock_get_net_info.return_value = mock_net_config
+
+        # Call remove_vm
+        remove_vm("testvm")
+
+        # Verify call order: teardown_nat must be called before delete_tap
+        calls = []
+        for call in mock_teardown_nat.call_args_list:
+            calls.append(("teardown_nat", call))
+        for call in mock_delete_tap.call_args_list:
+            calls.append(("delete_tap", call))
+
+        # Find positions of each call
+        teardown_positions = [i for i, (name, _) in enumerate(calls) if name == "teardown_nat"]
+        delete_positions = [i for i, (name, _) in enumerate(calls) if name == "delete_tap"]
+
+        # teardown_nat should be called before delete_tap
+        assert teardown_positions, "teardown_nat was not called"
+        assert delete_positions, "delete_tap was not called"
+        assert min(teardown_positions) < min(delete_positions), (
+            "teardown_nat must be called before delete_tap to preserve NAT for other VMs"
+        )
+
+    @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+    @patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+    @patch("mvmctl.core.vm_lifecycle.get_network")
+    @patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+    @patch("mvmctl.core.vm_lifecycle.cleanup_tap")
+    @patch("mvmctl.core.vm_lifecycle.remove_iptables_forward_rules")
+    @patch("mvmctl.core.vm_lifecycle.teardown_nat")
+    @patch("mvmctl.core.vm_lifecycle.delete_tap")
+    @patch("mvmctl.core.vm_lifecycle.release_network_ip")
+    @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
+    @patch("mvmctl.core.vm_lifecycle.ConsoleRelayManager")
+    @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+    def test_teardown_nat_called_with_force_false(
+        self,
+        mock_nocloud_mgr,
+        mock_console_mgr,
+        mock_rmtree,
+        mock_release_ip,
+        mock_delete_tap,
+        mock_teardown_nat,
+        mock_remove_rules,
+        mock_cleanup_tap,
+        mock_graceful_shutdown,
+        mock_get_net_info,
+        mock_get_vm_dir,
+        mock_get_vm_mgr,
+    ):
+        """teardown_nat should be called with force=False to enable guard check."""
+        from mvmctl.core.vm_lifecycle import remove_vm
+        from mvmctl.models.vm import VMInstance, VMState
+
+        vm = VMInstance(
+            id="a" * 64,
+            name="testvm",
+            ip="10.0.0.2",
+            mac="02:FC:00:00:00:01",
+            pid=1234,
+            status=VMState.STOPPED,
+            tap_device="mvm-def-tes-123",
+            network_name="default",
+        )
+
+        mock_manager = MagicMock()
+        mock_manager.get_by_short_id.return_value = []
+        mock_manager.get_by_name.return_value = [vm]
+        mock_get_vm_mgr.return_value = mock_manager
+
+        mock_vm_dir = MagicMock()
+        mock_vm_dir.exists.return_value = True
+        mock_get_vm_dir.return_value = mock_vm_dir
+
+        # Mock network config with bridge attribute
+        mock_net_config = MagicMock()
+        mock_net_config.bridge = "mvm-default"
+        mock_get_net_info.return_value = mock_net_config
+
+        remove_vm("testvm")
+
+        # Verify teardown_nat was called with force=False (or no force argument)
+        mock_teardown_nat.assert_called()
+        call_kwargs = mock_teardown_nat.call_args[1] if mock_teardown_nat.call_args[1] else {}
+        force_value = call_kwargs.get("force", False)
+        assert force_value is False, "teardown_nat should be called with force=False"

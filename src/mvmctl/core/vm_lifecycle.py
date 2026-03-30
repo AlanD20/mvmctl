@@ -1015,15 +1015,17 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
             logger.warning("Failed to cleanup nocloud-net resources: %s", e)
 
     remove_iptables_forward_rules(tap_name, bridge=bridge)
+
+    # Try to teardown NAT BEFORE deleting TAP (so guard check can see if other TAPs exist)
+    try:
+        teardown_nat(bridge, force=False)
+    except NetworkError as e:
+        logger.debug("NAT teardown for bridge %s: %s", bridge, e)
+
     try:
         delete_tap(tap_name)
     except NetworkError:
         pass
-
-    try:
-        teardown_nat(bridge)
-    except NetworkError as e:
-        logger.debug("NAT teardown for bridge %s: %s", bridge, e)
 
     try:
         release_network_ip(net_name, name)
