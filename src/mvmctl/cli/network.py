@@ -85,7 +85,7 @@ def ls(
         )
     print_table(
         title="Networks",
-        columns=["Name", "CIDR", "Gateway", "Bridge", "NAT", "VMs", "Created"],
+        columns=["Name", "Network", "Gateway", "Bridge", "NAT", "VMs", "Created"],
         rows=rows,
     )
 

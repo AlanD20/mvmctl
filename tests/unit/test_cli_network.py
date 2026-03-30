@@ -38,6 +38,8 @@ def test_ls_with_networks(mock_leases, mock_list):
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "testnet" in result.output
+    # Verify column header is "Network" not "CIDR"
+    assert "Network" in result.output
 
 
 @patch("mvmctl.cli.network.list_networks", return_value=[_FAKE_NET])
