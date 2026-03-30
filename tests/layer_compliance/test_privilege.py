@@ -37,14 +37,14 @@ def _get_function_body(file_path: Path, function_name: str) -> ast.AST | None:
 
 
 def _has_check_privileges_call(function_node: ast.AST) -> bool:
-    """Check if a function body contains a call to check_privileges()."""
+    """Check if a function body contains a call to check_privileges() or check_privileges_interactive()."""
     for child in ast.walk(function_node):
         if isinstance(child, ast.Call):
             if isinstance(child.func, ast.Name):
-                if child.func.id == "check_privileges":
+                if child.func.id in ("check_privileges", "check_privileges_interactive"):
                     return True
             elif isinstance(child.func, ast.Attribute):
-                if child.func.attr == "check_privileges":
+                if child.func.attr in ("check_privileges", "check_privileges_interactive"):
                     return True
 
     return False
@@ -67,16 +67,16 @@ class TestAPIPrivilegeChecks:
             ("network.py", ["create_network", "remove_network"]),
         ],
     )
-    def test_privileged_functions_have_check_privileges(
+    def test_privileged_functions_have_privilege_check(
         self, api_file: str, expected_privileged_functions: list[str]
     ):
-        """Verify privileged API functions call check_privileges().
+        """Verify privileged API functions call check_privileges() or check_privileges_interactive().
 
         Known violations:
         - api/vms.py: create_vm, remove_vm, snapshot_vm, load_snapshot
           are re-exported from core without privilege checks
         - api/network.py is correctly implemented (create_network, remove_network
-          both have check_privileges calls)
+          both have privilege check calls)
         """
         file_path = API_DIR / api_file
 
@@ -123,7 +123,7 @@ class TestAPIPrivilegeChecks:
                         "file": api_file,
                         "function": func_name,
                         "line": func_node.lineno,
-                        "reason": "missing check_privileges() call",
+                        "reason": "missing check_privileges() or check_privileges_interactive() call",
                     }
                 )
 
@@ -140,7 +140,7 @@ class TestAPIPrivilegeChecks:
             msg = (
                 f"Found {len(violations)} missing privilege check(s):\n"
                 + "\n".join(violation_msgs)
-                + "\n\nPrivileged API functions must call check_privileges() "
+                + "\n\nPrivileged API functions must call check_privileges() or check_privileges_interactive() "
                 + "before delegating to core layer."
             )
             pytest.fail(msg)
@@ -149,7 +149,7 @@ class TestAPIPrivilegeChecks:
         """Specifically verify network API has correct privilege checks.
 
         This test serves as a reference implementation - network API
-        correctly wraps core functions with check_privileges() calls.
+        correctly wraps core functions with check_privileges() or check_privileges_interactive() calls.
         """
         file_path = API_DIR / "network.py"
 
@@ -174,14 +174,16 @@ class TestAPIPrivilegeChecks:
                 continue
 
             if not _has_check_privileges_call(func_node):
-                pytest.fail(f"network.{func_name}() is missing check_privileges() call")
+                pytest.fail(
+                    f"network.{func_name}() is missing check_privileges() or check_privileges_interactive() call"
+                )
 
 
 class TestPrivilegeCheckPatterns:
     """Tests for privilege check detection logic."""
 
     def test_detects_direct_check_privileges_call(self):
-        """Test detection of direct check_privileges() call."""
+        """Test detection of direct check_privileges() or check_privileges_interactive() call."""
         code = """
 def my_function():
     check_privileges("/usr/sbin/ip")
@@ -192,19 +194,33 @@ def my_function():
 
         assert _has_check_privileges_call(func_node), "Should detect direct check_privileges() call"
 
-    def test_detects_imported_check_privileges_call(self):
-        """Test detection of api.host.check_privileges() call."""
+    def test_detects_check_privileges_interactive_call(self):
+        """Test detection of check_privileges_interactive() call."""
         code = """
 def my_function():
-    from mvmctl.api.host import check_privileges
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", "operation description")
     do_something()
 """
         tree = ast.parse(code)
         func_node = tree.body[0]
 
         assert _has_check_privileges_call(func_node), (
-            "Should detect imported check_privileges() call"
+            "Should detect check_privileges_interactive() call"
+        )
+
+    def test_detects_imported_check_privileges_call(self):
+        """Test detection of api.host.check_privileges() or check_privileges_interactive() call."""
+        code = """
+def my_function():
+    from mvmctl.api.host import check_privileges_interactive
+    check_privileges_interactive("/usr/sbin/ip", "operation description")
+    do_something()
+"""
+        tree = ast.parse(code)
+        func_node = tree.body[0]
+
+        assert _has_check_privileges_call(func_node), (
+            "Should detect imported check_privileges_interactive() call"
         )
 
     def test_detects_missing_check_privileges(self):

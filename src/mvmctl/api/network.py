@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.api.host import check_privileges
+from mvmctl.api.host import check_privileges_interactive
 from mvmctl.core.network import get_iptables_rules_for_bridge
 from mvmctl.core.network_manager import (
     NetworkConfig,
@@ -47,11 +47,11 @@ def create_network(
     nat: bool = True,
 ) -> NetworkConfig:
     """Create a named network, setting up bridge and NAT rules."""
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", f"create network '{name}'")
     return _create_network(name, cidr=cidr, gateway=gateway, nat=nat)
 
 
 def remove_network(name: str) -> None:
     """Remove a named network, tearing down its bridge and NAT rules."""
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", f"remove network '{name}'")
     return _remove_network(name)

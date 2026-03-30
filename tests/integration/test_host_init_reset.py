@@ -39,7 +39,7 @@ def _host_change(setting: str, original: str | None, applied: str, mechanism: st
 class TestHostInitResetWorkflow:
     """Test host init/reset roundtrip workflow."""
 
-    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.host.init_host")
     @patch("mvmctl.cli.host.get_host_state")
     def test_init_and_check_state(self, mock_get_state, mock_init, mock_check_priv):
@@ -61,7 +61,7 @@ class TestHostInitResetWorkflow:
         result = runner.invoke(host_app, ["ls"])
         assert result.exit_code == 0
 
-    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.host.init_host")
     @patch("mvmctl.cli.host.reset_host")
     @patch("mvmctl.cli.host.get_host_state")
@@ -124,7 +124,7 @@ class TestHostWithSubprocessMocking:
     @patch("mvmctl.core.host_privilege._group_exists")
     @patch("mvmctl.core.host_privilege._user_in_group")
     @patch("mvmctl.core.host_state._state_dir")
-    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     def test_init_with_subprocess_mocking(
         self,
         mock_check_priv,

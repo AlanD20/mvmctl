@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.api.host import check_privileges
+from mvmctl.api.host import check_privileges_interactive
 from mvmctl.core import cache_manager
 
 __all__ = [
@@ -24,7 +24,7 @@ def init_all() -> dict[str, str]:
     Returns:
         Dictionary mapping resource names to their directory paths as strings.
     """
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", "initialize cache")
     result = cache_manager.cache_init_all()
     return {k: str(v) if v else "" for k, v in result.items()}
 
@@ -47,7 +47,7 @@ def prune_vms(
     Returns:
         List of VM names that were removed.
     """
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", "prune VMs")
     return cache_manager.cache_prune_vms(
         include_stopped=include_stopped,
         include_running=include_running,
@@ -67,7 +67,7 @@ def prune_networks(dry_run: bool = False) -> list[str]:
     Returns:
         List of network names that were removed.
     """
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", "prune networks")
     return cache_manager.cache_prune_networks(dry_run=dry_run)
 
 
@@ -83,7 +83,7 @@ def prune_images(dry_run: bool = False) -> list[str]:
     Returns:
         List of image IDs (short form, first 6 chars) that were removed.
     """
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", "prune images")
     return cache_manager.cache_prune_images(dry_run=dry_run)
 
 
@@ -99,7 +99,7 @@ def prune_kernels(dry_run: bool = False) -> list[str]:
     Returns:
         List of kernel IDs (short form, first 6 chars) that were removed.
     """
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", "prune kernels")
     return cache_manager.cache_prune_kernels(dry_run=dry_run)
 
 
@@ -125,7 +125,7 @@ def prune_all(
         - "images": list of removed image IDs
         - "kernels": list of removed kernel IDs
     """
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", "prune all cache resources")
     return cache_manager.cache_prune_all(
         include_stopped=include_stopped,
         include_running=include_running,

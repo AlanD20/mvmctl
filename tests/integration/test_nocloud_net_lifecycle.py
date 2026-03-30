@@ -46,7 +46,7 @@ class TestFullNocloudNetLifecycle:
     """Test complete nocloud-net VM lifecycle workflow."""
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.remove_nocloud_input_rule")
@@ -161,7 +161,7 @@ class TestFullNocloudNetLifecycle:
         assert vm.nocloud_net_port == 8000
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.remove_nocloud_input_rule")
@@ -287,7 +287,7 @@ class TestMultipleVMsDifferentPorts:
     """Test multiple VMs with nocloud-net mode get different ports."""
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
@@ -438,7 +438,7 @@ class TestNocloudNetFailureCleanup:
     """Test cleanup on nocloud-net failure scenarios."""
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.remove_nocloud_input_rule")
@@ -528,7 +528,7 @@ class TestNocloudNetFailureCleanup:
         assert vm_mgr.get("failing-vm") is None
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.core.vm_lifecycle.subprocess.run")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
@@ -633,7 +633,7 @@ class TestVMWithoutNocloudNet:
     """Test that VMs without nocloud-net mode are unaffected."""
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
@@ -725,7 +725,7 @@ class TestVMWithoutNocloudNet:
 class TestNocloudNetCLIAuthoring:
     """Test CLI integration for nocloud-net VMs."""
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_vm_with_nocloud_net_flag(
@@ -750,7 +750,7 @@ class TestNocloudNetCLIAuthoring:
         call_kwargs = mock_create_vm.call_args.kwargs
         assert call_kwargs.get("cloud_init_mode") == CloudInitMode.NO_CLOUD_NET
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_vm_with_custom_nocloud_port(

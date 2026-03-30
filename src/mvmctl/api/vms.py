@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from mvmctl.api.host import check_privileges
+from mvmctl.api.host import check_privileges_interactive
 from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
@@ -207,7 +207,7 @@ def create_vm(
     vm_manager: VMManager | None = None,
     nocloud_net_port: int = 0,
 ) -> VMInstance:
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", f"create VM '{name}'")
     return _create_vm(
         name=name,
         image=image,
@@ -236,17 +236,17 @@ def create_vm(
 
 
 def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", f"remove VM '{name}'")
     return _remove_vm(name=name, vm_manager=vm_manager)
 
 
 def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", f"create snapshot for VM '{name}'")
     return _snapshot_vm(name=name, mem_out=mem_out, state_out=state_out)
 
 
 def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = True) -> None:
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", f"load snapshot for VM '{name}'")
     return _load_snapshot(name=name, mem_in=mem_in, state_in=state_in, resume_after=resume_after)
 
 
@@ -321,7 +321,7 @@ def cleanup_vms(
     all_vms: bool = False, dry_run: bool = False, vm_manager: VMManager | None = None
 ) -> list[VMInstance]:
     """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules."""
-    check_privileges("/usr/sbin/ip")
+    check_privileges_interactive("/usr/sbin/ip", "cleanup VMs")
     import logging
     import os
     import shutil

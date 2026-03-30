@@ -40,7 +40,7 @@ def _make_vm(
 class TestCloudInitISOCreation:
     """Test cloud-init ISO creation during VM creation."""
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.utils.process.run_cmd")
@@ -76,7 +76,7 @@ class TestCloudInitISOCreation:
         assert call_kwargs["name"] == "cloud-init-vm"
         assert call_kwargs["image"] == "abc123"
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_vm_create_with_custom_iso(
@@ -119,7 +119,7 @@ class TestCloudInitISOCreation:
         assert call_kwargs["name"] == "custom-iso-vm"
         assert call_kwargs["cloud_init_iso_path"] == custom_iso
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_vm_create_disabled_cloud_init(
@@ -157,7 +157,7 @@ class TestCloudInitISOCreation:
         call_kwargs = mock_create_vm.call_args.kwargs
         assert call_kwargs["name"] == "no-cloud-init-vm"
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_vm_create_keep_iso_flag(self, mock_create_vm, mock_resolve_image, mock_check_priv):
@@ -199,7 +199,7 @@ class TestCloudInitISOSubprocessMocking:
     """Test cloud-init ISO workflows with mocked subprocess calls."""
 
     @patch("mvmctl.utils.process.run_cmd")
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_iso_creation_with_cloud_localds_mock(
@@ -265,7 +265,7 @@ class TestCloudInitISOSubprocessMocking:
 class TestCloudInitISOEdgeCases:
     """Test edge cases in cloud-init ISO workflows."""
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     def test_custom_iso_not_found(self, mock_resolve_image, mock_check_priv, tmp_path):
         """Test error when custom ISO path doesn't exist."""
@@ -289,7 +289,7 @@ class TestCloudInitISOEdgeCases:
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     def test_mutually_exclusive_cloud_init_flags(
         self, mock_resolve_image, mock_check_priv, tmp_path
@@ -317,7 +317,7 @@ class TestCloudInitISOEdgeCases:
         assert result.exit_code == 1
         assert "are mutually exclusive" in result.output.lower()
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_nocloud_net_mode(self, mock_create_vm, mock_resolve_image, mock_check_priv):
@@ -351,7 +351,7 @@ class TestCloudInitISOEdgeCases:
         call_kwargs = mock_create_vm.call_args.kwargs
         assert call_kwargs["name"] == "nocloud-vm"
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     def test_nocloud_net_with_custom_iso_conflict(
         self, mock_resolve_image, mock_check_priv, tmp_path
@@ -379,7 +379,7 @@ class TestCloudInitISOEdgeCases:
         assert result.exit_code == 1
         assert "only one of" in result.output.lower()
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     def test_nocloud_net_with_no_cloud_init_conflict(self, mock_resolve_image, mock_check_priv):
         """Test that --nocloud-net and --no-cloud-init are mutually exclusive."""

@@ -86,7 +86,7 @@ def test_get_logs(mock_show_logs):
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
 @patch("mvmctl.core.firewall.remove_nocloud_input_rule")
 @patch("os.kill")
-@patch("mvmctl.api.vms.check_privileges")
+@patch("mvmctl.api.vms.check_privileges_interactive")
 @patch("mvmctl.api.vms.get_network")
 @patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms(
@@ -136,7 +136,7 @@ def test_cleanup_vms(
         assert len(res) == 1
         assert res[0].name == "vm1"
 
-        mock_check_privs.assert_called_once_with("/usr/sbin/ip")
+        mock_check_privs.assert_called_once_with("/usr/sbin/ip", "cleanup VMs")
         mock_kill.assert_called_once_with(123, 9)
         mock_rm_iptables.assert_called_once_with("mvm-def-vm1-abc", bridge="mvm-default")
         mock_del_tap.assert_called_once_with("mvm-def-vm1-abc")
@@ -152,7 +152,7 @@ def test_cleanup_vms(
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
 @patch("mvmctl.core.firewall.remove_nocloud_input_rule")
 @patch("os.kill")
-@patch("mvmctl.api.vms.check_privileges")
+@patch("mvmctl.api.vms.check_privileges_interactive")
 @patch("mvmctl.api.vms.get_network")
 @patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms_removes_hash_based_dir(
@@ -207,7 +207,7 @@ def test_cleanup_vms_removes_hash_based_dir(
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
 @patch("mvmctl.core.firewall.remove_nocloud_input_rule")
 @patch("os.kill")
-@patch("mvmctl.api.vms.check_privileges")
+@patch("mvmctl.api.vms.check_privileges_interactive")
 @patch("mvmctl.api.vms.get_network")
 @patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms_handles_missing_vm_id(

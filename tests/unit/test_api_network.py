@@ -7,7 +7,7 @@ from mvmctl.api.network import create_network, remove_network
 from mvmctl.core.network_manager import NetworkConfig, NetworkLease
 
 
-@patch("mvmctl.api.network.check_privileges")
+@patch("mvmctl.api.network.check_privileges_interactive")
 @patch("mvmctl.api.network._create_network")
 def test_create_network_with_privileges(mock_create, mock_check_priv):
     """Test create_network calls privilege check and delegates."""
@@ -16,20 +16,20 @@ def test_create_network_with_privileges(mock_create, mock_check_priv):
 
     result = create_network("test-net", cidr="10.0.0.0/24", gateway="10.0.0.1", nat=True)
 
-    mock_check_priv.assert_called_once_with("/usr/sbin/ip")
+    mock_check_priv.assert_called_once_with("/usr/sbin/ip", "create network 'test-net'")
     mock_create.assert_called_once_with(
         "test-net", cidr="10.0.0.0/24", gateway="10.0.0.1", nat=True
     )
     assert result == mock_config
 
 
-@patch("mvmctl.api.network.check_privileges")
+@patch("mvmctl.api.network.check_privileges_interactive")
 @patch("mvmctl.api.network._remove_network")
 def test_remove_network_with_privileges(mock_remove, mock_check_priv):
     """Test remove_network calls privilege check and delegates."""
     remove_network("test-net")
 
-    mock_check_priv.assert_called_once_with("/usr/sbin/ip")
+    mock_check_priv.assert_called_once_with("/usr/sbin/ip", "remove network 'test-net'")
     mock_remove.assert_called_once_with("test-net")
 
 

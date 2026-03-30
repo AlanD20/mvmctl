@@ -39,7 +39,7 @@ def _make_vm(
 class TestVMLifecycleWorkflow:
     """Test complete VM lifecycle workflow end-to-end."""
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.list_vms")
@@ -65,7 +65,7 @@ class TestVMLifecycleWorkflow:
         assert len(data) == 1
         assert data[0]["name"] == "lifecycle-vm"
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.ssh_vm")
@@ -85,7 +85,7 @@ class TestVMLifecycleWorkflow:
         assert result.exit_code == 0
         mock_ssh.assert_called_once()
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.snapshot_vm")
@@ -154,7 +154,7 @@ class TestVMLifecycleWorkflow:
         assert result.exit_code == 0
         mock_remove.assert_called_once_with("full-lifecycle-vm")
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.get_logs")
@@ -244,7 +244,7 @@ class TestVMLifecycleWorkflow:
 class TestVMLifecycleEdgeCases:
     """Test edge cases in VM lifecycle workflows."""
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.cli.vm.remove_vm")
     def test_remove_nonexistent_vm(self, mock_remove, mock_manager, mock_check_priv):
@@ -257,7 +257,7 @@ class TestVMLifecycleEdgeCases:
         assert result.exit_code == 1
         assert "no vm found" in result.output.lower()
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_duplicate_vm_name(self, mock_create, mock_resolve_image, mock_check_priv):
@@ -272,7 +272,7 @@ class TestVMLifecycleEdgeCases:
         assert result.exit_code == 1
         assert "already exists" in result.output.lower()
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.cleanup_vms")

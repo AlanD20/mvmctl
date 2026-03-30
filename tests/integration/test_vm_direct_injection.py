@@ -11,7 +11,7 @@ from mvmctl.models.cloud_init import CloudInitMode
 class TestVMDirectInjection:
     """Integration tests for VM creation with direct injection mode."""
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.core.rootfs_injector.check_libguestfs")
@@ -57,7 +57,7 @@ class TestVMDirectInjection:
         call_kwargs = mock_create_vm.call_args[1]
         assert call_kwargs["cloud_init_mode"] == CloudInitMode.DIRECT_INJECTION
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_vm_create_explicit_direct_mode(
@@ -88,7 +88,7 @@ class TestVMDirectInjection:
         args, kwargs = mock_create_vm.call_args
         assert kwargs.get("cloud_init_mode") == CloudInitMode.DIRECT_INJECTION
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     def test_vm_create_invalid_mode_rejected(
         self,
@@ -109,7 +109,7 @@ class TestVMDirectInjection:
         assert result.exit_code != 0
         assert "Invalid mode" in result.output or "invalid" in result.output.lower()
 
-    @patch("mvmctl.api.vms.check_privileges")
+    @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.core.rootfs_injector.check_libguestfs")

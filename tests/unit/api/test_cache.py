@@ -12,7 +12,7 @@ from mvmctl.api import cache as cache_api
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_init_all")
 def test_init_all_calls_core_functions(mock_init_all, mock_check_privs):
     """Verify init_all delegates to core cache_manager functions."""
@@ -34,7 +34,7 @@ def test_init_all_calls_core_functions(mock_init_all, mock_check_privs):
     assert "guestfs" not in result
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_init_all")
 def test_init_all_privilege_check(mock_init_all, mock_check_privs):
     """Verify privilege check is called for init_all."""
@@ -42,7 +42,7 @@ def test_init_all_privilege_check(mock_init_all, mock_check_privs):
 
     cache_api.init_all()
 
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip")
+    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "initialize cache")
 
 
 # =============================================================================
@@ -50,7 +50,7 @@ def test_init_all_privilege_check(mock_init_all, mock_check_privs):
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_prune_vms")
 def test_prune_vms_privilege_check(mock_prune_vms, mock_check_privs):
     """Verify privilege check is called for prune_vms."""
@@ -58,11 +58,11 @@ def test_prune_vms_privilege_check(mock_prune_vms, mock_check_privs):
 
     result = cache_api.prune_vms()
 
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip")
+    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune VMs")
     assert result == ["vm1", "vm2"]
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_prune_vms")
 def test_prune_vms_passes_flags(mock_prune_vms, mock_check_privs):
     """Verify flags are passed correctly to core prune_vms."""
@@ -93,7 +93,7 @@ def test_prune_vms_passes_flags(mock_prune_vms, mock_check_privs):
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_prune_networks")
 def test_prune_networks_privilege_check(mock_prune_networks, mock_check_privs):
     """Verify privilege check is called for prune_networks."""
@@ -101,7 +101,7 @@ def test_prune_networks_privilege_check(mock_prune_networks, mock_check_privs):
 
     result = cache_api.prune_networks()
 
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip")
+    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune networks")
     mock_prune_networks.assert_called_once()
     assert result == ["unused-net"]
 
@@ -111,7 +111,7 @@ def test_prune_networks_privilege_check(mock_prune_networks, mock_check_privs):
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_prune_images")
 def test_prune_images_privilege_check(mock_prune_images, mock_check_privs):
     """Verify privilege check is called for prune_images."""
@@ -119,7 +119,7 @@ def test_prune_images_privilege_check(mock_prune_images, mock_check_privs):
 
     result = cache_api.prune_images()
 
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip")
+    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune images")
     mock_prune_images.assert_called_once()
     assert result == ["abc123"]
 
@@ -129,7 +129,7 @@ def test_prune_images_privilege_check(mock_prune_images, mock_check_privs):
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_prune_kernels")
 def test_prune_kernels_privilege_check(mock_prune_kernels, mock_check_privs):
     """Verify privilege check is called for prune_kernels."""
@@ -137,7 +137,7 @@ def test_prune_kernels_privilege_check(mock_prune_kernels, mock_check_privs):
 
     result = cache_api.prune_kernels()
 
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip")
+    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune kernels")
     mock_prune_kernels.assert_called_once()
     assert result == ["def456"]
 
@@ -147,7 +147,7 @@ def test_prune_kernels_privilege_check(mock_prune_kernels, mock_check_privs):
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_prune_all")
 def test_prune_all_privilege_check(mock_prune_all, mock_check_privs):
     """Verify privilege check is called for prune_all."""
@@ -160,7 +160,7 @@ def test_prune_all_privilege_check(mock_prune_all, mock_check_privs):
 
     result = cache_api.prune_all()
 
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip")
+    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune all cache resources")
     assert result["vms"] == ["vm1"]
     assert result["networks"] == ["net1"]
     assert result["images"] == ["img1"]
@@ -169,7 +169,7 @@ def test_prune_all_privilege_check(mock_prune_all, mock_check_privs):
     assert "guestfs" not in result
 
 
-@patch("mvmctl.api.cache.check_privileges")
+@patch("mvmctl.api.cache.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_prune_all")
 def test_prune_all_passes_flags(mock_prune_all, mock_check_privs):
     """Verify flags are passed correctly to core prune_all."""
