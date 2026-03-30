@@ -18,7 +18,6 @@ from mvmctl.api.vms import (
     resolve_image_multi_strategy,
     resolve_kernel_multi_strategy,
     snapshot_vm,
-    ssh_vm,
 )
 from mvmctl.cli._helpers import get_state_marker, is_file_missing, is_vm_process_running
 from mvmctl.constants import (
@@ -32,7 +31,6 @@ from mvmctl.utils.console import print_error, print_info, print_success, print_t
 from mvmctl.utils.fs import get_vm_dir_by_hash as get_vm_dir  # noqa: F401
 from mvmctl.utils.fs import get_vms_dir  # noqa: F401
 from mvmctl.utils.time import human_readable_time
-from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 # Sentinel for auto-generation mode
 USE_ISO_AUTO = "__use_iso_auto__"
@@ -671,70 +669,6 @@ def ps_vms(
 ) -> None:
     """List running VMs (alias for ls)."""
     ls_vms(json_output=json_output, all_vms=all_vms)
-
-
-def _find_ssh_key_from_path(key_path: Path) -> Path | None:
-    if key_path.is_file():
-        return key_path
-    if key_path.is_dir():
-        for candidate in sorted(key_path.iterdir()):
-            if (
-                candidate.is_file()
-                and candidate.suffix != ".pub"
-                and not candidate.name.startswith(".")
-            ):
-                return candidate
-    return None
-
-
-def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
-    if key is not None:
-        resolved = _find_ssh_key_from_path(key)
-        if resolved is None:
-            raise MVMError(f"No SSH key found at: {key}")
-        return resolved
-    from mvmctl.utils.fs import get_keys_dir
-
-    mvm_keys_dir = get_keys_dir()
-    if mvm_keys_dir.exists():
-        for f in sorted(mvm_keys_dir.iterdir()):
-            if f.is_file() and f.suffix not in (".pub", ".json") and not f.name.startswith("."):
-                return f
-    ssh_dir = Path.home() / ".ssh"
-    if ssh_dir.exists():
-        for f in sorted(ssh_dir.iterdir()):
-            if (
-                f.is_file()
-                and not f.name.endswith((".pub", ".json"))
-                and not f.name.startswith(".")
-                and f.name not in ("known_hosts", "config", "authorized_keys")
-            ):
-                return f
-    return None
-
-
-@app.command()
-def ssh(
-    name: str = typer.Option(..., "--name", "-n", help="VM name or IP address"),
-    user: Optional[str] = typer.Option(
-        None, "--user", "-u", help="SSH user (default: from user config)"
-    ),
-    key: Optional[Path] = typer.Option(
-        None, "--key", help="SSH private key file or directory of keys"
-    ),
-    cmd: Optional[str] = typer.Option(None, "--cmd", "-c", help="Command to execute"),
-) -> None:
-    """Open an SSH session into a VM."""
-    try:
-        if not is_ip_address(name):
-            validate_entity_name(name, "VM")
-        resolved_key = _resolve_ssh_key_for_vm(key)
-        effective_user = user if user is not None else _get_vm_defaults().ssh_user
-        exit_code = ssh_vm(name=name, user=effective_user, key=resolved_key, cmd=cmd)
-        raise typer.Exit(code=exit_code)
-    except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
 
 
 def _do_prune(all_vms: bool, dry_run: bool) -> None:

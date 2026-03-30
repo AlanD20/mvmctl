@@ -68,6 +68,7 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "bin": _LazyCommandSpec("mvmctl.cli.bin", "bin_app", "Binary management"),
     "cache": _LazyCommandSpec("mvmctl.cli.cache", "app", "Cache management"),
     "logs": _LazyCommandSpec("mvmctl.cli.logs", "app", "VM log management"),
+    "ssh": _LazyCommandSpec("mvmctl.cli.ssh", "app", "VM SSH access"),
 }
 
 _STATIC_COMMAND_HELP: dict[str, str] = {
@@ -90,6 +91,7 @@ _COMMAND_ORDER = [
     "bin",
     "cache",
     "logs",
+    "ssh",
     "clear",
     "version",
     "help",
@@ -234,6 +236,7 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
         "key",
         "cache",
         "logs",
+        "ssh",
         "clear",
     }:
         _reconcile_networks()

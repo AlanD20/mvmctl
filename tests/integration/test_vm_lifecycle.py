@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.vm import app as vm_app
 from mvmctl.cli.logs import app as logs_app
+from mvmctl.cli.ssh import app as ssh_app
 from mvmctl.main import app as main_app
 from mvmctl.models.vm import VMInstance, VMState
 
@@ -70,7 +71,7 @@ class TestVMLifecycleWorkflow:
     @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.cli.vm.ssh_vm")
+    @patch("mvmctl.cli.ssh.ssh_vm")
     def test_create_and_ssh_vm(self, mock_ssh, mock_create_vm, mock_resolve_image, mock_check_priv):
         """Test creating a VM and then SSHing into it."""
         mock_check_priv.return_value = None
@@ -83,7 +84,7 @@ class TestVMLifecycleWorkflow:
         result = runner.invoke(vm_app, ["create", "--name", "ssh-test-vm", "--image", "abc123"])
         assert result.exit_code == 0
 
-        result = runner.invoke(vm_app, ["ssh", "--name", "ssh-test-vm"])
+        result = runner.invoke(ssh_app, ["--name", "ssh-test-vm"])
         assert result.exit_code == 0
         mock_ssh.assert_called_once()
 
