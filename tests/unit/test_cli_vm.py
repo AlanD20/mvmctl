@@ -59,7 +59,7 @@ def test_list_vms_all_flag(mocker: MockerFixture):
 def test_rm_vm_not_found(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_name.return_value = []
-    mock_mgr.find_by_short_id.return_value = []
+    mock_mgr.find_by_id_prefix.return_value = []
     mocker.patch("mvmctl.core.vm_manager.get_vm_manager", return_value=mock_mgr)
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm", "--name", "nonexistent"])
@@ -70,7 +70,7 @@ def test_rm_running_vm(mocker: MockerFixture):
     vm = _make_vm("delvm", VMState.RUNNING)
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_name.return_value = [vm]
-    mock_mgr.find_by_short_id.return_value = []
+    mock_mgr.find_by_id_prefix.return_value = []
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     mocker.patch("mvmctl.cli.vm.remove_vm")
     result = runner.invoke(app, ["rm", "--name", "delvm"])
@@ -93,7 +93,7 @@ def test_rm_multiple_vms_same_name_errors(mocker: MockerFixture):
 
     mock_manager = mocker.MagicMock()
     mock_manager.get_by_name.return_value = [vm1, vm2]
-    mock_manager.find_by_short_id.return_value = []
+    mock_manager.find_by_id_prefix.return_value = []
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_manager)
 
     result = runner.invoke(app, ["rm", "--name", "test-dup"])
@@ -135,7 +135,7 @@ def test_create_vm_fail(mocker: MockerFixture):
     assert "Kernel not found" in result.output
 
 
-def test_create_vm_rejects_non_matching_image_short_id(mocker: MockerFixture):
+def test_create_vm_rejects_non_matching_image_id_prefix(mocker: MockerFixture):
     mocker.patch(
         "mvmctl.cli.vm.resolve_image_multi_strategy",
         side_effect=MVMError("Image 'badid' was not found"),
@@ -147,7 +147,7 @@ def test_create_vm_rejects_non_matching_image_short_id(mocker: MockerFixture):
     mock_create.assert_not_called()
 
 
-def test_create_vm_short_id_preserves_identifier_for_uuid_lookup(mocker: MockerFixture):
+def test_create_vm_id_prefix_preserves_identifier_for_uuid_lookup(mocker: MockerFixture):
     vm = _make_vm("newvm")
     image_path = "/cache/images/ubuntu-24.04.ext4"
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
@@ -543,10 +543,10 @@ def test_ps_all_flag(mocker: MockerFixture):
     assert "stopped" in result.output
 
 
-def test_rm_by_short_id(mocker: MockerFixture):  # No --force needed
+def test_rm_by_id_prefix(mocker: MockerFixture):  # No --force needed
     vm = _make_vm("myvm")
     mock_mgr = mocker.MagicMock()
-    mock_mgr.find_by_short_id.return_value = [vm]
+    mock_mgr.find_by_id_prefix.return_value = [vm]
     mock_mgr.get_by_name.return_value = []
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     mocker.patch("mvmctl.cli.vm.remove_vm")
@@ -559,7 +559,7 @@ def test_rm_multiple_names(mocker: MockerFixture):  # No --force needed
     vm1 = _make_vm("vm1")
     vm2 = _make_vm("vm2")
     mock_mgr = mocker.MagicMock()
-    mock_mgr.find_by_short_id.return_value = []
+    mock_mgr.find_by_id_prefix.return_value = []
     mock_mgr.get_by_name.side_effect = lambda n: [vm1] if n == "vm1" else [vm2]
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     mocker.patch("mvmctl.cli.vm.remove_vm")
@@ -569,7 +569,7 @@ def test_rm_multiple_names(mocker: MockerFixture):  # No --force needed
 
 def test_rm_no_targets(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
-    mock_mgr.find_by_short_id.return_value = []
+    mock_mgr.find_by_id_prefix.return_value = []
     mock_mgr.get_by_name.return_value = []
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm"])
@@ -595,8 +595,7 @@ def test_inspect_vm_command(mocker: MockerFixture):
     mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
     mock_inspect.return_value = {
         "name": "myvm",
-        "id": "abc123" + "x" * 58,
-        "short_id": "abc123",
+        "id": "abc123" + "x" * 10,
         "status": "running",
         "pid": 1234,
         "ip": "10.0.0.2",
@@ -630,8 +629,7 @@ def test_inspect_vm_json_output(mocker: MockerFixture):
     mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
     mock_inspect.return_value = {
         "name": "myvm",
-        "id": "abc123" + "x" * 58,
-        "short_id": "abc123",
+        "id": "abc123" + "x" * 10,
         "status": "running",
         "pid": 1234,
         "ip": "10.0.0.2",
@@ -856,16 +854,16 @@ def test_resolve_image_yaml_name(mocker: MockerFixture, tmp_path: Path, monkeypa
     assert result.name == "ubuntu-24.04.ext4"
 
 
-def test_resolve_image_short_id(mocker: MockerFixture, tmp_path: Path, monkeypatch):
-    """resolve_image_multi_strategy falls back to short-ID resolution."""
+def test_resolve_image_id_prefix(mocker: MockerFixture, tmp_path: Path, monkeypatch):
+    """resolve_image_multi_strategy falls back to ID prefix resolution."""
     from mvmctl.api.vms import resolve_image_multi_strategy
 
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
 
-    # Mock short-id resolution to return a path
+    # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "images" / "abc123.ext4"
     mocker.patch(
-        "mvmctl.api.vms._core_resolve_image_short_id_path",
+        "mvmctl.api.vms._core_resolve_image_id_path",
         return_value=mock_path,
     )
 
@@ -884,16 +882,16 @@ def test_resolve_kernel_direct_path(tmp_path: Path, monkeypatch):
     assert result == kernel_file
 
 
-def test_resolve_kernel_short_id(mocker: MockerFixture, tmp_path: Path, monkeypatch):
-    """resolve_kernel_multi_strategy falls back to short-ID resolution."""
+def test_resolve_kernel_id_prefix(mocker: MockerFixture, tmp_path: Path, monkeypatch):
+    """resolve_kernel_multi_strategy falls back to ID prefix resolution."""
     from mvmctl.api.vms import resolve_kernel_multi_strategy
 
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
 
-    # Mock short-id resolution to return a path
+    # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "kernels" / "abc123"
     mocker.patch(
-        "mvmctl.api.vms._core_resolve_kernel_short_id_path",
+        "mvmctl.api.vms._core_resolve_kernel_id_path",
         return_value=mock_path,
     )
 
@@ -953,8 +951,7 @@ class TestInspectCommand:
         mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
         mock_inspect.return_value = {
             "name": "positional-vm",
-            "id": "a" * 64,
-            "short_id": "aaaaaa",
+            "id": "a" * 16,
             "status": "running",
             "created_at": "2026-01-01",
             "pid": 1234,
@@ -985,8 +982,7 @@ class TestInspectCommand:
         mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
         mock_inspect.return_value = {
             "name": "myvm",
-            "id": "a" * 64,
-            "short_id": "aaaaaa",
+            "id": "a" * 16,
             "status": "running",
             "created_at": "2026-01-01",
             "pid": 1234,

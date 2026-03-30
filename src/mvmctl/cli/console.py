@@ -46,29 +46,29 @@ def _resolve_vm(vm_id: Optional[str], name: Optional[str]) -> str:
         return name
 
     if vm_id:
-        matches = manager.find_by_short_id(vm_id)
+        matches = manager.find_by_id_prefix(vm_id)
         if len(matches) == 1:
             return matches[0].name
         if len(matches) > 1:
-            print_error(f"Multiple VMs match short ID '{vm_id}' — use a longer prefix or --name")
+            print_error(f"Multiple VMs match ID prefix '{vm_id}' — use a longer prefix or --name")
             raise typer.Exit(1)
         if manager.get(vm_id) is not None:
             return vm_id
-        print_error(f"No VM found with short ID or name '{vm_id}'")
+        print_error(f"No VM found with ID prefix or name '{vm_id}'")
         raise typer.Exit(1)
 
-    print_error("Provide a VM short ID or --name")
+    print_error("Provide a VM ID prefix or --name")
     raise typer.Exit(1)
 
 
 @app.command()
 def attach(
-    vm_id: Optional[str] = typer.Argument(None, help="VM short ID (first 6 chars) or name"),
+    vm_id: Optional[str] = typer.Argument(None, help="VM ID prefix or name"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name"),
     state: bool = typer.Option(False, "--state", help="Show console state without attaching"),
     kill: bool = typer.Option(False, "--kill", help="Kill the console relay"),
 ) -> None:
-    """Attach to a VM console by short ID (e.g., 3df) or --name."""
+    """Attach to a VM console by ID prefix (e.g., 3df) or --name."""
     vm_name = _resolve_vm(vm_id, name)
 
     if state:

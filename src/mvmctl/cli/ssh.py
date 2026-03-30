@@ -72,7 +72,7 @@ def _get_vm_defaults() -> "VMDefaultsConfig":
 
 @app.command()
 def ssh(
-    vm_id: str = typer.Argument(None, help="VM name, short ID, or IP address"),
+    vm_id: str = typer.Argument(None, help="VM name, ID prefix, or IP address"),
     user: Optional[str] = typer.Option(
         None, "--user", "-u", help="SSH user (default: from user config)"
     ),
@@ -101,11 +101,11 @@ def ssh(
                 from mvmctl.utils.fs import get_vms_dir
 
                 manager = VMManager(get_vms_dir())
-                matches = manager.find_by_short_id(target)
+                matches = manager.find_by_id_prefix(target)
                 if len(matches) == 1:
                     target = matches[0].name
                 elif len(matches) > 1:
-                    raise MVMError(f"Ambiguous short ID '{target}' matches {len(matches)} VMs")
+                    raise MVMError(f"Ambiguous ID prefix '{target}' matches {len(matches)} VMs")
                 else:
                     validate_entity_name(target, "VM")
         else:

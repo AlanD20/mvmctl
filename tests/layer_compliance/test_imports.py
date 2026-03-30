@@ -178,7 +178,7 @@ class TestImportWhitelist:
             ("mvmctl.core.kernel", True),
             ("mvmctl.core.vm_lifecycle", True),
             ("mvmctl.core.network", True),
-            ("mvmctl.core.metadata.find_images_by_short_id", True),
+            ("mvmctl.core.metadata.find_images_by_id_prefix", True),
             ("mvmctl.models", False),
             ("mvmctl.models.vm", False),
             ("mvmctl.exceptions", False),

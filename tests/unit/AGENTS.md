@@ -169,6 +169,6 @@ To execute the `mvmctl` CLI with proper group privileges, use:
 ## NOTES
 
 - **Two kernel test files coexist**: `test_kernel.py` (full legacy coverage) + `test_kernel_new.py` (new features). Do not merge or delete either.
-- **VMManager mocking**: Always mock both `get_by_name()` and `find_by_short_id()` together — `vm rm` tries short-ID first, then falls back to name.
+- **VMManager mocking**: Always mock both `get_by_name()` and `find_by_id_prefix()` together — `vm rm` tries ID prefix first, then falls back to name.
 - **`test_security.py`**: Not tied to a single source file — validates security properties across modules.
 - **`conftest.py`** (132 lines) — provides VM fixtures (`sample_vm`, `running_vm`, `stopped_vm`, `error_vm`), network fixtures, key fixtures, and subprocess mock fixtures; autouse isolation via parent `tests/conftest.py`.

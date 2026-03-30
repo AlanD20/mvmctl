@@ -4,8 +4,8 @@ This module provides thin API wrappers around core.metadata functions,
 exposing them to the CLI layer while maintaining the architecture rule:
 CLI → API → Core.
 
-Note: find_kernels_by_short_id does not exist in core.metadata; kernels are
-looked up by their full name, not by short ID prefix.
+Note: find_kernels_by_id_prefix does not exist in core.metadata; kernels are
+looked up by their full name, not by ID prefix.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from mvmctl.core.metadata import find_images_by_short_id as _find_images_by_short_id
+from mvmctl.core.metadata import find_images_by_id_prefix as _find_images_by_id_prefix
 from mvmctl.core.metadata import get_default_image_entry as _get_default_image_entry
 from mvmctl.core.metadata import get_default_network_entry as _get_default_network_entry
 from mvmctl.core.metadata import get_image_entry as _get_image_entry
@@ -32,8 +32,8 @@ __all__ = [
     "list_image_entries",
     "list_binary_entries",
     "get_image_entry",
-    "find_images_by_short_id",
-    "find_kernels_by_short_id",
+    "find_images_by_id_prefix",
+    "find_kernels_by_id_prefix",
     "get_default_image_entry",
     "get_default_network_entry",
     "remove_image_entry",
@@ -87,25 +87,15 @@ def get_image_entry(cache_dir: Path, image_id: str) -> dict[str, Any]:
     return _get_image_entry(cache_dir, image_id)
 
 
-def find_images_by_short_id(cache_dir: Path, short_id: str) -> list[tuple[str, dict[str, Any]]]:
-    """Return all image entries whose key starts with short_id.
-
-    Args:
-        cache_dir: Directory containing metadata.json
-        short_id: Short ID prefix to search for
-
-    Returns:
-        List of (full_image_id, metadata) tuples matching the prefix
-    """
-    return _find_images_by_short_id(cache_dir, short_id)
+def find_images_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, dict[str, Any]]]:
+    """Return all image entries whose key starts with prefix."""
+    return _find_images_by_id_prefix(cache_dir, prefix)
 
 
-def find_kernels_by_short_id(cache_dir: Path, short_id: str) -> list[tuple[str, dict[str, Any]]]:
-    """Return all kernel entries whose full_id starts with short_id."""
+def find_kernels_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, dict[str, Any]]]:
+    """Return all kernel entries whose full_id starts with prefix."""
     all_kernels = _list_kernel_entries(cache_dir)
-    return [
-        (full_id, data) for full_id, data in all_kernels.items() if full_id.startswith(short_id)
-    ]
+    return [(full_id, data) for full_id, data in all_kernels.items() if full_id.startswith(prefix)]
 
 
 def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:

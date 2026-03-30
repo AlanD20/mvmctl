@@ -120,7 +120,7 @@ Fields: `name`, `vcpu_count`, `mem_size_mib`, `kernel_path`, `rootfs_path`, `gue
 **`__post_init__` validation:** vCPU 1–32; mem 128–65536 MiB — the only behavioral logic on a model.
 
 ### VMInstance — `vm.py`
-Fields: `name`, `id` (64-char SHA256), `pid`, `socket_path`, `ip`, `mac`, `network_name`, `tap_device`, `created_at`, `status` (VMState), `config` (VMConfig)
+Fields: `name`, `id` (16-char hex), `pid`, `socket_path`, `ip`, `mac`, `network_name`, `tap_device`, `created_at`, `status` (VMState), `config` (VMConfig)
 
 ### ImageSpec — `image.py`
 Fields: `id`, `name`, `source` (URL), `format`, `convert_to`, `size_mib`, `sha256`, `sha256_url`

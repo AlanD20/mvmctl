@@ -451,25 +451,25 @@ def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | Non
     return _find_default_entry(cache_dir, "images")
 
 
-def find_image_by_short_id(cache_dir: Path, short_id: str) -> tuple[str, dict[str, Any]] | None:
-    """Find an image entry whose key starts with short_id. Returns (full_key, meta) or None."""
+def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str, Any]] | None:
+    """Find an image entry whose key starts with prefix. Returns (full_key, meta) or None."""
     data = read_metadata(cache_dir)
     images = data.get("images", {})
     if not isinstance(images, dict):
         return None
-    matches = [(k, v) for k, v in images.items() if k.startswith(short_id) and isinstance(v, dict)]
+    matches = [(k, v) for k, v in images.items() if k.startswith(prefix) and isinstance(v, dict)]
     if len(matches) == 1:
         return matches[0]
     return None
 
 
-def find_images_by_short_id(cache_dir: Path, short_id: str) -> list[tuple[str, dict[str, Any]]]:
-    """Return all image entries whose key starts with short_id."""
+def find_images_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, dict[str, Any]]]:
+    """Return all image entries whose key starts with prefix."""
     data = read_metadata(cache_dir)
     images = data.get("images", {})
     if not isinstance(images, dict):
         return []
-    return [(k, v) for k, v in images.items() if k.startswith(short_id) and isinstance(v, dict)]
+    return [(k, v) for k, v in images.items() if k.startswith(prefix) and isinstance(v, dict)]
 
 
 # =============================================================================

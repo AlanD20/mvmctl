@@ -95,33 +95,33 @@ def test_vm_manager_update_status_not_found(
         vm_manager.update_status(vm_name, new_status)
 
 
-def test_vm_manager_find_by_short_id(vm_manager: VMManager):
+def test_vm_manager_find_by_id_prefix(vm_manager: VMManager):
     vm = VMInstance(name="myvm", pid=1, status=VMState.RUNNING)
     vm_manager.register(vm)
     registered = vm_manager.get("myvm")
     assert registered is not None
-    short_id = registered.id[:6]
-    matches = vm_manager.find_by_short_id(short_id)
+    prefix = registered.id[:6]
+    matches = vm_manager.find_by_id_prefix(prefix)
     assert len(matches) == 1
     assert matches[0].name == "myvm"
 
 
-def test_vm_manager_find_by_short_id_no_match(vm_manager: VMManager):
-    assert vm_manager.find_by_short_id("zzzzzz") == []
+def test_vm_manager_find_by_id_prefix_no_match(vm_manager: VMManager):
+    assert vm_manager.find_by_id_prefix("zzzzzz") == []
 
 
-def test_vm_manager_get_by_short_id_unique(vm_manager: VMManager):
+def test_vm_manager_get_by_id_prefix_unique(vm_manager: VMManager):
     vm = VMInstance(name="uniquevm", pid=2, status=VMState.RUNNING)
     vm_manager.register(vm)
     registered = vm_manager.get("uniquevm")
     assert registered is not None
-    result = vm_manager.get_by_short_id(registered.id[:6])
+    result = vm_manager.get_by_id_prefix(registered.id[:6])
     assert result is not None
     assert result.name == "uniquevm"
 
 
 def test_vm_manager_get_by_full_id_exact_match(vm_manager: VMManager):
-    """Test that get_by_full_id returns exact match by full 64-char hash."""
+    """Test that get_by_full_id returns exact match by full 16-char hash."""
     vm = VMInstance(name="testvm", pid=1, status=VMState.RUNNING)
     vm_manager.register(vm)
     registered = vm_manager.get("testvm")
@@ -136,15 +136,15 @@ def test_vm_manager_get_by_full_id_exact_match(vm_manager: VMManager):
 
 def test_vm_manager_get_by_full_id_no_match(vm_manager: VMManager):
     """Test that get_by_full_id returns None for non-existent hash."""
-    result = vm_manager.get_by_full_id("a" * 64)
+    result = vm_manager.get_by_full_id("a" * 16)
     assert result is None
 
 
 def test_vm_manager_get_by_full_id_collision_resistance(vm_manager: VMManager):
-    """Test that get_by_full_id handles VMs with same 6-char prefix correctly."""
+    """Test that get_by_full_id handles VMs with same prefix correctly."""
     # Create two VMs that might have same prefix (forced for test)
-    vm1 = VMInstance(name="vm1", pid=1, status=VMState.RUNNING, id="abc123" + "a" * 58)
-    vm2 = VMInstance(name="vm2", pid=2, status=VMState.RUNNING, id="abc123" + "b" * 58)
+    vm1 = VMInstance(name="vm1", pid=1, status=VMState.RUNNING, id="abc123" + "a" * 10)
+    vm2 = VMInstance(name="vm2", pid=2, status=VMState.RUNNING, id="abc123" + "b" * 10)
 
     # Register directly to state to bypass ID generation
     with vm_manager._locked():
@@ -153,9 +153,9 @@ def test_vm_manager_get_by_full_id_collision_resistance(vm_manager: VMManager):
         state["vms"][vm2.id] = vm2.to_dict()
         vm_manager._save_state(state)
 
-    # get_by_short_id should return None (ambiguous)
-    short_result = vm_manager.get_by_short_id("abc123")
-    assert short_result is None
+    # get_by_id_prefix should return None (ambiguous)
+    prefix_result = vm_manager.get_by_id_prefix("abc123")
+    assert prefix_result is None
 
     # get_by_full_id should return correct VM for each full ID
     result1 = vm_manager.get_by_full_id(vm1.id)
@@ -215,7 +215,7 @@ def test_vm_manager_migration(tmp_path: Path):
     vms = mgr.list_all()
     assert len(vms) == 1
     assert vms[0].name == "mylegacyvm"
-    assert len(vms[0].id) == 64
+    assert len(vms[0].id) == 16
 
 
 # ---------------------------------------------------------------------------

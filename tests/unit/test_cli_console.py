@@ -16,7 +16,7 @@ def _make_mock_manager(vm=None, matches=None):
     """Helper to create a mock VM manager."""
     mock_mgr = MagicMock()
     mock_mgr.get.return_value = vm
-    mock_mgr.find_by_short_id.return_value = matches if matches else []
+    mock_mgr.find_by_id_prefix.return_value = matches if matches else []
     return mock_mgr
 
 

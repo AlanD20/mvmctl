@@ -248,11 +248,11 @@ def test_cleanup_vms_handles_missing_vm_id(
     mock_manager.deregister.assert_called_once_with(vm1.name)
 
 
-def test_inspect_vm_by_short_id(mocker: MockerFixture):
-    """Test inspect_vm returns complete VM metadata by short ID."""
+def test_inspect_vm_by_id_prefix(mocker: MockerFixture):
+    """Test inspect_vm returns complete VM metadata by ID prefix."""
     mock_vm = VMInstance(
         name="test-vm",
-        id="abc123" + "x" * 58,  # 64-char hash
+        id="abc123" + "x" * 10,  # 16-char hash
         pid=1234,
         ip="10.0.0.2",
         mac="02:FC:00:00:00:01",
@@ -263,7 +263,7 @@ def test_inspect_vm_by_short_id(mocker: MockerFixture):
     )
 
     mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_short_id.return_value = mock_vm
+    mock_mgr.get_by_id_prefix.return_value = mock_vm
     mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
 
     result = inspect_vm("abc123")
@@ -273,21 +273,20 @@ def test_inspect_vm_by_short_id(mocker: MockerFixture):
     assert result["status"] == "running"
     assert result["pid"] == 1234
     assert result["ip"] == "10.0.0.2"
-    assert result["short_id"] == "abc123"
 
 
 def test_inspect_vm_by_name(mocker: MockerFixture):
     """Test inspect_vm returns VM metadata by name."""
     mock_vm = VMInstance(
         name="myvm",
-        id="def456" + "y" * 58,
+        id="def456" + "y" * 10,
         pid=5678,
         status=VMState.RUNNING,
         created_at=datetime.now(),
     )
 
     mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_short_id.return_value = None
+    mock_mgr.get_by_id_prefix.return_value = None
     mock_mgr.get_by_name.return_value = [mock_vm]
     mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
 
@@ -300,13 +299,13 @@ def test_inspect_vm_by_name(mocker: MockerFixture):
 def test_inspect_vm_ambiguous(mocker: MockerFixture):
     """Test inspect_vm raises error for ambiguous name."""
     mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_short_id.return_value = None
+    mock_mgr.get_by_id_prefix.return_value = None
     mock_mgr.get_by_name.return_value = [
         VMInstance(
-            name="myvm", id="abc123" + "x" * 58, status=VMState.RUNNING, created_at=datetime.now()
+            name="myvm", id="abc123" + "x" * 10, status=VMState.RUNNING, created_at=datetime.now()
         ),
         VMInstance(
-            name="myvm", id="def456" + "y" * 58, status=VMState.RUNNING, created_at=datetime.now()
+            name="myvm", id="def456" + "y" * 10, status=VMState.RUNNING, created_at=datetime.now()
         ),
     ]
     mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
@@ -318,7 +317,7 @@ def test_inspect_vm_ambiguous(mocker: MockerFixture):
 def test_inspect_vm_not_found(mocker: MockerFixture):
     """Test inspect_vm raises error for non-existent VM."""
     mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_short_id.return_value = None
+    mock_mgr.get_by_id_prefix.return_value = None
     mock_mgr.get_by_name.return_value = []
     mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
 
@@ -413,7 +412,7 @@ def test_inspect_vm_rootfs_source_field(mocker: MockerFixture, tmp_path: Path):
     )
 
     mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_short_id.return_value = mock_vm
+    mock_mgr.get_by_id_prefix.return_value = mock_vm
     mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
 
     # Mock the VM directory with a local rootfs

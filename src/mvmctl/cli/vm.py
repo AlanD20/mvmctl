@@ -525,15 +525,15 @@ def create(
 
 @app.command(name="rm")
 def rm(
-    ids: Optional[List[str]] = typer.Argument(None, help="VM short IDs (first 6 chars) to remove"),
+    ids: Optional[List[str]] = typer.Argument(None, help="VM ID prefixes to remove"),
     name: List[str] = typer.Option(
         [], "--name", "-n", help="VM name to remove (can be specified multiple times)"
     ),
 ) -> None:
-    """Stop and remove VMs by short ID or name.
+    """Stop and remove VMs by ID prefix or name.
 
     Examples:
-        # Remove by short ID:
+        # Remove by ID prefix:
         mvm vm rm abc123 def456
 
         # Remove by name (prompts if multiple with same name):
@@ -548,13 +548,13 @@ def rm(
 
     effective_ids: list[str] = list(ids) if ids else []
 
-    # Resolve short IDs
-    for short_id in effective_ids:
-        matches = manager.find_by_short_id(short_id)
+    # Resolve ID prefixes
+    for prefix in effective_ids:
+        matches = manager.find_by_id_prefix(prefix)
         if len(matches) == 0:
-            errors.append(f"No VM found with short ID '{short_id}'")
+            errors.append(f"No VM found with ID prefix '{prefix}'")
         elif len(matches) > 1:
-            errors.append(f"Multiple VMs match short ID '{short_id}' — use a longer prefix or name")
+            errors.append(f"Multiple VMs match ID prefix '{prefix}' — use a longer prefix or name")
         else:
             targets.append(matches[0])
 
@@ -570,7 +570,7 @@ def rm(
             print_info("Matching VMs:")
             for v in matches:
                 print_info(
-                    f"  - {v.name} (ID: {v.id[:6] if v.id else '-'}, IP: {v.ip or '-'}, status: {v.status.value})"
+                    f"  - {v.name} (ID: {v.id}, IP: {v.ip or '-'}, status: {v.status.value})"
                 )
             exit_code = 1
             continue
@@ -578,7 +578,7 @@ def rm(
             targets.append(matches[0])
 
     if not targets and not errors:
-        print_error("Provide at least one VM short ID or --name")
+        print_error("Provide at least one VM ID prefix or --name")
         raise typer.Exit(code=1)
 
     if errors:
@@ -626,7 +626,7 @@ def ls_vms(
             status_str, exit_code = get_vm_status_with_exit_code(v)
             data.append(
                 {
-                    "id": v.id[:6] if v.id else "-",
+                    "id": v.id if v.id else "-",
                     "name": v.name,
                     "ip": v.ip,
                     "mac": v.mac,
@@ -653,7 +653,7 @@ def ls_vms(
         rows.append(
             [
                 state_marker,
-                v.id[:6] if v.id else "-",
+                v.id if v.id else "-",
                 v.name,
                 v.ip or "-",
                 status_str,
@@ -767,8 +767,8 @@ def resume(
 
 @app.command()
 def inspect(
-    selector: Optional[str] = typer.Argument(None, help="VM short ID or name"),
-    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or short ID"),
+    selector: Optional[str] = typer.Argument(None, help="VM ID prefix or name"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
 ) -> None:
@@ -803,7 +803,7 @@ def inspect(
 def _print_vm_details(info: dict[str, Any]) -> None:
     from datetime import datetime
 
-    from mvmctl.api.metadata import find_images_by_short_id, find_kernels_by_short_id
+    from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
     from mvmctl.utils.fs import get_cache_dir
 
     name = info.get("name", "-")
@@ -837,7 +837,7 @@ def _print_vm_details(info: dict[str, Any]) -> None:
 
     print("\nBASIC INFO")
     print(f"  Name:       {name}")
-    print(f"  Full ID:    {info.get('id', '-')[0:16]}...")
+    print(f"  Full ID:    {info.get('id', '-')}")
     print(f"  Created:    {created_str}")
     print(f"  PID:        {info.get('pid') or '-'}")
     print(f"  IP:         {info.get('ip') or '-'}")
@@ -855,10 +855,10 @@ def _print_vm_details(info: dict[str, Any]) -> None:
 
     image_id = info.get("image_id")
     if image_id:
-        image_short = image_id[:6] if len(image_id) > 6 else image_id
+        image_display = image_id
         image_name = image_id
         try:
-            matches = find_images_by_short_id(get_cache_dir(), image_short)
+            matches = find_images_by_id_prefix(get_cache_dir(), image_id)
             if matches:
                 _, meta = matches[0]
                 internal_id = meta.get("internal_id")
@@ -866,14 +866,14 @@ def _print_vm_details(info: dict[str, Any]) -> None:
                     image_name = internal_id
         except Exception:
             pass
-        print(f"  Image:      {image_name} ({image_short})")
+        print(f"  Image:      {image_name} ({image_display})")
 
     kernel_id = info.get("kernel_id")
     if kernel_id:
-        kernel_short = kernel_id[:6] if len(kernel_id) > 6 else kernel_id
+        kernel_display = kernel_id
         kernel_name = kernel_id
         try:
-            matches = find_kernels_by_short_id(get_cache_dir(), kernel_short)
+            matches = find_kernels_by_id_prefix(get_cache_dir(), kernel_id)
             if matches:
                 _, meta = matches[0]
                 version = meta.get("version")
@@ -881,7 +881,7 @@ def _print_vm_details(info: dict[str, Any]) -> None:
                     kernel_name = version
         except Exception:
             pass
-        print(f"  Kernel:     {kernel_name} ({kernel_short})")
+        print(f"  Kernel:     {kernel_name} ({kernel_display})")
 
     print("\nPATHS")
     paths = info.get("paths", {})
@@ -896,7 +896,7 @@ def _print_vm_details(info: dict[str, Any]) -> None:
 def _print_vm_details_tree(info: dict[str, Any]) -> None:
     from datetime import datetime
 
-    from mvmctl.api.metadata import find_images_by_short_id, find_kernels_by_short_id
+    from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
     from mvmctl.utils.fs import get_cache_dir
 
     name = info.get("name", "-")
@@ -946,10 +946,10 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
 
     image_id = info.get("image_id")
     if image_id:
-        image_short = image_id[:6] if len(image_id) > 6 else image_id
+        image_display = image_id
         image_name = image_id
         try:
-            matches = find_images_by_short_id(get_cache_dir(), image_short)
+            matches = find_images_by_id_prefix(get_cache_dir(), image_id)
             if matches:
                 _, meta = matches[0]
                 internal_id = meta.get("internal_id")
@@ -957,14 +957,14 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
                     image_name = internal_id
         except Exception:
             pass
-        tree_lines.append(f"├── Image:      {image_name} ({image_short})")
+        tree_lines.append(f"├── Image:      {image_name} ({image_display})")
 
     kernel_id = info.get("kernel_id")
     if kernel_id:
-        kernel_short = kernel_id[:6] if len(kernel_id) > 6 else kernel_id
+        kernel_display = kernel_id
         kernel_name = kernel_id
         try:
-            matches = find_kernels_by_short_id(get_cache_dir(), kernel_short)
+            matches = find_kernels_by_id_prefix(get_cache_dir(), kernel_id)
             if matches:
                 _, meta = matches[0]
                 version = meta.get("version")
@@ -972,7 +972,7 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
                     kernel_name = version
         except Exception:
             pass
-        tree_lines.append(f"├── Kernel:     {kernel_name} ({kernel_short})")
+        tree_lines.append(f"├── Kernel:     {kernel_name} ({kernel_display})")
 
     paths = info.get("paths", {})
     vm_dir = paths.get("vm_dir", "-")

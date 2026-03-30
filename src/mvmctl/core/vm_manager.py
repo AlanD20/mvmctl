@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _STATE_SCHEMA_VERSION = 1
 
 
-def _is_hex_string(s: str, length: int = 64) -> bool:
+def _is_hex_string(s: str, length: int = 16) -> bool:
     """Check if string is a hex string of given length."""
     if len(s) != length:
         return False
@@ -33,7 +33,7 @@ def _is_hex_string(s: str, length: int = 64) -> bool:
 def _generate_vm_id(name: str, created_at: datetime) -> str:
     """Generate a unique VM ID from name and creation time."""
     data = f"{name}:{created_at.isoformat()}"
-    return hashlib.sha256(data.encode()).hexdigest()
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
 class VMManager:
@@ -115,12 +115,12 @@ class VMManager:
             if not isinstance(vm_data, dict):
                 continue
 
-            # Check if key is already a hash (64-char hex)
-            if _is_hex_string(key, 64):
+            # Check if key is already a hash (16-char hex)
+            if _is_hex_string(key, 16):
                 # Already migrated
                 new_vms[key] = vm_data
             else:
-                # Old format: key is the VM name, need to migrate
+                # Old format: key is the VM name or legacy hash, need to migrate
                 name = key
                 created_at_str = vm_data.get("created_at", datetime.now().isoformat())
                 try:
@@ -184,7 +184,6 @@ class VMManager:
         """
         with self._locked():
             state = self._load_state()
-            # Use vm.id as the key (full 64-char hash)
             vm_id = vm.id if vm.id else _generate_vm_id(vm.name, vm.created_at)
             vm_data = vm.to_dict()
             vm_data["id"] = vm_id
@@ -214,8 +213,8 @@ class VMManager:
                     return VMInstance.from_dict(vm_data)
             return None
 
-    def get_by_short_id(self, short_id: str) -> VMInstance | None:
-        """Find VM by short ID (first 6 chars of hash).
+    def get_by_id_prefix(self, prefix: str) -> VMInstance | None:
+        """Find VM by ID prefix.
 
         Returns None if none or multiple VMs match.
         """
@@ -224,7 +223,7 @@ class VMManager:
             matches = [
                 (vm_id, vm_data)
                 for vm_id, vm_data in state["vms"].items()
-                if vm_id.startswith(short_id)
+                if vm_id.startswith(prefix)
             ]
             if len(matches) == 1:
                 vm_id, vm_data = matches[0]
@@ -232,13 +231,13 @@ class VMManager:
             return None
 
     def get_by_full_id(self, full_hash: str) -> VMInstance | None:
-        """Find VM by full 64-character hash ID.
+        """Find VM by exact hash ID.
 
         Performs exact-match lookup for collision-free VM identification.
         Returns None if no VM with the exact hash exists.
 
         Args:
-            full_hash: Full 64-character SHA256 hash ID of the VM
+            full_id: Full 16-character hash ID of the VM
 
         Returns:
             VMInstance if found, None otherwise
@@ -255,13 +254,13 @@ class VMManager:
                 return None
             return vm
 
-    def find_by_short_id(self, short_id: str) -> list[VMInstance]:
-        """Return all VMs whose ID starts with short_id."""
+    def find_by_id_prefix(self, prefix: str) -> list[VMInstance]:
+        """Return all VMs whose ID starts with prefix."""
         with self._locked(exclusive=False):
             state = self._load_state()
             results = []
             for vm_id, vm_data in state["vms"].items():
-                if vm_id.startswith(short_id):
+                if vm_id.startswith(prefix):
                     results.append(VMInstance.from_dict(vm_data))
             return results
 

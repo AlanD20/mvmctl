@@ -1044,7 +1044,7 @@ def save_kernel_metadata(
     except OSError:
         file_hash = hashlib.sha256(kernel_name.encode()).hexdigest()
     timestamp = str(datetime.now(tz=timezone.utc).timestamp())
-    full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()
+    full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()[:16]
 
     cache_dir = get_cache_dir()
     update_kernel_entry(
@@ -1100,7 +1100,7 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
         results.append(
             {
-                "id": entry_id[:6],
+                "id": entry_id,
                 "name": base_name,
                 "filename": filename,
                 "full_name": filename,

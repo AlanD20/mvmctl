@@ -322,11 +322,11 @@ def cache_prune_images(dry_run: bool = False) -> list[str]:
 
                 # Remove metadata entry
                 remove_image_entry(cache_dir, image_id)
-                removed.append(image_id[:6])  # Short ID
+                removed.append(image_id)  # ID
             except Exception as e:
                 logger.warning(f"Failed to remove image {image_id}: {e}")
         else:
-            removed.append(image_id[:6])
+            removed.append(image_id)
 
     return removed
 
@@ -379,11 +379,11 @@ def cache_prune_kernels(dry_run: bool = False) -> list[str]:
 
                 # Remove metadata entry
                 remove_kernel_entry(cache_dir, kernel_id)
-                removed.append(kernel_id[:6])  # Short ID
+                removed.append(kernel_id)  # ID
             except Exception as e:
                 logger.warning(f"Failed to remove kernel {kernel_id}: {e}")
         else:
-            removed.append(kernel_id[:6])
+            removed.append(kernel_id)
 
     return removed
 

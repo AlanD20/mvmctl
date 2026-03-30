@@ -34,16 +34,16 @@ from mvmctl.core.network import teardown_nat
 from mvmctl.core.network_manager import get_network
 from mvmctl.core.ssh import connect_to_vm
 from mvmctl.core.vm_lifecycle import (
+    _resolve_image_id_path as _core_resolve_image_id_path,
+)
+from mvmctl.core.vm_lifecycle import (
     _resolve_image_path as _core_resolve_image_path,
 )
 from mvmctl.core.vm_lifecycle import (
-    _resolve_image_short_id_path as _core_resolve_image_short_id_path,
+    _resolve_kernel_id_path as _core_resolve_kernel_id_path,
 )
 from mvmctl.core.vm_lifecycle import (
     _resolve_kernel_path as _core_resolve_kernel_path,
-)
-from mvmctl.core.vm_lifecycle import (
-    _resolve_kernel_short_id_path as _core_resolve_kernel_short_id_path,
 )
 from mvmctl.core.vm_lifecycle import (
     create_vm as _create_vm,
@@ -78,8 +78,8 @@ __all__ = [
     "VMManager",
     "resolve_image_path",
     "resolve_kernel_path",
-    "resolve_image_short_id_path",
-    "resolve_kernel_short_id_path",
+    "resolve_image_id_path",
+    "resolve_kernel_id_path",
     "resolve_image_multi_strategy",
     "resolve_kernel_multi_strategy",
     "attach_console",
@@ -103,12 +103,12 @@ def resolve_kernel_path(kernel: str) -> Path:
     return _core_resolve_kernel_path(kernel)
 
 
-def resolve_image_short_id_path(image: str) -> Path:
-    return _core_resolve_image_short_id_path(image)
+def resolve_image_id_path(image: str) -> Path:
+    return _core_resolve_image_id_path(image)
 
 
-def resolve_kernel_short_id_path(kernel: str) -> Path:
-    return _core_resolve_kernel_short_id_path(kernel)
+def resolve_kernel_id_path(kernel: str) -> Path:
+    return _core_resolve_kernel_id_path(kernel)
 
 
 def resolve_image_multi_strategy(value: str) -> Path:
@@ -152,8 +152,8 @@ def resolve_image_multi_strategy(value: str) -> Path:
                 if candidate.exists():
                     return candidate
 
-    # Short-ID resolution (existing behavior)
-    return _core_resolve_image_short_id_path(value)
+    # ID prefix resolution
+    return _core_resolve_image_id_path(value)
 
 
 def resolve_kernel_multi_strategy(value: str) -> Path:
@@ -178,8 +178,8 @@ def resolve_kernel_multi_strategy(value: str) -> Path:
     if candidate.exists():
         return candidate
 
-    # Short-ID resolution (existing behavior)
-    return _core_resolve_kernel_short_id_path(value)
+    # ID prefix resolution
+    return _core_resolve_kernel_id_path(value)
 
 
 def create_vm(
@@ -456,8 +456,8 @@ def inspect_vm(name: str) -> dict[str, Any]:
 
     manager = get_vm_manager()
 
-    # Try short ID first
-    vm = manager.get_by_short_id(name)
+    # Try ID prefix first
+    vm = manager.get_by_id_prefix(name)
     if vm:
         return _gather_vm_details(vm)
 
@@ -466,7 +466,7 @@ def inspect_vm(name: str) -> dict[str, Any]:
     if len(matches) == 1:
         return _gather_vm_details(matches[0])
     elif len(matches) > 1:
-        raise MVMError(f"Multiple VMs match name '{name}' — use short ID")
+        raise MVMError(f"Multiple VMs match name '{name}' — use ID prefix")
 
     raise VMNotFoundError(f"VM '{name}' not found")
 

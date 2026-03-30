@@ -268,17 +268,17 @@ def configure(
 
 ## VM RM — ID VS NAME RESOLUTION
 
-`mvm vm rm` accepts either short ID or name:
+`mvm vm rm` accepts either ID prefix or name:
 
 ```python
-# By short ID (6 chars from full hash)
-matches = manager.find_by_short_id(short_id)
+# By ID prefix
+matches = manager.find_by_id_prefix(prefix)
 
 # By name
 matches = manager.get_by_name(name)
 
 # Resolution logic:
-# 1. Try as short ID first
+# 1. Try as ID prefix first
 # 2. If ambiguous (len > 1) or not found, try as name
 # 3. If multiple name matches, prompt user
 ```

@@ -26,8 +26,8 @@ from mvmctl.api.assets import (
     set_default_kernel,
 )
 from mvmctl.api.metadata import (
-    find_images_by_short_id,
-    find_kernels_by_short_id,
+    find_images_by_id_prefix,
+    find_kernels_by_id_prefix,
     get_default_image_entry,
     get_image_entry,
     list_image_entries,
@@ -73,7 +73,7 @@ from mvmctl.utils.fs import (
     get_images_dir,
     get_kernels_dir,
 )
-from mvmctl.utils.short_id import resolve_single_by_short_id
+from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
 
 
 def _format_size_human_readable(size_sectors: int) -> str:
@@ -472,21 +472,21 @@ def kernel_fetch(
 
 @kernel_app.command(name="set-default")
 def kernel_set_default(
-    short_id: str = typer.Argument(..., help="Kernel short ID (6 chars) to set as default"),
+    prefix: str = typer.Argument(..., help="Kernel ID prefix to set as default"),
     kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
 ) -> None:
     """Set a kernel as the default for VM creation."""
     kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
     cache_dir = get_cache_dir()
 
-    match = resolve_single_by_short_id(short_id, find_kernels_by_short_id, cache_dir, "kernel")
+    match = resolve_single_by_id_prefix(prefix, find_kernels_by_id_prefix, cache_dir, "kernel")
     if match is None:
         raise typer.Exit(code=1)
 
     _, meta = match
     filename = str(meta.get("filename", ""))
     if not filename or not (kernels_dir / filename).exists():
-        print_error(f"Kernel file not found for ID '{short_id}'")
+        print_error(f"Kernel file not found for ID '{prefix}'")
         raise typer.Exit(code=1)
 
     try:
@@ -499,35 +499,33 @@ def kernel_set_default(
 
 @kernel_app.command(name="rm")
 def kernel_rm(
-    short_ids: Optional[List[str]] = typer.Argument(
-        None, help="Kernel short IDs (6 chars) to remove"
-    ),
+    prefixes: Optional[List[str]] = typer.Argument(None, help="Kernel ID prefixes to remove"),
     kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Remove even if referenced by VMs"),
 ) -> None:
-    """Remove cached kernels by short ID.
+    """Remove cached kernels by ID prefix.
 
     Examples:
         mvm kernel rm abc123
         mvm kernel rm abc123 def456
     """
     kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
-    effective_ids: list[str] = list(short_ids) if short_ids else []
+    effective_ids: list[str] = list(prefixes) if prefixes else []
     if not effective_ids:
-        print_error("Provide at least one kernel short ID")
+        print_error("Provide at least one kernel ID prefix")
         raise typer.Exit(code=1)
 
     cache_dir = get_cache_dir()
     exit_code = 0
 
-    for short_id in effective_ids:
-        match = resolve_single_by_short_id(short_id, find_kernels_by_short_id, cache_dir, "kernel")
+    for prefix in effective_ids:
+        match = resolve_single_by_id_prefix(prefix, find_kernels_by_id_prefix, cache_dir, "kernel")
         if match is None:
-            if not find_kernels_by_short_id(cache_dir, short_id):
-                print_error(f"No kernel found with short ID '{short_id}'")
+            if not find_kernels_by_id_prefix(cache_dir, prefix):
+                print_error(f"No kernel found with ID prefix '{prefix}'")
             else:
                 print_error(
-                    f"Ambiguous short ID '{short_id}' matches {len(find_kernels_by_short_id(cache_dir, short_id))} kernels — use more characters"
+                    f"Ambiguous ID prefix '{prefix}' matches {len(find_kernels_by_id_prefix(cache_dir, prefix))} kernels — use more characters"
                 )
             exit_code = 1
             continue
@@ -538,7 +536,7 @@ def kernel_rm(
         path: Path | None = kernels_dir / filename if filename else None
         if path is None or not path.exists():
             print_error(
-                f"Kernel file not found for ID '{short_id}' (metadata exists but file missing)"
+                f"Kernel file not found for ID '{prefix}' (metadata exists but file missing)"
             )
             remove_kernel_entry(cache_dir, full_id)
             exit_code = 1
@@ -548,7 +546,7 @@ def kernel_rm(
         referencing_vms = _get_vms_using_kernel(path)
         if referencing_vms and not force:
             print_warning(
-                f"Kernel '{short_id}' is referenced by active VMs: {', '.join(referencing_vms)}"
+                f"Kernel '{prefix}' is referenced by active VMs: {', '.join(referencing_vms)}"
             )
             print_info("Use --force to remove anyway (this may break those VMs)")
             exit_code = 1
@@ -688,7 +686,7 @@ def image_ls(
             entry = _find_meta_for_internal_id(img.id)
             if entry:
                 meta_key, meta = entry
-                display_id = meta_key[:6]
+                display_id = meta_key
                 result.append(
                     {
                         "id": display_id,
@@ -703,7 +701,7 @@ def image_ls(
         for meta_id, meta in _all_meta.items():
             if str(meta.get("internal_id", meta_id)) in internal_ids:
                 continue
-            display_id = meta_id[:6] if len(meta_id) >= 6 else meta_id
+            display_id = meta_id
             result.append(
                 {
                     "id": display_id,
@@ -738,7 +736,7 @@ def image_ls(
             entry = _find_meta_for_internal_id(img.id)
         if entry:
             meta_key, meta = entry
-            display_id_base = meta_key[:6]
+            display_id_base = meta_key
             added = (
                 human_readable_time(str(meta.get("pulled_at", "")))
                 if meta.get("pulled_at")
@@ -783,9 +781,7 @@ def image_ls(
         os_name = str(meta.get("os_name", meta_id))
         is_default = meta_id == default_img
         is_missing = is_file_missing(found_path)
-        display_id = get_combined_marker(is_default, is_missing) + (
-            meta_id[:6] if len(meta_id) >= 6 else meta_id
-        )
+        display_id = get_combined_marker(is_default, is_missing) + meta_id
         size = found_path.stat().st_size if found_path and found_path.exists() else 0
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
         rows_local.append([display_id, os_name, fs_type, added, size_str])
@@ -941,7 +937,7 @@ def image_fetch(
         except OSError:
             file_hash = hashlib.sha256(str(result_path).encode()).hexdigest()
         timestamp = str(time.time())
-        full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()
+        full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()[:16]
 
         _save_image_meta(
             out,
@@ -960,7 +956,7 @@ def image_fetch(
             compression_ratio=result.compression_ratio,
         )
         print_success(f"Image ready: {result_path}")
-        print_info(f"  ID: {full_id[:6]}")
+        print_info(f"  ID: {full_id}")
         if set_default:
             set_default_image_by_internal_id(get_cache_dir(), spec.id)
             print_success(f"Default image set to: {spec.id}")
@@ -972,7 +968,7 @@ def image_fetch(
 
 @image_app.command(name="set-default")
 def image_set_default(
-    short_id: str = typer.Argument(..., help="Image short ID (6 chars) to set as default"),
+    prefix: str = typer.Argument(..., help="Image ID prefix to set as default"),
     images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
 ) -> None:
     """Set the default image for VM creation."""
@@ -980,7 +976,7 @@ def image_set_default(
     images_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = get_cache_dir()
 
-    match = resolve_single_by_short_id(short_id, find_images_by_short_id, cache_dir, "image")
+    match = resolve_single_by_id_prefix(prefix, find_images_by_id_prefix, cache_dir, "image")
     if match is None:
         raise typer.Exit(code=1)
 
@@ -994,44 +990,42 @@ def image_set_default(
             (images_dir / f"{full_key}{ext}").exists() for ext in SUPPORTED_IMAGE_EXTENSIONS
         )
         if not found:
-            print_error(f"Image file not found for ID '{short_id}'")
+            print_error(f"Image file not found for ID '{prefix}'")
             raise typer.Exit(code=1)
 
     set_default_image_entry(cache_dir, full_key)
-    print_success(f"✓ Default image set to: {short_id}")
+    print_success(f"Default image set to: {prefix}")
 
 
 @image_app.command(name="rm")
 def image_rm(
-    short_ids: Optional[List[str]] = typer.Argument(
-        None, help="Image short IDs (6 chars) to remove"
-    ),
+    prefixes: Optional[List[str]] = typer.Argument(None, help="Image ID prefixes to remove"),
     images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Remove even if referenced by VMs"),
 ) -> None:
-    """Remove cached images by short ID.
+    """Remove cached images by ID prefix.
 
     Examples:
         mvm image rm abc123
         mvm image rm abc123 def456
     """
     images_dir = images_dir if images_dir is not None else get_images_dir()
-    effective_ids: list[str] = list(short_ids) if short_ids else []
+    effective_ids: list[str] = list(prefixes) if prefixes else []
     if not effective_ids:
-        print_error("Provide at least one image short ID")
+        print_error("Provide at least one image ID prefix")
         raise typer.Exit(code=1)
 
     cache_dir = get_cache_dir()
     exit_code = 0
 
-    for short_id in effective_ids:
-        match = resolve_single_by_short_id(short_id, find_images_by_short_id, cache_dir, "image")
+    for prefix in effective_ids:
+        match = resolve_single_by_id_prefix(prefix, find_images_by_id_prefix, cache_dir, "image")
         if match is None:
-            if not find_images_by_short_id(cache_dir, short_id):
-                print_error(f"No image found with short ID '{short_id}'")
+            if not find_images_by_id_prefix(cache_dir, prefix):
+                print_error(f"No image found with ID prefix '{prefix}'")
             else:
                 print_error(
-                    f"Ambiguous short ID '{short_id}' matches {len(find_images_by_short_id(cache_dir, short_id))} images — use more characters"
+                    f"Ambiguous ID prefix '{prefix}' matches {len(find_images_by_id_prefix(cache_dir, prefix))} images — use more characters"
                 )
             exit_code = 1
             continue
@@ -1054,7 +1048,7 @@ def image_rm(
 
         if not files_to_remove:
             print_error(
-                f"Image file not found for ID '{short_id}' (metadata exists but file missing)"
+                f"Image file not found for ID '{prefix}' (metadata exists but file missing)"
             )
             remove_image_entry(cache_dir, full_key)
             exit_code = 1
@@ -1065,7 +1059,7 @@ def image_rm(
             referencing_vms = _get_vms_using_image(path)
             if referencing_vms and not force:
                 print_warning(
-                    f"Image '{short_id}' is referenced by active VMs: {', '.join(referencing_vms)}"
+                    f"Image '{prefix}' is referenced by active VMs: {', '.join(referencing_vms)}"
                 )
                 print_info("Use --force to remove anyway (this may break those VMs)")
                 exit_code = 1
@@ -1148,9 +1142,8 @@ def image_import(
 
     file_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
     timestamp = str(time.time())
-    full_id_hash = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()
-    image_id = full_id_hash  # Use FULL hash as key
-    short_id = full_id_hash[:6]  # Display first 6 chars
+    full_id_hash = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()[:16]
+    image_id = full_id_hash
 
     resolved_format: str | None = format
     if resolved_format == DEFAULT_IMAGE_IMPORT_FORMAT:
@@ -1215,7 +1208,7 @@ def image_import(
     )
     print_success(f"Image imported: {result_path}")
     print_info(f"  Name: {name}")
-    print_info(f"  ID:   {short_id}")
+    print_info(f"  ID:   {full_id_hash}")
 
     if set_default:
         set_default_image_entry(get_cache_dir(), image_id)

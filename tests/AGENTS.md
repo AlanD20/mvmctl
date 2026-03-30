@@ -294,7 +294,7 @@ def test_vm_lookup_by_name(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     sample = VMInstance(name="test", id="abc123def...")
     mock_mgr.get_by_name.return_value = [sample]
-    mock_mgr.find_by_short_id.return_value = []
+    mock_mgr.find_by_id_prefix.return_value = []
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
 ```
 

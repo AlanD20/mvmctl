@@ -97,7 +97,7 @@ def get_vm_dir(name: str) -> Path:
 
 
 def get_vm_dir_by_hash(vm_hash: str) -> Path:
-    """Return the directory for a specific VM by its 64-char hash."""
+    """Return the directory for a specific VM by its hash."""
     return get_vms_dir() / vm_hash
 
 

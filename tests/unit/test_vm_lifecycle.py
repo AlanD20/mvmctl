@@ -19,7 +19,7 @@ from mvmctl.core.vm_lifecycle import (
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode
 from mvmctl.models.vm import VMInstance, VMState
-from mvmctl.utils.short_id import resolve_single_by_short_id
+from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
 
 
 def test_write_read_pid_file(tmp_path):
@@ -843,24 +843,24 @@ def test_resolve_image_path_not_found(tmp_path, monkeypatch):
             _resolve_image_path("nonexistent")
 
 
-def test_resolve_single_by_short_id_unique(tmp_path):
-    def _find(_: Path, short_id: str) -> list[tuple[str, dict[str, str]]]:
-        if short_id == "abc123":
+def test_resolve_single_by_id_prefix_unique(tmp_path):
+    def _find(_: Path, prefix: str) -> list[tuple[str, dict[str, str]]]:
+        if prefix == "abc123":
             return [("abc123deadbeef", {"filename": "asset"})]
         return []
 
-    result = resolve_single_by_short_id("abc123", _find, tmp_path)
+    result = resolve_single_by_id_prefix("abc123", _find, tmp_path)
     assert result == ("abc123deadbeef", {"filename": "asset"})
 
 
-def test_resolve_single_by_short_id_none_for_ambiguous(tmp_path):
+def test_resolve_single_by_id_prefix_none_for_ambiguous(tmp_path):
     def _find(_: Path, __: str) -> list[tuple[str, dict[str, str]]]:
         return [
             ("abc123deadbeef", {"filename": "a"}),
             ("abc123feedface", {"filename": "b"}),
         ]
 
-    assert resolve_single_by_short_id("abc123", _find, tmp_path) is None
+    assert resolve_single_by_id_prefix("abc123", _find, tmp_path) is None
 
 
 def test_resolve_kernel_path_by_filename(tmp_path, monkeypatch):
@@ -919,15 +919,15 @@ def test_resolve_kernel_path_not_found(tmp_path, monkeypatch):
             _resolve_kernel_path("nonexistent")
 
 
-def test_resolve_image_short_id_path_unique(tmp_path, monkeypatch):
+def test_resolve_image_id_path_unique(tmp_path, monkeypatch):
     import json
 
-    from mvmctl.core.vm_lifecycle import _resolve_image_short_id_path
+    from mvmctl.core.vm_lifecycle import _resolve_image_id_path
 
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    full_hash = "b" * 64
+    full_hash = "b" * 16
     img = images_dir / "ubuntu.ext4"
     img.write_bytes(b"img")
     (tmp_path / "metadata.json").write_text(
@@ -935,19 +935,19 @@ def test_resolve_image_short_id_path_unique(tmp_path, monkeypatch):
     )
 
     with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
-        result = _resolve_image_short_id_path(full_hash[:6])
+        result = _resolve_image_id_path(full_hash[:6])
     assert result == img
 
 
-def test_resolve_kernel_short_id_path_unique(tmp_path, monkeypatch):
+def test_resolve_kernel_id_path_unique(tmp_path, monkeypatch):
     import json
 
-    from mvmctl.core.vm_lifecycle import _resolve_kernel_short_id_path
+    from mvmctl.core.vm_lifecycle import _resolve_kernel_id_path
 
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
-    full_hash = "c" * 64
+    full_hash = "c" * 16
     kernel = kernels_dir / "vmlinux-short"
     kernel.write_bytes(b"kernel")
     (tmp_path / "metadata.json").write_text(
@@ -955,7 +955,7 @@ def test_resolve_kernel_short_id_path_unique(tmp_path, monkeypatch):
     )
 
     with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir):
-        result = _resolve_kernel_short_id_path(full_hash[:6])
+        result = _resolve_kernel_id_path(full_hash[:6])
     assert result == kernel
 
 
@@ -2935,7 +2935,7 @@ class TestRemoveVMNATOrdering:
 
         # Setup mocks
         mock_manager = MagicMock()
-        mock_manager.get_by_short_id.return_value = []
+        mock_manager.get_by_id_prefix.return_value = []
         mock_manager.get_by_name.return_value = [vm]
         mock_get_vm_mgr.return_value = mock_manager
 
@@ -3017,7 +3017,7 @@ class TestRemoveVMNATOrdering:
         )
 
         mock_manager = MagicMock()
-        mock_manager.get_by_short_id.return_value = []
+        mock_manager.get_by_id_prefix.return_value = []
         mock_manager.get_by_name.return_value = [vm]
         mock_get_vm_mgr.return_value = mock_manager
 

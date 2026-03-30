@@ -38,7 +38,7 @@ class TestAttachCommand:
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
                 mock_mgr.get.return_value = mock_vm
-                mock_mgr.find_by_short_id.return_value = []
+                mock_mgr.find_by_id_prefix.return_value = []
                 mock_get_mgr.return_value = mock_mgr
 
                 result = runner.invoke(click_app, ["testvm"])
@@ -54,7 +54,7 @@ class TestAttachCommand:
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
                 mock_mgr.get.return_value = mock_vm
-                mock_mgr.find_by_short_id.return_value = [mock_vm]
+                mock_mgr.find_by_id_prefix.return_value = [mock_vm]
                 mock_get_mgr.return_value = mock_mgr
 
                 result = runner.invoke(click_app, ["testvm", "--state"])
@@ -70,7 +70,7 @@ class TestAttachCommand:
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
                 mock_mgr.get.return_value = mock_vm
-                mock_mgr.find_by_short_id.return_value = [mock_vm]
+                mock_mgr.find_by_id_prefix.return_value = [mock_vm]
                 mock_get_mgr.return_value = mock_mgr
 
                 result = runner.invoke(click_app, ["testvm", "--kill"])
@@ -83,7 +83,7 @@ class TestAttachCommand:
         with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
             mock_mgr = MagicMock()
             mock_mgr.get.return_value = None
-            mock_mgr.find_by_short_id.return_value = []
+            mock_mgr.find_by_id_prefix.return_value = []
             mock_get_mgr.return_value = mock_mgr
 
             result = runner.invoke(click_app, ["nonexistent"])
@@ -103,7 +103,7 @@ class TestAttachCommand:
                 mock_vm = MagicMock()
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
-                mock_mgr.find_by_short_id.return_value = [mock_vm]
+                mock_mgr.find_by_id_prefix.return_value = [mock_vm]
                 mock_mgr.get.return_value = None  # Not found by exact name
                 mock_get_mgr.return_value = mock_mgr
 
@@ -118,7 +118,7 @@ class TestAttachCommand:
             with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
                 mock_mgr = MagicMock()
-                mock_mgr.find_by_short_id.return_value = []
+                mock_mgr.find_by_id_prefix.return_value = []
                 mock_mgr.get.return_value = mock_vm  # Found by exact name
                 mock_get_mgr.return_value = mock_mgr
 
@@ -135,14 +135,14 @@ class TestAttachCommand:
             mock_vm2 = MagicMock()
             mock_vm2.name = "vm2"
             mock_mgr = MagicMock()
-            mock_mgr.find_by_short_id.return_value = [mock_vm1, mock_vm2]
+            mock_mgr.find_by_id_prefix.return_value = [mock_vm1, mock_vm2]
             mock_mgr.get.return_value = None
             mock_get_mgr.return_value = mock_mgr
 
             result = runner.invoke(click_app, ["abc"])
 
             assert result.exit_code == 1
-            assert "Multiple VMs match short ID" in result.stdout
+            assert "Multiple VMs match ID prefix" in result.stdout
 
 
 class TestShowStateFunction:
@@ -621,7 +621,7 @@ class TestAttachCommandIntegration:
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
                 mock_mgr.get.return_value = mock_vm
-                mock_mgr.find_by_short_id.return_value = [mock_vm]
+                mock_mgr.find_by_id_prefix.return_value = [mock_vm]
                 mock_get_mgr.return_value = mock_mgr
 
                 result = runner.invoke(click_app, ["testvm", "--state"])
@@ -637,7 +637,7 @@ class TestAttachCommandIntegration:
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
                 mock_mgr.get.return_value = mock_vm
-                mock_mgr.find_by_short_id.return_value = [mock_vm]
+                mock_mgr.find_by_id_prefix.return_value = [mock_vm]
                 mock_get_mgr.return_value = mock_mgr
 
                 result = runner.invoke(click_app, ["testvm", "--kill"])
@@ -653,7 +653,7 @@ class TestAttachCommandIntegration:
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
                 mock_mgr.get.return_value = mock_vm
-                mock_mgr.find_by_short_id.return_value = []
+                mock_mgr.find_by_id_prefix.return_value = []
                 mock_get_mgr.return_value = mock_mgr
 
                 result = runner.invoke(click_app, ["testvm"])
@@ -670,7 +670,7 @@ class TestAttachCommandIntegration:
                     mock_vm.name = "testvm"
                     mock_mgr = MagicMock()
                     mock_mgr.get.return_value = mock_vm
-                    mock_mgr.find_by_short_id.return_value = [mock_vm]
+                    mock_mgr.find_by_id_prefix.return_value = [mock_vm]
                     mock_get_mgr.return_value = mock_mgr
 
                     result = runner.invoke(click_app, ["testvm", "--state", "--kill"])

@@ -138,7 +138,7 @@ class TestVMLifecycleWorkflow:
         mock_create.return_value = vm
         mock_list.return_value = [vm]
         mock_manager.return_value.get_by_name.return_value = [vm]
-        mock_manager.return_value.find_by_short_id.return_value = []
+        mock_manager.return_value.find_by_id_prefix.return_value = []
 
         result = runner.invoke(
             vm_app,
@@ -203,7 +203,7 @@ class TestVMLifecycleWorkflow:
         mock_load.return_value = None
         mock_remove.return_value = None
         mock_manager.return_value.get_by_name.return_value = [vm]
-        mock_manager.return_value.find_by_short_id.return_value = []
+        mock_manager.return_value.find_by_id_prefix.return_value = []
 
         result = runner.invoke(vm_app, ["create", "--name", "restore-vm", "--image", "abc123"])
         assert result.exit_code == 0
@@ -253,7 +253,7 @@ class TestVMLifecycleEdgeCases:
         """Test attempting to remove a VM that doesn't exist."""
         mock_check_priv.return_value = None
         mock_manager.return_value.get_by_name.return_value = []
-        mock_manager.return_value.find_by_short_id.return_value = []
+        mock_manager.return_value.find_by_id_prefix.return_value = []
 
         result = runner.invoke(vm_app, ["rm", "--name", "missing-vm"])
         assert result.exit_code == 1

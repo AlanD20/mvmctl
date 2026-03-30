@@ -121,10 +121,10 @@ def _resolve_image_path(image: str) -> Path:
     if direct.is_absolute() and direct.exists():
         return direct
 
-    from mvmctl.core.metadata import find_images_by_short_id
+    from mvmctl.core.metadata import find_images_by_id_prefix
     from mvmctl.utils.fs import get_cache_dir
 
-    matches = find_images_by_short_id(get_cache_dir(), image)
+    matches = find_images_by_id_prefix(get_cache_dir(), image)
     if len(matches) == 1:
         full_key, meta = matches[0]
         filename = str(meta.get("filename", ""))
@@ -152,7 +152,7 @@ def _resolve_image_path(image: str) -> Path:
 
 
 def _resolve_image_fs_uuid(image: str) -> str | None:
-    from mvmctl.core.metadata import find_images_by_short_id, list_image_entries
+    from mvmctl.core.metadata import find_images_by_id_prefix, list_image_entries
     from mvmctl.utils.fs import get_cache_dir
 
     cache_dir = get_cache_dir()
@@ -168,7 +168,7 @@ def _resolve_image_fs_uuid(image: str) -> str | None:
         if isinstance(fs_uuid, str) and fs_uuid.strip():
             return fs_uuid.strip()
 
-    matches = find_images_by_short_id(cache_dir, image)
+    matches = find_images_by_id_prefix(cache_dir, image)
     if len(matches) == 1:
         _, meta = matches[0]
         fs_uuid = meta.get("fs_uuid")
@@ -179,7 +179,7 @@ def _resolve_image_fs_uuid(image: str) -> str | None:
 
 
 def _resolve_image_fs_type(image: str) -> str | None:
-    from mvmctl.core.metadata import find_images_by_short_id, list_image_entries
+    from mvmctl.core.metadata import find_images_by_id_prefix, list_image_entries
     from mvmctl.utils.fs import get_cache_dir
 
     cache_dir = get_cache_dir()
@@ -194,7 +194,7 @@ def _resolve_image_fs_type(image: str) -> str | None:
         if isinstance(fs_type, str) and fs_type.strip():
             return fs_type.strip()
 
-    matches = find_images_by_short_id(cache_dir, image)
+    matches = find_images_by_id_prefix(cache_dir, image)
     if len(matches) == 1:
         _, meta = matches[0]
         fs_type = meta.get("fs_type")
@@ -204,15 +204,15 @@ def _resolve_image_fs_type(image: str) -> str | None:
     return None
 
 
-def _resolve_image_short_id_path(image: str) -> Path:
-    from mvmctl.core.metadata import find_images_by_short_id
+def _resolve_image_id_path(image: str) -> Path:
+    from mvmctl.core.metadata import find_images_by_id_prefix
     from mvmctl.utils.fs import get_cache_dir
-    from mvmctl.utils.short_id import resolve_single_by_short_id
+    from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
 
     images_dir = get_images_dir()
-    match = resolve_single_by_short_id(image, find_images_by_short_id, get_cache_dir())
+    match = resolve_single_by_id_prefix(image, find_images_by_id_prefix, get_cache_dir())
     if match is None:
-        raise MVMError(f"Image short ID not found or ambiguous: {image!r}")
+        raise MVMError(f"Image ID not found or ambiguous: {image!r}")
 
     full_key, meta = match
     filename = str(meta.get("filename", ""))
@@ -272,25 +272,25 @@ def _resolve_kernel_path(kernel: str) -> Path:
     raise MVMError(f"Kernel not found: {kernel!r}")
 
 
-def _resolve_kernel_short_id_path(kernel: str) -> Path:
+def _resolve_kernel_id_path(kernel: str) -> Path:
     from mvmctl.core.metadata import list_kernel_entries
     from mvmctl.utils.fs import get_cache_dir
-    from mvmctl.utils.short_id import resolve_single_by_short_id
+    from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
 
     kernels_dir = get_kernels_dir()
 
-    def _find_kernels_by_short_id(
-        cache_dir: Path, short_id: str
+    def _find_kernels_by_id_prefix(
+        cache_dir: Path, prefix: str
     ) -> list[tuple[str, dict[str, object]]]:
         return [
             (full_key, meta)
             for full_key, meta in list_kernel_entries(cache_dir, kernels_dir).items()
-            if full_key.startswith(short_id)
+            if full_key.startswith(prefix)
         ]
 
-    match = resolve_single_by_short_id(kernel, _find_kernels_by_short_id, get_cache_dir())
+    match = resolve_single_by_id_prefix(kernel, _find_kernels_by_id_prefix, get_cache_dir())
     if match is None:
-        raise MVMError(f"Kernel short ID not found or ambiguous: {kernel!r}")
+        raise MVMError(f"Kernel ID not found or ambiguous: {kernel!r}")
 
     full_key, meta = match
     filename = str(meta.get("filename", ""))
@@ -308,7 +308,7 @@ def _resolve_kernel_short_id_path(kernel: str) -> Path:
 def generate_vm_id(name: str) -> str:
     """Generate a unique VM ID from name and current time."""
     data = f"{name}:{time.time()}"
-    return hashlib.sha256(data.encode()).hexdigest()
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
 logger = logging.getLogger(__name__)
