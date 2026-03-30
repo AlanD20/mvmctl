@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-30
+
+### Added
+- (Add changes here)
+
+### Changed
+- (Add changes here)
+
+### Fixed
+- (Add changes here)
+
 ### Added
 - `mvm vm pause` / `mvm vm resume` commands for live VM state management
 - `mvm asset bin fetch` / `mvm asset bin list` / `mvm asset bin use` for Firecracker binary management
