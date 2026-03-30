@@ -26,6 +26,7 @@ from mvmctl.api.vms import (
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error, print_info, print_success
+from mvmctl.utils.error_handler import handle_mvm_error
 
 app = typer.Typer(
     help="VM console access",
@@ -96,8 +97,7 @@ def _show_state(name: str) -> None:
         if state["socket_path"]:
             print_info(f"  Socket: {state['socket_path']}")
     except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(1)
+        handle_mvm_error(e)
 
 
 def _do_kill(name: str) -> None:
@@ -114,8 +114,7 @@ def _do_kill(name: str) -> None:
             print_error(f"No console relay running for '{name}'")
             raise typer.Exit(1)
     except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(1)
+        handle_mvm_error(e)
 
 
 def _do_attach(name: str) -> None:
@@ -128,8 +127,7 @@ def _do_attach(name: str) -> None:
         info = _attach_console(name)
         socket_path = Path(info["socket_path"])
     except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(1)
+        handle_mvm_error(e)
 
     print_info(f"Attaching to console of '{name}'...")
     print_info("Press Ctrl+X then D to detach")

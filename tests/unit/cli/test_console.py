@@ -205,7 +205,7 @@ class TestShowStateFunction:
 
     def test_show_state_handles_mvm_error(self):
         """Handles MVMError gracefully."""
-        with patch("mvmctl.cli.console.print_error") as mock_print:
+        with patch("mvmctl.utils.error_handler.print_error") as mock_print:
             with patch("mvmctl.cli.console._get_console_state") as mock_get_state:
                 with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
                     mock_vm = MagicMock()
@@ -275,7 +275,7 @@ class TestDoKillFunction:
 
     def test_do_kill_handles_mvm_error(self):
         """Handles MVMError gracefully."""
-        with patch("mvmctl.cli.console.print_error") as mock_print:
+        with patch("mvmctl.utils.error_handler.print_error") as mock_print:
             with patch("mvmctl.cli.console._kill_console") as mock_kill:
                 with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
                     mock_vm = MagicMock()
@@ -340,7 +340,7 @@ class TestDoAttachFunction:
 
     def test_do_attach_console_not_running(self):
         """Console not running exits with error."""
-        with patch("mvmctl.cli.console.print_error") as mock_print:
+        with patch("mvmctl.utils.error_handler.print_error") as mock_print:
             with patch("mvmctl.cli.console._attach_console") as mock_attach:
                 with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
                     mock_vm = MagicMock()

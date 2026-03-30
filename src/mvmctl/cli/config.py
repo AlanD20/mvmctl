@@ -13,6 +13,7 @@ from mvmctl.api.config import (
 from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error, print_info, print_success
+from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import get_assets_dir
 
 app = typer.Typer(
@@ -44,8 +45,7 @@ def show(
         data = dump_config(config, section)
         typer.echo(json.dumps(data, indent=2))
     except MVMError as e:
-        print_error(f"Failed to load config: {e}")
-        raise typer.Exit(code=1)
+        handle_mvm_error(e)
 
 
 @app.command()
@@ -69,8 +69,7 @@ def validate(
         else:
             print_success("Configuration is valid")
     except MVMError as e:
-        print_error(f"Validation error: {e}")
-        raise typer.Exit(code=1)
+        handle_mvm_error(e)
 
 
 @app.command()
@@ -123,7 +122,6 @@ def config_set(
     """Set a configuration value."""
     try:
         set_config_value(key, value)
-    except Exception as exc:
-        print_error(f"Failed to set config: {exc}")
-        raise typer.Exit(code=1)
+    except (ValueError, KeyError, OSError) as exc:
+        handle_mvm_error(exc)
     print_success(f"{key} = {value}")

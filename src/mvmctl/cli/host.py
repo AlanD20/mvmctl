@@ -19,6 +19,7 @@ from mvmctl.api.host import (
 from mvmctl.constants import PROJECT_GROUP
 from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
+from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import get_cache_dir
 
 _CHAIN_EXISTS_MARKER = "MVM chains already exist"
@@ -238,8 +239,7 @@ def clean_cmd(
     try:
         summary = clean_host(cache_dir)
     except MVMError as e:
-        print_error(f"Clean failed: {e}")
-        raise typer.Exit(code=1)
+        handle_mvm_error(e)
 
     if summary:
         for item in summary:
@@ -283,8 +283,7 @@ def reset_cmd(
     try:
         summary = reset_host(cache_dir)
     except MVMError as e:
-        print_error(f"Reset failed: {e}")
-        raise typer.Exit(code=1)
+        handle_mvm_error(e)
 
     from mvmctl.utils.audit import log_audit
 

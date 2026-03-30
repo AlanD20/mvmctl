@@ -11,7 +11,7 @@ from mvmctl.constants import (
     DEFAULT_VM_LOG_TYPE,
 )
 from mvmctl.exceptions import MVMError
-from mvmctl.utils.console import print_error
+from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.validation import validate_entity_name
 
 app = typer.Typer(
@@ -45,5 +45,4 @@ def logs(
             print(line, end="" if line.endswith("\n") else "\n")
         raise typer.Exit(code=0)
     except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+        handle_mvm_error(e)

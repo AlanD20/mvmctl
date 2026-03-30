@@ -32,6 +32,7 @@ from mvmctl.constants import (
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode, VMInstance, VMState
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
+from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import get_vm_dir_by_hash as get_vm_dir  # noqa: F401
 from mvmctl.utils.fs import get_vms_dir  # noqa: F401
 from mvmctl.utils.time import human_readable_time
@@ -264,8 +265,7 @@ def create(
         try:
             base_config = load_vm_config_file(import_config)
         except (FileNotFoundError, ValueError) as e:
-            print_error(str(e))
-            raise typer.Exit(code=1)
+            handle_mvm_error(e)
 
         merged = merge_cli_overrides(
             base_config,
@@ -357,11 +357,8 @@ def create(
         try:
             resolved_image_path = resolve_image_multi_strategy(image)
             image_id_for_lookup = image if image else str(resolved_image_path)
-        except MVMError:
-            print_error(
-                f"Image '{image}' was not found. Provide a valid image name (e.g., ubuntu-24.04), short ID, or direct path."
-            )
-            raise typer.Exit(code=1)
+        except MVMError as e:
+            handle_mvm_error(e)
 
     # Kernel path validation and resolution
     if kernel_path is not None:
@@ -381,11 +378,8 @@ def create(
         try:
             resolved_kernel_path = resolve_kernel_multi_strategy(kernel)
             kernel_id_for_lookup = kernel if kernel else str(resolved_kernel_path)
-        except MVMError:
-            print_error(
-                f"Kernel '{kernel}' was not found. Provide a valid kernel short ID or direct path."
-            )
-            raise typer.Exit(code=1)
+        except MVMError as e:
+            handle_mvm_error(e)
 
     effective_bin = firecracker_bin or _resolve_active_firecracker_bin()
 
@@ -526,8 +520,7 @@ def create(
         print_info(f"  SSH ready in ~30-60s: mvm vm ssh --name {name}")
         print_info(f"  Logs: mvm vm logs --name {name} --type os --follow")
     except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+        handle_mvm_error(e)
 
 
 @app.command(name="rm")
@@ -613,7 +606,7 @@ def rm(
             print_success(f"VM '{vm.name}' removed")
             removed_count += 1
         except MVMError as e:
-            print_error(f"Failed to remove VM '{vm.name}': {e}")
+            handle_mvm_error(e)
 
     if removed_count == 0 and targets:
         raise typer.Exit(code=exit_code)
@@ -735,8 +728,7 @@ def snapshot(
         snapshot_vm(name=name, mem_out=mem_out, state_out=state_out)
         raise typer.Exit(code=0)
     except MVMError as exc:
-        print_error(str(exc))
-        raise typer.Exit(code=1)
+        handle_mvm_error(exc)
 
 
 @app.command()
@@ -756,8 +748,7 @@ def load(
         load_snapshot(name=name, mem_in=mem_in, state_in=state_in, resume_after=resume_after)
         raise typer.Exit(code=0)
     except MVMError as exc:
-        print_error(str(exc))
-        raise typer.Exit(code=1)
+        handle_mvm_error(exc)
 
 
 @app.command(name="pause", hidden=True)
@@ -801,8 +792,7 @@ def inspect(
     try:
         vm_info = inspect_vm(effective_selector)
     except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+        handle_mvm_error(e)
 
     if json_output:
         typer.echo(json.dumps(vm_info, indent=2, default=str))

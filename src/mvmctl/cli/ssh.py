@@ -9,7 +9,7 @@ import typer
 
 from mvmctl.api.vms import ssh_vm
 from mvmctl.exceptions import MVMError
-from mvmctl.utils.console import print_error
+from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 if TYPE_CHECKING:
@@ -90,5 +90,4 @@ def ssh(
         exit_code = ssh_vm(name=name, user=effective_user, key=resolved_key, cmd=cmd)
         raise typer.Exit(code=exit_code)
     except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+        handle_mvm_error(e)
