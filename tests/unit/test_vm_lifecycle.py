@@ -2881,6 +2881,7 @@ class TestRemoveVMNATOrdering:
     ensuring the NAT guard check can see remaining TAPs on the bridge.
     """
 
+    @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
     @patch("mvmctl.core.vm_lifecycle.get_vm_dir")
     @patch("mvmctl.core.vm_lifecycle.get_network")
@@ -2909,6 +2910,7 @@ class TestRemoveVMNATOrdering:
         mock_get_net_info,
         mock_get_vm_dir,
         mock_get_vm_mgr,
+        mock_firewall_subprocess,
     ):
         """CRITICAL: teardown_nat must be called before delete_tap.
 
@@ -2968,6 +2970,7 @@ class TestRemoveVMNATOrdering:
             "teardown_nat must be called before delete_tap to preserve NAT for other VMs"
         )
 
+    @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
     @patch("mvmctl.core.vm_lifecycle.get_vm_dir")
     @patch("mvmctl.core.vm_lifecycle.get_network")
@@ -2996,6 +2999,7 @@ class TestRemoveVMNATOrdering:
         mock_get_net_info,
         mock_get_vm_dir,
         mock_get_vm_mgr,
+        mock_firewall_subprocess,
     ):
         """teardown_nat should be called with force=False to enable guard check."""
         from mvmctl.core.vm_lifecycle import remove_vm

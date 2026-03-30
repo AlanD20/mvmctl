@@ -24,10 +24,7 @@ import pytest
 #   - File: src/mvmctl/services/console_relay/manager.py -> module_path: "mvmctl.services.console_relay.manager"
 #
 # To find a module's path: python -c "import mvmctl.<module>; print(mvmctl.<module>.__name__)""
-STARTUP_ALLOWLIST: dict[str, str] = {
-    # Example (remove when adding real exemptions):
-    # "mvmctl.cli.vm": "Heavy form processing adds 50ms overhead (Issue #123)",
-}
+STARTUP_ALLOWLIST: dict[str, str] = {}
 
 MAX_STARTUP_MS = 200
 
@@ -83,14 +80,17 @@ print(f"{{(end - start) * 1000:.2f}}")
         pytest.skip(f"Could not parse timing: {result.stdout!r}")
 
 
-def _get_all_modules() -> list[str]:
-    """Discover all mvmctl modules."""
+def _get_non_cli_modules() -> list[str]:
+    """Discover all mvmctl modules except CLI (which are lazy-loaded)."""
     project_root = Path(__file__).parent.parent.parent
     src_path = project_root / "src" / "mvmctl"
 
     modules = []
     for py_file in src_path.rglob("*.py"):
         if py_file.name.startswith("_"):
+            continue
+        # Skip CLI modules - they are lazy-loaded by main.py and import typer
+        if "cli" in str(py_file.relative_to(src_path)):
             continue
 
         relative = py_file.relative_to(src_path)
@@ -109,23 +109,21 @@ class TestStartupTimeCompliance:
 
         print(f"\n[MEASUREMENT] CLI startup: {elapsed_ms:.1f}ms (limit: {MAX_STARTUP_MS}ms)")
 
-        if elapsed_ms > MAX_STARTUP_MS and "CLI" not in STARTUP_ALLOWLIST:
-            pytest.fail(
-                f"CLI startup time {elapsed_ms:.1f}ms exceeds limit of {MAX_STARTUP_MS}ms.\n"
-                f"Add to STARTUP_ALLOWLIST with justification if intentional."
-            )
+        assert elapsed_ms <= MAX_STARTUP_MS, (
+            f"CLI startup time {elapsed_ms:.1f}ms exceeds limit of {MAX_STARTUP_MS}ms.\n"
+            f"Investigate import-time overhead in main.py and constants.py"
+        )
 
-        assert elapsed_ms <= MAX_STARTUP_MS or "CLI" in STARTUP_ALLOWLIST
-
-    @pytest.mark.parametrize("module_path", _get_all_modules())
+    @pytest.mark.parametrize("module_path", _get_non_cli_modules())
     def test_module_import_startup(self, module_path: str):
-        """All modules import in < 200ms unless exempted."""
+        """Non-CLI modules must import in < 200ms."""
         elapsed_ms = _measure_startup_time(module_path)
 
         if elapsed_ms > MAX_STARTUP_MS and module_path not in STARTUP_ALLOWLIST:
             pytest.fail(
                 f"Module '{module_path}' import time {elapsed_ms:.1f}ms exceeds limit.\n"
-                f"Add to STARTUP_ALLOWLIST with justification if intentional."
+                f"This module is part of the cold-start path. Investigate and fix, "
+                f"or add to STARTUP_ALLOWLIST with documented justification."
             )
 
         assert elapsed_ms <= MAX_STARTUP_MS or module_path in STARTUP_ALLOWLIST
