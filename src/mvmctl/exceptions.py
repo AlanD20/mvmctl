@@ -149,3 +149,9 @@ class TieDetectedError(MVMError):
 
     def __str__(self) -> str:
         return f"{self.message}: {', '.join(self.tied_partitions)}"
+
+
+class DownloadError(MVMError):
+    """Raised when a download operation fails."""
+
+    pass

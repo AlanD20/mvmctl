@@ -499,6 +499,10 @@ CONST_SECONDS_PER_MONTH: Final[int] = 2592000
 CONST_SECONDS_PER_YEAR: Final[int] = 31536000
 CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
 
+# HTTP status codes
+CONST_HTTP_STATUS_OK: Final[int] = 200
+CONST_HTTP_STATUS_PARTIAL_CONTENT: Final[int] = 206
+
 # Retry and timeout constants
 CONST_RETRY_ATTEMPTS: Final[int] = 3
 CONST_RETRY_DELAY_SECONDS: Final[int] = 1
@@ -529,3 +533,6 @@ FIRECRACKER_GITHUB_DOWNLOAD_URL: Final[str] = _require_str(
     ("urls", "firecracker", "github_download_base")
 )
 FIRECRACKER_GITHUB_RAW_URL: Final[str] = _require_str(("urls", "firecracker", "github_raw_base"))
+
+# Fallback temp directory for download staging
+FALLBACK_TEMP_DIR: Final[Path] = Path("/tmp/mvmctl")
