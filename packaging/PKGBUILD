@@ -2,7 +2,7 @@
 pkgname=mvmctl
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="MicroVM Manager for Firecracker microVMs"
+pkgdesc="MicroVM Manager - Container speed, VM isolation"
 arch=('x86_64')
 url="https://github.com/AlanD20/mvmctl"
 license=('MIT')

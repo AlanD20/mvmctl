@@ -10,8 +10,8 @@ Package: mvmctl
 Architecture: amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}, iproute2, iptables, qemu-utils, libguestfs-tools | guestfs-tools, xorriso | genisoimage
 Recommends: openssh-client
-Description: MicroVM Manager for Firecracker microVMs
- mvmctl is a production-grade CLI for managing Firecracker microVMs on Linux.
+Description: MicroVM Manager - Container speed, VM isolation
+ mvmctl is a production-grade CLI for managing microVMs on Linux.
  It handles VM lifecycle: downloading kernels/images, networking, VM creation,
  SSH access, log streaming, snapshots, and cleanup.
  .

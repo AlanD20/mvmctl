@@ -1,7 +1,7 @@
 Name:           mvmctl
 Version:        0.1.0
 Release:        1%{?dist}
-Summary:        MicroVM Manager for Firecracker microVMs
+Summary:        MicroVM Manager - Container speed, VM isolation
 
 License:        MIT
 URL:            https://github.com/AlanD20/mvmctl
@@ -12,7 +12,7 @@ BuildArch:      x86_64
 Requires:       iproute, iptables, qemu-img, libguestfs, xorriso, openssh-clients
 
 %description
-mvmctl is a production-grade CLI for managing Firecracker microVMs on Linux.
+mvmctl is a production-grade CLI for managing microVMs on Linux.
 It handles VM lifecycle: downloading kernels/images, networking, VM creation,
 SSH access, log streaming, snapshots, and cleanup.
 
