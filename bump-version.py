@@ -73,8 +73,13 @@ def update_init_py(root: Path, new_version: str, dry_run: bool) -> None:
         print(f"  ⚠️  src/mvmctl/__init__.py: __version__ not found")
 
 
-def update_pkgbuild(root: Path, new_version: str, dry_run: bool) -> None:
-    """Update pkgver in packaging/PKGBUILD."""
+def update_pkgbuild(
+    root: Path,
+    new_version: str,
+    dry_run: bool,
+    author: tuple[str, str] = ("AlanD20", "aland20@pm.me"),
+) -> None:
+    """Update pkgver and maintainer in packaging/PKGBUILD."""
     file_path = root / "packaging" / "PKGBUILD"
     if not file_path.exists():
         print(f"  ⚠️  packaging/PKGBUILD: file not found")
@@ -85,9 +90,14 @@ def update_pkgbuild(root: Path, new_version: str, dry_run: bool) -> None:
 
     if old_version:
         old = old_version.group(1)
-        # Extract base version (without pre-release suffix for pkgver)
         base_version = new_version.split("-")[0]
         new_content = re.sub(r"^pkgver=[0-9.]+", f"pkgver={base_version}", content, flags=re.M)
+
+        # Update maintainer
+        new_content = re.sub(
+            r"# Maintainer: .*", f"# Maintainer: {author[0]} <{author[1]}>", new_content
+        )
+
         if not dry_run:
             file_path.write_text(new_content)
         print(f"  packaging/PKGBUILD: {old} → {base_version}")
@@ -119,7 +129,11 @@ def update_rpm_spec(root: Path, new_version: str, dry_run: bool) -> None:
 
 
 def update_debian_changelog(
-    root: Path, new_version: str, dry_run: bool, changelog: str = ""
+    root: Path,
+    new_version: str,
+    dry_run: bool,
+    changelog: str = "",
+    author: tuple[str, str] = ("AlanD20", "aland20@pm.me"),
 ) -> None:
     """Add new entry to packaging/debian/changelog."""
     file_path = root / "packaging" / "debian" / "changelog"
@@ -146,7 +160,7 @@ def update_debian_changelog(
 
 {debian_changes}
 
- -- AlanD20 <aland20@pm.me>  {date_str}
+ -- {author[0]} <{author[1]}>  {date_str}
 
 """
 
@@ -175,7 +189,13 @@ def update_man_page(root: Path, new_version: str, dry_run: bool) -> None:
     print(f"  docs/mvm.1: {old_version} → {new_version}")
 
 
-def update_rpm_changelog(root: Path, new_version: str, dry_run: bool, changelog: str = "") -> None:
+def update_rpm_changelog(
+    root: Path,
+    new_version: str,
+    dry_run: bool,
+    changelog: str = "",
+    author: tuple[str, str] = ("AlanD20", "aland20@pm.me"),
+) -> None:
     """Update %changelog in packaging/mvmctl.spec."""
     file_path = root / "packaging" / "mvmctl.spec"
     if not file_path.exists():
@@ -199,7 +219,7 @@ def update_rpm_changelog(root: Path, new_version: str, dry_run: bool, changelog:
     else:
         rpm_changes = f"- New upstream release {new_version}"
 
-    new_entry = f"""* {date_str} AlanD20 <aland20@pm.me> - {new_version}-1
+    new_entry = f"""* {date_str} {author[0]} <{author[1]}> - {new_version}-1
 {rpm_changes}
 
 """
@@ -311,6 +331,18 @@ Examples:
         "--changelog", dest="changelog_text", help="Changelog entry text (multi-line supported)"
     )
     parser.add_argument("--changelog-file", dest="changelog_file", help="Read changelog from file")
+    parser.add_argument(
+        "--author-name",
+        dest="author_name",
+        default="AlanD20",
+        help="Package author/maintainer name",
+    )
+    parser.add_argument(
+        "--author-email",
+        dest="author_email",
+        default="aland20@pm.me",
+        help="Package author/maintainer email",
+    )
 
     args = parser.parse_args()
 
@@ -332,6 +364,9 @@ Examples:
     elif args.changelog_text:
         changelog = args.changelog_text
 
+    # Get author info
+    author = (args.author_name, args.author_email)
+
     # Find project root
     script_dir = Path(__file__).parent.absolute()
     root = script_dir  # Script is at root
@@ -340,6 +375,7 @@ Examples:
     print(f"Bumping version to: {args.version}")
     if changelog:
         print("Changelog entries provided")
+    print(f"Author: {author[0]} <{author[1]}>")
     if args.dry_run:
         print("(DRY RUN - no files will be modified)")
     print(f"{'=' * 60}\n")
@@ -348,10 +384,10 @@ Examples:
     print("Updating files:")
     update_pyproject_toml(root, args.version, args.dry_run)
     update_init_py(root, args.version, args.dry_run)
-    update_pkgbuild(root, args.version, args.dry_run)
+    update_pkgbuild(root, args.version, args.dry_run, author)
     update_rpm_spec(root, args.version, args.dry_run)
-    update_rpm_changelog(root, args.version, args.dry_run, changelog)
-    update_debian_changelog(root, args.version, args.dry_run, changelog)
+    update_rpm_changelog(root, args.version, args.dry_run, changelog, author)
+    update_debian_changelog(root, args.version, args.dry_run, changelog, author)
     update_man_page(root, args.version, args.dry_run)
     update_root_changelog(root, args.version, args.dry_run, changelog)
 

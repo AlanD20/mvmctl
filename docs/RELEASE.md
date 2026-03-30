@@ -15,6 +15,88 @@ Before releasing, ensure the following are available on your workstation:
 
 The version is defined in one place: the `version` field under `[project]` in `pyproject.toml`. Update it there, and also update the `__version__` fallback in `src/mvmctl/__init__.py` to match.
 
+**Recommended**: Use the `bump-version.py` script to update all version references atomically:
+
+```bash
+# Simple version bump (no changelog)
+./bump-version.py 0.2.0
+
+# With inline changelog
+./bump-version.py 0.2.0 --changelog "- Added feature X\n- Fixed bug Y"
+
+# With changelog from file (recommended for releases)
+./bump-version.py 0.2.0 --changelog-file release-notes.md
+
+# Preview changes without modifying files
+./bump-version.py 0.2.0 --dry-run
+
+# Bump and auto-commit
+./bump-version.py 0.2.0 --changelog-file notes.md --commit
+
+# With custom author (for package changelogs)
+./bump-version.py 0.2.0 \
+  --author-name "Jane Doe" \
+  --author-email "jane@example.com" \
+  --changelog-file notes.md
+```
+
+### What bump-version.py Updates
+
+The script automatically updates version numbers in:
+
+| File | Field Updated |
+|------|--------------|
+| `pyproject.toml` | `version = "X.Y.Z"` |
+| `src/mvmctl/__init__.py` | `__version__ = "X.Y.Z"` |
+| `packaging/PKGBUILD` | `pkgver=X.Y.Z` and `# Maintainer:` comment |
+| `packaging/mvmctl.spec` | `Version: X.Y.Z` and `%changelog` entries |
+| `packaging/debian/changelog` | New version entry with Debian format |
+| `docs/mvm.1` | Version in `.TH` header line |
+| `CHANGELOG.md` | New version section with formatted changelog |
+
+### Changelog Format
+
+When providing a changelog via `--changelog` or `--changelog-file`, the script **parses and reformats** the content for each package format:
+
+**Input format** (Markdown):
+```markdown
+### Added
+- Feature X description
+- Feature Y description
+
+### Fixed
+- Bug Z description
+```
+
+**Output formats**:
+
+| Package | Format |
+|---------|--------|
+| `CHANGELOG.md` | Full Markdown with `### Added/Fixed/Changed` sections |
+| `debian/changelog` | Debian format: `  * entry text` (2-space indented bullets) |
+| `RPM spec` | `%changelog` with dash-prefixed entries |
+| `Arch PKGBUILD` | References root `CHANGELOG.md` (no embedded changelog) |
+
+### Default Changelogs
+
+If no changelog is provided, the script uses placeholder text:
+
+- **CHANGELOG.md**: `- (Add changes here)` template
+- **debian/changelog**: `* New upstream release {version}`
+- **RPM spec**: `- New upstream release {version}`
+
+### Manual Version Bump (Alternative)
+
+If not using the script, manually update these files:
+
+1. `pyproject.toml` — update `version`
+2. `src/mvmctl/__init__.py` — update `__version__`
+3. `packaging/PKGBUILD` — update `pkgver`
+4. `packaging/mvmctl.spec` — update `Version` and add `%changelog` entry
+5. `packaging/debian/changelog` — add new version entry
+6. `docs/mvm.1` — update version in `.TH` line
+7. `CHANGELOG.md` — add new version section
+
 This project uses **semantic versioning** (MAJOR.MINOR.PATCH):
 
 - **MAJOR** — increment when you make incompatible API or CLI changes (e.g., removing a command, renaming a flag without a deprecation alias, changing config file format in a breaking way).
