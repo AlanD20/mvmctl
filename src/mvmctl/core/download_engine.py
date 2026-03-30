@@ -4,9 +4,10 @@ import hashlib
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from mvmctl.constants import (
@@ -19,6 +20,11 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import ChecksumMismatchError, DownloadError
 from mvmctl.utils.progress import ASCIIProgressBar
+
+# Download retry configuration
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 1.0  # seconds
+DEFAULT_RETRY_BACKOFF = 2.0  # exponential backoff multiplier
 
 
 class DownloadEngine:
@@ -48,8 +54,9 @@ class DownloadEngine:
         resume: bool = True,
         progress: bool = True,
         timeout: int = CONST_HTTP_TIMEOUT_SECONDS,
+        max_retries: int = DEFAULT_MAX_RETRIES,
     ) -> Path:
-        """Download with temp staging, resume, and atomic move.
+        """Download with temp staging, resume, atomic move, and retry logic.
 
         Args:
             url: Source URL
@@ -58,6 +65,7 @@ class DownloadEngine:
             resume: Allow resuming partial downloads
             progress: Show ASCII progress bar
             timeout: Download timeout in seconds
+            max_retries: Number of retry attempts on transient failures
 
         Returns:
             Path to downloaded file (dest)
@@ -66,6 +74,36 @@ class DownloadEngine:
             DownloadError: On failure (with cleanup performed)
             ChecksumMismatchError: If SHA256 verification fails
         """
+        delay = DEFAULT_RETRY_DELAY
+        last_exception: Optional[Exception] = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                return self._download_once(url, dest, expected_sha256, resume, progress, timeout)
+            except (URLError, HTTPError, IOError, OSError) as e:
+                last_exception = e
+                if attempt < max_retries:
+                    print(f"Download attempt {attempt + 1}/{max_retries + 1} failed: {e}")
+                    print(f"Retrying in {delay:.1f}s...")
+                    time.sleep(delay)
+                    delay *= DEFAULT_RETRY_BACKOFF
+                else:
+                    raise DownloadError(
+                        f"Download failed after {max_retries + 1} attempts: {e}"
+                    ) from e
+
+        raise last_exception if last_exception else DownloadError("Download failed")
+
+    def _download_once(
+        self,
+        url: str,
+        dest: Path,
+        expected_sha256: Optional[str] = None,
+        resume: bool = True,
+        progress: bool = True,
+        timeout: int = CONST_HTTP_TIMEOUT_SECONDS,
+    ) -> Path:
+        """Internal download method without retry logic."""
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         # Create temp file with .part suffix for staging

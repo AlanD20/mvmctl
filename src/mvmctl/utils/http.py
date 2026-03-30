@@ -7,9 +7,11 @@ import logging
 import os
 import re
 import tempfile
+import time
+from functools import wraps
 from pathlib import Path
-from typing import Any
-from urllib.error import URLError
+from typing import Any, Callable, TypeVar
+from urllib.error import HTTPError, URLError
 from urllib.request import Request
 from urllib.request import urlopen as urlopen
 
@@ -20,6 +22,58 @@ __all__ = ["download_file", "urlopen"]
 
 logger = logging.getLogger(__name__)
 _CONTENT_RANGE_PATTERN = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+|\*)$")
+
+# Download retry configuration
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 1.0  # seconds
+DEFAULT_RETRY_BACKOFF = 2.0  # exponential backoff multiplier
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _with_retry(
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    retry_delay: float = DEFAULT_RETRY_DELAY,
+    backoff: float = DEFAULT_RETRY_BACKOFF,
+    retryable_exceptions: tuple[type[Exception], ...] = (URLError, HTTPError, IOError),
+) -> Callable[[F], F]:
+    """Decorator that adds retry logic with exponential backoff."""
+
+    def decorator(func: F) -> F:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            delay = retry_delay
+            last_exception: Exception | None = None
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except retryable_exceptions as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(
+                            "%s failed (attempt %d/%d): %s. Retrying in %.1fs...",
+                            func.__name__,
+                            attempt + 1,
+                            max_retries + 1,
+                            e,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        delay *= backoff
+                    else:
+                        logger.error(
+                            "%s failed after %d attempts: %s",
+                            func.__name__,
+                            max_retries + 1,
+                            e,
+                        )
+
+            raise last_exception if last_exception else MVMError("Download failed")
+
+        return wrapper  # type: ignore[return-value]
+
+    return decorator
 
 
 def _partial_download_path(dest: Path) -> Path:
@@ -87,6 +141,9 @@ def _parse_total_size(
         return None
 
 
+@_with_retry(
+    max_retries=DEFAULT_MAX_RETRIES, retry_delay=DEFAULT_RETRY_DELAY, backoff=DEFAULT_RETRY_BACKOFF
+)
 def download_file(
     url: str,
     dest: Path,

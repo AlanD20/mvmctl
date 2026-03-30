@@ -128,7 +128,7 @@ host:
         table: filter
         built_in: INPUT
 http:
-  download_chunk_size: 100485760
+  download_chunk_size: 262144  # 256KB - optimal for smooth progress updates
 kernel:
   defaults:
     version: 6.19.9
