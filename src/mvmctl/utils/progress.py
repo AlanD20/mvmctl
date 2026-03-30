@@ -6,7 +6,9 @@ in CI/script environments.
 """
 
 import hashlib
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 from urllib.error import URLError
@@ -21,6 +23,7 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import ChecksumMismatchError, MVMError
 from mvmctl.utils import http
+from mvmctl.utils.fs import get_temp_dir
 from mvmctl.utils.http import _with_retry
 
 
@@ -161,28 +164,30 @@ def download_with_progress(
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    # Get file size first via HEAD request
     total_size = 0
     try:
-        req = Request(
-            url,
-            headers={"User-Agent": HTTP_USER_AGENT},
-            method="HEAD",
-        )
+        req = Request(url, headers={"User-Agent": HTTP_USER_AGENT}, method="HEAD")
         with http.urlopen(req, timeout=30) as response:
             content_length = response.headers.get("Content-Length")
             if content_length:
                 total_size = int(content_length)
     except Exception:
-        pass  # Continue without size info if HEAD fails
+        pass
 
     progress = ASCIIProgressBar(total=total_size, title=title)
     sha256_hash = hashlib.sha256() if expected_sha256 else None
+    temp_path: Optional[Path] = None
 
     try:
+        temp_fd, temp_str = tempfile.mkstemp(
+            dir=get_temp_dir(), prefix=f"{dest.stem}-", suffix=".tmp"
+        )
+        os.close(temp_fd)
+        temp_path = Path(temp_str)
+
         req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
         with http.urlopen(req, timeout=timeout) as response:
-            with open(dest, "wb") as f:
+            with temp_path.open("wb") as f:
                 while True:
                     chunk = response.read(CONST_DOWNLOAD_CHUNK_SIZE)
                     if not chunk:
@@ -194,16 +199,20 @@ def download_with_progress(
 
         progress.finish()
 
-        # Verify checksum if provided
         if expected_sha256 and sha256_hash:
             actual = sha256_hash.hexdigest()
             if actual.lower() != expected_sha256.lower():
-                dest.unlink(missing_ok=True)
+                temp_path.unlink(missing_ok=True)
                 raise ChecksumMismatchError(
                     f"Checksum mismatch! Expected {expected_sha256}, got {actual}"
                 )
 
+        os.replace(temp_path, dest)
+        temp_path = None
         return True
 
     except URLError as e:
         raise MVMError(f"Download failed: {e}") from e
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)

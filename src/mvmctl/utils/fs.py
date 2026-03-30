@@ -79,6 +79,13 @@ def get_config_file() -> Path:
     return get_config_dir() / "config.json"
 
 
+def get_temp_dir() -> Path:
+    override = os.environ.get(env_var("TEMP_DIR"))
+    result = Path(override) if override else Path("/tmp") / PROJECT_NAME
+    result.mkdir(parents=True, exist_ok=True)
+    return result
+
+
 def get_vms_dir() -> Path:
     """Return the directory that holds VM state and per-VM dirs."""
     return get_cache_dir() / "vms"

@@ -691,9 +691,6 @@ FIRECRACKER_GITHUB_DOWNLOAD_URL: Final[str] = _require_str(
 )
 FIRECRACKER_GITHUB_RAW_URL: Final[str] = _require_str(("urls", "firecracker", "github_raw_base"))
 
-# Fallback temp directory for download staging
-FALLBACK_TEMP_DIR: Final[Path] = Path("/tmp/mvmctl")
-
 # ---------------------------------------------------------------------------
 # Debug mode constants (loaded from assets/defaults.yaml)
 # ---------------------------------------------------------------------------
