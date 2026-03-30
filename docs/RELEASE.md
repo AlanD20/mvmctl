@@ -205,6 +205,28 @@ Yanking does not delete the release — it marks it so that `pip install mvmctl`
 
 After yanking, immediately publish a new patch release with the fix (see "Issuing a Hotfix" above).
 
+## Man Page Installation
+
+A man page is included at `docs/mvm.1`. Install it system-wide:
+
+### Manual Installation
+
+```bash
+# Copy to system man page directory
+sudo cp docs/mvm.1 /usr/local/share/man/man1/
+sudo mandb  # Update man database
+
+# View the man page
+man mvm
+```
+
+### Package Installation (when packaging for distributions)
+
+For distro packages (deb, rpm, etc.), install to:
+- **Debian/Ubuntu**: `/usr/share/man/man1/mvm.1`
+- **RHEL/CentOS/Fedora**: `/usr/share/man/man1/mvm.1`
+- **Arch**: `/usr/share/man/man1/mvm.1`
+
 ## Appendix: Dynamic Import Handling in Compiled Binaries
 
 mvmctl uses dynamic imports for optional dependencies to keep the core runtime lightweight:

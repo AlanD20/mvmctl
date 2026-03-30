@@ -1,0 +1,278 @@
+.TH MVM 1 "March 2026" "mvmctl 0.1.0" "User Commands"
+.SH NAME
+mvm \- MicroVM Manager for Firecracker microVMs
+.SH SYNOPSIS
+.B mvm
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]...
+.SH DESCRIPTION
+.B mvm
+is a production-grade CLI for managing Firecracker microVMs on Linux.
+It handles the full VM lifecycle: downloading kernels and images, setting up bridge networking,
+creating and destroying VMs, SSH access, log streaming, snapshots, and cleanup.
+.SH OPTIONS
+.TP
+.BR \-\-verbose
+Enable verbose output.
+.TP
+.BR \-\-debug
+Enable debug mode with detailed error messages and stack traces.
+.TP
+.BR \-\-version
+Show the version and exit.
+.TP
+.BR \-\-help
+Show this help message and exit.
+.SH COMMANDS
+.SS VM Management
+.TP
+.BR vm\ create
+Create and start a new Firecracker VM.
+.TP
+.BR vm\ rm
+Stop and remove VMs by short ID or name.
+.TP
+.BR vm\ ls
+List running and stopped VMs.
+.TP
+.BR vm\ ps
+List running VMs (alias for ls).
+.TP
+.BR vm\ prune
+Remove stopped VMs and stale directories.
+.TP
+.BR vm\ snapshot
+Snapshot VM memory and disk state.
+.TP
+.BR vm\ load
+Load VM from snapshot.
+.TP
+.BR vm\ inspect
+Show detailed information about a VM.
+.TP
+.BR vm\ ssh
+SSH into a VM.
+.TP
+.BR vm\ logs
+View VM logs (boot or Firecracker process logs).
+.SS Host Configuration
+.TP
+.BR host\ init
+Apply host configuration (KVM, modules, ip_forward, mvm group, sudoers).
+.TP
+.BR host\ ls
+Show current host configuration state.
+.TP
+.BR host\ clean
+Remove networking config (bridges, TAPs, iptables).
+.TP
+.BR host\ reset
+Full rollback: networking + sysctl + sudoers + group removal.
+.SS Kernel Management
+.TP
+.BR kernel\ ls
+List cached kernels.
+.TP
+.BR kernel\ fetch
+Download or build a kernel (official or Firecracker-optimized).
+.TP
+.BR kernel\ set-default
+Set a kernel as the default for VM creation.
+.TP
+.BR kernel\ rm
+Remove a cached kernel.
+.SS Image Management
+.TP
+.BR image\ ls
+List available and cached images.
+.TP
+.BR image\ fetch
+Download an image by its ID (e.g., ubuntu-24.04, archlinux).
+.TP
+.BR image\ import
+Import a local image file.
+.TP
+.BR image\ set-default
+Set the default image for VM creation.
+.TP
+.BR image\ rm
+Remove a cached image.
+.SS Binary Management
+.TP
+.BR bin\ ls
+List local Firecracker versions.
+.TP
+.BR bin\ fetch
+Download a specific Firecracker release.
+.TP
+.BR bin\ set-default
+Set the active Firecracker version.
+.TP
+.BR bin\ rm
+Remove a cached version.
+.SS Network Management
+.TP
+.BR network\ create
+Create a named bridge network.
+.TP
+.BR network\ rm
+Remove a named network.
+.TP
+.BR network\ ls
+List all networks.
+.TP
+.BR network\ inspect
+Show network details and IP leases.
+.SS SSH Key Management
+.TP
+.BR key\ ls
+List cached keys.
+.TP
+.BR key\ add
+Import an existing public key.
+.TP
+.BR key\ create
+Generate a new ED25519 keypair.
+.TP
+.BR key\ rm
+Remove a key from the cache.
+.TP
+.BR key\ set-default
+Set one or more keys as defaults for new VMs.
+.TP
+.BR key\ export
+Export a key to ~/.ssh or a custom directory.
+.SS Cache Management
+.TP
+.BR cache\ init
+Initialize cache directories.
+.TP
+.BR cache\ prune
+Prune stale cache entries (VMs, networks, images, kernels).
+.SS Other Commands
+.TP
+.BR console
+VM console access (PTY-over-vsock relay).
+.TP
+.BR config
+Configuration management (get, set, show, validate).
+.TP
+.BR init
+Initialize mvm (guided setup wizard).
+.TP
+.BR ssh
+VM SSH access.
+.TP
+.BR logs
+VM log management.
+.TP
+.BR clear
+Clear cached assets.
+.TP
+.BR version
+Show version and exit.
+.TP
+.BR help
+Show help for mvm or a subcommand.
+.SH ENVIRONMENT
+.TP
+.BR MVM_CACHE_DIR
+Override cache directory (default: ~/.cache/mvmctl).
+.TP
+.BR MVM_CONFIG_DIR
+Override config directory (default: ~/.config/mvmctl).
+.TP
+.BR MVM_KERNEL
+Override default kernel path.
+.TP
+.BR MVM_FIRECRACKER_BIN
+Override Firecracker binary path.
+.TP
+.BR MVM_LOG_LEVEL
+Set log level (DEBUG, INFO, WARNING, ERROR).
+.SH FILES
+.TP
+.I ~/.cache/mvmctl/
+Cache directory for binaries, kernels, images, VM state.
+.TP
+.I ~/.config/mvmctl/config.json
+User configuration file.
+.TP
+.I ~/.cache/mvmctl/metadata.json
+Asset registry (images, kernels, binaries with default flags).
+.SH EXAMPLES
+.PP
+One-time host setup:
+.RS
+.nf
+$ sudo mvm host init
+# Log out and back in, or run: newgrp mvm
+.fi
+.RE
+.PP
+Download kernel and image:
+.RS
+.nf
+$ mvm kernel fetch
+$ mvm image fetch ubuntu-24.04
+.fi
+.RE
+.PP
+Create and start a VM:
+.RS
+.nf
+$ mvm vm create --name myvm --image ubuntu-24.04
+$ mvm vm logs --name myvm --type boot --follow
+$ mvm vm ssh --name myvm
+.fi
+.RE
+.PP
+List and remove VMs:
+.RS
+.nf
+$ mvm vm ls
+$ mvm vm rm --name myvm --force
+.fi
+.RE
+.PP
+Network management:
+.RS
+.nf
+$ mvm network create mynet --subnet 10.1.0.0/16
+$ mvm vm create --name myvm2 --image ubuntu-24.04 --network mynet
+.fi
+.RE
+.PP
+Run interactive setup wizard:
+.RS
+.nf
+$ mvm init
+.fi
+.RE
+.SH PREREQUISITES
+.IP \(bu 2
+Linux (x86_64 or aarch64) - Firecracker only runs on Linux
+.IP \(bu 2
+KVM access (/dev/kvm) - add user to kvm group
+.IP \(bu 2
+Python 3.13+
+.IP \(bu 2
+System packages: iproute2, iptables, genisoimage (or xorriso), qemu-utils
+.SH NOTES
+.IP \(bu 2
+After \fBsudo mvm host init\fR, normal mvm commands require no sudo.
+.IP \(bu 2
+Cache is stored at ~/.cache/mvmctl/ by default.
+.IP \(bu 2
+All assets are keyed by SHA256 hash (64 characters).
+.IP \(bu 2
+CLI displays only first 6 characters of hashes as short IDs.
+.SH SEE ALSO
+.BR firecracker (1),
+.BR iptables (8),
+.BR ip (8)
+.SH BUGS
+Report bugs at: https://github.com/AlanD20/mvmctl/issues
+.SH AUTHOR
+AlanD20 and contributors
+.SH LICENSE
+MIT License

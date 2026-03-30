@@ -80,17 +80,14 @@ print(f"{{(end - start) * 1000:.2f}}")
         pytest.skip(f"Could not parse timing: {result.stdout!r}")
 
 
-def _get_non_cli_modules() -> list[str]:
-    """Discover all mvmctl modules except CLI (which are lazy-loaded)."""
+def _get_all_modules() -> list[str]:
+    """Discover all mvmctl modules."""
     project_root = Path(__file__).parent.parent.parent
     src_path = project_root / "src" / "mvmctl"
 
     modules = []
     for py_file in src_path.rglob("*.py"):
         if py_file.name.startswith("_"):
-            continue
-        # Skip CLI modules - they are lazy-loaded by main.py and import typer
-        if "cli" in str(py_file.relative_to(src_path)):
             continue
 
         relative = py_file.relative_to(src_path)
@@ -114,9 +111,9 @@ class TestStartupTimeCompliance:
             f"Investigate import-time overhead in main.py and constants.py"
         )
 
-    @pytest.mark.parametrize("module_path", _get_non_cli_modules())
+    @pytest.mark.parametrize("module_path", _get_all_modules())
     def test_module_import_startup(self, module_path: str):
-        """Non-CLI modules must import in < 200ms."""
+        """All modules must import in < 200ms."""
         elapsed_ms = _measure_startup_time(module_path)
 
         if elapsed_ms > MAX_STARTUP_MS and module_path not in STARTUP_ALLOWLIST:
