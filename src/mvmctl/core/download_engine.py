@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Optional
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from mvmctl.constants import (
     CONST_DOWNLOAD_CHUNK_SIZE,
@@ -22,6 +22,7 @@ from mvmctl.constants import (
     HTTP_USER_AGENT,
 )
 from mvmctl.exceptions import ChecksumMismatchError, DownloadError
+from mvmctl.utils import http
 from mvmctl.utils.progress import ASCIIProgressBar
 
 
@@ -120,7 +121,7 @@ class DownloadEngine:
                 headers={"User-Agent": HTTP_USER_AGENT},
                 method="HEAD",
             )
-            with urlopen(req, timeout=30) as response:
+            with http.urlopen(req, timeout=30) as response:
                 content_length = response.headers.get("Content-Length")
                 if content_length:
                     total_size = int(content_length)
@@ -146,7 +147,7 @@ class DownloadEngine:
 
             req = Request(url, headers=headers)
 
-            with urlopen(req, timeout=timeout) as response:
+            with http.urlopen(req, timeout=timeout) as response:
                 is_resume = (
                     resume_byte_pos > 0 and response.status == CONST_HTTP_STATUS_PARTIAL_CONTENT
                 )

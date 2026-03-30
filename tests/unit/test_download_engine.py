@@ -64,7 +64,7 @@ class TestDownloadEngineDownload:
 
         mock_response = self._create_mock_response(b"data", headers={"Content-Length": "4"})
 
-        with patch("mvmctl.core.download_engine.urlopen", return_value=mock_response):
+        with patch("mvmctl.utils.http.urlopen", return_value=mock_response):
             result = engine.download("http://example.com/file", dest, progress=False)
 
         assert result == dest
@@ -80,7 +80,7 @@ class TestDownloadEngineDownload:
 
         mock_response = self._create_mock_response(data)
 
-        with patch("mvmctl.core.download_engine.urlopen", return_value=mock_response):
+        with patch("mvmctl.utils.http.urlopen", return_value=mock_response):
             with pytest.raises(ChecksumMismatchError):
                 engine.download(
                     "http://example.com/file", dest, expected_sha256=wrong_hash, progress=False
@@ -108,7 +108,7 @@ class TestDownloadEngineDownload:
             raise URLError("Network error")
 
         with patch(
-            "mvmctl.core.download_engine.urlopen",
+            "mvmctl.utils.http.urlopen",
             side_effect=side_effect,
         ):
             with pytest.raises(DownloadError):
@@ -131,7 +131,7 @@ class TestDownloadEngineDownload:
             b" data", status=206, headers={"Content-Range": "bytes 7-11/12"}
         )
 
-        with patch("mvmctl.core.download_engine.urlopen", return_value=mock_response):
+        with patch("mvmctl.utils.http.urlopen", return_value=mock_response):
             result = engine.download("http://example.com/file", dest, resume=True, progress=False)
 
         assert result == dest
@@ -144,7 +144,7 @@ class TestDownloadEngineDownload:
 
         mock_response = self._create_mock_response(b"data")
 
-        with patch("mvmctl.core.download_engine.urlopen", return_value=mock_response):
+        with patch("mvmctl.utils.http.urlopen", return_value=mock_response):
             engine.download("http://example.com/file", dest, progress=False)
 
         # File should exist at destination
@@ -159,7 +159,7 @@ class TestDownloadEngineDownload:
         mock_response = self._create_mock_response(b"data", headers={"Content-Length": "4"})
         mock_progress = Mock()
 
-        with patch("mvmctl.core.download_engine.urlopen", return_value=mock_response):
+        with patch("mvmctl.utils.http.urlopen", return_value=mock_response):
             with patch(
                 "mvmctl.core.download_engine.ASCIIProgressBar",
                 return_value=mock_progress,
@@ -177,7 +177,7 @@ class TestDownloadEngineDownload:
         mock_response = self._create_mock_response(b"data")
         mock_progress = Mock()
 
-        with patch("mvmctl.core.download_engine.urlopen", return_value=mock_response):
+        with patch("mvmctl.utils.http.urlopen", return_value=mock_response):
             with patch(
                 "mvmctl.core.download_engine.ASCIIProgressBar",
                 return_value=mock_progress,
