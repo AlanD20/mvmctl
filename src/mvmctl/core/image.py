@@ -44,6 +44,7 @@ class ImageImportResult:
     fs_uuid: str | None
     compressed_size: int | None = None
     original_size: int | None = None
+    shrunk_size: int | None = None
     compression_ratio: float | None = None
 
 
@@ -934,19 +935,20 @@ def fetch_image(
         fs_type = detect_filesystem_type(actual_path)
         fs_uuid = get_filesystem_uuid(actual_path)
 
-        # Compress the image if it exists (may be mocked in tests)
+        # Shrink before compression
         if actual_path.exists():
-            original_size = actual_path.stat().st_size
-            compressed_path = compress_image(actual_path)
+            shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(actual_path)
+            compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
-            compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+            compression_ratio = pre_shrink_size / compressed_size if compressed_size > 0 else 1.0
 
             return ImageImportResult(
                 path=compressed_path,
                 fs_type=fs_type,
                 fs_uuid=fs_uuid,
                 compressed_size=compressed_size,
-                original_size=original_size,
+                original_size=pre_shrink_size,
+                shrunk_size=post_shrink_size,
                 compression_ratio=compression_ratio,
             )
 
@@ -1063,19 +1065,24 @@ def import_image(
             fs_type = detect_filesystem_type(destination_path)
             fs_uuid = get_filesystem_uuid(destination_path)
 
-            # Compress the image if it exists (may be mocked in tests)
+            # Shrink before compression
             if destination_path.exists():
-                original_size = destination_path.stat().st_size
-                compressed_path = compress_image(destination_path)
+                shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(
+                    destination_path
+                )
+                compressed_path = compress_image(shrunk_path)
                 compressed_size = compressed_path.stat().st_size
-                compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+                compression_ratio = (
+                    pre_shrink_size / compressed_size if compressed_size > 0 else 1.0
+                )
 
                 return ImageImportResult(
                     path=compressed_path,
                     fs_type=fs_type,
                     fs_uuid=fs_uuid,
                     compressed_size=compressed_size,
-                    original_size=original_size,
+                    original_size=pre_shrink_size,
+                    shrunk_size=post_shrink_size,
                     compression_ratio=compression_ratio,
                 )
 
@@ -1088,19 +1095,20 @@ def import_image(
         fs_type = detect_filesystem_type(final_path)
         fs_uuid = get_filesystem_uuid(final_path)
 
-        # Compress the image if it exists (may be mocked in tests)
+        # Shrink before compression
         if final_path.exists():
-            original_size = final_path.stat().st_size
-            compressed_path = compress_image(final_path)
+            shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(final_path)
+            compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
-            compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+            compression_ratio = pre_shrink_size / compressed_size if compressed_size > 0 else 1.0
 
             return ImageImportResult(
                 path=compressed_path,
                 fs_type=fs_type,
                 fs_uuid=fs_uuid,
                 compressed_size=compressed_size,
-                original_size=original_size,
+                original_size=pre_shrink_size,
+                shrunk_size=post_shrink_size,
                 compression_ratio=compression_ratio,
             )
 
@@ -1114,19 +1122,20 @@ def import_image(
         fs_type = detect_filesystem_type(final_path)
         fs_uuid = get_filesystem_uuid(final_path)
 
-        # Compress the image if it exists (may be mocked in tests)
+        # Shrink before compression
         if final_path.exists():
-            original_size = final_path.stat().st_size
-            compressed_path = compress_image(final_path)
+            shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(final_path)
+            compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
-            compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+            compression_ratio = pre_shrink_size / compressed_size if compressed_size > 0 else 1.0
 
             return ImageImportResult(
                 path=compressed_path,
                 fs_type=fs_type,
                 fs_uuid=fs_uuid,
                 compressed_size=compressed_size,
-                original_size=original_size,
+                original_size=pre_shrink_size,
+                shrunk_size=post_shrink_size,
                 compression_ratio=compression_ratio,
             )
 
