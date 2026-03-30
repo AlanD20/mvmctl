@@ -454,6 +454,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
     { name = "typer-slim" },
+    { name = "zstandard" },
 ]
 
 [package.dev-dependencies]
@@ -481,6 +482,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "rich", specifier = ">=13,<15" },
     { name = "typer-slim", specifier = ">=0.12,<0.16" },
+    { name = "zstandard", specifier = ">=0.21.0" },
 ]
 
 [package.metadata.requires-dev]

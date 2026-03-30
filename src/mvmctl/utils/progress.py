@@ -180,6 +180,13 @@ def download_with_progress(
 
     except URLError as e:
         raise MVMError(f"Download failed: {e}") from e
+    except OSError as e:
+        if e.errno == 122:
+            raise MVMError(
+                "No storage available: insufficient space in /tmp. "
+                "Clear temporary files or increase disk space to continue."
+            ) from e
+        raise MVMError(f"I/O error: {e}") from e
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)

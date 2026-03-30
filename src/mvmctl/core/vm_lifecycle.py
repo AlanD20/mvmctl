@@ -52,6 +52,7 @@ from mvmctl.core.firewall import (
     remove_nocloud_input_rule,
     setup_nocloud_input_chain,
 )
+from mvmctl.core.image import decompress_image
 from mvmctl.core.network import (
     add_iptables_forward_rules,
     bridge_exists,
@@ -105,7 +106,13 @@ get_vm_dir_by_hash = get_vm_dir
 def _resolve_image_path(image: str) -> Path:
     images_dir = get_images_dir()
 
+    # Check for compressed images first (.zst), then uncompressed
     for ext in SUPPORTED_IMAGE_EXTENSIONS:
+        # Check for compressed version first
+        compressed_candidate = images_dir / f"{image}{ext}.zst"
+        if compressed_candidate.exists():
+            return compressed_candidate
+        # Fall back to uncompressed
         candidate = images_dir / f"{image}{ext}"
         if candidate.exists():
             return candidate
@@ -122,10 +129,18 @@ def _resolve_image_path(image: str) -> Path:
         full_key, meta = matches[0]
         filename = str(meta.get("filename", ""))
         if filename:
+            # Check for compressed version first
+            compressed_candidate = images_dir / f"{filename}.zst"
+            if compressed_candidate.exists():
+                return compressed_candidate
             candidate = images_dir / filename
             if candidate.exists():
                 return candidate
         for ext in SUPPORTED_IMAGE_EXTENSIONS:
+            # Check for compressed version first
+            compressed_candidate = images_dir / f"{full_key}{ext}.zst"
+            if compressed_candidate.exists():
+                return compressed_candidate
             candidate = images_dir / f"{full_key}{ext}"
             if candidate.exists():
                 return candidate
@@ -202,10 +217,18 @@ def _resolve_image_short_id_path(image: str) -> Path:
     full_key, meta = match
     filename = str(meta.get("filename", ""))
     if filename:
+        # Check for compressed version first
+        compressed_candidate = images_dir / f"{filename}.zst"
+        if compressed_candidate.exists():
+            return compressed_candidate
         candidate = images_dir / filename
         if candidate.exists():
             return candidate
     for ext in SUPPORTED_IMAGE_EXTENSIONS:
+        # Check for compressed version first
+        compressed_candidate = images_dir / f"{full_key}{ext}.zst"
+        if compressed_candidate.exists():
+            return compressed_candidate
         candidate = images_dir / f"{full_key}{ext}"
         if candidate.exists():
             return candidate
@@ -676,9 +699,16 @@ def create_vm(
         bridge = net_config.bridge
 
         # Copy image to VM directory (VM-local rootfs)
-        rootfs_ext = resolved_image_path.suffix
-        vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
-        shutil.copy2(resolved_image_path, vm_rootfs_path)
+        # Handle compressed images (.zst suffix)
+        if resolved_image_path.suffix == ".zst":
+            # Image is compressed, decompress it
+            rootfs_ext = resolved_image_path.suffixes[0]  # Get the extension before .zst
+            vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
+            decompress_image(resolved_image_path, vm_rootfs_path)
+        else:
+            rootfs_ext = resolved_image_path.suffix
+            vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
+            shutil.copy2(resolved_image_path, vm_rootfs_path)
         rootfs_path = vm_rootfs_path
 
         # Resize if disk_size specified (only the VM-local copy)

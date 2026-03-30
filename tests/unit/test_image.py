@@ -935,7 +935,8 @@ def test_fetch_image_force_re_download(
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result.path == expected_output
+    # Result path should be the compressed version
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     mock_download.assert_called_once()
 
 
@@ -1907,7 +1908,8 @@ def test_import_image_force_overwrite(mock_copy: MagicMock, tmp_path: Path):
 
     result = import_image(spec, output_dir, force=True)
 
-    assert result.path == final_path
+    # Result path should be the compressed version
+    assert result.path == final_path.with_suffix(".ext4.zst")
     mock_copy.assert_called_once()
 
 

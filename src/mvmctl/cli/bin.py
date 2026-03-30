@@ -582,6 +582,9 @@ def _save_image_meta(
     meta: dict[str, str],
     fs_type: str | None = None,
     fs_uuid: str | None = None,
+    compressed_size: int | None = None,
+    original_size: int | None = None,
+    compression_ratio: float | None = None,
 ) -> None:
     from datetime import datetime, timezone
 
@@ -597,6 +600,14 @@ def _save_image_meta(
         )
     if fs_uuid:
         fields.setdefault("fs_uuid", fs_uuid)
+    # Store compression metadata
+    if compressed_size is not None:
+        fields.setdefault("compressed_size", compressed_size)
+    if original_size is not None:
+        fields.setdefault("original_size", original_size)
+    if compression_ratio is not None:
+        fields.setdefault("compression_ratio", compression_ratio)
+    fields.setdefault("compressed_format", "zst")
     update_image_entry(cache_dir, image_id, **fields)
 
 
@@ -944,6 +955,9 @@ def image_fetch(
             },
             fs_type=result_fs_type,
             fs_uuid=result_fs_uuid,
+            compressed_size=result.compressed_size,
+            original_size=result.original_size,
+            compression_ratio=result.compression_ratio,
         )
         print_success(f"Image ready: {result_path}")
         print_info(f"  ID: {full_id[:6]}")
@@ -1195,6 +1209,9 @@ def image_import(
         },
         fs_type=result_fs_type,
         fs_uuid=result_fs_uuid,
+        compressed_size=result.compressed_size,
+        original_size=result.original_size,
+        compression_ratio=result.compression_ratio,
     )
     print_success(f"Image imported: {result_path}")
     print_info(f"  Name: {name}")

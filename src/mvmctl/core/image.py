@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import URLError
 
+import zstandard as zstd
+
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
     CONST_SECTOR_SIZE_BYTES,
@@ -29,6 +31,9 @@ from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
 
+# Re-export for backward compatibility
+download_file = _download_file
+
 
 @dataclass
 class ImageImportResult:
@@ -37,11 +42,74 @@ class ImageImportResult:
     path: "Path"
     fs_type: str | None
     fs_uuid: str | None
+    compressed_size: int | None = None
+    original_size: int | None = None
+    compression_ratio: float | None = None
 
 
 _SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
 
-download_file = _download_file
+
+def compress_image(image_path: Path, level: int = 6) -> Path:
+    """Compress an image using zstd.
+
+    Args:
+        image_path: Path to the image file to compress
+        level: Compression level (1-22, default 6 for speed/size balance)
+
+    Returns:
+        Path to the compressed file (with .zst suffix)
+
+    Raises:
+        ImageError: If compression fails
+    """
+    try:
+        compressed_path = image_path.with_suffix(image_path.suffix + ".zst")
+        original_size = image_path.stat().st_size
+
+        compressor = zstd.ZstdCompressor(level=level)
+        with open(image_path, "rb") as src, open(compressed_path, "wb") as dst:
+            compressor.copy_stream(src, dst)
+
+        compressed_size = compressed_path.stat().st_size
+        ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+
+        # Remove original uncompressed file
+        image_path.unlink()
+
+        logger.info(
+            "Compressed %s: %d MB → %d MB (%.1fx reduction)",
+            image_path.name,
+            original_size // (1024 * 1024),
+            compressed_size // (1024 * 1024),
+            ratio,
+        )
+
+        return compressed_path
+
+    except OSError as e:
+        raise ImageError(f"Failed to compress image: {e}") from e
+
+
+def decompress_image(compressed_path: Path, output_path: Path) -> None:
+    """Decompress a zstd compressed image.
+
+    Args:
+        compressed_path: Path to the compressed .zst file
+        output_path: Path where the decompressed file should be written
+
+    Raises:
+        ImageError: If decompression fails
+    """
+    try:
+        decompressor = zstd.ZstdDecompressor()
+        with open(compressed_path, "rb") as src, open(output_path, "wb") as dst:
+            decompressor.copy_stream(src, dst)
+
+        logger.info("Decompressed %s → %s", compressed_path.name, output_path.name)
+
+    except OSError as e:
+        raise ImageError(f"Failed to decompress image: {e}") from e
 
 
 def _get_int(value: object, default: int = 0) -> int:
@@ -792,6 +860,22 @@ def fetch_image(
         fs_type = detect_filesystem_type(actual_path)
         fs_uuid = get_filesystem_uuid(actual_path)
 
+        # Compress the image if it exists (may be mocked in tests)
+        if actual_path.exists():
+            original_size = actual_path.stat().st_size
+            compressed_path = compress_image(actual_path)
+            compressed_size = compressed_path.stat().st_size
+            compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+
+            return ImageImportResult(
+                path=compressed_path,
+                fs_type=fs_type,
+                fs_uuid=fs_uuid,
+                compressed_size=compressed_size,
+                original_size=original_size,
+                compression_ratio=compression_ratio,
+            )
+
         return ImageImportResult(path=actual_path, fs_type=fs_type, fs_uuid=fs_uuid)
     except Exception:
         # Cleanup download on any failure
@@ -905,6 +989,22 @@ def import_image(
             fs_type = detect_filesystem_type(destination_path)
             fs_uuid = get_filesystem_uuid(destination_path)
 
+            # Compress the image if it exists (may be mocked in tests)
+            if destination_path.exists():
+                original_size = destination_path.stat().st_size
+                compressed_path = compress_image(destination_path)
+                compressed_size = compressed_path.stat().st_size
+                compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+
+                return ImageImportResult(
+                    path=compressed_path,
+                    fs_type=fs_type,
+                    fs_uuid=fs_uuid,
+                    compressed_size=compressed_size,
+                    original_size=original_size,
+                    compression_ratio=compression_ratio,
+                )
+
             return ImageImportResult(path=destination_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
     elif spec.format == "raw":
@@ -913,6 +1013,22 @@ def import_image(
         # Detect filesystem type and UUID
         fs_type = detect_filesystem_type(final_path)
         fs_uuid = get_filesystem_uuid(final_path)
+
+        # Compress the image if it exists (may be mocked in tests)
+        if final_path.exists():
+            original_size = final_path.stat().st_size
+            compressed_path = compress_image(final_path)
+            compressed_size = compressed_path.stat().st_size
+            compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+
+            return ImageImportResult(
+                path=compressed_path,
+                fs_type=fs_type,
+                fs_uuid=fs_uuid,
+                compressed_size=compressed_size,
+                original_size=original_size,
+                compression_ratio=compression_ratio,
+            )
 
         return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
@@ -923,6 +1039,22 @@ def import_image(
         # Detect filesystem type and UUID for tar-rootfs (always ext4)
         fs_type = detect_filesystem_type(final_path)
         fs_uuid = get_filesystem_uuid(final_path)
+
+        # Compress the image if it exists (may be mocked in tests)
+        if final_path.exists():
+            original_size = final_path.stat().st_size
+            compressed_path = compress_image(final_path)
+            compressed_size = compressed_path.stat().st_size
+            compression_ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+
+            return ImageImportResult(
+                path=compressed_path,
+                fs_type=fs_type,
+                fs_uuid=fs_uuid,
+                compressed_size=compressed_size,
+                original_size=original_size,
+                compression_ratio=compression_ratio,
+            )
 
         return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
 

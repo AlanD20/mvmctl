@@ -199,7 +199,12 @@ def download_file(
 
     except URLError as e:
         raise MVMError(f"Download failed: {e}") from e
-    except IOError as e:
+    except OSError as e:
+        if e.errno == 122:
+            raise MVMError(
+                "No storage available: insufficient space in /tmp. "
+                "Clear temporary files or increase disk space to continue."
+            ) from e
         raise MVMError(f"I/O error: {e}") from e
     finally:
         if temp_path is not None:
