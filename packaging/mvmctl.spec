@@ -1,5 +1,5 @@
 Name:           mvmctl
-Version:        0.2.0
+Version:        0.1.0
 Release:        1%{?dist}
 Summary:        MicroVM Manager for Firecracker microVMs
 
@@ -32,5 +32,8 @@ gzip -9 %{buildroot}/usr/share/man/man1/mvm.1
 /usr/share/man/man1/mvm.1.gz
 
 %changelog
+* Mon Mar 30 2026 AlanD20 <aland20@pm.me> - 0.1.0-1
+- Development version
+
 * Mon Mar 30 2026 AlanD20 <aland20@pm.me> - 0.1.0-1
 - Initial RPM release
