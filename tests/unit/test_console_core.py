@@ -186,10 +186,10 @@ class TestReadConsoleOutput:
 
 
 class TestCheckEscapeSequence:
-    def test_check_escape_sequence_detects_ctrl_a_d(self):
-        buffer = bytearray(b"\x01d")
+    def test_check_escape_sequence_detects_ctrl_x_d(self):
+        buffer = bytearray(b"\x18d")
         result = check_escape_sequence(buffer)
-        assert result == (True, "")
+        assert result == (True, "detach")
 
     def test_check_escape_sequence_no_match(self):
         buffer = bytearray(b"ab")
@@ -197,20 +197,14 @@ class TestCheckEscapeSequence:
         assert matched is False
         assert action == ""
 
-    def test_check_escape_sequence_partial_match(self):
-        buffer = bytearray(b"\x01")
-        matched, action = check_escape_sequence(buffer)
-        assert matched is False
-        assert action == ""
-
-    def test_check_escape_sequence_ends_with_escape(self):
-        buffer = bytearray(b"hello\x01")
+    def test_check_escape_sequence_partial_ctrl_x(self):
+        buffer = bytearray(b"\x18")
         matched, action = check_escape_sequence(buffer)
         assert matched is False
         assert action == ""
 
     def test_check_escape_sequence_with_content_before(self):
-        buffer = bytearray(b"some text\x01d")
+        buffer = bytearray(b"some text\x18d")
         result = check_escape_sequence(buffer)
         assert result == (False, "")
 

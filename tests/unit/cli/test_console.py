@@ -460,7 +460,7 @@ class TestDoAttachFunction:
                                     mock_disconnect.assert_called_once()
 
     def test_do_attach_detach_sequence(self):
-        """Detach sequence (Ctrl+A D) works correctly."""
+        """Detach sequence (Ctrl+X D) works correctly."""
         import sys
 
         with patch("mvmctl.cli.console.print_info") as mock_print:
