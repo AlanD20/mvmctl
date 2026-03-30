@@ -80,26 +80,30 @@ def ssh(
         None, "--key", help="SSH private key file or directory of keys"
     ),
     cmd: Optional[str] = typer.Option(None, "--cmd", "-c", help="Command to execute"),
+    ip: Optional[str] = typer.Option(
+        None, "--ip", help="IP address to connect to (skips all validation)"
+    ),
 ) -> None:
     """Open an SSH session into a VM."""
     try:
-        # Resolve vm_id to actual VM name if it's a short ID
-        if not is_ip_address(vm_id):
+        target = ip if ip is not None else vm_id
+
+        if ip is None and not is_ip_address(target):
             from mvmctl.core.vm_manager import VMManager
             from mvmctl.utils.fs import get_vms_dir
 
             manager = VMManager(get_vms_dir())
-            matches = manager.find_by_short_id(vm_id)
+            matches = manager.find_by_short_id(target)
             if len(matches) == 1:
-                vm_id = matches[0].name
+                target = matches[0].name
             elif len(matches) > 1:
-                raise MVMError(f"Ambiguous short ID '{vm_id}' matches {len(matches)} VMs")
+                raise MVMError(f"Ambiguous short ID '{target}' matches {len(matches)} VMs")
             else:
                 # Not a short ID, validate as name
-                validate_entity_name(vm_id, "VM")
+                validate_entity_name(target, "VM")
         resolved_key = _resolve_ssh_key_for_vm(key)
         effective_user = user if user is not None else _get_vm_defaults().ssh_user
-        exit_code = ssh_vm(name=vm_id, user=effective_user, key=resolved_key, cmd=cmd)
+        exit_code = ssh_vm(name=target, user=effective_user, key=resolved_key, cmd=cmd)
         raise typer.Exit(code=exit_code)
     except MVMError as e:
         handle_mvm_error(e)
