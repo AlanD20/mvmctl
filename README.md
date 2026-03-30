@@ -100,37 +100,32 @@ uv run mvm --help
 
 ## Quick Start
 
+The easiest way to get started is with the interactive setup wizard:
+
 ```bash
-# 1. One-time host setup (KVM, ip_forward, mvm group, sudoers drop-in)
-sudo mvm host init
-# ⚠ Log out and back in, or run: newgrp mvm
+# Interactive setup - guides you through host init, downloads, and configuration
+# (handles privilege escalation automatically when needed)
+mvm init
+# ⚠ Log out and back in when prompted, or run: newgrp mvm
 
-# 2. Download a prebuilt Firecracker kernel
-mvm kernel fetch
+# Create a key
+mvm key create test
+mvm key set-default test
 
-# 3. Download a root filesystem image
-mvm image fetch ubuntu-24.04
-
-# 4. Create and start a VM
+# Create and start a VM
 mvm vm create --name myvm --image ubuntu-24.04
 
-# 5. Follow the boot log until SSH is ready (~30-60 s)
+# Follow the boot log until SSH is ready (~30-60 s)
 mvm logs --name myvm --type boot --follow
 
-# 6. SSH in
+# SSH in
 mvm ssh --name myvm
 
-# 7. List running VMs
+# List running VMs
 mvm vm ls
 
-# 8. Remove the VM
-mvm vm rm --name myvm --force
-```
-
-Or run the interactive setup wizard which guides you through all of the above:
-
-```bash
-mvm init
+# Remove the VM when done
+mvm vm rm --name myvm
 ```
 
 ---
