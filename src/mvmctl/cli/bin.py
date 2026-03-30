@@ -1354,24 +1354,3 @@ def bin_rm(
             exit_code = 1
 
     raise typer.Exit(code=exit_code)
-
-
-def clear_assets(
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-) -> None:
-    """Remove all cached assets (bin, kernels, images). Does NOT touch VMs."""
-    cache = get_cache_dir()
-    targets = ["bin", "kernels", "images"]
-    dirs_to_remove = [cache / t for t in targets if (cache / t).exists()]
-
-    if not dirs_to_remove:
-        print_warning("Nothing to clear")
-        raise typer.Exit(code=0)
-
-    if not force:
-        names = ", ".join(d.name for d in dirs_to_remove)
-        typer.confirm(f"Remove cached assets ({names})?", abort=True)
-
-    for d in dirs_to_remove:
-        shutil.rmtree(d)
-        print_success(f"Removed {d}")

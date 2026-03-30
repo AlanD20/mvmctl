@@ -1138,68 +1138,6 @@ def test_bin_rm_proceeds_without_confirmation():
     mock_rm.assert_called_once_with("1.5.0")
 
 
-# ---------------------------------------------------------------------------
-# cache clear
-# ---------------------------------------------------------------------------
-
-
-def test_cache_clear_dirs_exist(tmp_path: Path):
-    (tmp_path / "bin").mkdir()
-    (tmp_path / "kernels").mkdir()
-    (tmp_path / "images").mkdir()
-    (tmp_path / "bin" / "firecracker-v1.0.0").touch()
-
-    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
-        result = click_runner.invoke(main_app, ["clear", "--force"])
-    assert result.exit_code == 0
-    assert "Removed" in result.output
-    assert not (tmp_path / "bin").exists()
-    assert not (tmp_path / "kernels").exists()
-    assert not (tmp_path / "images").exists()
-
-
-def test_cache_clear_nothing_to_clear(tmp_path: Path):
-    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
-        result = click_runner.invoke(main_app, ["clear", "--force"])
-    assert result.exit_code == 0
-    assert "Nothing to clear" in result.output
-
-
-def test_cache_clear_partial_dirs(tmp_path: Path):
-    (tmp_path / "bin").mkdir()
-    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
-        result = click_runner.invoke(main_app, ["clear", "--force"])
-    assert result.exit_code == 0
-    assert not (tmp_path / "bin").exists()
-
-
-def test_cache_clear_with_confirmation(tmp_path: Path):
-    (tmp_path / "bin").mkdir()
-    (tmp_path / "kernels").mkdir()
-    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
-        result = click_runner.invoke(main_app, ["clear"], input="y\n")
-    assert result.exit_code == 0
-    assert not (tmp_path / "bin").exists()
-
-
-def test_cache_clear_abort_confirmation(tmp_path: Path):
-    (tmp_path / "bin").mkdir()
-    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
-        result = click_runner.invoke(main_app, ["clear"], input="n\n")
-    assert result.exit_code != 0
-    assert (tmp_path / "bin").exists()
-
-
-def test_cache_clear_preserves_vms_dir(tmp_path: Path):
-    (tmp_path / "bin").mkdir()
-    (tmp_path / "vms").mkdir()
-    (tmp_path / "vms" / "state.json").write_text("{}")
-    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
-        result = click_runner.invoke(main_app, ["clear", "--force"])
-    assert result.exit_code == 0
-    assert (tmp_path / "vms").exists()
-
-
 def test_image_set_default(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "f" * 64

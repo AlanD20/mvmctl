@@ -76,26 +76,24 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
 
 _STATIC_COMMAND_HELP: dict[str, str] = {
     **{name: spec.help_text for name, spec in _COMMAND_SPECS.items()},
-    "clear": "Clear cached assets",
     "version": "Show the version and exit",
     "help": "Show help for mvm or a subcommand",
 }
 
 _COMMAND_ORDER = [
-    "vm",
-    "console",
-    "host",
-    "network",
-    "key",
-    "config",
     "init",
+    "bin",
     "kernel",
     "image",
-    "bin",
-    "cache",
-    "logs",
+    "network",
+    "vm",
+    "key",
     "ssh",
-    "clear",
+    "console",
+    "logs",
+    "host",
+    "config",
+    "cache",
     "version",
     "help",
 ]
@@ -166,8 +164,6 @@ class LazyMVMGroup(click.Group):
         return list(_COMMAND_ORDER)
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
-        if cmd_name == "clear":
-            return clear_cmd
         if cmd_name == "version":
             return version_cmd
         if cmd_name == "help":
@@ -200,7 +196,7 @@ class LazyMVMGroup(click.Group):
 @click.group(
     cls=LazyMVMGroup,
     invoke_without_command=True,
-    help="MicroVM Manager - Manage microVMs",
+    help="MicroVM Manager - Container speed, VM Isolation",
 )
 @click.option("--verbose", "verbose", is_flag=True, help="Enable verbose output")
 @click.option("--debug", is_flag=True, help="Enable debug mode")
@@ -242,7 +238,6 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
         "cache",
         "logs",
         "ssh",
-        "clear",
     }:
         _reconcile_networks()
 
@@ -281,14 +276,6 @@ def help_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
 
     click.echo(command.get_help(current_ctx))
     ctx.exit()
-
-
-@click.command(name="clear", help="Clear cached assets")
-@click.option("--force", "force", is_flag=True, help="Skip confirmation")
-def clear_cmd(force: bool) -> None:
-    from mvmctl.cli.bin import clear_assets
-
-    clear_assets(force=force)
 
 
 if __name__ == "__main__":
