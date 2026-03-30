@@ -79,7 +79,7 @@ def _run_host_init_interactive() -> None:
 
 def _step_host(skip: bool, non_interactive: bool) -> None:
     """Step 1: Privilege setup and host initialisation."""
-    print_info("\n[1/6] Privilege setup")
+    print_info("\n[1/3] Privilege setup")
     if skip:
         print_info("  Skipped (--skip-host)")
         return
@@ -94,7 +94,15 @@ def _step_host(skip: bool, non_interactive: bool) -> None:
     kvm_ok = check_kvm_access()
 
     if state and kvm_ok:
-        print_success("  Already configured")
+        # Even if host state looks healthy, ensure network is materialized
+        # (bridge, iptables chains, NAT may be missing after reboot)
+        try:
+            from mvmctl.api.network import ensure_default_network
+
+            ensure_default_network()
+            print_success("  Host and network ready")
+        except MVMError as e:
+            print_warning(f"  Network check failed: {e}")
         return
 
     if not kvm_ok:
@@ -109,9 +117,24 @@ def _step_host(skip: bool, non_interactive: bool) -> None:
         _run_host_init_interactive()
 
 
+def _step_cache_init() -> None:
+    from mvmctl.api.cache import init_all
+
+    print_info("\n[2/4] Cache init")
+    try:
+        result = init_all()
+        guestfs_built = bool(result.get("guestfs_appliance"))
+        if guestfs_built:
+            print_success("  Cache directories ready (libguestfs appliance built)")
+        else:
+            print_success("  Cache directories ready")
+    except Exception as e:
+        print_warning(f"  Cache init failed: {e}")
+
+
 def _step_binary(non_interactive: bool) -> None:
-    """Step 2: Binary download."""
-    print_info("\n[2/6] Firecracker binary")
+    """Step 3: Binary download."""
+    print_info("\n[3/4] Firecracker binary")
 
     local = list_local_versions()
     if local:
@@ -311,12 +334,12 @@ def _step_ssh_key(non_interactive: bool) -> None:
 
 
 def _step_summary() -> None:
-    """Step 6: Print summary."""
-    print_info("\n[6/6] Summary")
+    """Step 3: Print summary."""
+    print_info("\n[4/4] Summary")
 
     cache_dir = get_cache_dir()
 
-    # Check each component
+    # Check host and network only
     checks: list[tuple[str, bool]] = []
 
     try:
@@ -325,21 +348,12 @@ def _step_summary() -> None:
     except HostError:
         checks.append(("Host init", False))
 
-    local_bins = list_local_versions()
-    checks.append(("Firecracker binary", len(local_bins) > 0))
+    # Check default network
+    from mvmctl.api.network import list_networks
 
-    kernels_dir = get_kernels_dir()
-    has_kernel = kernels_dir.exists() and any(kernels_dir.glob("vmlinux*"))
-    checks.append(("Kernel", has_kernel))
-
-    images_dir = get_images_dir()
-    has_image = images_dir.exists() and any(
-        images_dir.glob(f"*{ext}") for ext in SUPPORTED_IMAGE_EXTENSIONS
-    )
-    checks.append(("Image", has_image))
-
-    keys = list_keys()
-    checks.append(("SSH key", len(keys) > 0))
+    networks = list_networks()
+    default_net = next((n for n in networks if n.name == "default"), None)
+    checks.append(("Default network", default_net is not None))
 
     all_ok = True
     for label, ok in checks:
@@ -349,11 +363,13 @@ def _step_summary() -> None:
             all_ok = False
 
     if all_ok:
-        print_success("\nAll set! Create your first VM with:")
-        key_flag = f" --ssh-key {keys[0].name}" if keys else ""
-        print_info(f"  mvm vm create --name my-vm --image <image-id>{key_flag}")
+        print_success("\nHost ready! Next steps:")
+        print_info("  mvm kernel fetch")
+        print_info("  mvm image fetch ubuntu-24.04")
+        print_info("  mvm key create mykey")
+        print_info("  mvm vm create --name my-vm --image ubuntu-24.04")
     else:
-        print_warning("\nSome components are missing. Fix them and run 'mvm init' again.")
+        print_warning("\nHost setup incomplete. Run 'mvm init' again.")
 
 
 @app.callback(invoke_without_command=True)
@@ -363,15 +379,17 @@ def init(
     ),
     skip_host: bool = typer.Option(False, "--skip-host", help="Skip host init step"),
 ) -> None:
-    """Initialize mvm — run this to get started.
+    """Initialize mvm host, network, and binary — run this to get started.
 
-    Walks through six steps: host privilege setup, Firecracker binary
-    download, kernel build, root filesystem image download, SSH key
-    creation, and a final readiness summary.
+    Performs host privilege setup, downloads the Firecracker binary if missing,
+    and ensures the default network is materialized (bridge, iptables chains, NAT).
+    This is a focused one-time setup command that downloads the Firecracker binary
+    if missing, but does NOT download kernels, images, or create SSH keys.
 
-    In interactive mode (the default), each step prompts before making
-    changes. Use --non-interactive to accept all defaults for headless or
-    CI environments.
+    After init, run these separately:
+        mvm kernel fetch
+        mvm image fetch <id>
+        mvm key create <name>
 
     Examples:
         mvm init
@@ -384,8 +402,6 @@ def init(
     initialize_default_config()
 
     _step_host(skip=skip_host, non_interactive=non_interactive)
-    _step_binary(non_interactive=non_interactive)
-    _step_kernel(non_interactive=non_interactive)
-    _step_image(non_interactive=non_interactive)
-    _step_ssh_key(non_interactive=non_interactive)
+    _step_cache_init()
+    _step_binary(non_interactive)
     _step_summary()

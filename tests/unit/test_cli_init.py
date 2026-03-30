@@ -7,17 +7,8 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.init import app
 from mvmctl.core.binary_manager import BinaryVersion
-from mvmctl.core.key_manager import KeyInfo
 
 runner = CliRunner()
-
-_FAKE_KEY = KeyInfo(
-    name="mvm-default",
-    fingerprint="SHA256:abc",
-    algorithm="ssh-ed25519",
-    comment="test@host",
-    added_at="2024-01-01T00:00:00",
-)
 
 _FAKE_BIN = BinaryVersion(
     version="1.12.0",
@@ -28,73 +19,30 @@ _FAKE_BIN = BinaryVersion(
 
 
 # ---------------------------------------------------------------------------
-# Full wizard — all components already present
-# ---------------------------------------------------------------------------
-
-
-@patch("mvmctl.cli.init.list_keys", return_value=[_FAKE_KEY])
-@patch("mvmctl.cli.init.get_images_dir")
-@patch("mvmctl.cli.init.get_kernels_dir")
-@patch("mvmctl.cli.init.list_local_versions", return_value=[_FAKE_BIN])
-@patch("mvmctl.cli.init.check_kvm_access", return_value=True)
-@patch("mvmctl.cli.init.get_host_state", return_value=MagicMock(init_timestamp="2024-01-01"))
-@patch("mvmctl.cli.init.get_cache_dir")
-def test_configure_all_ready(
-    mock_cache,
-    mock_host_state,
-    mock_kvm,
-    mock_bins,
-    mock_kernels_dir,
-    mock_images_dir,
-    mock_keys,
-    tmp_path,
-):
-    mock_cache.return_value = tmp_path
-
-    kdir = tmp_path / "kernels"
-    kdir.mkdir()
-    (kdir / "vmlinux").write_text("kernel")
-    mock_kernels_dir.return_value = kdir
-
-    idir = tmp_path / "images"
-    idir.mkdir()
-    (idir / "test.ext4").write_text("image")
-    mock_images_dir.return_value = idir
-
-    result = runner.invoke(app, [])
-    assert result.exit_code == 0
-    assert "Already configured" in result.output or "ready" in result.output
-
-
+# Full wizard — host and network only (no asset downloads)
 # ---------------------------------------------------------------------------
 # --skip-host flag
 # ---------------------------------------------------------------------------
 
 
-@patch("mvmctl.cli.init.list_keys", return_value=[_FAKE_KEY])
-@patch("mvmctl.cli.init.get_images_dir")
-@patch("mvmctl.cli.init.get_kernels_dir")
-@patch("mvmctl.cli.init.list_local_versions", return_value=[_FAKE_BIN])
+@patch("mvmctl.api.network.list_networks")
 @patch("mvmctl.cli.init.get_cache_dir")
-def test_configure_skip_host(
-    mock_cache,
-    mock_bins,
-    mock_kernels_dir,
-    mock_images_dir,
-    mock_keys,
-    tmp_path,
-):
+def test_init_skip_host(mock_cache, mock_list_networks, tmp_path):
+    """mvm init --skip-host should skip host initialization."""
     mock_cache.return_value = tmp_path
+    # Mock default network exists
+    from mvmctl.core.network_manager import NetworkConfig
 
-    kdir = tmp_path / "kernels"
-    kdir.mkdir()
-    (kdir / "vmlinux").write_text("kernel")
-    mock_kernels_dir.return_value = kdir
-
-    idir = tmp_path / "images"
-    idir.mkdir()
-    (idir / "test.ext4").write_text("image")
-    mock_images_dir.return_value = idir
+    mock_list_networks.return_value = [
+        NetworkConfig(
+            name="default",
+            cidr="172.35.0.0/24",
+            gateway="172.35.0.1",
+            bridge="mvm-default",
+            nat_enabled=True,
+            created_at="2024-01-01T00:00:00",
+        )
+    ]
 
     result = runner.invoke(app, ["--skip-host"])
     assert result.exit_code == 0
@@ -109,12 +57,16 @@ def test_configure_skip_host(
 @patch("mvmctl.cli.init.check_kvm_access", return_value=True)
 @patch("mvmctl.cli.init.get_host_state", return_value=MagicMock())
 @patch("mvmctl.cli.init.get_cache_dir")
-def test_step_host_already_done(mock_cache, mock_state, mock_kvm, tmp_path):
+@patch("mvmctl.api.network.ensure_default_network")
+def test_step_host_already_done(mock_ensure_net, mock_cache, mock_state, mock_kvm, tmp_path):
+    """When state exists and KVM is ok, ensure_default_network should still be called."""
     from mvmctl.cli.init import _step_host
 
     mock_cache.return_value = tmp_path
     _step_host(skip=False, non_interactive=True)
-    # Should not raise
+    # Even when host state exists, ensure_default_network should be called
+    # to verify network resources are materialized (bridge, chains, NAT)
+    mock_ensure_net.assert_called_once()
 
 
 @patch("mvmctl.cli.init.check_kvm_access", return_value=False)
@@ -137,63 +89,6 @@ def test_step_host_skip():
 
     # Should not call any host functions
     _step_host(skip=True, non_interactive=False)
-
-
-@patch("mvmctl.cli.init.list_local_versions", return_value=[_FAKE_BIN])
-def test_step_binary_already_present(mock_bins):
-    from mvmctl.cli.init import _step_binary
-
-    _step_binary(non_interactive=True)
-
-
-@patch("mvmctl.cli.init.list_local_versions", return_value=[])
-@patch("mvmctl.cli.init.list_remote_versions", return_value=["1.12.0"])
-@patch("mvmctl.cli.init.fetch_binary", return_value=_FAKE_BIN)
-def test_step_binary_non_interactive_download(mock_fetch, mock_remote, mock_local):
-    from mvmctl.cli.init import _step_binary
-
-    _step_binary(non_interactive=True)
-    mock_fetch.assert_called_once_with("1.12.0")
-
-
-@patch("mvmctl.cli.init.list_keys", return_value=[_FAKE_KEY])
-def test_step_ssh_key_already_present(mock_keys):
-    from mvmctl.cli.init import _step_ssh_key
-
-    _step_ssh_key(non_interactive=True)
-
-
-@patch("mvmctl.cli.init.list_keys", return_value=[])
-@patch("mvmctl.cli.init.create_key", return_value=(_FAKE_KEY, Path("/home/.ssh/mvm-default")))
-def test_step_ssh_key_non_interactive_create(mock_create, mock_keys):
-    from mvmctl.cli.init import _step_ssh_key
-
-    _step_ssh_key(non_interactive=True)
-    mock_create.assert_called_once_with("mvm-default")
-
-
-@patch("mvmctl.cli.init.get_kernels_dir")
-def test_step_kernel_already_present(mock_kdir, tmp_path):
-    kdir = tmp_path / "kernels"
-    kdir.mkdir()
-    (kdir / "vmlinux").write_text("kernel")
-    mock_kdir.return_value = kdir
-
-    from mvmctl.cli.init import _step_kernel
-
-    _step_kernel(non_interactive=True)
-
-
-@patch("mvmctl.cli.init.get_images_dir")
-def test_step_image_already_present(mock_idir, tmp_path):
-    idir = tmp_path / "images"
-    idir.mkdir()
-    (idir / "ubuntu.ext4").write_text("image")
-    mock_idir.return_value = idir
-
-    from mvmctl.cli.init import _step_image
-
-    _step_image(non_interactive=True)
 
 
 # ---------------------------------------------------------------------------
@@ -220,3 +115,74 @@ def test_step_host_uses_shutil_which_for_mvm(mock_cache, mock_state, mock_kvm, t
     mock_run.assert_called_once()
     cmd = mock_run.call_args[0][0]
     assert cmd == ["sudo", "-E", "/usr/local/bin/mvm", "host", "init"]
+
+
+# ---------------------------------------------------------------------------
+# Init scope reduction: mvm init should NOT download assets
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.init.fetch_binary")
+@patch("mvmctl.cli.init.build_kernel_pipeline")
+@patch("mvmctl.cli.init.fetch_image")
+@patch("mvmctl.cli.init.create_key")
+@patch("mvmctl.api.network.list_networks", return_value=[])
+@patch("mvmctl.cli.init.check_kvm_access", return_value=True)
+@patch("mvmctl.cli.init.get_host_state", return_value=MagicMock(init_timestamp="2024-01-01"))
+@patch("mvmctl.cli.init.get_cache_dir")
+def test_init_non_interactive_no_kernel_image_key(
+    mock_cache,
+    mock_host_state,
+    mock_kvm,
+    mock_list_networks,
+    mock_create_key,
+    mock_fetch_image,
+    mock_build_kernel,
+    mock_fetch_binary,
+    tmp_path,
+):
+    """mvm init --non-interactive should NOT download kernel/image or create keys, but MAY fetch binary."""
+    mock_cache.return_value = tmp_path
+
+    result = runner.invoke(app, ["--non-interactive"])
+    assert result.exit_code == 0
+
+    # Kernel, image, key should NOT be called
+    mock_build_kernel.assert_not_called()
+    mock_fetch_image.assert_not_called()
+    mock_create_key.assert_not_called()
+    # Binary is allowed (may or may not be called depending on cache state)
+
+
+@patch("mvmctl.cli.init.fetch_binary")
+@patch("mvmctl.cli.init.list_local_versions", return_value=[])  # No local binaries
+@patch("mvmctl.cli.init.list_remote_versions")
+@patch("mvmctl.api.network.list_networks", return_value=[])
+@patch("mvmctl.cli.init.check_kvm_access", return_value=True)
+@patch("mvmctl.cli.init.get_host_state", return_value=MagicMock(init_timestamp="2024-01-01"))
+@patch("mvmctl.cli.init.get_cache_dir")
+def test_init_non_interactive_fetches_binary_when_none_cached(
+    mock_cache,
+    mock_host_state,
+    mock_kvm,
+    mock_list_networks,
+    mock_list_remote,
+    mock_list_local,
+    mock_fetch_binary,
+    tmp_path,
+):
+    """mvm init --non-interactive should fetch binary when none is cached."""
+    mock_cache.return_value = tmp_path
+    mock_list_remote.return_value = [
+        BinaryVersion(
+            version="1.12.0",
+            firecracker_path=tmp_path / "bin" / "firecracker",
+            jailer_path=tmp_path / "bin" / "jailer",
+            is_active=False,
+        )
+    ]
+
+    result = runner.invoke(app, ["--non-interactive"])
+    assert result.exit_code == 0
+
+    mock_fetch_binary.assert_called_once()
