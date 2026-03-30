@@ -122,6 +122,7 @@ def test_step_host_uses_shutil_which_for_mvm(mock_cache, mock_state, mock_kvm, t
 # ---------------------------------------------------------------------------
 
 
+@patch("mvmctl.api.network.ensure_default_network")
 @patch("mvmctl.cli.init.fetch_binary")
 @patch("mvmctl.cli.init.build_kernel_pipeline")
 @patch("mvmctl.cli.init.fetch_image")
@@ -139,6 +140,7 @@ def test_init_non_interactive_no_kernel_image_key(
     mock_fetch_image,
     mock_build_kernel,
     mock_fetch_binary,
+    mock_ensure_net,
     tmp_path,
 ):
     """mvm init --non-interactive should NOT download kernel/image or create keys, but MAY fetch binary."""
@@ -154,6 +156,7 @@ def test_init_non_interactive_no_kernel_image_key(
     # Binary is allowed (may or may not be called depending on cache state)
 
 
+@patch("mvmctl.api.network.ensure_default_network")
 @patch("mvmctl.cli.init.fetch_binary")
 @patch("mvmctl.cli.init.list_local_versions", return_value=[])  # No local binaries
 @patch("mvmctl.cli.init.list_remote_versions")
@@ -169,6 +172,7 @@ def test_init_non_interactive_fetches_binary_when_none_cached(
     mock_list_remote,
     mock_list_local,
     mock_fetch_binary,
+    mock_ensure_net,
     tmp_path,
 ):
     """mvm init --non-interactive should fetch binary when none is cached."""

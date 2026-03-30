@@ -330,7 +330,11 @@ def test_ensure_default_network_creates_when_missing(mock_create_network, mock_c
     mock_create_network.assert_called_once_with("default", cidr="172.35.0.0/24", nat=True)
 
 
-def test_ensure_default_network_returns_existing(mock_cache_dir: Path):
+@patch("mvmctl.core.network.bridge_exists", return_value=True)
+@patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
+def test_ensure_default_network_returns_existing(
+    mock_setup_chains, mock_bridge_exists, mock_cache_dir: Path
+):
     _add_network_to_metadata(
         mock_cache_dir,
         "default",

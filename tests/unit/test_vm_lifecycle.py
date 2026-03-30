@@ -2893,8 +2893,10 @@ class TestRemoveVMNATOrdering:
     @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
     @patch("mvmctl.core.vm_lifecycle.ConsoleRelayManager")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+    @patch("mvmctl.core.firewall._chain_exists")
     def test_remove_vm_calls_teardown_nat_before_delete_tap(
         self,
+        mock_chain_exists,
         mock_nocloud_mgr,
         mock_console_mgr,
         mock_rmtree,
@@ -2943,6 +2945,7 @@ class TestRemoveVMNATOrdering:
         mock_net_config = MagicMock()
         mock_net_config.bridge = "mvm-default"
         mock_get_net_info.return_value = mock_net_config
+        mock_chain_exists.return_value = True
 
         # Call remove_vm
         remove_vm("testvm")
@@ -2977,8 +2980,10 @@ class TestRemoveVMNATOrdering:
     @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
     @patch("mvmctl.core.vm_lifecycle.ConsoleRelayManager")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+    @patch("mvmctl.core.firewall._chain_exists")
     def test_teardown_nat_called_with_force_false(
         self,
+        mock_chain_exists,
         mock_nocloud_mgr,
         mock_console_mgr,
         mock_rmtree,
@@ -3020,6 +3025,7 @@ class TestRemoveVMNATOrdering:
         mock_net_config = MagicMock()
         mock_net_config.bridge = "mvm-default"
         mock_get_net_info.return_value = mock_net_config
+        mock_chain_exists.return_value = True
 
         remove_vm("testvm")
 
