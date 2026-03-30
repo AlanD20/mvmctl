@@ -33,7 +33,10 @@ gzip -9 %{buildroot}/usr/share/man/man1/mvm.1
 
 %changelog
 * Mon Mar 30 2026 AlanD20 <aland20@pm.me> - 0.1.0-1
-- Development version
-
-* Mon Mar 30 2026 AlanD20 <aland20@pm.me> - 0.1.0-1
 - Initial RPM release
+- Firecracker microVM management
+- Network bridge and TAP management
+- SSH key and image management
+- VM lifecycle (create, start, stop, remove, snapshot)
+- Distribution packages support
+- Comprehensive test suite (2300+ tests)

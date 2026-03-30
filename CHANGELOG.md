@@ -10,42 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-03-30
 
 ### Added
-- Development version
-## [0.2.0] - 2026-03-30
-
-### Added
-- (Add changes here)
-
-### Changed
-- (Add changes here)
-
-### Fixed
-- (Add changes here)
-
-### Added
-- `mvm vm pause` / `mvm vm resume` commands for live VM state management
-- `mvm asset bin fetch` / `mvm asset bin list` / `mvm asset bin use` for Firecracker binary management
-- `mvm key create` / `mvm key add` / `mvm key list` / `mvm key remove` SSH key registry
-- Named network management via `mvm network create` / `mvm network remove` / `mvm network list`
-- Host initialisation with privilege delegation (`mvm host init` / `mvm host reset`)
-- Python API layer (`mvmctl.api.*`) for programmatic VM management without the CLI
-- PyInstaller standalone binary build for Ubuntu 22.04 and 24.04
-- Cloud-init support for first-boot VM configuration
-- Snapshot and restore support via Firecracker API socket
-- Audit logging for privileged operations
-
-### Changed
-- Replaced bash proof-of-concept scripts with production-grade Python CLI
-- `mvm host init` now persists MVM iptables chains via `iptables-save` to `/etc/iptables/rules.v4`; requires `iptables-persistent` (Debian/Ubuntu) or `iptables-services` (RHEL) for automatic boot-time restore
-
-### Breaking Changes
-
-### Security
-- NAT teardown is guarded: MASQUERADE rule only removed when no VMs are attached to the bridge
-- SSH known_hosts generated per-VM when using `mvm vm ssh`
-
-## [0.1.0] — Initial Release
-
-### Added
 - Initial Python CLI (`mvm`) for managing Firecracker microVMs
-- Single-VM and multi-VM bash scripts (legacy, in `single-vm/` and `multi-vm/`)
+- VM lifecycle management (create, start, stop, remove, snapshot, load)
+- Firecracker microVM orchestration
+- Bridge/TAP networking with NAT and iptables management
+- SSH key management (generate, import, set-default)
+- Kernel management (fetch official and Firecracker-optimized kernels)
+- Image management (fetch from registry, import local files)
+- Binary management (download Firecracker releases)
+- Cloud-init integration with nocloud-net server
+- Console relay for VM serial access
+- Log streaming (boot logs and Firecracker process logs)
+- VM pruning and cache management
+- Host initialization (KVM, networking, sudoers setup)
+- Named network support with IP lease management
+- State-based VM directory structure using SHA256 hashes
+- Short ID resolution (6-character prefixes)
+- Comprehensive test suite (2300+ tests, 82% coverage)
+- Distribution packages (.deb, .rpm, PKGBUILD)
+- Man page documentation
+- Startup time compliance testing (< 200ms requirement)
+- CI/CD with GitHub Actions
+
+### Performance
+- CLI startup optimized to ~140ms via typer-slim
+- Lazy-loading architecture for subcommands via LazyMVMGroup
+- Nuitka-compiled standalone binary available
+
+[Unreleased]: https://github.com/AlanD20/mvmctl/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/AlanD20/mvmctl/releases/tag/v0.1.0
