@@ -549,6 +549,7 @@ def rm(
     from mvmctl.api.vms import get_vm_manager as _get_vm_manager
 
     manager = _get_vm_manager()
+    exit_code = 0
     targets: list[VMInstance] = []
     errors: list[str] = []
 
@@ -570,16 +571,16 @@ def rm(
         if len(matches) == 0:
             errors.append(f"No VM found with name '{n}'")
         elif len(matches) > 1:
-            print_info(f"Multiple VMs found with name '{n}':")
-            for i, v in enumerate(matches, 1):
+            print_error(
+                f"Multiple VMs match name '{n}'. Use ID instead of name, or remove VMs individually."
+            )
+            print_info("Matching VMs:")
+            for v in matches:
                 print_info(
-                    f"  {i}. {v.name} (ID: {v.id[:6] if v.id else '-'}, IP: {v.ip or '-'}, status: {v.status.value})"
+                    f"  - {v.name} (ID: {v.id[:6] if v.id else '-'}, IP: {v.ip or '-'}, status: {v.status.value})"
                 )
-            choice = typer.prompt(f"Select VM to remove (1-{len(matches)})", type=int)
-            if choice < 1 or choice > len(matches):
-                print_error("Invalid selection")
-                raise typer.Exit(code=1)
-            targets.append(matches[choice - 1])
+            exit_code = 1
+            continue
         else:
             targets.append(matches[0])
 
@@ -615,7 +616,7 @@ def rm(
             print_error(f"Failed to remove VM '{vm.name}': {e}")
 
     if removed_count == 0 and targets:
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=exit_code)
 
 
 @app.command(name="ls")

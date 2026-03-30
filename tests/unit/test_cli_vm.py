@@ -78,6 +78,30 @@ def test_rm_running_vm(mocker: MockerFixture):
     assert "removed" in result.output.lower()
 
 
+def test_rm_multiple_vms_same_name_errors(mocker: MockerFixture):
+    """Test that rm errors when multiple VMs share the same name."""
+    vm1 = _make_vm("test-dup", VMState.STOPPED, "192.168.1.10")
+    vm2 = VMInstance(
+        id="def456abc1237890abcd1234567890ab",
+        name="test-dup",
+        ip="192.168.1.11",
+        mac="02:FC:ee:ff:00:11",
+        pid=2345,
+        status=VMState.STOPPED,
+        created_at=datetime(2026, 1, 1, 12, 0, 0),
+    )
+    
+    mock_manager = mocker.MagicMock()
+    mock_manager.get_by_name.return_value = [vm1, vm2]
+    mock_manager.find_by_short_id.return_value = []
+    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_manager)
+    
+    result = runner.invoke(app, ["rm", "--name", "test-dup"])
+    
+    assert result.exit_code == 1
+    assert "Multiple VMs match name" in result.output
+
+
 def test_prune_nothing_to_do(mocker: MockerFixture):
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[])
     result = runner.invoke(app, ["prune"])
