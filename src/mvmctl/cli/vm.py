@@ -861,19 +861,26 @@ def resume(
 
 @app.command()
 def inspect(
-    name: str = typer.Option(..., "--name", "-n", help="VM name or short ID"),
+    selector: Optional[str] = typer.Argument(None, help="VM short ID or name"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or short ID"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show detailed information about a VM.
 
     Examples:
+        mvm vm inspect myvm
         mvm vm inspect --name myvm
-        mvm vm inspect --name myvm --json
+        mvm vm inspect myvm --json
     """
     from mvmctl.api.vms import inspect_vm
 
+    effective_selector = selector or name
+    if not effective_selector:
+        print_error("Error: Must provide VM selector via positional argument or --name")
+        raise typer.Exit(code=1)
+
     try:
-        vm_info = inspect_vm(name)
+        vm_info = inspect_vm(effective_selector)
     except MVMError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
