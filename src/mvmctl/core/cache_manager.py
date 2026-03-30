@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 from pathlib import Path
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, SUPPORTED_IMAGE_EXTENSIONS
@@ -76,6 +78,38 @@ def cache_init_networks() -> Path:
     return networks_dir
 
 
+def cache_init_guestfs_appliance() -> Path | None:
+    """Build the libguestfs fixed appliance into $MVM_CACHE_DIR/appliance/.
+
+    Building a fixed appliance with libguestfs-make-fixed-appliance eliminates
+    the supermin appliance-construction phase on every guestfs launch, reducing
+    inject_cloud_init() from 8-60s down to sub-second launch times.
+
+    Returns the appliance directory path if build succeeded, None if
+    libguestfs-make-fixed-appliance is not installed or the build failed.
+    """
+    make_tool = shutil.which("libguestfs-make-fixed-appliance")
+    if not make_tool:
+        logger.debug("libguestfs-make-fixed-appliance not found — skipping appliance build")
+        return None
+
+    appliance_dir = get_cache_dir() / "appliance"
+    appliance_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        subprocess.run(
+            [make_tool, str(appliance_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        logger.debug("libguestfs fixed appliance built at %s", appliance_dir)
+        return appliance_dir
+    except subprocess.CalledProcessError as e:
+        logger.warning("libguestfs appliance build failed: %s", e.stderr)
+        return None
+
+
 def cache_init_all() -> dict[str, Path | None]:
     """Initialize all cache resources.
 
@@ -86,6 +120,7 @@ def cache_init_all() -> dict[str, Path | None]:
         "images": cache_init_images(),
         "kernels": cache_init_kernels(),
         "networks": cache_init_networks(),
+        "guestfs_appliance": cache_init_guestfs_appliance(),
     }
 
 

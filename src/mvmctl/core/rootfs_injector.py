@@ -17,6 +17,7 @@ from mvmctl.exceptions import (
     GuestfsNotAvailableError,
     GuestfsWriteError,
 )
+from mvmctl.utils.fs import get_cache_dir
 
 
 def check_libguestfs() -> bool:
@@ -123,13 +124,19 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
 
     guestfs = importlib.import_module("guestfs")
 
-    # Configure libguestfs backend via environment variables (must be set before handle creation)
-    # Save original values to restore after handle creation
     orig_backend = os.environ.get("LIBGUESTFS_BACKEND")
     orig_backend_settings = os.environ.get("LIBGUESTFS_BACKEND_SETTINGS")
+    orig_cachedir = os.environ.get("LIBGUESTFS_CACHEDIR")
+    orig_path = os.environ.get("LIBGUESTFS_PATH")
 
     os.environ["LIBGUESTFS_BACKEND"] = "direct"
     os.environ["LIBGUESTFS_BACKEND_SETTINGS"] = f"timeout={DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT}"
+    if Path("/dev/shm").exists():
+        os.environ["LIBGUESTFS_CACHEDIR"] = "/dev/shm"
+
+    appliance_dir = get_cache_dir() / "appliance"
+    if appliance_dir.is_dir() and any(appliance_dir.iterdir()):
+        os.environ["LIBGUESTFS_PATH"] = str(appliance_dir)
 
     try:
         g: Any = guestfs.GuestFS(python_return_dict=True)
@@ -145,6 +152,16 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
         elif "LIBGUESTFS_BACKEND_SETTINGS" in os.environ:
             del os.environ["LIBGUESTFS_BACKEND_SETTINGS"]
 
+        if orig_cachedir is not None:
+            os.environ["LIBGUESTFS_CACHEDIR"] = orig_cachedir
+        elif "LIBGUESTFS_CACHEDIR" in os.environ:
+            del os.environ["LIBGUESTFS_CACHEDIR"]
+
+        if orig_path is not None:
+            os.environ["LIBGUESTFS_PATH"] = orig_path
+        elif "LIBGUESTFS_PATH" in os.environ:
+            del os.environ["LIBGUESTFS_PATH"]
+
     try:
         # Apply boot-time optimizations with compatibility guards
         if hasattr(g, "set_network"):
@@ -156,8 +173,14 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
         if hasattr(g, "set_memsize"):
             g.set_memsize(256)
 
-        # Add the disk image
-        g.add_drive(rootfs_path, readonly=False)
+        if hasattr(g, "set_recovery_proc"):
+            g.set_recovery_proc(False)
+
+        if hasattr(g, "set_autosync"):
+            g.set_autosync(False)
+
+        # Add the disk image with unsafe cache mode for performance
+        g.add_drive(rootfs_path, readonly=False, format="raw", cachemode="unsafe")
 
         # Launch the appliance
         try:
@@ -174,6 +197,12 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
 
         # Write cloud-init files
         _write_cloud_init_files(g, cloud_init_dir)
+
+        # Explicit umount before shutdown (required when autosync is disabled)
+        try:
+            g.umount("/")
+        except Exception:
+            pass  # Already unmounted or not mounted
 
     finally:
         # Always cleanup
