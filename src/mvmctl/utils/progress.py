@@ -82,39 +82,30 @@ class ASCIIProgressBar:
         return f"{size_gb:.1f}GB"
 
     def _display(self) -> None:
-        """Display progress bar.
-
-        In TTY mode: Uses carriage return for animation
-        In non-TTY mode: Prints every 10% on new lines
-        """
         if self.total == 0:
             percent = 0
         else:
             percent = min(100, int(100 * self.current / self.total))
 
-        filled = int(self.width * percent / 100)
-        bar = "#" * filled + " " * (self.width - filled)
-
         if self._is_tty:
-            # TTY: Use carriage return for animation
+            if percent == self._last_percent:
+                return
+            filled = int(self.width * percent / 100)
+            bar = "#" * filled + " " * (self.width - filled)
             line = f"\r{self.title} [{bar}] {percent}%"
             if self.total > 0:
-                current_str = self._format_size(self.current)
-                total_str = self._format_size(self.total)
-                line += f" ({current_str}/{total_str})"
-            # Clear previous line and write new one
-            sys.stdout.write("\r" + " " * self._last_line_length + "\r")
+                line += f" ({self._format_size(self.current)}/{self._format_size(self.total)})"
             sys.stdout.write(line)
             sys.stdout.flush()
             self._last_line_length = len(line)
+            self._last_percent = percent
         else:
-            # Non-TTY: Simple line-by-line progress (every 10% or on completion)
             if percent % 10 == 0 and percent != self._last_percent:
+                filled = int(self.width * percent / 100)
+                bar = "#" * filled + " " * (self.width - filled)
                 line = f"{self.title} [{bar}] {percent}%"
                 if self.total > 0:
-                    current_str = self._format_size(self.current)
-                    total_str = self._format_size(self.total)
-                    line += f" ({current_str}/{total_str})"
+                    line += f" ({self._format_size(self.current)}/{self._format_size(self.total)})"
                 print(line)
                 self._last_percent = percent
 
@@ -164,17 +155,6 @@ def download_with_progress(
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    total_size = 0
-    try:
-        req = Request(url, headers={"User-Agent": HTTP_USER_AGENT}, method="HEAD")
-        with http.urlopen(req, timeout=30) as response:
-            content_length = response.headers.get("Content-Length")
-            if content_length:
-                total_size = int(content_length)
-    except Exception:
-        pass
-
-    progress = ASCIIProgressBar(total=total_size, title=title)
     sha256_hash = hashlib.sha256() if expected_sha256 else None
     temp_path: Optional[Path] = None
 
@@ -185,8 +165,11 @@ def download_with_progress(
         os.close(temp_fd)
         temp_path = Path(temp_str)
 
+        progress: Optional[ASCIIProgressBar] = None
         req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
         with http.urlopen(req, timeout=timeout) as response:
+            total_size = int(cl) if (cl := response.headers.get("Content-Length")) else 0
+            progress = ASCIIProgressBar(total=total_size, title=title)
             with temp_path.open("wb") as f:
                 while True:
                     chunk = response.read(CONST_DOWNLOAD_CHUNK_SIZE)
@@ -197,7 +180,8 @@ def download_with_progress(
                     if sha256_hash:
                         sha256_hash.update(chunk)
 
-        progress.finish()
+        if progress:
+            progress.finish()
 
         if expected_sha256 and sha256_hash:
             actual = sha256_hash.hexdigest()
