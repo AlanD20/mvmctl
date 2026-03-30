@@ -1155,7 +1155,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
     assert vm_config_arg.rootfs_path.parent == mock_vm_dir
 
 
-@patch("mvmctl.utils.resize.resize_rootfs")
+@patch("mvmctl.core.vm_lifecycle.grow_rootfs_with_guestfs")
 @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -1203,7 +1203,7 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     mock_net_mgr,
     mock_add_firewall_rule,
     mock_copy2,
-    mock_resize_rootfs,
+    mock_grow_rootfs,
 ):
     """Verify --disk-size only resizes the VM-local copy, not the cached image."""
     mock_manager = MagicMock()
@@ -1260,9 +1260,9 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     mock_copy2.assert_called_once()
     copied_path = mock_copy2.call_args.args[1]  # destination path
 
-    # Verify resize was called on the VM-local copy, not the cached image
-    mock_resize_rootfs.assert_called_once()
-    resized_path = mock_resize_rootfs.call_args.args[0]
+    # Verify grow_rootfs was called on the VM-local copy, not the cached image
+    mock_grow_rootfs.assert_called_once()
+    resized_path = mock_grow_rootfs.call_args.args[0]
     assert resized_path == copied_path
     assert resized_path == mock_rootfs_path
 

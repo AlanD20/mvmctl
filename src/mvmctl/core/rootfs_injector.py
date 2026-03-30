@@ -1,34 +1,19 @@
 """Rootfs injection using libguestfs for reliable cloud-init seeding."""
 
-import importlib
-import os
 from pathlib import Path
 from typing import Any
 
 from mvmctl.constants import (
-    DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT,
     DEFAULT_LIBGUESTFS_ROOT_DEVICE,
     DEFAULT_LIBGUESTFS_ROOT_INDICATORS,
     DEFAULT_LIBGUESTFS_SEED_DIR,
 )
 from mvmctl.exceptions import (
-    GuestfsLaunchError,
     GuestfsMountError,
     GuestfsNotAvailableError,
     GuestfsWriteError,
 )
-from mvmctl.utils.fs import get_cache_dir
-
-
-def check_libguestfs() -> bool:
-    """Check if libguestfs Python bindings are available."""
-    try:
-        guestfs = importlib.import_module("guestfs")
-
-        # Verify the module has the expected interface
-        return hasattr(guestfs, "GuestFS")
-    except ImportError:
-        return False
+from mvmctl.utils.guestfs import check_libguestfs, optimized_guestfs
 
 
 def _detect_root_partition(g: Any, rootfs_path: str) -> str:
@@ -105,7 +90,6 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
 
     Raises:
         GuestfsNotAvailableError: If libguestfs Python bindings are not installed
-        GuestfsLaunchError: If the guestfs appliance fails to launch
         GuestfsMountError: If unable to detect or mount the root partition
         GuestfsWriteError: If writing cloud-init files fails
         FileNotFoundError: If rootfs_path or cloud_init_dir does not exist
@@ -122,72 +106,7 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
             "libguestfs Python bindings not available. Install python3-libguestfs package."
         )
 
-    guestfs = importlib.import_module("guestfs")
-
-    orig_backend = os.environ.get("LIBGUESTFS_BACKEND")
-    orig_backend_settings = os.environ.get("LIBGUESTFS_BACKEND_SETTINGS")
-    orig_cachedir = os.environ.get("LIBGUESTFS_CACHEDIR")
-    orig_path = os.environ.get("LIBGUESTFS_PATH")
-
-    os.environ["LIBGUESTFS_BACKEND"] = "direct"
-    os.environ["LIBGUESTFS_BACKEND_SETTINGS"] = f"timeout={DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT}"
-    if Path("/dev/shm").exists():
-        os.environ["LIBGUESTFS_CACHEDIR"] = "/dev/shm"
-
-    appliance_dir = get_cache_dir() / "appliance"
-    if appliance_dir.is_dir() and any(appliance_dir.iterdir()):
-        os.environ["LIBGUESTFS_PATH"] = str(appliance_dir)
-
-    try:
-        g: Any = guestfs.GuestFS(python_return_dict=True)
-    finally:
-        # Restore original environment values
-        if orig_backend is not None:
-            os.environ["LIBGUESTFS_BACKEND"] = orig_backend
-        elif "LIBGUESTFS_BACKEND" in os.environ:
-            del os.environ["LIBGUESTFS_BACKEND"]
-
-        if orig_backend_settings is not None:
-            os.environ["LIBGUESTFS_BACKEND_SETTINGS"] = orig_backend_settings
-        elif "LIBGUESTFS_BACKEND_SETTINGS" in os.environ:
-            del os.environ["LIBGUESTFS_BACKEND_SETTINGS"]
-
-        if orig_cachedir is not None:
-            os.environ["LIBGUESTFS_CACHEDIR"] = orig_cachedir
-        elif "LIBGUESTFS_CACHEDIR" in os.environ:
-            del os.environ["LIBGUESTFS_CACHEDIR"]
-
-        if orig_path is not None:
-            os.environ["LIBGUESTFS_PATH"] = orig_path
-        elif "LIBGUESTFS_PATH" in os.environ:
-            del os.environ["LIBGUESTFS_PATH"]
-
-    try:
-        # Apply boot-time optimizations with compatibility guards
-        if hasattr(g, "set_network"):
-            g.set_network(False)
-
-        if hasattr(g, "set_smp"):
-            g.set_smp(1)
-
-        if hasattr(g, "set_memsize"):
-            g.set_memsize(256)
-
-        if hasattr(g, "set_recovery_proc"):
-            g.set_recovery_proc(False)
-
-        if hasattr(g, "set_autosync"):
-            g.set_autosync(False)
-
-        # Add the disk image with unsafe cache mode for performance
-        g.add_drive(rootfs_path, readonly=False, format="raw", cachemode="unsafe")
-
-        # Launch the appliance
-        try:
-            g.launch()
-        except Exception as e:
-            raise GuestfsLaunchError(f"Failed to launch guestfs appliance: {e}")
-
+    with optimized_guestfs(Path(rootfs_path), readonly=False) as g:
         # Detect and mount root partition
         root_device = _detect_root_partition(g, rootfs_path)
         try:
@@ -203,14 +122,3 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
             g.umount("/")
         except Exception:
             pass  # Already unmounted or not mounted
-
-    finally:
-        # Always cleanup
-        try:
-            g.shutdown()
-        except Exception:
-            pass
-        try:
-            g.close()
-        except Exception:
-            pass

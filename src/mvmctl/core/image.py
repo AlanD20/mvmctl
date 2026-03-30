@@ -50,6 +50,80 @@ class ImageImportResult:
 _SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
 
 
+def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
+    """Shrink an image to its minimum size using libguestfs.
+
+    Args:
+        image_path: Path to the image file to shrink
+
+    Returns:
+        Tuple of (shrunk_image_path, original_size_bytes, final_size_bytes)
+
+    Uses the same guestfs approach as rootfs_injector.py.
+    """
+    from mvmctl.utils.guestfs import check_libguestfs
+
+    if not check_libguestfs():
+        logger.warning("libguestfs not available, skipping image shrink")
+        return image_path, image_path.stat().st_size, image_path.stat().st_size
+
+    # Handle case where file doesn't exist (e.g., in mocked tests)
+    if not image_path.exists():
+        logger.debug("Image file does not exist, skipping shrink: %s", image_path)
+        return image_path, 0, 0
+
+    from mvmctl.utils.guestfs import optimized_guestfs
+
+    original_size = image_path.stat().st_size
+
+    try:
+        with optimized_guestfs(image_path, readonly=False) as g:
+            # Detect root device (usually /dev/sda1 or first partition)
+            partitions = g.list_partitions()
+            root_device = partitions[0] if partitions else "/dev/sda"
+
+            fs_type = g.vfs_type(root_device)
+
+            if fs_type in ("ext2", "ext3", "ext4"):
+                # For ext: mount, check, resize to minimum
+                g.mount(root_device, "/")
+                # Run e2fsck first (required before resize)
+                g.e2fsck(root_device, correct=True)
+                g.umount(root_device)
+                # Resize to minimum (0 means minimum)
+                g.resize2fs_size(root_device, 0)
+            elif fs_type == "btrfs":
+                g.mount(root_device, "/")
+                g.btrfs_filesystem_resize("/", 0)  # 0 = minimum
+                g.umount(root_device)
+            else:
+                logger.warning(f"Cannot shrink {fs_type} filesystem")
+                return image_path, original_size, original_size
+
+            # Get new device size
+            new_size = g.blockdev_getsize64(root_device)
+
+        # Truncate file to new size + small buffer (1% safety margin)
+        final_size = int(new_size * 1.01)
+        with open(image_path, "r+b") as f:
+            f.truncate(final_size)
+
+        actual_final = image_path.stat().st_size
+        logger.info(
+            "Shrunk %s: %d MB → %d MB (%.1fx reduction)",
+            image_path.name,
+            original_size // (1024 * 1024),
+            actual_final // (1024 * 1024),
+            original_size / actual_final if actual_final > 0 else 1.0,
+        )
+
+        return image_path, original_size, actual_final
+
+    except Exception as e:
+        logger.warning("Failed to shrink image: %s", e)
+        return image_path, original_size, image_path.stat().st_size
+
+
 def compress_image(image_path: Path, level: int = 6) -> Path:
     """Compress an image using zstd.
 

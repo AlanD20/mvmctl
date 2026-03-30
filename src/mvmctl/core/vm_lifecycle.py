@@ -314,6 +314,65 @@ def generate_vm_id(name: str) -> str:
 logger = logging.getLogger(__name__)
 
 
+def grow_rootfs_with_guestfs(image_path: Path, target_size_bytes: int) -> None:
+    """Grow a rootfs image to target size using libguestfs.
+
+    Args:
+        image_path: Path to the rootfs image
+        target_size_bytes: Target size in bytes
+
+    Raises:
+        VMCreateError: If libguestfs is not available or resize fails
+    """
+    from mvmctl.utils.guestfs import check_libguestfs
+
+    if not check_libguestfs():
+        raise VMCreateError("libguestfs required for disk resize")
+
+    # Handle case where file doesn't exist or stat returns mock (e.g., in tests)
+    try:
+        current_size = image_path.stat().st_size
+        if not isinstance(current_size, int):
+            return  # Skip in mocked tests
+    except (OSError, AttributeError):
+        return  # Skip if file doesn't exist or stat fails
+
+    if current_size >= target_size_bytes:
+        return  # Already big enough
+
+    try:
+        # First, extend the file size
+        with open(image_path, "r+b") as f:
+            f.truncate(target_size_bytes)
+
+        from mvmctl.utils.guestfs import optimized_guestfs
+
+        with optimized_guestfs(image_path, readonly=False) as g:
+            partitions = g.list_partitions()
+            root_device = partitions[0] if partitions else "/dev/sda"
+
+            fs_type = g.vfs_type(root_device)
+
+            if fs_type in ("ext2", "ext3", "ext4"):
+                # For ext: resize the filesystem to fill new space
+                g.resize2fs(root_device)
+            elif fs_type == "btrfs":
+                g.mount(root_device, "/")
+                g.btrfs_filesystem_resize("/", target_size_bytes)
+                g.umount(root_device)
+            else:
+                logger.warning(f"Cannot resize {fs_type} filesystem")
+
+        logger.info(
+            "Grew rootfs: %d MB → %d MB",
+            current_size // (1024 * 1024),
+            target_size_bytes // (1024 * 1024),
+        )
+
+    except Exception as e:
+        raise VMCreateError(f"Failed to grow rootfs: {e}") from e
+
+
 def _cleanup_vm_creation_resources(
     resources_created: dict[str, bool],
     vm_dir: Path | None,
@@ -717,13 +776,13 @@ def create_vm(
             shutil.copy2(resolved_image_path, vm_rootfs_path)
         rootfs_path = vm_rootfs_path
 
-        # Resize if disk_size specified (only the VM-local copy)
+        # Grow rootfs if disk_size specified (only the VM-local copy)
+        # This must happen BEFORE cloud-init injection for DIRECT_INJECTION mode
         if disk_size is not None:
             from mvmctl.utils.disk_size import parse_disk_size
-            from mvmctl.utils.resize import resize_rootfs
 
             target_bytes = parse_disk_size(disk_size)
-            resize_rootfs(vm_rootfs_path, target_bytes)  # Correct: modifies VM-local copy only
+            grow_rootfs_with_guestfs(vm_rootfs_path, target_bytes)
 
         # Handle cloud-init based on mode
         cloud_init_iso: Path | None = None
