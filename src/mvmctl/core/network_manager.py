@@ -410,10 +410,47 @@ def release_network_ip(network_name: str, vm_name: str) -> None:
 
 
 def ensure_default_network() -> NetworkConfig:
-    """Ensure the default network exists, creating it if needed."""
+    """Ensure the default network exists with all host resources materialized.
+
+    If the network exists in metadata but the actual bridge, iptables chains,
+    or NAT rules are missing (e.g., after a reboot), this function recreates
+    them from the stored configuration.
+    """
+    from mvmctl.core.host_setup import save_iptables_rules
+    from mvmctl.core.network import bridge_exists, setup_bridge, setup_mvm_chains, setup_nat
+
     config = get_network(DEFAULT_NETWORK_NAME)
+
     if config is not None:
+        # Metadata claims network exists, verify actual resources
+        bridge_missing = not bridge_exists(config.bridge)
+        # Check for our custom chains by trying to set them up (idempotent)
+        chains_missing = not setup_mvm_chains()
+
+        if bridge_missing or chains_missing:
+            # Recreate from stored config
+            gateway_cidr = f"{config.gateway}/{_prefix_len(config.cidr)}"
+            try:
+                if bridge_missing:
+                    setup_bridge(config.bridge, gateway_cidr=gateway_cidr)
+                if config.nat_enabled:
+                    setup_nat(config.bridge)
+                    if os.getuid() == 0:
+                        save_iptables_rules()
+                # Update metadata to reflect reality
+                cache_dir = get_cache_dir()
+                update_network_entry(cache_dir, DEFAULT_NETWORK_NAME, bridge_active=True)
+            except NetworkError:
+                # Best-effort cleanup on failure
+                if bridge_missing:
+                    try:
+                        teardown_bridge(config.bridge)
+                    except NetworkError:
+                        pass
+                raise
         return config
+
+    # No metadata entry, create from scratch
     return create_network(DEFAULT_NETWORK_NAME, cidr=DEFAULT_NETWORK_CIDR, nat=True)
 
 

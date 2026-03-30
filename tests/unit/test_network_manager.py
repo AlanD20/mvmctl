@@ -341,6 +341,81 @@ def test_ensure_default_network_returns_existing(mock_cache_dir: Path):
     assert config.name == "default"
 
 
+@patch("mvmctl.core.network.bridge_exists", return_value=False)
+@patch("mvmctl.core.network.setup_bridge")
+@patch("mvmctl.core.network.setup_nat")
+@patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
+def test_ensure_default_network_recreates_missing_bridge(
+    mock_setup_chains, mock_setup_nat, mock_setup_bridge, mock_bridge_exists, mock_cache_dir: Path
+):
+    """When metadata exists but bridge is missing, setup_bridge should be called."""
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "default",
+        cidr="172.35.0.0/24",
+        gateway="172.35.0.1",
+        bridge="mvm-default",
+        nat_enabled=True,
+    )
+
+    config = ensure_default_network()
+    assert config is not None
+    assert config.name == "default"
+    mock_setup_bridge.assert_called_once_with("mvm-default", gateway_cidr="172.35.0.1/24")
+    mock_setup_nat.assert_called_once_with("mvm-default")
+
+
+@patch("mvmctl.core.network.bridge_exists", return_value=True)
+@patch("mvmctl.core.network.setup_bridge")
+@patch("mvmctl.core.network.setup_nat")
+@patch("mvmctl.core.network.setup_mvm_chains", return_value=False)
+def test_ensure_default_network_recreates_missing_chains(
+    mock_setup_chains, mock_setup_nat, mock_setup_bridge, mock_bridge_exists, mock_cache_dir: Path
+):
+    """When bridge exists but chains were just created, NAT should be set up."""
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "default",
+        cidr="172.35.0.0/24",
+        gateway="172.35.0.1",
+        bridge="mvm-default",
+        nat_enabled=True,
+    )
+
+    config = ensure_default_network()
+    assert config is not None
+    assert config.name == "default"
+    # Bridge exists, so setup_bridge should not be called
+    mock_setup_bridge.assert_not_called()
+    # Chains were missing (setup_mvm_chains returned False), so NAT should be set up
+    mock_setup_nat.assert_called_once_with("mvm-default")
+
+
+@patch("mvmctl.core.network.bridge_exists", return_value=True)
+@patch("mvmctl.core.network.setup_bridge")
+@patch("mvmctl.core.network.setup_nat")
+@patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
+def test_ensure_default_network_idempotent_when_all_exists(
+    mock_setup_chains, mock_setup_nat, mock_setup_bridge, mock_bridge_exists, mock_cache_dir: Path
+):
+    """When both metadata and resources exist, no setup functions should be called."""
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "default",
+        cidr="172.35.0.0/24",
+        gateway="172.35.0.1",
+        bridge="mvm-default",
+        nat_enabled=True,
+    )
+
+    config = ensure_default_network()
+    assert config is not None
+    assert config.name == "default"
+    # All resources exist, no setup should be called
+    mock_setup_bridge.assert_not_called()
+    mock_setup_nat.assert_not_called()
+
+
 def test_validate_subnet_no_overlap(mock_cache_dir: Path):
     _add_network_to_metadata(
         mock_cache_dir, "net1", cidr="10.20.0.0/24", gateway="10.20.0.1", bridge="mvm-net1"

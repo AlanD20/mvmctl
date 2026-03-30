@@ -133,6 +133,14 @@ def _warn_if_running_as_root() -> None:
 
 
 def _reconcile_networks() -> None:
+    """Reconcile network metadata with kernel state.
+
+    This is intentionally metadata-only. We detect and report stale networks
+    but do NOT auto-repair them. Repair happens explicitly via:
+    - `mvm init` (default network)
+    - `mvm network create` (named networks)
+    - `mvm host init` (full host setup)
+    """
     try:
         from mvmctl.core.network_manager import reconcile_networks
 
