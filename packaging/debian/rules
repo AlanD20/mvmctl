@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Binary is built externally via Nuitka, just copy it
+	mkdir -p debian/mvmctl/usr/bin
+	cp dist/mvm debian/mvmctl/usr/bin/
+	chmod +x debian/mvmctl/usr/bin/mvm
+
+override_dh_auto_install:
+	# Install man page
+	mkdir -p debian/mvmctl/usr/share/man/man1
+	cp docs/mvm.1 debian/mvmctl/usr/share/man/man1/
+	gzip -9 debian/mvmctl/usr/share/man/man1/mvm.1
+
+override_dh_auto_clean:
+	# No clean needed

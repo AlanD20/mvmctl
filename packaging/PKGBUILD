@@ -1,0 +1,22 @@
+# Maintainer: AlanD20 <aland20@pm.me>
+pkgname=mvmctl
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="MicroVM Manager for Firecracker microVMs"
+arch=('x86_64')
+url="https://github.com/AlanD20/mvmctl"
+license=('MIT')
+depends=('iproute2' 'iptables' 'qemu' 'libguestfs' 'xorriso' 'openssh')
+makedepends=()
+source=("mvm-${pkgver}::https://github.com/AlanD20/mvmctl/releases/download/v${pkgver}/mvm"
+        "mvm.1-${pkgver}::https://raw.githubusercontent.com/AlanD20/mvmctl/v${pkgver}/docs/mvm.1")
+sha256sums=('SKIP' 'SKIP')
+
+package() {
+    # Install binary
+    install -Dm755 "${srcdir}/mvm-${pkgver}" "${pkgdir}/usr/bin/mvm"
+    
+    # Install man page
+    install -Dm644 "${srcdir}/mvm.1-${pkgver}" "${pkgdir}/usr/share/man/man1/mvm.1"
+    gzip -9 "${pkgdir}/usr/share/man/man1/mvm.1"
+}

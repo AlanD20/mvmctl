@@ -227,6 +227,80 @@ For distro packages (deb, rpm, etc.), install to:
 - **RHEL/CentOS/Fedora**: `/usr/share/man/man1/mvm.1`
 - **Arch**: `/usr/share/man/man1/mvm.1`
 
+## Distribution Package Builds
+
+The CI automatically builds distribution packages for popular Linux distributions:
+
+| Format | Target | CI Job | Install Command |
+|--------|--------|--------|-----------------|
+| .deb | Debian, Ubuntu | `build-deb` | `sudo dpkg -i mvmctl_*.deb` |
+| .rpm | RHEL, CentOS, Fedora | `build-rpm` | `sudo dnf install mvmctl-*.rpm` |
+| PKGBUILD | Arch Linux | `build-arch` | `makepkg -si` |
+
+### Package Files
+
+- **Debian/Ubuntu**: `packaging/debian/` directory contains control files
+  - `control` — package metadata and dependencies
+  - `rules` — build rules (binary is pre-built, just installs)
+  - `changelog` — version history
+  - `compat` — debhelper compatibility level
+
+- **RPM**: `packaging/mvmctl.spec` — RPM spec file
+  - Uses Fedora container for building
+  - Includes man page installation
+
+- **Arch**: `packaging/PKGBUILD` — Arch package build file
+  - Downloads binary from GitHub releases
+  - Installs binary and man page
+  - Can be submitted to AUR
+
+### Local Package Building
+
+To build packages locally (for testing):
+
+#### Debian/Ubuntu
+```bash
+# Install build dependencies
+sudo apt-get install debhelper build-essential
+
+# Build the binary first
+uv run python -m nuitka --onefile --output-dir=dist --output-filename=mvm \
+  --include-package=mvmctl --include-data-dir=src/mvmctl/assets=mvmctl/assets \
+  --lto=yes src/mvmctl/main.py
+
+# Build the .deb
+cp -r packaging/debian debian
+dpkg-buildpackage -us -uc -b
+# Package will be at ../mvmctl_*.deb
+```
+
+#### RPM (on Fedora/RHEL)
+```bash
+# Install build tools
+sudo dnf install rpm-build rpmdevtools
+
+# Set up build tree
+rpmdev-setuptree
+
+# Copy files
+cp packaging/mvmctl.spec ~/rpmbuild/SPECS/
+cp dist/mvm ~/rpmbuild/SOURCES/
+cp docs/mvm.1 ~/rpmbuild/SOURCES/
+
+# Build
+rpmbuild -bb ~/rpmbuild/SPECS/mvmctl.spec
+# Package will be at ~/rpmbuild/RPMS/x86_64/*.rpm
+```
+
+#### Arch (on Arch Linux)
+```bash
+# Copy PKGBUILD
+cp packaging/PKGBUILD .
+
+# Build and install
+makepkg -si
+```
+
 ## Appendix: Dynamic Import Handling in Compiled Binaries
 
 mvmctl uses dynamic imports for optional dependencies to keep the core runtime lightweight:
