@@ -15,7 +15,19 @@ import pytest
 
 # Modules explicitly allowed to exceed 200ms startup time
 # Format: module_path: justification
-STARTUP_ALLOWLIST: dict[str, str] = {}
+#
+# module_path is the fully qualified Python import path (e.g., "mvmctl.cli.vm")
+# Examples:
+#   - File: src/mvmctl/cli/vm.py              -> module_path: "mvmctl.cli.vm"
+#   - File: src/mvmctl/core/firecracker.py    -> module_path: "mvmctl.core.firecracker"
+#   - File: src/mvmctl/constants.py           -> module_path: "mvmctl.constants"
+#   - File: src/mvmctl/services/console_relay/manager.py -> module_path: "mvmctl.services.console_relay.manager"
+#
+# To find a module's path: python -c "import mvmctl.<module>; print(mvmctl.<module>.__name__)""
+STARTUP_ALLOWLIST: dict[str, str] = {
+    # Example (remove when adding real exemptions):
+    # "mvmctl.cli.vm": "Heavy form processing adds 50ms overhead (Issue #123)",
+}
 
 MAX_STARTUP_MS = 200
 

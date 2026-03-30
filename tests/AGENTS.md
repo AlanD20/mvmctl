@@ -141,7 +141,7 @@ To execute the `mvm` CLI with proper group privileges, use:
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Coverage Gate:** 80% branch coverage (`pyproject.toml --cov-fail-under=80`)  
 **Rule:** Tests must NEVER require root, KVM, or real network stack
-**Files:** 64 total — 54 unit + 7 integration + 3 layer_compliance
+**Files:** 65 total — 54 unit + 7 integration + 4 layer_compliance
 
 ## STRUCTURE
 
@@ -161,9 +161,10 @@ tests/
 │   ├── test_cloud_init_iso.py      # Cloud-init ISO generation
 │   └── test_console_integration.py # Console/pty-over-vsock integration
 └── layer_compliance/
-    ├── test_imports.py       # Enforces import boundaries (cli→api→core only)
-    ├── test_constants.py    # Ensures constants.py is single source of truth
-    └── test_privilege.py    # Verifies privilege checks in api/ layer
+    ├── test_imports.py        # Enforces import boundaries (cli→api→core only)
+    ├── test_constants.py      # Ensures constants.py is single source of truth
+    ├── test_privilege.py      # Verifies privilege checks in api/ layer
+    └── test_startup_time.py   # Enforces <200ms startup time for all modules
 ```
 
 ## KEY FIXTURES (conftest.py)
@@ -367,6 +368,29 @@ def test_binary_checks_in_api():
 def test_host_operations_require_privilege():
     # Host init/reset must call check_privileges() via api/
     pass
+```
+
+### test_startup_time.py
+
+Enforces CLI startup time limit (< 200ms) for all modules.
+
+```python
+def test_main_cli_startup_under_limit():
+    # Main CLI startup (mvm --help) must complete in < 200ms
+    # Uses subprocess isolation for accurate cold-start measurement
+```
+
+```python
+def test_module_import_startup():
+    # All mvmctl modules must import in < 200ms unless exempted
+    # Parametrized test covering 75+ modules
+```
+
+To exempt a slow module, add to `STARTUP_ALLOWLIST`:
+```python
+STARTUP_ALLOWLIST = {
+    "mvmctl.module.name": "Reason for exemption (Issue #X)",
+}
 ```
 
 ## TEST FILE SIZES
