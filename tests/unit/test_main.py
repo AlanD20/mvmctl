@@ -63,47 +63,47 @@ def test_version_command():
 
 def test_main_import_is_lazy(monkeypatch):
     monkeypatch.delitem(sys.modules, "mvmctl.cli.vm", raising=False)
-    monkeypatch.delitem(sys.modules, "mvmctl.cli.asset", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.bin", raising=False)
     monkeypatch.delitem(sys.modules, "mvmctl.cli.host", raising=False)
 
     importlib.reload(main_module)
 
     assert "mvmctl.cli.vm" not in sys.modules
-    assert "mvmctl.cli.asset" not in sys.modules
+    assert "mvmctl.cli.bin" not in sys.modules
     assert "mvmctl.cli.host" not in sys.modules
 
 
 def test_root_help_does_not_import_cli_modules(monkeypatch):
     monkeypatch.delitem(sys.modules, "mvmctl.cli.vm", raising=False)
-    monkeypatch.delitem(sys.modules, "mvmctl.cli.asset", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.bin", raising=False)
 
     importlib.reload(main_module)
     result = invoke_cli(["--help"])
 
     assert result.exit_code == 0
     assert "mvmctl.cli.vm" not in sys.modules
-    assert "mvmctl.cli.asset" not in sys.modules
+    assert "mvmctl.cli.bin" not in sys.modules
 
 
 def test_version_flag_does_not_import_cli_modules(monkeypatch):
     monkeypatch.delitem(sys.modules, "mvmctl.cli.vm", raising=False)
-    monkeypatch.delitem(sys.modules, "mvmctl.cli.asset", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.bin", raising=False)
 
     importlib.reload(main_module)
     result = invoke_cli(["--version"])
 
     assert result.exit_code == 0
     assert "mvmctl.cli.vm" not in sys.modules
-    assert "mvmctl.cli.asset" not in sys.modules
+    assert "mvmctl.cli.bin" not in sys.modules
 
 
 def test_vm_help_imports_only_requested_module(monkeypatch):
     monkeypatch.delitem(sys.modules, "mvmctl.cli.vm", raising=False)
-    monkeypatch.delitem(sys.modules, "mvmctl.cli.asset", raising=False)
+    monkeypatch.delitem(sys.modules, "mvmctl.cli.bin", raising=False)
 
     importlib.reload(main_module)
     result = invoke_cli(["vm", "--help"])
 
     assert result.exit_code == 0
     assert "mvmctl.cli.vm" in sys.modules
-    assert "mvmctl.cli.asset" not in sys.modules
+    assert "mvmctl.cli.bin" not in sys.modules

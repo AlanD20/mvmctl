@@ -13,7 +13,7 @@ datas, binaries, hiddenimports = collect_all("mvmctl")
 # Explicitly declare CLI submodules for lazy loading
 # These are imported on-demand by LazyMVMGroup.get_command()
 hiddenimports += [
-    "mvmctl.cli.asset",
+    "mvmctl.cli.bin",
     "mvmctl.cli.cache",
     "mvmctl.cli.config",
     "mvmctl.cli.console",

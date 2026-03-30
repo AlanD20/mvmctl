@@ -167,9 +167,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "key":       _LazyCommandSpec("mvmctl.cli.key",        "app",         "SSH key management"),
     "config":    _LazyCommandSpec("mvmctl.cli.config",     "app",         "Configuration commands"),
     "configure": _LazyCommandSpec("mvmctl.cli.configure",  "app",         "Guided setup wizard"),
-    "kernel":    _LazyCommandSpec("mvmctl.cli.asset",      "kernel_app",  "Kernel management"),
-    "image":     _LazyCommandSpec("mvmctl.cli.asset",      "image_app",   "Image management"),
-    "bin":       _LazyCommandSpec("mvmctl.cli.asset",      "bin_app",     "Binary management"),
+    "kernel":    _LazyCommandSpec("mvmctl.cli.bin",      "kernel_app",  "Kernel management"),
+    "image":     _LazyCommandSpec("mvmctl.cli.bin",      "image_app",   "Image management"),
+    "bin":       _LazyCommandSpec("mvmctl.cli.bin",      "bin_app",     "Binary management"),
 }
 ```
 

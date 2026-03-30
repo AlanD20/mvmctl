@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner as ClickCliRunner
 from typer.testing import CliRunner
 
-from mvmctl.cli.asset import kernel_app
+from mvmctl.cli.bin import kernel_app
 from mvmctl.core.binary_manager import BinaryVersion
 from mvmctl.core.image import ImageImportResult
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, KernelError
@@ -157,8 +157,8 @@ def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_official_success(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -188,8 +188,8 @@ def test_kernel_fetch_official_success(
     mock_build.assert_called_once()
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline", side_effect=KernelError("build failed"))
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.build_kernel_pipeline", side_effect=KernelError("build failed"))
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_official_failure(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -208,9 +208,9 @@ def test_kernel_fetch_official_failure(
     assert result.exit_code == 1
 
 
-@patch("mvmctl.cli.asset.download_firecracker_kernel")
-@patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.download_firecracker_kernel")
+@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_firecracker_success(
     mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -237,9 +237,9 @@ def test_kernel_fetch_firecracker_success(
     assert call_kwargs["output_path"] is None
 
 
-@patch("mvmctl.cli.asset.download_firecracker_kernel")
-@patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.download_firecracker_kernel")
+@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_firecracker_flag_shortcut(
     mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -262,8 +262,8 @@ def test_kernel_fetch_firecracker_flag_shortcut(
     mock_resolve.assert_called_once_with(kernel_type="firecracker", version=None)
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_official_flag_shortcut(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -307,9 +307,9 @@ def test_kernel_fetch_name_conflicts_with_out(tmp_path: Path):
     assert "--name cannot be combined with --out" in result.output
 
 
-@patch("mvmctl.cli.asset.download_firecracker_kernel")
-@patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.download_firecracker_kernel")
+@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_firecracker_uses_name_override(
     mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -335,9 +335,9 @@ def test_kernel_fetch_firecracker_uses_name_override(
     assert mock_dl.call_args.kwargs["output_path"] is None
 
 
-@patch("mvmctl.cli.asset.download_firecracker_kernel")
-@patch("mvmctl.cli.asset._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.download_firecracker_kernel")
+@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_firecracker_out_is_explicit_path(
     mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -364,8 +364,8 @@ def test_kernel_fetch_firecracker_out_is_explicit_path(
     assert mock_dl.call_args.kwargs["output_path"] == explicit_out
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_official_uses_name_override(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -395,8 +395,8 @@ def test_kernel_fetch_official_uses_name_override(
     assert mock_build.call_args.kwargs["use_cache"] is True
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_official_without_name_uses_cache(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -422,8 +422,8 @@ def test_kernel_fetch_official_without_name_uses_cache(
     assert mock_build.call_args.kwargs["use_cache"] is True
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_official_clean_build_disables_cache(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -449,8 +449,8 @@ def test_kernel_fetch_official_clean_build_disables_cache(
     assert mock_build.call_args.kwargs["use_cache"] is False
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_official_name_with_clean_build_disables_cache(
     mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
 ):
@@ -494,15 +494,15 @@ def test_kernel_fetch_firecracker_conflicting_type():
     assert "cannot be combined" in result.output
 
 
-@patch("mvmctl.cli.asset.resolve_kernel_spec", side_effect=KernelError("ambiguous type"))
+@patch("mvmctl.cli.bin.resolve_kernel_spec", side_effect=KernelError("ambiguous type"))
 def test_kernel_fetch_type_ambiguity_error(mock_resolve: MagicMock):
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--type", "firecracker"])
     assert result.exit_code == 1
     assert "ambiguous type" in result.output
 
 
-@patch("mvmctl.cli.asset.build_kernel_pipeline")
-@patch("mvmctl.cli.asset.resolve_kernel_spec")
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
 def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path):
     from mvmctl.core.kernel import KernelPipelineResult
 
@@ -601,8 +601,8 @@ def test_image_ls_normal(tmp_path: Path):
     (tmp_path / "ubuntu-24.04.ext4").write_bytes(b"\x00" * 1024)
     (tmp_path / "debian-12.ext4").write_bytes(b"\x00" * 1024)
     with (
-        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
-        patch("mvmctl.cli.asset.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.bin.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -611,7 +611,7 @@ def test_image_ls_normal(tmp_path: Path):
 
 
 def test_image_ls_json():
-    with patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -621,7 +621,7 @@ def test_image_ls_json():
 
 
 def test_image_ls_empty():
-    with patch("mvmctl.cli.asset.load_images_config", return_value=[]):
+    with patch("mvmctl.cli.bin.load_images_config", return_value=[]):
         result = click_runner.invoke(main_app, ["image", "ls", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -631,8 +631,8 @@ def test_image_ls_empty():
 def test_image_ls_shows_cached_marker(tmp_path: Path):
     (tmp_path / "ubuntu-24.04.ext4").touch()
     with (
-        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
-        patch("mvmctl.cli.asset.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.bin.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -644,9 +644,9 @@ def test_image_ls_shows_cached_marker(tmp_path: Path):
 
 
 @patch("pathlib.Path.read_bytes", return_value=b"mocked")
-@patch("mvmctl.cli.asset._save_image_meta")
-@patch("mvmctl.cli.asset.fetch_image")
-@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.bin._save_image_meta")
+@patch("mvmctl.cli.bin.fetch_image")
+@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_success(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
@@ -665,16 +665,16 @@ def test_image_fetch_success(
     mock_fetch.assert_called_once()
 
 
-@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_not_found(mock_config: MagicMock):
     result = click_runner.invoke(main_app, ["image", "fetch", "nonexistent"])
     assert result.exit_code == 1
 
 
 @patch("pathlib.Path.read_bytes", return_value=b"mocked")
-@patch("mvmctl.cli.asset._save_image_meta")
-@patch("mvmctl.cli.asset.fetch_image")
-@patch("mvmctl.cli.asset.load_images_config")
+@patch("mvmctl.cli.bin._save_image_meta")
+@patch("mvmctl.cli.bin.fetch_image")
+@patch("mvmctl.cli.bin.load_images_config")
 def test_image_fetch_by_type_and_version(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
@@ -719,7 +719,7 @@ def test_image_fetch_by_type_and_version(
     assert called_spec.id == "ubuntu-24.04"
 
 
-@patch("mvmctl.cli.asset.load_images_config")
+@patch("mvmctl.cli.bin.load_images_config")
 def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
     mock_config.return_value = [
         ImageSpec(
@@ -752,9 +752,9 @@ def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
 
 
 @patch("pathlib.Path.read_bytes", return_value=b"mocked")
-@patch("mvmctl.cli.asset._save_image_meta")
-@patch("mvmctl.cli.asset.fetch_image")
-@patch("mvmctl.cli.asset.load_images_config")
+@patch("mvmctl.cli.bin._save_image_meta")
+@patch("mvmctl.cli.bin.fetch_image")
+@patch("mvmctl.cli.bin.load_images_config")
 def test_image_fetch_with_type_option(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
@@ -786,7 +786,7 @@ def test_image_fetch_with_type_option(
     assert result.exit_code == 0
 
 
-@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_type_option_conflicts_with_id(mock_config: MagicMock):
     result = click_runner.invoke(
         main_app,
@@ -796,8 +796,8 @@ def test_image_fetch_type_option_conflicts_with_id(mock_config: MagicMock):
     assert "cannot be used when selector is an image ID" in result.output
 
 
-@patch("mvmctl.cli.asset.fetch_image", return_value=None)
-@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.bin.fetch_image", return_value=None)
+@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_failure(mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path):
     result = click_runner.invoke(
         main_app, ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path)]
@@ -806,9 +806,9 @@ def test_image_fetch_failure(mock_config: MagicMock, mock_fetch: MagicMock, tmp_
 
 
 @patch("pathlib.Path.read_bytes", return_value=b"mocked")
-@patch("mvmctl.cli.asset._save_image_meta")
-@patch("mvmctl.cli.asset.fetch_image")
-@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.bin._save_image_meta")
+@patch("mvmctl.cli.bin.fetch_image")
+@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_with_force(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
@@ -832,8 +832,8 @@ def test_image_fetch_with_force(
     )
 
 
-@patch("mvmctl.cli.asset.fetch_image")
-@patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.bin.fetch_image")
+@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_saves_fs_uuid_in_metadata(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
@@ -864,7 +864,7 @@ def test_image_fetch_saves_fs_uuid_in_metadata(
     assert entry.get("fs_uuid") == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
-@patch("mvmctl.cli.asset.import_image")
+@patch("mvmctl.cli.bin.import_image")
 def test_image_import_saves_fs_uuid_in_metadata(
     mock_import: MagicMock,
     tmp_path: Path,
@@ -1009,14 +1009,14 @@ def test_bin_ls_with_local():
             is_active=True,
         ),
     ]
-    with patch("mvmctl.cli.asset.list_local_versions", return_value=fake_versions):
+    with patch("mvmctl.cli.bin.list_local_versions", return_value=fake_versions):
         result = click_runner.invoke(main_app, ["bin", "ls"])
     assert result.exit_code == 0
     assert "1.5.0" in result.output
 
 
 def test_bin_ls_empty():
-    with patch("mvmctl.cli.asset.list_local_versions", return_value=[]):
+    with patch("mvmctl.cli.bin.list_local_versions", return_value=[]):
         result = click_runner.invoke(main_app, ["bin", "ls"])
     assert result.exit_code == 0
     assert "No local binaries" in result.output
@@ -1033,8 +1033,8 @@ def test_bin_ls_with_remote():
     ]
     remote = ["1.6.0", "1.5.0", "1.4.0"]
     with (
-        patch("mvmctl.cli.asset.list_local_versions", return_value=local),
-        patch("mvmctl.cli.asset.list_remote_versions", return_value=remote),
+        patch("mvmctl.cli.bin.list_local_versions", return_value=local),
+        patch("mvmctl.cli.bin.list_remote_versions", return_value=remote),
     ):
         result = click_runner.invoke(main_app, ["bin", "ls", "--remote"])
     assert result.exit_code == 0
@@ -1044,8 +1044,8 @@ def test_bin_ls_with_remote():
 
 def test_bin_ls_remote_error():
     with (
-        patch("mvmctl.cli.asset.list_local_versions", return_value=[]),
-        patch("mvmctl.cli.asset.list_remote_versions", side_effect=BinaryError("network fail")),
+        patch("mvmctl.cli.bin.list_local_versions", return_value=[]),
+        patch("mvmctl.cli.bin.list_remote_versions", side_effect=BinaryError("network fail")),
     ):
         result = click_runner.invoke(main_app, ["bin", "ls", "--remote"])
     assert result.exit_code == 1
@@ -1053,8 +1053,8 @@ def test_bin_ls_remote_error():
 
 def test_bin_ls_with_limit():
     with (
-        patch("mvmctl.cli.asset.list_local_versions", return_value=[]),
-        patch("mvmctl.cli.asset.list_remote_versions", return_value=["1.6.0"]) as mock_remote,
+        patch("mvmctl.cli.bin.list_local_versions", return_value=[]),
+        patch("mvmctl.cli.bin.list_remote_versions", return_value=["1.6.0"]) as mock_remote,
     ):
         result = click_runner.invoke(main_app, ["bin", "ls", "--remote", "--limit", "5"])
     assert result.exit_code == 0
@@ -1073,7 +1073,7 @@ def test_bin_fetch_success():
         jailer_path=Path("/cache/bin/jailer-v1.5.0"),
         is_active=False,
     )
-    with patch("mvmctl.cli.asset.fetch_binary", return_value=bv):
+    with patch("mvmctl.cli.bin.fetch_binary", return_value=bv):
         result = click_runner.invoke(main_app, ["bin", "fetch", "1.5.0"])
     assert result.exit_code == 0
     assert "Downloaded" in result.output
@@ -1081,7 +1081,7 @@ def test_bin_fetch_success():
 
 
 def test_bin_fetch_error():
-    with patch("mvmctl.cli.asset.fetch_binary", side_effect=BinaryError("download failed")):
+    with patch("mvmctl.cli.bin.fetch_binary", side_effect=BinaryError("download failed")):
         result = click_runner.invoke(main_app, ["bin", "fetch", "1.5.0"])
     assert result.exit_code == 1
 
@@ -1092,7 +1092,7 @@ def test_bin_fetch_error():
 
 
 def test_bin_set_default_success():
-    with patch("mvmctl.cli.asset.set_active_version") as mock_set:
+    with patch("mvmctl.cli.bin.set_active_version") as mock_set:
         result = click_runner.invoke(main_app, ["bin", "set-default", "1.5.0"])
     assert result.exit_code == 0
     assert "Active version set" in result.output
@@ -1101,7 +1101,7 @@ def test_bin_set_default_success():
 
 def test_bin_set_default_not_found():
     with patch(
-        "mvmctl.cli.asset.set_active_version",
+        "mvmctl.cli.bin.set_active_version",
         side_effect=AssetNotFoundError("not downloaded"),
     ):
         result = click_runner.invoke(main_app, ["bin", "set-default", "9.9.9"])
@@ -1114,7 +1114,7 @@ def test_bin_set_default_not_found():
 
 
 def test_bin_rm_success():
-    with patch("mvmctl.cli.asset.remove_version") as mock_rm:
+    with patch("mvmctl.cli.bin.remove_version") as mock_rm:
         result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0"])
     assert result.exit_code == 0
     assert "Removed" in result.output
@@ -1123,7 +1123,7 @@ def test_bin_rm_success():
 
 def test_bin_rm_not_found():
     with patch(
-        "mvmctl.cli.asset.remove_version",
+        "mvmctl.cli.bin.remove_version",
         side_effect=AssetNotFoundError("not found"),
     ):
         result = click_runner.invoke(main_app, ["bin", "rm", "9.9.9"])
@@ -1132,7 +1132,7 @@ def test_bin_rm_not_found():
 
 def test_bin_rm_proceeds_without_confirmation():
     """Test that bin rm proceeds without confirmation prompt."""
-    with patch("mvmctl.cli.asset.remove_version") as mock_rm:
+    with patch("mvmctl.cli.bin.remove_version") as mock_rm:
         result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0"])
     assert result.exit_code == 0
     mock_rm.assert_called_once_with("1.5.0")
@@ -1149,7 +1149,7 @@ def test_cache_clear_dirs_exist(tmp_path: Path):
     (tmp_path / "images").mkdir()
     (tmp_path / "bin" / "firecracker-v1.0.0").touch()
 
-    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert "Removed" in result.output
@@ -1159,7 +1159,7 @@ def test_cache_clear_dirs_exist(tmp_path: Path):
 
 
 def test_cache_clear_nothing_to_clear(tmp_path: Path):
-    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert "Nothing to clear" in result.output
@@ -1167,7 +1167,7 @@ def test_cache_clear_nothing_to_clear(tmp_path: Path):
 
 def test_cache_clear_partial_dirs(tmp_path: Path):
     (tmp_path / "bin").mkdir()
-    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert not (tmp_path / "bin").exists()
@@ -1176,7 +1176,7 @@ def test_cache_clear_partial_dirs(tmp_path: Path):
 def test_cache_clear_with_confirmation(tmp_path: Path):
     (tmp_path / "bin").mkdir()
     (tmp_path / "kernels").mkdir()
-    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear"], input="y\n")
     assert result.exit_code == 0
     assert not (tmp_path / "bin").exists()
@@ -1184,7 +1184,7 @@ def test_cache_clear_with_confirmation(tmp_path: Path):
 
 def test_cache_clear_abort_confirmation(tmp_path: Path):
     (tmp_path / "bin").mkdir()
-    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear"], input="n\n")
     assert result.exit_code != 0
     assert (tmp_path / "bin").exists()
@@ -1194,7 +1194,7 @@ def test_cache_clear_preserves_vms_dir(tmp_path: Path):
     (tmp_path / "bin").mkdir()
     (tmp_path / "vms").mkdir()
     (tmp_path / "vms" / "state.json").write_text("{}")
-    with patch("mvmctl.cli.asset.get_cache_dir", return_value=tmp_path):
+    with patch("mvmctl.cli.bin.get_cache_dir", return_value=tmp_path):
         result = click_runner.invoke(main_app, ["clear", "--force"])
     assert result.exit_code == 0
     assert (tmp_path / "vms").exists()
@@ -1228,8 +1228,8 @@ def test_image_set_default_not_found(tmp_path: Path, monkeypatch):
 
 def test_image_ls_remote(tmp_path: Path):
     with (
-        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
-        patch("mvmctl.cli.asset.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.bin.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--remote", "--images-dir", str(tmp_path)]
@@ -1262,7 +1262,7 @@ def test_kernel_set_default_not_found(tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 def test_bin_ls_default_limit():
-    from mvmctl.cli.asset import bin_app
+    from mvmctl.cli.bin import bin_app
 
     result = runner.invoke(bin_app, ["ls", "--help"])
     assert "5" in result.output
@@ -1275,8 +1275,8 @@ def test_kernel_ls_auto_creates_dir(tmp_path: Path):
     assert missing.exists()
 
 
-@patch("mvmctl.cli.asset.fetch_image")
-@patch("mvmctl.cli.asset.load_images_config")
+@patch("mvmctl.cli.bin.fetch_image")
+@patch("mvmctl.cli.bin.load_images_config")
 def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     """FIX-009: image fetch warns when image already exists."""
     from click.testing import CliRunner as _ClickRunner
@@ -1314,7 +1314,7 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
 
 
 def test_bin_rm_multiple_versions():
-    with patch("mvmctl.cli.asset.remove_version") as mock_rm:
+    with patch("mvmctl.cli.bin.remove_version") as mock_rm:
         result = click_runner.invoke(main_app, ["bin", "rm", "1.5.0", "1.6.0"])
     assert result.exit_code == 0
     assert mock_rm.call_count == 2
@@ -1362,7 +1362,7 @@ def test_kernel_rm_blocked_when_referenced_by_vm(
     mock_vm.config.kernel_path = kernel
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -1389,7 +1389,7 @@ def test_kernel_rm_with_force_removes_referenced(
     mock_vm.config.kernel_path = kernel
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -1423,7 +1423,7 @@ def test_image_rm_blocked_when_referenced_by_vm(
     mock_vm.config.rootfs_path = img_file
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -1451,7 +1451,7 @@ def test_image_rm_with_force_removes_referenced(
     mock_vm.config.rootfs_path = img_file
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -1532,7 +1532,7 @@ def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         }
     }
     (tmp_path / "metadata.json").write_text(json.dumps(meta))
-    with patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--images-dir", str(tmp_path / "images")]
         )
@@ -1654,7 +1654,7 @@ def test_image_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):
 
     with (
         patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
-        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
@@ -1694,7 +1694,7 @@ def test_image_ls_no_x_mark_for_existing_file(tmp_path: Path, mocker):
 
     with (
         patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
-        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
@@ -1975,7 +1975,7 @@ def test_image_ls_shows_size_column(tmp_path: Path, mocker):
 
     with (
         patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
-        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
@@ -2051,7 +2051,7 @@ def test_image_ls_size_various_units(tmp_path: Path, mocker):
 
     with (
         patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
-        patch("mvmctl.cli.asset.load_images_config", return_value=fake_images),
+        patch("mvmctl.cli.bin.load_images_config", return_value=fake_images),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
@@ -2183,7 +2183,7 @@ def test_image_ls_shows_default_prefix(tmp_path: Path, mocker):
 
     with (
         patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
-        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
@@ -2297,7 +2297,7 @@ def test_image_ls_no_def_column(tmp_path: Path, mocker):
 
     with (
         patch.dict(os.environ, {"MVM_CACHE_DIR": str(cache_dir)}),
-        patch("mvmctl.cli.asset.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
@@ -2365,7 +2365,7 @@ def test_kernel_rm_blocked_when_referenced_by_kernel_id(
     mock_vm.kernel_id = str(kernel)  # But kernel_id is set
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -2394,7 +2394,7 @@ def test_image_rm_blocked_when_referenced_by_image_id(
     mock_vm.image_id = str(img_file)  # But image_id is set
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -2422,7 +2422,7 @@ def test_kernel_rm_with_kernel_id_and_force(
     mock_vm.kernel_id = str(kernel)
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.asset.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,

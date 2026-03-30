@@ -63,9 +63,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "key": _LazyCommandSpec("mvmctl.cli.key", "app", "SSH key management"),
     "config": _LazyCommandSpec("mvmctl.cli.config", "app", "Configuration commands"),
     "init": _LazyCommandSpec("mvmctl.cli.init", "app", "Initialize mvm"),
-    "kernel": _LazyCommandSpec("mvmctl.cli.asset", "kernel_app", "Kernel management"),
-    "image": _LazyCommandSpec("mvmctl.cli.asset", "image_app", "Image management"),
-    "bin": _LazyCommandSpec("mvmctl.cli.asset", "bin_app", "Binary management"),
+    "kernel": _LazyCommandSpec("mvmctl.cli.bin", "kernel_app", "Kernel management"),
+    "image": _LazyCommandSpec("mvmctl.cli.bin", "image_app", "Image management"),
+    "bin": _LazyCommandSpec("mvmctl.cli.bin", "bin_app", "Binary management"),
     "cache": _LazyCommandSpec("mvmctl.cli.cache", "app", "Cache management"),
 }
 
@@ -275,7 +275,7 @@ def help_cmd(ctx: click.Context, args: tuple[str, ...]) -> None:
 @click.command(name="clear", help="Clear cached assets")
 @click.option("--force", "force", is_flag=True, help="Skip confirmation")
 def clear_cmd(force: bool) -> None:
-    from mvmctl.cli.asset import clear_assets
+    from mvmctl.cli.bin import clear_assets
 
     clear_assets(force=force)
 
