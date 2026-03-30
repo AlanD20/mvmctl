@@ -641,9 +641,6 @@ def ls_vms(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    if not vms:
-        print_info("No VMs found." + (" Use --all to include stopped VMs." if not all_vms else ""))
-
     rows = []
     for v in vms:
         vm_dir = get_vm_dir(v.id) if v.id else None
@@ -666,7 +663,7 @@ def ls_vms(
             ]
         )
     print_table(
-        title="Firecracker VMs",
+        title="",
         columns=["State", "ID", "Name", "IP", "Status", "PID", "API", "Created"],
         rows=rows,
     )
