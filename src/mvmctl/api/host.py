@@ -29,6 +29,7 @@ from mvmctl.core.host import (
 from mvmctl.core.host import (
     reset_host as _reset_host,
 )
+from mvmctl.core.image import clean_ready_pool as _clean_ready_pool
 from mvmctl.core.vm_manager import get_vm_manager
 from mvmctl.exceptions import HostError
 from mvmctl.utils.fs import get_cache_dir
@@ -44,6 +45,7 @@ __all__ = [
     "check_privileges_interactive",
     "check_required_binaries",
     "clean_host",
+    "clean_ready_pool",
     "default_cache_dir",
     "escalate_and_init_host",
     "get_host_state",
@@ -155,3 +157,15 @@ def prune_host(cache_dir: Path | None = None) -> list[str]:
     if cache_dir is None:
         cache_dir = get_cache_dir()
     return _prune_host(cache_dir)
+
+
+def clean_ready_pool() -> int:
+    """Remove all images from the tmpfs ready pool.
+
+    The ready pool holds decompressed VM images in tmpfs (RAM) for fast cloning.
+    This clears all cached images to free up memory.
+
+    Returns:
+        Number of files removed from the ready pool.
+    """
+    return _clean_ready_pool()

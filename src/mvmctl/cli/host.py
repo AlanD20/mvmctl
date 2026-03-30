@@ -10,6 +10,7 @@ from mvmctl.api.host import (
     check_kvm_access,
     check_required_binaries,
     clean_host,
+    clean_ready_pool,
     get_host_state,
     get_ip_forward_status,
     get_vm_manager,
@@ -297,3 +298,44 @@ def reset_cmd(
                 print_info(f"  {item}")
 
     print_success("Host reset successfully.")
+
+
+@app.command(name="clean-ready-pool")
+def clean_ready_pool_cmd(
+    force: bool = typer.Option(False, "--force", help="Skip confirmation"),
+) -> None:
+    """Clear the tmpfs ready pool to free RAM.
+
+    The ready pool holds decompressed VM images in tmpfs (RAM) for fast cloning.
+    This command removes all cached images to free up memory. Images will be
+    re-decompressed on next VM creation.
+
+    Examples:
+        mvm host clean-ready-pool
+        mvm host clean-ready-pool --force
+    """
+    from mvmctl.core.image import get_ready_pool_dir
+
+    ready_dir = get_ready_pool_dir()
+
+    if not ready_dir.exists() or not any(ready_dir.iterdir()):
+        print_info("Ready pool is already empty.")
+        return
+
+    if not force:
+        print_warning(
+            f"This will remove all cached images from {ready_dir} "
+            "to free up RAM. Images will be re-decompressed on next VM creation."
+        )
+        typer.confirm("Proceed with cleaning ready pool?", abort=True)
+
+    removed_count = clean_ready_pool()
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("host.clean_ready_pool", f"removed={removed_count}")
+
+    if removed_count > 0:
+        print_success(f"Ready pool cleaned: removed {removed_count} image(s).")
+    else:
+        print_info("Ready pool is empty.")

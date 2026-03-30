@@ -1060,3 +1060,123 @@ def import_image(
 
     else:
         raise ImageError(f"Unsupported import format: {spec.format}")
+
+
+def get_ready_pool_dir() -> Path:
+    """Get the tmpfs ready pool directory for fast clones.
+
+    Returns:
+        Path to the ready pool directory (typically /tmp/mvmctl/ready/)
+    """
+    ready_dir = Path(tempfile.gettempdir()) / "mvmctl" / "ready"
+    ready_dir.mkdir(parents=True, exist_ok=True)
+    return ready_dir
+
+
+def _get_ready_image_path(image_hash: str, fs_type: str) -> Path:
+    """Get path to ready image in tmpfs pool.
+
+    Args:
+        image_hash: The image hash (short or full) for naming
+        fs_type: Filesystem type (e.g., 'ext4', 'btrfs')
+
+    Returns:
+        Path to the ready pool image file
+    """
+    return get_ready_pool_dir() / f"{image_hash}.{fs_type}"
+
+
+def ensure_image_in_ready_pool(
+    compressed_path: Path,
+    image_hash: str,
+    fs_type: str = "ext4",
+) -> Path:
+    """Ensure decompressed image exists in ready pool, creating if needed.
+
+    This function maintains a tmpfs-based cache of decompressed images
+    for fast cloning. First call decompresses to RAM, subsequent calls
+    return the cached path immediately.
+
+    Args:
+        compressed_path: Path to the compressed .zst image file
+        image_hash: Hash identifier for the image (used for naming)
+        fs_type: Filesystem type extension (default: 'ext4')
+
+    Returns:
+        Path to the ready pool image (in tmpfs/RAM)
+
+    Raises:
+        ImageError: If decompression fails
+    """
+    ready_path = _get_ready_image_path(image_hash, fs_type)
+
+    if ready_path.exists():
+        logger.debug("Found image in ready pool: %s", ready_path)
+        return ready_path
+
+    # Decompress to ready pool
+    logger.info("Decompressing to ready pool: %s", ready_path.name)
+    decompress_image(compressed_path, ready_path)
+
+    return ready_path
+
+
+def copy_from_ready_pool(
+    image_hash: str,
+    fs_type: str,
+    output_path: Path,
+) -> None:
+    """Fast copy from tmpfs ready pool to VM directory.
+
+    Uses reflink (copy-on-write) if available (btrfs/xfs), otherwise
+    falls back to regular copy. Since the ready pool is in tmpfs (RAM),
+    the copy is fast regardless of the underlying filesystem.
+
+    Args:
+        image_hash: Hash identifier for the image
+        fs_type: Filesystem type extension
+        output_path: Destination path for the VM rootfs
+
+    Raises:
+        ImageError: If the image is not found in the ready pool
+    """
+    ready_path = _get_ready_image_path(image_hash, fs_type)
+
+    if not ready_path.exists():
+        raise ImageError(f"Image not in ready pool: {image_hash}")
+
+    # Use reflink if available (btrfs/xfs), fallback to copy
+    try:
+        # Try reflink first (instant copy on supported filesystems)
+        subprocess.run(
+            ["cp", "--reflink=auto", str(ready_path), str(output_path)],
+            check=True,
+            capture_output=True,
+        )
+        logger.info("Fast-copied from ready pool: %s", output_path.name)
+    except subprocess.CalledProcessError:
+        # Fallback to regular copy
+        shutil.copy2(ready_path, output_path)
+        logger.info("Copied from ready pool: %s", output_path.name)
+
+
+def clean_ready_pool() -> int:
+    """Remove all images from the ready pool.
+
+    Returns:
+        Number of files removed
+    """
+    ready_dir = get_ready_pool_dir()
+    removed_count = 0
+
+    if ready_dir.exists():
+        for item in ready_dir.iterdir():
+            try:
+                item.unlink()
+                removed_count += 1
+                logger.debug("Removed from ready pool: %s", item.name)
+            except OSError as e:
+                logger.warning("Failed to remove %s: %s", item.name, e)
+
+    logger.info("Cleaned ready pool: removed %d file(s)", removed_count)
+    return removed_count

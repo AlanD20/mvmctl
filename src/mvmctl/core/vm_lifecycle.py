@@ -52,7 +52,7 @@ from mvmctl.core.firewall import (
     remove_nocloud_input_rule,
     setup_nocloud_input_chain,
 )
-from mvmctl.core.image import decompress_image
+from mvmctl.core.image import copy_from_ready_pool, ensure_image_in_ready_pool
 from mvmctl.core.network import (
     add_iptables_forward_rules,
     bridge_exists,
@@ -701,10 +701,16 @@ def create_vm(
         # Copy image to VM directory (VM-local rootfs)
         # Handle compressed images (.zst suffix)
         if resolved_image_path.suffix == ".zst":
-            # Image is compressed, decompress it
-            rootfs_ext = resolved_image_path.suffixes[0]  # Get the extension before .zst
+            rootfs_ext = resolved_image_path.suffixes[0]
             vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
-            decompress_image(resolved_image_path, vm_rootfs_path)
+            fs_type = rootfs_ext.lstrip(".")
+
+            # Get image hash from the path
+            image_hash = resolved_image_path.stem  # e.g., "abc123" from "abc123.ext4.zst"
+
+            # Ensure image is in ready pool (tmpfs), then fast-copy
+            ensure_image_in_ready_pool(resolved_image_path, image_hash, fs_type)
+            copy_from_ready_pool(image_hash, fs_type, vm_rootfs_path)
         else:
             rootfs_ext = resolved_image_path.suffix
             vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
