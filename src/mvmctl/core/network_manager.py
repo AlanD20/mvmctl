@@ -462,7 +462,32 @@ def ensure_default_network() -> NetworkConfig:
         # Check for our custom chains by trying to set them up (idempotent)
         chains_missing = not setup_mvm_chains()
 
-        if bridge_missing or chains_missing:
+        # Check if NAT rules are missing (when NAT is enabled)
+        nat_missing = False
+        if config.nat_enabled:
+            from mvmctl.constants import MVM_POSTROUTING_CHAIN
+            from mvmctl.core.network import _iptables_rule_exists, get_default_interface
+
+            try:
+                internet_iface = get_default_interface()
+                masquerade_check = [
+                    "iptables",
+                    "-t",
+                    "nat",
+                    "-C",
+                    MVM_POSTROUTING_CHAIN,
+                    "-s",
+                    config.cidr,
+                    "-o",
+                    internet_iface,
+                    "-j",
+                    "MASQUERADE",
+                ]
+                nat_missing = not _iptables_rule_exists(masquerade_check)
+            except Exception:
+                nat_missing = True
+
+        if bridge_missing or chains_missing or nat_missing:
             # Recreate from stored config
             gateway_cidr = f"{config.gateway}/{_prefix_len(config.cidr)}"
             try:
