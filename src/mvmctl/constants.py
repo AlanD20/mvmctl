@@ -328,16 +328,20 @@ DEFAULT_CLOUD_INIT_SEED_PATH: Final[str] = _require_str(("vm", "cloud_init", "se
 DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS: Final[str] = _require_str(
     ("vm", "cloud_init", "kernel_cmdline_ds")
 )
-DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD: Final[str] = "ds=nocloud"
+DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD: Final[str] = _require_str(
+    ("vm", "cloud_init", "kernel_cmdline_nocloud")
+)
 DEFAULT_CLOUD_INIT_FINAL_MESSAGE: Final[str] = _require_str(("vm", "cloud_init", "final_message"))
 DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD: Final[str] = _require_str(
     ("vm", "cloud_init", "disable_snapd_cmd")
 )
 DEFAULT_CLOUD_INIT_DIRNAME: Final[str] = _require_str(("vm", "cloud_init", "dirname"))
-DEFAULT_CLOUD_INIT_ISO_NAME: Final[str] = "cloud-init.iso"
-DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL: Final[str] = "cidata"
-DEFAULT_CLOUD_INIT_DRIVE_ID: Final[str] = "cloud-init"
-REQUIRED_ISO_TOOL: Final[str] = "cloud-localds"
+DEFAULT_CLOUD_INIT_ISO_NAME: Final[str] = _require_str(("vm", "cloud_init", "iso_name"))
+DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL: Final[str] = _require_str(
+    ("vm", "cloud_init", "iso_volume_label")
+)
+DEFAULT_CLOUD_INIT_DRIVE_ID: Final[str] = _require_str(("vm", "cloud_init", "drive_id"))
+REQUIRED_ISO_TOOL: Final[str] = _require_str(("vm", "cloud_init", "required_iso_tool"))
 
 # Cloud-init detection timeouts
 

@@ -37,6 +37,11 @@ vm:
     final_message: mvm cloud-init done
     disable_snapd_cmd: systemctl disable --now snapd.socket 2>/dev/null || true
     dirname: cloud-init
+    kernel_cmdline_nocloud: "ds=nocloud"
+    iso_name: "cloud-init.iso"
+    iso_volume_label: "cidata"
+    drive_id: "cloud-init"
+    required_iso_tool: "cloud-localds"
   boot:
     console: console=ttyS0
     reboot: reboot=k
