@@ -11,7 +11,6 @@ from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merg
 from mvmctl.api.vms import (
     cleanup_vms,
     create_vm,
-    get_logs,
     get_vm_status_with_exit_code,
     list_vms,
     load_snapshot,
@@ -26,9 +25,6 @@ from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BIN,
     DEFAULT_NETWORK_NAME,
     DEFAULT_SNAPSHOT_RESUME,
-    DEFAULT_VM_LOG_FOLLOW,
-    DEFAULT_VM_LOG_LINES,
-    DEFAULT_VM_LOG_TYPE,
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode, VMInstance, VMState
@@ -736,35 +732,6 @@ def ssh(
         effective_user = user if user is not None else _get_vm_defaults().ssh_user
         exit_code = ssh_vm(name=name, user=effective_user, key=resolved_key, cmd=cmd)
         raise typer.Exit(code=exit_code)
-    except MVMError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-
-
-@app.command()
-def logs(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    follow: bool = typer.Option(DEFAULT_VM_LOG_FOLLOW, "--follow", "-f", help="Follow log output"),
-    lines: int = typer.Option(DEFAULT_VM_LOG_LINES, "--lines", help="Number of lines to show"),
-    log_type: str = typer.Option(
-        DEFAULT_VM_LOG_TYPE,
-        "--type",
-        help="Log type: boot (serial console) or os (firecracker process log)",
-    ),
-) -> None:
-    """View VM logs.
-
-    Use --type boot for serial console output (what you see during boot).
-    Use --type os for the Firecracker process log (hypervisor events).
-    """
-    try:
-        from mvmctl.utils.validation import validate_entity_name
-
-        validate_entity_name(name, "VM")
-        log_lines = get_logs(name=name, log_type=log_type, lines=lines, follow=follow)
-        for line in log_lines:
-            print(line, end="" if line.endswith("\n") else "\n")
-        raise typer.Exit(code=0)
     except MVMError as e:
         print_error(str(e))
         raise typer.Exit(code=1)

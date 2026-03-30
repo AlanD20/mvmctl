@@ -201,18 +201,6 @@ def test_ssh_failure(mocker: MockerFixture):
     assert result.exit_code == 1
 
 
-def test_logs_success(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.get_logs", return_value=["line 1\n", "line 2\n"])
-    result = runner.invoke(app, ["logs", "--name", "myvm"])
-    assert result.exit_code == 0
-
-
-def test_logs_failure(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.get_logs", side_effect=MVMError("Log error"))
-    result = runner.invoke(app, ["logs", "--name", "badvm"])
-    assert result.exit_code == 1
-
-
 def test_snapshot_success(mocker: MockerFixture):
     mocker.patch("mvmctl.cli.vm.snapshot_vm")
     result = runner.invoke(

@@ -11,6 +11,8 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from mvmctl.cli.vm import app as vm_app
+from mvmctl.cli.logs import app as logs_app
+from mvmctl.main import app as main_app
 from mvmctl.models.vm import VMInstance, VMState
 
 runner = CliRunner()
@@ -157,7 +159,7 @@ class TestVMLifecycleWorkflow:
     @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.cli.vm.get_logs")
+    @patch("mvmctl.cli.logs.get_logs")
     def test_create_and_check_logs(
         self, mock_logs, mock_create, mock_resolve_image, mock_check_priv
     ):
@@ -172,7 +174,7 @@ class TestVMLifecycleWorkflow:
         result = runner.invoke(vm_app, ["create", "--name", "logs-vm", "--image", "abc123"])
         assert result.exit_code == 0
 
-        result = runner.invoke(vm_app, ["logs", "--name", "logs-vm", "--type", "boot"])
+        result = runner.invoke(logs_app, ["--name", "logs-vm", "--type", "boot"])
         assert result.exit_code == 0
         assert "Boot log line 1" in result.output
         mock_logs.assert_called_once()
