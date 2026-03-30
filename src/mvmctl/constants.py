@@ -274,6 +274,15 @@ MVM_FORWARD_CHAIN: Final[str] = f"{CLI_NAME.upper()}-FORWARD"
 MVM_POSTROUTING_CHAIN: Final[str] = f"{CLI_NAME.upper()}-POSTROUTING"
 MVM_NO_CLOUD_INPUT_CHAIN: Final[str] = "MVM-NOCLOUD-INPUT"
 
+# Centralized registry of all iptables chains created by mvmctl
+# Each tuple is (chain_name, table_name)
+# Used for cleanup, validation, and bulk operations on MVM network rules
+IPTABLES_CHAINS: Final[list[tuple[str, str]]] = [
+    (MVM_FORWARD_CHAIN, "filter"),
+    (MVM_POSTROUTING_CHAIN, "nat"),
+    (MVM_NO_CLOUD_INPUT_CHAIN, "filter"),
+]
+
 PROJECT_GROUP: Final[str] = CLI_NAME
 SUDOERS_DROP_IN_PATH: Final[str] = _require_str(
     ("host", "system_files", "sudoers_drop_in_template")

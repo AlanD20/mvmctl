@@ -1585,10 +1585,11 @@ class TestHostHelpers:
 
 class TestCleanHost:
     @patch(
-        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
+            "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
     @patch("mvmctl.core.network.list_bridges", return_value=[])
@@ -1610,10 +1611,11 @@ class TestCleanHost:
         assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
+            "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
     @patch("mvmctl.core.network.list_bridges", return_value=[])
@@ -1638,7 +1640,7 @@ class TestCleanHost:
         mock_list.return_value = [net]
 
         summary = clean_host(MagicMock())
-        assert len(summary) == 3
+        assert len(summary) == 4
         assert any("Removed network 'default'" in s for s in summary)
         assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
 
@@ -1647,10 +1649,11 @@ class TestCleanHost:
         side_effect=NetworkError("bridge teardown failed"),
     )
     @patch(
-        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: chain MVM-FORWARD already deleted, skipping",
             "MVM Networking: chain MVM-POSTROUTING already deleted, skipping",
+            "MVM Networking: chain MVM-NOCLOUD-INPUT already deleted, skipping",
         ],
     )
     @patch("mvmctl.core.network.list_bridges", return_value=[])
@@ -1678,10 +1681,11 @@ class TestCleanHost:
         assert any("already deleted, skipping" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
+            "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
     @patch("mvmctl.core.network.list_bridges", return_value=[])
@@ -1706,10 +1710,11 @@ class TestCleanHost:
         assert any("MVM Networking: deleted chain" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
         return_value=[
             "Warning: MVM Networking: failed to delete chain MVM-FORWARD",
             "Warning: MVM Networking: failed to delete chain MVM-POSTROUTING",
+            "Warning: MVM Networking: failed to delete chain MVM-NOCLOUD-INPUT",
         ],
     )
     @patch("mvmctl.core.network.list_bridges", return_value=[])
@@ -1741,10 +1746,11 @@ class TestCleanHost:
         assert any("failed to delete chain MVM-FORWARD" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
+            "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
     @patch("mvmctl.core.network.list_bridges", return_value=[])
@@ -1974,10 +1980,11 @@ class TestCleanHostErrorPaths:
     """Error-path tests for clean_host."""
 
     @patch(
-        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: chain MVM-FORWARD already deleted, skipping",
             "MVM Networking: chain MVM-POSTROUTING already deleted, skipping",
+            "MVM Networking: chain MVM-NOCLOUD-INPUT already deleted, skipping",
         ],
     )
     @patch("mvmctl.core.network.list_bridges", return_value=[])
@@ -1996,15 +2003,16 @@ class TestCleanHostErrorPaths:
     ):
         """clean_host removes MVM chains even when no bridges/networks exist."""
         summary = clean_host(MagicMock())
-        assert len(summary) == 2
+        assert len(summary) == 3
         assert any("already deleted, skipping" in s for s in summary)
         mock_list.assert_called_once()
 
     @patch(
-        "mvmctl.core.network.teardown_mvm_chains_with_status",
+        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
+            "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
     @patch("mvmctl.core.network.list_bridges", return_value=[])
@@ -2030,7 +2038,7 @@ class TestCleanHostErrorPaths:
         mock_remove.side_effect = NetworkError("ip link delete failed")
 
         summary = clean_host(MagicMock())
-        assert len(summary) == 3
+        assert len(summary) == 4
         assert any("Warning" in s for s in summary)
         assert any("stale-net" in s for s in summary)
         assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)

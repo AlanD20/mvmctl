@@ -86,8 +86,8 @@ def clean_host(cache_dir: Path) -> list[str]:
         delete_tap,
         list_bridges,
         list_tuntap_devices,
+        teardown_all_mvm_chains_with_status,
         teardown_bridge,
-        teardown_mvm_chains_with_status,
         teardown_nat,
     )
     from mvmctl.core.network_manager import list_networks, remove_network
@@ -161,7 +161,7 @@ def clean_host(cache_dir: Path) -> list[str]:
                 f"(already clean or insufficient privileges): {e}"
             )
 
-    summary.extend(teardown_mvm_chains_with_status())
+    summary.extend(teardown_all_mvm_chains_with_status())
 
     if not summary:
         summary.append("Warning: skipped host networking cleanup (already clean)")

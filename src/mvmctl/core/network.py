@@ -18,7 +18,9 @@ from mvmctl.constants import (
     DEFAULT_GUEST_MAC_PREFIX,
     DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_GATEWAY,
+    IPTABLES_CHAINS,
     MVM_FORWARD_CHAIN,
+    MVM_NO_CLOUD_INPUT_CHAIN,
     MVM_POSTROUTING_CHAIN,
 )
 from mvmctl.exceptions import NetworkError
@@ -513,6 +515,143 @@ def teardown_mvm_chains_with_status() -> list[str]:
             status.append(f"Warning: MVM Networking: failed to delete chain {postrouting_chain}")
     else:
         status.append(f"MVM Networking: chain {postrouting_chain} already deleted, skipping")
+
+    return status
+
+
+def teardown_all_mvm_chains() -> None:
+    """Remove all MVM iptables chains and their jumps from built-in chains.
+
+    Iterates over IPTABLES_CHAINS from constants and removes each chain
+    along with its jump rule from the appropriate built-in chain.
+
+    Safe to call even if chains don't exist.
+    Raises NetworkError on failure.
+    """
+    for chain_name, table in IPTABLES_CHAINS:
+        # Determine the built-in chain to remove jump from
+        if chain_name == MVM_FORWARD_CHAIN:
+            built_in = "FORWARD"
+        elif chain_name == MVM_POSTROUTING_CHAIN:
+            built_in = "POSTROUTING"
+        elif chain_name == MVM_NO_CLOUD_INPUT_CHAIN:
+            built_in = "INPUT"
+        else:
+            continue
+
+        # Check if chain exists
+        if not chain_exists(chain_name, table):
+            continue
+
+        # Remove jump rule (ignore errors - may not exist)
+        if table == "nat":
+            subprocess.run(
+                _privileged_cmd(["iptables", "-t", "nat", "-D", built_in, "-j", chain_name]),
+                capture_output=True,
+                check=False,
+            )
+        else:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-D", built_in, "-j", chain_name]),
+                capture_output=True,
+                check=False,
+            )
+
+        # Flush and delete the chain
+        try:
+            if table == "nat":
+                subprocess.run(
+                    _privileged_cmd(["iptables", "-t", "nat", "-F", chain_name]),
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    _privileged_cmd(["iptables", "-t", "nat", "-X", chain_name]),
+                    check=True,
+                    capture_output=True,
+                )
+            else:
+                subprocess.run(
+                    _privileged_cmd(["iptables", "-F", chain_name]),
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    _privileged_cmd(["iptables", "-X", chain_name]),
+                    check=True,
+                    capture_output=True,
+                )
+            logger.debug("Removed iptables chain %s from %s table", chain_name, table)
+        except subprocess.CalledProcessError as e:
+            raise NetworkError(f"Failed to remove {chain_name} chain from {table} table") from e
+
+    logger.info("All MVM iptables chains removed")
+
+
+def teardown_all_mvm_chains_with_status() -> list[str]:
+    """Remove all MVM iptables chains with status reporting.
+
+    Returns:
+        List of status strings describing what was cleaned up.
+    """
+    status: list[str] = []
+
+    for chain_name, table in IPTABLES_CHAINS:
+        # Determine the built-in chain to remove jump from
+        if chain_name == MVM_FORWARD_CHAIN:
+            built_in = "FORWARD"
+        elif chain_name == MVM_POSTROUTING_CHAIN:
+            built_in = "POSTROUTING"
+        elif chain_name == MVM_NO_CLOUD_INPUT_CHAIN:
+            built_in = "INPUT"
+        else:
+            continue
+
+        if not chain_exists(chain_name, table):
+            status.append(f"MVM Networking: chain {chain_name} already deleted, skipping")
+            continue
+
+        # Remove jump rule (ignore errors)
+        if table == "nat":
+            subprocess.run(
+                _privileged_cmd(["iptables", "-t", "nat", "-D", built_in, "-j", chain_name]),
+                capture_output=True,
+                check=False,
+            )
+        else:
+            subprocess.run(
+                _privileged_cmd(["iptables", "-D", built_in, "-j", chain_name]),
+                capture_output=True,
+                check=False,
+            )
+
+        # Flush and delete the chain
+        try:
+            if table == "nat":
+                subprocess.run(
+                    _privileged_cmd(["iptables", "-t", "nat", "-F", chain_name]),
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    _privileged_cmd(["iptables", "-t", "nat", "-X", chain_name]),
+                    check=True,
+                    capture_output=True,
+                )
+            else:
+                subprocess.run(
+                    _privileged_cmd(["iptables", "-F", chain_name]),
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    _privileged_cmd(["iptables", "-X", chain_name]),
+                    check=True,
+                    capture_output=True,
+                )
+            status.append(f"MVM Networking: deleted chain {chain_name}")
+        except subprocess.CalledProcessError:
+            status.append(f"Warning: MVM Networking: failed to delete chain {chain_name}")
 
     return status
 
