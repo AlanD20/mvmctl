@@ -310,16 +310,12 @@ def chain_exists(chain: str, table: str = "filter") -> bool:
 def setup_mvm_chains() -> bool:
     """Create MVM iptables chains and link them to built-in chains.
 
-    Creates:
-    - MVM-FORWARD chain in filter table
-    - MVM-POSTROUTING chain in nat table
-    - Jumps from built-in chains to MVM chains
+    Creates all chains defined in IPTABLES_CHAINS constant and links
+    them to their respective built-in chains.
 
     Idempotent: checks if chains exist before creating.
     Raises NetworkError on failure.
     """
-    forward_chain = MVM_FORWARD_CHAIN
-    postrouting_chain = MVM_POSTROUTING_CHAIN
     had_existing_chains = False
 
     def _create_chain_if_missing(chain_name: str, table: str | None = None) -> bool:
@@ -348,47 +344,29 @@ def setup_mvm_chains() -> bool:
                 return False
             raise NetworkError(f"Failed to create {chain_name} chain") from e
 
-    # Create MVM-FORWARD chain in filter table
-    _create_chain_if_missing(forward_chain)
+    for chain_name, table, built_in in IPTABLES_CHAINS:
+        _create_chain_if_missing(chain_name, table)
 
-    # Create MVM-POSTROUTING chain in nat table
-    _create_chain_if_missing(postrouting_chain, "nat")
-
-    subprocess.run(
-        _privileged_cmd(["iptables", "-D", "FORWARD", "-j", forward_chain]),
-        capture_output=True,
-        check=False,
-    )
-    jump_rule = ["iptables", "-C", "FORWARD", "-j", forward_chain]
-    if not _iptables_rule_exists(jump_rule):
-        try:
+    for chain_name, table, built_in in IPTABLES_CHAINS:
+        if built_in:
             subprocess.run(
-                _privileged_cmd(["iptables", "-I", "FORWARD", "1", "-j", forward_chain]),
-                check=True,
+                _privileged_cmd(["iptables", "-t", table, "-D", built_in, "-j", chain_name]),
                 capture_output=True,
+                check=False,
             )
-            logger.debug("Inserted high-priority jump from FORWARD to %s", forward_chain)
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to add jump to {forward_chain}") from e
-
-    subprocess.run(
-        _privileged_cmd(["iptables", "-t", "nat", "-D", "POSTROUTING", "-j", postrouting_chain]),
-        capture_output=True,
-        check=False,
-    )
-    jump_rule_nat = ["iptables", "-t", "nat", "-C", "POSTROUTING", "-j", postrouting_chain]
-    if not _iptables_rule_exists(jump_rule_nat):
-        try:
-            subprocess.run(
-                _privileged_cmd(
-                    ["iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-j", postrouting_chain]
-                ),
-                check=True,
-                capture_output=True,
-            )
-            logger.debug("Inserted high-priority jump from POSTROUTING to %s", postrouting_chain)
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to add jump to {postrouting_chain}") from e
+            jump_rule = ["iptables", "-t", table, "-C", built_in, "-j", chain_name]
+            if not _iptables_rule_exists(jump_rule):
+                try:
+                    subprocess.run(
+                        _privileged_cmd(
+                            ["iptables", "-t", table, "-I", built_in, "1", "-j", chain_name]
+                        ),
+                        check=True,
+                        capture_output=True,
+                    )
+                    logger.debug("Inserted high-priority jump from %s to %s", built_in, chain_name)
+                except subprocess.CalledProcessError as e:
+                    raise NetworkError(f"Failed to add jump from {built_in} to {chain_name}") from e
 
     logger.info("MVM iptables chains configured")
     return had_existing_chains
