@@ -202,7 +202,7 @@ src/mvmctl/core/
 **Asset metadata** (`$MVM_CACHE_DIR/metadata.json`):
 ```json
 {
-  "images":  { "<full-hash>": { "yaml_id": "ubuntu-24.04", "filename": "...", "is_default": 0|1, ... } },
+  "images":  { "<full-hash>": { "internal_id": "ubuntu-24.04", "filename": "...", "is_default": 0|1, ... } },
   "kernels": { "<full-hash>": { "filename": "vmlinux", "version": "6.1", "is_default": 0|1, ... } },
   "binaries": {
     "firecracker": { "binary_name": "firecracker", "binary_path": ".../firecracker-v1.15.0", "full_version": "v1.15.0", "ci_version": "v1.15", "package_version": "1.15.0", "default_binary_path": ".../firecracker", "is_default": 0|1, ... },
@@ -211,7 +211,7 @@ src/mvmctl/core/
 }
 ```
 - Use `find_images_by_short_id(cache_dir, "abc123")` for 6-char prefix lookup
-- Images downloaded via `mvm image fetch` store `yaml_id` to link back to images.yaml
+- Images downloaded via `mvm image fetch` store `internal_id` to link back to images.yaml
 - Exactly one entry per section should carry `is_default: 1` when a default is set
 
 **Config** (`$MVM_CONFIG_DIR/config.json`):

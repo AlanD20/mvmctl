@@ -233,7 +233,7 @@ Single file exports three separate `typer.Typer()` instances:
 | App | Attribute | Commands |
 |-----|-----------|----------|
 | `kernel_app` | `kernel_ls`, `kernel_fetch`, `kernel_set_default`, `kernel_rm` | `--type firecracker\|official`, `--name`, `--clean-build` for fetch |
-| `image_app` | `image_ls`, `image_fetch`, `image_set_default`, `image_rm`, `image_import` | Hash-based ID; `_find_meta_for_yaml_id()` for YAML lookup |
+| `image_app` | `image_ls`, `image_fetch`, `image_set_default`, `image_rm`, `image_import` | Hash-based ID; `_find_meta_for_internal_id()` for YAML lookup |
 | `bin_app` | `bin_ls`, `bin_fetch`, `bin_set_default`, `bin_rm` | SHA256 verified against GitHub releases |
 
 **Shared function:** `clear_assets()` — removes all cached `bin/`, `kernels/`, `images/` dirs.

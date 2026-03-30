@@ -662,7 +662,7 @@ def image_ls(
         return
 
     default_img = _get_default_image()
-    yaml_ids = {img.id for img in images}
+    internal_ids = {img.id for img in images}
 
     _all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
 
@@ -691,7 +691,7 @@ def image_ls(
                     }
                 )
         for meta_id, meta in _all_meta.items():
-            if str(meta.get("internal_id", meta_id)) in yaml_ids:
+            if str(meta.get("internal_id", meta_id)) in internal_ids:
                 continue
             display_id = meta_id[:6] if len(meta_id) >= 6 else meta_id
             result.append(
@@ -749,7 +749,7 @@ def image_ls(
         rows_local.append([display_id, img.name, fs_type, added, size_str])
 
     for meta_id, meta in _all_meta.items():
-        if str(meta.get("internal_id", meta_id)) in yaml_ids:
+        if str(meta.get("internal_id", meta_id)) in internal_ids:
             continue
         found_path = next(
             (
