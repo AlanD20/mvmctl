@@ -711,80 +711,12 @@ Look for cloud-init status messages like `Cloud-init v. X.X.X running modules...
 
 ## Contributing
 
-Contributions are welcome — bug reports, feature requests, and pull requests.
-
-### Development setup
-
-```bash
-git clone https://github.com/AlanD20/mvmctl
-cd mvmctl
-uv sync --group dev
-```
-
-### Working with libguestfs (direct cloud-init mode)
-
-If you're developing or testing the **direct cloud-init injection** feature (`--cloud-init-mode direct`),
-you need the `guestfs` Python bindings available in your uv virtual environment.
-Since `guestfs` is not on PyPI and must come from your system package manager, use the
-Taskfile helper to symlink the system bindings into the uv venv:
-
-**1. Install system libguestfs packages:**
-
-```bash
-# Debian/Ubuntu
-sudo apt-get install libguestfs0 libguestfs-tools python3-libguestfs supermin
-
-# Arch Linux
-sudo pacman -S libguestfs python-libguestfs supermin
-```
-
-**2. Link guestfs into the uv venv:**
-
-```bash
-task link-guestfs
-```
-
-This creates symlinks from the system Python site-packages into the uv virtual
-environment, making `import guestfs` work under `uv run`.
-
-**3. Verify the link:**
-
-```bash
-task test-guestfs
-# ✅ libguestfs is active in .venv
-```
-
-**4. Unlink when done (optional):**
-
-```bash
-task unlink-guestfs
-```
-
-> **Note:** This linking approach is only needed for local development. When building
-> a standalone binary with Nuitka, use `--include-package=guestfs` to bundle the
-> system bindings directly (see "Build with Guestfs Support" below).
-
-### Running tests and linting
-
-```bash
-uv run pytest tests/ -x -q         # Tests (stops at first failure)
-uv run ruff check src/              # Linter
-uv run ruff format --check src/     # Format check
-uv run mypy src/                    # Type checker (strict mode)
-```
-
-All four commands must pass before opening a PR — they are enforced by CI.
-
-### Guidelines
-
-- **Tests must not require root, KVM, or a real network.** Mock all subprocess calls.
-- **Coverage gate:** 80% branch coverage minimum. Dropping coverage will fail CI.
-- **Architecture layers:** `cli/` → `api/` → `core/` — no skipping layers. See [`AGENTS.md`](AGENTS.md) for the full architecture reference.
-- **No hardcoded defaults** — use `FALLBACK_*` constants in `constants.py`.
-- **Strict mypy** — no `type: ignore` suppressions.
-- One feature or fix per PR; write a clear description of *why*, not just *what*.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
+Contributions are welcome! See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for the full guide on:
+- Development setup
+- Running tests and linting
+- Adding new commands and images
+- Build system and version bumping
+- Development guidelines
 
 ---
 

@@ -163,6 +163,15 @@ def test_something_fails_gracefully() -> None:
 
 Use `pytest.fixture` for shared setup. Keep unit tests fast; avoid `sleep()` or network calls.
 
+## Development Guidelines
+
+- **Tests must not require root, KVM, or a real network.** Mock all subprocess calls.
+- **Coverage gate:** 80% branch coverage minimum. Dropping coverage will fail CI.
+- **Architecture layers:** `cli/` → `api/` → `core/` — no skipping layers. See [`AGENTS.md`](AGENTS.md) for the full architecture reference.
+- **No hardcoded defaults** — use `FALLBACK_*` constants in `constants.py`.
+- **Strict mypy** — no `type: ignore` suppressions.
+- One feature or fix per PR; write a clear description of *why*, not just *what*.
+
 ## Commit Conventions
 
 This project follows [Conventional Commits](https://www.conventionalcommits.org/):
@@ -220,6 +229,49 @@ The project name is defined once in `pyproject.toml` under `[project] name`. Cha
 - The network device prefixes (`mvm-br0`, `fc-<name>-0`)
 
 To rename the project, update `pyproject.toml` and re-run the PyInstaller command with `--name <new-name>`. No grep-and-replace needed.
+
+### Working with libguestfs (direct cloud-init mode)
+
+If you're developing or testing the **direct cloud-init injection** feature (`--cloud-init-mode direct`),
+you need the `guestfs` Python bindings available in your uv virtual environment.
+Since `guestfs` is not on PyPI and must come from your system package manager, use the
+Taskfile helper to symlink the system bindings into the uv venv:
+
+**1. Install system libguestfs packages:**
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install libguestfs0 libguestfs-tools python3-libguestfs supermin
+
+# Arch Linux
+sudo pacman -S libguestfs python-libguestfs supermin
+```
+
+**2. Link guestfs into the uv venv:**
+
+```bash
+task link-guestfs
+```
+
+This creates symlinks from the system Python site-packages into the uv virtual
+environment, making `import guestfs` work under `uv run`.
+
+**3. Verify the link:**
+
+```bash
+task test-guestfs
+# ✅ libguestfs is active in .venv
+```
+
+**4. Unlink when done (optional):**
+
+```bash
+task unlink-guestfs
+```
+
+> **Note:** This linking approach is only needed for local development. When building
+> a standalone binary with Nuitka, use `--include-package=guestfs` to bundle the
+> system bindings directly (see "Build with Guestfs Support" below).
 
 ### Building the Standalone Binary
 
