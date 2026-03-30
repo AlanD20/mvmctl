@@ -477,14 +477,12 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
 
     vm_dir = get_vm_dir_by_hash(vm.id)
 
-    # Resolve rootfs path from multiple sources (in priority order)
     rootfs_path, rootfs_source = _resolve_rootfs_path(vm, vm_dir)
 
     config_path = vm_dir / "firecracker.json"
 
     info: dict[str, Any] = {
         "id": vm.id,
-        "short_id": vm.id[:6] if vm.id else "-",
         "name": vm.name,
         "status": vm.status.value,
         "created_at": vm.created_at.isoformat() if vm.created_at else None,
@@ -493,6 +491,9 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
         "mac": vm.mac,
         "network_name": vm.network_name,
         "tap_device": vm.tap_device,
+        "cloud_init_mode": vm.cloud_init_mode.value,
+        "image_id": vm.image_id,
+        "kernel_id": vm.kernel_id,
         "paths": {
             "vm_dir": str(vm_dir),
             "rootfs": str(rootfs_path) if rootfs_path else None,
@@ -506,7 +507,6 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
         },
     }
 
-    # Add cloud-init info if available
     if vm.nocloud_net_port:
         info["nocloud_net"] = {
             "port": vm.nocloud_net_port,

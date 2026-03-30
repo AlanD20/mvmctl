@@ -800,29 +800,85 @@ def inspect(
 
 
 def _print_vm_details(info: dict[str, Any]) -> None:
-    """Print formatted VM details."""
+    from datetime import datetime
+
+    from mvmctl.api.metadata import find_images_by_short_id, find_kernels_by_short_id
+    from mvmctl.utils.fs import get_cache_dir
+
+    created_at = info.get("created_at")
+    if created_at:
+        try:
+            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            created_str = dt.strftime("%Y/%m/%d %H:%M:%S")
+        except (ValueError, AttributeError):
+            created_str = str(created_at)
+    else:
+        created_str = "-"
+
+    disk_size_str = "-"
+    rootfs_path = info.get("paths", {}).get("rootfs")
+    if rootfs_path:
+        try:
+            rootfs_size = Path(rootfs_path).stat().st_size
+            disk_size_gb = rootfs_size / (1024**3)
+            disk_size_str = f"{disk_size_gb:.1f}G"
+        except (OSError, ValueError):
+            pass
+
+    cloud_init_mode = info.get("cloud_init_mode", "auto").lower()
+
+    rows = [
+        [info.get("name", "-"), "", ""],
+        ["Full ID", info.get("id", "-"), ""],
+        ["Status", info.get("status", "-"), ""],
+        ["Created", created_str, ""],
+        ["PID", str(info.get("pid")) if info.get("pid") else "-", ""],
+        ["IP", info.get("ip") or "-", ""],
+        ["MAC", info.get("mac") or "-", ""],
+        ["Network", info.get("network_name") or "-", ""],
+        ["TAP Device", info.get("tap_device") or "-", ""],
+        ["Disk Size", disk_size_str, ""],
+        ["cloud-init Mode", cloud_init_mode, ""],
+        ["API Socket", "enabled" if info.get("features", {}).get("api_socket") else "disabled", ""],
+        ["Console", "enabled" if info.get("features", {}).get("console") else "disabled", ""],
+    ]
+
     print_table(
         title=f"VM: {info['name']}",
-        columns=["Property", "Value"],
-        rows=[
-            ["ID", info["short_id"]],
-            ["Full ID", info["id"]],
-            ["Status", info["status"]],
-            ["Created", info["created_at"]],
-            ["PID", str(info["pid"]) if info["pid"] else "-"],
-            ["IP", info["ip"] or "-"],
-            ["MAC", info["mac"] or "-"],
-            ["Network", info["network_name"] or "-"],
-            ["TAP Device", info["tap_device"] or "-"],
-            ["API Socket", "enabled" if info["features"]["api_socket"] else "disabled"],
-            ["Console", "enabled" if info["features"]["console"] else "disabled"],
-            ["NoCloud-net", "enabled" if info["features"]["nocloud_net"] else "disabled"],
-        ],
+        columns=["", "", ""],
+        rows=rows,
     )
 
-    print_info("\nPaths:")
-    print_info(f"  VM Directory: {info['paths']['vm_dir']}")
-    if info["paths"]["rootfs"]:
-        print_info(f"  Rootfs: {info['paths']['rootfs']}")
-    if info["paths"]["config"]:
-        print_info(f"  Config: {info['paths']['config']}")
+    print_info(f"\nState Directory: {info['paths']['vm_dir']}")
+
+    image_id = info.get("image_id")
+    if image_id:
+        print_info("\nImage:")
+        print_info(f"  ID:   {image_id[:6] if len(image_id) > 6 else image_id}")
+        try:
+            matches = find_images_by_short_id(get_cache_dir(), image_id[:6])
+            if matches:
+                _, meta = matches[0]
+                internal_id = meta.get("internal_id", "-")
+                print_info(f"  Name: {internal_id}")
+        except Exception:
+            pass
+
+    kernel_id = info.get("kernel_id")
+    if kernel_id:
+        print_info("\nKernel:")
+        kernel_short = kernel_id[:6] if len(kernel_id) > 6 else kernel_id
+        print_info(f"  ID:   {kernel_short}")
+        try:
+            matches = find_kernels_by_short_id(get_cache_dir(), kernel_short)
+            if matches:
+                _, meta = matches[0]
+                version = meta.get("version", "-")
+                print_info(f"  Name: {version}")
+        except Exception:
+            pass
+
+    if info["paths"].get("rootfs"):
+        print_info(f"\nRootfs: {info['paths']['rootfs']}")
+    if info["paths"].get("config"):
+        print_info(f"Config: {info['paths']['config']}")
