@@ -3,11 +3,11 @@ When making these changes. Ensure that there will be NO DEPRECATION messages/cod
 
 # Metadata
 
-- [ ] the binaries>firecracker should not contain jailer_path
-- [ ] the binaries>firecracker should not contain active_binary_path
-- [ ] the binaries>jailer should not contain firecracker_path
-- [ ] the binaries>jailer should not contain active_binary_path
-- [ ] the binaries should contain defaults key where it has all the default binary paths like the following examples:
+- [x] the binaries>firecracker should not contain jailer_path
+- [x] the binaries>firecracker should not contain active_binary_path
+- [x] the binaries>jailer should not contain firecracker_path
+- [x] the binaries>jailer should not contain active_binary_path
+- [x] the binaries should contain defaults key where it has all the default binary paths like the following examples:
     - binaries>defaults>firecracker>binary_path, binaries>defaults>firecracker>full_version
     - binaries>defaults>jailer>binary_path, binaries>defaults>jailer>full_version
 
@@ -42,9 +42,9 @@ When making these changes. Ensure that there will be NO DEPRECATION messages/cod
     - In non-TTY environments (CI/scripts), progress bars should be disabled or show simple text progress
 - [x] firecracker failure and exit codes arent caught by `mvm vm ls`, it should appropriately follow and track if pid exist or exit out! each vm has `firecracker.pid` in the vm folder state. use this pid to track! and ideally a way to show the exit code in the `status` field.
 - [x] when running `ls` on EVERY SUPPORTED commands such as `mvm image ls`, etc.. it must read through the metadata and check if it has a path, file exist? if no, add (X) mark to indicate it's deleted and only metadata left. if it's a network bridge, check if it's still there. etc.. the state check with actual environment depends on the command, for image, kernel, vm, key, bin, they are file state checks, but for network, it's a check with the actual bridge if it still exists!
-- [ ] when user enters `rm` for any resources such as kernel, image, vm, keys, etc.. it shouldn't prompt y/n. It MUST PROCEED WITH REMOVAL.
+- [x] when user enters `rm` for any resources such as kernel, image, vm, keys, etc.. it shouldn't prompt y/n. It MUST PROCEED WITH REMOVAL.
 - [x] DO NOT ALLOW REMOVAL OF networks, images, kernels, if they are used by an active VM. The CLI must utilize the metadata to ensure there isnt an active VM using these.
-- [ ] Add size to `kernel`, `image` ls commands
+- [x] Add size to `kernel`, `image` ls commands
 - [x] Add `*` to default resource names. This applies to `mvm kernel|image|key|network` commands! if there is a field for default when running `ls` remove it and use `* ` as a prefix for the name of the resource. **Format is asterisk + space prefix** (e.g., "* ubuntu-24.04").
 - [x] introduce `mvm cache init` and `mvm cache prune` where the `cache_init` function executes functions. DO NOT IMPLEMENT caching within this function, each caching mechanism must have their own function to do the caching and clear the caching. This will make the cache_init more maintainable and exactly define what is being cached. Currently caching is only done for guestfs appliance.
     - **MODULAR FUNCTION DEFINITION**: Define separate functions for each resource: `cache_init_guestfs_appliance()`, `cache_init_vms()`, `cache_init_images()`, `cache_init_kernels()`, `cache_init_networks()` for initialization. Define `cache_prune_guestfs_appliance()`, `cache_prune_vms()`, `cache_prune_networks()`, `cache_prune_images()`, `cache_prune_kernels()` for pruning.
@@ -68,7 +68,7 @@ When making these changes. Ensure that there will be NO DEPRECATION messages/cod
 # Debugging
 
 Complete overhaul of every single path of the CLI application and handle any user facing error gracefully as a friendly output. DO NOT SHOW EXCEPTIONS and STACK TRACES, unless DEBUG MODE is enabled. Every single path of the entire application must support this mode, ensure that every single path of the code has this particularly more emphasis on complex logics requiring sequential state in order to allow the cli application to perform an action.
-- [ ] introduce a new build type that enables debugging at finer grain for easier debugging issues. a value defined in constants.py file where it derives the DEBUG_MODE value from defaults.yaml file! this will enable debug mode throughout the cli application.
+- [x] introduce a new build type that enables debugging at finer grain for easier debugging issues. a value defined in constants.py file where it derives the DEBUG_MODE value from defaults.yaml file! this will enable debug mode throughout the cli application.
     - **DEBUG_MODE DEFAULT STRUCTURE** (add to defaults.yaml):
         ```yaml
         debug:
@@ -77,33 +77,33 @@ Complete overhaul of every single path of the CLI application and handle any use
           show_tracebacks: false
         ```
     - Debug mode is **OFF by default** (`enabled: false`)
-- [ ] DEBUG MODE also introduces verbosity of errors, warnings, stack traces, etc.. to improve debugging throughout the application when an error occurs.
+- [x] DEBUG MODE also introduces verbosity of errors, warnings, stack traces, etc.. to improve debugging throughout the application when an error occurs.
 
 # Following UI errors must be more friendlier for user
 
-- [ ] Running `mvm key add ~/.ssh/id_rsa.pub`
-- [ ] Running `mvm network create` when user doesn't have proper permission
+- [x] Running `mvm key add ~/.ssh/id_rsa.pub`
+- [x] Running `mvm network create` when user doesn't have proper permission
 
 # Networking
 
-- [ ] prompt user to provide the interface that provides internet for routing
-- [ ] When a new network is created, this is effectively a new bridge with its own subnet and every rule. in `chain POSTROUTING` the target for this bridge must only allow `source` for the cidr provided only! and the `out` value must be the bridge interface name! for example a new network called `mvm-test` with cidr 175.39.0.0/24. the expected `source` value is 175.39.0.0/24 and `out` value is !mvm-test when the target is `MVM-POSTROUTING` chain.
-- [ ] when `--ip` is passed to `mvm vm create` the IP isnt being checked against if this ip is already leased or free. the application must show a friendly error that given ip on given network name is already reserved.
+- [x] prompt user to provide the interface that provides internet for routing
+- [x] When a new network is created, this is effectively a new bridge with its own subnet and every rule. in `chain POSTROUTING` the target for this bridge must only allow `source` for the cidr provided only! and the `out` value must be the bridge interface name! for example a new network called `mvm-test` with cidr 175.39.0.0/24. the expected `source` value is 175.39.0.0/24 and `out` value is !mvm-test when the target is `MVM-POSTROUTING` chain.
+- [x] when `--ip` is passed to `mvm vm create` the IP isnt being checked against if this ip is already leased or free. the application must show a friendly error that given ip on given network name is already reserved.
 - [ ] Explore fully isolated bridge networking mechanism for vms.
 
 # Escalation
 
-- [ ] handle privilege escalations exactly how `mvm network create` is handling it!
+- [x] handle privilege escalations exactly how `mvm network create` is handling it!
 
 # Codebase Maintainability
 
 - [ ] Ensure ALL 'yaml id' references in the code are replaced with internal id.
-- [ ] move values from constants.py to defaults.yaml for cloud-init
-- [ ] add the entire cloud-init config to --output-config with cloud-init as the key, then under it all the user-data, meta-data, network-config
+- [x] move values from constants.py to defaults.yaml for cloud-init
+- [x] add the entire cloud-init config to --output-config with cloud-init as the key, then under it all the user-data, meta-data, network-config
 - ~~config_gen.py line 227 must come from defaults.yaml!!~~ **REMOVED: Skip this requirement**
-- [ ] move `mvm vm logs` to `mvm logs`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
-- [ ] move `mvm vm ssh` to `mvm ssh`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
-- [ ] change `cli/asset.py` to `cli/bin.py` to be consistent with the top command name, , DO NOT LEAVE DEPRECATION NOTES, project is in development state
+- [x] move `mvm vm logs` to `mvm logs`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
+- [x] move `mvm vm ssh` to `mvm ssh`, DO NOT LEAVE DEPRECATION NOTES, project is in development state
+- [x] change `cli/asset.py` to `cli/bin.py` to be consistent with the top command name, , DO NOT LEAVE DEPRECATION NOTES, project is in development state
 
 # Guestfs
 
