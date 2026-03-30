@@ -118,7 +118,9 @@ def update_rpm_spec(root: Path, new_version: str, dry_run: bool) -> None:
         print(f"  ⚠️  packaging/mvmctl.spec: Version not found")
 
 
-def update_debian_changelog(root: Path, new_version: str, dry_run: bool) -> None:
+def update_debian_changelog(
+    root: Path, new_version: str, dry_run: bool, changelog: str = ""
+) -> None:
     """Add new entry to packaging/debian/changelog."""
     file_path = root / "packaging" / "debian" / "changelog"
     if not file_path.exists():
@@ -129,13 +131,20 @@ def update_debian_changelog(root: Path, new_version: str, dry_run: bool) -> None
     old_version_match = re.search(r"mvmctl \(([0-9.]+)\)", content)
     old_version = old_version_match.group(1) if old_version_match else "unknown"
 
-    # Get current date in Debian format
     date_str = datetime.now().strftime("%a, %d %b %Y %H:%M:%S %z")
 
-    # Create new changelog entry
+    if changelog:
+        debian_changes = "\n".join(
+            f"  * {line.lstrip('- ').lstrip('* ')}"
+            for line in changelog.strip().split("\n")
+            if line.strip()
+        )
+    else:
+        debian_changes = f"  * New upstream release {new_version}"
+
     new_entry = f"""mvmctl ({new_version}) unstable; urgency=medium
 
-  * New upstream release {new_version}
+{debian_changes}
 
  -- AlanD20 <aland20@pm.me>  {date_str}
 
@@ -166,7 +175,44 @@ def update_man_page(root: Path, new_version: str, dry_run: bool) -> None:
     print(f"  docs/mvm.1: {old_version} → {new_version}")
 
 
-def update_root_changelog(root: Path, new_version: str, dry_run: bool) -> None:
+def update_rpm_changelog(root: Path, new_version: str, dry_run: bool, changelog: str = "") -> None:
+    """Update %changelog in packaging/mvmctl.spec."""
+    file_path = root / "packaging" / "mvmctl.spec"
+    if not file_path.exists():
+        print(f"  ⚠️  packaging/mvmctl.spec: file not found")
+        return
+
+    content = file_path.read_text()
+
+    if "%changelog" not in content:
+        print(f"  ⚠️  packaging/mvmctl.spec: no %changelog section found")
+        return
+
+    date_str = datetime.now().strftime("%a %b %d %Y")
+
+    if changelog:
+        rpm_changes = "\n".join(
+            f"- {line.lstrip('- ').lstrip('* ')}"
+            for line in changelog.strip().split("\n")
+            if line.strip() and not line.startswith("###")
+        )
+    else:
+        rpm_changes = f"- New upstream release {new_version}"
+
+    new_entry = f"""* {date_str} AlanD20 <aland20@pm.me> - {new_version}-1
+{rpm_changes}
+
+"""
+
+    changelog_pattern = r"(%changelog\n)"
+    new_content = re.sub(changelog_pattern, rf"\1{new_entry}", content)
+
+    if not dry_run:
+        file_path.write_text(new_content)
+    print(f"  packaging/mvmctl.spec: added %changelog entry for {new_version}")
+
+
+def update_root_changelog(root: Path, new_version: str, dry_run: bool, changelog: str = "") -> None:
     """Update CHANGELOG.md with new version entry."""
     file_path = root / "CHANGELOG.md"
     if not file_path.exists():
@@ -174,18 +220,40 @@ def update_root_changelog(root: Path, new_version: str, dry_run: bool) -> None:
         return
 
     content = file_path.read_text()
-
-    # Check if Unreleased section has content
-    unreleased_match = re.search(
-        r"## \[Unreleased\]\n\n(### [a-zA-Z]+\n- .*?)?\n## \[", content, re.DOTALL
-    )
-
     date_str = datetime.now().strftime("%Y-%m-%d")
 
-    # Create new version entry
-    new_entry = f"""## [Unreleased]
+    if changelog:
+        sections = {"Added": [], "Changed": [], "Fixed": [], "Other": []}
+        current_section = "Other"
 
-## [{new_version}] - {date_str}
+        for line in changelog.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("### "):
+                current_section = line[4:].strip()
+                if current_section not in sections:
+                    sections[current_section] = []
+            elif line.startswith("- ") or line.startswith("* "):
+                sections[current_section].append(line)
+
+        entry_parts = [f"## [{new_version}] - {date_str}", ""]
+        for section_name in ["Added", "Changed", "Fixed", "Deprecated", "Removed", "Security"]:
+            items = sections.get(section_name, [])
+            if items:
+                entry_parts.append(f"### {section_name}")
+                entry_parts.extend(items)
+                entry_parts.append("")
+
+        if sections["Other"]:
+            if not any(sections.get(k) for k in ["Added", "Changed", "Fixed"]):
+                entry_parts.append("### Added")
+                entry_parts.extend(sections["Other"])
+                entry_parts.append("")
+
+        new_version_section = "\n".join(entry_parts)
+    else:
+        new_version_section = f"""## [{new_version}] - {date_str}
 
 ### Added
 - (Add changes here)
@@ -198,10 +266,12 @@ def update_root_changelog(root: Path, new_version: str, dry_run: bool) -> None:
 
 """
 
-    # Replace Unreleased header with new version entry
+    new_entry = f"""## [Unreleased]
+
+{new_version_section}"""
+
     new_content = re.sub(r"## \[Unreleased\]\n\n", new_entry, content)
 
-    # Add new version to link references at bottom
     link_pattern = (
         r"(\[Unreleased\]: https://github\.com/AlanD20/mvmctl/compare/v)([0-9.]+)(\.\.\.HEAD)"
     )
@@ -222,9 +292,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s 0.2.0              # Bump to version 0.2.0
-  %(prog)s 1.0.0 --dry-run  # Preview changes
-  %(prog)s 0.2.0 --commit   # Bump and auto-commit
+  %(prog)s 0.2.0                          # Bump to version 0.2.0
+  %(prog)s 0.2.0 --changelog "- Added feature X"  # With changelog
+  %(prog)s 0.2.0 --changelog-file notes.md      # Read from file
+  %(prog)s 1.0.0 --dry-run                # Preview changes
+  %(prog)s 0.2.0 --commit                 # Bump and auto-commit
         """,
     )
     parser.add_argument("version", help="New version number (e.g., 0.2.0)")
@@ -235,6 +307,10 @@ Examples:
     parser.add_argument(
         "--no-commit-msg", action="store_true", help="Skip the commit message prompt (use default)"
     )
+    parser.add_argument(
+        "--changelog", dest="changelog_text", help="Changelog entry text (multi-line supported)"
+    )
+    parser.add_argument("--changelog-file", dest="changelog_file", help="Read changelog from file")
 
     args = parser.parse_args()
 
@@ -244,12 +320,26 @@ Examples:
         print("Version must follow semantic versioning: X.Y.Z or X.Y.Z-prerelease")
         sys.exit(1)
 
+    # Get changelog from file or argument
+    changelog = ""
+    if args.changelog_file:
+        file_path = Path(args.changelog_file)
+        if file_path.exists():
+            changelog = file_path.read_text()
+        else:
+            print(f"Error: Changelog file not found: {args.changelog_file}")
+            sys.exit(1)
+    elif args.changelog_text:
+        changelog = args.changelog_text
+
     # Find project root
     script_dir = Path(__file__).parent.absolute()
     root = script_dir  # Script is at root
 
     print(f"\n{'=' * 60}")
     print(f"Bumping version to: {args.version}")
+    if changelog:
+        print("Changelog entries provided")
     if args.dry_run:
         print("(DRY RUN - no files will be modified)")
     print(f"{'=' * 60}\n")
@@ -260,9 +350,10 @@ Examples:
     update_init_py(root, args.version, args.dry_run)
     update_pkgbuild(root, args.version, args.dry_run)
     update_rpm_spec(root, args.version, args.dry_run)
-    update_debian_changelog(root, args.version, args.dry_run)
+    update_rpm_changelog(root, args.version, args.dry_run, changelog)
+    update_debian_changelog(root, args.version, args.dry_run, changelog)
     update_man_page(root, args.version, args.dry_run)
-    update_root_changelog(root, args.version, args.dry_run)
+    update_root_changelog(root, args.version, args.dry_run, changelog)
 
     print(f"\n{'=' * 60}")
 
