@@ -151,6 +151,39 @@ def get_network_leases(name: str) -> list[NetworkLease]:
     return _leases_from_entry(entry)
 
 
+def check_ip_available(network_name: str, ip: str) -> None:
+    """Check if an IP is available for use in a network.
+
+    Args:
+        network_name: Name of the network to check
+        ip: IP address to verify availability
+
+    Raises:
+        NetworkError: If the IP is already leased to another VM
+    """
+    leases = get_network_leases(network_name)
+    for lease in leases:
+        if lease.ip == ip:
+            raise NetworkError(f"IP {ip} is already in use by VM '{lease.vm_name}'")
+
+
+def is_ip_available(network_name: str, ip: str) -> bool:
+    """Check if an IP address is available for use in a network.
+
+    Args:
+        network_name: Name of the network to check
+        ip: IP address to verify availability
+
+    Returns:
+        True if the IP is not currently leased, False otherwise
+    """
+    leases = get_network_leases(network_name)
+    for lease in leases:
+        if lease.ip == ip:
+            return False
+    return True
+
+
 def set_default_network(name: str) -> None:
     """Set a network as the default for VM creation.
 
@@ -181,6 +214,7 @@ def create_network(
     cidr: str,
     gateway: str | None = None,
     nat: bool = True,
+    internet_iface: str | None = None,
 ) -> NetworkConfig:
     """Create a named network.
 
@@ -192,6 +226,7 @@ def create_network(
         cidr: IP subnet in CIDR notation (e.g., "192.168.100.0/24").
         gateway: Gateway IP for the bridge. Defaults to first host in subnet.
         nat: Whether to configure NAT/masquerade. Default True.
+        internet_iface: Physical interface for NAT (auto-detected if not provided).
 
     Returns:
         The created NetworkConfig.
@@ -230,7 +265,7 @@ def create_network(
     try:
         setup_bridge(bridge, gateway_cidr=f"{gateway}/{_prefix_len(cidr)}")
         if nat:
-            setup_nat(bridge)
+            setup_nat(bridge, internet_iface=internet_iface)
     except NetworkError:
         # Best-effort cleanup on failure
         try:

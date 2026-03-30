@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from mvmctl.api.host import check_privileges_interactive
-from mvmctl.core.network import get_iptables_rules_for_bridge
+from mvmctl.core.network import get_iptables_rules_for_bridge, list_network_interfaces
 from mvmctl.core.network_manager import (
     NetworkConfig,
     NetworkLease,
     allocate_network_ip,
+    check_ip_available,
     ensure_default_network,
     get_network,
     get_network_leases,
@@ -26,7 +27,9 @@ from mvmctl.core.network_manager import (
 __all__ = [
     "NetworkConfig",
     "NetworkLease",
+    "check_ip_available",
     "get_iptables_rules_for_bridge",
+    "list_network_interfaces",
     "list_networks",
     "get_network",
     "get_network_leases",
@@ -45,10 +48,11 @@ def create_network(
     cidr: str,
     gateway: str | None = None,
     nat: bool = True,
+    internet_iface: str | None = None,
 ) -> NetworkConfig:
     """Create a named network, setting up bridge and NAT rules."""
     check_privileges_interactive("/usr/sbin/ip", f"create network '{name}'")
-    return _create_network(name, cidr=cidr, gateway=gateway, nat=nat)
+    return _create_network(name, cidr=cidr, gateway=gateway, nat=nat, internet_iface=internet_iface)
 
 
 def remove_network(name: str) -> None:

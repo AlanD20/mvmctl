@@ -7,6 +7,7 @@ import typer
 if TYPE_CHECKING:
     from mvmctl.core.config import VMDefaultsConfig
 
+from mvmctl.api.network import check_ip_available
 from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from mvmctl.api.vms import (
     cleanup_vms,
@@ -310,6 +311,9 @@ def create(
     effective_network: str = (
         network_name if network_name is not None else _resolve_default_network()
     )
+    # Check IP availability before VM creation
+    if ip is not None:
+        check_ip_available(effective_network, ip)
 
     # Check mutual exclusivity of --no-cloud-init and --cloud-init-iso
     if no_cloud_init and cloud_init_iso is not None:

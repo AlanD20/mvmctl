@@ -7,9 +7,10 @@ from mvmctl.api.network import create_network, remove_network
 from mvmctl.core.network_manager import NetworkConfig, NetworkLease
 
 
+@patch("mvmctl.api.network.list_network_interfaces", return_value=["eth0"])
 @patch("mvmctl.api.network.check_privileges_interactive")
 @patch("mvmctl.api.network._create_network")
-def test_create_network_with_privileges(mock_create, mock_check_priv):
+def test_create_network_with_privileges(mock_create, mock_check_priv, mock_interfaces):
     """Test create_network calls privilege check and delegates."""
     mock_config = MagicMock(spec=NetworkConfig)
     mock_create.return_value = mock_config
@@ -18,7 +19,7 @@ def test_create_network_with_privileges(mock_create, mock_check_priv):
 
     mock_check_priv.assert_called_once_with("/usr/sbin/ip", "create network 'test-net'")
     mock_create.assert_called_once_with(
-        "test-net", cidr="10.0.0.0/24", gateway="10.0.0.1", nat=True
+        "test-net", cidr="10.0.0.0/24", gateway="10.0.0.1", nat=True, internet_iface=None
     )
     assert result == mock_config
 

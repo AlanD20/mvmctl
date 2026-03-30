@@ -177,9 +177,12 @@ def test_get_network_leases_empty(mock_cache_dir: Path):
     assert leases == []
 
 
-@patch("mvmctl.core.network_manager.setup_bridge")
 @patch("mvmctl.core.network_manager.setup_nat")
-def test_create_network_success(mock_setup_nat, mock_setup_bridge, mock_cache_dir: Path):
+@patch("mvmctl.core.network_manager.setup_bridge")
+@patch("mvmctl.core.network.list_network_interfaces", return_value=["eth0"])
+def test_create_network_success(
+    mock_interfaces, mock_setup_bridge, mock_setup_nat, mock_cache_dir: Path
+):
     config = create_network(name="mynet", cidr="10.20.0.0/24")
     assert config.name == "mynet"
     assert config.cidr == "10.20.0.0/24"
@@ -188,7 +191,7 @@ def test_create_network_success(mock_setup_nat, mock_setup_bridge, mock_cache_di
     # Verify persistence in metadata
     assert get_network("mynet") is not None
     mock_setup_bridge.assert_called_once_with("mvm-mynet", gateway_cidr="10.20.0.1/24")
-    mock_setup_nat.assert_called_once_with("mvm-mynet")
+    mock_setup_nat.assert_called_once_with("mvm-mynet", internet_iface=None)
 
 
 def test_create_network_already_exists(mock_cache_dir: Path):

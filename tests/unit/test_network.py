@@ -383,9 +383,10 @@ def test_teardown_nat_force_true_removes():
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
                 with patch("mvmctl.core.network.chain_exists", return_value=True):
-                    teardown_nat("fc-br0", force=True)
-                    # 3 rule deletions = 3 calls
-                    assert mock_run.call_count == 3
+                    with patch("mvmctl.core.network._detect_cidr_for_bridge", return_value=None):
+                        teardown_nat("fc-br0", force=True)
+                        # 3 rule deletions = 3 calls (CIDR detection returns None, no extra call)
+                        assert mock_run.call_count == 3
 
 
 def test_teardown_nat_tap_devices_present_skips():
@@ -405,9 +406,10 @@ def test_teardown_nat_no_taps_removes():
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
                 with patch("mvmctl.core.network.chain_exists", return_value=True):
-                    teardown_nat("fc-br0", force=False)
-                    # 3 rule deletions = 3 calls
-                    assert mock_run.call_count == 3
+                    with patch("mvmctl.core.network._detect_cidr_for_bridge", return_value=None):
+                        teardown_nat("fc-br0", force=False)
+                        # 3 rule deletions = 3 calls (CIDR detection returns None, no extra call)
+                        assert mock_run.call_count == 3
 
 
 def test_teardown_nat_removes_forward_rules_for_correct_bridge():

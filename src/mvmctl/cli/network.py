@@ -3,12 +3,14 @@
 import json
 
 import typer
+from rich.prompt import Prompt
 
 from mvmctl.api.network import (
     create_network,
     get_iptables_rules_for_bridge,
     get_network_leases,
     inspect_network,
+    list_network_interfaces,
     list_networks,
     remove_network,
     set_default_network,
@@ -117,6 +119,11 @@ def create(
     ),
     gateway: str | None = typer.Option(None, "--gateway", help="Gateway IP for the bridge"),
     no_nat: bool = typer.Option(False, "--no-nat", help="Disable NAT/masquerade"),
+    internet_iface: str | None = typer.Option(
+        None,
+        "--internet-iface",
+        help="Physical interface for NAT (auto-detected if not provided)",
+    ),
 ) -> None:
     """Create a named network."""
     name = check_name_arg(ctx, name)
@@ -124,12 +131,34 @@ def create(
         print_error("Missing required option '--cidr'")
         raise typer.Exit(code=1)
     validate_entity_name(name, "network")
+
+    # Auto-detect internet interface if not provided
+    if internet_iface is None:
+        interfaces = list_network_interfaces()
+        if len(interfaces) == 0:
+            print_error("No network interfaces found")
+            raise typer.Exit(code=1)
+        elif len(interfaces) == 1:
+            internet_iface = interfaces[0]
+        else:
+            # Prompt user to select interface
+            print_info("Multiple network interfaces found:")
+            for i, iface in enumerate(interfaces, 1):
+                print_info(f"  [{i}] {iface}")
+            selected = Prompt.ask(
+                "Select interface number",
+                choices=[str(i) for i in range(1, len(interfaces) + 1)],
+                default="1",
+            )
+            internet_iface = interfaces[int(selected) - 1]
+
     try:
         config = create_network(
             name=name,
             cidr=cidr,
             gateway=gateway,
             nat=not no_nat,
+            internet_iface=internet_iface,
         )
     except NetworkError as e:
         print_error(str(e))
@@ -140,6 +169,7 @@ def create(
     print_info(f"  Gateway: {config.gateway}")
     print_info(f"  Bridge:  {config.bridge}")
     print_info(f"  NAT:     {'enabled' if config.nat_enabled else 'disabled'}")
+    print_info(f"  Internet interface: {internet_iface}")
 
 
 @app.command(

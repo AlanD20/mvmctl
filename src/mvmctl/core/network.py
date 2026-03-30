@@ -45,6 +45,46 @@ BRIDGE_CIDR = f"{DEFAULT_NETWORK_GATEWAY}/24"
 SUBNET = DEFAULT_NETWORK_CIDR
 GATEWAY = DEFAULT_NETWORK_GATEWAY
 
+# Interfaces to exclude when listing physical network interfaces
+_VIRTUAL_INTERFACE_PREFIXES = ("mvm-", "tap", "br-", "virbr", "docker", "veth")
+_EXCLUDED_INTERFACES = ("lo",)
+
+
+def list_network_interfaces() -> list[str]:
+    """List available physical network interfaces.
+
+    Returns a list of network interface names (e.g. ["eth0", "enp0s1", "wlan0"]).
+    Excludes loopback, bridges, TAP devices, and virtual interfaces.
+
+    Uses /sys/class/net to enumerate interfaces.
+
+    Returns:
+        List of physical network interface names.
+
+    Raises:
+        NetworkError: If unable to read network interfaces.
+    """
+    try:
+        net_path = Path("/sys/class/net")
+        if not net_path.exists():
+            raise NetworkError("Unable to access /sys/class/net")
+
+        interfaces: list[str] = []
+        for entry in net_path.iterdir():
+            name = entry.name
+            # Skip excluded interfaces
+            if name in _EXCLUDED_INTERFACES:
+                continue
+            # Skip virtual interface prefixes
+            if any(name.startswith(prefix) for prefix in _VIRTUAL_INTERFACE_PREFIXES):
+                continue
+            interfaces.append(name)
+
+        return sorted(interfaces)
+    except OSError as e:
+        logger.debug("Failed to list network interfaces", exc_info=True)
+        raise NetworkError("Failed to list network interfaces") from e
+
 
 def get_default_interface() -> str:
     """Get the default network interface by parsing ``ip route show default``.
@@ -477,33 +517,55 @@ def teardown_mvm_chains_with_status() -> list[str]:
     return status
 
 
-def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
+def setup_nat(
+    bridge: str = BRIDGE_NAME,
+    internet_iface: str | None = None,
+    *,
+    cidr: str | None = None,
+) -> None:
     """Set up NAT (MASQUERADE) for the bridge subnet using MVM chains.
 
-    - Gets host_iface via get_default_interface() if not provided
-    - Adds MASQUERADE rule to MVM-POSTROUTING chain
+    - Gets internet_iface via get_default_interface() if not provided
+    - Uses provided cidr or defaults to SUBNET constant for source filtering
+    - Adds MASQUERADE rule with source filtering to MVM-POSTROUTING chain
     - Adds FORWARD rules to MVM-FORWARD chain
-    - Is idempotent: uses iptables-restore --noflush for atomic rule application
+    - Is idempotent: uses _ensure_iptables_rule for atomic rule application
     - Raises NetworkError on failure.
+
+    Args:
+        bridge: Bridge interface name.
+        internet_iface: Physical interface for NAT (defaults to default route interface).
+        cidr: Source CIDR for NAT rules (defaults to SUBNET).
     """
-    if host_iface is None:
-        host_iface = get_default_interface()
+    if internet_iface is None:
+        internet_iface = get_default_interface()
+
+    if cidr is None:
+        cidr = SUBNET
 
     forward_chain = MVM_FORWARD_CHAIN
     postrouting_chain = MVM_POSTROUTING_CHAIN
+    comment = f"mvm-nat:{bridge}"
 
     setup_mvm_chains()
 
+    # MASQUERADE rule with source filtering and comment
     masquerade_check = [
         "iptables",
         "-t",
         "nat",
         "-C",
         postrouting_chain,
+        "-s",
+        cidr,
         "-o",
-        host_iface,
+        internet_iface,
         "-j",
         "MASQUERADE",
+        "-m",
+        "comment",
+        "--comment",
+        comment,
     ]
     masquerade_add = [
         "iptables",
@@ -511,10 +573,16 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
         "nat",
         "-A",
         postrouting_chain,
+        "-s",
+        cidr,
         "-o",
-        host_iface,
+        internet_iface,
         "-j",
         "MASQUERADE",
+        "-m",
+        "comment",
+        "--comment",
+        comment,
     ]
     _ensure_iptables_rule(
         masquerade_check,
@@ -522,16 +590,19 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
         f"Failed to add MASQUERADE rule for {bridge}",
     )
 
+    # FORWARD out rule with source filtering
     forward_out_check = [
         "iptables",
         "-t",
         "filter",
         "-C",
         forward_chain,
+        "-s",
+        cidr,
         "-i",
         bridge,
         "-o",
-        host_iface,
+        internet_iface,
         "-j",
         "ACCEPT",
     ]
@@ -541,10 +612,12 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
         "filter",
         "-A",
         forward_chain,
+        "-s",
+        cidr,
         "-i",
         bridge,
         "-o",
-        host_iface,
+        internet_iface,
         "-j",
         "ACCEPT",
     ]
@@ -554,14 +627,17 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
         f"Failed to add FORWARD rule for {bridge}",
     )
 
+    # FORWARD in rule with destination filtering
     forward_in_check = [
         "iptables",
         "-t",
         "filter",
         "-C",
         forward_chain,
+        "-d",
+        cidr,
         "-i",
-        host_iface,
+        internet_iface,
         "-o",
         bridge,
         "-j",
@@ -573,8 +649,10 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
         "filter",
         "-A",
         forward_chain,
+        "-d",
+        cidr,
         "-i",
-        host_iface,
+        internet_iface,
         "-o",
         bridge,
         "-j",
@@ -586,10 +664,17 @@ def setup_nat(bridge: str = BRIDGE_NAME, host_iface: str | None = None) -> None:
         f"Failed to add FORWARD rule for {bridge}",
     )
 
-    logger.info("NAT rules configured for bridge %s via %s", bridge, host_iface)
+    logger.info(
+        "NAT rules configured for bridge %s via %s (source %s)", bridge, internet_iface, cidr
+    )
 
 
-def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
+def teardown_nat(
+    bridge: str = BRIDGE_NAME,
+    force: bool = False,
+    *,
+    cidr: str | None = None,
+) -> None:
     """Remove NAT (MASQUERADE + FORWARD) rules for the bridge from MVM chains.
 
     IMPORTANT: Only removes rules if `force=True` OR no VMs are currently
@@ -600,8 +685,15 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
     - MASQUERADE rule from MVM-POSTROUTING chain
     - FORWARD rules from MVM-FORWARD chain
 
-    Raises NetworkError if the MASQUERADE deletion fails.
-    FORWARD rule deletions are best-effort (ignored if missing).
+    Args:
+        bridge: Bridge interface name.
+        force: If True, remove rules even if TAP devices are attached.
+        cidr: Source CIDR used in NAT rules (for precise rule deletion).
+               If None, attempts to detect from existing rules.
+
+    Raises:
+        NetworkError: If the MASQUERADE deletion fails.
+        FORWARD rule deletions are best-effort (ignored if missing).
     """
     if not force:
         tap_devices = get_tap_devices(bridge)
@@ -614,7 +706,7 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
             return
 
     try:
-        host_iface = get_default_interface()
+        internet_iface = get_default_interface()
     except NetworkError:
         logger.warning("Could not detect default interface, skipping NAT teardown")
         return
@@ -627,34 +719,124 @@ def teardown_nat(bridge: str = BRIDGE_NAME, force: bool = False) -> None:
         logger.debug("MVM chains do not exist, skipping NAT teardown")
         return
 
+    # If cidr not provided, try to detect it from existing rules
+    if cidr is None:
+        cidr = _detect_cidr_for_bridge(bridge)
+
+    comment = f"mvm-nat:{bridge}"
+
+    # Build MASQUERADE deletion rule - use source filtering if cidr known
+    masquerade_del_args: list[str] = [
+        "iptables",
+        "-t",
+        "nat",
+        "-D",
+        postrouting_chain,
+    ]
+    if cidr:
+        masquerade_del_args.extend(["-s", cidr])
+    masquerade_del_args.extend(
+        [
+            "-o",
+            internet_iface,
+            "-j",
+            "MASQUERADE",
+            "-m",
+            "comment",
+            "--comment",
+            comment,
+        ]
+    )
+
     try:
         subprocess.run(
-            _privileged_cmd(
-                [
-                    "iptables",
-                    "-t",
-                    "nat",
-                    "-D",
-                    postrouting_chain,
-                    "-o",
-                    host_iface,
-                    "-j",
-                    "MASQUERADE",
-                ]
-            ),
+            _privileged_cmd(masquerade_del_args),
             check=True,
             capture_output=True,
         )
     except subprocess.CalledProcessError as e:
         raise NetworkError("Failed to remove MASQUERADE rule") from e
 
-    for rule in [
-        ["iptables", "-D", forward_chain, "-i", bridge, "-o", host_iface, "-j", "ACCEPT"],
-        ["iptables", "-D", forward_chain, "-i", host_iface, "-o", bridge, "-j", "ACCEPT"],
-    ]:
+    # FORWARD rule deletions - use source/destination filtering if cidr known
+    forward_del_rules: list[list[str]] = []
+    if cidr:
+        forward_del_rules = [
+            [
+                "iptables",
+                "-D",
+                forward_chain,
+                "-s",
+                cidr,
+                "-i",
+                bridge,
+                "-o",
+                internet_iface,
+                "-j",
+                "ACCEPT",
+            ],
+            [
+                "iptables",
+                "-D",
+                forward_chain,
+                "-d",
+                cidr,
+                "-i",
+                internet_iface,
+                "-o",
+                bridge,
+                "-j",
+                "ACCEPT",
+            ],
+        ]
+    else:
+        forward_del_rules = [
+            ["iptables", "-D", forward_chain, "-i", bridge, "-o", internet_iface, "-j", "ACCEPT"],
+            ["iptables", "-D", forward_chain, "-i", internet_iface, "-o", bridge, "-j", "ACCEPT"],
+        ]
+
+    for rule in forward_del_rules:
         subprocess.run(_privileged_cmd(rule), capture_output=True, check=False)
 
-    logger.info("NAT rules removed for bridge %s via %s", bridge, host_iface)
+    logger.info("NAT rules removed for bridge %s via %s", bridge, internet_iface)
+
+
+def _detect_cidr_for_bridge(bridge: str) -> str | None:
+    """Detect the CIDR used for NAT rules associated with a bridge.
+
+    Examines existing iptables rules in MVM-POSTROUTING chain to find
+    the source CIDR used for MASQUERADE rules matching the bridge.
+
+    Args:
+        bridge: Bridge interface name.
+
+    Returns:
+        The detected CIDR string (e.g. "172.35.0.0/24") or None if not found.
+    """
+    postrouting_chain = MVM_POSTROUTING_CHAIN
+
+    try:
+        result = subprocess.run(
+            _privileged_cmd(["iptables", "-t", "nat", "-L", postrouting_chain, "-n", "-v"]),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
+
+    comment = f"mvm-nat:{bridge}"
+    for line in result.stdout.splitlines():
+        if comment in line and "MASQUERADE" in line:
+            # Parse the line to extract source CIDR
+            # Format: num   packets   bytes target     prot opt in     out     source               destination
+            parts = line.split()
+            if len(parts) >= 9:
+                # Source is typically the 9th field (index 8)
+                source = parts[8]
+                if "/" in source:
+                    return source
+
+    return None
 
 
 def tap_exists(tap_name: str) -> bool:
