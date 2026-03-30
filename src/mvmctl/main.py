@@ -8,10 +8,13 @@ import importlib.metadata
 import logging
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import click
-import typer
-import typer.models
+
+if TYPE_CHECKING:
+    import typer
+    import typer.models
 
 # Lazy imports from constants to avoid heavy import-time work
 # (parsing defaults.yaml, package metadata resolution)
