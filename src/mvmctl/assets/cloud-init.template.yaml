@@ -61,9 +61,6 @@ user_data: |
 
   {% if ssh_pub_keys %}
   runcmd:
-    - systemctl stop systemd-networkd 2>/dev/null || true
-    - systemctl disable --now systemd-networkd 2>/dev/null || true
-    - systemctl mask systemd-networkd 2>/dev/null || true
     - systemctl enable --now sshd || systemctl enable --now ssh
     - systemctl disable --now snapd.appliance.service 2>/dev/null || true
   {% endif %}
@@ -75,7 +72,8 @@ meta_data: |
   local-hostname: {{vm_name}}
 
 # Network configuration for cloud-init netplan/systemd-networkd
-# This ensures the VM gets the correct static IP that matches the kernel ip= parameter
+# NOTE: This is IGNORED when kernel ip= parameter is present (kernel has absolute priority)
+# The kernel ip= parameter already configures the network, this is kept for documentation purposes
 network_config: |
   version: 2
   ethernets:
