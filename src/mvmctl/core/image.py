@@ -182,7 +182,14 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
                 g.btrfs_filesystem_resize("/", 0)  # 0 = minimum
                 g.umount(root_device)
             else:
-                logger.warning(f"Cannot shrink {fs_type} filesystem")
+                if fs_type:
+                    logger.debug(
+                        f"Skipping shrink: {fs_type} filesystem not supported for shrinking"
+                    )
+                else:
+                    logger.debug(
+                        "Skipping shrink: filesystem type could not be detected (may already be minimal or raw image)"
+                    )
                 return image_path, original_size, original_size
 
             # Get new device size
