@@ -28,6 +28,15 @@ from mvmctl.utils.fs import get_temp_dir
 from mvmctl.utils.http import _with_retry
 
 
+def _is_interactive() -> bool:
+    """Check if running in an interactive terminal.
+
+    Checks both stdout and stderr since some environments (e.g., sg mvm)
+    may redirect stdout but still support interactive TTY features via stderr.
+    """
+    return sys.stdout.isatty() or sys.stderr.isatty()
+
+
 class ASCIIProgressBar:
     """Simple ASCII progress bar for TTY and non-TTY environments.
 
@@ -49,7 +58,7 @@ class ASCIIProgressBar:
         self.width = width
         self.title = title
         self.current = 0
-        self._is_tty = sys.stdout.isatty()
+        self._is_tty = _is_interactive()
         self._last_line_length = 0
         self._last_percent = -1
 
@@ -93,10 +102,10 @@ class ASCIIProgressBar:
                 return
             filled = int(self.width * percent / 100)
             bar = "#" * filled + " " * (self.width - filled)
-            line = f"\r{self.title} [{bar}] {percent}%"
+            line = f"{self.title} [{bar}] {percent}%"
             if self.total > 0:
                 line += f" ({self._format_size(self.current)}/{self._format_size(self.total)})"
-            sys.stdout.write(line)
+            sys.stdout.write(f"\r\033[K{line}")
             sys.stdout.flush()
             self._last_line_length = len(line)
             self._last_percent = percent
@@ -111,13 +120,9 @@ class ASCIIProgressBar:
                 self._last_percent = percent
 
     def finish(self) -> None:
-        """Finish progress display.
-
-        In TTY mode: Moves to new line
-        In non-TTY mode: Prints completion message
-        """
+        """Finish progress display."""
         if self._is_tty:
-            sys.stdout.write("\n")
+            sys.stdout.write("\r\033[K")
             sys.stdout.flush()
         print(f"{self.title} complete.")
 
