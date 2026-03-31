@@ -131,10 +131,9 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
                     # Log but don't fail - cleanup is best-effort
                     logger.debug(f"Cleanup phase encountered issue (non-fatal): {e}")
 
-                # Phase B: Zero free space for better compression
-                g.umount(root_device)
-                g.zero_free_space(root_device)
                 g.mount(root_device, "/")
+                g.zero_free_space(root_device)
+                g.umount(root_device)
 
                 # Phase C: Shrink - run e2fsck and resize
                 g.e2fsck(root_device, correct=True)
@@ -213,7 +212,7 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
         return image_path, original_size, actual_final
 
     except Exception as e:
-        logger.warning("Failed to shrink image: %s", e)
+        logger.debug("Failed to shrink image: %s", e)  # Technical details to debug level
         return image_path, original_size, image_path.stat().st_size
 
 
@@ -239,6 +238,16 @@ def compress_image(image_path: Path, level: int = 6) -> Path:
         original_size = image_path.stat().st_size
         if original_size == 0:
             raise ImageError(f"Cannot compress: source file is empty: {image_path}")
+
+        # Before compression, verify source has actual content (not all zeros)
+        with open(image_path, "rb") as f:
+            # Read first 1MB to check for zeros
+            first_mb = f.read(1024 * 1024)
+            if first_mb == b"\x00" * len(first_mb):
+                raise ImageError(
+                    f"Source file appears to be all zeros: {image_path}. "
+                    f"File may be corrupted. Please re-download with --force"
+                )
 
         compressor = zstd.ZstdCompressor(level=level)
         with open(image_path, "rb") as src, open(compressed_path, "wb") as dst:
@@ -649,6 +658,14 @@ def extract_partition_from_raw(
     from mvmctl.core.partition_detection import RootPartitionDetector
 
     try:
+        # Check if the image is a direct filesystem (superfloppy) using blkid
+        # This handles Alpine and other images that are raw filesystems without partition tables
+        fs_type = detect_filesystem_type(raw_path)
+        if fs_type in ("ext4", "ext3", "ext2", "btrfs", "xfs"):
+            logger.info("Image is %s filesystem, using as-is", fs_type)
+            shutil.copy2(raw_path, output_path)
+            return output_path
+
         parsed = _parse_partitions_sfdisk(raw_path, partition)
         if parsed is None:
             parsed = _parse_partitions_fdisk(raw_path, partition)
@@ -738,42 +755,68 @@ def extract_partition_from_raw(
 def create_ext4_from_tar(
     tar_path: Path,
     output_path: Path,
-    size: str,
+    minimum_rootfs_mib: int | str,
 ) -> bool:
-    """Create ext4 image from tar archive.
+    """Create ext4 image from tar archive using mkfs.ext4 -d.
 
-    Args:
-        tar_path: Source tar archive
-        output_path: Destination ext4 image
-        size: Image size (e.g., "2G")
-
-    Returns:
-        True if successful
-
-    Raises:
-        ImageError: On failure to create image or missing tools
+    This approach avoids mount/umount and uses tar extraction + mkfs.ext4 -d
+    for better performance and no root privileges required.
     """
+    import tempfile
 
     try:
         logger.info("Creating ext4 image from %s...", tar_path.name)
 
-        # Create empty image
-        subprocess.run(
-            ["truncate", "-s", size, str(output_path)],
-            capture_output=True,
-            check=True,
-        )
-
-        # Extract tar to a temporary directory, then use it with mkfs.ext4 -d
-        # (mkfs.ext4 -d requires a directory, not a tar file)
+        # Create temp directory and extract tar
         with tempfile.TemporaryDirectory() as tmpdir:
+            logger.debug("Extracting tar to %s...", tmpdir)
+
+            # Extract tar, excluding device files (they're recreated by devtmpfs at boot)
+            cmd = [
+                "tar",
+                "-xf",
+                str(tar_path),
+                "-C",
+                tmpdir,
+                "--exclude=dev/*",
+                "--no-same-owner",
+                "--no-same-permissions",
+            ]
+            subprocess.run(cmd, capture_output=True, check=True)
+
+            # Ensure all extracted files are readable (fix permission issues from cloud images)
+            subprocess.run(["chmod", "-R", "u+rwx", tmpdir], capture_output=True, check=False)
+
+            # Calculate actual size with du -sb
+            # Handle exit code 1 (permission warnings) - still valid
+            du_result = subprocess.run(["du", "-sb", tmpdir], capture_output=True, text=True)
+            if du_result.returncode not in (0, 1):  # 0=success, 1=permission warnings acceptable
+                raise ImageError(f"Failed to get directory size: {du_result.stderr}")
+
+            actual_bytes = int(du_result.stdout.split()[0])
+            actual_mib = actual_bytes / (1024 * 1024)
+
+            # Calculate size with 25% headroom for ext4 metadata overhead and 128MB minimum
+            if minimum_rootfs_mib == "dynamic":
+                calculated_mib = int(actual_mib * 1.25)
+                raw_size_mb = max(128, calculated_mib)
+            else:
+                # Add 25% headroom to specified size for ext4 metadata overhead
+                calculated_mib = int(int(minimum_rootfs_mib) * 1.25)
+                raw_size_mb = max(128, calculated_mib)
+
+            logger.info("Creating ext4 image (%d MiB)...", raw_size_mb)
+
+            # Create empty image
             subprocess.run(
-                ["tar", "-xf", str(tar_path), "-C", tmpdir],
+                ["truncate", "-s", f"{raw_size_mb}M", str(output_path)],
                 capture_output=True,
                 check=True,
             )
+
+            # Create ext4 with directory contents
             subprocess.run(
-                ["mkfs.ext4", "-d", tmpdir, "-O", "metadata_csum,64bit", str(output_path)],
+                ["mkfs.ext4", "-d", tmpdir, "-F", str(output_path)],
                 capture_output=True,
                 check=True,
             )
@@ -782,15 +825,15 @@ def create_ext4_from_tar(
         return True
 
     except subprocess.CalledProcessError as e:
-        # Include stderr in error message for debugging
-        stderr_msg = e.stderr.decode() if e.stderr else ""
-        if stderr_msg:
-            logger.error(f"Command failed: {e.cmd}\nStderr: {stderr_msg}")
-        # Sanitize: don't expose command details in error message
-        raise ImageError("Failed to create image") from e
+        stderr_msg = (
+            e.stderr.decode()
+            if isinstance(e.stderr, bytes)
+            else (e.stderr if e.stderr else "no details")
+        )
+        logger.error("Failed to create ext4 image: %s", stderr_msg)
+        raise ImageError(f"Failed to create ext4 image: {stderr_msg}") from e
     except FileNotFoundError as e:
-        # Sanitize: don't expose tool path in error message
-        raise ImageError("Required tool not found") from e
+        raise ImageError("Required tool not found: tar, truncate, or mkfs.ext4") from e
 
 
 def _handle_qcow2(
@@ -802,6 +845,17 @@ def _handle_qcow2(
 ) -> Path:
     raw_path = download_path.with_suffix(".raw")
     convert_qcow2_to_raw(download_path, raw_path)
+
+    # Try guestfs-based extraction first (more reliable)
+    actual_path = extract_partition_with_guestfs(
+        raw_path, final_path.with_suffix(".img"), partition
+    )
+    if actual_path is not None:
+        raw_path.unlink(missing_ok=True)
+        return actual_path
+
+    # Fall back to sfdisk/fdisk parsing
+    logger.info("Guestfs extraction unavailable, falling back to manual partition parsing")
     actual_path = extract_partition_from_raw(
         raw_path,
         final_path.with_suffix(".img"),
@@ -815,11 +869,11 @@ def _handle_qcow2(
 def _handle_tar_rootfs(
     download_path: Path,
     final_path: Path,
-    minimum_rootfs_size: int,
+    minimum_rootfs_size: int | str,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
-    create_ext4_from_tar(download_path, final_path, size=f"{minimum_rootfs_size}M")
+    create_ext4_from_tar(download_path, final_path, minimum_rootfs_mib=minimum_rootfs_size)
     return final_path
 
 
@@ -997,19 +1051,27 @@ def _handle_squashfs(
         except FileNotFoundError as e:
             raise ImageError("unsquashfs not found. Install squashfs-tools.") from e
 
+        if not shutil.which("virt-make-fs"):
+            raise ImageError("virt-make-fs not found. Install libguestfs-tools package.")
+
         try:
             subprocess.run(
-                ["truncate", "-s", f"{minimum_rootfs_size}M", str(final_path)],
+                [
+                    "virt-make-fs",
+                    "--type=ext4",
+                    "--format=raw",
+                    "--size",
+                    f"+{minimum_rootfs_size}M",
+                    str(extract_dir),
+                    str(final_path),
+                ],
                 capture_output=True,
-                check=True,
-            )
-            subprocess.run(
-                ["mkfs.ext4", "-d", str(extract_dir), "-F", str(final_path)],
-                capture_output=True,
+                text=True,
                 check=True,
             )
         except subprocess.CalledProcessError as e:
-            raise ImageError("Failed to create ext4 from squashfs") from e
+            stderr_msg = e.stderr.strip() if e.stderr else "no details"
+            raise ImageError(f"Failed to create ext4 from squashfs: {stderr_msg}") from e
 
     logger.info("Created ext4 from squashfs: %s", final_path)
     return final_path
@@ -1404,8 +1466,9 @@ def import_image(
         return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
     elif spec.format == "tar-rootfs":
-        size_str = f"{spec.minimum_rootfs_size}M"
-        create_ext4_from_tar(spec.source_path, final_path, size=size_str)
+        create_ext4_from_tar(
+            spec.source_path, final_path, minimum_rootfs_mib=spec.minimum_rootfs_size
+        )
 
         # Detect filesystem type and UUID for tar-rootfs (always ext4)
         fs_type = detect_filesystem_type(final_path)

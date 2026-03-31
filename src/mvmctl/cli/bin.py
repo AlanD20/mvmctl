@@ -808,9 +808,6 @@ def image_ls(
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
         rows_local.append([display_id, os_name, fs_type, size_str, added])
 
-    if not rows_local:
-        print_info("No images downloaded. Use 'mvm image fetch <id>' to download one.")
-        return
     print_table(
         title="Downloaded Images",
         columns=["ID", "OS Name", "FS Type", "Size", "Added"],
