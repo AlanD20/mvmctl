@@ -319,15 +319,17 @@ def test_release_network_ip(mock_cache_dir: Path):
     assert leases[0].vm_name == "vm2"
 
 
+@patch("mvmctl.core.network.get_default_interface")
 @patch("mvmctl.core.network_manager.create_network")
-def test_ensure_default_network_creates_when_missing(mock_create_network, mock_cache_dir: Path):
+def test_ensure_default_network_creates_when_missing(mock_create_network, mock_get_default_iface, mock_cache_dir: Path):
     # Doesn't exist, will be created
+    mock_get_default_iface.return_value = "wlo1"
     mock_create_network.return_value = NetworkConfig(
         "default", "172.35.0.0/24", "172.35.0.1", "mvm-default"
     )
     config = ensure_default_network()
     assert config is not None
-    mock_create_network.assert_called_once_with("default", cidr="172.35.0.0/24", nat=True)
+    mock_create_network.assert_called_once_with("default", cidr="172.35.0.0/24", nat=True, nat_gateways=["wlo1"])
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)

@@ -588,7 +588,17 @@ def ensure_default_network() -> NetworkConfig:
                 raise
         return config
 
-    return create_network(DEFAULT_NETWORK_NAME, cidr=DEFAULT_NETWORK_CIDR, nat=True)
+    # Auto-detect internet-facing interface for NAT gateway
+    default_iface = get_default_interface()
+    if not default_iface:
+        raise NetworkError(
+            "Could not auto-detect internet-facing interface. "
+            "Please create the default network manually with: "
+            "mvm network create default --nat-gateways <interface>"
+        )
+    return create_network(
+        DEFAULT_NETWORK_NAME, cidr=DEFAULT_NETWORK_CIDR, nat=True, nat_gateways=[default_iface]
+    )
 
 
 @dataclass
