@@ -52,7 +52,7 @@ class NetworkConfig:
     gateway: str
     bridge: str
     nat_enabled: bool = True
-    nat_interface: str | None = None
+    nat_gateways: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
     is_default: bool = False
 
@@ -88,7 +88,7 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
     Validates all fields from metadata to prevent injection attacks:
     - name: validated via validate_entity_name()
     - bridge: validated via validate_bridge_name()
-    - nat_interface: validated via validate_interface_name()
+    - nat_gateways: validated via validate_nat_gateways()
     - cidr: validated via validate_cidr()
     - gateway: validated via validate_ipv4_address()
 
@@ -137,18 +137,26 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
         logger.warning("Invalid bridge name in metadata for network '%s': %s", name, e)
         return None
 
-    # Extract and validate nat_interface if present
-    nat_interface = entry.get("nat_interface")
-    if nat_interface is not None:
-        if not isinstance(nat_interface, str):
-            logger.warning("Invalid NAT interface in metadata for network '%s': not a string", name)
-            nat_interface = None
+    # Extract and validate nat_gateways if present
+    nat_gateways: list[str] = []
+    raw_nat_gateways = entry.get("nat_gateways")
+    if raw_nat_gateways is not None:
+        if isinstance(raw_nat_gateways, list):
+            for iface in raw_nat_gateways:
+                if isinstance(iface, str):
+                    try:
+                        validated_iface = validate_interface_name(iface)
+                        nat_gateways.append(validated_iface)
+                    except MVMError as e:
+                        logger.warning(
+                            "Invalid NAT gateway in metadata for network '%s': %s", name, e
+                        )
+                else:
+                    logger.warning(
+                        "Invalid NAT gateway in metadata for network '%s': not a string", name
+                    )
         else:
-            try:
-                nat_interface = validate_interface_name(nat_interface)
-            except MVMError as e:
-                logger.warning("Invalid NAT interface in metadata for network '%s': %s", name, e)
-                nat_interface = None
+            logger.warning("Invalid nat_gateways in metadata for network '%s': not a list", name)
 
     return NetworkConfig(
         name=name,
@@ -156,7 +164,7 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
         gateway=gateway,
         bridge=bridge,
         nat_enabled=entry.get("nat_enabled", True),
-        nat_interface=nat_interface,
+        nat_gateways=nat_gateways,
         created_at=entry.get("created_at", ""),
         is_default=entry.get("is_default", 0) == 1,
     )
@@ -280,7 +288,7 @@ def create_network(
     cidr: str,
     gateway: str | None = None,
     nat: bool = True,
-    internet_iface: str | None = None,
+    nat_gateways: list[str] | None = None,
 ) -> NetworkConfig:
     """Create a named network.
 
@@ -292,7 +300,7 @@ def create_network(
         cidr: IP subnet in CIDR notation (e.g., "192.168.100.0/24").
         gateway: Gateway IP for the bridge. Defaults to first host in subnet.
         nat: Whether to configure NAT/masquerade. Default True.
-        internet_iface: Physical interface for NAT (auto-detected if not provided).
+        nat_gateways: Physical interfaces for NAT (auto-detected if not provided).
 
     Returns:
         The created NetworkConfig.
@@ -324,13 +332,13 @@ def create_network(
         gateway=gateway,
         bridge=bridge,
         nat_enabled=nat,
-        nat_interface=internet_iface,
+        nat_gateways=nat_gateways or [],
     )
 
     try:
         setup_bridge(bridge, gateway_cidr=f"{gateway}/{_prefix_len(cidr)}")
         if nat:
-            setup_nat(bridge, internet_iface=internet_iface)
+            setup_nat(bridge, nat_gateways=nat_gateways)
     except NetworkError:
         try:
             teardown_bridge(bridge)
@@ -346,7 +354,7 @@ def create_network(
         gateway=config.gateway,
         bridge=config.bridge,
         nat_enabled=config.nat_enabled,
-        nat_interface=config.nat_interface,
+        nat_gateways=config.nat_gateways,
         created_at=config.created_at,
         leases=[],
         bridge_active=True,
@@ -414,7 +422,7 @@ class NetworkInspect(TypedDict):
     gateway: str
     bridge: str
     nat_enabled: bool
-    nat_interface: str | None
+    nat_gateways: list[str]
     created_at: str
     bridge_exists: bool
     vms: list[_VMLease]
@@ -466,7 +474,7 @@ def inspect_network(name: str) -> NetworkInspect:
         "gateway": config.gateway,
         "bridge": config.bridge,
         "nat_enabled": config.nat_enabled,
-        "nat_interface": config.nat_interface,
+        "nat_gateways": config.nat_gateways,
         "created_at": config.created_at,
         "bridge_exists": active,
         "vms": enriched_vms,
@@ -537,21 +545,25 @@ def ensure_default_network() -> NetworkConfig:
         nat_missing = False
         if config.nat_enabled:
             try:
-                internet_iface = config.nat_interface or get_default_interface()
-                masquerade_check = [
-                    "iptables",
-                    "-t",
-                    "nat",
-                    "-C",
-                    MVM_POSTROUTING_CHAIN,
-                    "-s",
-                    config.cidr,
-                    "-o",
-                    internet_iface,
-                    "-j",
-                    "MASQUERADE",
-                ]
-                nat_missing = not _iptables_rule_exists(masquerade_check)
+                nat_gateways = config.nat_gateways or [get_default_interface()]
+                # Check if at least one gateway has a MASQUERADE rule
+                for gateway_iface in nat_gateways:
+                    masquerade_check = [
+                        "iptables",
+                        "-t",
+                        "nat",
+                        "-C",
+                        MVM_POSTROUTING_CHAIN,
+                        "-s",
+                        config.cidr,
+                        "-o",
+                        gateway_iface,
+                        "-j",
+                        "MASQUERADE",
+                    ]
+                    if not _iptables_rule_exists(masquerade_check):
+                        nat_missing = True
+                        break
             except Exception:
                 nat_missing = True
 
@@ -561,8 +573,8 @@ def ensure_default_network() -> NetworkConfig:
                 if bridge_missing:
                     setup_bridge(config.bridge, gateway_cidr=gateway_cidr)
                 if config.nat_enabled:
-                    internet_iface = config.nat_interface or get_default_interface()
-                    setup_nat(config.bridge, internet_iface=internet_iface)
+                    nat_gateways = config.nat_gateways or [get_default_interface()]
+                    setup_nat(config.bridge, nat_gateways=nat_gateways)
                     if os.getuid() == 0:
                         save_iptables_rules()
                 cache_dir = get_cache_dir()
@@ -668,33 +680,39 @@ def restore_networks() -> list[str]:
             continue
 
         if config.nat_enabled:
-            internet_iface = config.nat_interface
+            nat_gateways = config.nat_gateways or []
 
-            if internet_iface:
+            # Validate stored gateways
+            validated_gateways: list[str] = []
+            for gateway_iface in nat_gateways:
                 try:
-                    validate_network_interface(internet_iface)
+                    validate_network_interface(gateway_iface)
+                    validated_gateways.append(gateway_iface)
                 except NetworkError:
                     logger.warning(
-                        "Network '%s': stored interface '%s' is invalid, auto-detecting",
+                        "Network '%s': stored gateway '%s' is invalid, skipping",
                         config.name,
-                        internet_iface,
+                        gateway_iface,
                     )
-                    internet_iface = None
 
-            if internet_iface is None:
+            # If no valid gateways, auto-detect
+            if not validated_gateways:
                 try:
-                    internet_iface = get_default_interface()
-                    validate_network_interface(internet_iface)
+                    default_iface = get_default_interface()
+                    validate_network_interface(default_iface)
+                    validated_gateways = [default_iface]
                 except NetworkError as e:
                     status.append(f"Network '{config.name}': no valid interface for NAT: {e}")
                     continue
 
             try:
-                setup_nat(config.bridge, internet_iface=internet_iface, cidr=config.cidr)
-                status.append(f"Network '{config.name}': NAT configured via {internet_iface}")
+                setup_nat(config.bridge, nat_gateways=validated_gateways, cidr=config.cidr)
+                status.append(
+                    f"Network '{config.name}': NAT configured via {', '.join(validated_gateways)}"
+                )
 
-                if config.nat_interface != internet_iface:
-                    update_network_entry(cache_dir, config.name, nat_interface=internet_iface)
+                if config.nat_gateways != validated_gateways:
+                    update_network_entry(cache_dir, config.name, nat_gateways=validated_gateways)
             except NetworkError as e:
                 status.append(f"Network '{config.name}': failed to configure NAT: {e}")
 

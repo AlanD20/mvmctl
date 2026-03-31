@@ -191,7 +191,7 @@ def test_create_network_success(
     # Verify persistence in metadata
     assert get_network("mynet") is not None
     mock_setup_bridge.assert_called_once_with("mvm-mynet", gateway_cidr="10.20.0.1/24")
-    mock_setup_nat.assert_called_once_with("mvm-mynet", internet_iface=None)
+    mock_setup_nat.assert_called_once_with("mvm-mynet", nat_gateways=None)
 
 
 def test_create_network_already_exists(mock_cache_dir: Path):
@@ -376,7 +376,7 @@ def test_ensure_default_network_recreates_missing_bridge(
     assert config is not None
     assert config.name == "default"
     mock_setup_bridge.assert_called_once_with("mvm-default", gateway_cidr="172.35.0.1/24")
-    mock_setup_nat.assert_called_once_with("mvm-default", internet_iface="eth0")
+    mock_setup_nat.assert_called_once_with("mvm-default", nat_gateways=["eth0"])
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
@@ -406,7 +406,7 @@ def test_ensure_default_network_recreates_missing_chains(
     assert config is not None
     assert config.name == "default"
     mock_setup_bridge.assert_not_called()
-    mock_setup_nat.assert_called_once_with("mvm-default", internet_iface="eth0")
+    mock_setup_nat.assert_called_once_with("mvm-default", nat_gateways=["eth0"])
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
@@ -482,26 +482,26 @@ class TestSetDefaultNetwork:
             set_default_network("nonexistent")
 
 
-class TestNatInterfaceField:
-    """Tests for nat_interface field in NetworkConfig."""
+class TestNatGatewaysField:
+    """Tests for nat_gateways field in NetworkConfig."""
 
-    def test_network_entry_to_config_with_nat_interface(self):
-        """NetworkConfig should include nat_interface when present in entry."""
+    def test_network_entry_to_config_with_nat_gateways(self):
+        """NetworkConfig should include nat_gateways when present in entry."""
         entry = {
             "cidr": "10.20.1.0/24",
             "gateway": "10.20.1.1",
             "bridge": "mvm-testnet",
             "nat_enabled": True,
-            "nat_interface": "eth0",
+            "nat_gateways": ["eth0", "eth1"],
             "created_at": "2026-01-01T00:00:00Z",
             "is_default": 0,
         }
         config = _network_entry_to_config("testnet", entry)
         assert config is not None
-        assert config.nat_interface == "eth0"
+        assert config.nat_gateways == ["eth0", "eth1"]
 
-    def test_network_entry_to_config_without_nat_interface(self):
-        """NetworkConfig should have nat_interface=None when not in entry."""
+    def test_network_entry_to_config_without_nat_gateways(self):
+        """NetworkConfig should have nat_gateways=[] when not in entry."""
         entry = {
             "cidr": "10.20.1.0/24",
             "gateway": "10.20.1.1",
@@ -512,22 +512,38 @@ class TestNatInterfaceField:
         }
         config = _network_entry_to_config("testnet", entry)
         assert config is not None
-        assert config.nat_interface is None
+        assert config.nat_gateways == []
 
-    def test_network_entry_to_config_invalid_nat_interface(self):
-        """NetworkConfig should set nat_interface=None for invalid types."""
+    def test_network_entry_to_config_invalid_nat_gateways_type(self):
+        """NetworkConfig should set nat_gateways=[] for invalid types."""
         entry = {
             "cidr": "10.20.1.0/24",
             "gateway": "10.20.1.1",
             "bridge": "mvm-testnet",
             "nat_enabled": True,
-            "nat_interface": 12345,
+            "nat_gateways": "eth0",  # Should be list, not string
             "created_at": "2026-01-01T00:00:00Z",
             "is_default": 0,
         }
         config = _network_entry_to_config("testnet", entry)
         assert config is not None
-        assert config.nat_interface is None
+        assert config.nat_gateways == []
+
+    def test_network_entry_to_config_invalid_gateway_in_list(self):
+        """NetworkConfig should skip invalid gateways in list."""
+        entry = {
+            "cidr": "10.20.1.0/24",
+            "gateway": "10.20.1.1",
+            "bridge": "mvm-testnet",
+            "nat_enabled": True,
+            "nat_gateways": ["eth0", 12345, "eth1"],  # 12345 is invalid
+            "created_at": "2026-01-01T00:00:00Z",
+            "is_default": 0,
+        }
+        config = _network_entry_to_config("testnet", entry)
+        assert config is not None
+        assert config.nat_gateways == ["eth0", "eth1"]
+
 
 
 class TestRestoreNetworks:
@@ -551,7 +567,7 @@ class TestRestoreNetworks:
             gateway="10.20.0.1",
             bridge="mvm-testnet",
             nat_enabled=True,
-            nat_interface="eth0",
+            nat_gateways=["eth0"],
         )
 
         with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
@@ -591,7 +607,7 @@ class TestRestoreNetworks:
             gateway="10.20.0.1",
             bridge="mvm-testnet",
             nat_enabled=True,
-            nat_interface="eth0",
+            nat_gateways=["eth0"],
         )
 
         with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
@@ -614,7 +630,7 @@ class TestRestoreNetworks:
             gateway="10.20.0.1",
             bridge="mvm-testnet",
             nat_enabled=True,
-            nat_interface="invalid0",
+            nat_gateways=["invalid0"],
         )
 
         with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):

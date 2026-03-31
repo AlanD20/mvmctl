@@ -624,3 +624,58 @@ def test_sanitize_metadata_string_includes_field_name_in_error():
 
     with pytest.raises(MVMError, match="Invalid custom_field"):
         sanitize_metadata_string("value;evil", "custom_field")
+
+
+# ---------------------------------------------------------------------------
+# validate_nat_gateways — comma-separated interface validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "gateways_str",
+    [
+        "eth0",
+        "eth0,eth1",
+        "eth0, eth1, eth2",
+        "wlan0",
+        "enp0s3,wlan0",
+    ],
+)
+def test_validate_nat_gateways_accepts_valid(gateways_str: str):
+    """Test valid NAT gateway strings are accepted."""
+    from mvmctl.utils.validation import validate_nat_gateways
+
+    result = validate_nat_gateways(gateways_str)
+    assert isinstance(result, list)
+    assert len(result) > 0
+    assert all(isinstance(iface, str) for iface in result)
+
+
+@pytest.mark.parametrize(
+    "gateways_str,reason",
+    [
+        ("", "empty string"),
+        ("   ", "only whitespace"),
+        ("eth0;evil", "semicolon injection"),
+        ("eth0|cat /etc/passwd", "pipe injection"),
+        ("eth0&&evil", "ampersand injection"),
+        ("eth0,eth1;evil", "injection in second interface"),
+    ],
+)
+def test_validate_nat_gateways_rejects_invalid(gateways_str: str, reason: str):
+    """Test NAT gateway validation rejects invalid inputs."""
+    from mvmctl.utils.validation import validate_nat_gateways
+
+    with pytest.raises(MVMError, match="Invalid.*NAT gateway|cannot be empty"):
+        validate_nat_gateways(gateways_str)
+
+
+def test_validate_nat_gateways_returns_list():
+    """Test that validate_nat_gateways returns a list."""
+    from mvmctl.utils.validation import validate_nat_gateways
+
+    result = validate_nat_gateways("eth0,eth1")
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert "eth0" in result
+    assert "eth1" in result

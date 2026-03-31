@@ -19,7 +19,7 @@ def test_create_network_with_privileges(mock_create, mock_check_priv, mock_inter
 
     mock_check_priv.assert_called_once_with("/usr/sbin/ip", "create network 'test-net'")
     mock_create.assert_called_once_with(
-        "test-net", cidr="10.0.0.0/24", gateway="10.0.0.1", nat=True, internet_iface=None
+        "test-net", cidr="10.0.0.0/24", gateway="10.0.0.1", nat=True, nat_gateways=None
     )
     assert result == mock_config
 

@@ -308,7 +308,7 @@ def test_setup_nat_all_rules_exist():
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
             with patch("mvmctl.core.network.setup_mvm_chains"):
                 with patch("mvmctl.core.network.chain_exists", return_value=False):
-                    setup_nat("fc-br0", "eth0")
+                    setup_nat("fc-br0", nat_gateways=["eth0"])
                     # 3 calls: check MASQUERADE, check FORWARD out, check FORWARD in
                     # All return 0 (exist), so no add calls
                     assert mock_run.call_count == 3
@@ -335,7 +335,7 @@ def test_setup_nat_no_rules_exist():
         with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
             with patch("mvmctl.core.network.setup_mvm_chains"):
                 with patch("mvmctl.core.network.chain_exists", return_value=False):
-                    setup_nat("fc-br0", "eth0")
+                    setup_nat("fc-br0", nat_gateways=["eth0"])
                     # 6 calls: 3 checks + 3 adds
                     assert mock_run.call_count == 6
 
@@ -355,7 +355,7 @@ def test_setup_nat_masquerade_add_fails():
             with patch("mvmctl.core.network.setup_mvm_chains"):
                 with patch("mvmctl.core.network.chain_exists", return_value=False):
                     with pytest.raises(NetworkError, match="Failed to add MASQUERADE"):
-                        setup_nat("fc-br0", "eth0")
+                        setup_nat("fc-br0", nat_gateways=["eth0"])
 
 
 def test_setup_nat_auto_detect_interface():
@@ -811,7 +811,7 @@ def test_setup_nat_calls_setup_mvm_chains():
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
             with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
                 with patch("mvmctl.core.network._iptables_rule_exists", return_value=True):
-                    setup_nat("fc-br0", "eth0")
+                    setup_nat("fc-br0", nat_gateways=["eth0"])
                     mock_setup_chains.assert_called_once()
 
 
@@ -823,7 +823,7 @@ def test_setup_nat_adds_rules_to_mvm_chains():
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
                 with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
-                    setup_nat("fc-br0", "eth0")
+                    setup_nat("fc-br0", nat_gateways=["eth0"])
                     # Check that rules are added to MVM chains
                     calls = [str(c) for c in mock_run.call_args_list]
                     assert any("MVM-POSTROUTING" in c for c in calls)

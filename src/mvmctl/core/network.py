@@ -615,153 +615,159 @@ def teardown_all_mvm_chains_with_status() -> list[str]:
 
 def setup_nat(
     bridge: str = BRIDGE_NAME,
-    internet_iface: str | None = None,
+    nat_gateways: list[str] | None = None,
     *,
     cidr: str | None = None,
 ) -> None:
     """Set up NAT (MASQUERADE) for the bridge subnet using MVM chains.
 
-    - Gets internet_iface via get_default_interface() if not provided
+    - Gets nat_gateways via get_default_interface() if not provided
     - Uses provided cidr or defaults to SUBNET constant for source filtering
-    - Adds MASQUERADE rule with source filtering to MVM-POSTROUTING chain
-    - Adds FORWARD rules to MVM-FORWARD chain
+    - Adds MASQUERADE rule with source filtering to MVM-POSTROUTING chain for each gateway
+    - Adds FORWARD rules to MVM-FORWARD chain for each gateway
     - Is idempotent: uses _ensure_iptables_rule for atomic rule application
     - Raises NetworkError on failure.
 
     Args:
         bridge: Bridge interface name.
-        internet_iface: Physical interface for NAT (defaults to default route interface).
+        nat_gateways: Physical interfaces for NAT (defaults to [default route interface]).
         cidr: Source CIDR for NAT rules (defaults to SUBNET).
     """
-    if internet_iface is None:
-        internet_iface = get_default_interface()
+    if nat_gateways is None:
+        nat_gateways = [get_default_interface()]
 
     if cidr is None:
         cidr = SUBNET
 
     forward_chain = MVM_FORWARD_CHAIN
     postrouting_chain = MVM_POSTROUTING_CHAIN
-    comment = f"mvm-nat:{bridge}"
 
     setup_mvm_chains()
 
-    # MASQUERADE rule with source filtering and comment
-    masquerade_check = [
-        "iptables",
-        "-t",
-        "nat",
-        "-C",
-        postrouting_chain,
-        "-s",
-        cidr,
-        "-o",
-        internet_iface,
-        "-j",
-        "MASQUERADE",
-        "-m",
-        "comment",
-        "--comment",
-        comment,
-    ]
-    masquerade_add = [
-        "iptables",
-        "-t",
-        "nat",
-        "-A",
-        postrouting_chain,
-        "-s",
-        cidr,
-        "-o",
-        internet_iface,
-        "-j",
-        "MASQUERADE",
-        "-m",
-        "comment",
-        "--comment",
-        comment,
-    ]
-    _ensure_iptables_rule(
-        masquerade_check,
-        masquerade_add,
-        f"Failed to add MASQUERADE rule for {bridge}",
-    )
+    # Create MASQUERADE rules for each gateway interface
+    for gateway_iface in nat_gateways:
+        comment = f"mvm-nat:{bridge}:{gateway_iface}"
 
-    # FORWARD out rule with source filtering
-    forward_out_check = [
-        "iptables",
-        "-t",
-        "filter",
-        "-C",
-        forward_chain,
-        "-s",
-        cidr,
-        "-i",
-        bridge,
-        "-o",
-        internet_iface,
-        "-j",
-        "ACCEPT",
-    ]
-    forward_out_add = [
-        "iptables",
-        "-t",
-        "filter",
-        "-A",
-        forward_chain,
-        "-s",
-        cidr,
-        "-i",
-        bridge,
-        "-o",
-        internet_iface,
-        "-j",
-        "ACCEPT",
-    ]
-    _ensure_iptables_rule(
-        forward_out_check,
-        forward_out_add,
-        f"Failed to add FORWARD rule for {bridge}",
-    )
+        # MASQUERADE rule with source filtering and comment
+        masquerade_check = [
+            "iptables",
+            "-t",
+            "nat",
+            "-C",
+            postrouting_chain,
+            "-s",
+            cidr,
+            "-o",
+            gateway_iface,
+            "-j",
+            "MASQUERADE",
+            "-m",
+            "comment",
+            "--comment",
+            comment,
+        ]
+        masquerade_add = [
+            "iptables",
+            "-t",
+            "nat",
+            "-A",
+            postrouting_chain,
+            "-s",
+            cidr,
+            "-o",
+            gateway_iface,
+            "-j",
+            "MASQUERADE",
+            "-m",
+            "comment",
+            "--comment",
+            comment,
+        ]
+        _ensure_iptables_rule(
+            masquerade_check,
+            masquerade_add,
+            f"Failed to add MASQUERADE rule for {bridge} via {gateway_iface}",
+        )
 
-    # FORWARD in rule with destination filtering
-    forward_in_check = [
-        "iptables",
-        "-t",
-        "filter",
-        "-C",
-        forward_chain,
-        "-d",
-        cidr,
-        "-i",
-        internet_iface,
-        "-o",
-        bridge,
-        "-j",
-        "ACCEPT",
-    ]
-    forward_in_add = [
-        "iptables",
-        "-t",
-        "filter",
-        "-A",
-        forward_chain,
-        "-d",
-        cidr,
-        "-i",
-        internet_iface,
-        "-o",
-        bridge,
-        "-j",
-        "ACCEPT",
-    ]
-    _ensure_iptables_rule(
-        forward_in_check,
-        forward_in_add,
-        f"Failed to add FORWARD rule for {bridge}",
-    )
+        # FORWARD out rule with source filtering
+        forward_out_check = [
+            "iptables",
+            "-t",
+            "filter",
+            "-C",
+            forward_chain,
+            "-s",
+            cidr,
+            "-i",
+            bridge,
+            "-o",
+            gateway_iface,
+            "-j",
+            "ACCEPT",
+        ]
+        forward_out_add = [
+            "iptables",
+            "-t",
+            "filter",
+            "-A",
+            forward_chain,
+            "-s",
+            cidr,
+            "-i",
+            bridge,
+            "-o",
+            gateway_iface,
+            "-j",
+            "ACCEPT",
+        ]
+        _ensure_iptables_rule(
+            forward_out_check,
+            forward_out_add,
+            f"Failed to add FORWARD rule for {bridge} via {gateway_iface}",
+        )
+
+        # FORWARD in rule with destination filtering
+        forward_in_check = [
+            "iptables",
+            "-t",
+            "filter",
+            "-C",
+            forward_chain,
+            "-d",
+            cidr,
+            "-i",
+            gateway_iface,
+            "-o",
+            bridge,
+            "-j",
+            "ACCEPT",
+        ]
+        forward_in_add = [
+            "iptables",
+            "-t",
+            "filter",
+            "-A",
+            forward_chain,
+            "-d",
+            cidr,
+            "-i",
+            gateway_iface,
+            "-o",
+            bridge,
+            "-j",
+            "ACCEPT",
+        ]
+        _ensure_iptables_rule(
+            forward_in_check,
+            forward_in_add,
+            f"Failed to add FORWARD rule for {bridge} via {gateway_iface}",
+        )
 
     logger.info(
-        "NAT rules configured for bridge %s via %s (source %s)", bridge, internet_iface, cidr
+        "NAT rules configured for bridge %s via %s (source %s)",
+        bridge,
+        ", ".join(nat_gateways),
+        cidr,
     )
 
 

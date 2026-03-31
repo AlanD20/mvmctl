@@ -28,11 +28,13 @@ from mvmctl.api.assets import (
 from mvmctl.api.metadata import (
     find_images_by_id_prefix,
     find_kernels_by_id_prefix,
+    get_default_binary_entry,
     get_default_image_entry,
     get_image_entry,
     list_image_entries,
     remove_image_entry,
     remove_kernel_entry,
+    set_default_binary_entry,
     set_default_image_by_internal_id,
     set_default_image_entry,
     update_image_entry,
@@ -1511,6 +1513,11 @@ def bin_fetch(
         raise typer.Exit(code=1)
 
     print_success(f"Downloaded v{bv.version}: {bv.firecracker_path}")
+
+    cache_dir = get_cache_dir()
+    if get_default_binary_entry(cache_dir) is None:
+        set_default_binary_entry(cache_dir, bv.version)
+        print_success(f"Default binary set to v{bv.version}")
 
 
 @bin_app.command(name="set-default")

@@ -55,11 +55,11 @@ def create_network(
     cidr: str,
     gateway: str | None = None,
     nat: bool = True,
-    internet_iface: str | None = None,
+    nat_gateways: list[str] | None = None,
 ) -> NetworkConfig:
     """Create a named network, setting up bridge and NAT rules."""
     check_privileges_interactive("/usr/sbin/ip", f"create network '{name}'")
-    return _create_network(name, cidr=cidr, gateway=gateway, nat=nat, internet_iface=internet_iface)
+    return _create_network(name, cidr=cidr, gateway=gateway, nat=nat, nat_gateways=nat_gateways)
 
 
 def remove_network(name: str) -> None:

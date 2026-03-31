@@ -14,7 +14,6 @@ from mvmctl.api.network import (
     list_networks,
     remove_network,
     set_default_network,
-    validate_network_interface,
 )
 from mvmctl.cli._helpers import check_name_arg, is_bridge_alive
 from mvmctl.exceptions import MVMError, NetworkError
@@ -32,8 +31,8 @@ from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import (
     validate_cidr,
     validate_entity_name,
-    validate_interface_name,
     validate_ipv4_address,
+    validate_nat_gateways,
 )
 
 app = typer.Typer(
@@ -133,10 +132,10 @@ def create(
     ),
     gateway: str | None = typer.Option(None, "--gateway", help="Gateway IP for the bridge"),
     no_nat: bool = typer.Option(False, "--no-nat", help="Disable NAT/masquerade"),
-    internet_iface: str | None = typer.Option(
+    nat_gateways: str | None = typer.Option(
         None,
-        "--internet-iface",
-        help="Physical interface for NAT (auto-detected if not provided)",
+        "--nat-gateways",
+        help="Physical interfaces for NAT (comma-separated, auto-detected if not provided)",
     ),
 ) -> None:
     """Create a named network."""
@@ -161,13 +160,13 @@ def create(
             print_error(f"Invalid gateway: {e}")
             raise typer.Exit(code=1)
 
-    if internet_iface is None:
+    if nat_gateways is None:
         interfaces = list_network_interfaces()
         if len(interfaces) == 0:
             print_error("No network interfaces found")
             raise typer.Exit(code=1)
         elif len(interfaces) == 1:
-            internet_iface = interfaces[0]
+            nat_gateways = interfaces[0]
         else:
             print_info("Select interface for NAT (internet access):")
             for i, iface in enumerate(interfaces, 1):
@@ -177,19 +176,13 @@ def create(
                 choices=[str(i) for i in range(1, len(interfaces) + 1)],
                 default="1",
             )
-            internet_iface = interfaces[int(selected) - 1]
+            nat_gateways = interfaces[int(selected) - 1]
 
-    # Validate interface name for security
+    # Validate and parse NAT gateways
     try:
-        internet_iface = validate_interface_name(internet_iface)
+        nat_gateways_list = validate_nat_gateways(nat_gateways)
     except MVMError as e:
-        print_error(f"Invalid interface '{internet_iface}': {e}")
-        raise typer.Exit(code=1)
-
-    try:
-        validate_network_interface(internet_iface)
-    except NetworkError as e:
-        print_error(f"Invalid interface '{internet_iface}': {e}")
+        print_error(f"Invalid NAT gateways: {e}")
         raise typer.Exit(code=1)
 
     try:
@@ -198,7 +191,7 @@ def create(
             cidr=cidr,
             gateway=gateway,
             nat=not no_nat,
-            internet_iface=internet_iface,
+            nat_gateways=nat_gateways_list,
         )
     except NetworkError as e:
         error_msg = str(e)
@@ -230,8 +223,8 @@ def create(
     print_info(f"  Gateway: {config.gateway}")
     print_info(f"  Bridge:  {config.bridge}")
     print_info(f"  NAT:     {'enabled' if config.nat_enabled else 'disabled'}")
-    if config.nat_interface:
-        print_info(f"  Internet interface: {config.nat_interface}")
+    if config.nat_gateways:
+        print_info(f"  NAT gateways: {', '.join(config.nat_gateways)}")
 
 
 @app.command(

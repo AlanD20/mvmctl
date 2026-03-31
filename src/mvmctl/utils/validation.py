@@ -280,6 +280,45 @@ def validate_ipv4_address(ip: str, field_name: str = "IP address") -> str:
         raise MVMError(f"Invalid {field_name}: '{ip}' is not a valid IPv4 address: {e}") from e
 
 
+def validate_nat_gateways(gateways_str: str) -> list[str]:
+    """Validate and parse comma-separated NAT gateway interfaces.
+
+    Splits the input string by commas, validates each interface name,
+    and returns a list of validated interface names.
+
+    Args:
+        gateways_str: Comma-separated interface names (e.g., "eth0,eth1")
+
+    Returns:
+        List of validated interface names
+
+    Raises:
+        MVMError: If any interface name is invalid
+    """
+    if not gateways_str or not gateways_str.strip():
+        raise MVMError("NAT gateways cannot be empty")
+
+    # Split by comma and strip whitespace
+    interfaces = [iface.strip() for iface in gateways_str.split(",")]
+
+    # Remove empty strings
+    interfaces = [iface for iface in interfaces if iface]
+
+    if not interfaces:
+        raise MVMError("NAT gateways cannot be empty")
+
+    # Validate each interface
+    validated: list[str] = []
+    for iface in interfaces:
+        try:
+            validated_iface = validate_interface_name(iface, "NAT gateway")
+            validated.append(validated_iface)
+        except MVMError as e:
+            raise MVMError(f"Invalid NAT gateway '{iface}': {e}") from e
+
+    return validated
+
+
 def sanitize_metadata_string(
     value: str, field_name: str, max_length: int = 255, allow_hyphen: bool = True
 ) -> str:

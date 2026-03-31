@@ -25,7 +25,7 @@ class TestSetupNat:
         # Mock subprocess.run for the iptables command
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
-        setup_nat(bridge="mvm-test", cidr="10.0.0.0/24")
+        setup_nat(bridge="mvm-test", nat_gateways=["eth0"], cidr="10.0.0.0/24")
 
         # Verify subprocess.run was called with the MASQUERADE rule containing -s CIDR
         calls = mock_run.call_args_list
@@ -43,7 +43,7 @@ class TestSetupNat:
         # Mock subprocess.run
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
-        setup_nat(bridge="mvm-test", internet_iface="eth1")
+        setup_nat(bridge="mvm-test", nat_gateways=["eth1"])
 
         # Verify -o eth1 appears in MASQUERADE rule
         calls = mock_run.call_args_list
@@ -62,7 +62,7 @@ class TestSetupNat:
         # Mock subprocess.run
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
-        setup_nat(bridge="mvm-test")
+        setup_nat(bridge="mvm-test", nat_gateways=["eth0"])
 
         # Verify comment appears in the rule
         calls = mock_run.call_args_list

@@ -1073,7 +1073,11 @@ def test_bin_fetch_success():
         jailer_path=Path("/cache/bin/jailer-v1.5.0"),
         is_active=False,
     )
-    with patch("mvmctl.cli.bin.fetch_binary", return_value=bv):
+    existing_default = ("1.4.0", {"binary_name": "firecracker", "is_default": 1})
+    with (
+        patch("mvmctl.cli.bin.fetch_binary", return_value=bv),
+        patch("mvmctl.cli.bin.get_default_binary_entry", return_value=existing_default),
+    ):
         result = click_runner.invoke(main_app, ["bin", "fetch", "1.5.0"])
     assert result.exit_code == 0
     assert "Downloaded" in result.output
@@ -1084,6 +1088,46 @@ def test_bin_fetch_error():
     with patch("mvmctl.cli.bin.fetch_binary", side_effect=BinaryError("download failed")):
         result = click_runner.invoke(main_app, ["bin", "fetch", "1.5.0"])
     assert result.exit_code == 1
+
+
+def test_bin_fetch_auto_sets_default_when_none_exists():
+    bv = BinaryVersion(
+        version="1.5.0",
+        firecracker_path=Path("/cache/bin/firecracker-v1.5.0"),
+        jailer_path=Path("/cache/bin/jailer-v1.5.0"),
+        is_active=False,
+    )
+    with (
+        patch("mvmctl.cli.bin.fetch_binary", return_value=bv),
+        patch("mvmctl.cli.bin.get_default_binary_entry", return_value=None) as mock_get,
+        patch("mvmctl.cli.bin.set_default_binary_entry") as mock_set,
+    ):
+        result = click_runner.invoke(main_app, ["bin", "fetch", "1.5.0"])
+    assert result.exit_code == 0
+    assert "Downloaded" in result.output
+    assert "Default binary set to v1.5.0" in result.output
+    mock_get.assert_called_once()
+    mock_set.assert_called_once()
+
+
+def test_bin_fetch_no_default_change_when_default_exists():
+    bv = BinaryVersion(
+        version="1.5.0",
+        firecracker_path=Path("/cache/bin/firecracker-v1.5.0"),
+        jailer_path=Path("/cache/bin/jailer-v1.5.0"),
+        is_active=False,
+    )
+    existing_default = ("1.4.0", {"binary_name": "firecracker", "is_default": 1})
+    with (
+        patch("mvmctl.cli.bin.fetch_binary", return_value=bv),
+        patch("mvmctl.cli.bin.get_default_binary_entry", return_value=existing_default),
+        patch("mvmctl.cli.bin.set_default_binary_entry") as mock_set,
+    ):
+        result = click_runner.invoke(main_app, ["bin", "fetch", "1.5.0"])
+    assert result.exit_code == 0
+    assert "Downloaded" in result.output
+    assert "Default binary set" not in result.output
+    mock_set.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
