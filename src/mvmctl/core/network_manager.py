@@ -30,9 +30,15 @@ from mvmctl.core.network import (
     teardown_bridge,
     teardown_nat,
 )
-from mvmctl.exceptions import NetworkError
+from mvmctl.exceptions import MVMError, NetworkError
 from mvmctl.utils.fs import get_cache_dir
-from mvmctl.utils.validation import validate_entity_name
+from mvmctl.utils.validation import (
+    validate_bridge_name,
+    validate_cidr,
+    validate_entity_name,
+    validate_interface_name,
+    validate_ipv4_address,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +52,7 @@ class NetworkConfig:
     gateway: str
     bridge: str
     nat_enabled: bool = True
+    nat_interface: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
     is_default: bool = False
 
@@ -76,21 +83,80 @@ def _gateway_for_subnet(subnet: str) -> str:
 
 
 def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig | None:
-    """Convert a metadata entry to NetworkConfig, returns None if essential fields missing."""
+    """Convert a metadata entry to NetworkConfig, returns None if essential fields missing or invalid.
+
+    Validates all fields from metadata to prevent injection attacks:
+    - name: validated via validate_entity_name()
+    - bridge: validated via validate_bridge_name()
+    - nat_interface: validated via validate_interface_name()
+    - cidr: validated via validate_cidr()
+    - gateway: validated via validate_ipv4_address()
+
+    Invalid entries are logged as warnings and skipped.
+    """
     if not entry:
         return None
-    # Required fields
-    cidr = entry.get("cidr")
-    gateway = entry.get("gateway")
-    bridge = entry.get("bridge")
-    if not isinstance(cidr, str) or not isinstance(gateway, str) or not isinstance(bridge, str):
+
+    # Validate network name
+    try:
+        name = validate_entity_name(name, "network")
+    except MVMError as e:
+        logger.warning("Invalid network name in metadata: %s", e)
         return None
+
+    # Extract and validate CIDR
+    cidr = entry.get("cidr")
+    if not isinstance(cidr, str):
+        logger.warning("Invalid CIDR in metadata for network '%s': not a string", name)
+        return None
+    try:
+        cidr = validate_cidr(cidr)
+    except MVMError as e:
+        logger.warning("Invalid CIDR in metadata for network '%s': %s", name, e)
+        return None
+
+    # Extract and validate gateway
+    gateway = entry.get("gateway")
+    if not isinstance(gateway, str):
+        logger.warning("Invalid gateway in metadata for network '%s': not a string", name)
+        return None
+    try:
+        gateway = validate_ipv4_address(gateway)
+    except MVMError as e:
+        logger.warning("Invalid gateway in metadata for network '%s': %s", name, e)
+        return None
+
+    # Extract and validate bridge
+    bridge = entry.get("bridge")
+    if not isinstance(bridge, str):
+        logger.warning("Invalid bridge in metadata for network '%s': not a string", name)
+        return None
+    try:
+        bridge = validate_bridge_name(bridge)
+    except MVMError as e:
+        logger.warning("Invalid bridge name in metadata for network '%s': %s", name, e)
+        return None
+
+    # Extract and validate nat_interface if present
+    nat_interface = entry.get("nat_interface")
+    if nat_interface is not None:
+        if not isinstance(nat_interface, str):
+            logger.warning("Invalid NAT interface in metadata for network '%s': not a string", name)
+            nat_interface = None
+        else:
+            try:
+                nat_interface = validate_interface_name(nat_interface)
+            except MVMError as e:
+                logger.warning("Invalid NAT interface in metadata for network '%s': %s", name, e)
+                nat_interface = None
+
     return NetworkConfig(
         name=name,
         cidr=cidr,
         gateway=gateway,
         bridge=bridge,
         nat_enabled=entry.get("nat_enabled", True),
+        nat_interface=nat_interface,
         created_at=entry.get("created_at", ""),
         is_default=entry.get("is_default", 0) == 1,
     )
@@ -236,7 +302,6 @@ def create_network(
     """
     validate_entity_name(name, "network")
 
-    # Check if network already exists
     if get_network(name) is not None:
         raise NetworkError(f"Network '{name}' already exists")
 
@@ -259,22 +324,20 @@ def create_network(
         gateway=gateway,
         bridge=bridge,
         nat_enabled=nat,
+        nat_interface=internet_iface,
     )
 
-    # Create host-level resources
     try:
         setup_bridge(bridge, gateway_cidr=f"{gateway}/{_prefix_len(cidr)}")
         if nat:
             setup_nat(bridge, internet_iface=internet_iface)
     except NetworkError:
-        # Best-effort cleanup on failure
         try:
             teardown_bridge(bridge)
         except NetworkError as e:
             logger.warning("Rollback: failed to tear down bridge: %s", e)
         raise
 
-    # Persist to metadata.json
     cache_dir = get_cache_dir()
     update_network_entry(
         cache_dir,
@@ -283,6 +346,7 @@ def create_network(
         gateway=config.gateway,
         bridge=config.bridge,
         nat_enabled=config.nat_enabled,
+        nat_interface=config.nat_interface,
         created_at=config.created_at,
         leases=[],
         bridge_active=True,
@@ -350,6 +414,7 @@ class NetworkInspect(TypedDict):
     gateway: str
     bridge: str
     nat_enabled: bool
+    nat_interface: str | None
     created_at: str
     bridge_exists: bool
     vms: list[_VMLease]
@@ -401,6 +466,7 @@ def inspect_network(name: str) -> NetworkInspect:
         "gateway": config.gateway,
         "bridge": config.bridge,
         "nat_enabled": config.nat_enabled,
+        "nat_interface": config.nat_interface,
         "created_at": config.created_at,
         "bridge_exists": active,
         "vms": enriched_vms,
@@ -451,25 +517,27 @@ def ensure_default_network() -> NetworkConfig:
     or NAT rules are missing (e.g., after a reboot), this function recreates
     them from the stored configuration.
     """
+    from mvmctl.constants import MVM_POSTROUTING_CHAIN
     from mvmctl.core.host_setup import save_iptables_rules
-    from mvmctl.core.network import bridge_exists, setup_bridge, setup_mvm_chains, setup_nat
+    from mvmctl.core.network import (
+        _iptables_rule_exists,
+        bridge_exists,
+        get_default_interface,
+        setup_bridge,
+        setup_mvm_chains,
+        setup_nat,
+    )
 
     config = get_network(DEFAULT_NETWORK_NAME)
 
     if config is not None:
-        # Metadata claims network exists, verify actual resources
         bridge_missing = not bridge_exists(config.bridge)
-        # Check for our custom chains by trying to set them up (idempotent)
         chains_missing = not setup_mvm_chains()
 
-        # Check if NAT rules are missing (when NAT is enabled)
         nat_missing = False
         if config.nat_enabled:
-            from mvmctl.constants import MVM_POSTROUTING_CHAIN
-            from mvmctl.core.network import _iptables_rule_exists, get_default_interface
-
             try:
-                internet_iface = get_default_interface()
+                internet_iface = config.nat_interface or get_default_interface()
                 masquerade_check = [
                     "iptables",
                     "-t",
@@ -488,20 +556,18 @@ def ensure_default_network() -> NetworkConfig:
                 nat_missing = True
 
         if bridge_missing or chains_missing or nat_missing:
-            # Recreate from stored config
             gateway_cidr = f"{config.gateway}/{_prefix_len(config.cidr)}"
             try:
                 if bridge_missing:
                     setup_bridge(config.bridge, gateway_cidr=gateway_cidr)
                 if config.nat_enabled:
-                    setup_nat(config.bridge)
+                    internet_iface = config.nat_interface or get_default_interface()
+                    setup_nat(config.bridge, internet_iface=internet_iface)
                     if os.getuid() == 0:
                         save_iptables_rules()
-                # Update metadata to reflect reality
                 cache_dir = get_cache_dir()
                 update_network_entry(cache_dir, DEFAULT_NETWORK_NAME, bridge_active=True)
             except NetworkError:
-                # Best-effort cleanup on failure
                 if bridge_missing:
                     try:
                         teardown_bridge(config.bridge)
@@ -510,7 +576,6 @@ def ensure_default_network() -> NetworkConfig:
                 raise
         return config
 
-    # No metadata entry, create from scratch
     return create_network(DEFAULT_NETWORK_NAME, cidr=DEFAULT_NETWORK_CIDR, nat=True)
 
 
@@ -562,6 +627,80 @@ def reconcile_networks() -> list[ReconcileResult]:
         logger.warning("Stale networks detected (bridge missing): %s", ", ".join(stale_names))
 
     return results
+
+
+def restore_networks() -> list[str]:
+    """Restore all networks from metadata, recreating bridges and NAT rules.
+
+    This function is called during host init to restore networks after a clean
+    or reboot. It validates stored interfaces and recreates network resources.
+
+    Returns:
+        List of status messages describing what was restored.
+    """
+    from mvmctl.core.network import (
+        bridge_exists,
+        get_default_interface,
+        setup_bridge,
+        setup_nat,
+        validate_network_interface,
+    )
+
+    networks = list_networks()
+    if not networks:
+        return []
+
+    status: list[str] = []
+    cache_dir = get_cache_dir()
+
+    for config in networks:
+        if bridge_exists(config.bridge):
+            status.append(f"Network '{config.name}': bridge already exists, skipping")
+            continue
+
+        gateway_cidr = f"{config.gateway}/{_prefix_len(config.cidr)}"
+
+        try:
+            setup_bridge(config.bridge, gateway_cidr=gateway_cidr)
+            status.append(f"Network '{config.name}': created bridge {config.bridge}")
+        except NetworkError as e:
+            status.append(f"Network '{config.name}': failed to create bridge: {e}")
+            continue
+
+        if config.nat_enabled:
+            internet_iface = config.nat_interface
+
+            if internet_iface:
+                try:
+                    validate_network_interface(internet_iface)
+                except NetworkError:
+                    logger.warning(
+                        "Network '%s': stored interface '%s' is invalid, auto-detecting",
+                        config.name,
+                        internet_iface,
+                    )
+                    internet_iface = None
+
+            if internet_iface is None:
+                try:
+                    internet_iface = get_default_interface()
+                    validate_network_interface(internet_iface)
+                except NetworkError as e:
+                    status.append(f"Network '{config.name}': no valid interface for NAT: {e}")
+                    continue
+
+            try:
+                setup_nat(config.bridge, internet_iface=internet_iface, cidr=config.cidr)
+                status.append(f"Network '{config.name}': NAT configured via {internet_iface}")
+
+                if config.nat_interface != internet_iface:
+                    update_network_entry(cache_dir, config.name, nat_interface=internet_iface)
+            except NetworkError as e:
+                status.append(f"Network '{config.name}': failed to configure NAT: {e}")
+
+        update_network_entry(cache_dir, config.name, bridge_active=True)
+
+    return status
 
 
 # ---------------------------------------------------------------------------

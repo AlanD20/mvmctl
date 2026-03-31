@@ -1230,3 +1230,58 @@ def generate_mac() -> str:
     rand_bytes = secrets.token_bytes(4)
     suffix = ":".join(f"{b:02x}" for b in rand_bytes)
     return f"{DEFAULT_GUEST_MAC_PREFIX}:{suffix}"
+
+
+def validate_network_interface(interface: str) -> bool:
+    """Validate that a network interface exists and is suitable for NAT.
+
+    Performs the following checks:
+    1. Interface exists in the system
+    2. Interface is not a loopback
+    3. Interface has an IP address assigned (for routing)
+    4. Interface is UP or can be brought up
+
+    Args:
+        interface: Network interface name to validate.
+
+    Returns:
+        True if the interface is valid for NAT.
+
+    Raises:
+        NetworkError: If the interface is invalid with a descriptive message.
+    """
+    if interface == "lo":
+        raise NetworkError("Loopback interface 'lo' cannot be used for NAT")
+
+    net_path = Path(f"/sys/class/net/{interface}")
+    if not net_path.exists():
+        raise NetworkError(f"Interface '{interface}' does not exist")
+
+    operstate_path = net_path / "operstate"
+    try:
+        state = operstate_path.read_text().strip()
+    except OSError:
+        state = "unknown"
+
+    if state == "down":
+        raise NetworkError(
+            f"Interface '{interface}' is down. Bring it up with: ip link set {interface} up"
+        )
+
+    try:
+        result = subprocess.run(
+            ["ip", "-o", "-4", "addr", "show", interface],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise NetworkError("'ip' command not found — install iproute2")
+
+    if result.returncode != 0 or not result.stdout.strip():
+        raise NetworkError(
+            f"Interface '{interface}' has no IPv4 address assigned. "
+            f"NAT requires an interface with a valid IP address."
+        )
+
+    return True

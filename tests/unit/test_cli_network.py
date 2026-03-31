@@ -55,9 +55,10 @@ def test_ls_json(mock_leases, mock_list):
 # ---------------------------------------------------------------------------
 
 
+@patch("mvmctl.cli.network.validate_network_interface", return_value=True)
 @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
 @patch("mvmctl.cli.network.create_network", return_value=_FAKE_NET)
-def test_create_success(mock_create, mock_interfaces):
+def test_create_success(mock_create, mock_interfaces, mock_validate):
     result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
     assert result.exit_code == 0
     assert "created" in result.output.lower()
@@ -70,14 +71,16 @@ def test_create_success(mock_create, mock_interfaces):
     )
 
 
+@patch("mvmctl.cli.network.validate_network_interface", return_value=True)
 @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
 @patch("mvmctl.cli.network.create_network", side_effect=NetworkError("already exists"))
-def test_create_error(mock_create, mock_interfaces):
+def test_create_error(mock_create, mock_interfaces, mock_validate):
     result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
     assert result.exit_code == 1
     assert "already exists" in result.output.lower()
 
 
+@patch("mvmctl.cli.network.validate_network_interface", return_value=True)
 @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
 @patch(
     "mvmctl.cli.network.create_network",
@@ -85,7 +88,7 @@ def test_create_error(mock_create, mock_interfaces):
         "Subnet 192.168.100.0/24 overlaps with network 'default' (192.168.100.0/24)"
     ),
 )
-def test_create_error_subnet_overlap(mock_create, mock_interfaces):
+def test_create_error_subnet_overlap(mock_create, mock_interfaces, mock_validate):
     result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
     assert result.exit_code == 1
     assert "overlaps" in result.output.lower()

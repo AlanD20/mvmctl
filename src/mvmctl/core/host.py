@@ -78,6 +78,7 @@ def clean_host(cache_dir: Path) -> list[str]:
     """Remove all networking config (bridges, TAP devices, iptables rules, MVM chains).
 
     Does NOT revert sysctl, remove sudoers, or remove project group.
+    Preserves network metadata to allow restoration during host init.
     Returns list of summary strings.
     """
     from mvmctl.constants import DEFAULT_NETWORK_NAME, TAP_PREFIX, device_prefix
@@ -90,7 +91,7 @@ def clean_host(cache_dir: Path) -> list[str]:
         teardown_bridge,
         teardown_nat,
     )
-    from mvmctl.core.network_manager import list_networks, remove_network
+    from mvmctl.core.network_manager import list_networks
     from mvmctl.exceptions import NetworkError
 
     summary: list[str] = []
@@ -115,13 +116,19 @@ def clean_host(cache_dir: Path) -> list[str]:
         )
         networks = []
     metadata_bridges.update(net.bridge for net in networks)
+
     for net in networks:
+        if net.nat_enabled:
+            try:
+                teardown_nat(bridge=net.bridge, force=True)
+            except NetworkError:
+                pass
         try:
-            remove_network(net.name)
+            teardown_bridge(net.bridge)
             summary.append(f"Removed network '{net.name}' (bridge: {net.bridge})")
         except NetworkError as e:
             summary.append(
-                f"Warning: skipped cleanup for network '{net.name}' "
+                f"Warning: failed to remove network '{net.name}' "
                 f"(already clean or insufficient privileges): {e}"
             )
 

@@ -18,11 +18,12 @@ from mvmctl.api.host import (
     init_host,
     reset_host,
 )
+from mvmctl.api.network import ensure_default_network, restore_networks
 from mvmctl.constants import PROJECT_GROUP
 from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.error_handler import handle_mvm_error
-from mvmctl.utils.fs import get_cache_dir
+from mvmctl.utils.fs import chown_to_real_user, get_cache_dir
 
 _CHAIN_EXISTS_MARKER = "MVM chains already exist"
 
@@ -156,17 +157,17 @@ def init_cmd() -> None:
             )
             print_info(f"Or run immediately: newgrp {PROJECT_GROUP}")
 
-    from mvmctl.api.network import ensure_default_network
-    from mvmctl.utils.fs import chown_to_real_user
-
     try:
-        ensure_default_network()
-        print_success("Default network ready.")
+        restore_results = restore_networks()
+        if restore_results:
+            for result in restore_results:
+                print_info(f"  {result}")
+        else:
+            ensure_default_network()
+            print_success("Default network ready.")
     except MVMError as e:
-        print_warning(f"Default network setup skipped: {e}")
+        print_warning(f"Network setup skipped: {e}")
 
-    # Ensure everything under cache_dir is owned by the invoking user,
-    # not root — covers bin/, networks/, host/, and any dir created above.
     chown_to_real_user(get_cache_dir())
 
 

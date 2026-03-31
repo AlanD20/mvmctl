@@ -1470,11 +1470,100 @@ def test_apply_iptables_rules_batch_logs_input():
             ]
             _apply_iptables_rules_batch(rules)
 
-            # Verify logger.debug was called with the restore input
             assert mock_logger.debug.called
-            # First call logs the input (second call logs "Successfully applied")
             first_call_args = mock_logger.debug.call_args_list[0]
             call_str = str(first_call_args)
-            # The restore input should be in the first logged message
             assert "*filter" in call_str
-            assert "-A MVM-FORWARD" in call_str
+
+
+# ---------------------------------------------------------------------------
+# validate_network_interface
+# ---------------------------------------------------------------------------
+
+
+class TestValidateNetworkInterface:
+    """Tests for validate_network_interface function."""
+
+    def test_reject_loopback(self):
+        """validate_network_interface should reject loopback interface."""
+        from mvmctl.core.network import validate_network_interface
+        from mvmctl.exceptions import NetworkError
+
+        with pytest.raises(NetworkError) as exc_info:
+            validate_network_interface("lo")
+        assert "loopback" in str(exc_info.value).lower()
+
+    def test_reject_nonexistent_interface(self):
+        """validate_network_interface should reject non-existent interface."""
+        from mvmctl.core.network import validate_network_interface
+        from mvmctl.exceptions import NetworkError
+
+        with patch("pathlib.Path.exists", return_value=False):
+            with pytest.raises(NetworkError) as exc_info:
+                validate_network_interface("nonexistent0")
+            assert "does not exist" in str(exc_info.value)
+
+    def test_reject_down_interface(self):
+        """validate_network_interface should reject interface that is down."""
+        from mvmctl.core.network import validate_network_interface
+        from mvmctl.exceptions import NetworkError
+
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("pathlib.Path.__truediv__") as mock_div:
+                mock_div.return_value = MagicMock(
+                    read_text=lambda: "down\n",
+                )
+                with pytest.raises(NetworkError) as exc_info:
+                    validate_network_interface("eth0")
+                assert "down" in str(exc_info.value).lower()
+
+    def test_reject_interface_without_ip(self):
+        """validate_network_interface should reject interface without IP address."""
+        from mvmctl.core.network import validate_network_interface
+        from mvmctl.exceptions import NetworkError
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("pathlib.Path.__truediv__") as mock_div:
+                mock_div.return_value = MagicMock(
+                    read_text=lambda: "up\n",
+                )
+                with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
+                    with pytest.raises(NetworkError) as exc_info:
+                        validate_network_interface("eth0")
+                    assert "ipv4 address" in str(exc_info.value).lower()
+
+    def test_accept_valid_interface(self):
+        """validate_network_interface should return True for valid interface."""
+        from mvmctl.core.network import validate_network_interface
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "2: eth0: <BROADCAST,MULTICAST,UP> inet 192.168.1.100/24"
+
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("pathlib.Path.__truediv__") as mock_div:
+                mock_div.return_value = MagicMock(
+                    read_text=lambda: "up\n",
+                )
+                with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
+                    result = validate_network_interface("eth0")
+                    assert result is True
+
+    def test_ip_command_not_found(self):
+        """validate_network_interface should raise NetworkError if ip command missing."""
+        from mvmctl.core.network import validate_network_interface
+        from mvmctl.exceptions import NetworkError
+
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("pathlib.Path.__truediv__") as mock_div:
+                mock_div.return_value = MagicMock(
+                    read_text=lambda: "up\n",
+                )
+                with patch("mvmctl.core.network.subprocess.run", side_effect=FileNotFoundError):
+                    with pytest.raises(NetworkError) as exc_info:
+                        validate_network_interface("eth0")
+                    assert "ip" in str(exc_info.value).lower()

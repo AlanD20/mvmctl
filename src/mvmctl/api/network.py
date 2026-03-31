@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from mvmctl.api.host import check_privileges_interactive
-from mvmctl.core.network import get_iptables_rules_for_bridge, list_network_interfaces
+from mvmctl.core.network import (
+    get_iptables_rules_for_bridge,
+    list_network_interfaces,
+    validate_network_interface,
+)
 from mvmctl.core.network_manager import (
     NetworkConfig,
     NetworkLease,
@@ -15,6 +19,7 @@ from mvmctl.core.network_manager import (
     inspect_network,
     list_networks,
     release_network_ip,
+    restore_networks,
     set_default_network,
 )
 from mvmctl.core.network_manager import (
@@ -39,7 +44,9 @@ __all__ = [
     "allocate_network_ip",
     "release_network_ip",
     "ensure_default_network",
+    "restore_networks",
     "set_default_network",
+    "validate_network_interface",
 ]
 
 

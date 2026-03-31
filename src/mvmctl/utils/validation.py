@@ -115,3 +115,218 @@ def validate_fs_type(fs_type: str | None, field_name: str = "fs_type") -> None:
             f"Invalid {field_name}: '{fs_type}'. "
             f"Supported types: {', '.join(sorted(supported_types))}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Network metadata security validation
+# ---------------------------------------------------------------------------
+
+# Linux IFNAMSIZ limit for interface names
+IFNAMSIZ = 15
+
+# Shell metacharacters that must be rejected
+_SHELL_METACHARACTERS = set(";|&$`\\\"'\n\r\t<>{}[]()")
+
+# Path traversal characters
+_PATH_TRAVERSAL_CHARS = set("./~\\")
+
+# Null byte and control characters
+_CONTROL_CHARS = set(chr(i) for i in range(32)) | {chr(127)}
+
+
+def _contains_dangerous_chars(value: str) -> bool:
+    """Check if value contains shell metacharacters, path traversal, or control chars."""
+    dangerous = _SHELL_METACHARACTERS | _PATH_TRAVERSAL_CHARS | _CONTROL_CHARS
+    return any(c in dangerous for c in value)
+
+
+def validate_interface_name(name: str, field_name: str = "interface") -> str:
+    """Validate network interface name for security.
+
+    Prevents command injection through interface names by rejecting:
+    - Shell metacharacters (;|&$` etc.)
+    - Path traversal characters (../~)
+    - Control characters and null bytes
+    - Spaces
+    - Leading hyphens
+
+    Args:
+        name: Interface name to validate
+        field_name: Field name for error messages
+
+    Returns:
+        The validated interface name
+
+    Raises:
+        MVMError: If the name is invalid or contains dangerous characters
+    """
+    if not name:
+        raise MVMError(f"Invalid {field_name}: name cannot be empty")
+
+    if len(name) > IFNAMSIZ:
+        raise MVMError(
+            f"Invalid {field_name}: '{name}' exceeds maximum length of {IFNAMSIZ} characters"
+        )
+
+    if name.startswith("-"):
+        raise MVMError(f"Invalid {field_name}: '{name}' cannot start with a hyphen")
+
+    if _contains_dangerous_chars(name):
+        raise MVMError(
+            f"Invalid {field_name}: '{name}' contains forbidden characters "
+            "(shell metacharacters, path traversal, or control characters)"
+        )
+
+    if " " in name:
+        raise MVMError(f"Invalid {field_name}: '{name}' cannot contain spaces")
+
+    # Allow alphanumeric, hyphen, underscore only
+    if not re.match(r"^[a-zA-Z0-9_-]+$", name):
+        raise MVMError(
+            f"Invalid {field_name}: '{name}' must contain only alphanumeric, "
+            "hyphen, and underscore characters"
+        )
+
+    return name
+
+
+def validate_bridge_name(name: str, field_name: str = "bridge") -> str:
+    """Validate bridge interface name for security.
+
+    Same rules as interface names but with clearer error messages.
+
+    Args:
+        name: Bridge name to validate
+        field_name: Field name for error messages
+
+    Returns:
+        The validated bridge name
+
+    Raises:
+        MVMError: If the name is invalid or contains dangerous characters
+    """
+    return validate_interface_name(name, field_name)
+
+
+def validate_cidr(cidr: str, field_name: str = "CIDR") -> str:
+    """Validate CIDR notation and return sanitized version.
+
+    Validates that the CIDR is a valid IPv4 network notation.
+
+    Args:
+        cidr: CIDR notation string (e.g., "192.168.1.0/24")
+        field_name: Field name for error messages
+
+    Returns:
+        The validated CIDR string
+
+    Raises:
+        MVMError: If the CIDR is invalid
+    """
+    if not cidr:
+        raise MVMError(f"Invalid {field_name}: CIDR cannot be empty")
+
+    # Check for shell metacharacters and control characters (but allow . and /)
+    # CIDR notation legitimately contains dots and slashes
+    dangerous_chars = _SHELL_METACHARACTERS | _CONTROL_CHARS
+    if any(c in dangerous_chars for c in cidr):
+        raise MVMError(
+            f"Invalid {field_name}: '{cidr}' contains forbidden characters "
+            "(shell metacharacters or control characters)"
+        )
+
+    if " " in cidr:
+        raise MVMError(f"Invalid {field_name}: '{cidr}' cannot contain spaces")
+
+    try:
+        network = ipaddress.IPv4Network(cidr, strict=False)
+        return str(network)
+    except ValueError as e:
+        raise MVMError(f"Invalid {field_name}: '{cidr}' is not a valid IPv4 CIDR: {e}") from e
+
+
+def validate_ipv4_address(ip: str, field_name: str = "IP address") -> str:
+    """Validate IPv4 address and return sanitized version.
+
+    Args:
+        ip: IPv4 address string
+        field_name: Field name for error messages
+
+    Returns:
+        The validated IP address string
+
+    Raises:
+        MVMError: If the IP address is invalid
+    """
+    if not ip:
+        raise MVMError(f"Invalid {field_name}: IP address cannot be empty")
+
+    # Check for shell metacharacters and control characters (but allow .)
+    # IP addresses legitimately contain dots
+    dangerous_chars = _SHELL_METACHARACTERS | _CONTROL_CHARS
+    if any(c in dangerous_chars for c in ip):
+        raise MVMError(
+            f"Invalid {field_name}: '{ip}' contains forbidden characters "
+            "(shell metacharacters or control characters)"
+        )
+
+    if " " in ip:
+        raise MVMError(f"Invalid {field_name}: '{ip}' cannot contain spaces")
+
+    try:
+        addr = ipaddress.IPv4Address(ip)
+        return str(addr)
+    except ValueError as e:
+        raise MVMError(f"Invalid {field_name}: '{ip}' is not a valid IPv4 address: {e}") from e
+
+
+def sanitize_metadata_string(
+    value: str, field_name: str, max_length: int = 255, allow_hyphen: bool = True
+) -> str:
+    """Sanitize a metadata string field for safe use.
+
+    Removes/rejects:
+    - Shell metacharacters: ; | & $ ` \\ " ' \n \r \t < > { } [ ] ( )
+    - Path traversal: . / ~ \
+    - Null bytes
+    - Control characters
+
+    Args:
+        value: String value to sanitize
+        field_name: Field name for error messages
+        max_length: Maximum allowed length (default 255)
+        allow_hyphen: Whether to allow hyphens (default True)
+
+    Returns:
+        The sanitized string
+
+    Raises:
+        MVMError: If the value contains dangerous characters or exceeds limits
+    """
+    if not value:
+        raise MVMError(f"Invalid {field_name}: value cannot be empty")
+
+    if len(value) > max_length:
+        raise MVMError(
+            f"Invalid {field_name}: value exceeds maximum length of {max_length} characters"
+        )
+
+    if _contains_dangerous_chars(value):
+        raise MVMError(
+            f"Invalid {field_name}: value contains forbidden characters "
+            "(shell metacharacters, path traversal, or control characters)"
+        )
+
+    if " " in value:
+        raise MVMError(f"Invalid {field_name}: value cannot contain spaces")
+
+    # Build allowed character pattern
+    allowed_pattern = r"^[a-zA-Z0-9_" + (r"-" if allow_hyphen else r"") + r"]+$"
+
+    if not re.match(allowed_pattern, value):
+        chars = "alphanumeric and underscore"
+        if allow_hyphen:
+            chars += " and hyphen"
+        raise MVMError(f"Invalid {field_name}: '{value}' must contain only {chars}")
+
+    return value

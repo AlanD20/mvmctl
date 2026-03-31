@@ -353,8 +353,14 @@ def test_ensure_default_network_returns_existing(
 @patch("mvmctl.core.network.setup_bridge")
 @patch("mvmctl.core.network.setup_nat")
 @patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
+@patch("mvmctl.core.network.get_default_interface", return_value="eth0")
 def test_ensure_default_network_recreates_missing_bridge(
-    mock_setup_chains, mock_setup_nat, mock_setup_bridge, mock_bridge_exists, mock_cache_dir: Path
+    mock_get_iface,
+    mock_setup_chains,
+    mock_setup_nat,
+    mock_setup_bridge,
+    mock_bridge_exists,
+    mock_cache_dir: Path,
 ):
     """When metadata exists but bridge is missing, setup_bridge should be called."""
     _add_network_to_metadata(
@@ -370,15 +376,21 @@ def test_ensure_default_network_recreates_missing_bridge(
     assert config is not None
     assert config.name == "default"
     mock_setup_bridge.assert_called_once_with("mvm-default", gateway_cidr="172.35.0.1/24")
-    mock_setup_nat.assert_called_once_with("mvm-default")
+    mock_setup_nat.assert_called_once_with("mvm-default", internet_iface="eth0")
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
 @patch("mvmctl.core.network.setup_bridge")
 @patch("mvmctl.core.network.setup_nat")
 @patch("mvmctl.core.network.setup_mvm_chains", return_value=False)
+@patch("mvmctl.core.network.get_default_interface", return_value="eth0")
 def test_ensure_default_network_recreates_missing_chains(
-    mock_setup_chains, mock_setup_nat, mock_setup_bridge, mock_bridge_exists, mock_cache_dir: Path
+    mock_get_iface,
+    mock_setup_chains,
+    mock_setup_nat,
+    mock_setup_bridge,
+    mock_bridge_exists,
+    mock_cache_dir: Path,
 ):
     """When bridge exists but chains were just created, NAT should be set up."""
     _add_network_to_metadata(
@@ -393,10 +405,8 @@ def test_ensure_default_network_recreates_missing_chains(
     config = ensure_default_network()
     assert config is not None
     assert config.name == "default"
-    # Bridge exists, so setup_bridge should not be called
     mock_setup_bridge.assert_not_called()
-    # Chains were missing (setup_mvm_chains returned False), so NAT should be set up
-    mock_setup_nat.assert_called_once_with("mvm-default")
+    mock_setup_nat.assert_called_once_with("mvm-default", internet_iface="eth0")
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
@@ -470,3 +480,153 @@ class TestSetDefaultNetwork:
 
         with pytest.raises(NetworkError, match="does not exist"):
             set_default_network("nonexistent")
+
+
+class TestNatInterfaceField:
+    """Tests for nat_interface field in NetworkConfig."""
+
+    def test_network_entry_to_config_with_nat_interface(self):
+        """NetworkConfig should include nat_interface when present in entry."""
+        entry = {
+            "cidr": "10.20.1.0/24",
+            "gateway": "10.20.1.1",
+            "bridge": "mvm-testnet",
+            "nat_enabled": True,
+            "nat_interface": "eth0",
+            "created_at": "2026-01-01T00:00:00Z",
+            "is_default": 0,
+        }
+        config = _network_entry_to_config("testnet", entry)
+        assert config is not None
+        assert config.nat_interface == "eth0"
+
+    def test_network_entry_to_config_without_nat_interface(self):
+        """NetworkConfig should have nat_interface=None when not in entry."""
+        entry = {
+            "cidr": "10.20.1.0/24",
+            "gateway": "10.20.1.1",
+            "bridge": "mvm-testnet",
+            "nat_enabled": True,
+            "created_at": "2026-01-01T00:00:00Z",
+            "is_default": 0,
+        }
+        config = _network_entry_to_config("testnet", entry)
+        assert config is not None
+        assert config.nat_interface is None
+
+    def test_network_entry_to_config_invalid_nat_interface(self):
+        """NetworkConfig should set nat_interface=None for invalid types."""
+        entry = {
+            "cidr": "10.20.1.0/24",
+            "gateway": "10.20.1.1",
+            "bridge": "mvm-testnet",
+            "nat_enabled": True,
+            "nat_interface": 12345,
+            "created_at": "2026-01-01T00:00:00Z",
+            "is_default": 0,
+        }
+        config = _network_entry_to_config("testnet", entry)
+        assert config is not None
+        assert config.nat_interface is None
+
+
+class TestRestoreNetworks:
+    """Tests for restore_networks function."""
+
+    def test_restore_networks_empty(self, mock_cache_dir: Path):
+        """restore_networks should return empty list when no networks exist."""
+        from mvmctl.core.network_manager import restore_networks
+
+        with patch("mvmctl.core.network_manager.list_networks", return_value=[]):
+            result = restore_networks()
+            assert result == []
+
+    def test_restore_networks_existing_bridge(self, mock_cache_dir: Path):
+        """restore_networks should skip networks with existing bridges."""
+        from mvmctl.core.network_manager import NetworkConfig, restore_networks
+
+        config = NetworkConfig(
+            name="testnet",
+            cidr="10.20.0.0/24",
+            gateway="10.20.0.1",
+            bridge="mvm-testnet",
+            nat_enabled=True,
+            nat_interface="eth0",
+        )
+
+        with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
+            with patch("mvmctl.core.network.bridge_exists", return_value=True):
+                result = restore_networks()
+                assert len(result) == 1
+                assert "bridge already exists" in result[0]
+
+    def test_restore_networks_creates_bridge(self, mock_cache_dir: Path):
+        """restore_networks should create missing bridges."""
+        from mvmctl.core.network_manager import NetworkConfig, restore_networks
+
+        config = NetworkConfig(
+            name="testnet",
+            cidr="10.20.0.0/24",
+            gateway="10.20.0.1",
+            bridge="mvm-testnet",
+            nat_enabled=False,
+        )
+
+        with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
+            with patch("mvmctl.core.network.bridge_exists", return_value=False):
+                with patch("mvmctl.core.network.setup_bridge") as mock_setup:
+                    with patch("mvmctl.core.network_manager.update_network_entry"):
+                        result = restore_networks()
+                        mock_setup.assert_called_once()
+                        assert len(result) == 1
+                        assert "created bridge" in result[0]
+
+    def test_restore_networks_validates_interface(self, mock_cache_dir: Path):
+        """restore_networks should validate stored interface."""
+        from mvmctl.core.network_manager import NetworkConfig, restore_networks
+
+        config = NetworkConfig(
+            name="testnet",
+            cidr="10.20.0.0/24",
+            gateway="10.20.0.1",
+            bridge="mvm-testnet",
+            nat_enabled=True,
+            nat_interface="eth0",
+        )
+
+        with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
+            with patch("mvmctl.core.network.bridge_exists", return_value=False):
+                with patch("mvmctl.core.network.setup_bridge"):
+                    with patch("mvmctl.core.network.validate_network_interface", return_value=True):
+                        with patch("mvmctl.core.network.setup_nat") as mock_nat:
+                            with patch("mvmctl.core.network_manager.update_network_entry"):
+                                result = restore_networks()
+                                mock_nat.assert_called_once()
+                                assert "NAT configured" in result[1]
+
+    def test_restore_networks_fallback_to_default_interface(self, mock_cache_dir: Path):
+        """restore_networks should fallback to default interface if stored invalid."""
+        from mvmctl.core.network_manager import NetworkConfig, restore_networks
+
+        config = NetworkConfig(
+            name="testnet",
+            cidr="10.20.0.0/24",
+            gateway="10.20.0.1",
+            bridge="mvm-testnet",
+            nat_enabled=True,
+            nat_interface="invalid0",
+        )
+
+        with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
+            with patch("mvmctl.core.network.bridge_exists", return_value=False):
+                with patch("mvmctl.core.network.setup_bridge"):
+                    with patch("mvmctl.core.network.validate_network_interface") as mock_validate:
+                        mock_validate.return_value = True
+                        with patch(
+                            "mvmctl.core.network.get_default_interface", return_value="eth0"
+                        ):
+                            with patch("mvmctl.core.network.setup_nat") as mock_nat:
+                                with patch("mvmctl.core.network_manager.update_network_entry"):
+                                    result = restore_networks()
+                                    mock_nat.assert_called_once()
+                                    assert "NAT configured" in result[1]

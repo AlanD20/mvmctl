@@ -34,12 +34,14 @@ class TestNetworkLifecycleWorkflow:
     @patch("mvmctl.cli.network.list_networks")
     @patch("mvmctl.cli.network.create_network")
     @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.cli.network.validate_network_interface")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_create_and_list_network(
-        self, mock_interfaces, mock_check_priv, mock_create, mock_list
+        self, mock_interfaces, mock_validate_iface, mock_check_priv, mock_create, mock_list
     ):
         """Test creating a network and then listing it."""
         mock_check_priv.return_value = None
+        mock_validate_iface.return_value = None
 
         network = _make_network("integration-net", "10.50.0.0/24")
         mock_create.return_value = network
@@ -63,12 +65,20 @@ class TestNetworkLifecycleWorkflow:
     @patch("mvmctl.cli.network.inspect_network")
     @patch("mvmctl.cli.network.create_network")
     @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.cli.network.validate_network_interface")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_create_and_inspect_network(
-        self, mock_interfaces, mock_check_priv, mock_create, mock_inspect, mock_rules
+        self,
+        mock_interfaces,
+        mock_validate_iface,
+        mock_check_priv,
+        mock_create,
+        mock_inspect,
+        mock_rules,
     ):
         """Test creating a network and then inspecting it."""
         mock_check_priv.return_value = None
+        mock_validate_iface.return_value = None
 
         network = _make_network("inspect-net", "172.16.0.0/24")
         mock_create.return_value = network
@@ -99,12 +109,20 @@ class TestNetworkLifecycleWorkflow:
     @patch("mvmctl.cli.network.remove_network")
     @patch("mvmctl.cli.network.create_network")
     @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.cli.network.validate_network_interface")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_full_network_lifecycle(
-        self, mock_interfaces, mock_check_priv, mock_create, mock_remove, mock_list
+        self,
+        mock_interfaces,
+        mock_validate_iface,
+        mock_check_priv,
+        mock_create,
+        mock_remove,
+        mock_list,
     ):
         """Test full network lifecycle: create -> verify -> remove."""
         mock_check_priv.return_value = None
+        mock_validate_iface.return_value = None
 
         network = _make_network("lifecycle-net", "192.168.200.0/24")
         mock_create.return_value = network
@@ -130,10 +148,14 @@ class TestNetworkLifecycleWorkflow:
 
     @patch("mvmctl.cli.network.create_network")
     @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.cli.network.validate_network_interface")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
-    def test_create_network_without_nat(self, mock_interfaces, mock_check_priv, mock_create):
+    def test_create_network_without_nat(
+        self, mock_interfaces, mock_validate_iface, mock_check_priv, mock_create
+    ):
         """Test creating a network without NAT."""
         mock_check_priv.return_value = None
+        mock_validate_iface.return_value = None
 
         network = _make_network("no-nat-net", "10.100.0.0/24")
         network.nat_enabled = False
@@ -150,12 +172,14 @@ class TestNetworkLifecycleWorkflow:
 
     @patch("mvmctl.cli.network.create_network")
     @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.cli.network.validate_network_interface")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_create_network_with_custom_gateway(
-        self, mock_interfaces, mock_check_priv, mock_create
+        self, mock_interfaces, mock_validate_iface, mock_check_priv, mock_create
     ):
         """Test creating a network with a custom gateway."""
         mock_check_priv.return_value = None
+        mock_validate_iface.return_value = None
 
         network = _make_network("custom-gw-net", "10.99.0.0/24")
         network.gateway = "10.99.0.254"
@@ -183,10 +207,14 @@ class TestNetworkWorkflowEdgeCases:
 
     @patch("mvmctl.cli.network.create_network")
     @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.cli.network.validate_network_interface")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
-    def test_create_duplicate_network(self, mock_interfaces, mock_check_priv, mock_create):
+    def test_create_duplicate_network(
+        self, mock_interfaces, mock_validate_iface, mock_check_priv, mock_create
+    ):
         """Test attempting to create a network that already exists."""
         mock_check_priv.return_value = None
+        mock_validate_iface.return_value = None
         mock_create.side_effect = NetworkError("Network 'duplicate-net' already exists")
 
         result = runner.invoke(

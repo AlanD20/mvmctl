@@ -291,3 +291,336 @@ def test_validate_fs_type_lists_supported_types_in_error():
 
     with pytest.raises(MVMError, match="Supported types:.*btrfs.*ext2.*ext3.*ext4.*xfs"):
         validate_fs_type("ntfs")
+
+
+# ---------------------------------------------------------------------------
+# validate_interface_name — security validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "eth0",
+        "wlan0",
+        "enp0s3",
+        "br0",
+        "docker0",
+        "virbr0",
+        "lo",
+        "eth-0",
+        "eth_0",
+        "a" * 15,  # max length (IFNAMSIZ)
+        "ABC",  # uppercase allowed
+        "123abc",  # digits allowed
+    ],
+)
+def test_validate_interface_name_accepts_valid(name: str):
+    """Test valid interface names are accepted."""
+    from mvmctl.utils.validation import validate_interface_name
+
+    assert validate_interface_name(name) == name
+
+
+@pytest.mark.parametrize(
+    "name,reason",
+    [
+        ("", "empty string"),
+        ("eth0; rm -rf /", "semicolon injection"),
+        ("eth0|cat /etc/passwd", "pipe injection"),
+        ("eth0&&evil", "ampersand injection"),
+        ("eth0||evil", "double pipe injection"),
+        ("$(whoami)", "command substitution dollar"),
+        ("`whoami`", "command substitution backtick"),
+        ("eth0\nreboot", "newline injection"),
+        ("eth0\reboot", "carriage return injection"),
+        ("eth0\ttab", "tab character"),
+        (" lo ", "spaces"),
+        ("../../etc/passwd", "path traversal"),
+        ("~/evil", "home directory traversal"),
+        ("eth\x00", "null byte"),
+        ("a" * 16, "too long (exceeds IFNAMSIZ)"),
+        ("-eth0", "leading hyphen"),
+        ("eth.0", "dot character"),
+        ("eth/0", "slash character"),
+        ("eth\\0", "backslash"),
+        ("eth{0}", "curly braces"),
+        ("eth[0]", "square brackets"),
+        ("eth(0)", "parentheses"),
+        ("eth<0>", "angle brackets"),
+        ("eth'0", "single quote"),
+        ('eth"0', "double quote"),
+    ],
+)
+def test_validate_interface_name_rejects_injection_attempts(name: str, reason: str):
+    """Test interface name validation rejects injection attempts."""
+    from mvmctl.utils.validation import validate_interface_name
+
+    with pytest.raises(MVMError, match="Invalid.*interface"):
+        validate_interface_name(name)
+
+
+def test_validate_interface_name_includes_field_name_in_error():
+    """Test field name is included in error message."""
+    from mvmctl.utils.validation import validate_interface_name
+
+    with pytest.raises(MVMError, match="Invalid nat_interface"):
+        validate_interface_name("eth0;evil", "nat_interface")
+
+
+# ---------------------------------------------------------------------------
+# validate_bridge_name — security validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "br0",
+        "mvm-default",
+        "docker0",
+        "virbr0",
+        "br_0",
+        "BRIDGE",  # uppercase allowed
+        "br-0",
+    ],
+)
+def test_validate_bridge_name_accepts_valid(name: str):
+    """Test valid bridge names are accepted."""
+    from mvmctl.utils.validation import validate_bridge_name
+
+    assert validate_bridge_name(name) == name
+
+
+@pytest.mark.parametrize(
+    "name,reason",
+    [
+        ("", "empty string"),
+        ("br0; rm -rf /", "semicolon injection"),
+        ("br0|evil", "pipe injection"),
+        ("br0&&evil", "ampersand injection"),
+        ("$(id)", "command substitution"),
+        ("`id`", "backtick injection"),
+        ("br0\n", "newline injection"),
+        (" br0 ", "spaces"),
+        ("../../etc/passwd", "path traversal"),
+        ("a" * 16, "too long"),
+        ("-br0", "leading hyphen"),
+    ],
+)
+def test_validate_bridge_name_rejects_injection_attempts(name: str, reason: str):
+    """Test bridge name validation rejects injection attempts."""
+    from mvmctl.utils.validation import validate_bridge_name
+
+    with pytest.raises(MVMError, match="Invalid.*bridge"):
+        validate_bridge_name(name)
+
+
+# ---------------------------------------------------------------------------
+# validate_cidr — security validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cidr",
+    [
+        "192.168.1.0/24",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.100.0/24",
+        "0.0.0.0/0",
+        "255.255.255.255/32",
+    ],
+)
+def test_validate_cidr_accepts_valid(cidr: str):
+    """Test valid CIDR notations are accepted."""
+    from mvmctl.utils.validation import validate_cidr
+
+    assert validate_cidr(cidr) == cidr
+
+
+@pytest.mark.parametrize(
+    "cidr,reason",
+    [
+        ("", "empty string"),
+        ("192.168.1.0/24; rm -rf /", "semicolon injection"),
+        ("192.168.1.0/24|cat /etc/passwd", "pipe injection"),
+        ("192.168.1.0/24&&evil", "ampersand injection"),
+        ("$(whoami)/24", "command substitution"),
+        ("`whoami`/24", "backtick injection"),
+        ("192.168.1.0/24\n", "newline injection"),
+        (" 192.168.1.0/24 ", "spaces"),
+        ("../../etc/passwd", "path traversal"),
+        ("192.168.1.0/33", "invalid prefix length"),
+        ("999.999.999.999/24", "invalid IP"),
+        ("192.168.1.0/24/extra", "extra parts"),
+    ],
+)
+def test_validate_cidr_rejects_injection_attempts(cidr: str, reason: str):
+    """Test CIDR validation rejects injection attempts."""
+    from mvmctl.utils.validation import validate_cidr
+
+    with pytest.raises(MVMError, match="Invalid.*CIDR"):
+        validate_cidr(cidr)
+
+
+def test_validate_cidr_includes_field_name_in_error():
+    """Test field name is included in error message."""
+    from mvmctl.utils.validation import validate_cidr
+
+    with pytest.raises(MVMError, match="Invalid subnet"):
+        validate_cidr("192.168.1.0/24;evil", "subnet")
+
+
+# ---------------------------------------------------------------------------
+# validate_ipv4_address — security validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "192.168.1.1",
+        "10.0.0.1",
+        "172.16.0.1",
+        "0.0.0.0",
+        "255.255.255.255",
+        "127.0.0.1",
+    ],
+)
+def test_validate_ipv4_address_accepts_valid(ip: str):
+    """Test valid IPv4 addresses are accepted."""
+    from mvmctl.utils.validation import validate_ipv4_address
+
+    assert validate_ipv4_address(ip) == ip
+
+
+@pytest.mark.parametrize(
+    "ip,reason",
+    [
+        ("", "empty string"),
+        ("192.168.1.1; rm -rf /", "semicolon injection"),
+        ("192.168.1.1|cat /etc/passwd", "pipe injection"),
+        ("192.168.1.1&&evil", "ampersand injection"),
+        ("$(whoami)", "command substitution"),
+        ("`whoami`", "backtick injection"),
+        ("192.168.1.1\n", "newline injection"),
+        (" 192.168.1.1 ", "spaces"),
+        ("../../etc/passwd", "path traversal"),
+        ("999.999.999.999", "invalid octets"),
+        ("256.1.1.1", "octet too large"),
+        ("192.168.1", "missing octet"),
+        ("192.168.1.1.1", "extra octet"),
+        ("192.168.1.a", "non-numeric"),
+        ("::1", "IPv6 not supported"),
+        ("2001:db8::1", "IPv6 not supported"),
+    ],
+)
+def test_validate_ipv4_address_rejects_injection_attempts(ip: str, reason: str):
+    """Test IPv4 address validation rejects injection attempts."""
+    from mvmctl.utils.validation import validate_ipv4_address
+
+    with pytest.raises(MVMError, match="Invalid.*IP address"):
+        validate_ipv4_address(ip)
+
+
+def test_validate_ipv4_address_includes_field_name_in_error():
+    """Test field name is included in error message."""
+    from mvmctl.utils.validation import validate_ipv4_address
+
+    with pytest.raises(MVMError, match="Invalid gateway"):
+        validate_ipv4_address("192.168.1.1;evil", "gateway")
+
+
+# ---------------------------------------------------------------------------
+# sanitize_metadata_string — security validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "valid_name",
+        "valid-name",
+        "valid_name_123",
+        "ValidName",
+        "VALID123",
+        "a" * 255,  # max length
+    ],
+)
+def test_sanitize_metadata_string_accepts_valid(value: str):
+    """Test valid metadata strings are accepted."""
+    from mvmctl.utils.validation import sanitize_metadata_string
+
+    assert sanitize_metadata_string(value, "test_field") == value
+
+
+@pytest.mark.parametrize(
+    "value,reason",
+    [
+        ("", "empty string"),
+        ("value; rm -rf /", "semicolon injection"),
+        ("value|cat /etc/passwd", "pipe injection"),
+        ("value&&evil", "ampersand injection"),
+        ("value||evil", "double pipe injection"),
+        ("$(whoami)", "command substitution"),
+        ("`whoami`", "backtick injection"),
+        ("value\nreboot", "newline injection"),
+        ("value\rtab", "carriage return injection"),
+        ("value\ttab", "tab character"),
+        (" value ", "spaces"),
+        ("../../etc/passwd", "path traversal"),
+        ("~/evil", "home directory traversal"),
+        ("./evil", "dot path traversal"),
+        ("value\x00", "null byte"),
+        ("value{evil}", "curly braces"),
+        ("value[evil]", "square brackets"),
+        ("value(evil)", "parentheses"),
+        ("value<evil>", "angle brackets"),
+        ("value'evil", "single quote"),
+        ('value"evil', "double quote"),
+        ("value\\evil", "backslash"),
+        ("a" * 256, "too long"),
+        ("value.test", "dot character"),
+        ("value/test", "slash character"),
+    ],
+)
+def test_sanitize_metadata_string_rejects_injection_attempts(value: str, reason: str):
+    """Test metadata string sanitization rejects injection attempts."""
+    from mvmctl.utils.validation import sanitize_metadata_string
+
+    with pytest.raises(MVMError, match="Invalid.*test_field"):
+        sanitize_metadata_string(value, "test_field")
+
+
+def test_sanitize_metadata_string_custom_max_length():
+    """Test custom max_length parameter."""
+    from mvmctl.utils.validation import sanitize_metadata_string
+
+    # Should pass with default max_length=255
+    long_value = "a" * 255
+    assert sanitize_metadata_string(long_value, "test_field") == long_value
+
+    # Should fail with custom max_length=10
+    with pytest.raises(MVMError, match="exceeds maximum length"):
+        sanitize_metadata_string("a" * 11, "test_field", max_length=10)
+
+
+def test_sanitize_metadata_string_no_hyphen():
+    """Test allow_hyphen=False parameter."""
+    from mvmctl.utils.validation import sanitize_metadata_string
+
+    # Should pass with hyphen allowed (default)
+    assert sanitize_metadata_string("valid-name", "test_field") == "valid-name"
+
+    # Should fail with hyphen disallowed
+    with pytest.raises(MVMError, match="must contain only"):
+        sanitize_metadata_string("valid-name", "test_field", allow_hyphen=False)
+
+
+def test_sanitize_metadata_string_includes_field_name_in_error():
+    """Test field name is included in error message."""
+    from mvmctl.utils.validation import sanitize_metadata_string
+
+    with pytest.raises(MVMError, match="Invalid custom_field"):
+        sanitize_metadata_string("value;evil", "custom_field")
