@@ -1042,37 +1042,49 @@ def fetch_image(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine final output path
     final_path = output_dir / f"{spec.id}.{spec.convert_to}"
-    compressed_path = final_path.with_suffix(".ext4.zst")
-
-    # Check if compressed file already exists (idempotency)
-    if compressed_path.exists() and not force:
-        logger.info("Image already exists: %s", compressed_path)
-        fs_type = detect_filesystem_type(compressed_path)
-        fs_uuid = get_filesystem_uuid(compressed_path)
-        return ImageImportResult(path=compressed_path, fs_type=fs_type, fs_uuid=fs_uuid)
-
-    # Define download_path early for potential cleanup
     download_path = output_dir / f"{spec.id}.download"
 
-    # Clean up ALL stale files if force=True (before checking resume conditions)
+    compressed_extensions = [".ext4.zst", ".btrfs.zst", ".img.zst", ".raw.zst"]
+    uncompressed_extensions = [".ext4", ".btrfs", ".img", ".raw"]
+
+    existing_compressed = next(
+        (
+            final_path.with_suffix(ext)
+            for ext in compressed_extensions
+            if final_path.with_suffix(ext).exists()
+        ),
+        None,
+    )
+
+    if existing_compressed and not force:
+        logger.info("Image already exists: %s", existing_compressed)
+        fs_type = detect_filesystem_type(existing_compressed)
+        fs_uuid = get_filesystem_uuid(existing_compressed)
+        return ImageImportResult(path=existing_compressed, fs_type=fs_type, fs_uuid=fs_uuid)
+
     if force:
-        if compressed_path.exists():
-            logger.info("Removing stale compressed file: %s", compressed_path)
-            compressed_path.unlink()
-        if final_path.exists():
-            logger.info("Removing stale final file: %s", final_path)
-            final_path.unlink()
-        if download_path.exists():
-            logger.info("Removing stale download file: %s", download_path)
-            download_path.unlink()
+        for ext in compressed_extensions:
+            stale = final_path.with_suffix(ext)
+            if stale.exists():
+                logger.info("Removing stale compressed file: %s", stale)
+                stale.unlink()
+        for ext in uncompressed_extensions:
+            stale = output_dir / f"{spec.id}{ext}"
+            if stale.exists():
+                logger.info("Removing stale intermediate file: %s", stale)
+                stale.unlink()
 
-    # Check if we can resume from intermediate state (download exists or final ext4 exists)
-    resume_from_ext4 = final_path.exists() and not compressed_path.exists()
-
-    # Determine if we need to download or can resume from conversion step
-    need_download = not download_path.exists() and not resume_from_ext4
+    existing_uncompressed = next(
+        (
+            output_dir / f"{spec.id}{ext}"
+            for ext in uncompressed_extensions
+            if (output_dir / f"{spec.id}{ext}").exists()
+        ),
+        None,
+    )
+    resume_from_existing = existing_uncompressed is not None and not force
+    need_download = (not download_path.exists() and not resume_from_existing) or force
 
     template_vars = _get_template_variables(spec)
     source = spec.source
@@ -1098,19 +1110,26 @@ def fetch_image(
 
             # Validate downloaded file before processing
             _validate_downloaded_file(download_path, spec.format)
-        elif resume_from_ext4:
-            logger.info("Resuming from existing ext4 file: %s", final_path)
+        elif resume_from_existing:
+            logger.info("Resuming from existing image file: %s", existing_uncompressed)
         else:
             logger.info("Resuming from downloaded file: %s", download_path)
 
-        if not resume_from_ext4:
+        if not resume_from_existing:
             handler = _FORMAT_HANDLERS.get(spec.format)
             if handler is None:
                 download_path.unlink(missing_ok=True)
                 raise ImageError(f"Unknown format: {spec.format}")
-            actual_path = handler(download_path, final_path, spec.minimum_rootfs_size, partition, None)
+            actual_path = handler(
+                download_path, final_path, spec.minimum_rootfs_size, partition, None
+            )
         else:
-            actual_path = final_path
+            if existing_uncompressed is None:
+                raise ImageError("Resume failed: existing image file not found")
+            actual_path = existing_uncompressed
+
+        if actual_path is None:
+            raise ImageError("Failed to determine image path")
 
         # Cleanup download file if it exists (regardless of resume path)
         download_path.unlink(missing_ok=True)
@@ -1127,9 +1146,16 @@ def fetch_image(
         # Shrink before compression
         if actual_path.exists():
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(actual_path)
-            logger.info(
-                f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
-            )
+            shrink_successful = pre_shrink_size and post_shrink_size and pre_shrink_size > 0
+            if shrink_successful:
+                logger.info(
+                    "Image shrunk: %.1f MiB → %.1f MiB (%.1f%% reduction)",
+                    pre_shrink_size / CONST_MEBIBYTE_BYTES,
+                    post_shrink_size / CONST_MEBIBYTE_BYTES,
+                    (pre_shrink_size - post_shrink_size) / pre_shrink_size * 100,
+                )
+            else:
+                logger.warning("Image shrinking skipped or failed")
             compressed_path_out = compress_image(shrunk_path)
             compressed_size = compressed_path_out.stat().st_size
             compression_ratio = (
