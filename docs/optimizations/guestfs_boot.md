@@ -95,7 +95,21 @@ Setting `LIBGUESTFS_CACHEDIR` to a RAM-backed filesystem (like `/dev/shm`) speed
 os.environ["LIBGUESTFS_CACHEDIR"] = "/dev/shm"
 ```
 
-### 9. Fixed Appliance (Environment Variable)
+### 9. Disable QEMU File Locking (Environment Variable)
+
+QEMU's default file locking (`fcntl` locks) can cause `guestfs_launch` failures when a previous guestfs session crashes and leaves a stale lock on the image file. This is common with the ready pool, where multiple VM creations may reference the same source image.
+
+Setting `QEMU_LOCKING=off` disables this locking mechanism. This is safe in mvmctl because:
+- Each VM works on its own **copy** of the image, never the shared source
+- The ready pool image is effectively read-only after creation
+- No concurrent writers or shared storage scenarios exist
+
+**Implementation:**
+```python
+os.environ["QEMU_LOCKING"] = "off"
+```
+
+### 10. Fixed Appliance (Environment Variable)
 
 Using a pre-built fixed appliance completely bypasses the `supermin` checking logic. This is the ultimate optimization for launch speed.
 

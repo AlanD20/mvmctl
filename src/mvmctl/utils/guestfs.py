@@ -19,10 +19,17 @@ class OptimizedGuestfs:
         self._orig_env = {
             "LIBGUESTFS_BACKEND": os.environ.get("LIBGUESTFS_BACKEND"),
             "LIBGUESTFS_CACHEDIR": os.environ.get("LIBGUESTFS_CACHEDIR"),
+            "QEMU_LOCKING": os.environ.get("QEMU_LOCKING"),
         }
         os.environ["LIBGUESTFS_BACKEND"] = "direct"
         if Path("/dev/shm").exists():
             os.environ["LIBGUESTFS_CACHEDIR"] = "/dev/shm"
+        # Disable QEMU file locking — prevents stale lock issues from crashed
+        # guestfs sessions on shared images (ready pool, etc.)
+        os.environ["QEMU_LOCKING"] = "off"
+        # Disable QEMU file locking — prevents stale lock issues from crashed
+        # guestfs sessions on shared images (ready pool, etc.)
+        os.environ["QEMU_LOCKING"] = "off"
 
     def _restore_environment(self) -> None:
         for key, value in self._orig_env.items():
