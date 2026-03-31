@@ -745,6 +745,10 @@ def create_ext4_from_tar(
         return True
 
     except subprocess.CalledProcessError as e:
+        # Include stderr in error message for debugging
+        stderr_msg = e.stderr.decode() if e.stderr else ""
+        if stderr_msg:
+            logger.error(f"Command failed: {e.cmd}\nStderr: {stderr_msg}")
         # Sanitize: don't expose command details in error message
         raise ImageError("Failed to create image") from e
     except FileNotFoundError as e:
