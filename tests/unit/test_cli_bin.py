@@ -1279,10 +1279,10 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
             sha256="abc" * 21 + "a",
         )
     ]
-    # Pre-create existing image file
-    (tmp_path / "ubuntu-24.04.ext4").touch()
+    # Pre-create existing COMPRESSED image file (the final expected format)
+    (tmp_path / "ubuntu-24.04.ext4.zst").touch()
     mock_fetch.return_value = ImageImportResult(
-        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+        path=tmp_path / "ubuntu-24.04.ext4.zst", fs_type="ext4", fs_uuid="test-uuid"
     )
 
     # User says NO to re-download
@@ -1292,7 +1292,7 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
         input="n\n",  # Answer 'no' to confirm prompt
     )
     assert result.exit_code == 0
-    mock_fetch.assert_not_called()  # Should not have called fetch
+    mock_fetch.assert_not_called()  # Should not have called fetch since compressed exists
 
 
 def test_bin_rm_multiple_versions():

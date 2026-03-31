@@ -80,6 +80,11 @@ image:
       - .raw
       - .ext4.zst
       - .btrfs.zst
+    compression_extension_map:
+      .ext4: .ext4.zst
+      .btrfs: .btrfs.zst
+      .img: .img.zst
+      .raw: .raw.zst
     import_format_map:
       .qcow2: qcow2
       .raw: raw

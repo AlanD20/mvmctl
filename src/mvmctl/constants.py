@@ -418,6 +418,10 @@ SUPPORTED_IMAGE_EXTENSIONS: Final[list[str]] = _require_str_list(
     ("image", "defaults", "supported_extensions")
 )
 
+COMPRESSION_EXTENSION_MAP: Final[dict[str, str]] = _require_str_dict(
+    ("image", "defaults", "compression_extension_map")
+)
+
 IMAGE_IMPORT_FORMAT_MAP: Final[dict[str, str]] = _require_str_dict(
     ("image", "defaults", "import_format_map")
 )

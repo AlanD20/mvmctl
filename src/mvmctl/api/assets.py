@@ -220,7 +220,10 @@ def fetch_images_parallel(
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         future_to_idx = {
-            pool.submit(fetch_image, spec, output_dir, force, skip_optimization=skip_optimization): idx for idx, spec in enumerate(specs)
+            pool.submit(
+                fetch_image, spec, output_dir, force, skip_optimization=skip_optimization
+            ): idx
+            for idx, spec in enumerate(specs)
         }
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
@@ -273,7 +276,9 @@ def pull_images(
         raise ImageError(f"Image IDs not found in {images_yaml}: {', '.join(missing)}")
 
     specs = [specs_by_id[iid] for iid in image_ids]
-    return fetch_images_parallel(specs, output_dir, force=force, max_workers=max_workers, skip_optimization=skip_optimization)
+    return fetch_images_parallel(
+        specs, output_dir, force=force, max_workers=max_workers, skip_optimization=skip_optimization
+    )
 
 
 def list_assets() -> list[AssetInfo]:

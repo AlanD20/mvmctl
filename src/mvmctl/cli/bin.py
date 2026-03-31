@@ -42,6 +42,7 @@ from mvmctl.api.metadata import (
 from mvmctl.api.vms import get_vm_manager
 from mvmctl.cli._helpers import get_combined_marker, is_file_missing
 from mvmctl.constants import (
+    COMPRESSION_EXTENSION_MAP,
     DEFAULT_FC_CI_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_IMAGE_CONVERT_TO,
@@ -908,16 +909,17 @@ def image_fetch(
                 )
                 raise typer.Exit(code=1)
 
-    # Check if image already exists locally
+    # Check if image already exists locally (final compressed version)
     if not force:
-        existing_paths = [
+        compressed_extensions = list(COMPRESSION_EXTENSION_MAP.values())
+        existing_compressed = [
             out / f"{spec.id}{ext}"
-            for ext in SUPPORTED_IMAGE_EXTENSIONS
+            for ext in compressed_extensions
             if (out / f"{spec.id}{ext}").exists()
         ]
-        if existing_paths:
+        if existing_compressed:
             print_warning(f"Image '{spec.id}' already exists locally:")
-            for path in existing_paths:
+            for path in existing_compressed:
                 print_info(f"  {path}")
             meta = _load_image_meta(out, spec.id)
             if meta.get("pulled_at"):
@@ -945,7 +947,9 @@ def image_fetch(
             tied_partitions=tied,
         )
         print_info(f"Using user-selected partition: {selected}")
-        result = fetch_image(spec, out, force, partition=selected, skip_optimization=skip_optimization)
+        result = fetch_image(
+            spec, out, force, partition=selected, skip_optimization=skip_optimization
+        )
 
     if result:
         import hashlib

@@ -13,6 +13,7 @@ from urllib.error import URLError
 import zstandard as zstd
 
 from mvmctl.constants import (
+    COMPRESSION_EXTENSION_MAP,
     CONST_GUESTFS_OS_RELEASE_PATH,
     CONST_MEBIBYTE_BYTES,
     CONST_RATIO_MIN,
@@ -1045,8 +1046,8 @@ def fetch_image(
     final_path = output_dir / f"{spec.id}.{spec.convert_to}"
     download_path = output_dir / f"{spec.id}.download"
 
-    compressed_extensions = [".ext4.zst", ".btrfs.zst", ".img.zst", ".raw.zst"]
-    uncompressed_extensions = [".ext4", ".btrfs", ".img", ".raw"]
+    compressed_extensions = list(COMPRESSION_EXTENSION_MAP.values())
+    uncompressed_extensions = list(COMPRESSION_EXTENSION_MAP.keys())
 
     existing_compressed = next(
         (
