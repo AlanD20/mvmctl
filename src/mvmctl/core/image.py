@@ -1167,7 +1167,9 @@ def fetch_image(
                     (pre_shrink_size - post_shrink_size) / pre_shrink_size * 100,
                 )
             else:
-                logger.warning("Image shrinking skipped or failed")
+                logger.debug(
+                    "Image shrinking not performed (filesystem type may be unsupported or detection failed)"
+                )
             compressed_path_out = compress_image(shrunk_path)
             compressed_size = compressed_path_out.stat().st_size
             compression_ratio = (
