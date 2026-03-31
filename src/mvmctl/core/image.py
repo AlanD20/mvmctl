@@ -338,6 +338,53 @@ def convert_qcow2_to_raw(
         raise ImageError("qemu-img not found. Install qemu-utils.") from e
 
 
+def convert_vhd_to_raw(
+    vhd_path: Path,
+    raw_path: Path,
+) -> bool:
+    """Convert VHD to raw using qemu-img.
+
+    Args:
+        vhd_path: Source VHD file
+        raw_path: Destination raw file
+
+    Returns:
+        True if successful
+
+    Raises:
+        ImageError: On conversion failure or missing qemu-img
+    """
+    try:
+        logger.info("Converting %s to raw...", vhd_path.name)
+
+        subprocess.run(
+            [
+                "qemu-img",
+                "convert",
+                "-m",
+                "16",
+                "-f",
+                "vpc",  # VHD format
+                "-O",
+                "raw",
+                str(vhd_path),
+                str(raw_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        logger.info("Converted to %s", raw_path.name)
+        return True
+
+    except subprocess.CalledProcessError as e:
+        detail = e.stderr.strip() if e.stderr else "no details"
+        raise ImageError(f"qemu-img conversion failed: {detail}") from e
+    except FileNotFoundError as e:
+        raise ImageError("qemu-img not found. Install qemu-utils.") from e
+
+
 def _parse_partitions_sfdisk(
     raw_path: Path,
     partition: int | None,
@@ -841,6 +888,26 @@ def _fetch_sha256_from_url(sha256_url: str, source_filename: str | None = None) 
     return None
 
 
+def _handle_vhd(
+    download_path: Path,
+    final_path: Path,
+    minimum_rootfs_size: int,
+    partition: int | None = None,
+    disabled_detectors: list[str] | None = None,
+) -> Path:
+    """Convert VHD to raw, then extract partition."""
+    raw_path = download_path.with_suffix(".raw")
+    convert_vhd_to_raw(download_path, raw_path)
+    actual_path = extract_partition_from_raw(
+        raw_path,
+        final_path.with_suffix(".img"),
+        partition=partition,
+        disabled_detectors=disabled_detectors,
+    )
+    raw_path.unlink(missing_ok=True)
+    return actual_path
+
+
 def _handle_squashfs(
     download_path: Path,
     final_path: Path,
@@ -886,6 +953,7 @@ _FORMAT_HANDLERS: dict[str, Callable[[Path, Path, int, int | None, list[str] | N
     "tar-rootfs": _handle_tar_rootfs,
     "raw": _handle_raw,
     "squashfs": _handle_squashfs,
+    "vhd": _handle_vhd,
 }
 
 

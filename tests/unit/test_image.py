@@ -96,6 +96,39 @@ def test_load_images_config_empty(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+
+def test_load_images_config_alpine(tmp_path: Path):
+    """Test loading images.yaml with Alpine entry."""
+    config = {
+        "images": [
+            {
+                "id": "alpine-3.21",
+                "type": "alpine",
+                "version": "3.21",
+                "name": "Alpine Linux 3.21",
+                "source": "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/aws_alpine-3.21.4-x86_64-bios-cloudinit-r0.vhd",
+                "format": "vhd",
+                "convert_to": "ext4",
+                "minimum_rootfs_size": 256,
+                "sha256": None,
+                "sha256_url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/aws_alpine-3.21.4-x86_64-bios-cloudinit-r0.vhd.sha512",
+            },
+        ]
+    }
+    config_file = tmp_path / "images.yaml"
+    config_file.write_text(yaml.dump(config))
+
+    result = load_images_config(config_file)
+
+    assert len(result) == 1
+    assert result[0].id == "alpine-3.21"
+    assert result[0].image_type == "alpine"
+    assert result[0].version == "3.21"
+    assert result[0].format == "vhd"
+    assert result[0].convert_to == "ext4"
+    assert result[0].minimum_rootfs_size == 256
+
+
 def _mock_urlopen_response(data: bytes, content_length: str | None = None):
     """Create a mock urlopen response that yields data in chunks."""
     mock_response = MagicMock()
