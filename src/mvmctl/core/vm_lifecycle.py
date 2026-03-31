@@ -54,6 +54,7 @@ from mvmctl.core.firewall import (
     setup_nocloud_input_chain,
 )
 from mvmctl.core.image import copy_from_ready_pool, ensure_image_in_ready_pool
+from mvmctl.core.metadata import list_image_entries
 from mvmctl.core.network import (
     add_iptables_forward_rules,
     bridge_exists,
@@ -84,7 +85,7 @@ from mvmctl.exceptions import (
 from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMState
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.services.nocloud_server import NoCloudNetServerManager
-from mvmctl.utils.fs import get_images_dir, get_kernels_dir
+from mvmctl.utils.fs import get_cache_dir, get_images_dir, get_kernels_dir
 
 
 def get_vm_dir(vm_hash: str) -> Path:
@@ -339,7 +340,13 @@ def grow_rootfs_with_guestfs(image_path: Path, target_size_bytes: int) -> None:
         return  # Skip if file doesn't exist or stat fails
 
     if current_size >= target_size_bytes:
-        return  # Already big enough
+        logger.warning(
+            "Requested disk size (%d MB) is smaller than current image size (%d MB). "
+            "Filesystem will not be shrunk. Use a larger size or recreate VM with smaller image.",
+            target_size_bytes // CONST_MEBIBYTE_BYTES,
+            current_size // CONST_MEBIBYTE_BYTES,
+        )
+        return  # Cannot shrink, only grow
 
     try:
         # First, extend the file size
@@ -761,12 +768,18 @@ def create_vm(
         # Copy image to VM directory (VM-local rootfs)
         # Handle compressed images (.zst suffix)
         if resolved_image_path.suffix == ".zst":
-            rootfs_ext = resolved_image_path.suffixes[0]
+            rootfs_ext = resolved_image_path.suffixes[-2]  # Get .ext4 from .ext4.zst
             vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
             fs_type = rootfs_ext.lstrip(".")
 
-            # Get image hash from the path
-            image_hash = resolved_image_path.stem  # e.g., "abc123" from "abc123.ext4.zst"
+            # Look up image hash from metadata by filename
+            cache_dir = get_cache_dir()
+            all_entries = list_image_entries(cache_dir)
+            image_hash = resolved_image_path.stem  # fallback
+            for img_id, meta in all_entries.items():
+                if meta.get("filename") == resolved_image_path.name:
+                    image_hash = img_id
+                    break
 
             # Ensure image is in ready pool (tmpfs), then fast-copy
             ensure_image_in_ready_pool(resolved_image_path, image_hash, fs_type)
