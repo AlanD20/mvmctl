@@ -12,6 +12,9 @@ from urllib.request import Request, urlopen
 
 from mvmctl.constants import (
     CONST_DOWNLOAD_CHUNK_SIZE,
+    CONST_DOWNLOAD_MAX_RETRIES,
+    CONST_DOWNLOAD_RETRY_BACKOFF,
+    CONST_DOWNLOAD_RETRY_DELAY,
     CONST_HTTP_STATUS_OK,
     CONST_HTTP_STATUS_PARTIAL_CONTENT,
     CONST_HTTP_TIMEOUT_SECONDS,
@@ -20,11 +23,6 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import ChecksumMismatchError, DownloadError
 from mvmctl.utils.progress import ASCIIProgressBar
-
-# Download retry configuration
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_DELAY = 1.0  # seconds
-DEFAULT_RETRY_BACKOFF = 2.0  # exponential backoff multiplier
 
 
 class DownloadEngine:
@@ -54,7 +52,7 @@ class DownloadEngine:
         resume: bool = True,
         progress: bool = True,
         timeout: int = CONST_HTTP_TIMEOUT_SECONDS,
-        max_retries: int = DEFAULT_MAX_RETRIES,
+        max_retries: int = CONST_DOWNLOAD_MAX_RETRIES,
     ) -> Path:
         """Download with temp staging, resume, atomic move, and retry logic.
 
@@ -74,7 +72,7 @@ class DownloadEngine:
             DownloadError: On failure (with cleanup performed)
             ChecksumMismatchError: If SHA256 verification fails
         """
-        delay = DEFAULT_RETRY_DELAY
+        delay = CONST_DOWNLOAD_RETRY_DELAY
         last_exception: Optional[Exception] = None
 
         for attempt in range(max_retries + 1):
@@ -86,7 +84,7 @@ class DownloadEngine:
                     print(f"Download attempt {attempt + 1}/{max_retries + 1} failed: {e}")
                     print(f"Retrying in {delay:.1f}s...")
                     time.sleep(delay)
-                    delay *= DEFAULT_RETRY_BACKOFF
+                    delay *= CONST_DOWNLOAD_RETRY_BACKOFF
                 else:
                     raise DownloadError(
                         f"Download failed after {max_retries + 1} attempts: {e}"

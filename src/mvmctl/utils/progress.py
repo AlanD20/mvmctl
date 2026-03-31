@@ -12,15 +12,16 @@ from typing import Optional
 from urllib.error import URLError
 from urllib.request import Request
 
-from mvmctl.constants import CONST_DOWNLOAD_CHUNK_SIZE, HTTP_USER_AGENT
+from mvmctl.constants import (
+    CONST_DOWNLOAD_CHUNK_SIZE,
+    CONST_DOWNLOAD_MAX_RETRIES,
+    CONST_DOWNLOAD_RETRY_BACKOFF,
+    CONST_DOWNLOAD_RETRY_DELAY,
+    HTTP_USER_AGENT,
+)
 from mvmctl.exceptions import ChecksumMismatchError, MVMError
 from mvmctl.utils import http
-from mvmctl.utils.http import (
-    DEFAULT_MAX_RETRIES,
-    DEFAULT_RETRY_BACKOFF,
-    DEFAULT_RETRY_DELAY,
-    _with_retry,
-)
+from mvmctl.utils.http import _with_retry
 
 
 class ASCIIProgressBar:
@@ -127,7 +128,9 @@ class ASCIIProgressBar:
 
 
 @_with_retry(
-    max_retries=DEFAULT_MAX_RETRIES, retry_delay=DEFAULT_RETRY_DELAY, backoff=DEFAULT_RETRY_BACKOFF
+    max_retries=CONST_DOWNLOAD_MAX_RETRIES,
+    retry_delay=CONST_DOWNLOAD_RETRY_DELAY,
+    backoff=CONST_DOWNLOAD_RETRY_BACKOFF,
 )
 def download_with_progress(
     url: str,

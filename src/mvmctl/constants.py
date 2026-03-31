@@ -153,6 +153,13 @@ def _require_bool(path: tuple[str, ...]) -> bool:
     raise RuntimeError(f"defaults key must be bool: {_format_path(path)}")
 
 
+def _require_float(path: tuple[str, ...]) -> float:
+    value = _get_required(path)
+    if isinstance(value, (int, float)):
+        return float(value)
+    raise RuntimeError(f"defaults key must be float: {_format_path(path)}")
+
+
 def _require_str_list(path: tuple[str, ...]) -> list[str]:
     value = _get_required(path)
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
@@ -652,10 +659,11 @@ CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
 CONST_HTTP_STATUS_OK: Final[int] = 200
 CONST_HTTP_STATUS_PARTIAL_CONTENT: Final[int] = 206
 
-# Retry and timeout constants
-CONST_RETRY_ATTEMPTS: Final[int] = 3
-CONST_RETRY_DELAY_SECONDS: Final[int] = 1
+# Retry and timeout constants (loaded from assets/defaults.yaml)
 CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = _require_int(("http", "download_chunk_size"))
+CONST_DOWNLOAD_MAX_RETRIES: Final[int] = _require_int(("http", "download_max_retries"))
+CONST_DOWNLOAD_RETRY_DELAY: Final[float] = _require_float(("http", "download_retry_delay"))
+CONST_DOWNLOAD_RETRY_BACKOFF: Final[float] = _require_float(("http", "download_retry_backoff"))
 CONST_BINARY_FETCH_TIMEOUT: Final[int] = 300
 CONST_SOCKET_TIMEOUT_SECONDS: Final[float] = 5.0
 CONST_POLL_STEP_SECONDS: Final[float] = 0.1
