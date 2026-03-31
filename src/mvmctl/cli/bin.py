@@ -855,6 +855,9 @@ def image_fetch(
     no_prompt: bool = typer.Option(
         False, "--no-prompt", help="Exit with error on detection failure"
     ),
+    skip_optimization: bool = typer.Option(
+        False, "--skip-optimization", help="Skip shrink and compression, keep plain ext4"
+    ),
 ) -> None:
     """Download an image by its ID. Run 'mvm image ls -r' to list available image IDs."""
     out = out if out is not None else get_images_dir()
@@ -931,7 +934,7 @@ def image_fetch(
             force = True
 
     try:
-        result = fetch_image(spec, out, force)
+        result = fetch_image(spec, out, force, skip_optimization=skip_optimization)
     except (RootPartitionDetectionError, TieDetectedError) as exc:
         if no_prompt:
             print_error(str(exc))
@@ -942,7 +945,7 @@ def image_fetch(
             tied_partitions=tied,
         )
         print_info(f"Using user-selected partition: {selected}")
-        result = fetch_image(spec, out, force, partition=selected)
+        result = fetch_image(spec, out, force, partition=selected, skip_optimization=skip_optimization)
 
     if result:
         import hashlib

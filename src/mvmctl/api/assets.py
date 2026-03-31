@@ -159,6 +159,7 @@ def pull_image(
     force: bool = False,
     images_yaml: Path | None = None,
     output_dir: Path | None = None,
+    skip_optimization: bool = False,
 ) -> Path:
     """Fetch and provision a rootfs image via its ID in images.yaml.
 
@@ -167,6 +168,7 @@ def pull_image(
         force: Redownload even if it exists locally.
         images_yaml: Override path to the images configuration.
         output_dir: Override rootfs destination directory.
+        skip_optimization: Skip shrink and compression, keep plain ext4.
 
     Returns:
         Path to the provisioned image file.
@@ -186,7 +188,7 @@ def pull_image(
     if not spec:
         raise ImageError(f"Image ID '{image_id}' not found in {images_yaml}")
 
-    result = fetch_image(spec, output_dir, force=force)
+    result = fetch_image(spec, output_dir, force=force, skip_optimization=skip_optimization)
     return result.path
 
 
@@ -195,6 +197,7 @@ def fetch_images_parallel(
     output_dir: Path,
     force: bool = False,
     max_workers: int = DEFAULT_MAX_PARALLEL_DOWNLOADS,
+    skip_optimization: bool = False,
 ) -> list[Path]:
     """Fetch multiple images concurrently using a thread pool.
 
@@ -203,6 +206,7 @@ def fetch_images_parallel(
         output_dir: Directory to store downloaded/converted images.
         force: Re-download even if images already exist.
         max_workers: Maximum number of concurrent download threads.
+        skip_optimization: Skip shrink and compression, keep plain ext4.
 
     Returns:
         List of paths to the fetched images (order matches *specs*).
@@ -216,7 +220,7 @@ def fetch_images_parallel(
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         future_to_idx = {
-            pool.submit(fetch_image, spec, output_dir, force): idx for idx, spec in enumerate(specs)
+            pool.submit(fetch_image, spec, output_dir, force, skip_optimization=skip_optimization): idx for idx, spec in enumerate(specs)
         }
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
@@ -238,6 +242,7 @@ def pull_images(
     images_yaml: Path | None = None,
     output_dir: Path | None = None,
     max_workers: int = DEFAULT_MAX_PARALLEL_DOWNLOADS,
+    skip_optimization: bool = False,
 ) -> list[Path]:
     """Fetch multiple image IDs in parallel.
 
@@ -247,6 +252,7 @@ def pull_images(
         images_yaml: Override path to the images configuration.
         output_dir: Override rootfs destination directory.
         max_workers: Maximum number of concurrent download threads.
+        skip_optimization: Skip shrink and compression, keep plain ext4.
 
     Returns:
         List of paths to the fetched images (order matches *image_ids*).
@@ -267,7 +273,7 @@ def pull_images(
         raise ImageError(f"Image IDs not found in {images_yaml}: {', '.join(missing)}")
 
     specs = [specs_by_id[iid] for iid in image_ids]
-    return fetch_images_parallel(specs, output_dir, force=force, max_workers=max_workers)
+    return fetch_images_parallel(specs, output_dir, force=force, max_workers=max_workers, skip_optimization=skip_optimization)
 
 
 def list_assets() -> list[AssetInfo]:

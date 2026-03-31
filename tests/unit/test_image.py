@@ -358,20 +358,28 @@ def test_convert_qcow2_to_raw_uses_parallel_coroutines(mock_run: MagicMock, tmp_
 
 
 @patch("mvmctl.core.image.subprocess.run")
-def test_create_ext4_from_tar_success(mock_run: MagicMock, tmp_path: Path):
+def test_create_ext4_from_tar_success(mock_run: MagicMock, tmp_path: Path, monkeypatch):
     mock_run.return_value = MagicMock(returncode=0)
+    
+    # Mock tempfile.TemporaryDirectory to avoid actual temp dir creation
+    mock_tmpdir = "/fake/tmp/dir"
+    mock_temp_dir = MagicMock()
+    mock_temp_dir.__enter__ = MagicMock(return_value=mock_tmpdir)
+    mock_temp_dir.__exit__ = MagicMock(return_value=False)
+    monkeypatch.setattr("tempfile.TemporaryDirectory", lambda: mock_temp_dir)
 
     tar = tmp_path / "rootfs.tar"
     output = tmp_path / "rootfs.ext4"
     result = create_ext4_from_tar(tar, output, size="1G")
 
     assert result is True
-    assert mock_run.call_count == 2
+    assert mock_run.call_count == 3
     assert mock_run.call_args_list[0][0][0] == ["truncate", "-s", "1G", str(output)]
-    assert mock_run.call_args_list[1][0][0] == [
+    assert mock_run.call_args_list[1][0][0] == ["tar", "-xf", str(tar), "-C", mock_tmpdir]
+    assert mock_run.call_args_list[2][0][0] == [
         "mkfs.ext4",
         "-d",
-        str(tar),
+        mock_tmpdir,
         "-O",
         "metadata_csum,64bit",
         str(output),
@@ -405,13 +413,13 @@ def test_fetch_image_already_exists(tmp_path: Path):
         minimum_rootfs_size=4096,
     )
 
-    # Pre-create the final file
-    final = tmp_path / "ubuntu-24.04.ext4"
-    final.write_text("existing image data")
+    # Pre-create the compressed file (final output after processing)
+    compressed = tmp_path / "ubuntu-24.04.ext4.zst"
+    compressed.write_text("existing compressed image data")
 
     result = fetch_image(spec, tmp_path)
 
-    assert result.path == final
+    assert result.path == compressed
 
 
 @patch("mvmctl.core.image._validate_downloaded_file")
@@ -935,6 +943,8 @@ def test_fetch_image_tar_rootfs_failure(
         fetch_image(spec, tmp_path)
 
 
+@patch("mvmctl.core.image.compress_image")
+@patch("mvmctl.core.image.shrink_image_with_guestfs")
 @patch("mvmctl.core.image._validate_downloaded_file")
 @patch("mvmctl.core.image.extract_partition_from_raw")
 @patch("mvmctl.core.image.convert_qcow2_to_raw")
@@ -944,6 +954,8 @@ def test_fetch_image_force_re_download(
     mock_convert: MagicMock,
     mock_extract: MagicMock,
     mock_validate: MagicMock,
+    mock_shrink: MagicMock,
+    mock_compress: MagicMock,
     tmp_path: Path,
 ):
     spec = ImageSpec(
@@ -962,14 +974,28 @@ def test_fetch_image_force_re_download(
     final.write_text("existing image data")
 
     expected_output = tmp_path / "ubuntu-24.04.ext4"
+    expected_compressed = expected_output.with_suffix(".ext4.zst")
+    
+    # Create the expected output file after extraction mock
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_text("converted image data")
+        return expected_output
+    
+    # Create the compressed file when compress_image is called
+    def create_compressed_and_return(path):
+        expected_compressed.write_text("compressed image data")
+        return expected_compressed
+    
     mock_download.return_value = True
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
+    mock_extract.side_effect = create_file_and_return
+    mock_shrink.return_value = (expected_output, 1000000, 500000)
+    mock_compress.side_effect = create_compressed_and_return
 
     result = fetch_image(spec, tmp_path, force=True)
 
     # Result path should be the compressed version
-    assert result.path == expected_output.with_suffix(".ext4.zst")
+    assert result.path == expected_compressed
     mock_download.assert_called_once()
 
 
@@ -2632,7 +2658,7 @@ def test_fetch_image_cleans_download_on_unknown_format(
 
 
 def test_fetch_image_no_stale_cleanup_without_force(tmp_path: Path):
-    """Test that stale .download file is NOT cleaned when force=False."""
+    """Test that stale .download file is cleaned when resuming from ext4."""
     from mvmctl.core.image import fetch_image
 
     spec = ImageSpec(
@@ -2656,11 +2682,11 @@ def test_fetch_image_no_stale_cleanup_without_force(tmp_path: Path):
     with patch("mvmctl.core.image.download_file") as mock_download:
         result = fetch_image(spec, tmp_path, force=False)
 
-        # Should return early without downloading
-        assert result.path == final_path
+        # Should resume from ext4 and compress (no download needed)
+        assert result.path == final_path.with_suffix(".ext4.zst")
         mock_download.assert_not_called()
-        # Stale file should remain
-        assert download_path.exists()
+        # Stale .download file should be cleaned up after successful processing
+        assert not download_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -2697,7 +2723,7 @@ def test_fetch_image_tar_validation_failure_cleans_up(
     # tar validation fails
     mock_run.side_effect = subprocess.CalledProcessError(1, "tar", stderr="corrupt")
 
-    with pytest.raises(ImageError, match="Invalid tar file"):
+    with pytest.raises(ImageError, match="Failed to create image"):
         fetch_image(spec, tmp_path)
 
     # Download file should be cleaned up
@@ -2733,7 +2759,7 @@ def test_fetch_image_squashfs_validation_failure_cleans_up(
     # unsquashfs validation fails
     mock_run.side_effect = subprocess.CalledProcessError(1, "unsquashfs", stderr="corrupt")
 
-    with pytest.raises(ImageError, match="Invalid squashfs file"):
+    with pytest.raises(ImageError, match="unsquashfs failed"):
         fetch_image(spec, tmp_path)
 
     # Download file should be cleaned up

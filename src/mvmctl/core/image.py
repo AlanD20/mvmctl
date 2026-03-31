@@ -726,11 +726,19 @@ def create_ext4_from_tar(
             check=True,
         )
 
-        subprocess.run(
-            ["mkfs.ext4", "-d", str(tar_path), "-O", "metadata_csum,64bit", str(output_path)],
-            capture_output=True,
-            check=True,
-        )
+        # Extract tar to a temporary directory, then use it with mkfs.ext4 -d
+        # (mkfs.ext4 -d requires a directory, not a tar file)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                ["tar", "-xf", str(tar_path), "-C", tmpdir],
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                ["mkfs.ext4", "-d", tmpdir, "-O", "metadata_csum,64bit", str(output_path)],
+                capture_output=True,
+                check=True,
+            )
 
         logger.info("Created %s", output_path.name)
         return True
@@ -1015,6 +1023,7 @@ def fetch_image(
     output_dir: Path,
     force: bool = False,
     partition: int | None = None,
+    skip_optimization: bool = False,
 ) -> ImageImportResult:
     """Fetch and convert an image.
 
@@ -1023,6 +1032,7 @@ def fetch_image(
         output_dir: Directory to store images
         force: Re-download even if exists
         partition: Specific partition number to extract (1-indexed), or None for auto-detect
+        skip_optimization: Skip shrink and compression, keep plain ext4
 
     Returns:
         Path to final image
@@ -1034,13 +1044,35 @@ def fetch_image(
 
     # Determine final output path
     final_path = output_dir / f"{spec.id}.{spec.convert_to}"
+    compressed_path = final_path.with_suffix(".ext4.zst")
 
-    if final_path.exists() and not force:
-        logger.info("Image already exists: %s", final_path)
-        # Detect filesystem info for existing image
-        fs_type = detect_filesystem_type(final_path)
-        fs_uuid = get_filesystem_uuid(final_path)
-        return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
+    # Check if compressed file already exists (idempotency)
+    if compressed_path.exists() and not force:
+        logger.info("Image already exists: %s", compressed_path)
+        fs_type = detect_filesystem_type(compressed_path)
+        fs_uuid = get_filesystem_uuid(compressed_path)
+        return ImageImportResult(path=compressed_path, fs_type=fs_type, fs_uuid=fs_uuid)
+
+    # Define download_path early for potential cleanup
+    download_path = output_dir / f"{spec.id}.download"
+
+    # Clean up ALL stale files if force=True (before checking resume conditions)
+    if force:
+        if compressed_path.exists():
+            logger.info("Removing stale compressed file: %s", compressed_path)
+            compressed_path.unlink()
+        if final_path.exists():
+            logger.info("Removing stale final file: %s", final_path)
+            final_path.unlink()
+        if download_path.exists():
+            logger.info("Removing stale download file: %s", download_path)
+            download_path.unlink()
+
+    # Check if we can resume from intermediate state (download exists or final ext4 exists)
+    resume_from_ext4 = final_path.exists() and not compressed_path.exists()
+
+    # Determine if we need to download or can resume from conversion step
+    need_download = not download_path.exists() and not resume_from_ext4
 
     template_vars = _get_template_variables(spec)
     source = spec.source
@@ -1053,38 +1085,44 @@ def fetch_image(
         source_basename = source.rsplit("/", 1)[-1] if source else None
         resolved_sha256 = _fetch_sha256_from_url(sha256_url, source_filename=source_basename)
 
-    download_path = output_dir / f"{spec.id}.download"
-
-    # Clean up stale .download file if force=True
-    if force and download_path.exists():
-        logger.info("Removing stale download file: %s", download_path)
-        download_path.unlink()
-
     try:
-        download_with_progress(
-            source,
-            download_path,
-            title=f"Downloading image {spec.id}",
-            expected_sha256=resolved_sha256,
-            timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
-            allow_missing_checksum=resolved_sha256 is None,
-        )
+        if need_download:
+            download_with_progress(
+                source,
+                download_path,
+                title=f"Downloading image {spec.id}",
+                expected_sha256=resolved_sha256,
+                timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
+                allow_missing_checksum=resolved_sha256 is None,
+            )
 
-        # Validate downloaded file before processing
-        _validate_downloaded_file(download_path, spec.format)
+            # Validate downloaded file before processing
+            _validate_downloaded_file(download_path, spec.format)
+        elif resume_from_ext4:
+            logger.info("Resuming from existing ext4 file: %s", final_path)
+        else:
+            logger.info("Resuming from downloaded file: %s", download_path)
 
-        handler = _FORMAT_HANDLERS.get(spec.format)
-        if handler is None:
-            download_path.unlink(missing_ok=True)
-            raise ImageError(f"Unknown format: {spec.format}")
-        actual_path = handler(download_path, final_path, spec.minimum_rootfs_size, partition, None)
+        if not resume_from_ext4:
+            handler = _FORMAT_HANDLERS.get(spec.format)
+            if handler is None:
+                download_path.unlink(missing_ok=True)
+                raise ImageError(f"Unknown format: {spec.format}")
+            actual_path = handler(download_path, final_path, spec.minimum_rootfs_size, partition, None)
+        else:
+            actual_path = final_path
 
-        # Cleanup download on success
+        # Cleanup download file if it exists (regardless of resume path)
         download_path.unlink(missing_ok=True)
 
         # Detect filesystem type and UUID
         fs_type = detect_filesystem_type(actual_path)
         fs_uuid = get_filesystem_uuid(actual_path)
+
+        # Skip optimization if requested
+        if skip_optimization:
+            logger.info("Skipping optimization (shrink and compression)")
+            return ImageImportResult(path=actual_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
         # Shrink before compression
         if actual_path.exists():
@@ -1092,14 +1130,14 @@ def fetch_image(
             logger.info(
                 f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
             )
-            compressed_path = compress_image(shrunk_path)
-            compressed_size = compressed_path.stat().st_size
+            compressed_path_out = compress_image(shrunk_path)
+            compressed_size = compressed_path_out.stat().st_size
             compression_ratio = (
                 pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
             )
 
             return ImageImportResult(
-                path=compressed_path,
+                path=compressed_path_out,
                 fs_type=fs_type,
                 fs_uuid=fs_uuid,
                 compressed_size=compressed_size,
