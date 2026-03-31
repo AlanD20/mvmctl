@@ -379,6 +379,94 @@ def grow_rootfs_with_guestfs(image_path: Path, target_size_bytes: int) -> None:
         raise VMCreateError(f"Failed to grow rootfs: {e}") from e
 
 
+def _inject_ssh_keys_for_disabled_mode(
+    rootfs_path: Path,
+    ssh_pub_key: list[str] | str | None,
+    vm_dir: Path,
+) -> None:
+    """Inject SSH public keys directly into rootfs for DISABLED cloud-init mode.
+
+    Uses libguestfs to write SSH keys to /root/.ssh/authorized_keys when
+    cloud-init is disabled but SSH access is still desired.
+
+    Args:
+        rootfs_path: Path to the rootfs disk image
+        ssh_pub_key: SSH public key(s) to inject (single key, list, or None)
+        vm_dir: VM directory for logging
+
+    Raises:
+        VMCreateError: If libguestfs is not available or injection fails
+    """
+    from mvmctl.utils.guestfs import check_libguestfs, optimized_guestfs
+
+    if ssh_pub_key is None:
+        return
+
+    if not check_libguestfs():
+        raise VMCreateError("libguestfs required for SSH key injection")
+
+    # Normalize to list
+    keys: list[str]
+    if isinstance(ssh_pub_key, str):
+        keys = [ssh_pub_key]
+    else:
+        keys = ssh_pub_key
+
+    if not keys:
+        return
+
+    try:
+        with optimized_guestfs(rootfs_path, readonly=False) as g:
+            # Detect and mount root partition
+            from mvmctl.core.rootfs_injector import _detect_root_partition
+
+            root_device = _detect_root_partition(g, str(rootfs_path))
+            try:
+                g.mount(root_device, "/")
+            except Exception as e:
+                raise VMCreateError(f"Failed to mount {root_device}: {e}") from e
+
+            try:
+                # Create .ssh directory with proper permissions
+                g.mkdir_p("/root/.ssh")
+                g.chmod("/root/.ssh", 0o700)
+
+                # Read existing authorized_keys if any
+                existing_keys = ""
+                if g.exists("/root/.ssh/authorized_keys"):
+                    existing_keys = g.read_file("/root/.ssh/authorized_keys")
+                    if isinstance(existing_keys, bytes):
+                        existing_keys = existing_keys.decode("utf-8", errors="replace")
+
+                # Append new keys (avoid duplicates)
+                newline = "\n"
+                existing_set = (
+                    set(existing_keys.strip().split(newline)) if existing_keys.strip() else set()
+                )
+                new_keys = [k for k in keys if k.strip() and k.strip() not in existing_set]
+
+                if new_keys:
+                    combined = existing_keys
+                    if combined and not combined.endswith(newline):
+                        combined += newline
+                    combined += newline.join(new_keys) + newline
+                    g.write("/root/.ssh/authorized_keys", combined)
+                    g.chmod("/root/.ssh/authorized_keys", 0o600)
+                    logger.debug(
+                        "Injected %d SSH key(s) for disabled cloud-init mode", len(new_keys)
+                    )
+            finally:
+                try:
+                    g.umount("/")
+                except Exception:
+                    pass  # Already unmounted or not mounted
+
+    except VMCreateError:
+        raise
+    except Exception as e:
+        raise VMCreateError(f"Failed to inject SSH keys: {e}") from e
+
+
 def _cleanup_vm_creation_resources(
     resources_created: dict[str, bool],
     vm_dir: Path | None,
@@ -795,6 +883,36 @@ def create_vm(
 
             target_bytes = parse_disk_size(disk_size)
             grow_rootfs_with_guestfs(vm_rootfs_path, target_bytes)
+
+        # Resolve SSH keys for DISABLED mode (outside the cloud-init block)
+        disabled_ssh_pub_key: list[str] | str | None = None
+        if effective_mode == CloudInitMode.DISABLED and ssh_key is not None:
+            disabled_ssh_pub_key = resolve_ssh_key(ssh_key)
+        elif effective_mode == CloudInitMode.DISABLED and ssh_key is None:
+            from mvmctl.core.key_manager import get_default_keys as _get_default_keys
+            from mvmctl.utils.fs import get_keys_dir as _get_keys_dir
+
+            default_names = _get_default_keys()
+            if default_names:
+                keys_dir = _get_keys_dir()
+                resolved_keys: list[str] = []
+                for kname in default_names:
+                    pub_file = keys_dir / f"{kname}.pub"
+                    if pub_file.exists():
+                        content_key = pub_file.read_text().strip()
+                        if content_key:
+                            resolved_keys.append(content_key)
+                    else:
+                        logger.warning(
+                            "Default key '%s' not found at %s — skipping", kname, pub_file
+                        )
+                disabled_ssh_pub_key = resolved_keys if resolved_keys else None
+            else:
+                disabled_ssh_pub_key = resolve_ssh_key(None)
+
+        # Inject SSH keys directly into rootfs for DISABLED mode
+        if effective_mode == CloudInitMode.DISABLED and disabled_ssh_pub_key is not None:
+            _inject_ssh_keys_for_disabled_mode(rootfs_path, disabled_ssh_pub_key, vm_dir)
 
         # Handle cloud-init based on mode
         cloud_init_iso: Path | None = None

@@ -103,22 +103,6 @@ def test_rm_multiple_vms_same_name_errors(mocker: MockerFixture):
     assert "Multiple VMs match name" in result.output
 
 
-def test_prune_nothing_to_do(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[])
-    result = runner.invoke(app, ["prune"])
-    assert result.exit_code == 0
-    assert "Nothing to clean up" in result.output
-
-
-def test_prune_with_vms(mocker: MockerFixture):
-    stopped_vm = _make_vm("vm-stopped", VMState.STOPPED, "10.20.0.3")
-    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[stopped_vm])
-    mocker.patch("mvmctl.cli.vm.cleanup_vms")
-    result = runner.invoke(app, ["prune"])
-    assert result.exit_code == 0
-    assert "Removed" in result.output
-
-
 def test_create_vm_success(mocker: MockerFixture):
     vm = _make_vm("newvm")
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value="/tmp/image.ext4")
@@ -575,20 +559,6 @@ def test_rm_no_targets(mocker: MockerFixture):
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm"])
     assert result.exit_code == 1
-
-
-def test_prune_no_stopped(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[_make_vm("myvm")])
-    result = runner.invoke(app, ["prune"])
-    assert result.exit_code == 0
-    assert "Nothing" in result.output
-
-
-def test_prune_dry_run(mocker: MockerFixture):
-    mocker.patch("mvmctl.cli.vm.list_vms", return_value=[_make_vm("stopped", VMState.STOPPED)])
-    result = runner.invoke(app, ["prune", "--dry-run"])
-    assert result.exit_code == 0
-    assert "Dry run" in result.output
 
 
 def test_inspect_vm_command(mocker: MockerFixture):

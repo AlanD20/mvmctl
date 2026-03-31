@@ -55,52 +55,19 @@ def prune_vms(
     )
 
 
-def prune_networks(dry_run: bool = False) -> list[str]:
-    """Prune unused networks.
-
-    Removes networks that are not referenced by any VM and have no
-    active leases. The default network is never pruned.
-
-    Args:
-        dry_run: If True, only report what would be removed.
-
-    Returns:
-        List of network names that were removed.
-    """
+def prune_networks(dry_run: bool = False, include_all: bool = False) -> list[str]:
     check_privileges_interactive("/usr/sbin/ip", "prune networks")
-    return cache_manager.cache_prune_networks(dry_run=dry_run)
+    return cache_manager.cache_prune_networks(dry_run=dry_run, include_all=include_all)
 
 
-def prune_images(dry_run: bool = False) -> list[str]:
-    """Prune unused images.
-
-    Removes images that are not referenced by any VM. The default
-    image is never pruned.
-
-    Args:
-        dry_run: If True, only report what would be removed.
-
-    Returns:
-        List of image IDs (short form, first 6 chars) that were removed.
-    """
+def prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]:
     check_privileges_interactive("/usr/sbin/ip", "prune images")
-    return cache_manager.cache_prune_images(dry_run=dry_run)
+    return cache_manager.cache_prune_images(dry_run=dry_run, include_all=include_all)
 
 
-def prune_kernels(dry_run: bool = False) -> list[str]:
-    """Prune unused kernels.
-
-    Removes kernels that are not referenced by any VM. The default
-    kernel is never pruned.
-
-    Args:
-        dry_run: If True, only report what would be removed.
-
-    Returns:
-        List of kernel IDs (short form, first 6 chars) that were removed.
-    """
+def prune_kernels(dry_run: bool = False, include_all: bool = False) -> list[str]:
     check_privileges_interactive("/usr/sbin/ip", "prune kernels")
-    return cache_manager.cache_prune_kernels(dry_run=dry_run)
+    return cache_manager.cache_prune_kernels(dry_run=dry_run, include_all=include_all)
 
 
 def prune_all(

@@ -208,38 +208,20 @@ def cache_prune_vms(
     return removed
 
 
-def cache_prune_networks(dry_run: bool = False) -> list[str]:
-    """Prune networks not referenced by any VM.
-
-    A network is considered "unused" if:
-    - No VMs have network_name referencing it
-    - No active leases exist for it
-
-    The default network is NEVER pruned.
-
-    Args:
-        dry_run: If True, only report what would be removed
-
-    Returns:
-        List of network names that were (or would be) removed
-    """
+def cache_prune_networks(dry_run: bool = False, include_all: bool = False) -> list[str]:
     referenced_networks = _get_network_references()
     all_networks = list_networks()
 
     removed: list[str] = []
     for network in all_networks:
-        # Never remove default network
-        if network.name == DEFAULT_NETWORK_NAME:
-            continue
-
-        # Check if referenced by any VM
-        if network.name in referenced_networks:
-            continue
-
-        # Check if has active leases
-        leases = get_network_leases(network.name)
-        if leases:
-            continue
+        if not include_all:
+            if network.name == DEFAULT_NETWORK_NAME:
+                continue
+            if network.name in referenced_networks:
+                continue
+            leases = get_network_leases(network.name)
+            if leases:
+                continue
 
         if not dry_run:
             try:
@@ -253,67 +235,48 @@ def cache_prune_networks(dry_run: bool = False) -> list[str]:
     return removed
 
 
-def cache_prune_images(dry_run: bool = False) -> list[str]:
-    """Prune images not referenced by any VM.
-
-    An image is considered "unused" if:
-    - No VM's config.rootfs_path points to it
-    - Not the default image (unless --force logic added later)
-
-    Args:
-        dry_run: If True, only report what would be removed
-
-    Returns:
-        List of image IDs (short form) that were (or would be) removed
-    """
+def cache_prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]:
     cache_dir = get_cache_dir()
     images_dir = get_images_dir()
 
     referenced_paths = _get_image_references()
     all_images = list_image_entries(cache_dir, images_dir)
 
-    # Get default image to protect it
     default_entry = get_default_image_entry(cache_dir)
     default_id = default_entry[0] if default_entry else None
 
     removed: list[str] = []
     for image_id, meta in all_images.items():
-        # Protect default image
-        if image_id == default_id:
-            continue
+        if not include_all:
+            if image_id == default_id:
+                continue
 
-        # Check if referenced by path
+            filename = str(meta.get("filename", ""))
+            if filename:
+                image_path = str(images_dir / filename)
+                if image_path in referenced_paths:
+                    continue
+
+            internal_id = str(meta.get("internal_id", ""))
+            if internal_id:
+                is_referenced = False
+                for ref_path in referenced_paths:
+                    if internal_id in ref_path:
+                        is_referenced = True
+                        break
+                if is_referenced:
+                    continue
+
         filename = str(meta.get("filename", ""))
-        if filename:
-            image_path = str(images_dir / filename)
-            if image_path in referenced_paths:
-                continue
-
-        # Also check by internal_id
-        internal_id = str(meta.get("internal_id", ""))
-        if internal_id:
-            is_referenced = False
-            for ref_path in referenced_paths:
-                if internal_id in ref_path:
-                    is_referenced = True
-                    break
-            if is_referenced:
-                continue
-
-        # Not referenced - can remove
         if not dry_run:
             try:
-                # Remove file(s)
                 if filename:
                     (images_dir / filename).unlink(missing_ok=True)
                 else:
-                    # Try by ID
                     for ext in SUPPORTED_IMAGE_EXTENSIONS:
                         (images_dir / f"{image_id}{ext}").unlink(missing_ok=True)
-
-                # Remove metadata entry
                 remove_image_entry(cache_dir, image_id)
-                removed.append(image_id)  # ID
+                removed.append(image_id)
             except Exception as e:
                 logger.warning(f"Failed to remove image {image_id}: {e}")
         else:
@@ -322,55 +285,35 @@ def cache_prune_images(dry_run: bool = False) -> list[str]:
     return removed
 
 
-def cache_prune_kernels(dry_run: bool = False) -> list[str]:
-    """Prune kernels not referenced by any VM.
-
-    A kernel is considered "unused" if:
-    - No VM's config.kernel_path points to it
-    - Not the default kernel (unless --force logic added later)
-
-    Args:
-        dry_run: If True, only report what would be removed
-
-    Returns:
-        List of kernel IDs (short form) that were (or would be) removed
-    """
+def cache_prune_kernels(dry_run: bool = False, include_all: bool = False) -> list[str]:
     cache_dir = get_cache_dir()
     kernels_dir = get_kernels_dir()
 
     referenced_paths = _get_kernel_references()
     all_kernels = list_kernel_entries(cache_dir, kernels_dir)
 
-    # Get default kernel to protect it
     default_entry = get_default_kernel_entry(cache_dir)
     default_id = default_entry[0] if default_entry else None
 
     removed: list[str] = []
     for kernel_id, meta in all_kernels.items():
-        # Protect default kernel
-        if kernel_id == default_id:
-            continue
-
-        # Check if referenced by path
         filename = str(meta.get("filename", ""))
-        if filename:
-            kernel_path = str(kernels_dir / filename)
-            if kernel_path in referenced_paths:
+        if not include_all:
+            if kernel_id == default_id:
                 continue
+            if filename:
+                kernel_path = str(kernels_dir / filename)
+                if kernel_path in referenced_paths:
+                    continue
 
-        # Not referenced - can remove
         if not dry_run:
             try:
-                # Remove file(s)
                 if filename:
                     (kernels_dir / filename).unlink(missing_ok=True)
                 else:
-                    # Try by ID
                     (kernels_dir / kernel_id).unlink(missing_ok=True)
-
-                # Remove metadata entry
                 remove_kernel_entry(cache_dir, kernel_id)
-                removed.append(kernel_id)  # ID
+                removed.append(kernel_id)
             except Exception as e:
                 logger.warning(f"Failed to remove kernel {kernel_id}: {e}")
         else:

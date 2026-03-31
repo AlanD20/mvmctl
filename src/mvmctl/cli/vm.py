@@ -10,7 +10,6 @@ if TYPE_CHECKING:
 from mvmctl.api.network import check_ip_available
 from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from mvmctl.api.vms import (
-    cleanup_vms,
     create_vm,
     get_vm_status_with_exit_code,
     list_vms,
@@ -30,7 +29,7 @@ from mvmctl.constants import (
     DEFAULT_SNAPSHOT_RESUME,
 )
 from mvmctl.exceptions import MVMError
-from mvmctl.models import CloudInitMode, VMInstance, VMState
+from mvmctl.models import CloudInitMode, VMInstance
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import get_vm_dir_by_hash as get_vm_dir  # noqa: F401
@@ -667,38 +666,6 @@ def ps_vms(
 ) -> None:
     """List running VMs (alias for ls)."""
     ls_vms(json_output=json_output, all_vms=all_vms)
-
-
-def _do_prune(all_vms: bool, dry_run: bool) -> None:
-    manager = list_vms(include_stopped=True)
-    targets = manager if all_vms else [v for v in manager if v.status != VMState.RUNNING]
-
-    if not targets:
-        print_info("Nothing to clean up.")
-        return
-
-    print_info(f"VMs to remove ({len(targets)}):")
-    for v in targets:
-        print_info(f"  {v.name} ({v.status.value}, IP: {v.ip or '-'})")
-
-    if dry_run:
-        print_info("Dry run — no changes made.")
-        return
-
-    cleanup_vms(all_vms=all_vms, dry_run=False)
-    for v in targets:
-        print_success(f"Removed VM '{v.name}'")
-
-
-@app.command()
-def prune(
-    all_vms: bool = typer.Option(False, "--all", help="Remove all VMs, not just stopped"),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show what would be removed without deleting"
-    ),
-) -> None:
-    """Remove stopped VMs and stale directories."""
-    _do_prune(all_vms=all_vms, dry_run=dry_run)
 
 
 @app.command()

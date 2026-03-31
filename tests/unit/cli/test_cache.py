@@ -84,7 +84,7 @@ def test_cache_prune_network_subcommand(mocker: MockerFixture):
     assert "pruned" in result.output.lower()
     assert "network1" in result.output
     assert "network2" in result.output
-    mock_prune.assert_called_once_with(False)
+    mock_prune.assert_called_once_with(False, False)
 
 
 def test_cache_prune_image_subcommand(mocker: MockerFixture):
@@ -98,7 +98,7 @@ def test_cache_prune_image_subcommand(mocker: MockerFixture):
     assert "pruned" in result.output.lower()
     assert "img1abc" in result.output
     assert "img2def" in result.output
-    mock_prune.assert_called_once_with(False)
+    mock_prune.assert_called_once_with(False, False)
 
 
 def test_cache_prune_kernel_subcommand(mocker: MockerFixture):
@@ -112,7 +112,7 @@ def test_cache_prune_kernel_subcommand(mocker: MockerFixture):
     assert "pruned" in result.output.lower()
     assert "kern123" in result.output
     assert "kern456" in result.output
-    mock_prune.assert_called_once_with(False)
+    mock_prune.assert_called_once_with(False, False)
 
 
 # -----------------------------------------------------------------------------
@@ -401,3 +401,43 @@ def test_cache_prune_both_stopped_and_running_flags(mocker: MockerFixture):
     result = runner.invoke(app, ["prune", "vm", "--include-stopped", "--include-running"])
     assert result.exit_code == 0
     mock_prune.assert_called_once_with(True, True, False)
+
+
+def test_cache_prune_vm_all_flag(mocker: MockerFixture):
+    mock_prune = mocker.patch(
+        "mvmctl.cli.cache.cache_api.prune_vms",
+        return_value=["vm1", "vm2"],
+    )
+    result = runner.invoke(app, ["prune", "vm", "--all"])
+    assert result.exit_code == 0
+    mock_prune.assert_called_once_with(True, True, False)
+
+
+def test_cache_prune_image_all_flag(mocker: MockerFixture):
+    mock_prune = mocker.patch(
+        "mvmctl.cli.cache.cache_api.prune_images",
+        return_value=["img1abc", "img2def"],
+    )
+    result = runner.invoke(app, ["prune", "image", "--all"])
+    assert result.exit_code == 0
+    mock_prune.assert_called_once_with(False, True)
+
+
+def test_cache_prune_network_all_flag(mocker: MockerFixture):
+    mock_prune = mocker.patch(
+        "mvmctl.cli.cache.cache_api.prune_networks",
+        return_value=["net1"],
+    )
+    result = runner.invoke(app, ["prune", "network", "--all"])
+    assert result.exit_code == 0
+    mock_prune.assert_called_once_with(False, True)
+
+
+def test_cache_prune_kernel_all_flag(mocker: MockerFixture):
+    mock_prune = mocker.patch(
+        "mvmctl.cli.cache.cache_api.prune_kernels",
+        return_value=["kern1"],
+    )
+    result = runner.invoke(app, ["prune", "kernel", "--all"])
+    assert result.exit_code == 0
+    mock_prune.assert_called_once_with(False, True)

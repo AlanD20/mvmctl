@@ -48,7 +48,10 @@ def cache_prune(
         False, "--include-running", help="Include running VMs in pruning (USE WITH CAUTION)"
     ),
     all_resources: bool = typer.Option(
-        False, "--all", "-a", help="Prune all resources (VMs, networks, images, kernels)"
+        False,
+        "--all",
+        "-a",
+        help="With a resource: remove all items of that type (bypass protections). Without a resource: prune all types.",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be removed without actually removing"
@@ -58,14 +61,62 @@ def cache_prune(
     """Prune cache resources.
 
     Examples:
+        mvm cache prune vm --all                 # Remove ALL VMs (all states)
         mvm cache prune vm --include-stopped     # Prune stopped VMs
+        mvm cache prune image --all              # Remove ALL images (including default/referenced)
         mvm cache prune network                  # Prune unused networks
-        mvm cache prune all -a --include-stopped # Prune everything
+        mvm cache prune all --force              # Prune all resource types
     """
-    # Determine what to prune
-    prune_all_resources = all_resources or resource == "all"
+    if resource == "vm":
+        try:
+            all_vms = all_resources
+            removed = cache_api.prune_vms(
+                all_vms or include_stopped,
+                all_vms or include_running,
+                dry_run,
+            )
+            if removed:
+                print_success(f"Pruned {len(removed)} VM(s): {', '.join(removed)}")
+            else:
+                print_info("No VMs to prune")
+        except Exception as e:
+            print_error(f"Failed to prune VMs: {e}")
+            raise typer.Exit(code=1)
 
-    if prune_all_resources:
+    elif resource == "network":
+        try:
+            removed = cache_api.prune_networks(dry_run, all_resources)
+            if removed:
+                print_success(f"Pruned {len(removed)} network(s): {', '.join(removed)}")
+            else:
+                print_info("No networks to prune")
+        except Exception as e:
+            print_error(f"Failed to prune networks: {e}")
+            raise typer.Exit(code=1)
+
+    elif resource == "image":
+        try:
+            removed = cache_api.prune_images(dry_run, all_resources)
+            if removed:
+                print_success(f"Pruned {len(removed)} image(s): {', '.join(removed)}")
+            else:
+                print_info("No images to prune")
+        except Exception as e:
+            print_error(f"Failed to prune images: {e}")
+            raise typer.Exit(code=1)
+
+    elif resource == "kernel":
+        try:
+            removed = cache_api.prune_kernels(dry_run, all_resources)
+            if removed:
+                print_success(f"Pruned {len(removed)} kernel(s): {', '.join(removed)}")
+            else:
+                print_info("No kernels to prune")
+        except Exception as e:
+            print_error(f"Failed to prune kernels: {e}")
+            raise typer.Exit(code=1)
+
+    elif all_resources or resource == "all":
         if not force:
             print_warning("This will remove ALL unused cache resources:")
             print_warning("  - VMs (based on --include-stopped/--include-running flags)")
@@ -94,50 +145,6 @@ def cache_prune(
 
         except Exception as e:
             print_error(f"Failed to prune cache: {e}")
-            raise typer.Exit(code=1)
-
-    elif resource == "vm":
-        try:
-            removed = cache_api.prune_vms(include_stopped, include_running, dry_run)
-            if removed:
-                print_success(f"Pruned {len(removed)} VM(s): {', '.join(removed)}")
-            else:
-                print_info("No VMs to prune")
-        except Exception as e:
-            print_error(f"Failed to prune VMs: {e}")
-            raise typer.Exit(code=1)
-
-    elif resource == "network":
-        try:
-            removed = cache_api.prune_networks(dry_run)
-            if removed:
-                print_success(f"Pruned {len(removed)} network(s): {', '.join(removed)}")
-            else:
-                print_info("No networks to prune")
-        except Exception as e:
-            print_error(f"Failed to prune networks: {e}")
-            raise typer.Exit(code=1)
-
-    elif resource == "image":
-        try:
-            removed = cache_api.prune_images(dry_run)
-            if removed:
-                print_success(f"Pruned {len(removed)} image(s): {', '.join(removed)}")
-            else:
-                print_info("No images to prune")
-        except Exception as e:
-            print_error(f"Failed to prune images: {e}")
-            raise typer.Exit(code=1)
-
-    elif resource == "kernel":
-        try:
-            removed = cache_api.prune_kernels(dry_run)
-            if removed:
-                print_success(f"Pruned {len(removed)} kernel(s): {', '.join(removed)}")
-            else:
-                print_info("No kernels to prune")
-        except Exception as e:
-            print_error(f"Failed to prune kernels: {e}")
             raise typer.Exit(code=1)
 
     else:
