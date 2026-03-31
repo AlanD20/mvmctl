@@ -286,6 +286,42 @@ Every downloaded/imported asset (image, kernel, VM) gets a **full 64-char SHA256
 - **models/** — `@dataclass` only; no methods with side effects
 - **utils/** — pure helpers with no domain knowledge
 
+### Centralized Tool Wrappers (CRITICAL)
+
+**All external tool wrappers MUST be centralized in `utils/` — NEVER scattered in `core/` or other layers.**
+
+This ensures:
+1. **Single source of truth** for tool interactions (libguestfs, qemu-img, etc.)
+2. **Consistent error handling** across the codebase
+3. **Easier testing** with mocked utilities
+4. **Better maintainability** when tools change
+
+**Examples:**
+- `utils/guestfs.py` — ALL libguestfs operations (OptimizedGuestfs, check_libguestfs, extract_partition_with_guestfs)
+- `utils/http.py` — ALL HTTP operations (download, retry logic)
+- `utils/process.py` — ALL subprocess wrappers
+
+**Pattern:**
+```python
+# CORRECT: Tool logic in utils/
+# utils/guestfs.py:
+def extract_partition_with_guestfs(...) -> Path | None:
+    # All guestfs logic here
+    ...
+
+# core/image.py imports and uses:
+from mvmctl.utils.guestfs import extract_partition_with_guestfs
+result = extract_partition_with_guestfs(...)
+
+# WRONG: Tool logic scattered in core/
+# core/image.py:
+def _extract_partition_with_guestfs(...):  # DON'T DO THIS
+    # Guestfs logic mixed with business logic
+    ...
+```
+
+**Rule:** If a function uses an external tool (libguestfs, qemu-img, tar, etc.), it belongs in `utils/`. The `core/` layer should import and use these utilities, not implement them.
+
 ### Default Values Rule
 - Fallback defaults → `constants.py` with `FALLBACK_` prefix: `FALLBACK_FC_CI_VERSION`, `FALLBACK_FIRECRACKER_BIN`, `FALLBACK_KERNEL_BUILD_JOBS`
 - User-facing asset defaults (image/kernel/binary) → `$MVM_CACHE_DIR/metadata.json` via `is_default` flags
