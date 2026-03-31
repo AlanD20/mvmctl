@@ -15,7 +15,7 @@ vm_defaults:
   subnet_mask: 255.255.255.0
   boot_args: console=ttyS0 reboot=k panic=1 pci=off
   disk_size: 2G
-  enable_api_socket: false
+  enable_api_socket: true
   enable_pci: false
   enable_logging: true
   enable_metrics: false
@@ -67,7 +67,7 @@ vm:
   snapshot:
     resume: true
   limits:
-    max_vms: 50
+    max_vms: 1000
 image:
   defaults:
     convert_to: ext4

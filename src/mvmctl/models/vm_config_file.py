@@ -8,6 +8,7 @@ from typing import Any
 from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
+    DEFAULT_VM_ENABLE_API_SOCKET,
     DEFAULT_VM_MEM_MIB,
     DEFAULT_VM_SSH_USER,
     DEFAULT_VM_VCPU_COUNT,
@@ -26,7 +27,7 @@ class VMCreateConfigFile:
     mac: str | None = None
     ssh_key: str | None = None
     user: str = DEFAULT_VM_SSH_USER
-    enable_api_socket: bool = False
+    enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET
     enable_pci: bool = False
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME
     firecracker_config: dict[str, Any] | None = None

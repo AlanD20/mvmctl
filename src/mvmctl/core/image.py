@@ -16,7 +16,10 @@ from mvmctl.constants import (
     COMPRESSION_EXTENSION_MAP,
     CONST_GUESTFS_OS_RELEASE_PATH,
     CONST_MEBIBYTE_BYTES,
+    CONST_MIN_ROOTFS_SIZE_MIB,
+    CONST_PERCENT,
     CONST_RATIO_MIN,
+    CONST_ROOTFS_HEADROOM_FACTOR,
     CONST_SECTOR_SIZE_BYTES,
     CONST_SHRINK_SAFETY_MARGIN,
     DEFAULT_FC_KERNEL_ARCH,
@@ -241,8 +244,7 @@ def compress_image(image_path: Path, level: int = 6) -> Path:
 
         # Before compression, verify source has actual content (not all zeros)
         with open(image_path, "rb") as f:
-            # Read first 1MB to check for zeros
-            first_mb = f.read(1024 * 1024)
+            first_mb = f.read(CONST_MEBIBYTE_BYTES)
             if first_mb == b"\x00" * len(first_mb):
                 raise ImageError(
                     f"Source file appears to be all zeros: {image_path}. "
@@ -794,16 +796,14 @@ def create_ext4_from_tar(
                 raise ImageError(f"Failed to get directory size: {du_result.stderr}")
 
             actual_bytes = int(du_result.stdout.split()[0])
-            actual_mib = actual_bytes / (1024 * 1024)
+            actual_mib = actual_bytes / CONST_MEBIBYTE_BYTES
 
-            # Calculate size with 25% headroom for ext4 metadata overhead and 128MB minimum
             if minimum_rootfs_mib == "dynamic":
-                calculated_mib = int(actual_mib * 1.25)
-                raw_size_mb = max(128, calculated_mib)
+                calculated_mib = int(actual_mib * CONST_ROOTFS_HEADROOM_FACTOR)
+                raw_size_mb = max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mib)
             else:
-                # Add 25% headroom to specified size for ext4 metadata overhead
-                calculated_mib = int(int(minimum_rootfs_mib) * 1.25)
-                raw_size_mb = max(128, calculated_mib)
+                calculated_mib = int(int(minimum_rootfs_mib) * CONST_ROOTFS_HEADROOM_FACTOR)
+                raw_size_mb = max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mib)
 
             logger.info("Creating ext4 image (%d MiB)...", raw_size_mb)
 
@@ -1273,7 +1273,7 @@ def fetch_image(
                     "Image shrunk: %.1f MiB → %.1f MiB (%.1f%% reduction)",
                     pre_shrink_size / CONST_MEBIBYTE_BYTES,
                     post_shrink_size / CONST_MEBIBYTE_BYTES,
-                    (pre_shrink_size - post_shrink_size) / pre_shrink_size * 100,
+                    (pre_shrink_size - post_shrink_size) / pre_shrink_size * CONST_PERCENT,
                 )
             else:
                 logger.debug(
@@ -1414,7 +1414,7 @@ def import_image(
                     destination_path
                 )
                 logger.info(
-                    f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
+                    f"Image shrunk: {pre_shrink_size / CONST_MEBIBYTE_BYTES:.1f} MiB → {post_shrink_size / CONST_MEBIBYTE_BYTES:.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * CONST_PERCENT:.1f}% reduction)"
                 )
                 compressed_path = compress_image(shrunk_path)
                 compressed_size = compressed_path.stat().st_size
@@ -1445,7 +1445,7 @@ def import_image(
         if final_path.exists():
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(final_path)
             logger.info(
-                f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
+                f"Image shrunk: {pre_shrink_size / CONST_MEBIBYTE_BYTES:.1f} MiB → {post_shrink_size / CONST_MEBIBYTE_BYTES:.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * CONST_PERCENT:.1f}% reduction)"
             )
             compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
@@ -1478,7 +1478,7 @@ def import_image(
         if final_path.exists():
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(final_path)
             logger.info(
-                f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
+                f"Image shrunk: {pre_shrink_size / CONST_MEBIBYTE_BYTES:.1f} MiB → {post_shrink_size / CONST_MEBIBYTE_BYTES:.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * CONST_PERCENT:.1f}% reduction)"
             )
             compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size

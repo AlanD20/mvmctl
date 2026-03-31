@@ -44,7 +44,7 @@ def test_vm_create_config_file_from_dict_uses_defaults():
     assert cfg.vcpus == DEFAULT_VM_VCPU_COUNT
     assert cfg.mem == DEFAULT_VM_MEM_MIB
     assert cfg.user == DEFAULT_VM_SSH_USER
-    assert cfg.enable_api_socket is False
+    assert cfg.enable_api_socket is True
 
 
 def test_vm_create_config_file_from_json_file(tmp_path: Path):

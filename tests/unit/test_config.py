@@ -55,7 +55,7 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.mem_size_mib == DEFAULT_VM_MEM_MIB
     assert config.vm_defaults.network_interface == DEFAULT_VM_NETWORK_INTERFACE
     assert config.vm_defaults.disk_size == DEFAULT_VM_DISK_SIZE
-    assert config.vm_defaults.enable_api_socket is False
+    assert config.vm_defaults.enable_api_socket is True
     assert config.vm_defaults.enable_pci is False
 
     assert config.network.defaults.name == DEFAULT_NETWORK_NAME

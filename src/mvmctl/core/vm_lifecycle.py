@@ -670,7 +670,7 @@ def create_vm(
 
         # Determine effective cloud-init mode
         if cloud_init_mode == CloudInitMode.AUTO:
-            effective_mode = CloudInitMode.NO_CLOUD_NET
+            effective_mode = CloudInitMode.DIRECT_INJECTION
         elif cloud_init_mode == CloudInitMode.ISO:
             effective_mode = CloudInitMode.ISO
         else:

@@ -617,6 +617,9 @@ CONST_KIBIBYTE_BYTES: Final[int] = 1024
 # Image processing constants
 CONST_SHRINK_SAFETY_MARGIN: Final[float] = _require_float(("image", "shrink_safety_margin"))
 CONST_RATIO_MIN: Final[float] = _require_float(("image", "ratio_min"))
+CONST_MIN_ROOTFS_SIZE_MIB: Final[int] = 128
+CONST_ROOTFS_HEADROOM_FACTOR: Final[float] = 1.25
+CONST_PERCENT: Final[int] = 100
 
 # Permission modes (octal)
 CONST_FILE_PERMS_PRIVATE_KEY: Final[int] = 0o600

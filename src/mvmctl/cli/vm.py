@@ -206,11 +206,6 @@ def create(
     user: Optional[str] = typer.Option(
         None, "--user", help="Default SSH user for cloud-init (default: from user config)"
     ),
-    enable_api_socket: Optional[bool] = typer.Option(
-        None,
-        "--enable-api-socket/--no-enable-api-socket",
-        help="Enable Firecracker HTTP API socket (default: from user config)",
-    ),
     enable_pci: Optional[bool] = typer.Option(
         None,
         "--enable-pci/--no-enable-pci",
@@ -279,7 +274,6 @@ def create(
             mac=mac,
             ssh_key=ssh_key,
             user=user,
-            enable_api_socket=enable_api_socket,
             enable_pci=enable_pci,
             firecracker_bin=firecracker_bin,
         )
@@ -293,7 +287,6 @@ def create(
         mac = merged.mac
         ssh_key = merged.ssh_key
         user = merged.user
-        enable_api_socket = merged.enable_api_socket
         enable_pci = merged.enable_pci
         firecracker_bin = merged.firecracker_bin
 
@@ -307,9 +300,7 @@ def create(
     image_id_for_lookup: str = ""
     resolved_kernel_path: Path | None = None
     kernel_id_for_lookup: str | None = None
-    effective_api_socket: bool = (
-        enable_api_socket if enable_api_socket is not None else _defaults.enable_api_socket
-    )
+    effective_api_socket: bool = True
     effective_pci: bool = enable_pci if enable_pci is not None else _defaults.enable_pci
     effective_network: str = (
         network_name if network_name is not None else _resolve_default_network()
