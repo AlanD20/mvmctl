@@ -687,10 +687,25 @@ def extract_partition_from_raw(
         size_val = chosen.get("size")
         sector_count: int | None = _get_int(size_val, 0) if size_val else None
 
-        logger.info("Extracting partition %d (start=%d)...", partition_num, start_sector)
-
         skip_bytes = start_sector * _SECTOR_SIZE
         count_bytes = sector_count * _SECTOR_SIZE if sector_count else None
+
+        # Validate extraction is within file bounds
+        raw_file_size = raw_path.stat().st_size
+        if skip_bytes >= raw_file_size:
+            raise ImageError(
+                f"Partition {partition_num} start sector ({start_sector}) "
+                f"offset ({skip_bytes} bytes) exceeds file size ({raw_file_size} bytes). "
+                f"Partition table may be corrupted or in unsupported format."
+            )
+
+        logger.info(
+            "Extracting partition %d (start=%d, offset=%d bytes)...",
+            partition_num,
+            start_sector,
+            skip_bytes,
+        )
+
         _copy_bytes(raw_path, output_path, skip_bytes, count_bytes)
 
         output_path = _detect_and_rename_fs(output_path)
