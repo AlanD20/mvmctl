@@ -556,6 +556,21 @@ def _inject_ssh_keys_for_disabled_mode(
                     "datasource_list: [None]\n",
                 )
 
+                # Mask systemd services that block boot in microVMs
+                # snapd.seeded.service: waits for snap store sync (useless in VMs)
+                # systemd-networkd-wait-online.service: blocks waiting for all interfaces
+                #   to report "online" — TAP is already plumbed by host
+                g.mkdir_p("/etc/systemd/system/snapd.seeded.service.d")
+                g.write(
+                    "/etc/systemd/system/snapd.seeded.service.d/override.conf",
+                    "[Service]\nExecStart=\nExecStart=/bin/true\n",
+                )
+                g.mkdir_p("/etc/systemd/system/systemd-networkd-wait-online.service.d")
+                g.write(
+                    "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf",
+                    "[Unit]\nConditionPathExists=/dev/null\n",
+                )
+
                 # Enable SSH service based on init system
                 _detect_init_system_and_enable_ssh(g, rootfs_path)
 
