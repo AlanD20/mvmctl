@@ -915,6 +915,13 @@ def build_kernel_pipeline(
         shutil.copy2(cached_kernel_path, output_path)
         output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
         logger.info("Using cached kernel build (config hash match): %s", output_path)
+        save_kernel_metadata(
+            output_path.parent,
+            output_path.name,
+            version=version,
+            kernel_type=KERNEL_TYPE_OFFICIAL,
+            arch=arch,
+        )
         return KernelPipelineResult(
             build_dir=build_dir,
             config_result=None,
@@ -923,6 +930,13 @@ def build_kernel_pipeline(
 
     if use_cache and output_path.exists() and cache_marker.exists():
         logger.info("Using cached kernel (config hash match): %s", output_path)
+        save_kernel_metadata(
+            output_path.parent,
+            output_path.name,
+            version=version,
+            kernel_type=KERNEL_TYPE_OFFICIAL,
+            arch=arch,
+        )
         return KernelPipelineResult(
             build_dir=build_dir,
             config_result=None,
