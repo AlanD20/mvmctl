@@ -70,14 +70,6 @@ def cache_init_kernels() -> Path:
     return kernels_dir
 
 
-def cache_init_networks() -> Path:
-    """Initialize networks directory."""
-    cache_dir = get_cache_dir()
-    networks_dir = cache_dir / "networks"
-    networks_dir.mkdir(parents=True, exist_ok=True)
-    return networks_dir
-
-
 def cache_init_guestfs_appliance() -> Path | None:
     """Build the libguestfs fixed appliance into $MVM_CACHE_DIR/appliance/.
 
@@ -119,7 +111,6 @@ def cache_init_all() -> dict[str, Path | None]:
         "vms": cache_init_vms(),
         "images": cache_init_images(),
         "kernels": cache_init_kernels(),
-        "networks": cache_init_networks(),
         "guestfs_appliance": cache_init_guestfs_appliance(),
     }
 

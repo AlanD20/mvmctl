@@ -1197,6 +1197,13 @@ def download_firecracker_kernel(
 
     if resolved_output_path.exists():
         logger.info("Firecracker CI kernel already cached: %s", resolved_output_path)
+        save_kernel_metadata(
+            kernels_dir,
+            resolved_output_path.name,
+            version=kernel_version,
+            kernel_type=KERNEL_TYPE_FIRECRACKER,
+            arch=arch,
+        )
         return resolved_output_path
 
     intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None

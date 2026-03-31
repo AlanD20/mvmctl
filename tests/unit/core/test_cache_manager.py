@@ -13,7 +13,6 @@ from mvmctl.core.cache_manager import (
     cache_init_all,
     cache_init_images,
     cache_init_kernels,
-    cache_init_networks,
     cache_init_vms,
     cache_prune_all,
     cache_prune_images,
@@ -83,23 +82,6 @@ class TestCacheInitKernels:
         assert result.name == "kernels"
 
 
-class TestCacheInitNetworks:
-    """Tests for cache_init_networks function."""
-
-    def test_cache_init_networks_creates_directory(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
-        """Test networks directory creation."""
-        cache_dir = tmp_path / "cache"
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
-
-        result = cache_init_networks()
-
-        assert result.exists()
-        assert result.is_dir()
-        assert result.name == "networks"
-
-
 class TestCacheInitAll:
     """Tests for cache_init_all function."""
 
@@ -113,15 +95,15 @@ class TestCacheInitAll:
         assert "vms" in result
         assert "images" in result
         assert "kernels" in result
-        assert "networks" in result
-        # guestfs is not included (removed)
-        assert "guestfs" not in result
+        assert "networks" not in result
+        assert "guestfs_appliance" in result
 
-        # Verify directories were created
-        assert result["vms"].exists()
-        assert result["images"].exists()
-        assert result["kernels"].exists()
-        assert result["networks"].exists()
+        vms_dir = result["vms"]
+        images_dir = result["images"]
+        kernels_dir = result["kernels"]
+        assert vms_dir is not None and vms_dir.exists()
+        assert images_dir is not None and images_dir.exists()
+        assert kernels_dir is not None and kernels_dir.exists()
 
 
 # =============================================================================
