@@ -37,7 +37,7 @@ images:
     source: <url>           # download URL; may be a template (see below)
     format: <string>        # source file format (see Format types)
     convert_to: <string>    # target filesystem type written to disk
-    size_mib: <int>         # image size in MiB allocated during conversion
+    minimum_rootfs_size: <int>  # image size in MiB allocated during conversion
     sha256: <hex|null>      # expected SHA-256 of the downloaded file, or null
     sha256_url: <url|null>  # (informational) upstream checksum URL
 ```
@@ -51,7 +51,7 @@ images:
 | `source` | ✅ | Download URL. Either a concrete URL or a **template URL** (see [Template sources](#template-sources)). |
 | `format` | ✅ | Format of the downloaded file. See [Format types](#format-types). |
 | `convert_to` | ✅ | Filesystem type produced after conversion (`ext4`, `btrfs`). Becomes the file extension of the stored image. |
-| `size_mib` | ✅ | Allocated image size in MiB. Used as the `truncate` / `mkfs` size during conversion. Falls back to `image.defaults.import_size_mib` in `defaults.yaml` when omitted. |
+| `minimum_rootfs_size` | ✅ | Allocated image size in MiB. Used as the `truncate` / `mkfs` size during conversion. Falls back to `image.defaults.import_size_mib` in `defaults.yaml` when omitted. |
 | `sha256` | — | Exact SHA-256 hex digest of the downloaded file. When `null`, checksum verification is **skipped** and the file is downloaded without integrity checking. When set, the download is rejected if the digest does not match. |
 | `sha256_url` | — | Informational field pointing to the upstream checksum page. Not used by the fetch logic — present solely as a reference for maintainers. |
 
@@ -218,7 +218,7 @@ urls:                   All external URL templates used by mvm
 |-----|---------|-------------|
 | `convert_to` | `ext4` | Filesystem type used when converting a downloaded image |
 | `import_format` | `auto` | Source format assumed during `mvm image import` |
-| `import_size_mib` | `2048` | Allocated size in MiB for images whose YAML entry omits `size_mib` |
+| `import_size_mib` | `2048` | Allocated size in MiB for images whose YAML entry omits `minimum_rootfs_size` |
 | `supported_extensions` | `.ext4 .btrfs .img .raw` | File extensions scanned when looking up a locally cached image |
 | `import_format_map` | (extension → format) | Auto-detection table used when `import_format: auto` is set |
 
@@ -284,7 +284,7 @@ To register a new rootfs image that can be fetched via `mvm image fetch`:
   source: https://example.com/fedora-40-cloudimg.qcow2
   format: qcow2
   convert_to: ext4
-  size_mib: 4096
+  minimum_rootfs_size: 4096
   sha256: null                               # null = no checksum check
   sha256_url: https://example.com/fedora-40-CHECKSUM
 ```
@@ -305,7 +305,7 @@ use `{placeholder}` tokens in `source`:
   source: "https://s3.example.com/{ci_version}/{arch}/my-image.squashfs"
   format: squashfs
   convert_to: ext4
-  size_mib: 1024
+  minimum_rootfs_size: 1024
   sha256: null
   sha256_url: null
 ```
@@ -337,7 +337,7 @@ uv run mvm image fetch <your-new-id>
 |----------|------------|-------------|
 | `DEFAULT_IMAGE_CONVERT_TO` | `image.defaults.convert_to` | Default filesystem type for image conversion |
 | `DEFAULT_IMAGE_IMPORT_FORMAT` | `image.defaults.import_format` | Default source format for `mvm image import` |
-| `DEFAULT_IMAGE_IMPORT_SIZE_MIB` | `image.defaults.import_size_mib` | Fallback image size when `size_mib` is absent in YAML |
+| `DEFAULT_IMAGE_IMPORT_SIZE_MIB` | `image.defaults.import_size_mib` | Fallback image size when `minimum_rootfs_size` is absent in YAML |
 | `SUPPORTED_IMAGE_EXTENSIONS` | `image.defaults.supported_extensions` | File extensions scanned for cached images |
 | `IMAGE_IMPORT_FORMAT_MAP` | `image.defaults.import_format_map` | Extension → format auto-detection table |
 | `DEFAULT_REMOTE_VERSION_LIMIT` | `image.remote.version_limit` | Max remote versions shown by `mvm bin ls --remote` |

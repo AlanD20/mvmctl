@@ -123,11 +123,11 @@ Fields: `name`, `vcpu_count`, `mem_size_mib`, `kernel_path`, `rootfs_path`, `gue
 Fields: `name`, `id` (16-char hex), `pid`, `socket_path`, `ip`, `mac`, `network_name`, `tap_device`, `created_at`, `status` (VMState), `config` (VMConfig)
 
 ### ImageSpec — `image.py`
-Fields: `id`, `name`, `source` (URL), `format`, `convert_to`, `size_mib`, `sha256`, `sha256_url`
+Fields: `id`, `name`, `source` (URL), `format`, `convert_to`, `minimum_rootfs_size`, `sha256`, `sha256_url`
 Used for YAML-defined images in `images.yaml`.
 
 ### ImageImportSpec — `image.py`
-Fields: `id`, `name`, `source_path` (local), `format`, `convert_to`, `size_mib`
+Fields: `id`, `name`, `source_path` (local), `format`, `convert_to`, `minimum_rootfs_size`
 **Not in `models/__init__.__all__`** — import directly from `mvmctl.models.image`.
 
 ### VMCreateConfigFile — `vm_config_file.py`

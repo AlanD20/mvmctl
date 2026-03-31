@@ -155,7 +155,7 @@ Each entry → `ImageSpec` dataclass. `id` becomes the CLI argument to `mvm imag
 - id: ubuntu-24.04          # mvm image fetch ubuntu-24.04
   format: tar-rootfs         # tar-rootfs | qcow2 | squashfs
   convert_to: ext4           # ext4 | btrfs
-  size_mib: 2048             # Resize target after conversion
+  minimum_rootfs_size: 2048   # Resize target after conversion
   sha256: null               # null = fetch from sha256_url sidecar
   sha256_url: https://...    # URL to SHA256SUMS file
 ```

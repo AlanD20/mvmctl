@@ -699,7 +699,7 @@ def create_ext4_from_tar(
 def _handle_qcow2(
     download_path: Path,
     final_path: Path,
-    size_mib: int,
+    minimum_rootfs_size: int,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
@@ -718,18 +718,18 @@ def _handle_qcow2(
 def _handle_tar_rootfs(
     download_path: Path,
     final_path: Path,
-    size_mib: int,
+    minimum_rootfs_size: int,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
-    create_ext4_from_tar(download_path, final_path, size=f"{size_mib}M")
+    create_ext4_from_tar(download_path, final_path, size=f"{minimum_rootfs_size}M")
     return final_path
 
 
 def _handle_raw(
     download_path: Path,
     final_path: Path,
-    size_mib: int,
+    minimum_rootfs_size: int,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
@@ -844,7 +844,7 @@ def _fetch_sha256_from_url(sha256_url: str, source_filename: str | None = None) 
 def _handle_squashfs(
     download_path: Path,
     final_path: Path,
-    size_mib: int,
+    minimum_rootfs_size: int,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
@@ -865,7 +865,7 @@ def _handle_squashfs(
 
         try:
             subprocess.run(
-                ["truncate", "-s", f"{size_mib}M", str(final_path)],
+                ["truncate", "-s", f"{minimum_rootfs_size}M", str(final_path)],
                 capture_output=True,
                 check=True,
             )
@@ -1009,7 +1009,7 @@ def fetch_image(
         if handler is None:
             download_path.unlink(missing_ok=True)
             raise ImageError(f"Unknown format: {spec.format}")
-        actual_path = handler(download_path, final_path, spec.size_mib, partition, None)
+        actual_path = handler(download_path, final_path, spec.minimum_rootfs_size, partition, None)
 
         # Cleanup download on success
         download_path.unlink(missing_ok=True)
@@ -1079,7 +1079,7 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
                 source=img["source"],
                 format=img["format"],
                 convert_to=img["convert_to"],
-                size_mib=img.get("size_mib", DEFAULT_IMAGE_IMPORT_SIZE_MIB),
+                minimum_rootfs_size=img.get("minimum_rootfs_size", DEFAULT_IMAGE_IMPORT_SIZE_MIB),
                 sha256=img.get("sha256"),
                 sha256_url=img.get("sha256_url"),
             )
@@ -1211,7 +1211,7 @@ def import_image(
         return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
 
     elif spec.format == "tar-rootfs":
-        size_str = f"{spec.size_mib}M"
+        size_str = f"{spec.minimum_rootfs_size}M"
         create_ext4_from_tar(spec.source_path, final_path, size=size_str)
 
         # Detect filesystem type and UUID for tar-rootfs (always ext4)

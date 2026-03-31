@@ -13,7 +13,7 @@ class ImageSpec:
     source: str
     format: str  # noqa: N816
     convert_to: str
-    size_mib: int
+    minimum_rootfs_size: int
     sha256: str | None = None
     sha256_url: str | None = None
 
@@ -27,5 +27,5 @@ class ImageImportSpec:
     source_path: Path
     format: str  # noqa: N816  # "qcow2", "raw", "tar-rootfs"
     convert_to: str = "ext4"
-    size_mib: int = field(default=2048)
+    minimum_rootfs_size: int = field(default=2048)
     disabled_detectors: list[str] = field(default_factory=list)

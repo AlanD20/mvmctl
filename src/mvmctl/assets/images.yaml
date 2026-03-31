@@ -8,7 +8,7 @@ images:
     source: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64-root.tar.xz
     format: tar-rootfs
     convert_to: ext4
-    size_mib: 2048
+    minimum_rootfs_size: 1152
     sha256: null
     sha256_url: https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
 
@@ -16,9 +16,9 @@ images:
     name: Ubuntu 24.04 Minimal
     format: tar-rootfs
     convert_to: ext4
-    size_mib: 1024
-    source: https://cloud-images.ubuntu.com/minimal/releases/noble/current/ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz
-    sha256_url: https://cloud-images.ubuntu.com/minimal/releases/noble/current/SHA256SUMS
+    minimum_rootfs_size: 512
+    source: https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz
+    sha256_url: https://cloud-images.ubuntu.com/minimal/releases/noble/RELEASE/SHA256SUMS
 
   - id: ubuntu-22.04
     type: ubuntu
@@ -27,7 +27,7 @@ images:
     source: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64-root.tar.xz
     format: tar-rootfs
     convert_to: ext4
-    size_mib: 2048
+    minimum_rootfs_size: 1152
     sha256: null
     sha256_url: https://cloud-images.ubuntu.com/jammy/current/SHA256SUMS
 
@@ -38,7 +38,7 @@ images:
     source: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
     format: qcow2
     convert_to: btrfs
-    size_mib: 4096
+    minimum_rootfs_size: 1280
     sha256: null
     sha256_url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256
 
@@ -49,7 +49,7 @@ images:
     source: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
     format: qcow2
     convert_to: ext4
-    size_mib: 2048
+    minimum_rootfs_size: 1024
     sha256: null
     sha256_url: https://cloud.debian.org/images/cloud/bookworm/latest/SHA256SUMS
 
@@ -60,6 +60,6 @@ images:
     source: "https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-24.04.squashfs"
     format: squashfs
     convert_to: ext4
-    size_mib: 1024
+    minimum_rootfs_size: 640
     sha256: null
     sha256_url: null

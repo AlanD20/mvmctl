@@ -129,7 +129,7 @@ Specification for downloading and converting a VM root filesystem image.
 | `source` | `str` | — | Download URL for the image |
 | `format` | `str` | — | Source format: `"qcow2"`, `"tar-rootfs"`, or `"raw"` |
 | `convert_to` | `str` | — | Target format after conversion (e.g., `"ext4"`) |
-| `size_mib` | `int` | `2048` | Target filesystem size in MiB (used for `tar-rootfs` images) |
+| `minimum_rootfs_size` | `int` | `2048` | Target filesystem size in MiB (used for `tar-rootfs` images) |
 | `sha256` | `str \| None` | `None` | Expected SHA256 checksum for integrity verification |
 
 ### `mvmctl.core.network_manager`

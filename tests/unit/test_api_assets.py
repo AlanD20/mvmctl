@@ -153,7 +153,7 @@ def test_pull_image_success(tmp_path: Path, mocker: MockerFixture):
                 "source": "https://example.com/ubuntu.qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "size_mib": 4096,
+                "minimum_rootfs_size": 4096,
                 "sha256": "a" * 64,
             }
         ]
@@ -204,7 +204,7 @@ def test_pull_image_force_re_download(tmp_path: Path, mocker: MockerFixture):
                 "source": "https://example.com/alpine.tar.gz",
                 "format": "tar-rootfs",
                 "convert_to": "ext4",
-                "size_mib": 1024,
+                "minimum_rootfs_size": 1024,
             }
         ]
     }
@@ -237,7 +237,7 @@ def test_pull_image_fetch_failure(tmp_path: Path, mocker: MockerFixture):
                 "source": "https://example.com/test.qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "size_mib": 2048,
+                "minimum_rootfs_size": 2048,
             }
         ]
     }
@@ -260,7 +260,7 @@ def test_pull_image_uses_default_paths(tmp_path: Path, mocker: MockerFixture):
                 "source": "http://x/qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "size_mib": 100,
+                "minimum_rootfs_size": 100,
             }
         ]
     }
@@ -295,7 +295,7 @@ def test_fetch_images_parallel_success(tmp_path: Path, mocker: MockerFixture):
             source="http://x/1.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=100,
+            minimum_rootfs_size=100,
         ),
         ImageSpec(
             id="img2",
@@ -305,7 +305,7 @@ def test_fetch_images_parallel_success(tmp_path: Path, mocker: MockerFixture):
             source="http://x/2.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=200,
+            minimum_rootfs_size=200,
         ),
     ]
 
@@ -332,7 +332,7 @@ def test_fetch_images_parallel_with_force(tmp_path: Path, mocker: MockerFixture)
             source="http://x/1.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=100,
+            minimum_rootfs_size=100,
         )
     ]
 
@@ -360,7 +360,7 @@ def test_fetch_images_parallel_custom_workers(tmp_path: Path, mocker: MockerFixt
             source=f"http://x/{i}.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=100,
+            minimum_rootfs_size=100,
         )
         for i in range(3)
     ]
@@ -387,7 +387,7 @@ def test_fetch_images_parallel_failure(tmp_path: Path, mocker: MockerFixture):
             source="http://x/1.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=100,
+            minimum_rootfs_size=100,
         ),
         ImageSpec(
             id="img2",
@@ -397,7 +397,7 @@ def test_fetch_images_parallel_failure(tmp_path: Path, mocker: MockerFixture):
             source="http://x/2.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=200,
+            minimum_rootfs_size=200,
         ),
     ]
 
@@ -425,7 +425,7 @@ def test_fetch_images_parallel_multiple_failures(tmp_path: Path, mocker: MockerF
             source="http://x/1.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=100,
+            minimum_rootfs_size=100,
         ),
         ImageSpec(
             id="img2",
@@ -435,7 +435,7 @@ def test_fetch_images_parallel_multiple_failures(tmp_path: Path, mocker: MockerF
             source="http://x/2.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=200,
+            minimum_rootfs_size=200,
         ),
     ]
 
@@ -465,7 +465,7 @@ def test_pull_images_success(tmp_path: Path, mocker: MockerFixture):
                 "source": "http://x/1.qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "size_mib": 100,
+                "minimum_rootfs_size": 100,
             },
             {
                 "id": "img2",
@@ -473,7 +473,7 @@ def test_pull_images_success(tmp_path: Path, mocker: MockerFixture):
                 "source": "http://x/2.qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "size_mib": 200,
+                "minimum_rootfs_size": 200,
             },
         ]
     }
@@ -507,7 +507,7 @@ def test_pull_images_missing_ids(tmp_path: Path, mocker: MockerFixture):
                 "source": "http://x/1.qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "size_mib": 100,
+                "minimum_rootfs_size": 100,
             }
         ]
     }
@@ -540,7 +540,7 @@ def test_pull_images_with_force(tmp_path: Path, mocker: MockerFixture):
                 "source": "http://x/1.qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "size_mib": 100,
+                "minimum_rootfs_size": 100,
             }
         ]
     }
@@ -567,7 +567,7 @@ def test_pull_images_with_max_workers(tmp_path: Path, mocker: MockerFixture):
                 "source": "http://x/1.qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "size_mib": 100,
+                "minimum_rootfs_size": 100,
             }
         ]
     }
@@ -680,7 +680,7 @@ def test_list_assets_images(
         source="http://x/qcow2",
         format="qcow2",
         convert_to="ext4",
-        size_mib=4096,
+        minimum_rootfs_size=4096,
     )
     mock_load_config.return_value = [spec]
 
@@ -725,7 +725,7 @@ def test_list_assets_missing_image(
         source="http://x/qcow2",
         format="qcow2",
         convert_to="ext4",
-        size_mib=100,
+        minimum_rootfs_size=100,
     )
     mock_load_config.return_value = [spec]
 

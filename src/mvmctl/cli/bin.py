@@ -1350,7 +1350,7 @@ def image_import(
         source_path=source_path,
         format=str(resolved_format),
         convert_to=convert_to,
-        size_mib=size_mib,
+        minimum_rootfs_size=size_mib,
         disabled_detectors=disabled_detectors,
     )
 

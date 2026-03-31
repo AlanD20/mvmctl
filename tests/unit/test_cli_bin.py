@@ -28,7 +28,7 @@ _FAKE_IMAGES = [
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        size_mib=2048,
+        minimum_rootfs_size=2048,
         sha256=None,
     ),
     ImageSpec(
@@ -39,7 +39,7 @@ _FAKE_IMAGES = [
         source="https://example.com/debian.qcow2",
         format="qcow2",
         convert_to="ext4",
-        size_mib=2048,
+        minimum_rootfs_size=2048,
         sha256=None,
     ),
 ]
@@ -691,7 +691,7 @@ def test_image_fetch_by_type_and_version(
             source="https://example.com/ubuntu-22.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=2048,
+            minimum_rootfs_size=2048,
             sha256=None,
         ),
         ImageSpec(
@@ -702,7 +702,7 @@ def test_image_fetch_by_type_and_version(
             source="https://example.com/ubuntu-24.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=2048,
+            minimum_rootfs_size=2048,
             sha256=None,
         ),
     ]
@@ -730,7 +730,7 @@ def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
             source="https://example.com/ubuntu-22.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=2048,
+            minimum_rootfs_size=2048,
             sha256=None,
         ),
         ImageSpec(
@@ -741,7 +741,7 @@ def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
             source="https://example.com/ubuntu-24.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=2048,
+            minimum_rootfs_size=2048,
             sha256=None,
         ),
     ]
@@ -771,7 +771,7 @@ def test_image_fetch_with_type_option(
             source="https://example.com/ubuntu-24.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=2048,
+            minimum_rootfs_size=2048,
             sha256=None,
         )
     ]
@@ -1275,7 +1275,7 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
             source="https://example.com/ubuntu.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=2048,
+            minimum_rootfs_size=2048,
             sha256="abc" * 21 + "a",
         )
     ]
@@ -2015,7 +2015,7 @@ def test_image_ls_size_various_units(tmp_path: Path, mocker):
             source="https://example.com/small.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=1,
+            minimum_rootfs_size=1,
             sha256=None,
         ),
         ImageSpec(
@@ -2026,7 +2026,7 @@ def test_image_ls_size_various_units(tmp_path: Path, mocker):
             source="https://example.com/medium.qcow2",
             format="qcow2",
             convert_to="ext4",
-            size_mib=100,
+            minimum_rootfs_size=100,
             sha256=None,
         ),
     ]
