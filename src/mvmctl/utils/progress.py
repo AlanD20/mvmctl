@@ -28,22 +28,13 @@ from mvmctl.utils.fs import get_temp_dir
 from mvmctl.utils.http import _with_retry
 
 
-def _is_interactive() -> bool:
-    """Check if running in an interactive terminal.
-
-    Checks both stdout and stderr since some environments (e.g., sg mvm)
-    may redirect stdout but still support interactive TTY features via stderr.
-    """
-    return sys.stdout.isatty() or sys.stderr.isatty()
-
-
 class ASCIIProgressBar:
-    """Simple ASCII progress bar for TTY and non-TTY environments.
+    """Simple ASCII progress bar that updates on a single line.
 
     Displays progress as: [####      ] 45% (4.2MB/10MB)
 
-    In TTY mode: Uses carriage return for smooth animation
-    In non-TTY mode: Prints progress every 10% on new lines
+    Uses carriage return + ANSI clear to update the same line.
+    Works in both TTY and non-TTY environments.
     """
 
     def __init__(self, total: int, width: int = 40, title: str = "Downloading") -> None:
@@ -58,7 +49,6 @@ class ASCIIProgressBar:
         self.width = width
         self.title = title
         self.current = 0
-        self._is_tty = _is_interactive()
         self._last_line_length = 0
         self._last_percent = -1
 
@@ -97,33 +87,22 @@ class ASCIIProgressBar:
         else:
             percent = min(100, int(100 * self.current / self.total))
 
-        if self._is_tty:
-            if percent == self._last_percent:
-                return
-            filled = int(self.width * percent / 100)
-            bar = "#" * filled + " " * (self.width - filled)
-            line = f"{self.title} [{bar}] {percent}%"
-            if self.total > 0:
-                line += f" ({self._format_size(self.current)}/{self._format_size(self.total)})"
-            sys.stdout.write(f"\r\033[K{line}")
-            sys.stdout.flush()
-            self._last_line_length = len(line)
-            self._last_percent = percent
-        else:
-            if percent % 10 == 0 and percent != self._last_percent:
-                filled = int(self.width * percent / 100)
-                bar = "#" * filled + " " * (self.width - filled)
-                line = f"{self.title} [{bar}] {percent}%"
-                if self.total > 0:
-                    line += f" ({self._format_size(self.current)}/{self._format_size(self.total)})"
-                print(line)
-                self._last_percent = percent
+        if percent == self._last_percent:
+            return
+        filled = int(self.width * percent / 100)
+        bar = "#" * filled + " " * (self.width - filled)
+        line = f"{self.title} [{bar}] {percent}%"
+        if self.total > 0:
+            line += f" ({self._format_size(self.current)}/{self._format_size(self.total)})"
+        sys.stdout.write(f"\r\033[K{line}")
+        sys.stdout.flush()
+        self._last_line_length = len(line)
+        self._last_percent = percent
 
     def finish(self) -> None:
         """Finish progress display."""
-        if self._is_tty:
-            sys.stdout.write("\r\033[K")
-            sys.stdout.flush()
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
         print(f"{self.title} complete.")
 
 
