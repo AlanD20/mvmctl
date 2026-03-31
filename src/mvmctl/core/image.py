@@ -14,7 +14,9 @@ import zstandard as zstd
 
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
+    CONST_RATIO_MIN,
     CONST_SECTOR_SIZE_BYTES,
+    CONST_SHRINK_SAFETY_MARGIN,
     DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_FIRECRACKER_CI_VERSION,
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
@@ -105,7 +107,7 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
             new_size = g.blockdev_getsize64(root_device)
 
         # Truncate file to new size + small buffer (1% safety margin)
-        final_size = int(new_size * 1.01)
+        final_size = int(new_size * CONST_SHRINK_SAFETY_MARGIN)
         with open(image_path, "r+b") as f:
             f.truncate(final_size)
 
@@ -113,9 +115,9 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
         logger.info(
             "Shrunk %s: %d MB → %d MB (%.1fx reduction)",
             image_path.name,
-            original_size // (1024 * 1024),
-            actual_final // (1024 * 1024),
-            original_size / actual_final if actual_final > 0 else 1.0,
+            original_size // CONST_MEBIBYTE_BYTES,
+            actual_final // CONST_MEBIBYTE_BYTES,
+            original_size / actual_final if actual_final > 0 else CONST_RATIO_MIN,
         )
 
         return image_path, original_size, actual_final
@@ -147,7 +149,7 @@ def compress_image(image_path: Path, level: int = 6) -> Path:
             compressor.copy_stream(src, dst)
 
         compressed_size = compressed_path.stat().st_size
-        ratio = original_size / compressed_size if compressed_size > 0 else 1.0
+        ratio = original_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
 
         # Remove original uncompressed file
         image_path.unlink()
@@ -155,8 +157,8 @@ def compress_image(image_path: Path, level: int = 6) -> Path:
         logger.info(
             "Compressed %s: %d MB → %d MB (%.1fx reduction)",
             image_path.name,
-            original_size // (1024 * 1024),
-            compressed_size // (1024 * 1024),
+            original_size // CONST_MEBIBYTE_BYTES,
+            compressed_size // CONST_MEBIBYTE_BYTES,
             ratio,
         )
 
@@ -940,7 +942,9 @@ def fetch_image(
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(actual_path)
             compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
-            compression_ratio = pre_shrink_size / compressed_size if compressed_size > 0 else 1.0
+            compression_ratio = (
+                pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
+            )
 
             return ImageImportResult(
                 path=compressed_path,
@@ -1073,7 +1077,7 @@ def import_image(
                 compressed_path = compress_image(shrunk_path)
                 compressed_size = compressed_path.stat().st_size
                 compression_ratio = (
-                    pre_shrink_size / compressed_size if compressed_size > 0 else 1.0
+                    pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
                 )
 
                 return ImageImportResult(
@@ -1100,7 +1104,9 @@ def import_image(
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(final_path)
             compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
-            compression_ratio = pre_shrink_size / compressed_size if compressed_size > 0 else 1.0
+            compression_ratio = (
+                pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
+            )
 
             return ImageImportResult(
                 path=compressed_path,
@@ -1127,7 +1133,9 @@ def import_image(
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(final_path)
             compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
-            compression_ratio = pre_shrink_size / compressed_size if compressed_size > 0 else 1.0
+            compression_ratio = (
+                pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
+            )
 
             return ImageImportResult(
                 path=compressed_path,

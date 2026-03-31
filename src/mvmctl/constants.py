@@ -607,6 +607,10 @@ CONST_SECTOR_SIZE_BYTES: Final[int] = 512
 CONST_MEBIBYTE_BYTES: Final[int] = 1024 * 1024
 CONST_KIBIBYTE_BYTES: Final[int] = 1024
 
+# Image processing constants
+CONST_SHRINK_SAFETY_MARGIN: Final[float] = _require_float(("image", "shrink_safety_margin"))
+CONST_RATIO_MIN: Final[float] = _require_float(("image", "ratio_min"))
+
 # Permission modes (octal)
 CONST_FILE_PERMS_PRIVATE_KEY: Final[int] = 0o600
 CONST_FILE_PERMS_PUBLIC_KEY: Final[int] = 0o644

@@ -66,7 +66,7 @@ def test_save_kernel_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     full_id = save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
     import json
 
-    assert len(full_id) == 64
+    assert len(full_id) == 16
     meta_file = tmp_path / "metadata.json"
     assert meta_file.exists()
     data = json.loads(meta_file.read_text())
@@ -89,7 +89,7 @@ def test_save_kernel_metadata_parses_filename(tmp_path: Path, monkeypatch: pytes
     full_id = save_kernel_metadata(tmp_path, "vmlinux-fc-v1.15-x86_64", kernel_type="firecracker")
     import json
 
-    assert len(full_id) == 64
+    assert len(full_id) == 16
     meta_file = tmp_path / "metadata.json"
     data = json.loads(meta_file.read_text())
     assert full_id in data["kernels"]
@@ -116,7 +116,7 @@ def test_list_kernels_with_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     (tmp_path / "vmlinux").write_bytes(b"\x7fELF" + b"\x00" * 100)
     import json as _json
 
-    fake_id = "a" * 64
+    fake_id = "a" * 16
     (tmp_path / "metadata.json").write_text(
         _json.dumps(
             {
@@ -129,7 +129,7 @@ def test_list_kernels_with_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     )
     result = list_kernels(tmp_path)
     assert len(result) == 1
-    assert result[0]["id"] == fake_id[:6]
+    assert result[0]["id"] == fake_id
     assert result[0]["full_name"] == "vmlinux"
     assert "size" in result[0]
 

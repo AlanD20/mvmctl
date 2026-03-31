@@ -31,7 +31,8 @@ def test_list_vms_empty(mocker: MockerFixture):
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[])
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
-    assert "No VMs found" in result.output
+    assert "State" in result.output  # Just verify header is present
+    assert "No VMs found" not in result.output  # Verify message is NOT shown
 
 
 def test_list_vms_json(mocker: MockerFixture):

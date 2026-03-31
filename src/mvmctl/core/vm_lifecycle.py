@@ -17,6 +17,7 @@ from mvmctl.constants import (
     CLI_NAME,
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_PID_FILE,
+    CONST_MEBIBYTE_BYTES,
     CONST_POLL_STEP_SECONDS,
     CONST_SIGNAL_EXIT_CODE_BASE,
     CONST_VM_MEM_MAX_MIB,
@@ -365,8 +366,8 @@ def grow_rootfs_with_guestfs(image_path: Path, target_size_bytes: int) -> None:
 
         logger.info(
             "Grew rootfs: %d MB → %d MB",
-            current_size // (1024 * 1024),
-            target_size_bytes // (1024 * 1024),
+            current_size // CONST_MEBIBYTE_BYTES,
+            target_size_bytes // CONST_MEBIBYTE_BYTES,
         )
 
     except Exception as e:

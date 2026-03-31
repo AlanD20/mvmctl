@@ -683,14 +683,14 @@ def test_chain_exists_nat_table():
 
 
 def test_setup_mvm_chains_creates_both_chains():
-    """setup_mvm_chains should create both FORWARD and POSTROUTING chains."""
+    """setup_mvm_chains should create all MVM iptables chains (FORWARD, POSTROUTING, NOCLOUD-INPUT)."""
     mock_result = MagicMock()
     mock_result.returncode = 0
     with patch("mvmctl.core.network.chain_exists", return_value=False):
         with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
             with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
                 setup_mvm_chains()
-                assert mock_run.call_count == 6
+                assert mock_run.call_count == 9  # 3 chains × (1 create + 2 jump rule ops)
 
 
 def test_setup_mvm_chains_idempotent():
@@ -699,7 +699,7 @@ def test_setup_mvm_chains_idempotent():
         with patch("mvmctl.core.network._iptables_rule_exists", return_value=True):
             with patch("mvmctl.core.network.subprocess.run") as mock_run:
                 already_existed = setup_mvm_chains()
-                assert mock_run.call_count == 2
+                assert mock_run.call_count == 3  # 3 chains, just delete old jump rules
                 assert already_existed is True
 
 
@@ -711,7 +711,7 @@ def test_setup_mvm_chains_adds_jump_rules():
         with patch("mvmctl.core.network._iptables_rule_exists", return_value=False):
             with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
                 setup_mvm_chains()
-                assert mock_run.call_count == 4
+                assert mock_run.call_count == 6  # 3 chains × 2 (delete + insert jump rule)
 
 
 def test_setup_mvm_chains_inserts_forward_jump_at_top_priority():
@@ -722,7 +722,17 @@ def test_setup_mvm_chains_inserts_forward_jump_at_top_priority():
             with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
                 setup_mvm_chains()
                 commands = [call.args[0] for call in mock_run.call_args_list]
-                assert ["sudo", "iptables", "-I", "FORWARD", "1", "-j", "MVM-FORWARD"] in commands
+                assert [
+                    "sudo",
+                    "iptables",
+                    "-t",
+                    "filter",
+                    "-I",
+                    "FORWARD",
+                    "1",
+                    "-j",
+                    "MVM-FORWARD",
+                ] in commands
 
 
 def test_setup_mvm_chains_returns_false_when_created():

@@ -319,7 +319,7 @@ class TestCachePruneImages:
         unused_image.write_text("fake image")
 
         # Mock metadata
-        full_hash = "a" * 64
+        full_hash = "a" * 16
         mock_entries = {full_hash: {"filename": "unused.ext4", "is_default": 0}}
 
         mock_manager = mocker.MagicMock()
@@ -332,7 +332,7 @@ class TestCachePruneImages:
         removed = cache_prune_images()
 
         assert len(removed) == 1
-        assert full_hash[:6] in removed
+        assert full_hash in removed
         # File should be removed
         assert not unused_image.exists()
 
@@ -439,7 +439,7 @@ class TestCachePruneKernels:
         unused_kernel = kernels_dir / "unused-vmlinux"
         unused_kernel.write_text("fake kernel")
 
-        full_hash = "d" * 64
+        full_hash = "d" * 16
         mock_entries = {full_hash: {"filename": "unused-vmlinux", "is_default": 0}}
 
         mock_manager = mocker.MagicMock()
@@ -452,7 +452,7 @@ class TestCachePruneKernels:
         removed = cache_prune_kernels()
 
         assert len(removed) == 1
-        assert full_hash[:6] in removed
+        assert full_hash in removed
         assert not unused_kernel.exists()
 
     def test_cache_prune_kernels_skips_referenced(

@@ -30,6 +30,7 @@ from mvmctl.core.host import (
     reset_host as _reset_host,
 )
 from mvmctl.core.image import clean_ready_pool as _clean_ready_pool
+from mvmctl.core.image import get_ready_pool_dir as _get_ready_pool_dir
 from mvmctl.core.vm_manager import get_vm_manager
 from mvmctl.exceptions import HostError
 from mvmctl.utils.fs import get_cache_dir
@@ -46,6 +47,7 @@ __all__ = [
     "check_required_binaries",
     "clean_host",
     "clean_ready_pool",
+    "get_ready_pool_dir",
     "default_cache_dir",
     "escalate_and_init_host",
     "get_host_state",
@@ -169,3 +171,14 @@ def clean_ready_pool() -> int:
         Number of files removed from the ready pool.
     """
     return _clean_ready_pool()
+
+
+def get_ready_pool_dir() -> Path:
+    """Return the path to the tmpfs ready pool directory.
+
+    The ready pool holds decompressed VM images in tmpfs (RAM) for fast cloning.
+
+    Returns:
+        Path to the ready pool directory.
+    """
+    return _get_ready_pool_dir()

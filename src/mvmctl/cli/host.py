@@ -13,6 +13,7 @@ from mvmctl.api.host import (
     clean_ready_pool,
     get_host_state,
     get_ip_forward_status,
+    get_ready_pool_dir,
     get_vm_manager,
     init_host,
     reset_host,
@@ -314,7 +315,6 @@ def clean_ready_pool_cmd(
         mvm host clean-ready-pool
         mvm host clean-ready-pool --force
     """
-    from mvmctl.core.image import get_ready_pool_dir
 
     ready_dir = get_ready_pool_dir()
 

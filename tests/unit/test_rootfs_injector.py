@@ -198,7 +198,7 @@ class TestInjectCloudInit:
         mock_g.exists.return_value = True  # Has /etc/os-release
 
         with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
-            with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_ctx:
+            with patch("mvmctl.core.rootfs_injector.optimized_guestfs") as mock_ctx:
                 mock_ctx.return_value.__enter__ = Mock(return_value=mock_g)
                 mock_ctx.return_value.__exit__ = Mock(return_value=False)
                 inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
@@ -224,7 +224,7 @@ class TestInjectCloudInit:
         mock_g.mount.side_effect = [None, Exception("Mount failed")]
 
         with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
-            with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_ctx:
+            with patch("mvmctl.core.rootfs_injector.optimized_guestfs") as mock_ctx:
                 mock_ctx.return_value.__enter__ = Mock(return_value=mock_g)
                 mock_ctx.return_value.__exit__ = Mock(return_value=False)
                 with pytest.raises(GuestfsMountError, match="Failed to mount"):
@@ -249,7 +249,7 @@ class TestFilesystemTypes:
         mock_g.exists.return_value = True
 
         with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
-            with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_ctx:
+            with patch("mvmctl.core.rootfs_injector.optimized_guestfs") as mock_ctx:
                 mock_ctx.return_value.__enter__ = Mock(return_value=mock_g)
                 mock_ctx.return_value.__exit__ = Mock(return_value=False)
                 inject_cloud_init(str(rootfs_path), str(cloud_init_dir))

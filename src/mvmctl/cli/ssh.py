@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 
 import typer
 
-from mvmctl.api.vms import ssh_vm
+from mvmctl.api.vms import get_vm_manager, ssh_vm
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
@@ -97,10 +97,7 @@ def ssh(
         elif vm_id is not None:
             target = vm_id
             if not is_ip_address(target):
-                from mvmctl.core.vm_manager import VMManager
-                from mvmctl.utils.fs import get_vms_dir
-
-                manager = VMManager(get_vms_dir())
+                manager = get_vm_manager()
                 matches = manager.find_by_id_prefix(target)
                 if len(matches) == 1:
                     target = matches[0].name

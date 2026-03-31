@@ -331,9 +331,10 @@ def test_ensure_default_network_creates_when_missing(mock_create_network, mock_c
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
+@patch("mvmctl.core.network.setup_nat")
 @patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
 def test_ensure_default_network_returns_existing(
-    mock_setup_chains, mock_bridge_exists, mock_cache_dir: Path
+    mock_setup_chains, mock_setup_nat, mock_bridge_exists, mock_cache_dir: Path
 ):
     _add_network_to_metadata(
         mock_cache_dir,
@@ -402,8 +403,14 @@ def test_ensure_default_network_recreates_missing_chains(
 @patch("mvmctl.core.network.setup_bridge")
 @patch("mvmctl.core.network.setup_nat")
 @patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
+@patch("mvmctl.core.network._iptables_rule_exists", return_value=True)
 def test_ensure_default_network_idempotent_when_all_exists(
-    mock_setup_chains, mock_setup_nat, mock_setup_bridge, mock_bridge_exists, mock_cache_dir: Path
+    mock_rule_exists,
+    mock_setup_chains,
+    mock_setup_nat,
+    mock_setup_bridge,
+    mock_bridge_exists,
+    mock_cache_dir: Path,
 ):
     """When both metadata and resources exist, no setup functions should be called."""
     _add_network_to_metadata(

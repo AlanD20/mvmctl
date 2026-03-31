@@ -89,6 +89,8 @@ image:
   remote:
     version_limit: 5
     max_parallel_downloads: 4
+  shrink_safety_margin: 1.01  # 1% safety margin when truncating shrunk images
+  ratio_min: 1.0  # minimum compression ratio (fallback when division by zero)
 host:
   system_dirs:
     sysctl_conf_dir: /etc/sysctl.d
