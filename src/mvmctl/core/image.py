@@ -232,16 +232,30 @@ def compress_image(image_path: Path, level: int = 6) -> Path:
     """
     try:
         compressed_path = image_path.with_suffix(image_path.suffix + ".zst")
+
+        if not image_path.exists():
+            raise ImageError(f"Cannot compress: source file does not exist: {image_path}")
+
         original_size = image_path.stat().st_size
+        if original_size == 0:
+            raise ImageError(f"Cannot compress: source file is empty: {image_path}")
 
         compressor = zstd.ZstdCompressor(level=level)
         with open(image_path, "rb") as src, open(compressed_path, "wb") as dst:
             compressor.copy_stream(src, dst)
 
-        compressed_size = compressed_path.stat().st_size
-        ratio = original_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
+        if not compressed_path.exists():
+            raise ImageError(f"Compression failed: output file not created: {compressed_path}")
 
-        # Remove original uncompressed file
+        compressed_size = compressed_path.stat().st_size
+        if compressed_size == 0:
+            compressed_path.unlink(missing_ok=True)
+            raise ImageError(
+                f"Compression failed: output file is empty (source was {original_size} bytes)"
+            )
+
+        ratio = original_size / compressed_size
+
         image_path.unlink()
 
         logger.info(
