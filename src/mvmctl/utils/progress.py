@@ -89,11 +89,17 @@ class ASCIIProgressBar:
 
         if percent == self._last_percent:
             return
+
+        term_width = shutil.get_terminal_size((80, 20)).columns
         filled = int(self.width * percent / 100)
         bar = "#" * filled + " " * (self.width - filled)
         line = f"{self.title} [{bar}] {percent}%"
         if self.total > 0:
             line += f" ({self._format_size(self.current)}/{self._format_size(self.total)})"
+
+        if len(line) > term_width - 1:
+            line = line[: term_width - 1]
+
         sys.stdout.write(f"\r\033[K{line}")
         sys.stdout.flush()
         self._last_line_length = len(line)

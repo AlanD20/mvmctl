@@ -7,7 +7,9 @@ import importlib
 import importlib.metadata
 import logging
 import os
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
@@ -41,14 +43,65 @@ def _get_env_var(suffix: str) -> str:
     return env_var(suffix)
 
 
+def _get_git_version_info() -> str | None:
+    """Get git version info if running from source.
+
+    Returns:
+        - Tag name if current commit is tagged
+        - Short commit hash prefixed with 'git+' if not tagged
+        - None if not in a git repo or git not available
+    """
+    try:
+        # Get the directory containing this file (src/mvmctl/)
+        repo_dir = Path(__file__).parent.parent.parent
+        git_dir = repo_dir / ".git"
+        if not git_dir.exists():
+            return None
+
+        # Check if current commit has a tag
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "describe", "--tags", "--exact-match", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()  # Return the tag
+
+        # No tag, get short commit hash
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return f"git+{result.stdout.strip()}"
+
+        return None
+    except Exception:
+        return None
+
+
 def _get_version() -> str:
     bootstrap_name = _get_bootstrap_name()
     try:
-        return importlib.metadata.version(bootstrap_name)
+        version = importlib.metadata.version(bootstrap_name)
     except importlib.metadata.PackageNotFoundError:
         from mvmctl import __version__
 
-        return __version__
+        version = __version__
+
+    # Add git info if available
+    git_info = _get_git_version_info()
+    if git_info:
+        if git_info.startswith("git+"):
+            version = f"{version}+{git_info}"
+        else:
+            # It's a tag, use tag as version
+            version = git_info
+
+    return version
 
 
 @dataclass(frozen=True)
@@ -244,7 +297,16 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
 
 @click.command(name="version", help="Show the version and exit")
 def version_cmd() -> None:
-    click.echo(f"{_get_cli_name()} {_get_version()}")
+    version = _get_version()
+    git_info = _get_git_version_info()
+
+    click.echo(f"{_get_cli_name()} {version}")
+
+    if git_info:
+        if git_info.startswith("git+"):
+            click.echo(f"  built from: {git_info[5:]}")
+        else:
+            click.echo(f"  tagged: {git_info}")
 
 
 @click.command(name="help", help="Show help for mvm or a subcommand")
