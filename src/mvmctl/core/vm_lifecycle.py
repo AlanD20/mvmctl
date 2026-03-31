@@ -522,7 +522,7 @@ def _inject_ssh_keys_for_disabled_mode(
             try:
                 # Create .ssh directory with proper permissions
                 g.mkdir_p("/root/.ssh")
-                g.chmod("/root/.ssh", 0o700)
+                g.chmod(0o700, "/root/.ssh")
 
                 # Read existing authorized_keys if any
                 existing_keys = ""
@@ -544,7 +544,7 @@ def _inject_ssh_keys_for_disabled_mode(
                         combined += newline
                     combined += newline.join(new_keys) + newline
                     g.write("/root/.ssh/authorized_keys", combined)
-                    g.chmod("/root/.ssh/authorized_keys", 0o600)
+                    g.chmod(0o600, "/root/.ssh/authorized_keys")
                     logger.debug(
                         "Injected %d SSH key(s) for disabled cloud-init mode", len(new_keys)
                     )
@@ -591,8 +591,9 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 """
 
+                g.mkdir_p("/etc/systemd/system")
                 g.write("/etc/systemd/system/first-boot-ssh-installer.service", first_boot_service)
-                g.chmod("/etc/systemd/system/first-boot-ssh-installer.service", 0o644)
+                g.chmod(0o644, "/etc/systemd/system/first-boot-ssh-installer.service")
 
                 # Enable the service
                 g.mkdir_p("/etc/systemd/system/multi-user.target.wants")
