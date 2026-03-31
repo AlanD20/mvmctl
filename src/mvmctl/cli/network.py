@@ -17,7 +17,16 @@ from mvmctl.api.network import (
 )
 from mvmctl.cli._helpers import check_name_arg, is_bridge_alive
 from mvmctl.exceptions import NetworkError
-from mvmctl.utils.console import print_error, print_info, print_success, print_table
+from mvmctl.utils.console import (
+    format_timestamp,
+    print_error,
+    print_info,
+    print_inspect_header,
+    print_key_value,
+    print_section_header,
+    print_success,
+    print_table,
+)
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import validate_entity_name
 
@@ -141,7 +150,7 @@ def create(
             internet_iface = interfaces[0]
         else:
             # Prompt user to select interface
-            print_info("Multiple network interfaces found:")
+            print_info("Select interface for NAT (internet access):")
             for i, iface in enumerate(interfaces, 1):
                 print_info(f"  [{i}] {iface}")
             selected = Prompt.ask(
@@ -245,29 +254,47 @@ def inspect(
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    print_info(f"Network: {info['name']}")
-    print_info(f"  CIDR:         {info.get('cidr', info.get('subnet', ''))}")
-    print_info(f"  Gateway:      {info['gateway']}")
-    print_info(f"  Bridge:       {info['bridge']}")
-    print_info(f"  NAT:          {'enabled' if info['nat_enabled'] else 'disabled'}")
-    print_info(f"  Bridge alive: {'yes' if info['bridge_exists'] else 'no'}")
-    print_info(f"  Created:      {info['created_at']}")
+    status = "active" if info.get("bridge_exists") else "inactive"
+    print_inspect_header(f"Network: {info['name']}", status)
 
+    print_section_header("BASIC INFO")
+    print_key_value("Name", info["name"])
+    print_key_value("CIDR", info.get("cidr", info.get("subnet", "-")))
+    print_key_value("Gateway", info["gateway"])
+    print_key_value("Bridge", info["bridge"])
+    print_key_value("NAT", "enabled" if info["nat_enabled"] else "disabled")
+    print_key_value("Created", format_timestamp(info.get("created_at")))
+
+    print_section_header("RESOURCES")
     raw_vms = info.get("vms")
     vms = [v for v in (raw_vms if isinstance(raw_vms, list) else []) if isinstance(v, dict)]
-    if vms:
-        print_info(f"  VMs ({len(vms)}):")
-        for vm in vms:
-            print_info(f"    {vm['vm_name']}: {vm['ip']}")
-    else:
-        print_info("  VMs: none")
+    print_key_value("Bridge Active", "yes" if info.get("bridge_exists") else "no")
+    print_key_value("Leases", f"{len(vms)} assigned")
 
-    # iptables rule dump for this bridge
-    bridge = str(info["bridge"])
-    rules = get_iptables_rules_for_bridge(bridge)
-    if rules:
-        print_info(f"  iptables rules for {bridge}:")
+    print_section_header("INTERFACES")
+    print_key_value("Bridge", info["bridge"])
+
+    # Show NAT config if enabled
+    if info.get("nat_enabled"):
+        print_section_header("NAT CONFIG")
+        # Get iptables rules to find interface
+        bridge = str(info["bridge"])
+        rules = get_iptables_rules_for_bridge(bridge)
+        iface = "-"
         for rule in rules:
-            print_info(f"    {rule}")
-    else:
-        print_info(f"  iptables rules for {bridge}: none")
+            if "-o" in rule:
+                parts = rule.split()
+                for i, part in enumerate(parts):
+                    if part == "-o" and i + 1 < len(parts):
+                        iface = parts[i + 1]
+                        break
+            if iface != "-":
+                break
+        print_key_value("Interface", iface)
+        print_key_value("MASQUERADE", "enabled" if rules else "disabled")
+
+    # Show VMs if any
+    if vms:
+        print_section_header("VMS")
+        for vm in vms:
+            print_key_value(vm["vm_name"], vm["ip"], indent=2, key_width=20)

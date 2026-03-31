@@ -801,23 +801,19 @@ def inspect(
 
 
 def _print_vm_details(info: dict[str, Any]) -> None:
-    from datetime import datetime
-
     from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
+    from mvmctl.utils.console import (
+        format_timestamp,
+        print_inspect_header,
+        print_key_value,
+        print_section_header,
+    )
     from mvmctl.utils.fs import get_cache_dir
 
     name = info.get("name", "-")
     status = info.get("status", "-")
 
-    created_at = info.get("created_at")
-    if created_at:
-        try:
-            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            created_str = dt.strftime("%Y/%m/%d %H:%M:%S")
-        except (ValueError, AttributeError):
-            created_str = str(created_at)
-    else:
-        created_str = "-"
+    created_str = format_timestamp(info.get("created_at"))
 
     disk_size_str = "-"
     rootfs_path = info.get("paths", {}).get("rootfs")
@@ -832,26 +828,25 @@ def _print_vm_details(info: dict[str, Any]) -> None:
     cloud_init_mode = info.get("cloud_init_mode", "auto").lower()
     features = info.get("features", {})
 
-    print(f"VM: {name} ({status})")
-    print("=" * (len(name) + len(status) + 8))
+    print_inspect_header(f"VM: {name}", status)
 
-    print("\nBASIC INFO")
-    print(f"  Name:       {name}")
-    print(f"  Full ID:    {info.get('id', '-')}")
-    print(f"  Created:    {created_str}")
-    print(f"  PID:        {info.get('pid') or '-'}")
-    print(f"  IP:         {info.get('ip') or '-'}")
-    print(f"  MAC:        {info.get('mac') or '-'}")
-    print(f"  Network:    {info.get('network_name') or '-'}")
-    print(f"  TAP Device: {info.get('tap_device') or '-'}")
+    print_section_header("BASIC INFO")
+    print_key_value("Name", name)
+    print_key_value("Full ID", info.get("id", "-"))
+    print_key_value("Created", created_str)
+    print_key_value("PID", info.get("pid") or "-")
+    print_key_value("IP", info.get("ip") or "-")
+    print_key_value("MAC", info.get("mac") or "-")
+    print_key_value("Network", info.get("network_name") or "-")
+    print_key_value("TAP Device", info.get("tap_device") or "-")
 
-    print("\nRESOURCES")
-    print(f"  Disk Size:  {disk_size_str}")
-    print(f"  Cloud-init: {cloud_init_mode}")
-    print(f"  API Socket: {'enabled' if features.get('api_socket') else 'disabled'}")
-    print(f"  Console:    {'enabled' if features.get('console') else 'disabled'}")
+    print_section_header("RESOURCES")
+    print_key_value("Disk Size", disk_size_str)
+    print_key_value("Cloud-init", cloud_init_mode)
+    print_key_value("API Socket", "enabled" if features.get("api_socket") else "disabled")
+    print_key_value("Console", "enabled" if features.get("console") else "disabled")
 
-    print("\nASSETS")
+    print_section_header("ASSETS")
 
     image_id = info.get("image_id")
     if image_id:
@@ -866,7 +861,7 @@ def _print_vm_details(info: dict[str, Any]) -> None:
                     image_name = internal_id
         except Exception:
             pass
-        print(f"  Image:      {image_name} ({image_display})")
+        print_key_value("Image", f"{image_name} ({image_display})")
 
     kernel_id = info.get("kernel_id")
     if kernel_id:
@@ -881,16 +876,16 @@ def _print_vm_details(info: dict[str, Any]) -> None:
                     kernel_name = version
         except Exception:
             pass
-        print(f"  Kernel:     {kernel_name} ({kernel_display})")
+        print_key_value("Kernel", f"{kernel_name} ({kernel_display})")
 
-    print("\nPATHS")
+    print_section_header("PATHS")
     paths = info.get("paths", {})
     vm_dir = paths.get("vm_dir", "-")
-    print(f"  State Dir:  {vm_dir}")
+    print_key_value("State Dir", vm_dir)
     if paths.get("rootfs"):
-        print(f"  Rootfs:     {paths['rootfs']}")
+        print_key_value("Rootfs", paths["rootfs"])
     if paths.get("config"):
-        print(f"  Config:     {paths['config']}")
+        print_key_value("Config", paths["config"])
 
 
 def _print_vm_details_tree(info: dict[str, Any]) -> None:

@@ -2369,3 +2369,552 @@ def test_kernel_rm_with_kernel_id_and_force(
     assert result.exit_code == 0
     assert "Removed" in result.output
     assert not kernel.exists()  # Kernel should be removed with --force
+
+
+# ---------------------------------------------------------------------------
+# image inspect tests
+# ---------------------------------------------------------------------------
+
+
+def test_image_inspect_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect shows image details."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "a" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / f"{full_hash}.ext4"
+    img_file.write_bytes(b"\x00" * (10 * 1024 * 1024))  # 10 MiB
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04 LTS",
+                "internal_id": "ubuntu-24.04",
+                "filename": img_file.name,
+                "fs_type": "ext4",
+                "fs_uuid": "test-uuid-1234",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "original_size": str(20 * 1024 * 1024),
+                "compressed_size": str(10 * 1024 * 1024),
+                "compression_ratio": "2.0",
+                "compressed_format": "zst",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    assert "Ubuntu 24.04 LTS" in result.output
+    assert "ubuntu-24.04" in result.output
+    assert "ext4" in result.output
+    assert "zst" in result.output
+
+
+def test_image_inspect_json_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect --json outputs valid JSON."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "b" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / f"{full_hash}.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Test Image",
+                "internal_id": "test-image",
+                "filename": img_file.name,
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--json", "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["id"] == full_hash
+    assert data["name"] == "Test Image"
+    assert data["internal_id"] == "test-image"
+
+
+def test_image_inspect_tree_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect --tree shows tree format."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "c" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / f"{full_hash}.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Tree Test",
+                "internal_id": "tree-test",
+                "filename": img_file.name,
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--tree", "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    assert "├──" in result.output or "└──" in result.output
+    assert "tree-test" in result.output
+
+
+def test_image_inspect_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect with non-existent ID."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", "nonexistent", "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 1
+    assert "No image found" in result.output or "not found" in result.output.lower()
+
+
+def test_image_inspect_ambiguous_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect with ambiguous ID prefix."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # Create two images with same prefix
+    for i, suffix in enumerate(["aaa", "aab"]):
+        full_hash = "a" * 61 + suffix
+        img_file = images_dir / f"{full_hash}.ext4"
+        img_file.write_bytes(b"\x00" * 1024)
+        meta = {
+            "images": {
+                full_hash: {
+                    "os_name": f"Image {i}",
+                    "filename": img_file.name,
+                    "fs_type": "ext4",
+                    "full_hash": full_hash,
+                }
+            },
+            "kernels": {},
+        }
+        if i == 0:
+            (tmp_path / "metadata.json").write_text(json.dumps(meta))
+        else:
+            existing = json.loads((tmp_path / "metadata.json").read_text())
+            existing["images"][full_hash] = meta["images"][full_hash]
+            (tmp_path / "metadata.json").write_text(json.dumps(existing))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", "a", "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 1
+    assert "Ambiguous" in result.output or "ambiguous" in result.output.lower()
+
+
+def test_image_inspect_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect shows missing marker when file is gone."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "d" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    # Note: NOT creating the actual file
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Missing Image",
+                "internal_id": "missing-image",
+                "filename": f"{full_hash}.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    assert "missing" in result.output.lower() or "(missing)" in result.output
+
+
+# ---------------------------------------------------------------------------
+# image ls --remote compression column tests
+# ---------------------------------------------------------------------------
+
+
+def test_image_ls_remote_shows_compression_column(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image ls --remote shows Compression column instead of Downloaded."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # Create downloaded image with compression metadata
+    full_hash = "f" * 64
+    img_file = images_dir / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * (100 * 1024 * 1024))  # 100 MiB
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04 LTS",
+                "internal_id": "ubuntu-24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "compressed_format": "zst",
+                "original_size": str(200 * 1024 * 1024),
+                "compressed_size": str(100 * 1024 * 1024),
+                "compression_ratio": "2.0",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+        result = click_runner.invoke(
+            main_app, ["image", "ls", "--remote", "--images-dir", str(images_dir)]
+        )
+
+    assert result.exit_code == 0
+    # Verify Compression column header is present
+    assert "Compression" in result.output
+    # Verify Downloaded column is NOT present
+    assert "Downloaded" not in result.output
+    # Verify compression format is shown for downloaded image
+    assert "zst" in result.output
+
+
+def test_image_ls_remote_shows_dash_for_not_downloaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Test image ls --remote shows '-' for images not downloaded."""
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # No images downloaded, no metadata
+    (tmp_path / "metadata.json").write_text(json.dumps({"images": {}, "kernels": {}}))
+
+    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+        result = click_runner.invoke(
+            main_app, ["image", "ls", "--remote", "--images-dir", str(images_dir)]
+        )
+
+    assert result.exit_code == 0
+    # Verify Compression column header is present
+    assert "Compression" in result.output
+    # For not downloaded images, compression should show "-"
+    # The output should have dashes in the compression column for missing images
+
+
+def test_image_ls_remote_missing_file_shows_x_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Test image ls --remote shows X marker for missing files."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    # Create metadata but NOT the actual file
+    full_hash = "g" * 64
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04 LTS",
+                "internal_id": "ubuntu-24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "compressed_format": "zst",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+        result = click_runner.invoke(
+            main_app, ["image", "ls", "--remote", "--images-dir", str(images_dir)]
+        )
+
+    assert result.exit_code == 0
+    # Verify X marker is shown for missing file
+    assert "X " in result.output
+
+
+def test_image_inspect_with_compression_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect shows compression details."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "h" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / f"{full_hash}.ext4"
+    img_file.write_bytes(b"\x00" * (50 * 1024 * 1024))
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Compressed Image",
+                "internal_id": "compressed-img",
+                "filename": img_file.name,
+                "fs_type": "ext4",
+                "fs_uuid": "uuid-1234",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "original_size": str(100 * 1024 * 1024),
+                "compressed_size": str(50 * 1024 * 1024),
+                "compression_ratio": "2.0",
+                "compressed_format": "zst",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    assert "COMPRESSION" in result.output
+    assert "zst" in result.output
+    assert "2.00x" in result.output
+    assert "MiB" in result.output
+
+
+def test_image_inspect_with_internal_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect shows internal_id when available."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "i" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / f"{full_hash}.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04",
+                "internal_id": "ubuntu-24.04",
+                "filename": img_file.name,
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    assert "ubuntu-24.04" in result.output
+    assert "Internal ID" in result.output
+
+
+def test_image_ls_remote_with_compression_in_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Test image ls --remote shows compression from metadata for downloaded images."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    img_file = images_dir / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * (100 * 1024 * 1024))
+
+    full_hash = "j" * 64
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Ubuntu 24.04 LTS",
+                "internal_id": "ubuntu-24.04",
+                "filename": "ubuntu-24.04.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "compressed_format": "zst",
+                "original_size": str(200 * 1024 * 1024),
+                "compressed_size": str(100 * 1024 * 1024),
+                "compression_ratio": "2.0",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+        result = click_runner.invoke(
+            main_app, ["image", "ls", "--remote", "--images-dir", str(images_dir)]
+        )
+
+    assert result.exit_code == 0
+    assert "Compression" in result.output
+    assert "zst" in result.output
+
+
+def test_image_inspect_with_filename_lookup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect finds image by filename."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "k" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / "custom-image.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Custom Image",
+                "internal_id": "custom",
+                "filename": "custom-image.ext4",
+                "fs_type": "ext4",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    assert "Custom Image" in result.output
+    assert "custom-image.ext4" in result.output
+
+
+def test_image_inspect_tree_format(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect --tree shows tree format with all sections."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "l" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / f"{full_hash}.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "Tree Test Image",
+                "internal_id": "tree-test",
+                "filename": img_file.name,
+                "fs_type": "ext4",
+                "fs_uuid": "test-uuid",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--tree", "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    assert "├──" in result.output
+    assert "└──" in result.output
+    assert "tree-test" in result.output
+
+
+def test_image_inspect_json_format(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect --json outputs valid JSON with all fields."""
+    import json
+
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    full_hash = "m" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / f"{full_hash}.ext4"
+    img_file.write_bytes(b"\x00" * 1024)
+
+    meta = {
+        "images": {
+            full_hash: {
+                "os_name": "JSON Test",
+                "internal_id": "json-test",
+                "filename": img_file.name,
+                "fs_type": "ext4",
+                "fs_uuid": "json-uuid",
+                "pulled_at": "2026-01-15T10:30:00+00:00",
+                "full_hash": full_hash,
+            }
+        },
+        "kernels": {},
+    }
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+
+    result = click_runner.invoke(
+        main_app, ["image", "inspect", full_hash[:6], "--json", "--images-dir", str(images_dir)]
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["id"] == full_hash
+    assert data["name"] == "JSON Test"
+    assert data["internal_id"] == "json-test"
+    assert data["fs_type"] == "ext4"
+    assert data["fs_uuid"] == "json-uuid"

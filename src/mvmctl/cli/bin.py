@@ -3,7 +3,7 @@
 import json
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import typer
 
@@ -630,6 +630,17 @@ def image_ls(
         ]
 
     if remote:
+        # Pre-load all metadata for lookup
+        _all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
+
+        def _find_meta_for_internal_id_remote(
+            internal_id: str,
+        ) -> tuple[str, dict[str, object]] | None:
+            for _k, _v in _all_meta.items():
+                if str(_v.get("internal_id", "")) == internal_id:
+                    return _k, _v
+            return None
+
         rows: list[list[str]] = []
         for img in images:
             found_path = next(
@@ -640,12 +651,20 @@ def image_ls(
                 ),
                 None,
             )
-            downloaded = "✓" if found_path else " "
             is_missing = is_file_missing(found_path)
             display_id = get_combined_marker(False, is_missing) + img.id
+
+            # Get compression format from metadata if downloaded
+            compression = "-"
+            if found_path and not is_missing:
+                entry = _find_meta_for_internal_id_remote(img.id)
+                if entry:
+                    _, meta = entry
+                    compression = str(meta.get("compressed_format", "-"))
+
             size = found_path.stat().st_size if found_path else 0
             size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-            rows.append([display_id, downloaded, img.name, img.convert_to, size_str])
+            rows.append([display_id, img.name, compression, img.convert_to, size_str])
         if json_output:
             typer.echo(
                 json.dumps(
@@ -664,7 +683,7 @@ def image_ls(
         else:
             print_table(
                 title="Available Images (Remote)",
-                columns=["Image ID", "Downloaded", "Name", "FS Type", "Size"],
+                columns=["Image ID", "Name", "Compression", "FS Type", "Size"],
                 rows=rows,
             )
         return
@@ -754,7 +773,7 @@ def image_ls(
         display_id = get_combined_marker(is_default, is_missing) + display_id_base
         size = found_path.stat().st_size if found_path and found_path.exists() else 0
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-        rows_local.append([display_id, img.name, fs_type, added, size_str])
+        rows_local.append([display_id, img.name, fs_type, size_str, added])
 
     for meta_id, meta in _all_meta.items():
         if str(meta.get("internal_id", meta_id)) in internal_ids:
@@ -784,14 +803,14 @@ def image_ls(
         display_id = get_combined_marker(is_default, is_missing) + meta_id
         size = found_path.stat().st_size if found_path and found_path.exists() else 0
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-        rows_local.append([display_id, os_name, fs_type, added, size_str])
+        rows_local.append([display_id, os_name, fs_type, size_str, added])
 
     if not rows_local:
         print_info("No images downloaded. Use 'mvm image fetch <id>' to download one.")
         return
     print_table(
         title="Downloaded Images",
-        columns=["ID", "OS Name", "FS Type", "Added", "Size"],
+        columns=["ID", "OS Name", "FS Type", "Size", "Added"],
         rows=rows_local,
     )
 
@@ -1076,6 +1095,170 @@ def image_rm(
             remove_image_entry(cache_dir, full_key)
 
     raise typer.Exit(code=exit_code)
+
+
+@image_app.command(name="inspect")
+def image_inspect(
+    prefix: str = typer.Argument(..., help="Image ID prefix to inspect"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    tree: bool = typer.Option(False, "--tree", help="Output in tree format"),
+    images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
+) -> None:
+    """Show detailed information about an image.
+
+    Examples:
+        mvm image inspect abc123
+        mvm image inspect abc123 --json
+        mvm image inspect abc123 --tree
+    """
+    from datetime import datetime
+
+    images_dir = images_dir if images_dir is not None else get_images_dir()
+    cache_dir = get_cache_dir()
+
+    match = resolve_single_by_id_prefix(prefix, find_images_by_id_prefix, cache_dir, "image")
+    if match is None:
+        if not find_images_by_id_prefix(cache_dir, prefix):
+            print_error(f"No image found with ID prefix '{prefix}'")
+        else:
+            print_error(
+                f"Ambiguous ID prefix '{prefix}' matches {len(find_images_by_id_prefix(cache_dir, prefix))} images — use more characters"
+            )
+        raise typer.Exit(code=1)
+
+    full_id, meta = match
+
+    filename = str(meta.get("filename", ""))
+    found_path = None
+    if filename:
+        candidate = images_dir / filename
+        if candidate.exists():
+            found_path = candidate
+    if not found_path:
+        for ext in SUPPORTED_IMAGE_EXTENSIONS:
+            candidate = images_dir / f"{full_id}{ext}"
+            if candidate.exists():
+                found_path = candidate
+                break
+
+    is_missing = is_file_missing(found_path)
+
+    pulled_at = meta.get("pulled_at")
+    if pulled_at:
+        try:
+            dt = datetime.fromisoformat(str(pulled_at).replace("Z", "+00:00"))
+            pulled_str = dt.strftime("%Y/%m/%d %H:%M:%S")
+        except (ValueError, AttributeError):
+            pulled_str = str(pulled_at)
+    else:
+        pulled_str = "-"
+
+    original_size = meta.get("original_size")
+    compressed_size = meta.get("compressed_size")
+    compression_ratio = meta.get("compression_ratio")
+    compressed_format = meta.get("compressed_format", "-")
+
+    original_size_str = _format_bytes_human_readable(int(original_size)) if original_size else "-"
+    compressed_size_str = (
+        _format_bytes_human_readable(int(compressed_size)) if compressed_size else "-"
+    )
+    ratio_str = f"{float(compression_ratio):.2f}x" if compression_ratio else "-"
+
+    file_size_str = "-"
+    if found_path and found_path.exists():
+        try:
+            file_size = found_path.stat().st_size
+            file_size_str = _format_bytes_human_readable(file_size)
+        except OSError:
+            pass
+
+    info = {
+        "id": full_id,
+        "name": str(meta.get("os_name", "-")),
+        "internal_id": str(meta.get("internal_id", "-")),
+        "filename": filename or "-",
+        "fs_type": str(meta.get("fs_type", "-")),
+        "fs_uuid": str(meta.get("fs_uuid", "-")),
+        "pulled_at": pulled_str,
+        "original_size": original_size_str,
+        "compressed_size": compressed_size_str,
+        "compression_ratio": ratio_str,
+        "compressed_format": str(compressed_format),
+        "file_size": file_size_str,
+        "missing": is_missing,
+    }
+
+    if json_output:
+        typer.echo(json.dumps(info, indent=2))
+        return
+
+    if tree:
+        _print_image_details_tree(info, found_path)
+    else:
+        _print_image_details(info, found_path)
+
+
+def _print_image_details(info: dict[str, Any], found_path: Path | None) -> None:
+    from mvmctl.utils.console import (
+        format_timestamp,
+        print_inspect_header,
+        print_key_value,
+        print_section_header,
+    )
+
+    name = info.get("name", "-")
+    internal_id = info.get("internal_id", "-")
+    missing_marker = " (missing)" if info.get("missing") else ""
+
+    print_inspect_header(f"Image: {internal_id}{missing_marker}")
+
+    print_section_header("BASIC INFO")
+    print_key_value("ID", info.get("id", "-"))
+    print_key_value("Name", name)
+    print_key_value("Internal ID", internal_id)
+    print_key_value("Pulled", format_timestamp(info.get("pulled_at")))
+
+    print_section_header("STORAGE")
+    print_key_value("Filename", info.get("filename", "-"))
+    print_key_value("FS Type", info.get("fs_type", "-"))
+    print_key_value("FS UUID", info.get("fs_uuid", "-"))
+    print_key_value("File Size", info.get("file_size", "-"))
+
+    print_section_header("COMPRESSION")
+    print_key_value("Format", info.get("compressed_format", "-"))
+    print_key_value("Original", info.get("original_size", "-"))
+    print_key_value("Compressed", info.get("compressed_size", "-"))
+    print_key_value("Ratio", info.get("compression_ratio", "-"))
+
+
+def _print_image_details_tree(info: dict[str, Any], found_path: Path | None) -> None:
+    name = info.get("name", "-")
+    internal_id = info.get("internal_id", "-")
+    missing_marker = " (missing)" if info.get("missing") else ""
+
+    print(f"{internal_id}{missing_marker}")
+
+    tree_lines = [
+        f"├── ID:          {info.get('id', '-')}",
+        f"├── Name:        {name}",
+        f"├── Internal ID: {internal_id}",
+        f"├── Pulled:      {info.get('pulled_at', '-')}",
+    ]
+
+    tree_lines.append("├── Storage")
+    tree_lines.append(f"│   ├── Filename:  {info.get('filename', '-')}")
+    tree_lines.append(f"│   ├── FS Type:   {info.get('fs_type', '-')}")
+    tree_lines.append(f"│   ├── FS UUID:   {info.get('fs_uuid', '-')}")
+    tree_lines.append(f"│   └── File Size: {info.get('file_size', '-')}")
+
+    tree_lines.append("└── Compression")
+    tree_lines.append(f"    ├── Format:    {info.get('compressed_format', '-')}")
+    tree_lines.append(f"    ├── Original:  {info.get('original_size', '-')}")
+    tree_lines.append(f"    ├── Compressed: {info.get('compressed_size', '-')}")
+    tree_lines.append(f"    └── Ratio:     {info.get('compression_ratio', '-')}")
+
+    for line in tree_lines:
+        print(line)
 
 
 # Mapping from CLI detector names to internal detector names
