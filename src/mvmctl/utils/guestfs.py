@@ -92,3 +92,94 @@ def check_libguestfs() -> bool:
         return hasattr(guestfs, "GuestFS")
     except ImportError:
         return False
+
+
+def extract_partition_with_guestfs(
+    raw_path: Path,
+    output_path: Path,
+    partition: int | None = None,
+) -> Path | None:
+    """Extract root partition using libguestfs for reliable VHD handling.
+
+    Uses guestfs to reliably extract partitions from VHD-converted images
+    that may have non-standard partition tables.
+
+    Args:
+        raw_path: Path to the raw disk image
+        output_path: Path to write the extracted filesystem image
+        partition: Partition number (1-indexed), or None for auto-detect
+
+    Returns:
+        Path to the extracted filesystem image, or None if guestfs unavailable/fails
+    """
+    import logging
+
+    from mvmctl.constants import CONST_SHRINK_SAFETY_MARGIN
+
+    logger = logging.getLogger(__name__)
+
+    if not check_libguestfs():
+        return None
+
+    try:
+        with optimized_guestfs(raw_path, readonly=True) as g:
+            partitions = g.list_partitions()
+            if not partitions:
+                logger.debug("No partitions found in image")
+                return None
+
+            if partition is not None:
+                if partition < 1 or partition > len(partitions):
+                    logger.debug("Partition %d out of range (1-%d)", partition, len(partitions))
+                    return None
+                root_device = partitions[partition - 1]
+            else:
+                root_device = _find_largest_linux_fs(g, partitions)
+                if root_device is None:
+                    root_device = partitions[0]
+
+            fs_size = _get_fs_size(g, root_device)
+            g.copy_device_to_file(root_device, str(output_path))
+
+            if fs_size > 0:
+                final_size = int(fs_size * CONST_SHRINK_SAFETY_MARGIN)
+                with open(output_path, "r+b") as f:
+                    f.truncate(final_size)
+
+            logger.info("Extracted root partition via guestfs: %s", output_path.name)
+            return output_path
+
+    except Exception as e:
+        logger.debug("Guestfs extraction failed: %s", e)
+        return None
+
+
+def _find_largest_linux_fs(g: Any, partitions: list[str]) -> str | None:
+    max_size = 0
+    root_device = None
+    for dev in partitions:
+        try:
+            fs_type = g.vfs_type(dev)
+            if fs_type in ("ext2", "ext3", "ext4", "btrfs", "xfs"):
+                g.mount(dev, "/")
+                try:
+                    stat = g.statvfs("/")
+                    size = stat.get("fs_blocks", 0) * stat.get("fs_bsize", 4096)
+                    if size > max_size:
+                        max_size = size
+                        root_device = dev
+                finally:
+                    g.umount(dev)
+        except Exception:
+            continue
+    return root_device
+
+
+def _get_fs_size(g: Any, device: str) -> int:
+    g.mount(device, "/")
+    try:
+        stat = g.statvfs("/")
+        size = stat.get("fs_blocks", 0) * stat.get("fs_bsize", 4096)
+        return int(size)
+    finally:
+        g.umount(device)

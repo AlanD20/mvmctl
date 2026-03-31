@@ -29,6 +29,7 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import ConfigError, ImageError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
+from mvmctl.utils.guestfs import extract_partition_with_guestfs
 from mvmctl.utils.http import download_file as _download_file
 from mvmctl.utils.progress import download_with_progress
 from mvmctl.utils.template import render_optional_template, render_template
@@ -930,15 +931,32 @@ def _handle_vhd(
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
-    """Convert VHD to raw, then extract partition."""
+    """Convert VHD to raw, then extract partition.
+
+    Tries guestfs-based extraction first for reliability with non-standard
+    VHD images (e.g., Alpine), falls back to sfdisk/fdisk parsing.
+    """
     raw_path = download_path.with_suffix(".raw")
     convert_vhd_to_raw(download_path, raw_path)
+
+    # Try guestfs-based extraction first (more reliable for VHD)
+    actual_path = extract_partition_with_guestfs(
+        raw_path, final_path.with_suffix(".img"), partition
+    )
+    if actual_path is not None:
+        raw_path.unlink(missing_ok=True)
+        return actual_path
+
+    # Fall back to sfdisk/fdisk parsing
+    logger.info("Guestfs extraction unavailable, falling back to manual partition parsing")
     actual_path = extract_partition_from_raw(
         raw_path,
         final_path.with_suffix(".img"),
         partition=partition,
         disabled_detectors=disabled_detectors,
     )
+    if actual_path is None:
+        raise ImageError("Failed to extract partition from VHD")
     raw_path.unlink(missing_ok=True)
     return actual_path
 
