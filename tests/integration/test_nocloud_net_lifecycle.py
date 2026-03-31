@@ -37,7 +37,7 @@ def _make_vm(
         created_at=datetime(2026, 1, 1, 12, 0, 0),
         network_name=network,
         socket_path=Path(f"/tmp/mvm/{name}.sock"),
-        cloud_init_mode=CloudInitMode.NO_CLOUD_NET if nocloud_net_port else CloudInitMode.AUTO,
+        cloud_init_mode=CloudInitMode.NET if nocloud_net_port else CloudInitMode.INJECT,
         nocloud_net_port=nocloud_net_port,
     )
 
@@ -146,7 +146,7 @@ class TestFullNocloudNetLifecycle:
                     kernel="vmlinux",
                     vcpus=2,
                     mem=2048,
-                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                    cloud_init_mode=CloudInitMode.NET,
                     vm_manager=vm_mgr,
                 )
 
@@ -260,7 +260,7 @@ class TestFullNocloudNetLifecycle:
                     name="cleanup-test-vm",
                     image="ubuntu-24.04",
                     kernel="vmlinux",
-                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                    cloud_init_mode=CloudInitMode.NET,
                     vm_manager=vm_mgr,
                 )
 
@@ -371,7 +371,7 @@ class TestMultipleVMsDifferentPorts:
                                                     name="vm1",
                                                     image="ubuntu-24.04",
                                                     kernel="vmlinux",
-                                                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                                                    cloud_init_mode=CloudInitMode.NET,
                                                     vm_manager=vm_mgr,
                                                 )
 
@@ -379,7 +379,7 @@ class TestMultipleVMsDifferentPorts:
                                                     name="vm2",
                                                     image="ubuntu-24.04",
                                                     kernel="vmlinux",
-                                                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                                                    cloud_init_mode=CloudInitMode.NET,
                                                     vm_manager=vm_mgr,
                                                 )
 
@@ -517,7 +517,7 @@ class TestNocloudNetFailureCleanup:
                     name="failing-vm",
                     image="ubuntu-24.04",
                     kernel="vmlinux",
-                    cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                    cloud_init_mode=CloudInitMode.NET,
                     vm_manager=vm_mgr,
                 )
 
@@ -621,7 +621,7 @@ class TestNocloudNetFailureCleanup:
                         name="fc-fail-vm",
                         image="ubuntu-24.04",
                         kernel="vmlinux",
-                        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+                        cloud_init_mode=CloudInitMode.NET,
                         vm_manager=vm_mgr,
                     )
 
@@ -708,7 +708,7 @@ class TestVMWithoutNocloudNet:
                                                     name="disabled-mode-vm",
                                                     image="ubuntu-24.04",
                                                     kernel="vmlinux",
-                                                    cloud_init_mode=CloudInitMode.DISABLED,
+                                                    cloud_init_mode=CloudInitMode.OFF,
                                                     vm_manager=vm_mgr,
                                                 )
 
@@ -748,7 +748,7 @@ class TestNocloudNetCLIAuthoring:
 
         # Verify nocloud-net mode was passed
         call_kwargs = mock_create_vm.call_args.kwargs
-        assert call_kwargs.get("cloud_init_mode") == CloudInitMode.NO_CLOUD_NET
+        assert call_kwargs.get("cloud_init_mode") == CloudInitMode.NET
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")

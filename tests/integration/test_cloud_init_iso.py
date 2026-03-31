@@ -87,7 +87,7 @@ class TestCloudInitISOCreation:
         Verifies that:
         - --cloud-init-iso flag is accepted
         - Custom ISO path is passed to create_vm
-        - CloudInitMode.CUSTOM is used
+        - CloudInitMode.ISO is used
         """
         mock_check_priv.return_value = None
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
@@ -129,7 +129,7 @@ class TestCloudInitISOCreation:
 
         Verifies that:
         - --no-cloud-init flag disables cloud-init
-        - CloudInitMode.DISABLED is used
+        - CloudInitMode.OFF is used
         - No ISO is created or attached
         """
         mock_check_priv.return_value = None

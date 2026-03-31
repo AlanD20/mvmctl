@@ -158,8 +158,9 @@ class TestConsoleWorkflow:
         print(f"cloud_init.write_cloud_init: {cloud_init.write_cloud_init}")
         print(f"Is mock: {cloud_init.write_cloud_init is mock_write_ci}")
 
-        # Create VM with console enabled (default)
-        vm = create_vm(name="testvm", image="ubuntu-22.04")
+        from mvmctl.models import CloudInitMode
+
+        vm = create_vm(name="testvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
 
         assert isinstance(vm, VMInstance)
         assert vm.name == "testvm"
@@ -276,8 +277,14 @@ class TestConsoleWorkflow:
         mock_nocloud_instance.get_server_pid.return_value = 9999
         mock_nocloud_mgr.return_value = mock_nocloud_instance
 
-        # Create VM with console disabled
-        vm = create_vm(name="testvm", image="ubuntu-22.04", enable_console=False)
+        from mvmctl.models import CloudInitMode
+
+        vm = create_vm(
+            name="testvm",
+            image="ubuntu-22.04",
+            enable_console=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
 
         assert isinstance(vm, VMInstance)
         assert vm.name == "testvm"

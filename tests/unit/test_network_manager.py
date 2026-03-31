@@ -191,7 +191,7 @@ def test_create_network_success(
     # Verify persistence in metadata
     assert get_network("mynet") is not None
     mock_setup_bridge.assert_called_once_with("mvm-mynet", gateway_cidr="10.20.0.1/24")
-    mock_setup_nat.assert_called_once_with("mvm-mynet", nat_gateways=None)
+    mock_setup_nat.assert_called_once_with("mvm-mynet", nat_gateways=None, cidr="10.20.0.0/24")
 
 
 def test_create_network_already_exists(mock_cache_dir: Path):
@@ -222,7 +222,7 @@ def test_remove_network(mock_teardown_nat, mock_teardown_bridge, mock_cache_dir:
 
     remove_network("mynet")
 
-    mock_teardown_nat.assert_called_once_with(bridge="mvm-mynet", force=True)
+    mock_teardown_nat.assert_called_once_with(bridge="mvm-mynet", force=True, cidr="10.20.1.0/24")
     mock_teardown_bridge.assert_called_once_with("mvm-mynet")
     assert get_network("mynet") is None
 
@@ -321,7 +321,9 @@ def test_release_network_ip(mock_cache_dir: Path):
 
 @patch("mvmctl.core.network.get_default_interface")
 @patch("mvmctl.core.network_manager.create_network")
-def test_ensure_default_network_creates_when_missing(mock_create_network, mock_get_default_iface, mock_cache_dir: Path):
+def test_ensure_default_network_creates_when_missing(
+    mock_create_network, mock_get_default_iface, mock_cache_dir: Path
+):
     # Doesn't exist, will be created
     mock_get_default_iface.return_value = "wlo1"
     mock_create_network.return_value = NetworkConfig(
@@ -329,7 +331,9 @@ def test_ensure_default_network_creates_when_missing(mock_create_network, mock_g
     )
     config = ensure_default_network()
     assert config is not None
-    mock_create_network.assert_called_once_with("default", cidr="172.35.0.0/24", nat=True, nat_gateways=["wlo1"])
+    mock_create_network.assert_called_once_with(
+        "default", cidr="172.35.0.0/24", nat=True, nat_gateways=["wlo1"]
+    )
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
@@ -378,7 +382,9 @@ def test_ensure_default_network_recreates_missing_bridge(
     assert config is not None
     assert config.name == "default"
     mock_setup_bridge.assert_called_once_with("mvm-default", gateway_cidr="172.35.0.1/24")
-    mock_setup_nat.assert_called_once_with("mvm-default", nat_gateways=["eth0"])
+    mock_setup_nat.assert_called_once_with(
+        "mvm-default", nat_gateways=["eth0"], cidr="172.35.0.0/24"
+    )
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
@@ -408,7 +414,9 @@ def test_ensure_default_network_recreates_missing_chains(
     assert config is not None
     assert config.name == "default"
     mock_setup_bridge.assert_not_called()
-    mock_setup_nat.assert_called_once_with("mvm-default", nat_gateways=["eth0"])
+    mock_setup_nat.assert_called_once_with(
+        "mvm-default", nat_gateways=["eth0"], cidr="172.35.0.0/24"
+    )
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
@@ -545,7 +553,6 @@ class TestNatGatewaysField:
         config = _network_entry_to_config("testnet", entry)
         assert config is not None
         assert config.nat_gateways == ["eth0", "eth1"]
-
 
 
 class TestRestoreNetworks:

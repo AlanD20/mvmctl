@@ -201,7 +201,7 @@ def create_vm(
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
     enable_console: bool = DEFAULT_VM_ENABLE_CONSOLE,
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
-    cloud_init_mode: CloudInitMode = CloudInitMode.AUTO,
+    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT,
     cloud_init_iso_path: Path | None = None,
     keep_cloud_init_iso: bool = False,
     vm_manager: VMManager | None = None,

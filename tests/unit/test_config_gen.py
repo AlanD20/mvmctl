@@ -323,7 +323,7 @@ def test_config_gen_cloud_init_drive_added_once():
         name="ci-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        cloud_init_mode=CloudInitMode.AUTO,
+        cloud_init_mode=CloudInitMode.INJECT,
         cloud_init_iso_path=Path("/tmp/cloud-init.iso"),
     )
 
@@ -400,7 +400,7 @@ def test_boot_args_nocloud_net_ds():
         name="nocloud-net-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+        cloud_init_mode=CloudInitMode.NET,
         nocloud_net_url="http://192.168.1.1:8123/",
     )
     generator = ConfigGenerator(vm_config)
@@ -414,7 +414,7 @@ def test_boot_args_direct_injection_seed_dir_uses_constant():
         name="direct-injection-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        cloud_init_mode=CloudInitMode.DIRECT_INJECTION,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
 
     config = ConfigGenerator(vm_config).generate()
@@ -432,7 +432,7 @@ def test_boot_args_nocloud_net_requires_url():
         name="nocloud-net-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+        cloud_init_mode=CloudInitMode.NET,
     )
     generator = ConfigGenerator(vm_config)
     with pytest.raises(ConfigError, match="nocloud_net_url must be set"):
@@ -445,7 +445,7 @@ def test_boot_args_cloud_init_disabled():
         name="no-ci-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        cloud_init_mode=CloudInitMode.DISABLED,
+        cloud_init_mode=CloudInitMode.OFF,
     )
     generator = ConfigGenerator(vm_config)
     config = generator.generate()

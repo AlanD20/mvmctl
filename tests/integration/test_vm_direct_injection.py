@@ -34,7 +34,7 @@ class TestVMDirectInjection:
         # Create mock VM response
         mock_vm = MagicMock()
         mock_vm.name = "direct-test-vm"
-        mock_vm.cloud_init_mode = CloudInitMode.DIRECT_INJECTION
+        mock_vm.cloud_init_mode = CloudInitMode.INJECT
         mock_create_vm.return_value = mock_vm
 
         runner = CliRunner()
@@ -47,7 +47,7 @@ class TestVMDirectInjection:
                 "--image",
                 "abc123",
                 "--cloud-init-mode",
-                "direct",
+                "inject",
             ],
         )
 
@@ -55,7 +55,7 @@ class TestVMDirectInjection:
 
         # Verify create_vm was called with correct mode
         call_kwargs = mock_create_vm.call_args[1]
-        assert call_kwargs["cloud_init_mode"] == CloudInitMode.DIRECT_INJECTION
+        assert call_kwargs["cloud_init_mode"] == CloudInitMode.INJECT
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
@@ -73,20 +73,20 @@ class TestVMDirectInjection:
 
         mock_vm = MagicMock()
         mock_vm.name = "test-vm"
-        mock_vm.cloud_init_mode = CloudInitMode.DIRECT_INJECTION
+        mock_vm.cloud_init_mode = CloudInitMode.INJECT
         mock_create_vm.return_value = mock_vm
 
         runner = CliRunner()
         result = runner.invoke(
             vm_app,
-            ["create", "--name", "test-vm", "--image", "img123", "--cloud-init-mode", "direct"],
+            ["create", "--name", "test-vm", "--image", "img123", "--cloud-init-mode", "inject"],
         )
 
         assert result.exit_code == 0
         assert mock_create_vm.called
         # Verify mode was passed correctly
         args, kwargs = mock_create_vm.call_args
-        assert kwargs.get("cloud_init_mode") == CloudInitMode.DIRECT_INJECTION
+        assert kwargs.get("cloud_init_mode") == CloudInitMode.INJECT
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
@@ -136,7 +136,7 @@ class TestVMDirectInjection:
         runner = CliRunner()
         result = runner.invoke(
             vm_app,
-            ["create", "--name", "test-vm", "--image", "img123", "--cloud-init-mode", "direct"],
+            ["create", "--name", "test-vm", "--image", "img123", "--cloud-init-mode", "inject"],
         )
 
         assert result.exit_code != 0

@@ -175,7 +175,7 @@ class ConfigGenerator:
 
         # Cloud-init ISO drive (if configured)
         if (
-            self.vm_config.cloud_init_mode != CloudInitMode.DISABLED
+            self.vm_config.cloud_init_mode != CloudInitMode.OFF
             and self.vm_config.cloud_init_iso_path is not None
         ):
             cloud_init_drive: DriveConfig = {
@@ -234,7 +234,7 @@ class ConfigGenerator:
         lsm_arg = f"lsm={lsm_flags}" if lsm_flags else ""
 
         # Determine cloud-init datasource string
-        if self.vm_config.cloud_init_mode == CloudInitMode.NO_CLOUD_NET:
+        if self.vm_config.cloud_init_mode == CloudInitMode.NET:
             # For nocloud-net, validate URL is configured
             if not self.vm_config.nocloud_net_url:
                 raise ConfigError("nocloud_net_url must be set when using NO_CLOUD_NET mode")
@@ -243,7 +243,7 @@ class ConfigGenerator:
             # The kernel ip= parameter already configures the network; this service
             # would block waiting for systemd-networkd to mark it as "online"
             mask_arg = "systemd.mask=systemd-networkd-wait-online.service"
-        elif self.vm_config.cloud_init_mode == CloudInitMode.DIRECT_INJECTION:
+        elif self.vm_config.cloud_init_mode == CloudInitMode.INJECT:
             ds_arg = f"ds=nocloud;s=file://{DEFAULT_LIBGUESTFS_SEED_DIR}/"
             mask_arg = "systemd.mask=systemd-networkd-wait-online.service"
         elif self.vm_config.cloud_init_mode == CloudInitMode.ISO:
@@ -251,7 +251,7 @@ class ConfigGenerator:
             ds_arg = DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD
             # Also mask systemd-networkd-wait-online for ISO mode
             mask_arg = "systemd.mask=systemd-networkd-wait-online.service"
-        elif self.vm_config.cloud_init_mode == CloudInitMode.DISABLED:
+        elif self.vm_config.cloud_init_mode == CloudInitMode.OFF:
             ds_arg = ""
             mask_arg = ""
         else:

@@ -338,7 +338,7 @@ def create_network(
     try:
         setup_bridge(bridge, gateway_cidr=f"{gateway}/{_prefix_len(cidr)}")
         if nat:
-            setup_nat(bridge, nat_gateways=nat_gateways)
+            setup_nat(bridge, nat_gateways=nat_gateways, cidr=cidr)
     except NetworkError:
         try:
             teardown_bridge(bridge)
@@ -396,7 +396,7 @@ def remove_network(name: str) -> None:
     # Teardown host resources
     try:
         if config.nat_enabled:
-            teardown_nat(bridge=config.bridge, force=True)
+            teardown_nat(bridge=config.bridge, force=True, cidr=config.cidr)
         teardown_bridge(config.bridge)
     except NetworkError as e:
         logger.warning("Partial teardown for network '%s': %s", name, e)
@@ -574,7 +574,7 @@ def ensure_default_network() -> NetworkConfig:
                     setup_bridge(config.bridge, gateway_cidr=gateway_cidr)
                 if config.nat_enabled:
                     nat_gateways = config.nat_gateways or [get_default_interface()]
-                    setup_nat(config.bridge, nat_gateways=nat_gateways)
+                    setup_nat(config.bridge, nat_gateways=nat_gateways, cidr=config.cidr)
                     if os.getuid() == 0:
                         save_iptables_rules()
                 cache_dir = get_cache_dir()

@@ -99,7 +99,7 @@ def test_vminstance_deserialization():
         "created_at": "2026-01-01T12:00:00+00:00",
         "status": "stopped",
         "config": None,
-        "cloud_init_mode": "auto",
+        "cloud_init_mode": "inject",
         "nocloud_net_port": None,
         "nocloud_server_pid": None,
         "console_relay_pid": None,

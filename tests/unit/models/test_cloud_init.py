@@ -9,28 +9,28 @@ class TestCloudInitMode:
     """Tests for CloudInitMode StrEnum."""
 
     def test_auto_value(self):
-        assert CloudInitMode.AUTO == "auto"
+        assert CloudInitMode.INJECT == "inject"
 
     def test_custom_value(self):
-        assert CloudInitMode.CUSTOM == "custom"
+        assert CloudInitMode.ISO == "iso"
 
     def test_disabled_value(self):
-        assert CloudInitMode.DISABLED == "disabled"
+        assert CloudInitMode.OFF == "off"
 
     def test_nocloud_net_value(self):
-        assert CloudInitMode.NO_CLOUD_NET == "nocloud-net"
+        assert CloudInitMode.NET == "net"
 
     def test_from_string_auto(self):
-        assert CloudInitMode("auto") == CloudInitMode.AUTO
+        assert CloudInitMode("inject") == CloudInitMode.INJECT
 
     def test_from_string_custom(self):
-        assert CloudInitMode("custom") == CloudInitMode.CUSTOM
+        assert CloudInitMode("iso") == CloudInitMode.ISO
 
     def test_from_string_disabled(self):
-        assert CloudInitMode("disabled") == CloudInitMode.DISABLED
+        assert CloudInitMode("off") == CloudInitMode.OFF
 
     def test_from_string_nocloud_net(self):
-        assert CloudInitMode("nocloud-net") == CloudInitMode.NO_CLOUD_NET
+        assert CloudInitMode("net") == CloudInitMode.NET
 
 
 class TestCloudInitStatus:
@@ -67,25 +67,25 @@ class TestCloudInitConfig:
     def test_default_construction(self):
         """Test construction with all defaults."""
         config = CloudInitConfig()
-        assert config.mode == CloudInitMode.AUTO
+        assert config.mode == CloudInitMode.INJECT
         assert config.iso_path is None
         assert config.keep_iso is False
         assert config.nocloud_net_url is None
 
     def test_custom_mode(self):
         """Test construction with CUSTOM mode."""
-        config = CloudInitConfig(mode=CloudInitMode.CUSTOM)
-        assert config.mode == CloudInitMode.CUSTOM
+        config = CloudInitConfig(mode=CloudInitMode.ISO)
+        assert config.mode == CloudInitMode.ISO
 
     def test_disabled_mode(self):
         """Test construction with DISABLED mode."""
-        config = CloudInitConfig(mode=CloudInitMode.DISABLED)
-        assert config.mode == CloudInitMode.DISABLED
+        config = CloudInitConfig(mode=CloudInitMode.OFF)
+        assert config.mode == CloudInitMode.OFF
 
     def test_nocloud_net_mode(self):
         """Test construction with NO_CLOUD_NET mode."""
-        config = CloudInitConfig(mode=CloudInitMode.NO_CLOUD_NET)
-        assert config.mode == CloudInitMode.NO_CLOUD_NET
+        config = CloudInitConfig(mode=CloudInitMode.NET)
+        assert config.mode == CloudInitMode.NET
 
     def test_with_iso_path(self):
         """Test construction with iso_path set."""
@@ -108,12 +108,12 @@ class TestCloudInitConfig:
         """Test construction with all fields specified."""
         path = Path("/path/to/iso")
         config = CloudInitConfig(
-            mode=CloudInitMode.CUSTOM,
+            mode=CloudInitMode.ISO,
             iso_path=path,
             keep_iso=True,
             nocloud_net_url="http://example.com/",
         )
-        assert config.mode == CloudInitMode.CUSTOM
+        assert config.mode == CloudInitMode.ISO
         assert config.iso_path == path
         assert config.keep_iso is True
         assert config.nocloud_net_url == "http://example.com/"
@@ -127,7 +127,7 @@ class TestCloudInitConfigSerialization:
         config = CloudInitConfig()
         data = config.to_dict()
         assert data == {
-            "mode": "auto",
+            "mode": "inject",
             "iso_path": None,
             "keep_iso": False,
             "nocloud_net_url": None,
@@ -136,14 +136,14 @@ class TestCloudInitConfigSerialization:
     def test_to_dict_with_values(self):
         """Test serialization with custom values."""
         config = CloudInitConfig(
-            mode=CloudInitMode.CUSTOM,
+            mode=CloudInitMode.ISO,
             iso_path=Path("/path/to/iso"),
             keep_iso=True,
             nocloud_net_url="http://10.0.0.1:8080/",
         )
         data = config.to_dict()
         assert data == {
-            "mode": "custom",
+            "mode": "iso",
             "iso_path": "/path/to/iso",
             "keep_iso": True,
             "nocloud_net_url": "http://10.0.0.1:8080/",
@@ -151,21 +151,21 @@ class TestCloudInitConfigSerialization:
 
     def test_to_dict_disabled_mode(self):
         """Test serialization with DISABLED mode."""
-        config = CloudInitConfig(mode=CloudInitMode.DISABLED)
+        config = CloudInitConfig(mode=CloudInitMode.OFF)
         data = config.to_dict()
-        assert data["mode"] == "disabled"
+        assert data["mode"] == "off"
 
     def test_to_dict_nocloud_net_mode(self):
         """Test serialization with NO_CLOUD_NET mode."""
-        config = CloudInitConfig(mode=CloudInitMode.NO_CLOUD_NET)
+        config = CloudInitConfig(mode=CloudInitMode.NET)
         data = config.to_dict()
-        assert data["mode"] == "nocloud-net"
+        assert data["mode"] == "net"
 
     def test_from_dict_defaults(self):
         """Test deserialization with minimal data."""
         data = {}
         config = CloudInitConfig.from_dict(data)
-        assert config.mode == CloudInitMode.AUTO
+        assert config.mode == CloudInitMode.INJECT
         assert config.iso_path is None
         assert config.keep_iso is False
         assert config.nocloud_net_url is None
@@ -173,34 +173,34 @@ class TestCloudInitConfigSerialization:
     def test_from_dict_full(self):
         """Test deserialization with all fields."""
         data = {
-            "mode": "custom",
+            "mode": "iso",
             "iso_path": "/path/to/iso",
             "keep_iso": True,
             "nocloud_net_url": "http://example.com/",
         }
         config = CloudInitConfig.from_dict(data)
-        assert config.mode == CloudInitMode.CUSTOM
+        assert config.mode == CloudInitMode.ISO
         assert config.iso_path == Path("/path/to/iso")
         assert config.keep_iso is True
         assert config.nocloud_net_url == "http://example.com/"
 
     def test_from_dict_auto_mode(self):
         """Test deserialization with auto mode string."""
-        data = {"mode": "auto"}
+        data = {"mode": "inject"}
         config = CloudInitConfig.from_dict(data)
-        assert config.mode == CloudInitMode.AUTO
+        assert config.mode == CloudInitMode.INJECT
 
     def test_from_dict_disabled_mode(self):
         """Test deserialization with disabled mode string."""
-        data = {"mode": "disabled"}
+        data = {"mode": "off"}
         config = CloudInitConfig.from_dict(data)
-        assert config.mode == CloudInitMode.DISABLED
+        assert config.mode == CloudInitMode.OFF
 
     def test_from_dict_nocloud_net_mode(self):
         """Test deserialization with nocloud-net mode string."""
-        data = {"mode": "nocloud-net"}
+        data = {"mode": "net"}
         config = CloudInitConfig.from_dict(data)
-        assert config.mode == CloudInitMode.NO_CLOUD_NET
+        assert config.mode == CloudInitMode.NET
 
     def test_from_dict_none_iso_path(self):
         """Test deserialization with null iso_path."""
@@ -210,20 +210,20 @@ class TestCloudInitConfigSerialization:
 
     def test_from_dict_missing_iso_path(self):
         """Test deserialization without iso_path key."""
-        data = {"mode": "auto"}
+        data = {"mode": "inject"}
         config = CloudInitConfig.from_dict(data)
         assert config.iso_path is None
 
     def test_from_dict_missing_nocloud_net_url(self):
         """Test deserialization without nocloud_net_url key."""
-        data = {"mode": "auto"}
+        data = {"mode": "inject"}
         config = CloudInitConfig.from_dict(data)
         assert config.nocloud_net_url is None
 
     def test_roundtrip_serialization(self):
         """Test that to_dict/from_dict are inverse operations."""
         original = CloudInitConfig(
-            mode=CloudInitMode.CUSTOM,
+            mode=CloudInitMode.ISO,
             iso_path=Path("/path/to/iso"),
             keep_iso=True,
             nocloud_net_url="http://10.0.0.1:8080/",
@@ -248,7 +248,7 @@ class TestCloudInitConfigSerialization:
     def test_roundtrip_serialization_nocloud_net(self):
         """Test roundtrip with NO_CLOUD_NET mode."""
         original = CloudInitConfig(
-            mode=CloudInitMode.NO_CLOUD_NET,
+            mode=CloudInitMode.NET,
             nocloud_net_url="http://10.0.0.1:8080/",
         )
         data = original.to_dict()

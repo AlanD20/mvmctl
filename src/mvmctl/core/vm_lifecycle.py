@@ -853,7 +853,7 @@ def create_vm(
     enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
     enable_console: bool = DEFAULT_VM_ENABLE_CONSOLE,
     firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
-    cloud_init_mode: CloudInitMode = CloudInitMode.AUTO,
+    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT,
     cloud_init_iso_path: Path | None = None,
     keep_cloud_init_iso: bool = False,
     vm_manager: VMManager | None = None,
@@ -882,7 +882,7 @@ def create_vm(
     relay_mgr: ConsoleRelayManager | None = None
     pty_master_fd: int | None = None
     pty_slave_fd: int | None = None
-    effective_mode: CloudInitMode = CloudInitMode.NO_CLOUD_NET
+    effective_mode: CloudInitMode = CloudInitMode.NET
     net_config = None
     proc = None
     log_fp = None
@@ -904,8 +904,8 @@ def create_vm(
             raise MVMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
 
         # Determine effective cloud-init mode
-        if cloud_init_mode == CloudInitMode.AUTO:
-            effective_mode = CloudInitMode.DIRECT_INJECTION
+        if cloud_init_mode == CloudInitMode.INJECT:
+            effective_mode = CloudInitMode.INJECT
         elif cloud_init_mode == CloudInitMode.ISO:
             effective_mode = CloudInitMode.ISO
         else:
@@ -1033,9 +1033,9 @@ def create_vm(
 
         # Resolve SSH keys for DISABLED mode (outside the cloud-init block)
         disabled_ssh_pub_key: list[str] | str | None = None
-        if effective_mode == CloudInitMode.DISABLED and ssh_key is not None:
+        if effective_mode == CloudInitMode.OFF and ssh_key is not None:
             disabled_ssh_pub_key = resolve_ssh_key(ssh_key)
-        elif effective_mode == CloudInitMode.DISABLED and ssh_key is None:
+        elif effective_mode == CloudInitMode.OFF and ssh_key is None:
             from mvmctl.core.key_manager import get_default_keys as _get_default_keys
             from mvmctl.utils.fs import get_keys_dir as _get_keys_dir
 
@@ -1058,7 +1058,7 @@ def create_vm(
                 disabled_ssh_pub_key = resolve_ssh_key(None)
 
         # Inject SSH keys directly into rootfs for DISABLED mode
-        if effective_mode == CloudInitMode.DISABLED and disabled_ssh_pub_key is not None:
+        if effective_mode == CloudInitMode.OFF and disabled_ssh_pub_key is not None:
             _inject_ssh_keys_for_disabled_mode(rootfs_path, disabled_ssh_pub_key, vm_dir)
 
         # Handle cloud-init based on mode
@@ -1067,7 +1067,7 @@ def create_vm(
         nocloud_net_url: str | None = None
         nocloud_server_pid: int | None = None
 
-        if effective_mode != CloudInitMode.DISABLED:
+        if effective_mode != CloudInitMode.OFF:
             cloud_init_dir = vm_dir / DEFAULT_CLOUD_INIT_DIRNAME
             cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
 
@@ -1110,13 +1110,13 @@ def create_vm(
                 skip_network_config=False,
             )
 
-            if effective_mode == CloudInitMode.CUSTOM:
+            if effective_mode == CloudInitMode.ISO:
                 if cloud_init_iso_path is None:
                     raise MVMError("cloud_init_iso_path required when cloud_init_mode is CUSTOM")
                 if not cloud_init_iso_path.exists():
                     raise MVMError(f"Custom cloud-init ISO not found: {cloud_init_iso_path}")
                 cloud_init_iso = cloud_init_iso_path
-            elif effective_mode == CloudInitMode.NO_CLOUD_NET:
+            elif effective_mode == CloudInitMode.NET:
                 net_manager = NoCloudNetServerManager()
                 url, port = net_manager.start_server(
                     name, cloud_init_dir, net_config.gateway, vm_id, preferred_port=nocloud_net_port
@@ -1128,12 +1128,12 @@ def create_vm(
                 logger.info("NoCloud-net server started at %s", nocloud_net_url)
                 add_nocloud_input_rule(guest_ip, name, nocloud_net_port)
                 resources_created["firewall_rule"] = True
-            elif effective_mode == CloudInitMode.DIRECT_INJECTION:
+            elif effective_mode == CloudInitMode.INJECT:
                 try:
                     inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
                 except Exception as e:
                     raise CloudInitError(f"Direct injection failed: {e}") from e
-            elif effective_mode in (CloudInitMode.AUTO, CloudInitMode.ISO):
+            elif effective_mode in (CloudInitMode.INJECT, CloudInitMode.ISO):
                 cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
                 try:
                     create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
@@ -1185,7 +1185,9 @@ def create_vm(
             )
             setup_bridge(bridge, gateway_cidr=_gw_cidr)
             if net_config.nat_enabled:
-                setup_nat(bridge)
+                setup_nat(
+                    bridge, nat_gateways=net_config.nat_gateways or None, cidr=net_config.cidr
+                )
 
         try:
             create_tap(tap_name, bridge=bridge)
@@ -1399,9 +1401,8 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
 
     remove_iptables_forward_rules(tap_name, bridge=bridge)
 
-    # Try to teardown NAT BEFORE deleting TAP (so guard check can see if other TAPs exist)
     try:
-        teardown_nat(bridge, force=False)
+        teardown_nat(bridge, force=False, cidr=net_config.cidr if net_config else None)
     except NetworkError as e:
         logger.debug("NAT teardown for bridge %s: %s", bridge, e)
 

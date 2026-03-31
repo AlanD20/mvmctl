@@ -81,7 +81,7 @@ class VMConfig:
     enable_logging: bool = DEFAULT_VM_ENABLE_LOGGING
     enable_metrics: bool = DEFAULT_VM_ENABLE_METRICS
     enable_console: bool = DEFAULT_VM_ENABLE_CONSOLE
-    cloud_init_mode: CloudInitMode = CloudInitMode.AUTO
+    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT
     cloud_init_iso_path: Path | None = None
     keep_cloud_init_iso: bool = False
     nocloud_net_url: str | None = None
@@ -184,7 +184,7 @@ class VMConfig:
             enable_console=data.get("enable_console", DEFAULT_VM_ENABLE_CONSOLE),
             cloud_init_mode=CloudInitMode(data["cloud_init_mode"])
             if data.get("cloud_init_mode")
-            else CloudInitMode.AUTO,
+            else CloudInitMode.INJECT,
             cloud_init_iso_path=Path(data["cloud_init_iso_path"])
             if data.get("cloud_init_iso_path")
             else None,
@@ -228,7 +228,7 @@ class VMInstance:
     created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     status: VMState = VMState.STOPPED
     config: VMConfig | None = None
-    cloud_init_mode: CloudInitMode = CloudInitMode.AUTO
+    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT
     nocloud_net_port: int | None = None
     nocloud_server_pid: int | None = None
     console_relay_pid: int | None = None
@@ -272,7 +272,7 @@ class VMInstance:
         if data.get("config") and isinstance(data["config"], dict):
             config = VMConfig.from_dict(data["config"])
 
-        cloud_init_mode = CloudInitMode.AUTO
+        cloud_init_mode = CloudInitMode.INJECT
         if data.get("cloud_init_mode"):
             cloud_init_mode = CloudInitMode(data["cloud_init_mode"])
 

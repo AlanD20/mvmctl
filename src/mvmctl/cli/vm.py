@@ -195,7 +195,7 @@ def create(
     cloud_init_mode: Optional[str] = typer.Option(
         None,
         "--cloud-init-mode",
-        help="Cloud-init mode: 'auto' (default, uses nocloud-net), 'iso' (ISO mode), 'nocloud-net' (HTTP), 'direct' (direct injection), 'disabled' (no cloud-init). Use --cloud-init-iso for custom ISO.",
+        help="Cloud-init mode: 'inject' (default, direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (no cloud-init)",
     ),
     nocloud_net_port: Optional[int] = typer.Option(
         None,
@@ -376,36 +376,36 @@ def create(
     # Determine cloud_init_mode based on flags (must be before output_config handling)
     if cloud_init_mode is not None:
         mode_lower = cloud_init_mode.lower()
-        if mode_lower == "disabled":
-            effective_cloud_init_mode = CloudInitMode.DISABLED
+        if mode_lower == "off":
+            effective_cloud_init_mode = CloudInitMode.OFF
             effective_cloud_init_iso_path: Path | None = None
         elif mode_lower == "iso":
             effective_cloud_init_mode = CloudInitMode.ISO
             effective_cloud_init_iso_path = None
-        elif mode_lower == "nocloud-net":
-            effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
+        elif mode_lower == "net":
+            effective_cloud_init_mode = CloudInitMode.NET
             effective_cloud_init_iso_path = None
-        elif mode_lower == "direct":
-            effective_cloud_init_mode = CloudInitMode.DIRECT_INJECTION
+        elif mode_lower == "inject":
+            effective_cloud_init_mode = CloudInitMode.INJECT
             effective_cloud_init_iso_path = None
-        else:  # "auto"
-            effective_cloud_init_mode = CloudInitMode.AUTO
+        else:  # default to INJECT
+            effective_cloud_init_mode = CloudInitMode.INJECT
             effective_cloud_init_iso_path = None
     elif no_cloud_init:
-        effective_cloud_init_mode = CloudInitMode.DISABLED
+        effective_cloud_init_mode = CloudInitMode.OFF
         effective_cloud_init_iso_path = None
     elif cloud_init_iso is not None:
-        effective_cloud_init_mode = CloudInitMode.CUSTOM
+        effective_cloud_init_mode = CloudInitMode.ISO
         effective_cloud_init_iso_path = (
             None
             if cloud_init_iso == USE_ISO_AUTO  # type: ignore[comparison-overlap]
             else Path(cloud_init_iso)
         )
     elif nocloud_net:
-        effective_cloud_init_mode = CloudInitMode.NO_CLOUD_NET
+        effective_cloud_init_mode = CloudInitMode.NET
         effective_cloud_init_iso_path = None
     else:
-        effective_cloud_init_mode = CloudInitMode.AUTO
+        effective_cloud_init_mode = CloudInitMode.INJECT
         effective_cloud_init_iso_path = None
 
     if output_config is not None:
@@ -471,7 +471,7 @@ def create(
     # Validate --cloud-init-mode if provided
     if cloud_init_mode is not None:
         mode_lower = cloud_init_mode.lower()
-        valid_modes = ["auto", "iso", "direct", "disabled", "nocloud-net"]
+        valid_modes = ["inject", "iso", "inject", "off", "net"]
         if mode_lower not in valid_modes:
             print_error(
                 f"Invalid --cloud-init-mode '{cloud_init_mode}'. Valid modes: {', '.join(valid_modes)}"
@@ -783,7 +783,7 @@ def _print_vm_details(info: dict[str, Any]) -> None:
         except (OSError, ValueError):
             pass
 
-    cloud_init_mode = info.get("cloud_init_mode", "auto").lower()
+    cloud_init_mode = info.get("cloud_init_mode", "inject").lower()
     features = info.get("features", {})
 
     print_inspect_header(f"VM: {name}", status)
@@ -801,8 +801,8 @@ def _print_vm_details(info: dict[str, Any]) -> None:
     print_section_header("RESOURCES")
     print_key_value("Disk Size", disk_size_str)
     print_key_value("Cloud-init", cloud_init_mode)
-    print_key_value("API Socket", "enabled" if features.get("api_socket") else "disabled")
-    print_key_value("Console", "enabled" if features.get("console") else "disabled")
+    print_key_value("API Socket", "enabled" if features.get("api_socket") else "off")
+    print_key_value("Console", "enabled" if features.get("console") else "off")
 
     print_section_header("ASSETS")
 
@@ -875,7 +875,7 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
         except (OSError, ValueError):
             pass
 
-    cloud_init_mode = info.get("cloud_init_mode", "auto").lower()
+    cloud_init_mode = info.get("cloud_init_mode", "inject").lower()
     features = info.get("features", {})
 
     print(f"{name} ({status})")
@@ -894,8 +894,8 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
     tree_lines.append("├── Resources")
     tree_lines.append(f"│   ├── Disk:   {disk_size_str}")
     tree_lines.append(f"│   ├── Cloud:  {cloud_init_mode}")
-    tree_lines.append(f"│   ├── API:    {'enabled' if features.get('api_socket') else 'disabled'}")
-    tree_lines.append(f"│   └── Console: {'enabled' if features.get('console') else 'disabled'}")
+    tree_lines.append(f"│   ├── API:    {'enabled' if features.get('api_socket') else 'off'}")
+    tree_lines.append(f"│   └── Console: {'enabled' if features.get('console') else 'off'}")
 
     image_id = info.get("image_id")
     if image_id:

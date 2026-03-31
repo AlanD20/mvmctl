@@ -81,6 +81,7 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
     mock_client.return_value.send_ctrl_alt_del.assert_called_once()
 
 
+@patch("mvmctl.core.vm_lifecycle.inject_cloud_init")
 @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -128,6 +129,7 @@ def test_create_vm_core_success(
     mock_net_mgr,
     mock_add_firewall_rule,
     mock_copy2,
+    mock_inject_cloud_init,
 ):
     """Test core create_vm() runs through successfully and registers VM with nocloud-net (default)."""
     mock_manager = MagicMock()
@@ -169,7 +171,7 @@ def test_create_vm_core_success(
     # Mock NoCloudNetServerManager to return a URL and port
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    vm = create_vm(name="myvm", image="ubuntu-22.04")
+    vm = create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
 
     assert isinstance(vm, VMInstance)
     assert vm.name == "myvm"
@@ -177,11 +179,11 @@ def test_create_vm_core_success(
     vm_config_arg = mock_config_gen.call_args.args[0]
     assert vm_config_arg.root_uuid == "11111111-2222-3333-4444-555555555555"
     assert vm_config_arg.root_fs_type == "ext4"
-    # With AUTO mode defaulting to nocloud-net, cloud_init_iso_path should be None
+    # With NET mode, cloud_init_iso_path should be None
     assert vm_config_arg.cloud_init_iso_path is None
-    # And nocloud_net_url should be set
-    assert vm_config_arg.nocloud_net_url is not None
-    assert vm_config_arg.cloud_init_mode == CloudInitMode.NO_CLOUD_NET
+    # With NET mode, nocloud_net_url should be set
+    assert vm_config_arg.nocloud_net_url == "http://10.20.0.1:8080"
+    assert vm_config_arg.cloud_init_mode == CloudInitMode.NET
     assert vm_config_arg.extra_drives == []
     mock_manager.register.assert_called_once()
     assert mock_popen.call_count == 2
@@ -193,6 +195,7 @@ def test_create_vm_core_success(
 # ============================================================================
 
 
+@patch("mvmctl.core.vm_lifecycle.inject_cloud_init")
 @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
 @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
@@ -216,7 +219,7 @@ def test_create_vm_core_success(
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
-def test_create_vm_auto_mode_defaults_to_nocloud_net(
+def test_create_vm_inject_mode_is_default(
     mock_setup_nat,
     mock_open,
     mock_resolve_fs_type,
@@ -240,8 +243,9 @@ def test_create_vm_auto_mode_defaults_to_nocloud_net(
     mock_net_mgr,
     mock_add_firewall_rule,
     mock_copy2,
+    mock_inject_cloud_init,
 ):
-    """Test that AUTO cloud_init_mode defaults to NO_CLOUD_NET mode."""
+    """Test that INJECT cloud_init_mode is the default."""
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
@@ -281,16 +285,17 @@ def test_create_vm_auto_mode_defaults_to_nocloud_net(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     # Create VM with explicit AUTO mode
-    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.AUTO)
+    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.INJECT)
 
     # Verify NO_CLOUD_NET was used
-    mock_net_mgr.return_value.start_server.assert_called_once()
+    # With INJECT mode, nocloud-net server should NOT be started
+    mock_net_mgr.return_value.start_server.assert_not_called()
     vm_config_arg = mock_config_gen.call_args.args[0]
-    assert vm_config_arg.cloud_init_mode == CloudInitMode.NO_CLOUD_NET
-    assert vm_config_arg.nocloud_net_url is not None
+    assert vm_config_arg.cloud_init_mode == CloudInitMode.INJECT
+    assert vm_config_arg.nocloud_net_url is None
     assert vm_config_arg.cloud_init_iso_path is None
 
-    # Verify create_cloud_init_iso was NOT called (no ISO for nocloud-net)
+    # Verify create_cloud_init_iso was NOT called (INJECT mode uses direct injection)
     mock_create_iso.assert_not_called()
 
 
@@ -298,7 +303,7 @@ def test_create_vm_auto_mode_defaults_to_nocloud_net(
 def test_create_vm_limit_reached(mock_get_vm_mgr):
     """create_vm raises MVMError if max VMs reached."""
     mock_manager = MagicMock()
-    mock_manager.count_vms.return_value = 100  # assuming MAX_VMS=50 or similar
+    mock_manager.count_vms.return_value = 1000  # MAX_VMS is 1000
     mock_get_vm_mgr.return_value = mock_manager
 
     with pytest.raises(MVMError, match="VM limit reached"):
@@ -1141,7 +1146,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
     # Mock NoCloudNetServerManager
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04")
+    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
 
     # Rootfs MUST be copied to VM directory (VM-local copy)
     mock_copy2.assert_called_once()
@@ -1254,7 +1259,7 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     # Mock NoCloudNetServerManager
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04", disk_size="10G")
+    create_vm(name="myvm", image="ubuntu-22.04", disk_size="10G", cloud_init_mode=CloudInitMode.NET)
 
     # Verify copy happened first
     mock_copy2.assert_called_once()
@@ -1369,7 +1374,7 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
     mock_create_tap.side_effect = Exception("TAP creation failed")
 
     with pytest.raises(Exception, match="TAP creation failed"):
-        create_vm(name="myvm", image="ubuntu-22.04")
+        create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
 
     # Verify copy happened before the failure
     mock_copy2.assert_called_once()
@@ -1487,7 +1492,7 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
     # Mock NoCloudNetServerManager
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    vm = create_vm(name="myvm", image="ubuntu-22.04")
+    vm = create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
 
     # Verify VMInstance has config field set
     assert vm.config is not None, "VMInstance.config should be set"
@@ -1601,7 +1606,7 @@ def test_create_vm_nocloud_net_starts_server(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
-        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+        cloud_init_mode=CloudInitMode.NET,
     )
 
     # Verify the manager's start_server was called
@@ -1715,7 +1720,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
         create_vm(
             name="myvm",
             image="ubuntu-22.04",
-            cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+            cloud_init_mode=CloudInitMode.NET,
         )
 
     # Verify the manager's stop_server was called to cleanup
@@ -1818,7 +1823,7 @@ def test_create_vm_nocloud_net_success_sets_port(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
-        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+        cloud_init_mode=CloudInitMode.NET,
     )
 
     # Verify VMInstance was created with the correct nocloud_net_port
@@ -1928,7 +1933,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
-        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+        cloud_init_mode=CloudInitMode.NET,
     )
 
     # Verify add_nocloud_input_rule was called with correct parameters
@@ -2049,7 +2054,7 @@ def test_firewall_failure_stops_server_and_raises(
         create_vm(
             name="myvm",
             image="ubuntu-22.04",
-            cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+            cloud_init_mode=CloudInitMode.NET,
         )
 
     # Verify stop_server was called
@@ -2164,7 +2169,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
-        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+        cloud_init_mode=CloudInitMode.NET,
     )
 
     # Verify VM was created successfully (no blocking wait for cloud-init)
@@ -2269,7 +2274,7 @@ def test_create_vm_starts_nocloud_server(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
-        cloud_init_mode=CloudInitMode.NO_CLOUD_NET,
+        cloud_init_mode=CloudInitMode.NET,
     )
 
     # Verify VM was created successfully
@@ -2374,7 +2379,7 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
         create_vm(
             name=vm_name,
             image="ubuntu-22.04",
-            cloud_init_mode=CloudInitMode.DIRECT_INJECTION,
+            cloud_init_mode=CloudInitMode.INJECT,
         )
 
     copy_calls = [e for e in call_log if e.startswith("copy2:")]
@@ -2490,7 +2495,7 @@ def test_direct_injection_cleanup_on_injection_failure(
         create_vm(
             name=vm_name,
             image="ubuntu-22.04",
-            cloud_init_mode=CloudInitMode.DIRECT_INJECTION,
+            cloud_init_mode=CloudInitMode.INJECT,
         )
 
     mock_rmtree.assert_called_once_with(vm_dir, ignore_errors=True)
@@ -2595,7 +2600,7 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     mock_popen.return_value.pid = 99999
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04")
+    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
 
     mock_write_ci.assert_called_once()
     _, kwargs = mock_write_ci.call_args
@@ -2688,7 +2693,7 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     mock_popen.return_value.pid = 99999
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04", ssh_key="mykey")
+    create_vm(name="myvm", image="ubuntu-22.04", ssh_key="mykey", cloud_init_mode=CloudInitMode.NET)
 
     mock_resolve_ssh_key.assert_called_once_with("mykey")
     mock_write_ci.assert_called_once()
@@ -2782,7 +2787,7 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_popen.return_value.pid = 99999
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04")
+    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
 
     mock_resolve_ssh_key.assert_called_once_with(None)
 
@@ -2866,7 +2871,7 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_add_rules.side_effect = NetworkError("iptables failed")
 
     with pytest.raises(NetworkError, match="Network setup failed"):
-        create_vm(name="myvm", image="ubuntu-22.04")
+        create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
 
     # cleanup_tap must be called to remove TAP and iptables rules
     mock_cleanup_tap.assert_called_once()
