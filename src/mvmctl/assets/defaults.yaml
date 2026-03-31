@@ -78,6 +78,8 @@ image:
       - .btrfs
       - .img
       - .raw
+      - .ext4.zst
+      - .btrfs.zst
     import_format_map:
       .qcow2: qcow2
       .raw: raw
