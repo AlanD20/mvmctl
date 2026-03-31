@@ -12,6 +12,14 @@ images:
     sha256: null
     sha256_url: https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
 
+  - id: ubuntu-24.04-minimal
+    name: Ubuntu 24.04 Minimal
+    format: tar-rootfs
+    convert_to: ext4
+    size_mib: 1024
+    source: https://cloud-images.ubuntu.com/minimal/releases/noble/current/ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz
+    sha256_url: https://cloud-images.ubuntu.com/minimal/releases/noble/current/SHA256SUMS
+
   - id: ubuntu-22.04
     type: ubuntu
     version: "22.04"

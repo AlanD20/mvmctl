@@ -2705,3 +2705,151 @@ def test_fetch_image_squashfs_validation_failure_cleans_up(
 
     # Download file should be cleaned up
     assert not download_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# shrink_image_with_guestfs - Ubuntu cleanup and filesystem-specific operations
+# ---------------------------------------------------------------------------
+
+
+def test_ubuntu_minimal_image_metadata():
+    """Test that ubuntu-24.04-minimal image is properly defined."""
+    import yaml
+
+    from mvmctl.utils.fs import get_assets_dir
+
+    assets_dir = get_assets_dir()
+    images_yaml = assets_dir / "images.yaml"
+
+    with open(images_yaml) as f:
+        data = yaml.safe_load(f)
+
+    # Find ubuntu-24.04-minimal entry
+    minimal = None
+    for img in data.get("images", []):
+        if img.get("id") == "ubuntu-24.04-minimal":
+            minimal = img
+            break
+
+    assert minimal is not None, "ubuntu-24.04-minimal not found in images.yaml"
+    assert minimal["id"] == "ubuntu-24.04-minimal"
+    assert minimal["name"] == "Ubuntu 24.04 Minimal"
+    assert minimal["format"] == "tar-rootfs"
+    assert minimal["convert_to"] == "ext4"
+    assert minimal["size_mib"] == 1024, f"Expected size_mib=1024, got {minimal['size_mib']}"
+
+
+def test_shrink_image_with_guestfs_performs_ubuntu_cleanup(tmp_path: Path, mocker: MockerFixture):
+    """Test that shrink_image_with_guestfs performs OS-specific cleanup for Ubuntu."""
+    # Patch check_libguestfs at the source location (utils.guestfs)
+    mocker.patch("mvmctl.utils.guestfs.check_libguestfs", return_value=True)
+
+    mock_g = MagicMock()
+    mock_g.list_partitions.return_value = ["/dev/sda1"]
+    mock_g.vfs_type.return_value = "ext4"
+    mock_g.cat.return_value = "ID=ubuntu"
+    mock_g.blockdev_getsize64.return_value = 1024 * 1024 * 1024  # 1GB
+
+    # Patch optimized_guestfs at the source location (utils.guestfs)
+    mocker.patch("mvmctl.utils.guestfs.optimized_guestfs")
+    with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_og:
+        mock_og.return_value.__enter__.return_value = mock_g
+        mock_og.return_value.__exit__.return_value = False
+
+        image_path = tmp_path / "test.img"
+        image_path.write_bytes(b"x" * (1024 * 1024))  # 1MB
+
+        from mvmctl.core.image import shrink_image_with_guestfs
+
+        shrink_image_with_guestfs(image_path)
+
+        # Verify cleanup commands were issued
+        sh_calls = [str(c) for c in mock_g.sh.call_args_list]
+        assert any("apt-get clean" in c for c in sh_calls), f"Expected apt-get clean in {sh_calls}"
+        assert any("rm -rf /var/lib/apt/lists" in c for c in sh_calls), (
+            f"Expected apt lists cleanup in {sh_calls}"
+        )
+        assert any("sync" in c for c in sh_calls), f"Expected sync in {sh_calls}"
+
+
+def test_shrink_image_with_guestfs_performs_zeroing_ext4(tmp_path: Path, mocker: MockerFixture):
+    """Test that shrink_image_with_guestfs zeros free space for ext4."""
+    mocker.patch("mvmctl.utils.guestfs.check_libguestfs", return_value=True)
+
+    mock_g = MagicMock()
+    mock_g.list_partitions.return_value = ["/dev/sda1"]
+    mock_g.vfs_type.return_value = "ext4"
+    mock_g.cat.return_value = "ID=ubuntu"
+    mock_g.blockdev_getsize64.return_value = 1024 * 1024 * 1024
+
+    mocker.patch("mvmctl.utils.guestfs.optimized_guestfs")
+    with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_og:
+        mock_og.return_value.__enter__.return_value = mock_g
+        mock_og.return_value.__exit__.return_value = False
+
+        image_path = tmp_path / "test.ext4"
+        image_path.write_bytes(b"x" * (1024 * 1024))
+
+        from mvmctl.core.image import shrink_image_with_guestfs
+
+        shrink_image_with_guestfs(image_path)
+
+        # Verify zero_free_space was called for ext4
+        mock_g.zero_free_space.assert_called()
+        # Verify resize2fs_size was called
+        mock_g.resize2fs_size.assert_called()
+
+
+def test_shrink_image_with_guestfs_performs_zeroing_btrfs(tmp_path: Path, mocker: MockerFixture):
+    """Test that shrink_image_with_guestfs uses fstrim for btrfs."""
+    mocker.patch("mvmctl.utils.guestfs.check_libguestfs", return_value=True)
+
+    mock_g = MagicMock()
+    mock_g.list_partitions.return_value = ["/dev/sda1"]
+    mock_g.vfs_type.return_value = "btrfs"
+    mock_g.cat.return_value = "ID=ubuntu"
+    mock_g.blockdev_getsize64.return_value = 1024 * 1024 * 1024
+
+    mocker.patch("mvmctl.utils.guestfs.optimized_guestfs")
+    with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_og:
+        mock_og.return_value.__enter__.return_value = mock_g
+        mock_og.return_value.__exit__.return_value = False
+
+        image_path = tmp_path / "test.btrfs"
+        image_path.write_bytes(b"x" * (1024 * 1024))
+
+        from mvmctl.core.image import shrink_image_with_guestfs
+
+        shrink_image_with_guestfs(image_path)
+
+        # Verify fstrim was called via g.sh
+        sh_calls = [str(c) for c in mock_g.sh.call_args_list]
+        assert any("fstrim" in c for c in sh_calls), f"Expected fstrim in {sh_calls}"
+        # Verify btrfs_filesystem_sync was called
+        mock_g.btrfs_filesystem_sync.assert_called()
+
+
+def test_shrink_image_with_guestfs_btrfs_resize_still_works(tmp_path: Path, mocker: MockerFixture):
+    """Test that btrfs filesystem resize still works after cleanup/trim."""
+    mocker.patch("mvmctl.utils.guestfs.check_libguestfs", return_value=True)
+
+    mock_g = MagicMock()
+    mock_g.list_partitions.return_value = ["/dev/sda1"]
+    mock_g.vfs_type.return_value = "btrfs"
+    mock_g.cat.return_value = "ID=ubuntu"
+    mock_g.blockdev_getsize64.return_value = 1024 * 1024 * 1024
+
+    mocker.patch("mvmctl.utils.guestfs.optimized_guestfs")
+    with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_og:
+        mock_og.return_value.__enter__.return_value = mock_g
+        mock_og.return_value.__exit__.return_value = False
+
+        image_path = tmp_path / "test.btrfs"
+        image_path.write_bytes(b"x" * (1024 * 1024))
+
+        from mvmctl.core.image import shrink_image_with_guestfs
+
+        shrink_image_with_guestfs(image_path)
+
+        # Verify btrfs_filesystem_resize was called with "/" and 0 (minimum size)
+        mock_g.btrfs_filesystem_resize.assert_called_with("/", 0)

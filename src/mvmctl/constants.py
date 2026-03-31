@@ -556,6 +556,9 @@ DEFAULT_LIBGUESTFS_ROOT_INDICATORS: Final[tuple[str, ...]] = _require_str_tuple(
     ("libguestfs", "root_indicators")
 )
 
+# Standard Linux system file path for OS release info (used by guestfs cleanup)
+CONST_GUESTFS_OS_RELEASE_PATH: Final[str] = "/etc/os-release"
+
 # ---------------------------------------------------------------------------
 # Timeouts and poll intervals (in seconds)
 # ---------------------------------------------------------------------------

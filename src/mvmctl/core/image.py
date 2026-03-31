@@ -13,6 +13,7 @@ from urllib.error import URLError
 import zstandard as zstd
 
 from mvmctl.constants import (
+    CONST_GUESTFS_OS_RELEASE_PATH,
     CONST_MEBIBYTE_BYTES,
     CONST_RATIO_MIN,
     CONST_SECTOR_SIZE_BYTES,
@@ -63,6 +64,11 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
         Tuple of (shrunk_image_path, original_size_bytes, final_size_bytes)
 
     Uses the same guestfs approach as rootfs_injector.py.
+
+    Enhancement phases:
+        1. Pre-shrink cleanup: OS-specific package manager caches, logs, docs
+        2. Zeroing: Free space zeroing for better compression
+        3. Shrink: Filesystem-specific minimal size resize
     """
     from mvmctl.utils.guestfs import check_libguestfs
 
@@ -90,13 +96,88 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
             if fs_type in ("ext2", "ext3", "ext4"):
                 # For ext: mount, check, resize to minimum
                 g.mount(root_device, "/")
-                # Run e2fsck first (required before resize)
+
+                # Phase A: Pre-shrink cleanup - detect OS and clean up
+                try:
+                    os_release = g.cat(CONST_GUESTFS_OS_RELEASE_PATH) or ""
+                    os_id = os_release.lower()
+
+                    if "ubuntu" in os_id or "debian" in os_id:
+                        # Ubuntu/Debian cleanup
+                        g.sh("apt-get clean")
+                        g.sh("rm -rf /var/lib/apt/lists/*")
+                        g.sh("rm -rf /var/cache/debconf/*")
+                    elif "arch" in os_id or "manjaro" in os_id:
+                        # Arch cleanup
+                        g.sh("pacman -Sc --noconfirm || true")
+                        g.sh("rm -rf /var/cache/pacman/pkg/*")
+                    elif "fedora" in os_id or "rhel" in os_id or "centos" in os_id:
+                        # Fedora/RHEL cleanup
+                        g.sh("dnf clean all || yum clean all || true")
+                        g.sh("rm -rf /var/cache/dnf/* /var/cache/yum/*")
+                    elif "alpine" in os_id:
+                        # Alpine cleanup
+                        g.sh("rm -rf /var/cache/apk/*")
+
+                    # Common cleanup for all OSes
+                    g.sh("rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*")
+                    g.sh("rm -rf /var/log/*.log /var/log/*.gz /var/log/journal/*")
+                    g.sh("rm -rf /tmp/*")
+                    g.sh("find /var/log -type f -delete 2>/dev/null || true")
+                    g.sh("sync")
+                except Exception as e:
+                    # Log but don't fail - cleanup is best-effort
+                    logger.debug(f"Cleanup phase encountered issue (non-fatal): {e}")
+
+                # Phase B: Zero free space for better compression
+                g.umount(root_device)
+                g.zero_free_space(root_device)
+                g.mount(root_device, "/")
+
+                # Phase C: Shrink - run e2fsck and resize
                 g.e2fsck(root_device, correct=True)
                 g.umount(root_device)
-                # Resize to minimum (0 means minimum)
                 g.resize2fs_size(root_device, 0)
             elif fs_type == "btrfs":
                 g.mount(root_device, "/")
+
+                # Phase A: Pre-shrink cleanup - detect OS and clean up
+                try:
+                    os_release = g.cat(CONST_GUESTFS_OS_RELEASE_PATH) or ""
+                    os_id = os_release.lower()
+
+                    if "ubuntu" in os_id or "debian" in os_id:
+                        # Ubuntu/Debian cleanup
+                        g.sh("apt-get clean")
+                        g.sh("rm -rf /var/lib/apt/lists/*")
+                        g.sh("rm -rf /var/cache/debconf/*")
+                    elif "arch" in os_id or "manjaro" in os_id:
+                        # Arch cleanup
+                        g.sh("pacman -Sc --noconfirm || true")
+                        g.sh("rm -rf /var/cache/pacman/pkg/*")
+                    elif "fedora" in os_id or "rhel" in os_id or "centos" in os_id:
+                        # Fedora/RHEL cleanup
+                        g.sh("dnf clean all || yum clean all || true")
+                        g.sh("rm -rf /var/cache/dnf/* /var/cache/yum/*")
+                    elif "alpine" in os_id:
+                        # Alpine cleanup
+                        g.sh("rm -rf /var/cache/apk/*")
+
+                    # Common cleanup for all OSes
+                    g.sh("rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*")
+                    g.sh("rm -rf /var/log/*.log /var/log/*.gz /var/log/journal/*")
+                    g.sh("rm -rf /tmp/*")
+                    g.sh("find /var/log -type f -delete 2>/dev/null || true")
+                    g.sh("sync")
+                except Exception as e:
+                    # Log but don't fail - cleanup is best-effort
+                    logger.debug(f"Cleanup phase encountered issue (non-fatal): {e}")
+
+                # Phase B: For btrfs, use fstrim to discard unused blocks
+                g.sh("fstrim -av / 2>/dev/null || true")
+                g.btrfs_filesystem_sync("/")
+
+                # Phase C: Shrink - existing btrfs_filesystem_resize preserved
                 g.btrfs_filesystem_resize("/", 0)  # 0 = minimum
                 g.umount(root_device)
             else:
@@ -940,6 +1021,9 @@ def fetch_image(
         # Shrink before compression
         if actual_path.exists():
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(actual_path)
+            logger.info(
+                f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
+            )
             compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
             compression_ratio = (
@@ -1074,6 +1158,9 @@ def import_image(
                 shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(
                     destination_path
                 )
+                logger.info(
+                    f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
+                )
                 compressed_path = compress_image(shrunk_path)
                 compressed_size = compressed_path.stat().st_size
                 compression_ratio = (
@@ -1102,6 +1189,9 @@ def import_image(
         # Shrink before compression
         if final_path.exists():
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(final_path)
+            logger.info(
+                f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
+            )
             compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
             compression_ratio = (
@@ -1131,6 +1221,9 @@ def import_image(
         # Shrink before compression
         if final_path.exists():
             shrunk_path, pre_shrink_size, post_shrink_size = shrink_image_with_guestfs(final_path)
+            logger.info(
+                f"Image shrunk: {pre_shrink_size / (1024 * 1024):.1f} MiB → {post_shrink_size / (1024 * 1024):.1f} MiB ({(pre_shrink_size - post_shrink_size) / pre_shrink_size * 100:.1f}% reduction)"
+            )
             compressed_path = compress_image(shrunk_path)
             compressed_size = compressed_path.stat().st_size
             compression_ratio = (
