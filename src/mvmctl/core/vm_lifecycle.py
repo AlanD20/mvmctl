@@ -340,13 +340,11 @@ def grow_rootfs_with_guestfs(image_path: Path, target_size_bytes: int) -> None:
         return  # Skip if file doesn't exist or stat fails
 
     if current_size >= target_size_bytes:
-        logger.warning(
-            "Requested disk size (%d MB) is smaller than current image size (%d MB). "
-            "Filesystem will not be shrunk. Use a larger size or recreate VM with smaller image.",
-            target_size_bytes // CONST_MEBIBYTE_BYTES,
-            current_size // CONST_MEBIBYTE_BYTES,
+        raise VMCreateError(
+            f"Requested disk size ({target_size_bytes // CONST_MEBIBYTE_BYTES} MB) is smaller than "
+            f"current image size ({current_size // CONST_MEBIBYTE_BYTES} MB). "
+            f"Cannot shrink filesystem. Use a larger size or recreate VM with smaller image."
         )
-        return  # Cannot shrink, only grow
 
     try:
         # First, extend the file size
