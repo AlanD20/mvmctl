@@ -379,6 +379,99 @@ def grow_rootfs_with_guestfs(image_path: Path, target_size_bytes: int) -> None:
         raise VMCreateError(f"Failed to grow rootfs: {e}") from e
 
 
+def _detect_init_system_and_enable_ssh(g: Any, rootfs_path: Path) -> bool:
+    """Detect init system and enable SSH service.
+
+    Args:
+        g: GuestFS handle (already mounted)
+        rootfs_path: Path to rootfs (for logging)
+
+    Returns:
+        True if SSH was enabled successfully
+    """
+    init_system = "unknown"
+
+    # Detection logic
+    if g.exists("/lib/systemd/systemd") or g.exists("/usr/lib/systemd/systemd"):
+        init_system = "systemd"
+        logger.debug("Detected systemd init system in %s", rootfs_path.name)
+    elif g.exists("/sbin/openrc") or g.exists("/usr/sbin/openrc"):
+        init_system = "openrc"
+        logger.debug("Detected OpenRC init system in %s", rootfs_path.name)
+    elif g.exists("/etc/init.d/"):
+        init_system = "sysvinit"
+        logger.debug("Detected sysvinit in %s", rootfs_path.name)
+    else:
+        logger.warning("Unknown init system in %s, cannot enable SSH", rootfs_path.name)
+        return False
+
+    # SSH enablement based on init system
+    try:
+        if init_system == "systemd":
+            # Create symlink to enable service
+            # Try ssh.service first, fallback to sshd.service
+            ssh_services = [
+                "/usr/lib/systemd/system/ssh.service",
+                "/lib/systemd/system/ssh.service",
+                "/etc/systemd/system/ssh.service",
+                "/usr/lib/systemd/system/sshd.service",
+                "/lib/systemd/system/sshd.service",
+                "/etc/systemd/system/sshd.service",
+            ]
+
+            ssh_service_path = None
+            for svc_path in ssh_services:
+                if g.exists(svc_path):
+                    ssh_service_path = svc_path
+                    break
+
+            if ssh_service_path:
+                g.mkdir_p("/etc/systemd/system/multi-user.target.wants")
+                g.ln_s(
+                    ssh_service_path,
+                    f"/etc/systemd/system/multi-user.target.wants/{ssh_service_path.split('/')[-1]}",
+                )
+                logger.info("Enabled SSH service (systemd) for %s", rootfs_path.name)
+                return True
+            else:
+                logger.warning("SSH service unit not found in %s", rootfs_path.name)
+                return False
+
+        elif init_system == "openrc":
+            # Enable sshd for default runlevel
+            g.mkdir_p("/etc/runlevels/default")
+            if g.exists("/etc/init.d/sshd"):
+                g.ln_s("/etc/init.d/sshd", "/etc/runlevels/default/sshd")
+                logger.info("Enabled SSH service (OpenRC) for %s", rootfs_path.name)
+                return True
+            elif g.exists("/etc/init.d/ssh"):
+                g.ln_s("/etc/init.d/ssh", "/etc/runlevels/default/ssh")
+                logger.info("Enabled SSH service (OpenRC) for %s", rootfs_path.name)
+                return True
+            else:
+                logger.warning("SSH init script not found for OpenRC in %s", rootfs_path.name)
+                return False
+
+        elif init_system == "sysvinit":
+            # For Debian/Ubuntu sysvinit - create rc.d symlinks
+            if g.exists("/etc/init.d/ssh"):
+                # Create symlinks for runlevels 2,3,4,5
+                for level in ["2", "3", "4", "5"]:
+                    g.mkdir_p(f"/etc/rc{level}.d")
+                    g.ln_s("../init.d/ssh", f"/etc/rc{level}.d/S02ssh")
+                logger.info("Enabled SSH service (sysvinit) for %s", rootfs_path.name)
+                return True
+            else:
+                logger.warning("SSH init script not found for sysvinit in %s", rootfs_path.name)
+                return False
+
+    except Exception as e:
+        logger.error("Failed to enable SSH for %s: %s", rootfs_path.name, e)
+        return False
+
+    return False
+
+
 def _inject_ssh_keys_for_disabled_mode(
     rootfs_path: Path,
     ssh_pub_key: list[str] | str | None,
@@ -455,6 +548,60 @@ def _inject_ssh_keys_for_disabled_mode(
                     logger.debug(
                         "Injected %d SSH key(s) for disabled cloud-init mode", len(new_keys)
                     )
+                # Enable SSH service based on init system
+                _detect_init_system_and_enable_ssh(g, rootfs_path)
+
+                # Create first-boot SSH installer service (for minimal images like Arch)
+                first_boot_service = """[Unit]
+Description=First-boot SSH installer
+After=network.target
+ConditionFirstBoot=yes
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '
+    # Detect package manager and install SSH if missing
+    if ! command -v sshd >/dev/null 2>&1 && ! command -v ssh >/dev/null 2>&1; then
+        if command -v pacman >/dev/null 2>&1; then
+            # Arch Linux
+            pacman -Sy --noconfirm openssh 2>/dev/null || true
+        elif command -v apt-get >/dev/null 2>&1; then
+            # Debian/Ubuntu
+            apt-get update && apt-get install -y openssh-server 2>/dev/null || true
+        elif command -v apk >/dev/null 2>&1; then
+            # Alpine
+            apk add --no-cache openssh 2>/dev/null || true
+        fi
+    fi
+    
+    # Enable SSH service
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable --now sshd 2>/dev/null || systemctl enable --now ssh 2>/dev/null || true
+    elif [ -f /sbin/openrc ]; then
+        rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true
+        rc-service sshd start 2>/dev/null || rc-service ssh start 2>/dev/null || true
+    fi
+    
+    # Mark service to not run again
+    systemctl disable first-boot-ssh-installer.service 2>/dev/null || true
+'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+                g.write("/etc/systemd/system/first-boot-ssh-installer.service", first_boot_service)
+                g.chmod("/etc/systemd/system/first-boot-ssh-installer.service", 0o644)
+
+                # Enable the service
+                g.mkdir_p("/etc/systemd/system/multi-user.target.wants")
+                g.ln_s(
+                    "/etc/systemd/system/first-boot-ssh-installer.service",
+                    "/etc/systemd/system/multi-user.target.wants/first-boot-ssh-installer.service",
+                )
+
+                logger.info("Created first-boot SSH installer for %s", rootfs_path.name)
             finally:
                 try:
                     g.umount("/")
