@@ -548,6 +548,14 @@ def _inject_ssh_keys_for_disabled_mode(
                     logger.debug(
                         "Injected %d SSH key(s) for disabled cloud-init mode", len(new_keys)
                     )
+                # Disable cloud-init datasource probing (Ec2/MMDS, etc.)
+                # Prevents ~120s timeout on boot waiting for unreachable metadata endpoints
+                g.mkdir_p("/etc/cloud/cloud.cfg.d")
+                g.write(
+                    "/etc/cloud/cloud.cfg.d/99-disable-datasources.cfg",
+                    "datasource_list: [None]\n",
+                )
+
                 # Enable SSH service based on init system
                 _detect_init_system_and_enable_ssh(g, rootfs_path)
 
