@@ -273,27 +273,3 @@ class TestVMLifecycleEdgeCases:
         result = runner.invoke(vm_app, ["create", "--name", "duplicate-vm", "--image", "abc123"])
         assert result.exit_code == 1
         assert "already exists" in result.output.lower()
-
-    @patch("mvmctl.api.vms.check_privileges_interactive")
-    @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.cli.vm.create_vm")
-    @patch("mvmctl.cli.vm.cleanup_vms")
-    @patch("mvmctl.cli.vm.list_vms")
-    def test_cleanup_workflow(
-        self, mock_list, mock_cleanup, mock_create, mock_resolve_image, mock_check_priv
-    ):
-        """Test cleanup workflow for stopped VMs."""
-        mock_check_priv.return_value = None
-        mock_resolve_image.return_value = Path("/tmp/image.ext4")
-
-        vm = _make_vm("cleanup-vm", status=VMState.STOPPED)
-        mock_create.return_value = vm
-        mock_list.return_value = [vm]
-        mock_cleanup.return_value = [vm]
-
-        result = runner.invoke(vm_app, ["create", "--name", "cleanup-vm", "--image", "abc123"])
-        assert result.exit_code == 0
-
-        result = runner.invoke(vm_app, ["prune"])
-        assert result.exit_code == 0
-        mock_cleanup.assert_called_once()

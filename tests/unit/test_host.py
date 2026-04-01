@@ -1622,12 +1622,14 @@ class TestCleanHost:
     @patch("mvmctl.core.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.remove_network")
+    @patch("mvmctl.core.network.teardown_nat")
+    @patch("mvmctl.core.network.teardown_bridge")
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_removes_networks(
         self,
         mock_list,
-        mock_remove,
+        mock_teardown_bridge,
+        mock_teardown_nat,
         mock_get_taps,
         mock_delete_tap,
         mock_bridge_exists,
@@ -1721,14 +1723,14 @@ class TestCleanHost:
     @patch("mvmctl.core.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap", side_effect=NetworkError("permission denied"))
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-denied-tap"])
-    @patch(
-        "mvmctl.core.network_manager.remove_network", side_effect=NetworkError("permission denied")
-    )
+    @patch("mvmctl.core.network.teardown_nat")
+    @patch("mvmctl.core.network.teardown_bridge", side_effect=NetworkError("permission denied"))
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_permission_denied_becomes_warnings(
         self,
         mock_list,
-        mock_remove,
+        mock_teardown_bridge,
+        mock_teardown_nat,
         mock_get_taps,
         mock_delete_tap,
         mock_bridge_exists,
@@ -1742,7 +1744,7 @@ class TestCleanHost:
 
         summary = clean_host(MagicMock())
         assert any("Warning: failed to remove TAP" in s for s in summary)
-        assert any("skipped cleanup for network 'default'" in s for s in summary)
+        assert any("failed to remove network 'default'" in s for s in summary)
         assert any("failed to delete chain MVM-FORWARD" in s for s in summary)
 
     @patch(
@@ -1846,12 +1848,10 @@ class TestCleanHost:
     @patch("mvmctl.core.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
     @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.remove_network")
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_skips_metadata_tracked_bridge_in_orphan_scan(
         self,
         mock_list,
-        mock_remove,
         mock_get_taps,
         mock_delete_tap,
         mock_bridge_exists,
@@ -1867,8 +1867,7 @@ class TestCleanHost:
 
         summary = clean_host(MagicMock())
 
-        mock_remove.assert_called_once_with("custom")
-        mock_teardown_bridge.assert_not_called()
+        mock_teardown_bridge.assert_called_once_with("mvm-custom")
         assert any("Removed network 'custom'" in s for s in summary)
 
 

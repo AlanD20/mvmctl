@@ -309,7 +309,9 @@ def test_fetch_images_parallel_success(tmp_path: Path, mocker: MockerFixture):
         ),
     ]
 
-    def mock_fetch(spec: ImageSpec, output_dir: Path, force: bool = False) -> ImageImportResult:
+    def mock_fetch(
+        spec: ImageSpec, output_dir: Path, force: bool = False, skip_optimization: bool = False
+    ) -> ImageImportResult:
         return ImageImportResult(path=output_dir / f"{spec.id}.ext4", fs_type="ext4", fs_uuid=None)
 
     mocker.patch("mvmctl.api.assets.fetch_image", side_effect=mock_fetch)
@@ -338,7 +340,7 @@ def test_fetch_images_parallel_with_force(tmp_path: Path, mocker: MockerFixture)
 
     captured_force = []
 
-    def mock_fetch_with_capture(spec, output_dir, force=False):
+    def mock_fetch_with_capture(spec, output_dir, force=False, skip_optimization=False):
         captured_force.append(force)
         return ImageImportResult(path=output_dir / f"{spec.id}.ext4", fs_type="ext4", fs_uuid=None)
 
@@ -401,7 +403,9 @@ def test_fetch_images_parallel_failure(tmp_path: Path, mocker: MockerFixture):
         ),
     ]
 
-    def mock_fetch(spec: ImageSpec, output_dir: Path, force: bool = False) -> Path:
+    def mock_fetch(
+        spec: ImageSpec, output_dir: Path, force: bool = False, skip_optimization: bool = False
+    ) -> Path:
         if spec.id == "img1":
             raise Exception("Network error for img1")
         return output_dir / f"{spec.id}.ext4"

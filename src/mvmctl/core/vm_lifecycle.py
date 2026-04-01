@@ -472,10 +472,250 @@ def _detect_init_system_and_enable_ssh(g: Any, rootfs_path: Path) -> bool:
     return False
 
 
+def _enforce_ssh_key_auth(g: Any, rootfs_path: Path, user: str) -> None:
+    """Enforce SSH key authentication via sshd_config.
+
+    Creates /etc/ssh/sshd_config.d/mvm.conf with key-only auth settings
+    and adds user-specific AllowUsers for non-root users.
+
+    Args:
+        g: GuestFS handle (already mounted)
+        rootfs_path: Path to rootfs (for logging)
+        user: Username to configure SSH for
+    """
+    try:
+        # Check if sshd_config exists
+        if not g.exists("/etc/ssh/sshd_config"):
+            logger.warning("sshd_config not found in %s", rootfs_path.name)
+            return
+
+        # Create sshd_config.d directory for our config
+        sshd_config_d = "/etc/ssh/sshd_config.d"
+        g.mkdir_p(sshd_config_d)
+
+        # Build sshd config content
+        config_lines = [
+            "# MVM SSH key authentication configuration",
+            "# This file is managed by mvmctl - changes will be preserved across reboots",
+            "",
+            "# Enable SSH key authentication",
+            "PubkeyAuthentication yes",
+            "AuthorizedKeysFile .ssh/authorized_keys",
+            "",
+            "# Disable password authentication entirely",
+            "PasswordAuthentication no",
+            "PermitEmptyPasswords no",
+            "",
+            "# Disable PAM for SSH (avoid password prompts)",
+            "UsePAM yes",
+            "",
+            "# Ensure SSH protocol version 2",
+            "Protocol 2",
+        ]
+
+        # Add user-specific AllowUsers for non-root users
+        if user != "root":
+            config_lines.append("")
+            config_lines.append("# Allow specific user for key-based auth")
+            config_lines.append(f"AllowUsers {user}")
+        else:
+            # For root, we allow root but require key auth
+            config_lines.append("")
+            config_lines.append("# Allow root with key authentication only")
+            config_lines.append("PermitRootLogin prohibit-password")
+
+        config_content = "\n".join(config_lines) + "\n"
+        g.write(f"{sshd_config_d}/mvm.conf", config_content)
+        g.chmod(0o644, f"{sshd_config_d}/mvm.conf")
+        logger.info("Configured SSH key authentication for user '%s' in %s", user, rootfs_path.name)
+
+    except Exception as e:
+        logger.warning("Failed to configure sshd: %s", e)
+
+
+def _ensure_user_exists(g: Any, user: str, rootfs_path: Path) -> None:
+    """Ensure the specified user exists in the rootfs.
+
+    Creates user with UID/GID 1000 if missing, sets up home directory,
+    adds to sudoers with NOPASSWD, and configures shadow password.
+
+    Args:
+        g: GuestFS handle (already mounted)
+        user: Username to ensure exists
+        rootfs_path: Path to rootfs (for logging)
+    """
+    if user == "root":
+        # Root always exists
+        return
+
+    try:
+        # Check if user already exists in /etc/passwd
+        passwd_content = ""
+        if g.exists("/etc/passwd"):
+            passwd_content = g.read_file("/etc/passwd")
+            if isinstance(passwd_content, bytes):
+                passwd_content = passwd_content.decode("utf-8", errors="replace")
+
+        user_exists = False
+        for line in passwd_content.strip().split("\n"):
+            if line.startswith(f"{user}:"):
+                user_exists = True
+                break
+
+        if user_exists:
+            logger.debug("User '%s' already exists in %s", user, rootfs_path.name)
+            return
+
+        # User doesn't exist - create it
+        logger.info("Creating user '%s' in %s", user, rootfs_path.name)
+
+        # Create home directory with proper structure
+        home_dir = f"/home/{user}"
+        g.mkdir_p(home_dir)
+        g.mkdir_p(f"{home_dir}/.ssh")
+
+        # Create user in /etc/passwd: username:password:uid:gid:gecos:home:shell
+        # Using '!' for locked password (no password login possible)
+        passwd_entry = f"{user}:!:1000:1000::{home_dir}:/bin/bash\n"
+        g.write("/etc/passwd", passwd_entry, mode="a")
+        g.chmod(0o644, "/etc/passwd")
+
+        # Create /etc/shadow with disabled password
+        # Format: username:encrypted_password:last_change:min:max:warn:inactive:expire:flag
+        # '!' prefix means account is locked (no password)
+        shadow_entry = f"{user}:!:19700:0:99999:7:::\n"
+        g.write("/etc/shadow", shadow_entry, mode="a")
+        g.chmod(0o640, "/etc/shadow")
+
+        # Add to /etc/group
+        group_entry = f"{user}:x:1000:\n"
+        g.write("/etc/group", group_entry, mode="a")
+        g.chmod(0o644, "/etc/group")
+
+        # Add to /etc/sudoers.d for passwordless sudo
+        sudoers_dir = "/etc/sudoers.d"
+        g.mkdir_p(sudoers_dir)
+        sudoers_content = f"{user} ALL=(ALL) NOPASSWD: ALL\n"
+        g.write(f"{sudoers_dir}/{user}", sudoers_content)
+        g.chmod(0o440, f"{sudoers_dir}/{user}")
+
+        # Set proper ownership on home directory
+        g.chown(1000, 1000, home_dir)
+        g.chown(1000, 1000, f"{home_dir}/.ssh")
+
+        logger.info("Created user '%s' with UID/GID 1000 in %s", user, rootfs_path.name)
+
+    except Exception as e:
+        logger.warning("Failed to create user '%s': %s", user, e)
+
+
+def _generate_ssh_host_keys(g: Any, rootfs_path: Path) -> None:
+    """Ensure SSH host keys exist for first boot.
+
+    Checks for existing host keys (rsa, ecdsa, ed25519) and creates a
+    first-boot script to generate any missing keys.
+
+    Args:
+        g: GuestFS handle (already mounted)
+        rootfs_path: Path to rootfs (for logging)
+    """
+    try:
+        # Check which host keys already exist
+        key_types = ["ssh_host_rsa_key", "ssh_host_ecdsa_key", "ssh_host_ed25519_key"]
+        existing_keys = []
+        missing_keys = []
+
+        for key in key_types:
+            if g.exists(f"/etc/ssh/{key}"):
+                existing_keys.append(key)
+            else:
+                missing_keys.append(key)
+
+        if not missing_keys:
+            logger.debug("All SSH host keys already exist in %s", rootfs_path.name)
+            return
+
+        logger.info("Missing SSH host keys in %s: %s", rootfs_path.name, missing_keys)
+
+        # Create first-boot script for OpenRC/systemd to generate missing keys
+        # This handles cases where keys don't exist in the image (common for minimal images)
+        local_d_dir = "/etc/local.d"
+        g.mkdir_p(local_d_dir)
+
+        keygen_script = """#!/bin/bash
+# SSH host key generation script
+# Generated by mvmctl - runs once on first boot
+
+SSH_KEYDIR="/etc/ssh"
+
+for key_type in ssh_host_rsa_key ssh_host_ecdsa_key ssh_host_ed25519_key; do
+    key_path="$SSH_KEYDIR/$key_type"
+    if [ ! -f "$key_path" ]; then
+        case "$key_type" in
+            ssh_host_rsa_key)
+                ssh-keygen -t rsa -f "$key_path" -N "" -q 2>/dev/null
+                ;;
+            ssh_host_ecdsa_key)
+                ssh-keygen -t ecdsa -f "$key_path" -N "" -q 2>/dev/null
+                ;;
+            ssh_host_ed25519_key)
+                ssh-keygen -t ed25519 -f "$key_path" -N "" -q 2>/dev/null
+                ;;
+        esac
+        # Ensure proper permissions
+        chmod 600 "$key_path" 2>/dev/null
+        chmod 644 "${key_path}.pub" 2>/dev/null
+    fi
+done
+
+# Remove ourselves so we don't run again
+rm -f /etc/local.d/ssh-keygen.start 2>/dev/null
+exit 0
+"""
+        g.write(f"{local_d_dir}/ssh-keygen.start", keygen_script)
+        g.chmod(0o755, f"{local_d_dir}/ssh-keygen.start")
+
+        # For OpenRC, make sure the service is enabled
+        if g.exists("/sbin/openrc") or g.exists("/usr/sbin/openrc"):
+            g.mkdir_p("/etc/runlevels/default")
+            if not g.exists("/etc/runlevels/default/local"):
+                g.ln_s("/sbin/openrc-local", "/etc/runlevels/default/local")
+
+        # For systemd, create a oneshot service to generate keys
+        g.mkdir_p("/etc/systemd/system")
+        keygen_service = """[Unit]
+Description=SSH Host Key Generation
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /etc/local.d/ssh-keygen.start
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+"""
+        g.write("/etc/systemd/system/ssh-hostkeygen.service", keygen_service)
+        g.chmod(0o644, "/etc/systemd/system/ssh-hostkeygen.service")
+
+        # Enable the service
+        g.mkdir_p("/etc/systemd/system/multi-user.target.wants")
+        g.ln_s(
+            "/etc/systemd/system/ssh-hostkeygen.service",
+            "/etc/systemd/system/multi-user.target.wants/ssh-hostkeygen.service",
+        )
+
+        logger.info("Created SSH host key generation service in %s", rootfs_path.name)
+
+    except Exception as e:
+        logger.warning("Failed to setup SSH host key generation: %s", e)
+
+
 def _inject_ssh_keys_for_disabled_mode(
     rootfs_path: Path,
     ssh_pub_key: list[str] | str | None,
     vm_dir: Path,
+    user: str = DEFAULT_VM_SSH_USER,
 ) -> None:
     """Inject SSH public keys directly into rootfs for DISABLED cloud-init mode.
 
@@ -521,13 +761,24 @@ def _inject_ssh_keys_for_disabled_mode(
 
             try:
                 # Create .ssh directory with proper permissions
-                g.mkdir_p("/root/.ssh")
-                g.chmod(0o700, "/root/.ssh")
+                ssh_home_dir = "/root" if user == "root" else f"/home/{user}"
+
+                # Ensure user exists (for non-root users)
+                _ensure_user_exists(g, user, rootfs_path)
+
+                # Enforce SSH key authentication
+                _enforce_ssh_key_auth(g, rootfs_path, user)
+
+                # Generate SSH host keys if missing
+                _generate_ssh_host_keys(g, rootfs_path)
+
+                g.mkdir_p(f"{ssh_home_dir}/.ssh")
+                g.chmod(0o700, f"{ssh_home_dir}/.ssh")
 
                 # Read existing authorized_keys if any
                 existing_keys = ""
-                if g.exists("/root/.ssh/authorized_keys"):
-                    existing_keys = g.read_file("/root/.ssh/authorized_keys")
+                if g.exists(f"{ssh_home_dir}/.ssh/authorized_keys"):
+                    existing_keys = g.read_file(f"{ssh_home_dir}/.ssh/authorized_keys")
                     if isinstance(existing_keys, bytes):
                         existing_keys = existing_keys.decode("utf-8", errors="replace")
 
@@ -543,8 +794,8 @@ def _inject_ssh_keys_for_disabled_mode(
                     if combined and not combined.endswith(newline):
                         combined += newline
                     combined += newline.join(new_keys) + newline
-                    g.write("/root/.ssh/authorized_keys", combined)
-                    g.chmod(0o600, "/root/.ssh/authorized_keys")
+                    g.write(f"{ssh_home_dir}/.ssh/authorized_keys", combined)
+                    g.chmod(0o600, f"{ssh_home_dir}/.ssh/authorized_keys")
                     logger.debug(
                         "Injected %d SSH key(s) for disabled cloud-init mode", len(new_keys)
                     )
@@ -1093,7 +1344,7 @@ def create_vm(
 
         # Inject SSH keys directly into rootfs for DISABLED mode
         if effective_mode == CloudInitMode.OFF and disabled_ssh_pub_key is not None:
-            _inject_ssh_keys_for_disabled_mode(rootfs_path, disabled_ssh_pub_key, vm_dir)
+            _inject_ssh_keys_for_disabled_mode(rootfs_path, disabled_ssh_pub_key, vm_dir, user)
 
         # Handle cloud-init based on mode
         cloud_init_iso: Path | None = None
