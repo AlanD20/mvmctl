@@ -85,7 +85,7 @@ sudo dnf install python3-libguestfs
 
 **Arch Linux:**
 ```bash
-sudo pacman -S python-libguestfs
+sudo pacman -S libguestfs supermin  # Python bindings included in libguestfs package
 ```
 
 > **Note:** The `guestfs` Python package is **not available on PyPI** and cannot be installed via
