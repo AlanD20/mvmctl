@@ -24,12 +24,7 @@ import pytest
 #   - File: src/mvmctl/services/console_relay/manager.py -> module_path: "mvmctl.services.console_relay.manager"
 #
 # To find a module's path: python -c "import mvmctl.<module>; print(mvmctl.<module>.__name__)""
-STARTUP_ALLOWLIST: dict[str, str] = {
-    "mvmctl.utils.error_handler": "Imports typer; measurement noise under full-suite CPU contention",
-    "mvmctl.api.configure": "Imports typer; measurement noise under full-suite CPU contention",
-    "mvmctl.api.metadata": "Imports rich; measurement noise under full-suite CPU contention",
-    "mvmctl.api.vms": "Imports typer+rich; measurement noise under full-suite CPU contention",
-}
+STARTUP_ALLOWLIST: dict[str, str] = {}
 
 MAX_STARTUP_MS = 200
 

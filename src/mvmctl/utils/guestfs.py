@@ -59,7 +59,7 @@ class OptimizedGuestfs:
             str(self.disk_path),
             format="raw",
             readonly=self.readonly,
-            cachemode="unsafe",
+            cachemode="writeback",
         )
 
         return g

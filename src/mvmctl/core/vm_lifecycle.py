@@ -750,10 +750,30 @@ def _inject_ssh_keys_for_disabled_mode(
 
     try:
         with optimized_guestfs(rootfs_path, readonly=False) as g:
-            # Detect and mount root partition
-            from mvmctl.core.rootfs_injector import _detect_root_partition
+            # Detect and mount root filesystem
+            # Firecracker uses loop filesystems (filesystem directly on disk, no partition)
+            # so we need to check for both /dev/sda (loop) and /dev/sda1 (partitioned)
+            filesystems: dict[str, str] = g.list_filesystems()
 
-            root_device = _detect_root_partition(g, str(rootfs_path))
+            # Try loop device first (Firecracker standard)
+            root_device: str | None = None
+            if "/dev/sda" in filesystems:
+                root_device = "/dev/sda"
+            elif "/dev/vda" in filesystems:
+                root_device = "/dev/vda"
+            elif "/dev/sda1" in filesystems:
+                root_device = "/dev/sda1"
+            elif "/dev/vda1" in filesystems:
+                root_device = "/dev/vda1"
+            elif filesystems:
+                # Fallback to first available
+                root_device = str(list(filesystems.keys())[0])
+
+            if root_device is None:
+                raise VMCreateError(f"No filesystem found in {rootfs_path}")
+
+            logger.debug("Using root device: %s", root_device)
+
             try:
                 g.mount(root_device, "/")
             except Exception as e:
@@ -762,6 +782,7 @@ def _inject_ssh_keys_for_disabled_mode(
             try:
                 # Create .ssh directory with proper permissions
                 ssh_home_dir = "/root" if user == "root" else f"/home/{user}"
+                logger.debug("SSH home directory: %s", ssh_home_dir)
 
                 # Ensure user exists (for non-root users)
                 _ensure_user_exists(g, user, rootfs_path)
@@ -772,8 +793,18 @@ def _inject_ssh_keys_for_disabled_mode(
                 # Generate SSH host keys if missing
                 _generate_ssh_host_keys(g, rootfs_path)
 
+                # Check if /root exists before creating .ssh
+                if not g.exists("/root"):
+                    logger.warning("/root directory does not exist, creating it")
+                    g.mkdir_p("/root")
+                    g.chmod(0o700, "/root")
+                    g.chown(0, 0, "/root")
+
                 g.mkdir_p(f"{ssh_home_dir}/.ssh")
                 g.chmod(0o700, f"{ssh_home_dir}/.ssh")
+                g.chown(0, 0, f"{ssh_home_dir}/.ssh")  # Set root:root ownership
+                g.sync()
+                logger.debug("Created %s/.ssh directory", ssh_home_dir)
 
                 # Read existing authorized_keys if any
                 existing_keys = ""
@@ -796,8 +827,20 @@ def _inject_ssh_keys_for_disabled_mode(
                     combined += newline.join(new_keys) + newline
                     g.write(f"{ssh_home_dir}/.ssh/authorized_keys", combined)
                     g.chmod(0o600, f"{ssh_home_dir}/.ssh/authorized_keys")
-                    logger.debug(
-                        "Injected %d SSH key(s) for disabled cloud-init mode", len(new_keys)
+                    g.sync()  # Ensure authorized_keys is written
+
+                    # Verify immediately
+                    if g.exists(f"{ssh_home_dir}/.ssh/authorized_keys"):
+                        logger.debug(
+                            "Injected %d SSH key(s) for disabled cloud-init mode", len(new_keys)
+                        )
+                    else:
+                        logger.error(
+                            "FAILED to write authorized_keys - file doesn't exist after write!"
+                        )
+                else:
+                    logger.warning(
+                        "No new SSH keys to inject (all keys already exist or no keys provided)"
                     )
                 # Disable cloud-init datasource probing (Ec2/MMDS, etc.)
                 # Prevents ~120s timeout on boot waiting for unreachable metadata endpoints
@@ -819,6 +862,28 @@ def _inject_ssh_keys_for_disabled_mode(
                 g.mkdir_p("/etc/systemd/system/systemd-networkd-wait-online.service.d")
                 g.write(
                     "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf",
+                    "[Unit]\nConditionPathExists=/dev/null\n",
+                )
+                # Mask cloud-init services to prevent slow boot/shutdown
+                # Even with datasource_list: [None], cloud-init still runs and takes time
+                g.mkdir_p("/etc/systemd/system/cloud-init.service.d")
+                g.write(
+                    "/etc/systemd/system/cloud-init.service.d/override.conf",
+                    "[Unit]\nConditionPathExists=/dev/null\n",
+                )
+                g.mkdir_p("/etc/systemd/system/cloud-init-local.service.d")
+                g.write(
+                    "/etc/systemd/system/cloud-init-local.service.d/override.conf",
+                    "[Unit]\nConditionPathExists=/dev/null\n",
+                )
+                g.mkdir_p("/etc/systemd/system/cloud-config.service.d")
+                g.write(
+                    "/etc/systemd/system/cloud-config.service.d/override.conf",
+                    "[Unit]\nConditionPathExists=/dev/null\n",
+                )
+                g.mkdir_p("/etc/systemd/system/cloud-final.service.d")
+                g.write(
+                    "/etc/systemd/system/cloud-final.service.d/override.conf",
                     "[Unit]\nConditionPathExists=/dev/null\n",
                 )
 
@@ -878,6 +943,11 @@ WantedBy=multi-user.target
 
                 logger.info("Created first-boot SSH installer for %s", rootfs_path.name)
             finally:
+                # CRITICAL: Force sync to disk before unmount (required when autosync is disabled)
+                try:
+                    g.sync()
+                except Exception:
+                    pass
                 try:
                     g.umount("/")
                 except Exception:
