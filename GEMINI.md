@@ -13,6 +13,26 @@ It handles everything from downloading official kernels and root filesystem imag
 - **Package Management:** `uv`
 - **Testing & Linting:** `pytest`, `ruff`, `mypy`
 
+### ⚠️ ABSOLUTE RULES
+ 
+1. **NEVER read files yourself** — spawn a subagent to do it
+2. **NEVER edit/create code yourself** — spawn a subagent to do it
+3. **ALWAYS use default subagent** — NEVER use `agentName: "Plan"` (omit `agentName` entirely)
+
+### User Confirmation Required
+
+**NEVER implement changes immediately without user confirmation.**
+
+Before making any code changes:
+1. Present your proposed approach to the user
+2. Explain what you intend to do and why
+3. Wait for explicit user approval
+4. Only proceed with implementation after receiving confirmation
+
+This applies to all edits, fixes, features, and refactoring. No exceptions.
+
+---
+
 ## Architecture
 The project strictly adheres to a layered architecture to separate concerns. Data flows sequentially: `User -> mvm -> main.py -> cli/*.py -> api/*.py -> core/*.py -> models/ + utils/`. Runtime services in `services/` are spawned as subprocesses for console relay and cloud-init HTTP serving.
 
