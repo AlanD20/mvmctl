@@ -632,6 +632,16 @@ WantedBy=multi-user.target
                 except Exception:
                     pass  # Already unmounted or not mounted
 
+    except MVMError as e:
+        # libguestfs failed to launch - warn but don't fail
+        logger.warning(
+            "SSH key injection skipped: libguestfs failed (%s). "
+            "SSH keys not injected. You may need to manually configure SSH "
+            "or use a different cloud-init mode.",
+            str(e),
+        )
+        # Don't re-raise - allow VM creation to continue
+        return
     except VMCreateError:
         raise
     except Exception as e:

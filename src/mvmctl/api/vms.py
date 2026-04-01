@@ -251,11 +251,26 @@ def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = 
 
 
 def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) -> list[VMInstance]:
-    """Return all registered VMs, optionally filtering out stopped ones."""
+    """Return all registered VMs, optionally filtering out stopped ones.
+
+    Reconciles live VM state from process status and Firecracker API
+    before returning the list.
+    """
     manager = vm_manager or get_vm_manager()
     all_vms = manager.list_all()
+
+    # Reconcile live state for VMs that might have changed
+    from mvmctl.core.vm_monitor import reconcile_vm
+
+    for vm in all_vms:
+        # Skip VMs with no PID — they're definitively stopped/unstarted
+        if vm.pid is not None:
+            new_state = reconcile_vm(vm, manager)
+            vm.status = new_state
+
     if not include_stopped:
-        return [vm for vm in all_vms if vm.status == VMState.RUNNING]
+        terminal_states = {VMState.STOPPED, VMState.ERROR, VMState.CRASHED}
+        return [vm for vm in all_vms if vm.status not in terminal_states]
     return all_vms
 
 

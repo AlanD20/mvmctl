@@ -31,9 +31,13 @@ from mvmctl.constants import (
 class VMState(StrEnum):
     """VM lifecycle states."""
 
-    RUNNING = auto()
-    STOPPED = auto()
-    ERROR = auto()
+    STARTING = auto()  # FC process just spawned, boot not yet confirmed
+    RUNNING = auto()  # Process alive + FC API reports "Running"
+    PAUSED = auto()  # FC API reports "Paused" (snapshot in progress)
+    STOPPING = auto()  # Graceful shutdown initiated (Ctrl+Alt+Del sent)
+    STOPPED = auto()  # Process exited with code 0
+    CRASHED = auto()  # Process exited with non-zero exit code
+    ERROR = auto()  # Process dead but exit code unknown
 
 
 @dataclass
