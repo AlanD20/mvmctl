@@ -12,7 +12,12 @@ from mvmctl.api.vms import (
     get_vm,
     inspect_vm,
     list_vms,
+    pause_vm,
+    reboot_vm,
+    resume_vm,
     ssh_vm,
+    start_vm,
+    stop_vm,
     vm_cache_dir,
 )
 from mvmctl.exceptions import MVMError, VMNotFoundError
@@ -426,3 +431,55 @@ def test_inspect_vm_rootfs_source_field(mocker: MockerFixture, tmp_path: Path):
 
     assert "paths" in result
     assert result["paths"]["rootfs_source"] == "local"
+
+
+# -----------------------------------------------------------------------------
+# Pause and Resume API tests
+# -----------------------------------------------------------------------------
+
+
+@patch("mvmctl.api.vms._pause_vm")
+def test_pause_vm_api(mock_pause):
+    """pause_vm API delegates directly to core function (no privilege check)."""
+    pause_vm("myvm")
+    mock_pause.assert_called_once_with(name="myvm")
+
+
+@patch("mvmctl.api.vms._resume_vm")
+def test_resume_vm_api(mock_resume):
+    """resume_vm API delegates directly to core function (no privilege check)."""
+    resume_vm("myvm")
+    mock_resume.assert_called_once_with(name="myvm")
+
+
+# -----------------------------------------------------------------------------
+# Stop, Start, Reboot API tests
+# -----------------------------------------------------------------------------
+
+
+@patch("mvmctl.core.vm_lifecycle.stop_vm")
+def test_stop_vm_api(mock_stop):
+    """stop_vm API delegates directly to core function."""
+    stop_vm("myvm")
+    mock_stop.assert_called_once_with(name="myvm", force=False)
+
+
+@patch("mvmctl.core.vm_lifecycle.stop_vm")
+def test_stop_vm_api_force(mock_stop):
+    """stop_vm API passes force=True to core function."""
+    stop_vm("myvm", force=True)
+    mock_stop.assert_called_once_with(name="myvm", force=True)
+
+
+@patch("mvmctl.core.vm_lifecycle.start_vm")
+def test_start_vm_api(mock_start):
+    """start_vm API delegates directly to core function (no privilege check)."""
+    start_vm("myvm")
+    mock_start.assert_called_once_with(name="myvm")
+
+
+@patch("mvmctl.core.vm_lifecycle.reboot_vm")
+def test_reboot_vm_api(mock_reboot):
+    """reboot_vm API delegates directly to core function."""
+    reboot_vm("myvm")
+    mock_reboot.assert_called_once_with(name="myvm", force=False)

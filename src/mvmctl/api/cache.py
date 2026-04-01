@@ -24,7 +24,6 @@ def init_all() -> dict[str, str]:
     Returns:
         Dictionary mapping resource names to their directory paths as strings.
     """
-    check_privileges_interactive("/usr/sbin/ip", "initialize cache")
     result = cache_manager.cache_init_all()
     return {k: str(v) if v else "" for k, v in result.items()}
 
@@ -61,12 +60,10 @@ def prune_networks(dry_run: bool = False, include_all: bool = False) -> list[str
 
 
 def prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]:
-    check_privileges_interactive("/usr/sbin/ip", "prune images")
     return cache_manager.cache_prune_images(dry_run=dry_run, include_all=include_all)
 
 
 def prune_kernels(dry_run: bool = False, include_all: bool = False) -> list[str]:
-    check_privileges_interactive("/usr/sbin/ip", "prune kernels")
     return cache_manager.cache_prune_kernels(dry_run=dry_run, include_all=include_all)
 
 

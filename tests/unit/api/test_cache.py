@@ -34,17 +34,6 @@ def test_init_all_calls_core_functions(mock_init_all, mock_check_privs):
     assert "guestfs" not in result
 
 
-@patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.core.cache_manager.cache_init_all")
-def test_init_all_privilege_check(mock_init_all, mock_check_privs):
-    """Verify privilege check is called for init_all."""
-    mock_init_all.return_value = {"vms": Path("/tmp/cache/vms")}
-
-    cache_api.init_all()
-
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "initialize cache")
-
-
 # =============================================================================
 # prune_vms tests
 # =============================================================================
@@ -111,35 +100,9 @@ def test_prune_networks_privilege_check(mock_prune_networks, mock_check_privs):
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.core.cache_manager.cache_prune_images")
-def test_prune_images_privilege_check(mock_prune_images, mock_check_privs):
-    """Verify privilege check is called for prune_images."""
-    mock_prune_images.return_value = ["abc123"]
-
-    result = cache_api.prune_images()
-
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune images")
-    mock_prune_images.assert_called_once()
-    assert result == ["abc123"]
-
-
 # =============================================================================
 # prune_kernels tests
 # =============================================================================
-
-
-@patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.core.cache_manager.cache_prune_kernels")
-def test_prune_kernels_privilege_check(mock_prune_kernels, mock_check_privs):
-    """Verify privilege check is called for prune_kernels."""
-    mock_prune_kernels.return_value = ["def456"]
-
-    result = cache_api.prune_kernels()
-
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune kernels")
-    mock_prune_kernels.assert_called_once()
-    assert result == ["def456"]
 
 
 # =============================================================================

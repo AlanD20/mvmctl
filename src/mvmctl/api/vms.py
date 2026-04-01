@@ -52,7 +52,13 @@ from mvmctl.core.vm_lifecycle import (
     load_snapshot as _load_snapshot,
 )
 from mvmctl.core.vm_lifecycle import (
+    pause_vm as _pause_vm,
+)
+from mvmctl.core.vm_lifecycle import (
     remove_vm as _remove_vm,
+)
+from mvmctl.core.vm_lifecycle import (
+    resume_vm as _resume_vm,
 )
 from mvmctl.core.vm_lifecycle import (
     snapshot_vm as _snapshot_vm,
@@ -71,6 +77,11 @@ __all__ = [
     "remove_vm",
     "snapshot_vm",
     "load_snapshot",
+    "pause_vm",
+    "resume_vm",
+    "stop_vm",
+    "start_vm",
+    "reboot_vm",
     "ssh_vm",
     "get_logs",
     "cleanup_vms",
@@ -87,11 +98,12 @@ __all__ = [
     "kill_console",
     "get_console_state",
     "check_escape_sequence",
-    "inspect_vm",
     "connect_to_relay",
     "disconnect_from_relay",
     "read_console_output",
     "send_console_input",
+    "inspect_vm",
+    "resolve_vm_selector",
 ]
 
 
@@ -182,6 +194,34 @@ def resolve_kernel_multi_strategy(value: str) -> Path:
     return _core_resolve_kernel_id_path(value)
 
 
+def resolve_vm_selector(selector: str) -> str:
+    """Resolve a VM selector (name or ID prefix) to a VM name.
+
+    Tries ID-prefix lookup first, falls back to treating selector as name.
+    Raises MVMError if the prefix is ambiguous (matches multiple VMs).
+
+    Args:
+        selector: VM name or ID prefix
+
+    Returns:
+        Resolved VM name
+
+    Raises:
+        MVMError: If ID prefix is ambiguous (matches multiple VMs)
+    """
+    from mvmctl.exceptions import MVMError
+
+    manager = get_vm_manager()
+    matches = manager.find_by_id_prefix(selector)
+    if len(matches) == 1:
+        return matches[0].name
+    if len(matches) > 1:
+        names = ", ".join(m.name for m in matches)
+        raise MVMError(f"Ambiguous ID prefix '{selector}' matches {len(matches)} VMs: {names}")
+    # No ID match — treat as name
+    return selector
+
+
 def create_vm(
     name: str,
     image: str,
@@ -241,13 +281,42 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
 
 
 def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
-    check_privileges_interactive("/usr/sbin/ip", f"create snapshot for VM '{name}'")
     return _snapshot_vm(name=name, mem_out=mem_out, state_out=state_out)
 
 
 def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = True) -> None:
-    check_privileges_interactive("/usr/sbin/ip", f"load snapshot for VM '{name}'")
     return _load_snapshot(name=name, mem_in=mem_in, state_in=state_in, resume_after=resume_after)
+
+
+def pause_vm(name: str) -> None:
+    """Pause a running VM."""
+    return _pause_vm(name=name)
+
+
+def resume_vm(name: str) -> None:
+    """Resume a paused VM."""
+    return _resume_vm(name=name)
+
+
+def stop_vm(name: str, force: bool = False) -> None:
+    """Stop a running VM gracefully."""
+    from mvmctl.core.vm_lifecycle import stop_vm as _stop_vm
+
+    return _stop_vm(name=name, force=force)
+
+
+def start_vm(name: str) -> None:
+    """Start a stopped VM."""
+    from mvmctl.core.vm_lifecycle import start_vm as _start_vm
+
+    return _start_vm(name=name)
+
+
+def reboot_vm(name: str, force: bool = False) -> None:
+    """Reboot a VM (stop then start)."""
+    from mvmctl.core.vm_lifecycle import reboot_vm as _reboot_vm
+
+    return _reboot_vm(name=name, force=force)
 
 
 def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) -> list[VMInstance]:

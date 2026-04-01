@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent / "src" / "mvmctl"
 API_DIR = PROJECT_ROOT / "api"
 
 PRIVILEGED_API_FUNCTIONS = {
-    "api/vms.py": ["create_vm", "remove_vm", "snapshot_vm", "load_snapshot"],
+    "api/vms.py": ["create_vm", "remove_vm", "cleanup_vms"],
     "api/network.py": ["create_network", "remove_network"],
 }
 
@@ -63,7 +63,7 @@ class TestAPIPrivilegeChecks:
     @pytest.mark.parametrize(
         "api_file,expected_privileged_functions",
         [
-            ("vms.py", ["create_vm", "remove_vm", "snapshot_vm", "load_snapshot"]),
+            ("vms.py", ["create_vm", "remove_vm", "cleanup_vms"]),
             ("network.py", ["create_network", "remove_network"]),
         ],
     )

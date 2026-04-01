@@ -1120,3 +1120,184 @@ def test_create_output_config_with_nocloud_net_flag(mocker: MockerFixture, tmp_p
     assert mock_build.call_args.kwargs["cloud_init"]["mode"] == "net"
     assert mock_build.call_args.kwargs["cloud_init"]["enabled"] is True
     mock_create.assert_not_called()
+
+
+# -----------------------------------------------------------------------------
+# Pause and Resume CLI tests
+# -----------------------------------------------------------------------------
+
+
+def test_pause_vm_success(mocker: MockerFixture):
+    """pause command calls pause_vm API."""
+    mock_pause = mocker.patch("mvmctl.cli.vm.pause_vm")
+    result = runner.invoke(app, ["pause", "myvm"])
+    assert result.exit_code == 0
+    assert "paused" in result.output.lower()
+    mock_pause.assert_called_once_with(name="myvm")
+
+
+def test_pause_vm_with_name_flag(mocker: MockerFixture):
+    """pause command works with --name flag."""
+    mock_pause = mocker.patch("mvmctl.cli.vm.pause_vm")
+    result = runner.invoke(app, ["pause", "--name", "myvm"])
+    assert result.exit_code == 0
+    mock_pause.assert_called_once_with(name="myvm")
+
+
+def test_pause_vm_missing_selector():
+    """pause command errors if no VM specified."""
+    result = runner.invoke(app, ["pause"])
+    assert result.exit_code == 1
+    assert "must provide" in result.output.lower() or "error" in result.output.lower()
+
+
+def test_pause_vm_api_error(mocker: MockerFixture):
+    """pause command handles API errors."""
+    mocker.patch("mvmctl.cli.vm.pause_vm", side_effect=MVMError("VM not running"))
+    result = runner.invoke(app, ["pause", "myvm"])
+    assert result.exit_code != 0
+
+
+def test_resume_vm_success(mocker: MockerFixture):
+    """resume command calls resume_vm API."""
+    mock_resume = mocker.patch("mvmctl.cli.vm.resume_vm")
+    result = runner.invoke(app, ["resume", "myvm"])
+    assert result.exit_code == 0
+    assert "resumed" in result.output.lower()
+    mock_resume.assert_called_once_with(name="myvm")
+
+
+def test_resume_vm_with_name_flag(mocker: MockerFixture):
+    """resume command works with --name flag."""
+    mock_resume = mocker.patch("mvmctl.cli.vm.resume_vm")
+    result = runner.invoke(app, ["resume", "--name", "myvm"])
+    assert result.exit_code == 0
+    mock_resume.assert_called_once_with(name="myvm")
+
+
+def test_resume_vm_missing_selector():
+    """resume command errors if no VM specified."""
+    result = runner.invoke(app, ["resume"])
+    assert result.exit_code == 1
+    assert "must provide" in result.output.lower() or "error" in result.output.lower()
+
+
+def test_resume_vm_api_error(mocker: MockerFixture):
+    """resume command handles API errors."""
+    mocker.patch("mvmctl.cli.vm.resume_vm", side_effect=MVMError("VM not paused"))
+    result = runner.invoke(app, ["resume", "myvm"])
+    assert result.exit_code != 0
+
+
+# -----------------------------------------------------------------------------
+# Stop, Start, Reboot CLI tests
+# -----------------------------------------------------------------------------
+
+
+def test_stop_vm_success(mocker: MockerFixture):
+    """stop command calls stop_vm API."""
+    mock_stop = mocker.patch("mvmctl.cli.vm.stop_vm")
+    result = runner.invoke(app, ["stop", "myvm"])
+    assert result.exit_code == 0
+    assert "stopped" in result.output.lower()
+    mock_stop.assert_called_once_with(name="myvm", force=False)
+
+
+def test_stop_vm_force(mocker: MockerFixture):
+    """stop command passes --force to stop_vm API."""
+    mock_stop = mocker.patch("mvmctl.cli.vm.stop_vm")
+    result = runner.invoke(app, ["stop", "myvm", "--force"])
+    assert result.exit_code == 0
+    mock_stop.assert_called_once_with(name="myvm", force=True)
+
+
+def test_stop_vm_with_name_flag(mocker: MockerFixture):
+    """stop command works with --name flag."""
+    mock_stop = mocker.patch("mvmctl.cli.vm.stop_vm")
+    result = runner.invoke(app, ["stop", "--name", "myvm"])
+    assert result.exit_code == 0
+    mock_stop.assert_called_once_with(name="myvm", force=False)
+
+
+def test_stop_vm_missing_selector():
+    """stop command errors if no VM specified."""
+    result = runner.invoke(app, ["stop"])
+    assert result.exit_code == 1
+    assert "must provide" in result.output.lower() or "error" in result.output.lower()
+
+
+def test_stop_vm_api_error(mocker: MockerFixture):
+    """stop command handles API errors."""
+    mocker.patch("mvmctl.cli.vm.stop_vm", side_effect=MVMError("VM not running"))
+    result = runner.invoke(app, ["stop", "myvm"])
+    assert result.exit_code != 0
+
+
+def test_start_vm_success(mocker: MockerFixture):
+    """start command calls start_vm API."""
+    mock_start = mocker.patch("mvmctl.cli.vm.start_vm")
+    result = runner.invoke(app, ["start", "myvm"])
+    assert result.exit_code == 0
+    assert "started" in result.output.lower()
+    mock_start.assert_called_once_with(name="myvm")
+
+
+def test_start_vm_with_name_flag(mocker: MockerFixture):
+    """start command works with --name flag."""
+    mock_start = mocker.patch("mvmctl.cli.vm.start_vm")
+    result = runner.invoke(app, ["start", "--name", "myvm"])
+    assert result.exit_code == 0
+    mock_start.assert_called_once_with(name="myvm")
+
+
+def test_start_vm_missing_selector():
+    """start command errors if no VM specified."""
+    result = runner.invoke(app, ["start"])
+    assert result.exit_code == 1
+    assert "must provide" in result.output.lower() or "error" in result.output.lower()
+
+
+def test_start_vm_api_error(mocker: MockerFixture):
+    """start command handles API errors."""
+    mocker.patch("mvmctl.cli.vm.start_vm", side_effect=MVMError("VM not stopped"))
+    result = runner.invoke(app, ["start", "myvm"])
+    assert result.exit_code != 0
+
+
+def test_reboot_vm_success(mocker: MockerFixture):
+    """reboot command calls reboot_vm API."""
+    mock_reboot = mocker.patch("mvmctl.cli.vm.reboot_vm")
+    result = runner.invoke(app, ["reboot", "myvm"])
+    assert result.exit_code == 0
+    assert "rebooted" in result.output.lower()
+    mock_reboot.assert_called_once_with(name="myvm", force=False)
+
+
+def test_reboot_vm_force(mocker: MockerFixture):
+    """reboot command passes --force to reboot_vm API."""
+    mock_reboot = mocker.patch("mvmctl.cli.vm.reboot_vm")
+    result = runner.invoke(app, ["reboot", "myvm", "--force"])
+    assert result.exit_code == 0
+    mock_reboot.assert_called_once_with(name="myvm", force=True)
+
+
+def test_reboot_vm_with_name_flag(mocker: MockerFixture):
+    """reboot command works with --name flag."""
+    mock_reboot = mocker.patch("mvmctl.cli.vm.reboot_vm")
+    result = runner.invoke(app, ["reboot", "--name", "myvm"])
+    assert result.exit_code == 0
+    mock_reboot.assert_called_once_with(name="myvm", force=False)
+
+
+def test_reboot_vm_missing_selector():
+    """reboot command errors if no VM specified."""
+    result = runner.invoke(app, ["reboot"])
+    assert result.exit_code == 1
+    assert "must provide" in result.output.lower() or "error" in result.output.lower()
+
+
+def test_reboot_vm_api_error(mocker: MockerFixture):
+    """reboot command handles API errors."""
+    mocker.patch("mvmctl.cli.vm.reboot_vm", side_effect=MVMError("Stop failed"))
+    result = runner.invoke(app, ["reboot", "myvm"])
+    assert result.exit_code != 0

@@ -252,6 +252,34 @@ class FirecrackerClient:
             logger.error("Failed to send Ctrl+Alt+Del: %s", status)
             return False
 
+    def pause_vm(self) -> None:
+        """Pause the microVM via PATCH /vm.
+
+        Raises:
+            FirecrackerError: If the pause operation fails.
+        """
+        logger.info("Pausing VM...")
+        status, _ = self._request("PATCH", "/vm", {"state": "Paused"})
+
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
+            logger.info("VM paused")
+        else:
+            raise FirecrackerError(f"Failed to pause VM: {status}")
+
+    def resume_vm(self) -> None:
+        """Resume a paused microVM via PATCH /vm.
+
+        Raises:
+            FirecrackerError: If the resume operation fails.
+        """
+        logger.info("Resuming VM...")
+        status, _ = self._request("PATCH", "/vm", {"state": "Resumed"})
+
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
+            logger.info("VM resumed")
+        else:
+            raise FirecrackerError(f"Failed to resume VM: {status}")
+
 
 def get_vm_socket_path(vm_hash: str) -> Path | None:
     """Get socket path for a VM from cache directory by its hash."""

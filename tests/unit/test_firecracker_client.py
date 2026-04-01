@@ -178,3 +178,55 @@ def test_get_vm_socket_path_not_found(tmp_path: Path):
         result = get_vm_socket_path("myvm")
 
     assert result is None
+
+
+def test_pause_vm_success(tmp_path: Path):
+    """pause_vm sends PATCH /vm with state Paused."""
+    client, _ = _make_client(tmp_path)
+    mock_conn = MagicMock()
+    mock_conn.getresponse.return_value = _mock_response(204)
+    client.conn = mock_conn
+
+    client.pause_vm()
+    mock_conn.request.assert_called_once()
+    call_args = mock_conn.request.call_args
+    assert call_args[0][0] == "PATCH"
+    assert call_args[0][1] == "/vm"
+    assert json.loads(call_args[1]["body"]) == {"state": "Paused"}
+
+
+def test_pause_vm_failure(tmp_path: Path):
+    """pause_vm raises FirecrackerError on non-204."""
+    client, _ = _make_client(tmp_path)
+    mock_conn = MagicMock()
+    mock_conn.getresponse.return_value = _mock_response(400, {"error": "fail"})
+    client.conn = mock_conn
+
+    with pytest.raises(FirecrackerError, match="Failed to pause VM"):
+        client.pause_vm()
+
+
+def test_resume_vm_success(tmp_path: Path):
+    """resume_vm sends PATCH /vm with state Resumed."""
+    client, _ = _make_client(tmp_path)
+    mock_conn = MagicMock()
+    mock_conn.getresponse.return_value = _mock_response(204)
+    client.conn = mock_conn
+
+    client.resume_vm()
+    mock_conn.request.assert_called_once()
+    call_args = mock_conn.request.call_args
+    assert call_args[0][0] == "PATCH"
+    assert call_args[0][1] == "/vm"
+    assert json.loads(call_args[1]["body"]) == {"state": "Resumed"}
+
+
+def test_resume_vm_failure(tmp_path: Path):
+    """resume_vm raises FirecrackerError on non-204."""
+    client, _ = _make_client(tmp_path)
+    mock_conn = MagicMock()
+    mock_conn.getresponse.return_value = _mock_response(400, {"error": "fail"})
+    client.conn = mock_conn
+
+    with pytest.raises(FirecrackerError, match="Failed to resume VM"):
+        client.resume_vm()

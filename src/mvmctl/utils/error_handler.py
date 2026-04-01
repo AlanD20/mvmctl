@@ -7,7 +7,7 @@ from mvmctl.utils.console import print_error
 from mvmctl.utils.debug_state import is_debug_mode
 
 if TYPE_CHECKING:
-    import typer
+    pass
 
 
 def handle_mvm_error(exc: Exception, exit_code: int = 1) -> NoReturn:

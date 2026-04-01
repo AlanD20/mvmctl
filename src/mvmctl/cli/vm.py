@@ -14,10 +14,16 @@ from mvmctl.api.vms import (
     get_vm_status_with_exit_code,
     list_vms,
     load_snapshot,
+    pause_vm,
+    reboot_vm,
     remove_vm,
     resolve_image_multi_strategy,
     resolve_kernel_multi_strategy,
+    resolve_vm_selector,
+    resume_vm,
     snapshot_vm,
+    start_vm,
+    stop_vm,
 )
 from mvmctl.cli._helpers import get_state_marker, is_file_missing, is_vm_process_running
 from mvmctl.constants import (
@@ -38,6 +44,7 @@ from mvmctl.utils.time import human_readable_time
 
 # Sentinel for auto-generation mode
 USE_ISO_AUTO = "__use_iso_auto__"
+
 
 app = typer.Typer(
     help="VM lifecycle management",
@@ -705,22 +712,105 @@ def load(
         handle_mvm_error(exc)
 
 
-@app.command(name="pause", hidden=True)
+@app.command()
 def pause(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
+    selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
 ) -> None:
-    """Pause a VM (not supported in this version)."""
-    print_info("'vm pause' is not supported by Firecracker. Use 'vm snapshot' instead.")
-    raise typer.Exit(code=0)
+    """Pause a running VM."""
+    effective = selector or name
+    if not effective:
+        print_error("Error: Must provide VM name via positional argument or --name")
+        raise typer.Exit(code=1)
+
+    try:
+        resolved = resolve_vm_selector(effective)
+        pause_vm(name=resolved)
+        print_success(f"VM '{effective}' paused")
+    except MVMError as exc:
+        handle_mvm_error(exc)
 
 
-@app.command(name="resume", hidden=True)
+@app.command()
 def resume(
-    name: str = typer.Option(..., "--name", "-n", help="VM name"),
+    selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
 ) -> None:
-    """Resume a paused VM (not supported in this version)."""
-    print_info("'vm resume' is not supported by Firecracker. Use 'vm load' instead.")
-    raise typer.Exit(code=0)
+    """Resume a paused VM."""
+    effective = selector or name
+    if not effective:
+        print_error("Error: Must provide VM name via positional argument or --name")
+        raise typer.Exit(code=1)
+
+    try:
+        resolved = resolve_vm_selector(effective)
+        resume_vm(name=resolved)
+        print_success(f"VM '{effective}' resumed")
+    except MVMError as exc:
+        handle_mvm_error(exc)
+
+
+@app.command()
+def stop(
+    selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force immediate shutdown without graceful shutdown"
+    ),
+) -> None:
+    """Stop a running VM gracefully."""
+    effective = selector or name
+    if not effective:
+        print_error("Error: Must provide VM name via positional argument or --name")
+        raise typer.Exit(code=1)
+
+    try:
+        resolved = resolve_vm_selector(effective)
+        stop_vm(name=resolved, force=force)
+        print_success(f"VM '{effective}' stopped")
+    except MVMError as exc:
+        handle_mvm_error(exc)
+
+
+@app.command()
+def start(
+    selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
+) -> None:
+    """Start a stopped VM."""
+    effective = selector or name
+    if not effective:
+        print_error("Error: Must provide VM name via positional argument or --name")
+        raise typer.Exit(code=1)
+
+    try:
+        resolved = resolve_vm_selector(effective)
+        start_vm(name=resolved)
+        print_success(f"VM '{effective}' started")
+    except MVMError as exc:
+        handle_mvm_error(exc)
+
+
+@app.command()
+def reboot(
+    selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force immediate shutdown without graceful shutdown"
+    ),
+) -> None:
+    """Reboot a VM (graceful stop then re-launch)."""
+    effective = selector or name
+    if not effective:
+        print_error("Error: Must provide VM name via positional argument or --name")
+        raise typer.Exit(code=1)
+
+    try:
+        resolved = resolve_vm_selector(effective)
+        reboot_vm(name=resolved, force=force)
+        print_success(f"VM '{effective}' rebooted")
+    except MVMError as exc:
+        handle_mvm_error(exc)
 
 
 @app.command()

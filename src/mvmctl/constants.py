@@ -692,6 +692,7 @@ CONST_NO_CLOUD_NET_MAX_PORT_RETRIES: Final[int] = 100
 CONST_CONSOLE_SOCKET_TIMEOUT_S: Final[float] = 5.0
 CONST_CONSOLE_BUFFER_SIZE: Final[int] = 4096
 CONST_CONSOLE_RECONNECT_DELAY_S: Final[float] = 0.5
+CONST_VM_START_WAIT_S: Final[float] = 0.5  # Brief wait after starting VM process
 CONST_CONSOLE_KILL_TIMEOUT_S: Final[float] = 5.0
 CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
 MAX_VMS: Final[int] = _require_int(("vm", "limits", "max_vms"))

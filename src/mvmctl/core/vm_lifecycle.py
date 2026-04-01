@@ -22,6 +22,7 @@ from mvmctl.constants import (
     CONST_SIGNAL_EXIT_CODE_BASE,
     CONST_VM_MEM_MAX_MIB,
     CONST_VM_MEM_MIN_MIB,
+    CONST_VM_START_WAIT_S,
     DEFAULT_CLOUD_INIT_DIRNAME,
     DEFAULT_CLOUD_INIT_ISO_NAME,
     DEFAULT_FC_API_SOCKET_FILENAME,
@@ -1140,7 +1141,7 @@ def _secure_mkdir_vm(vm_dir: Path, name: str) -> None:
         raise MVMError(f"VM '{name}' directory is a symlink (security violation): {vm_dir}")
 
 
-def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
+def graceful_shutdown(pid: int | None, socket_path: Path | None, force: bool = False) -> None:
     if pid is None:
         return
 
@@ -1150,6 +1151,22 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None) -> None:
             return True
         except (ProcessLookupError, PermissionError):
             return False
+
+    if force:
+        # Skip graceful shutdown - go straight to SIGTERM → SIGKILL
+        if _is_alive(pid):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            time.sleep(float(FIRECRACKER_SIGTERM_WAIT_S))
+
+        if _is_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        return
 
     if socket_path is not None and Path(socket_path).exists():
         try:
@@ -1821,3 +1838,216 @@ def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = 
         client.load_snapshot(mem_in, state_in, resume_after)
     finally:
         client.close()
+
+
+def pause_vm(name: str, vm_manager: VMManager | None = None) -> None:
+    """Pause a running VM.
+
+    Args:
+        name: VM name to pause.
+        vm_manager: Optional VMManager instance.
+
+    Raises:
+        VMNotFoundError: If VM not found.
+        MVMError: If VM is not running or pause fails.
+    """
+    manager = vm_manager or get_vm_manager()
+    vm = manager.get(name)
+    if not vm:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    if vm.status != VMState.RUNNING:
+        raise MVMError(f"VM '{name}' is not running (current state: {vm.status.value})")
+
+    socket_path = vm.socket_path
+    if not socket_path:
+        raise MVMError(f"VM '{name}' has no API socket enabled")
+
+    client = FirecrackerClient(socket_path)
+    try:
+        client.pause_vm()
+        manager.update_status(name, VMState.PAUSED)
+    finally:
+        client.close()
+
+
+def resume_vm(name: str, vm_manager: VMManager | None = None) -> None:
+    """Resume a paused VM.
+
+    Args:
+        name: VM name to resume.
+        vm_manager: Optional VMManager instance.
+
+    Raises:
+        VMNotFoundError: If VM not found.
+        MVMError: If VM is not paused or resume fails.
+    """
+    manager = vm_manager or get_vm_manager()
+    vm = manager.get(name)
+    if not vm:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    if vm.status != VMState.PAUSED:
+        raise MVMError(f"VM '{name}' is not paused (current state: {vm.status.value})")
+
+    socket_path = vm.socket_path
+    if not socket_path:
+        raise MVMError(f"VM '{name}' has no API socket enabled")
+
+    client = FirecrackerClient(socket_path)
+    try:
+        client.resume_vm()
+        manager.update_status(name, VMState.RUNNING)
+    finally:
+        client.close()
+
+
+def stop_vm(name: str, vm_manager: VMManager | None = None, force: bool = False) -> None:
+    """Gracefully stop a running VM via SendCtrlAltDel, then wait for process exit.
+
+    Args:
+        name: VM name to stop.
+        vm_manager: Optional VMManager instance.
+        force: If True, skip graceful shutdown and go straight to SIGTERM → SIGKILL.
+
+    Raises:
+        VMNotFoundError: If VM not found.
+        MVMError: If VM is not running/paused or stop fails.
+    """
+    manager = vm_manager or get_vm_manager()
+    vm = manager.get(name)
+    if not vm:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    if vm.status not in (VMState.RUNNING, VMState.PAUSED):
+        raise MVMError(f"VM '{name}' is not running (current state: {vm.status.value})")
+
+    pid = vm.pid
+    socket_path = vm.socket_path
+
+    manager.update_status(name, VMState.STOPPING)
+
+    try:
+        graceful_shutdown(pid, socket_path, force=force)
+        manager.update_status(name, VMState.STOPPED)
+    except Exception as e:
+        manager.update_status(name, VMState.ERROR)
+        raise MVMError(f"Failed to stop VM '{name}': {e}") from e
+
+
+def start_vm(name: str, vm_manager: VMManager | None = None) -> None:
+    """Re-launch a stopped VM using its stored firecracker.json config.
+
+    Args:
+        name: VM name to start.
+        vm_manager: Optional VMManager instance.
+
+    Raises:
+        VMNotFoundError: If VM not found.
+        MVMError: If VM is not stopped or start fails.
+    """
+    manager = vm_manager or get_vm_manager()
+    vm = manager.get(name)
+    if not vm:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    if vm.status != VMState.STOPPED:
+        raise MVMError(f"VM '{name}' is not stopped (current state: {vm.status.value})")
+
+    if not vm.id:
+        raise MVMError(f"VM '{name}' has no ID")
+
+    vm_dir = get_vm_dir(vm.id)
+    config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
+    pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
+
+    if not config_file.exists():
+        raise MVMError(f"VM config not found: {config_file}")
+
+    firecracker_bin = DEFAULT_FIRECRACKER_BIN_NAME
+    if vm.config and vm.config.kernel_path:
+        fc_bin_path = Path(firecracker_bin)
+        if fc_bin_path.is_absolute() or "/" in firecracker_bin:
+            if not fc_bin_path.exists():
+                raise MVMError(f"Firecracker binary not found: {firecracker_bin}")
+
+    enable_api_socket = vm.config.enable_api_socket if vm.config else DEFAULT_VM_ENABLE_API_SOCKET
+    socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
+
+    if enable_api_socket and socket_path:
+        fc_cmd = [
+            firecracker_bin,
+            "--api-sock",
+            str(socket_path),
+            "--config-file",
+            str(config_file),
+        ]
+    else:
+        fc_cmd = [firecracker_bin, "--no-api", "--config-file", str(config_file)]
+
+    log_file = vm_dir / DEFAULT_FC_LOG_FILENAME
+    console_log_file = vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
+
+    log_fp = open(log_file, "w", buffering=1, encoding="utf-8")
+    console_fp = None
+
+    try:
+        if vm.config and vm.config.enable_console:
+            console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
+            proc = subprocess.Popen(
+                fc_cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=console_fp,
+                stderr=log_fp,
+                start_new_session=True,
+            )
+        else:
+            console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
+            proc = subprocess.Popen(
+                fc_cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=console_fp,
+                stderr=log_fp,
+                start_new_session=True,
+            )
+
+        log_fp.close()
+        if console_fp:
+            console_fp.close()
+
+        _write_pid_file(pid_file, proc.pid)
+
+        vm.pid = proc.pid
+        vm.socket_path = socket_path
+        vm.status = VMState.RUNNING
+        manager.register(vm)
+
+        time.sleep(CONST_VM_START_WAIT_S)
+
+    except Exception as e:
+        try:
+            log_fp.close()
+        except OSError:
+            pass
+        if console_fp:
+            try:
+                console_fp.close()
+            except OSError:
+                pass
+        raise MVMError(f"Failed to start VM '{name}': {e}") from e
+
+
+def reboot_vm(name: str, vm_manager: VMManager | None = None, force: bool = False) -> None:
+    """Reboot a VM: graceful stop then re-launch.
+
+    Args:
+        name: VM name to reboot.
+        vm_manager: Optional VMManager instance.
+        force: If True, force immediate shutdown during the stop phase.
+
+    Raises:
+        VMNotFoundError: If VM not found.
+        MVMError: If stop or start fails.
+    """
+    stop_vm(name, vm_manager, force=force)
+    start_vm(name, vm_manager)

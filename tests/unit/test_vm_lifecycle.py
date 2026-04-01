@@ -13,8 +13,13 @@ from mvmctl.core.vm_lifecycle import (
     create_vm,
     graceful_shutdown,
     load_snapshot,
+    pause_vm,
+    reboot_vm,
     remove_vm,
+    resume_vm,
     snapshot_vm,
+    start_vm,
+    stop_vm,
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode
@@ -3043,3 +3048,413 @@ class TestRemoveVMNATOrdering:
         call_kwargs = mock_teardown_nat.call_args[1] if mock_teardown_nat.call_args[1] else {}
         force_value = call_kwargs.get("force", False)
         assert force_value is False, "teardown_nat should be called with force=False"
+
+
+# -----------------------------------------------------------------------------
+# Stop VM tests
+# -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_vm_manager_for_stop(mocker):
+    """Fixture providing a mock VMManager with a running VM."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.RUNNING
+    mock_vm.pid = 12345
+    mock_vm.socket_path = Path("/fake/socket")
+    mock_mgr.get.return_value = mock_vm
+    return mock_mgr
+
+
+@pytest.fixture
+def mock_vm_manager_for_start(mocker):
+    """Fixture providing a mock VMManager with a stopped VM."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_vm.id = "abc123def4567890"
+    mock_vm.config = MagicMock()
+    mock_vm.config.enable_api_socket = True
+    mock_vm.config.enable_console = False
+    mock_vm.config.kernel_path = Path("/fake/kernel")
+    mock_mgr.get.return_value = mock_vm
+    return mock_mgr
+
+
+@patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_stop_vm_success(mock_get_mgr, mock_graceful_shutdown):
+    """stop_vm stops a running VM and updates status."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.RUNNING
+    mock_vm.pid = 12345
+    mock_vm.socket_path = Path("/fake/socket")
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    stop_vm("myvm")
+
+    mock_graceful_shutdown.assert_called_once_with(12345, Path("/fake/socket"), force=False)
+    mock_mgr.update_status.assert_called_with("myvm", VMState.STOPPED)
+
+
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_stop_vm_not_found(mock_get_mgr):
+    """stop_vm raises error if VM not found."""
+    mock_mgr = MagicMock()
+    mock_mgr.get.return_value = None
+    mock_get_mgr.return_value = mock_mgr
+
+    with pytest.raises(Exception, match="VM 'myvm' not found"):
+        stop_vm("myvm")
+
+
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_stop_vm_already_stopped(mock_get_mgr):
+    """stop_vm raises error if VM is already stopped."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    with pytest.raises(MVMError, match="VM 'myvm' is not running"):
+        stop_vm("myvm")
+
+
+@patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_stop_vm_force(mock_get_mgr, mock_graceful_shutdown):
+    """stop_vm passes force=True to graceful_shutdown."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.RUNNING
+    mock_vm.pid = 12345
+    mock_vm.socket_path = Path("/fake/socket")
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    stop_vm("myvm", force=True)
+
+    mock_graceful_shutdown.assert_called_once_with(12345, Path("/fake/socket"), force=True)
+    mock_mgr.update_status.assert_called_with("myvm", VMState.STOPPED)
+
+
+@patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_stop_vm_handles_paused(mock_get_mgr, mock_graceful_shutdown):
+    """stop_vm can stop a paused VM."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.PAUSED
+    mock_vm.pid = 12345
+    mock_vm.socket_path = Path("/fake/socket")
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    stop_vm("myvm")
+
+    mock_graceful_shutdown.assert_called_once_with(12345, Path("/fake/socket"), force=False)
+    mock_mgr.update_status.assert_called_with("myvm", VMState.STOPPED)
+
+
+@patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_stop_vm_failure_sets_error(mock_get_mgr, mock_graceful_shutdown):
+    """stop_vm sets ERROR status on failure."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.RUNNING
+    mock_vm.pid = 12345
+    mock_vm.socket_path = Path("/fake/socket")
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    mock_graceful_shutdown.side_effect = RuntimeError("Shutdown failed")
+
+    with pytest.raises(MVMError, match="Failed to stop VM"):
+        stop_vm("myvm")
+
+    mock_mgr.update_status.assert_called_with("myvm", VMState.ERROR)
+
+
+# -----------------------------------------------------------------------------
+# Start VM tests
+# -----------------------------------------------------------------------------
+
+
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_success(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
+    """start_vm starts a stopped VM and updates status."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_vm.id = "abc123def4567890"
+    mock_vm.config = MagicMock()
+    mock_vm.config.enable_api_socket = True
+    mock_vm.config.enable_console = False
+    mock_vm.config.kernel_path = Path("/fake/kernel")
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.__truediv__ = MagicMock(side_effect=lambda x: Path(f"/fake/vm/{x}"))
+    mock_vm_dir.exists.return_value = True
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_popen.return_value = mock_proc
+
+    with patch("builtins.open", MagicMock()):
+        with patch("mvmctl.core.vm_lifecycle.time.sleep"):
+            with patch("pathlib.Path.exists", return_value=True):
+                start_vm("myvm")
+
+    mock_popen.assert_called_once()
+    mock_write_pid.assert_called_once()
+    mock_mgr.register.assert_called_once()
+
+
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_not_found(mock_get_mgr):
+    """start_vm raises error if VM not found."""
+    mock_mgr = MagicMock()
+    mock_mgr.get.return_value = None
+    mock_get_mgr.return_value = mock_mgr
+
+    with pytest.raises(Exception, match="VM 'myvm' not found"):
+        start_vm("myvm")
+
+
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_already_running(mock_get_mgr):
+    """start_vm raises error if VM is already running."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.RUNNING
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    with pytest.raises(MVMError, match="VM 'myvm' is not stopped"):
+        start_vm("myvm")
+
+
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_no_id(mock_get_mgr):
+    """start_vm raises error if VM has no ID."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_vm.id = None
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    with pytest.raises(MVMError, match="VM 'myvm' has no ID"):
+        start_vm("myvm")
+
+
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_failure_cleanup(mock_get_mgr, mock_get_vm_dir, mock_popen):
+    """start_vm cleans up resources on failure."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_vm.id = "abc123def4567890"
+    mock_vm.config = MagicMock()
+    mock_vm.config.enable_api_socket = True
+    mock_vm.config.enable_console = False
+    mock_vm.config.kernel_path = Path("/fake/kernel")
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.__truediv__ = MagicMock(side_effect=lambda x: Path(f"/fake/vm/{x}"))
+    mock_vm_dir.exists.return_value = True
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    mock_popen.side_effect = OSError("Failed to start process")
+
+    with patch("builtins.open", MagicMock()):
+        with patch("pathlib.Path.exists", return_value=True):
+            with pytest.raises(MVMError, match="Failed to start VM"):
+                start_vm("myvm")
+
+
+# -----------------------------------------------------------------------------
+# Reboot VM tests
+# -----------------------------------------------------------------------------
+
+
+@patch("mvmctl.core.vm_lifecycle.start_vm")
+@patch("mvmctl.core.vm_lifecycle.stop_vm")
+def test_reboot_vm_success(mock_stop, mock_start):
+    """reboot_vm calls stop then start."""
+    reboot_vm("myvm")
+
+    mock_stop.assert_called_once_with("myvm", None, force=False)
+    mock_start.assert_called_once_with("myvm", None)
+
+
+@patch("mvmctl.core.vm_lifecycle.start_vm")
+@patch("mvmctl.core.vm_lifecycle.stop_vm")
+def test_reboot_vm_force(mock_stop, mock_start):
+    """reboot_vm passes force=True to stop_vm."""
+    reboot_vm("myvm", force=True)
+
+    mock_stop.assert_called_once_with("myvm", None, force=True)
+    mock_start.assert_called_once_with("myvm", None)
+
+
+@patch("mvmctl.core.vm_lifecycle.stop_vm")
+def test_reboot_vm_stop_fails(mock_stop):
+    """reboot_vm raises error if stop fails."""
+    mock_stop.side_effect = MVMError("Stop failed")
+
+    with pytest.raises(MVMError, match="Stop failed"):
+        reboot_vm("myvm")
+
+
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_with_console(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
+    """start_vm handles console-enabled VMs."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_vm.id = "abc123def4567890"
+    mock_vm.config = MagicMock()
+    mock_vm.config.enable_api_socket = False
+    mock_vm.config.enable_console = True
+    mock_vm.config.kernel_path = None
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.__truediv__ = MagicMock(side_effect=lambda x: Path(f"/fake/vm/{x}"))
+    mock_vm_dir.exists.return_value = True
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_popen.return_value = mock_proc
+
+    with patch("builtins.open", MagicMock()):
+        with patch("mvmctl.core.vm_lifecycle.time.sleep"):
+            with patch("pathlib.Path.exists", return_value=True):
+                start_vm("myvm")
+
+    mock_popen.assert_called_once()
+    mock_write_pid.assert_called_once()
+
+
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_missing_config_file(mock_get_mgr, mock_get_vm_dir):
+    """start_vm raises error if firecracker.json is missing."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_vm.id = "abc123def4567890"
+    mock_vm.config = MagicMock()
+    mock_vm.config.enable_api_socket = True
+    mock_vm.config.enable_console = False
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.__truediv__ = MagicMock(side_effect=lambda x: Path(f"/fake/vm/{x}"))
+    mock_vm_dir.exists.return_value = True
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    with patch("pathlib.Path.exists", return_value=False):
+        with pytest.raises(MVMError, match="VM config not found"):
+            start_vm("myvm")
+
+
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_missing_firecracker_binary(
+    mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid
+):
+    """start_vm raises error if firecracker binary is missing (absolute path)."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_vm.id = "abc123def4567890"
+    mock_vm.config = MagicMock()
+    mock_vm.config.enable_api_socket = True
+    mock_vm.config.enable_console = False
+    mock_vm.config.kernel_path = Path("/fake/kernel")
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.__truediv__ = MagicMock(side_effect=lambda x: Path(f"/fake/vm/{x}"))
+    mock_vm_dir.exists.return_value = True
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_popen.return_value = mock_proc
+
+    with patch("builtins.open", MagicMock()):
+        with patch("mvmctl.core.vm_lifecycle.time.sleep"):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch(
+                    "mvmctl.core.vm_lifecycle.DEFAULT_FIRECRACKER_BIN_NAME",
+                    "firecracker",
+                ):
+                    start_vm("myvm")
+
+    mock_popen.assert_called_once()
+    mock_write_pid.assert_called_once()
+
+
+@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_manager")
+def test_start_vm_log_close_oserror(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
+    """start_vm handles OSError when closing log file by raising MVMError."""
+    mock_mgr = MagicMock()
+    mock_vm = MagicMock()
+    mock_vm.status = VMState.STOPPED
+    mock_vm.id = "abc123def4567890"
+    mock_vm.config = MagicMock()
+    mock_vm.config.enable_api_socket = True
+    mock_vm.config.enable_console = False
+    mock_vm.config.kernel_path = None
+    mock_mgr.get.return_value = mock_vm
+    mock_get_mgr.return_value = mock_mgr
+
+    mock_vm_dir = MagicMock()
+    mock_vm_dir.__truediv__ = MagicMock(side_effect=lambda x: Path(f"/fake/vm/{x}"))
+    mock_vm_dir.exists.return_value = True
+    mock_get_vm_dir.return_value = mock_vm_dir
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_popen.return_value = mock_proc
+
+    mock_log_fp = MagicMock()
+    mock_log_fp.close.side_effect = OSError("Close failed")
+
+    with patch("builtins.open", return_value=mock_log_fp):
+        with patch("mvmctl.core.vm_lifecycle.time.sleep"):
+            with patch("pathlib.Path.exists", return_value=True):
+                with pytest.raises(MVMError, match="Failed to start VM"):
+                    start_vm("myvm")
+
+    mock_popen.assert_called_once()
