@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import IO, Any
 
 from mvmctl.constants import CONST_FILE_PERMS_VM_STATE
+from mvmctl.core.mvm_db import MVMDatabase
+from mvmctl.db.models import VMState as DBVMState
 from mvmctl.models.vm import VMInstance, VMState
 from mvmctl.utils.fs import get_vms_dir
 
@@ -34,6 +36,67 @@ def _generate_vm_id(name: str, created_at: datetime) -> str:
     """Generate a unique VM ID from name and creation time."""
     data = f"{name}:{created_at.isoformat()}"
     return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+
+def _vm_instance_to_db_state(vm: VMInstance) -> DBVMState:
+    """Convert VMInstance to DB VMState for SQLite storage."""
+    return DBVMState(
+        id=vm.id,
+        name=vm.name,
+        status=vm.status.value,
+        pid=vm.pid,
+        ipv4=vm.ipv4,
+        mac=vm.mac,
+        network_id=vm.network_name,
+        tap_device=vm.tap_device,
+        image_id=vm.image_id,
+        kernel_id=vm.kernel_id,
+        binary_id=None,
+        api_socket_path=str(vm.api_socket_path) if vm.api_socket_path else None,
+        console_socket_path=str(vm.console_socket_path) if vm.console_socket_path else None,
+        config_path=None,
+        cloud_init_mode=vm.cloud_init_mode.value if vm.cloud_init_mode else None,
+        nocloud_net_port=vm.nocloud_net_port,
+        nocloud_server_pid=vm.nocloud_server_pid,
+        console_relay_pid=vm.console_relay_pid,
+        exit_code=vm.exit_code,
+        vcpu_count=vm.config.vcpu_count if vm.config else None,
+        mem_size_mib=vm.config.mem_size_mib if vm.config else None,
+        disk_size_mib=None,
+        rootfs_path=str(vm.config.rootfs_path) if vm.config and vm.config.rootfs_path else None,
+        rootfs_suffix=vm.rootfs_suffix if vm.rootfs_suffix else None,
+        created_at=vm.created_at.isoformat() if vm.created_at else None,
+        updated_at=None,
+    )
+
+
+def _db_state_to_vm_instance(state: DBVMState) -> VMInstance:
+    """Convert DB VMState to VMInstance."""
+    from mvmctl.models.cloud_init import CloudInitMode
+
+    vm = VMInstance(
+        name=state.name,
+        id=state.id,
+        pid=state.pid,
+        api_socket_path=Path(state.api_socket_path) if state.api_socket_path else None,
+        ipv4=state.ipv4,
+        mac=state.mac,
+        network_name=state.network_id,
+        tap_device=state.tap_device,
+        status=VMState(state.status) if state.status else VMState.STOPPED,
+        cloud_init_mode=CloudInitMode(state.cloud_init_mode)
+        if state.cloud_init_mode
+        else CloudInitMode.INJECT,
+        nocloud_net_port=state.nocloud_net_port,
+        nocloud_server_pid=state.nocloud_server_pid,
+        console_relay_pid=state.console_relay_pid,
+        console_socket_path=Path(state.console_socket_path) if state.console_socket_path else None,
+        exit_code=state.exit_code,
+        rootfs_suffix=state.rootfs_suffix or ".ext4",
+        image_id=state.image_id,
+        kernel_id=state.kernel_id,
+    )
+    return vm
 
 
 class VMManager:
@@ -190,22 +253,50 @@ class VMManager:
             state["vms"][vm_id] = vm_data
             self._save_state(state)
 
+        # NEW: Also write to SQLite (dual-write pattern)
+        try:
+            db = MVMDatabase()
+            db.upsert_vm(_vm_instance_to_db_state(vm))
+        except Exception:
+            pass  # Don't break if SQLite fails
+
     def update_status(self, name: str, status: VMState) -> None:
         """Update the status of a registered VM."""
+        vm_id = None
         with self._locked():
             state = self._load_state()
             # Find VM by name
-            for vm_id, vm_data in state["vms"].items():
+            for vm_id_key, vm_data in state["vms"].items():
                 if vm_data.get("name") == name:
                     vm_data["status"] = status.value
+                    vm_id = vm_id_key
                     self._save_state(state)
-                    return
-            from mvmctl.exceptions import VMNotFoundError
+                    break
+            if vm_id is None:
+                from mvmctl.exceptions import VMNotFoundError
 
-            raise VMNotFoundError(f"VM '{name}' not found in state")
+                raise VMNotFoundError(f"VM '{name}' not found in state")
+
+        # NEW: Also update SQLite
+        if vm_id:
+            try:
+                db = MVMDatabase()
+                db.update_vm_status(vm_id, status.value)
+            except Exception:
+                pass
 
     def get(self, name: str) -> VMInstance | None:
         """Get VM by name (searches all VMs for matching name)."""
+        # Try SQLite first
+        try:
+            db = MVMDatabase()
+            db_vm = db.get_vm_by_name(name)
+            if db_vm:
+                return _db_state_to_vm_instance(db_vm)
+        except Exception:
+            pass
+
+        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             for vm_id, vm_data in state["vms"].items():
@@ -218,6 +309,16 @@ class VMManager:
 
         Returns None if none or multiple VMs match.
         """
+        # Try SQLite first
+        try:
+            db = MVMDatabase()
+            db_vms = db.find_vms_by_prefix(prefix)
+            if len(db_vms) == 1:
+                return _db_state_to_vm_instance(db_vms[0])
+        except Exception:
+            pass
+
+        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             matches = [
@@ -242,6 +343,16 @@ class VMManager:
         Returns:
             VMInstance if found, None otherwise
         """
+        # Try SQLite first
+        try:
+            db = MVMDatabase()
+            db_vm = db.get_vm(full_hash)
+            if db_vm:
+                return _db_state_to_vm_instance(db_vm)
+        except Exception:
+            pass
+
+        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             vm_data = state["vms"].get(full_hash)
@@ -256,6 +367,16 @@ class VMManager:
 
     def find_by_id_prefix(self, prefix: str) -> list[VMInstance]:
         """Return all VMs whose ID starts with prefix."""
+        # Try SQLite first
+        try:
+            db = MVMDatabase()
+            db_vms = db.find_vms_by_prefix(prefix)
+            if db_vms:
+                return [_db_state_to_vm_instance(vm) for vm in db_vms]
+        except Exception:
+            pass
+
+        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             results = []
@@ -266,6 +387,16 @@ class VMManager:
 
     def get_by_name(self, name: str) -> list[VMInstance]:
         """Return all VMs with the given name (may be multiple)."""
+        # Try SQLite first
+        try:
+            db = MVMDatabase()
+            db_vm = db.get_vm_by_name(name)
+            if db_vm:
+                return [_db_state_to_vm_instance(db_vm)]
+        except Exception:
+            pass
+
+        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             results = []
@@ -276,6 +407,16 @@ class VMManager:
 
     def list_all(self) -> list[VMInstance]:
         """List all VMs."""
+        # Try SQLite first
+        try:
+            db = MVMDatabase()
+            db_vms = db.list_vms()
+            if db_vms:
+                return [_db_state_to_vm_instance(vm) for vm in db_vms]
+        except Exception:
+            pass
+
+        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             vms = []
@@ -300,6 +441,13 @@ class VMManager:
             if vm_id in state["vms"]:
                 del state["vms"][vm_id]
                 self._save_state(state)
+
+        # NEW: Also delete from SQLite
+        try:
+            db = MVMDatabase()
+            db.delete_vm(vm_id)
+        except Exception:
+            pass
 
 
 def get_vm_manager(run_dir: Path | None = None) -> VMManager:
