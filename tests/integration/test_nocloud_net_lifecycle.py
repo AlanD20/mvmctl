@@ -30,13 +30,13 @@ def _make_vm(
     """Create a sample VMInstance for testing."""
     return VMInstance(
         name=name,
-        ip=ip,
+        ipv4=ip,
         mac="02:FC:aa:bb:cc:dd",
         pid=pid,
         status=status,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
         network_name=network,
-        socket_path=Path(f"/tmp/mvm/{name}.sock"),
+        api_socket_path=Path(f"/tmp/mvm/{name}.sock"),
         cloud_init_mode=CloudInitMode.NET if nocloud_net_port else CloudInitMode.INJECT,
         nocloud_net_port=nocloud_net_port,
     )

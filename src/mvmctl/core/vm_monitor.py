@@ -96,7 +96,7 @@ def _check_firecracker_state(vm: VMInstance) -> VMState:
     Returns:
         VMState based on Firecracker response
     """
-    socket_path = vm.socket_path
+    socket_path = vm.api_socket_path
 
     # If no socket path, we can't query FC, but process is alive
     if socket_path is None:

@@ -152,9 +152,9 @@ def connect_to_vm(
         vm = manager.get(vm_name_or_ip)
         if not vm:
             raise VMNotFoundError(f"VM '{vm_name_or_ip}' not found")
-        if not vm.ip:
+        if not vm.ipv4:
             raise MVMError(f"VM '{vm_name_or_ip}' has no IP address")
-        ip = vm.ip
+        ip = vm.ipv4
 
     if not key_path:
         keys = find_ssh_keys()

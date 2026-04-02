@@ -1638,8 +1638,8 @@ def create_vm(
             name=name,
             id=vm_id,  # Use the pre-generated ID
             pid=proc.pid,
-            socket_path=socket_path,
-            ip=guest_ip,
+            api_socket_path=socket_path,
+            ipv4=guest_ip,
             mac=guest_mac,
             network_name=network_name,
             tap_device=tap_name,
@@ -1735,7 +1735,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if pid is None:
         pid = vm.pid
 
-    graceful_shutdown(pid, vm.socket_path)
+    graceful_shutdown(pid, vm.api_socket_path)
 
     # Try to capture exit code after shutdown
     if pid is not None:
@@ -1760,14 +1760,14 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
             logger.warning("Failed to cleanup console relay: %s", e)
 
     # Stop nocloud-net server and remove firewall rule if VM has nocloud-net configured
-    if vm.nocloud_net_port is not None and vm.ip is not None:
+    if vm.nocloud_net_port is not None and vm.ipv4 is not None:
         try:
             nocloud_manager = NoCloudNetServerManager()
             if vm.id:
                 nocloud_manager.stop_server(name, vm.id)
             else:
                 nocloud_manager.stop_server(name)
-            remove_nocloud_input_rule(vm.ip, name, vm.nocloud_net_port)
+            remove_nocloud_input_rule(vm.ipv4, name, vm.nocloud_net_port)
         except (OSError, RuntimeError, NetworkError) as e:
             logger.warning("Failed to cleanup nocloud-net resources: %s", e)
 
@@ -1788,10 +1788,10 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     except NetworkError as e:
         logger.warning("Failed to release network IP: %s", e)
 
-    if vm.ip:
+    if vm.ipv4:
         try:
             subprocess.run(
-                ["ssh-keygen", "-R", vm.ip],
+                ["ssh-keygen", "-R", vm.ipv4],
                 capture_output=True,
                 check=False,
             )
@@ -1859,7 +1859,7 @@ def pause_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if vm.status != VMState.RUNNING:
         raise MVMError(f"VM '{name}' is not running (current state: {vm.status.value})")
 
-    socket_path = vm.socket_path
+    socket_path = vm.api_socket_path
     if not socket_path:
         raise MVMError(f"VM '{name}' has no API socket enabled")
 
@@ -1890,7 +1890,7 @@ def resume_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if vm.status != VMState.PAUSED:
         raise MVMError(f"VM '{name}' is not paused (current state: {vm.status.value})")
 
-    socket_path = vm.socket_path
+    socket_path = vm.api_socket_path
     if not socket_path:
         raise MVMError(f"VM '{name}' has no API socket enabled")
 
@@ -1923,7 +1923,7 @@ def stop_vm(name: str, vm_manager: VMManager | None = None, force: bool = False)
         raise MVMError(f"VM '{name}' is not running (current state: {vm.status.value})")
 
     pid = vm.pid
-    socket_path = vm.socket_path
+    socket_path = vm.api_socket_path
 
     manager.update_status(name, VMState.STOPPING)
 
@@ -2018,7 +2018,7 @@ def start_vm(name: str, vm_manager: VMManager | None = None) -> None:
         _write_pid_file(pid_file, proc.pid)
 
         vm.pid = proc.pid
-        vm.socket_path = socket_path
+        vm.api_socket_path = socket_path
         vm.status = VMState.RUNNING
         manager.register(vm)
 

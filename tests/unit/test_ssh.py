@@ -156,7 +156,7 @@ def test_connect_to_vm_by_name(
     tmp_path: Path,
 ):
     """Connect by name: looks up VM, uses its IP."""
-    vm = VMInstance(name="myvm", ip="10.20.0.3", status=VMState.RUNNING)
+    vm = VMInstance(name="myvm", ipv4="10.20.0.3", status=VMState.RUNNING)
     mock_manager = MagicMock()
     mock_manager.get.return_value = vm
     mock_vm_manager_cls.return_value = mock_manager

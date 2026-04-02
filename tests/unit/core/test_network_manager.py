@@ -20,8 +20,8 @@ class TestIsIpAvailable:
         mocker.patch(
             "mvmctl.core.network_manager.get_network_leases",
             return_value=[
-                NetworkLease(vm_name="vm1", ip="10.0.0.2"),
-                NetworkLease(vm_name="vm2", ip="10.0.0.3"),
+                NetworkLease(vm_id="vm1", ipv4="10.0.0.2"),
+                NetworkLease(vm_id="vm2", ipv4="10.0.0.3"),
             ],
         )
 
@@ -35,8 +35,8 @@ class TestIsIpAvailable:
         mocker.patch(
             "mvmctl.core.network_manager.get_network_leases",
             return_value=[
-                NetworkLease(vm_name="vm1", ip="10.0.0.2"),
-                NetworkLease(vm_name="vm2", ip="10.0.0.5"),  # This is the IP we're checking
+                NetworkLease(vm_id="vm1", ipv4="10.0.0.2"),
+                NetworkLease(vm_id="vm2", ipv4="10.0.0.5"),  # This is the IP we're checking
             ],
         )
 
@@ -54,7 +54,7 @@ class TestCheckIpAvailable:
         mocker.patch(
             "mvmctl.core.network_manager.get_network_leases",
             return_value=[
-                NetworkLease(vm_name="vm1", ip="10.0.0.5"),
+                NetworkLease(vm_id="vm1", ipv4="10.0.0.5"),
             ],
         )
 

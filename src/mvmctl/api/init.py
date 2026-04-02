@@ -21,7 +21,22 @@ from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
 __all__ = [
     "run_host_init_escalated",
     "build_default_kernel",
+    "init_database",
 ]
+
+
+def init_database() -> None:
+    """Initialize the local state database.
+
+    Creates the MVMDatabase instance and runs migrations.
+
+    Raises:
+        Exception: Any error from the database migration.
+    """
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    db.migrate()
 
 
 def run_host_init_escalated() -> int:

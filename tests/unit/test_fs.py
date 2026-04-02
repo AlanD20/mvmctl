@@ -11,6 +11,7 @@ from mvmctl.utils.fs import (
     get_images_dir,
     get_kernels_dir,
     get_logs_dir,
+    get_mvm_db_path,
     get_state_file,
     get_vm_dir,
     get_vms_dir,
@@ -62,6 +63,27 @@ def test_get_assets_dir_points_to_package():
     assert result.is_dir()
     assert (result / "defaults.yaml").exists()
     assert (result / "images.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_mvm_db_path()
+# ---------------------------------------------------------------------------
+
+
+def test_get_mvm_db_path_returns_correct_filename(isolate_config_and_cache):
+    path = get_mvm_db_path()
+    assert path.name == "mvmdb.db"
+
+
+def test_get_mvm_db_path_is_under_cache_dir(isolate_config_and_cache):
+    path = get_mvm_db_path()
+    assert path.parent == get_cache_dir()
+
+
+def test_get_mvm_db_path_respects_mvm_cache_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    path = get_mvm_db_path()
+    assert path == tmp_path / "mvmdb.db"
 
 
 # ---------------------------------------------------------------------------

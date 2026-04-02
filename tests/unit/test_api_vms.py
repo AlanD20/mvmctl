@@ -259,7 +259,7 @@ def test_inspect_vm_by_id_prefix(mocker: MockerFixture):
         name="test-vm",
         id="abc123" + "x" * 10,  # 16-char hash
         pid=1234,
-        ip="10.0.0.2",
+        ipv4="10.0.0.2",
         mac="02:FC:00:00:00:01",
         status=VMState.RUNNING,
         network_name="default",

@@ -61,8 +61,8 @@ class NetworkConfig:
 class NetworkLease:
     """IP lease assignment for a VM within a network."""
 
-    vm_name: str
-    ip: str
+    vm_id: str
+    ipv4: str
 
 
 def _bridge_name_for(network_name: str) -> str:
@@ -177,8 +177,8 @@ def _leases_from_entry(entry: dict[str, Any]) -> list[NetworkLease]:
         return []
     leases = []
     for item in raw_leases:
-        if isinstance(item, dict) and "vm_name" in item and "ip" in item:
-            leases.append(NetworkLease(vm_name=item["vm_name"], ip=item["ip"]))
+        if isinstance(item, dict) and "vm_id" in item and "ipv4" in item:
+            leases.append(NetworkLease(vm_id=item["vm_id"], ipv4=item["ipv4"]))
     return leases
 
 
@@ -237,8 +237,8 @@ def check_ip_available(network_name: str, ip: str) -> None:
     """
     leases = get_network_leases(network_name)
     for lease in leases:
-        if lease.ip == ip:
-            raise NetworkError(f"IP {ip} is already in use by VM '{lease.vm_name}'")
+        if lease.ipv4 == ip:
+            raise NetworkError(f"IP {ip} is already in use by VM '{lease.vm_id}'")
 
 
 def is_ip_available(network_name: str, ip: str) -> bool:
@@ -253,7 +253,7 @@ def is_ip_available(network_name: str, ip: str) -> bool:
     """
     leases = get_network_leases(network_name)
     for lease in leases:
-        if lease.ip == ip:
+        if lease.ipv4 == ip:
             return False
     return True
 
@@ -388,7 +388,7 @@ def remove_network(name: str) -> None:
 
     leases = get_network_leases(name)
     if leases:
-        vm_names = ", ".join(lease.vm_name for lease in leases)
+        vm_names = ", ".join(lease.vm_id for lease in leases)
         raise NetworkError(
             f"Network '{name}' still has VMs attached: {vm_names}. Remove those VMs first."
         )
@@ -409,11 +409,11 @@ def remove_network(name: str) -> None:
 
 
 class _VMLease(TypedDict):
-    vm_name: str
-    ip: str
+    vm_id: str
+    ipv4: str
     status: str
     pid: int | None
-    socket_path: str | None
+    api_socket_path: str | None
 
 
 class NetworkInspect(TypedDict):
@@ -446,25 +446,25 @@ def inspect_network(name: str) -> NetworkInspect:
     vm_manager = VMManager()
     enriched_vms: list[_VMLease] = []
     for lease in leases:
-        vm = vm_manager.get(lease.vm_name)
+        vm = vm_manager.get(lease.vm_id)
         if vm is not None:
             enriched_vms.append(
                 {
-                    "vm_name": lease.vm_name,
-                    "ip": lease.ip,
+                    "vm_id": lease.vm_id,
+                    "ipv4": lease.ipv4,
                     "status": vm.status.value,
                     "pid": vm.pid,
-                    "socket_path": str(vm.socket_path) if vm.socket_path else None,
+                    "api_socket_path": str(vm.api_socket_path) if vm.api_socket_path else None,
                 }
             )
         else:
             enriched_vms.append(
                 {
-                    "vm_name": lease.vm_name,
-                    "ip": lease.ip,
+                    "vm_id": lease.vm_id,
+                    "ipv4": lease.ipv4,
                     "status": "unknown",
                     "pid": None,
-                    "socket_path": None,
+                    "api_socket_path": None,
                 }
             )
 
@@ -494,12 +494,12 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
         raise NetworkError(f"Network '{network_name}' not found")
 
     leases = get_network_leases(network_name)
-    used_ips = [lease.ip for lease in leases]
+    used_ips = [lease.ipv4 for lease in leases]
     # Also reserve the gateway
     used_ips.append(config.gateway)
 
     ip = allocate_ip(used_ips, subnet=config.cidr)
-    leases.append(NetworkLease(vm_name=vm_name, ip=ip))
+    leases.append(NetworkLease(vm_id=vm_name, ipv4=ip))
 
     # Persist updated leases to metadata
     cache_dir = get_cache_dir()
@@ -511,7 +511,7 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
 def release_network_ip(network_name: str, vm_name: str) -> None:
     """Release a VM's IP lease from a network."""
     leases = get_network_leases(network_name)
-    leases = [lease for lease in leases if lease.vm_name != vm_name]
+    leases = [lease for lease in leases if lease.vm_id != vm_name]
 
     # Persist updated leases to metadata
     cache_dir = get_cache_dir()

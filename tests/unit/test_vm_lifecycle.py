@@ -13,10 +13,8 @@ from mvmctl.core.vm_lifecycle import (
     create_vm,
     graceful_shutdown,
     load_snapshot,
-    pause_vm,
     reboot_vm,
     remove_vm,
-    resume_vm,
     snapshot_vm,
     start_vm,
     stop_vm,
@@ -180,7 +178,7 @@ def test_create_vm_core_success(
 
     assert isinstance(vm, VMInstance)
     assert vm.name == "myvm"
-    assert vm.ip == "10.20.0.5"
+    assert vm.ipv4 == "10.20.0.5"
     vm_config_arg = mock_config_gen.call_args.args[0]
     assert vm_config_arg.root_uuid == "11111111-2222-3333-4444-555555555555"
     assert vm_config_arg.root_fs_type == "ext4"
@@ -341,7 +339,7 @@ def test_remove_vm_success(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="myvm",
-        ip="10.20.0.5",
+        ipv4="10.20.0.5",
         pid=123,
         status=VMState.RUNNING,
         network_name="default",
@@ -396,7 +394,7 @@ def test_remove_vm_no_nat_skips_teardown(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="vm2",
-        ip="10.20.0.6",
+        ipv4="10.20.0.6",
         pid=456,
         status=VMState.RUNNING,
         network_name="isolated",
@@ -445,7 +443,7 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="shared",
-        ip="10.20.0.7",
+        ipv4="10.20.0.7",
         pid=789,
         status=VMState.RUNNING,
         network_name="default",
@@ -507,7 +505,7 @@ def test_remove_vm_stops_nocloud_server(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="nocloud-vm",
-        ip="10.20.0.10",
+        ipv4="10.20.0.10",
         pid=999,
         status=VMState.RUNNING,
         network_name="default",
@@ -559,7 +557,7 @@ def test_remove_vm_removes_firewall_rule(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="fw-test",
-        ip="10.20.0.15",
+        ipv4="10.20.0.15",
         pid=777,
         status=VMState.RUNNING,
         network_name="default",
@@ -610,7 +608,7 @@ def test_remove_vm_cleanup_is_idempotent(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="idempotent-vm",
-        ip="10.20.0.20",
+        ipv4="10.20.0.20",
         pid=555,
         status=VMState.RUNNING,
         network_name="default",
@@ -2935,7 +2933,7 @@ class TestRemoveVMNATOrdering:
         vm = VMInstance(
             id="a" * 64,
             name="testvm",
-            ip="10.0.0.2",
+            ipv4="10.0.0.2",
             mac="02:FC:00:00:00:01",
             pid=1234,
             status=VMState.STOPPED,
@@ -3018,7 +3016,7 @@ class TestRemoveVMNATOrdering:
         vm = VMInstance(
             id="a" * 64,
             name="testvm",
-            ip="10.0.0.2",
+            ipv4="10.0.0.2",
             mac="02:FC:00:00:00:01",
             pid=1234,
             status=VMState.STOPPED,
@@ -3062,7 +3060,7 @@ def mock_vm_manager_for_stop(mocker):
     mock_vm = MagicMock()
     mock_vm.status = VMState.RUNNING
     mock_vm.pid = 12345
-    mock_vm.socket_path = Path("/fake/socket")
+    mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
     return mock_mgr
 
@@ -3090,7 +3088,7 @@ def test_stop_vm_success(mock_get_mgr, mock_graceful_shutdown):
     mock_vm = MagicMock()
     mock_vm.status = VMState.RUNNING
     mock_vm.pid = 12345
-    mock_vm.socket_path = Path("/fake/socket")
+    mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
     mock_get_mgr.return_value = mock_mgr
 
@@ -3132,7 +3130,7 @@ def test_stop_vm_force(mock_get_mgr, mock_graceful_shutdown):
     mock_vm = MagicMock()
     mock_vm.status = VMState.RUNNING
     mock_vm.pid = 12345
-    mock_vm.socket_path = Path("/fake/socket")
+    mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
     mock_get_mgr.return_value = mock_mgr
 
@@ -3150,7 +3148,7 @@ def test_stop_vm_handles_paused(mock_get_mgr, mock_graceful_shutdown):
     mock_vm = MagicMock()
     mock_vm.status = VMState.PAUSED
     mock_vm.pid = 12345
-    mock_vm.socket_path = Path("/fake/socket")
+    mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
     mock_get_mgr.return_value = mock_mgr
 
@@ -3168,7 +3166,7 @@ def test_stop_vm_failure_sets_error(mock_get_mgr, mock_graceful_shutdown):
     mock_vm = MagicMock()
     mock_vm.status = VMState.RUNNING
     mock_vm.pid = 12345
-    mock_vm.socket_path = Path("/fake/socket")
+    mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
     mock_get_mgr.return_value = mock_mgr
 

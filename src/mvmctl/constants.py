@@ -471,6 +471,11 @@ DEFAULT_CONSOLE_SOCKET_FILENAME: Final[str] = "console.sock"
 DEFAULT_CONSOLE_PID_FILENAME: Final[str] = "console.pid"
 
 # ---------------------------------------------------------------------------
+# SQLite database filename
+# ---------------------------------------------------------------------------
+MVM_DB_FILENAME: Final[str] = "mvmdb.db"
+
+# ---------------------------------------------------------------------------
 # Kernel type strings
 # ---------------------------------------------------------------------------
 

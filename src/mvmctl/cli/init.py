@@ -132,6 +132,24 @@ def _step_cache_init() -> None:
         print_warning(f"  Cache init failed: {e}")
 
 
+def _step_local_state() -> None:
+    try:
+        from mvmctl.api.init import init_database
+
+        init_database()
+        print_success("  Local state ready")
+    except Exception:
+        from mvmctl.utils.fs import get_mvm_db_path
+
+        state_file = get_mvm_db_path()
+        print_warning("  Local state initialization failed.")
+        print_warning("  To recover, remove the file and run 'mvm init' again:")
+        print_warning(f"    rm {state_file}")
+        print_warning(
+            "  WARNING: Removing this file will permanently delete all existing state data."
+        )
+
+
 def _step_binary(non_interactive: bool) -> None:
     """Step 3: Binary download."""
     print_info("\n[3/4] Firecracker binary")
@@ -357,19 +375,18 @@ def _step_summary() -> None:
 
     all_ok = True
     for label, ok in checks:
-        status = "ready" if ok else "missing"
-        print_info(f"{label}: {status}")
-        if not ok:
+        if ok:
+            print_success(f"  {label}")
+        else:
+            print_warning(f"  {label}: missing")
             all_ok = False
 
     if all_ok:
-        print_success("\nHost ready! Next steps:")
-        print_info("  mvm kernel fetch")
-        print_info("  mvm image fetch ubuntu-24.04")
-        print_info("  mvm key create mykey")
-        print_info("  mvm vm create --name my-vm --image ubuntu-24.04")
+        print_info("")
+        print_success("Host ready!")
     else:
-        print_warning("\nHost setup incomplete. Run 'mvm init' again.")
+        print_info("")
+        print_warning("Host setup incomplete. Run 'mvm init' again.")
 
 
 @app.callback(invoke_without_command=True)
@@ -403,5 +420,6 @@ def init(
 
     _step_host(skip=skip_host, non_interactive=non_interactive)
     _step_cache_init()
+    _step_local_state()
     _step_binary(non_interactive)
     _step_summary()

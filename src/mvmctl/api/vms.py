@@ -436,7 +436,7 @@ def cleanup_vms(
         if not tap_name:
             log.warning("VM %s has no tap_device in state, skipping TAP cleanup", v.name)
 
-        if v.nocloud_net_port is not None and v.ip is not None:
+        if v.nocloud_net_port is not None and v.ipv4 is not None:
             try:
                 nocloud_manager = NoCloudNetServerManager()
                 nocloud_manager.stop_server(v.name, v.id)
@@ -444,7 +444,7 @@ def cleanup_vms(
                 pass
 
             try:
-                remove_nocloud_input_rule(v.ip, v.name, v.nocloud_net_port)
+                remove_nocloud_input_rule(v.ipv4, v.name, v.nocloud_net_port)
             except NetworkError:
                 pass
 
@@ -571,7 +571,7 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
         "status": vm.status.value,
         "created_at": vm.created_at.isoformat() if vm.created_at else None,
         "pid": vm.pid,
-        "ip": vm.ip,
+        "ip": vm.ipv4,
         "mac": vm.mac,
         "network_name": vm.network_name,
         "tap_device": vm.tap_device,
@@ -585,7 +585,7 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
             "config": str(config_path) if config_path.exists() else None,
         },
         "features": {
-            "api_socket": vm.socket_path is not None,
+            "api_socket": vm.api_socket_path is not None,
             "console": vm.console_socket_path is not None,
             "nocloud_net": vm.nocloud_net_port is not None,
         },

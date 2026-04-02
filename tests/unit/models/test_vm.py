@@ -10,7 +10,7 @@ def test_vminstance_dataclass_structure():
     # Create VMInstance with all standard fields
     vm = VMInstance(
         name="test-vm",
-        ip="10.0.0.2",
+        ipv4="10.0.0.2",
         mac="02:FC:00:00:00:01",
         pid=1234,
         status=VMState.RUNNING,
@@ -21,8 +21,8 @@ def test_vminstance_dataclass_structure():
     assert hasattr(vm, "name")
     assert hasattr(vm, "id")
     assert hasattr(vm, "pid")
-    assert hasattr(vm, "socket_path")
-    assert hasattr(vm, "ip")
+    assert hasattr(vm, "api_socket_path")
+    assert hasattr(vm, "ipv4")
     assert hasattr(vm, "mac")
     assert hasattr(vm, "network_name")
     assert hasattr(vm, "tap_device")
@@ -37,7 +37,7 @@ def test_vminstance_dataclass_structure():
 
     # Verify values
     assert vm.name == "test-vm"
-    assert vm.ip == "10.0.0.2"
+    assert vm.ipv4 == "10.0.0.2"
     assert vm.mac == "02:FC:00:00:00:01"
     assert vm.pid == 1234
     assert vm.status == VMState.RUNNING
@@ -50,8 +50,8 @@ def test_vminstance_default_values():
     # Verify defaults
     assert vm.id == ""
     assert vm.pid is None
-    assert vm.socket_path is None
-    assert vm.ip is None
+    assert vm.api_socket_path is None
+    assert vm.ipv4 is None
     assert vm.mac is None
     assert vm.network_name is None
     assert vm.tap_device is None
@@ -67,7 +67,7 @@ def test_vminstance_serialization():
     """Verify VMInstance can be serialized to dict."""
     vm = VMInstance(
         name="serializable-vm",
-        ip="10.0.0.3",
+        ipv4="10.0.0.3",
         mac="02:FC:00:00:00:02",
         pid=5678,
         status=VMState.RUNNING,
@@ -78,7 +78,7 @@ def test_vminstance_serialization():
 
     # Verify dict structure
     assert data["name"] == "serializable-vm"
-    assert data["ip"] == "10.0.0.3"
+    assert data["ipv4"] == "10.0.0.3"
     assert data["mac"] == "02:FC:00:00:00:02"
     assert data["pid"] == 5678
     assert data["status"] == "running"
@@ -91,8 +91,8 @@ def test_vminstance_deserialization():
         "name": "deserialized-vm",
         "id": "abc123" + "x" * 58,
         "pid": 9999,
-        "socket_path": None,
-        "ip": "10.0.0.4",
+        "api_socket_path": None,
+        "ipv4": "10.0.0.4",
         "mac": "02:FC:00:00:00:03",
         "network_name": "default",
         "tap_device": "tap0",
@@ -112,7 +112,7 @@ def test_vminstance_deserialization():
     assert vm.name == "deserialized-vm"
     assert vm.id == "abc123" + "x" * 58
     assert vm.pid == 9999
-    assert vm.ip == "10.0.0.4"
+    assert vm.ipv4 == "10.0.0.4"
     assert vm.mac == "02:FC:00:00:00:03"
     assert vm.status == VMState.STOPPED
 

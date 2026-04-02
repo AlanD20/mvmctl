@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from mvmctl.constants import PROJECT_NAME, env_var
+from mvmctl.constants import MVM_DB_FILENAME, PROJECT_NAME, env_var
 from mvmctl.exceptions import MVMError
 
 
@@ -77,6 +77,24 @@ def get_config_dir() -> Path:
 def get_config_file() -> Path:
     """Return the path to the MVM config file (config.json)."""
     return get_config_dir() / "config.json"
+
+
+def get_mvm_db_path() -> Path:
+    """Return the path to the SQLite database file.
+
+    The database lives in the MVM cache directory as ``mvmdb.db``.
+
+    Handles SUDO_USER correctly: when running under ``sudo``, returns
+    the invoking user's cache directory (not root's), matching the
+    behaviour of ``get_cache_dir()``.
+
+    Example::
+
+        # Returns ~/.cache/mvmctl/mvmdb.db
+        # (or $MVM_CACHE_DIR/mvmdb.db if env var is set)
+        path = get_mvm_db_path()
+    """
+    return get_cache_dir() / MVM_DB_FILENAME
 
 
 def get_temp_dir() -> Path:

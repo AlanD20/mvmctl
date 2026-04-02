@@ -224,8 +224,8 @@ class VMInstance:
     name: str
     id: str = ""  # Full 16-char hex string
     pid: int | None = None
-    socket_path: Path | None = None
-    ip: str | None = None
+    api_socket_path: Path | None = None
+    ipv4: str | None = None
     mac: str | None = None
     network_name: str | None = None
     tap_device: str | None = None
@@ -248,8 +248,8 @@ class VMInstance:
             "name": self.name,
             "id": self.id,
             "pid": self.pid,
-            "socket_path": str(self.socket_path) if self.socket_path else None,
-            "ip": self.ip,
+            "api_socket_path": str(self.api_socket_path) if self.api_socket_path else None,
+            "ipv4": self.ipv4,
             "mac": self.mac,
             "network_name": self.network_name,
             "tap_device": self.tap_device,
@@ -291,8 +291,8 @@ class VMInstance:
             name=data.get("name", ""),
             id=data.get("id", ""),
             pid=data.get("pid"),
-            socket_path=Path(data["socket_path"]) if data.get("socket_path") else None,
-            ip=data.get("ip"),
+            api_socket_path=Path(data["api_socket_path"]) if data.get("api_socket_path") else None,
+            ipv4=data.get("ipv4"),
             mac=data.get("mac"),
             network_name=data.get("network_name"),
             tap_device=data.get("tap_device"),

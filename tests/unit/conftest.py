@@ -56,7 +56,7 @@ def sample_vm() -> VMInstance:
     """Return a sample VMInstance for use in tests."""
     return VMInstance(
         name="test-vm",
-        ip="10.20.0.2",
+        ipv4="10.20.0.2",
         mac="02:FC:aa:bb:cc:dd",
         pid=1234,
         status=VMState.RUNNING,
@@ -69,7 +69,7 @@ def stopped_vm() -> VMInstance:
     """Return a stopped VMInstance for use in tests."""
     return VMInstance(
         name="stopped-vm",
-        ip="10.20.0.3",
+        ipv4="10.20.0.3",
         mac="02:FC:11:22:33:44",
         pid=None,
         status=VMState.STOPPED,
@@ -103,12 +103,12 @@ def running_vm() -> VMInstance:
     """Running VM with all fields set."""
     return VMInstance(
         name="running-vm",
-        ip="10.20.0.5",
+        ipv4="10.20.0.5",
         mac="02:FC:aa:bb:cc:01",
         pid=5678,
         status=VMState.RUNNING,
         created_at=datetime(2026, 1, 15, 8, 30, 0),
-        socket_path=Path("/tmp/running-vm.sock"),
+        api_socket_path=Path("/tmp/running-vm.sock"),
         network_name="default",
         config=VMConfig(name="running-vm", vcpu_count=4, mem_size_mib=4096),
     )
@@ -119,7 +119,7 @@ def error_vm() -> VMInstance:
     """VM in error state."""
     return VMInstance(
         name="error-vm",
-        ip="10.20.0.6",
+        ipv4="10.20.0.6",
         mac="02:FC:aa:bb:cc:02",
         pid=None,
         status=VMState.ERROR,

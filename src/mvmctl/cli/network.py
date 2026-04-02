@@ -323,4 +323,4 @@ def inspect(
     if vms:
         print_section_header("VMS")
         for vm in vms:
-            print_key_value(vm["vm_name"], vm["ip"], indent=2, key_width=20)
+            print_key_value(vm["vm_id"], vm["ipv4"], indent=2, key_width=20)

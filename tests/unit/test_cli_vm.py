@@ -19,7 +19,7 @@ def _make_vm(name: str, status: VMState = VMState.RUNNING, ip: str = "10.20.0.2"
     return VMInstance(
         id="a" * 64,  # Full 64-char SHA256 hex string
         name=name,
-        ip=ip,
+        ipv4=ip,
         mac="02:FC:aa:bb:cc:dd",
         pid=1234,
         status=status,
@@ -85,7 +85,7 @@ def test_rm_multiple_vms_same_name_errors(mocker: MockerFixture):
     vm2 = VMInstance(
         id="def456abc1237890abcd1234567890ab",
         name="test-dup",
-        ip="192.168.1.11",
+        ipv4="192.168.1.11",
         mac="02:FC:ee:ff:00:11",
         pid=2345,
         status=VMState.STOPPED,

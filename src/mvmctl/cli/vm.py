@@ -567,7 +567,7 @@ def rm(
             print_info("Matching VMs:")
             for v in matches:
                 print_info(
-                    f"  - {v.name} (ID: {v.id}, IP: {v.ip or '-'}, status: {v.status.value})"
+                    f"  - {v.name} (ID: {v.id}, IP: {v.ipv4 or '-'}, status: {v.status.value})"
                 )
             exit_code = 1
             continue
@@ -625,12 +625,12 @@ def ls_vms(
                 {
                     "id": v.id if v.id else "-",
                     "name": v.name,
-                    "ip": v.ip,
+                    "ip": v.ipv4,
                     "mac": v.mac,
                     "status": status_str,
                     "pid": v.pid,
                     "exit_code": exit_code,
-                    "api_socket": v.socket_path is not None,
+                    "api_socket": v.api_socket_path is not None,
                     "network": v.network_name or "-",
                     "created_at": v.created_at.isoformat(),
                 }
@@ -652,10 +652,10 @@ def ls_vms(
                 state_marker,
                 v.id if v.id else "-",
                 v.name,
-                v.ip or "-",
+                v.ipv4 or "-",
                 status_str,
                 str(v.pid) if v.pid else "-",
-                "on" if v.socket_path else "off",
+                "on" if v.api_socket_path else "off",
                 human_readable_time(v.created_at.isoformat()) if v.created_at else "-",
             ]
         )

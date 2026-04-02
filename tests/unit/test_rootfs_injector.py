@@ -1,6 +1,5 @@
 """Unit tests for libguestfs-based rootfs injection."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest

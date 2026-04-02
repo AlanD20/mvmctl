@@ -91,16 +91,16 @@ class TestLeasesFromEntry:
     def test_leases_from_entry_success(self):
         entry = {
             "leases": [
-                {"vm_name": "vm1", "ip": "10.20.1.2"},
-                {"vm_name": "vm2", "ip": "10.20.1.3"},
+                {"vm_id": "vm1", "ipv4": "10.20.1.2"},
+                {"vm_id": "vm2", "ipv4": "10.20.1.3"},
             ]
         }
         leases = _leases_from_entry(entry)
         assert len(leases) == 2
-        assert leases[0].vm_name == "vm1"
-        assert leases[0].ip == "10.20.1.2"
-        assert leases[1].vm_name == "vm2"
-        assert leases[1].ip == "10.20.1.3"
+        assert leases[0].vm_id == "vm1"
+        assert leases[0].ipv4 == "10.20.1.2"
+        assert leases[1].vm_id == "vm2"
+        assert leases[1].ipv4 == "10.20.1.3"
 
     def test_leases_from_entry_empty(self):
         assert _leases_from_entry({}) == []
@@ -110,8 +110,8 @@ class TestLeasesFromEntry:
         # leases is not a list
         assert _leases_from_entry({"leases": "invalid"}) == []
         # Missing required fields
-        assert _leases_from_entry({"leases": [{"vm_name": "vm1"}]}) == []
-        assert _leases_from_entry({"leases": [{"ip": "10.20.1.2"}]}) == []
+        assert _leases_from_entry({"leases": [{"vm_id": "vm1"}]}) == []
+        assert _leases_from_entry({"leases": [{"ipv4": "10.20.1.2"}]}) == []
 
 
 def _add_network_to_metadata(cache_dir: Path, name: str, **fields) -> None:
@@ -162,13 +162,13 @@ def test_get_network_leases(mock_cache_dir: Path):
     _add_network_to_metadata(
         mock_cache_dir,
         "testnet",
-        leases=[{"vm_name": "vm1", "ip": "10.20.1.2"}],
+        leases=[{"vm_id": "vm1", "ipv4": "10.20.1.2"}],
     )
 
     leases = get_network_leases("testnet")
     assert len(leases) == 1
-    assert leases[0].vm_name == "vm1"
-    assert leases[0].ip == "10.20.1.2"
+    assert leases[0].vm_id == "vm1"
+    assert leases[0].ipv4 == "10.20.1.2"
 
 
 def test_get_network_leases_empty(mock_cache_dir: Path):
@@ -234,7 +234,7 @@ def test_remove_network_not_found():
 
 def test_remove_network_with_vms(mock_cache_dir: Path):
     _add_network_to_metadata(
-        mock_cache_dir, "mynet", leases=[{"vm_name": "vm1", "ip": "10.20.1.2"}]
+        mock_cache_dir, "mynet", leases=[{"vm_id": "vm1", "ipv4": "10.20.1.2"}]
     )
 
     with pytest.raises(NetworkError, match="still has VMs attached"):
@@ -258,7 +258,7 @@ def test_remove_network_partial_failure(
 @patch("mvmctl.core.network_manager.bridge_exists", return_value=True)
 def test_inspect_network(mock_bridge_exists, mock_cache_dir: Path):
     _add_network_to_metadata(
-        mock_cache_dir, "mynet", leases=[{"vm_name": "vm1", "ip": "10.20.1.2"}]
+        mock_cache_dir, "mynet", leases=[{"vm_id": "vm1", "ipv4": "10.20.1.2"}]
     )
 
     info = inspect_network("mynet")
@@ -267,11 +267,11 @@ def test_inspect_network(mock_bridge_exists, mock_cache_dir: Path):
     vms = info["vms"]
     assert isinstance(vms, list)
     assert len(vms) == 1
-    assert vms[0]["vm_name"] == "vm1"
-    assert vms[0]["ip"] == "10.20.1.2"
+    assert vms[0]["vm_id"] == "vm1"
+    assert vms[0]["ipv4"] == "10.20.1.2"
     assert "status" in vms[0]
     assert "pid" in vms[0]
-    assert "socket_path" in vms[0]
+    assert "api_socket_path" in vms[0]
 
 
 def test_inspect_network_not_found():
@@ -293,8 +293,8 @@ def test_allocate_network_ip(mock_allocate_ip, mock_cache_dir: Path):
 
     leases = get_network_leases("mynet")
     assert len(leases) == 1
-    assert leases[0].vm_name == "vm1"
-    assert leases[0].ip == "10.20.1.2"
+    assert leases[0].vm_id == "vm1"
+    assert leases[0].ipv4 == "10.20.1.2"
 
 
 def test_allocate_network_ip_not_found():
@@ -307,8 +307,8 @@ def test_release_network_ip(mock_cache_dir: Path):
         mock_cache_dir,
         "mynet",
         leases=[
-            {"vm_name": "vm1", "ip": "10.20.1.2"},
-            {"vm_name": "vm2", "ip": "10.20.1.3"},
+            {"vm_id": "vm1", "ipv4": "10.20.1.2"},
+            {"vm_id": "vm2", "ipv4": "10.20.1.3"},
         ],
     )
 
@@ -316,7 +316,7 @@ def test_release_network_ip(mock_cache_dir: Path):
 
     leases = get_network_leases("mynet")
     assert len(leases) == 1
-    assert leases[0].vm_name == "vm2"
+    assert leases[0].vm_id == "vm2"
 
 
 @patch("mvmctl.core.network.get_default_interface")

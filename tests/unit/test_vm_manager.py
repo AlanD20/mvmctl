@@ -9,19 +9,19 @@ from mvmctl.models.vm import VMInstance, VMState
 
 
 @pytest.mark.parametrize(
-    "vm_name,pid,ip",
+    "vm_name,pid,ipv4",
     [
         ("test-vm", 1234, "10.0.0.2"),
         ("my-vm", 5678, "10.0.0.5"),
         ("vm123", 9999, "192.168.1.10"),
     ],
 )
-def test_vm_manager_register(vm_manager: VMManager, vm_name: str, pid: int, ip: str):
+def test_vm_manager_register(vm_manager: VMManager, vm_name: str, pid: int, ipv4: str):
     """register should store a VMInstance that is retrievable by name with correct attributes."""
     vm = VMInstance(
         name=vm_name,
         pid=pid,
-        ip=ip,
+        ipv4=ipv4,
         status=VMState.RUNNING,
     )
 
@@ -31,7 +31,7 @@ def test_vm_manager_register(vm_manager: VMManager, vm_name: str, pid: int, ip: 
     assert retrieved is not None
     assert retrieved.name == vm_name
     assert retrieved.pid == pid
-    assert retrieved.ip == ip
+    assert retrieved.ipv4 == ipv4
     assert retrieved.status == VMState.RUNNING
 
 
@@ -199,8 +199,8 @@ def test_vm_manager_migration(tmp_path: Path):
                 "vms": {
                     "mylegacyvm": {
                         "pid": 42,
-                        "socket_path": None,
-                        "ip": "10.0.0.2",
+                        "api_socket_path": None,
+                        "ipv4": "10.0.0.2",
                         "mac": "02:FC:00:00:00:01",
                         "network_name": "default",
                         "tap_device": "mvm-tap0",

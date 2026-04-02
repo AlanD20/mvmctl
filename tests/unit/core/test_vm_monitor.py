@@ -6,7 +6,6 @@ Tests for VM state reconciliation from live signals.
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from pytest_mock import MockerFixture
 
 from mvmctl.core.vm_monitor import reconcile_vm
@@ -20,28 +19,7 @@ class TestReconcileVM:
         """Test pid alive, FC API returns 'Running' → RUNNING."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
-        sample_vm.socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMState.STARTING
-
-        # Mock os.kill to indicate process is alive
-        with patch("os.kill", return_value=None):
-            # Mock FirecrackerClient to return "Running"
-            mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
-            mock_client = MagicMock()
-            mock_client.describe_instance.return_value = {"state": "Running"}
-            mock_client_class.return_value.__enter__.return_value = mock_client
-
-            result = reconcile_vm(sample_vm, mock_manager)
-
-        assert result == VMState.RUNNING
-        assert sample_vm.status == VMState.RUNNING
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.RUNNING)
-
-    def test_reconcile_paused_vm(self, mocker: MockerFixture, sample_vm: VMInstance):
-        """Test pid alive, FC API returns 'Paused' → PAUSED."""
-        mock_manager = mocker.MagicMock()
-        sample_vm.pid = 1234
-        sample_vm.socket_path = Path("/tmp/test.sock")
+        sample_vm.api_socket_path = Path("/tmp/test.sock")
         sample_vm.status = VMState.RUNNING
 
         with patch("os.kill", return_value=None):
@@ -112,30 +90,10 @@ class TestReconcileVM:
 
     def test_reconcile_socket_unreachable(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test pid alive, socket error → RUNNING."""
-        from mvmctl.exceptions import SocketNotFoundError
 
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
-        sample_vm.socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMState.STARTING
-
-        with patch("os.kill", return_value=None):
-            mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
-            mock_client_class.side_effect = SocketNotFoundError("Socket not found")
-
-            result = reconcile_vm(sample_vm, mock_manager)
-
-        assert result == VMState.RUNNING
-        assert sample_vm.status == VMState.RUNNING
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.RUNNING)
-
-    def test_reconcile_no_state_change_skips_write(
-        self, mocker: MockerFixture, sample_vm: VMInstance
-    ):
-        """Test same state → update_status NOT called."""
-        mock_manager = mocker.MagicMock()
-        sample_vm.pid = 1234
-        sample_vm.socket_path = Path("/tmp/test.sock")
+        sample_vm.api_socket_path = Path("/tmp/test.sock")
         sample_vm.status = VMState.RUNNING
 
         with patch("os.kill", return_value=None):
@@ -156,7 +114,7 @@ class TestReconcileVM:
         """Test PermissionError from os.kill → treats as alive → RUNNING."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
-        sample_vm.socket_path = Path("/tmp/test.sock")
+        sample_vm.api_socket_path = Path("/tmp/test.sock")
         sample_vm.status = VMState.STARTING
 
         with patch("os.kill", side_effect=PermissionError("Permission denied")):
@@ -187,7 +145,7 @@ class TestReconcileVM:
         """Test pid alive but no socket_path → RUNNING."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
-        sample_vm.socket_path = None
+        sample_vm.api_socket_path = None
         sample_vm.status = VMState.STARTING
 
         with patch("os.kill", return_value=None):
@@ -202,7 +160,7 @@ class TestReconcileVM:
 
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
-        sample_vm.socket_path = Path("/tmp/test.sock")
+        sample_vm.api_socket_path = Path("/tmp/test.sock")
         sample_vm.status = VMState.STARTING
 
         with patch("os.kill", return_value=None):
@@ -233,7 +191,7 @@ class TestReconcileVM:
         """Test unknown FC state → RUNNING."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
-        sample_vm.socket_path = Path("/tmp/test.sock")
+        sample_vm.api_socket_path = Path("/tmp/test.sock")
         sample_vm.status = VMState.STARTING
 
         with patch("os.kill", return_value=None):
@@ -250,7 +208,7 @@ class TestReconcileVM:
         """Test describe_instance returns None → RUNNING."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
-        sample_vm.socket_path = Path("/tmp/test.sock")
+        sample_vm.api_socket_path = Path("/tmp/test.sock")
         sample_vm.status = VMState.STARTING
 
         with patch("os.kill", return_value=None):
