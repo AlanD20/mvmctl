@@ -8,8 +8,15 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolate_config_and_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure tests never write to real config or cache directories."""
+def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure tests never write to real config or cache directories.
+
+    Skipped for system tests (marked with @pytest.mark.system).
+    """
+    # Skip isolation for system tests
+    if request.node.get_closest_marker("system"):
+        return
+
     # Use tmp_path which pytest automatically cleans up after each test
     config_dir = tmp_path / "config"
     cache_dir = tmp_path / "cache"
@@ -20,15 +27,30 @@ def isolate_config_and_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.fixture(autouse=True)
-def _isolate_iptables_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_iptables_rules(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate iptables rules for unit/integration tests.
+
+    Skipped for system tests (marked with @pytest.mark.system).
+    """
+    # Skip isolation for system tests
+    if request.node.get_closest_marker("system"):
+        return
+
     fake_rules = str(tmp_path / "iptables" / "rules.v4")
     monkeypatch.setattr("mvmctl.core.host_setup.IPTABLES_RULES_V4", fake_rules, raising=False)
     monkeypatch.setattr("mvmctl.core.host_state.IPTABLES_RULES_V4", fake_rules, raising=False)
 
 
 @pytest.fixture(autouse=True)
-def _mock_sudo_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pre-mark sudo credentials as cached so tests never invoke sudo -n/-v."""
+def _mock_sudo_cache(request, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pre-mark sudo credentials as cached so tests never invoke sudo -n/-v.
+
+    Skipped for system tests (marked with @pytest.mark.system).
+    """
+    # Skip for system tests
+    if request.node.get_closest_marker("system"):
+        return
+
     import mvmctl.utils.process as _proc
 
     monkeypatch.setattr(_proc, "_SUDO_CREDENTIALS_VALID", True)
@@ -46,11 +68,17 @@ def _is_sudo_command(command: object) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def _block_real_sudo_invocations(monkeypatch: pytest.MonkeyPatch) -> None:
+def _block_real_sudo_invocations(request, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail fast when tests attempt a real sudo invocation.
 
     Enabled in CI with MVM_TEST_ENFORCE_NO_SUDO=1.
+
+    Skipped for system tests (marked with @pytest.mark.system).
     """
+    # Skip for system tests
+    if request.node.get_closest_marker("system"):
+        return
+
     if os.environ.get("MVM_TEST_ENFORCE_NO_SUDO") != "1":
         return
 
