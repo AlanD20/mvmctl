@@ -52,9 +52,21 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=src/mvmctl --cov-branch --cov-report=term-missing --cov-fail-under=80"
+addopts = """
+    --cov=src/mvmctl
+    --cov-branch
+    --cov-report=term-missing
+    --cov-fail-under=80
+    --ignore=tests/system
+"""
 markers = [
     "real_mvm_group_check: test uses real _require_mvm_group_membership (not mocked)",
+    "system: real hardware integration test — requires KVM, mvm group",
+    "shared_vm: uses module-scoped VM fixture for stateful tests",
+    "independent_vm: creates independent VM per test",
+    "slow: test takes >30 seconds",
+    "requires_kvm: requires /dev/kvm access",
+    "requires_network: requires network setup",
 ]
 
 [dependency-groups]
