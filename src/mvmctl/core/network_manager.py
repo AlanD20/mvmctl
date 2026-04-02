@@ -22,6 +22,7 @@ from mvmctl.core.metadata import (
     set_default_network_entry,
     update_network_entry,
 )
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.network import (
     allocate_ip,
     bridge_exists,
@@ -193,6 +194,29 @@ def list_networks() -> list[NetworkConfig]:
     Returns:
         List of NetworkConfig objects with is_default populated from metadata
     """
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        db_networks = db.list_networks()
+        if db_networks:
+            configs: list[NetworkConfig] = []
+            for network in db_networks:
+                config = NetworkConfig(
+                    name=network.name,
+                    cidr=network.subnet,
+                    gateway=network.ipv4_gateway,
+                    bridge=network.bridge,
+                    nat_enabled=network.nat_enabled,
+                    nat_gateways=network.nat_gateways.split(",") if network.nat_gateways else [],
+                    created_at=network.created_at or "",
+                    is_default=network.is_default,
+                )
+                configs.append(config)
+            return sorted(configs, key=lambda c: c.name)
+    except Exception:
+        pass
+
+    # Fall back to JSON
     cache_dir = get_cache_dir()
     entries = list_network_entries(cache_dir)
     if not entries:
@@ -201,18 +225,37 @@ def list_networks() -> list[NetworkConfig]:
     default_entry = get_default_network_entry(cache_dir)
     default_name = default_entry[0] if default_entry else None
 
-    configs: list[NetworkConfig] = []
+    json_configs: list[NetworkConfig] = []
     for name, entry in entries.items():
-        config = _network_entry_to_config(name, entry)
-        if config is not None:
-            config.is_default = name == default_name
-            configs.append(config)
+        json_config = _network_entry_to_config(name, entry)
+        if json_config is not None:
+            json_config.is_default = name == default_name
+            json_configs.append(json_config)
 
-    return sorted(configs, key=lambda c: c.name)
+    return sorted(json_configs, key=lambda c: c.name)
 
 
 def get_network(name: str) -> NetworkConfig | None:
     """Get a named network by name."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(name)
+        if network:
+            return NetworkConfig(
+                name=network.name,
+                cidr=network.subnet,
+                gateway=network.ipv4_gateway,
+                bridge=network.bridge,
+                nat_enabled=network.nat_enabled,
+                nat_gateways=network.nat_gateways.split(",") if network.nat_gateways else [],
+                created_at=network.created_at or "",
+                is_default=network.is_default,
+            )
+    except Exception:
+        pass
+
+    # Fall back to JSON
     cache_dir = get_cache_dir()
     entry = get_network_entry(cache_dir, name)
     return _network_entry_to_config(name, entry)
@@ -220,6 +263,24 @@ def get_network(name: str) -> NetworkConfig | None:
 
 def get_network_leases(name: str) -> list[NetworkLease]:
     """Get all IP leases for a network."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(name)
+        if network:
+            db_leases = db.list_leases(network.id)
+            if db_leases:
+                return [
+                    NetworkLease(
+                        vm_id=lease.vm_id or "",
+                        ipv4=lease.ipv4,
+                    )
+                    for lease in db_leases
+                ]
+    except Exception:
+        pass
+
+    # Fall back to JSON
     cache_dir = get_cache_dir()
     entry = get_network_entry(cache_dir, name)
     return _leases_from_entry(entry)
@@ -273,6 +334,15 @@ def set_default_network(name: str) -> None:
 
     cache_dir = get_cache_dir()
     set_default_network_entry(cache_dir, name)
+
+    # NEW: Also update SQLite
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(name)
+        if network:
+            db.set_default_network(network.id)
+    except Exception:
+        pass
 
 
 def _persist_iptables_if_root() -> None:
@@ -360,6 +430,31 @@ def create_network(
         bridge_active=True,
     )
 
+    # NEW: Also write to SQLite
+    try:
+        db = MVMDatabase()
+        import hashlib
+
+        from mvmctl.db.models import Network as DBNetwork
+
+        network_id = hashlib.sha256(name.encode()).hexdigest()
+        db_network = DBNetwork(
+            id=network_id,
+            name=name,
+            subnet=cidr,
+            bridge=config.bridge,
+            ipv4_gateway=config.gateway,
+            bridge_active=True,
+            nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
+            nat_enabled=config.nat_enabled,
+            is_default=False,
+            created_at=config.created_at,
+            updated_at=None,
+        )
+        db.upsert_network(db_network)
+    except Exception:
+        pass
+
     _persist_iptables_if_root()
 
     return config
@@ -404,6 +499,15 @@ def remove_network(name: str) -> None:
     # Remove from metadata.json
     cache_dir = get_cache_dir()
     remove_network_entry(cache_dir, name)
+
+    # NEW: Also delete from SQLite
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(name)
+        if network:
+            db.delete_network(network.id)
+    except Exception:
+        pass
 
     _persist_iptables_if_root()
 
@@ -505,17 +609,42 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
     cache_dir = get_cache_dir()
     update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
 
+    # NEW: Also write to SQLite
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(network_name)
+        if network:
+            db.acquire_lease(network.id, ip, vm_name)
+    except Exception:
+        pass
+
     return ip
 
 
 def release_network_ip(network_name: str, vm_name: str) -> None:
     """Release a VM's IP lease from a network."""
     leases = get_network_leases(network_name)
+    released_ip = None
+    for lease in leases:
+        if lease.vm_id == vm_name:
+            released_ip = lease.ipv4
+            break
+
     leases = [lease for lease in leases if lease.vm_id != vm_name]
 
     # Persist updated leases to metadata
     cache_dir = get_cache_dir()
     update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
+
+    # NEW: Also release from SQLite
+    if released_ip:
+        try:
+            db = MVMDatabase()
+            network = db.get_network_by_name(network_name)
+            if network:
+                db.release_lease(network.id, released_ip)
+        except Exception:
+            pass
 
 
 def ensure_default_network() -> NetworkConfig:
@@ -579,6 +708,15 @@ def ensure_default_network() -> NetworkConfig:
                         save_iptables_rules()
                 cache_dir = get_cache_dir()
                 update_network_entry(cache_dir, DEFAULT_NETWORK_NAME, bridge_active=True)
+
+                # NEW: Also update SQLite
+                try:
+                    db = MVMDatabase()
+                    network = db.get_network_by_name(DEFAULT_NETWORK_NAME)
+                    if network:
+                        db.update_network_bridge_active(network.id, True)
+                except Exception:
+                    pass
             except NetworkError:
                 if bridge_missing:
                     try:
@@ -633,6 +771,15 @@ def reconcile_networks() -> list[ReconcileResult]:
 
         # Update bridge_active in metadata
         update_network_entry(cache_dir, config.name, bridge_active=actual_active)
+
+        # NEW: Also update SQLite
+        try:
+            db = MVMDatabase()
+            network = db.get_network_by_name(config.name)
+            if network:
+                db.update_network_bridge_active(network.id, actual_active)
+        except Exception:
+            pass
 
         results.append(
             ReconcileResult(
