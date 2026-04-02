@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import logging
+import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
@@ -40,6 +41,19 @@ def _generate_vm_id(name: str, created_at: datetime) -> str:
 
 def _vm_instance_to_db_state(vm: VMInstance) -> DBVMState:
     """Convert VMInstance to DB VMState for SQLite storage."""
+    network_id = None
+    if vm.network_name:
+        try:
+            db = MVMDatabase()
+            network = db.get_network_by_name(vm.network_name)
+            if network:
+                network_id = network.id
+        except Exception:
+            network_id = None
+
+    updated_at = datetime.now().isoformat()
+    created_at = vm.created_at.isoformat() if vm.created_at else datetime.now().isoformat()
+
     return DBVMState(
         id=vm.id,
         name=vm.name,
@@ -47,7 +61,7 @@ def _vm_instance_to_db_state(vm: VMInstance) -> DBVMState:
         pid=vm.pid,
         ipv4=vm.ipv4,
         mac=vm.mac,
-        network_id=vm.network_name,
+        network_id=network_id,
         tap_device=vm.tap_device,
         image_id=vm.image_id,
         kernel_id=vm.kernel_id,
@@ -65,8 +79,8 @@ def _vm_instance_to_db_state(vm: VMInstance) -> DBVMState:
         disk_size_mib=None,
         rootfs_path=str(vm.config.rootfs_path) if vm.config and vm.config.rootfs_path else None,
         rootfs_suffix=vm.rootfs_suffix if vm.rootfs_suffix else None,
-        created_at=vm.created_at.isoformat() if vm.created_at else None,
-        updated_at=None,
+        created_at=created_at,
+        updated_at=updated_at,
     )
 
 
@@ -253,12 +267,11 @@ class VMManager:
             state["vms"][vm_id] = vm_data
             self._save_state(state)
 
-        # NEW: Also write to SQLite (dual-write pattern)
         try:
             db = MVMDatabase()
             db.upsert_vm(_vm_instance_to_db_state(vm))
-        except Exception:
-            pass  # Don't break if SQLite fails
+        except sqlite3.OperationalError:
+            pass
 
     def update_status(self, name: str, status: VMState) -> None:
         """Update the status of a registered VM."""
@@ -277,26 +290,15 @@ class VMManager:
 
                 raise VMNotFoundError(f"VM '{name}' not found in state")
 
-        # NEW: Also update SQLite
         if vm_id:
             try:
                 db = MVMDatabase()
                 db.update_vm_status(vm_id, status.value)
-            except Exception:
+            except sqlite3.OperationalError:
                 pass
 
     def get(self, name: str) -> VMInstance | None:
         """Get VM by name (searches all VMs for matching name)."""
-        # Try SQLite first
-        try:
-            db = MVMDatabase()
-            db_vm = db.get_vm_by_name(name)
-            if db_vm:
-                return _db_state_to_vm_instance(db_vm)
-        except Exception:
-            pass
-
-        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             for vm_id, vm_data in state["vms"].items():
@@ -305,20 +307,7 @@ class VMManager:
             return None
 
     def get_by_id_prefix(self, prefix: str) -> VMInstance | None:
-        """Find VM by ID prefix.
-
-        Returns None if none or multiple VMs match.
-        """
-        # Try SQLite first
-        try:
-            db = MVMDatabase()
-            db_vms = db.find_vms_by_prefix(prefix)
-            if len(db_vms) == 1:
-                return _db_state_to_vm_instance(db_vms[0])
-        except Exception:
-            pass
-
-        # Fall back to JSON
+        """Find VM by ID prefix. Returns None if none or multiple VMs match."""
         with self._locked(exclusive=False):
             state = self._load_state()
             matches = [
@@ -332,34 +321,13 @@ class VMManager:
             return None
 
     def get_by_full_id(self, full_hash: str) -> VMInstance | None:
-        """Find VM by exact hash ID.
-
-        Performs exact-match lookup for collision-free VM identification.
-        Returns None if no VM with the exact hash exists.
-
-        Args:
-            full_id: Full 16-character hash ID of the VM
-
-        Returns:
-            VMInstance if found, None otherwise
-        """
-        # Try SQLite first
-        try:
-            db = MVMDatabase()
-            db_vm = db.get_vm(full_hash)
-            if db_vm:
-                return _db_state_to_vm_instance(db_vm)
-        except Exception:
-            pass
-
-        # Fall back to JSON
+        """Find VM by exact hash ID."""
         with self._locked(exclusive=False):
             state = self._load_state()
             vm_data = state["vms"].get(full_hash)
             if vm_data is None:
                 return None
             vm = VMInstance.from_dict(vm_data)
-            # Defense-in-depth: verify the ID matches exactly
             if vm.id != full_hash:
                 logger.warning("VM ID mismatch: looked up %s but got %s", full_hash, vm.id)
                 return None
@@ -367,16 +335,6 @@ class VMManager:
 
     def find_by_id_prefix(self, prefix: str) -> list[VMInstance]:
         """Return all VMs whose ID starts with prefix."""
-        # Try SQLite first
-        try:
-            db = MVMDatabase()
-            db_vms = db.find_vms_by_prefix(prefix)
-            if db_vms:
-                return [_db_state_to_vm_instance(vm) for vm in db_vms]
-        except Exception:
-            pass
-
-        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             results = []
@@ -387,16 +345,6 @@ class VMManager:
 
     def get_by_name(self, name: str) -> list[VMInstance]:
         """Return all VMs with the given name (may be multiple)."""
-        # Try SQLite first
-        try:
-            db = MVMDatabase()
-            db_vm = db.get_vm_by_name(name)
-            if db_vm:
-                return [_db_state_to_vm_instance(db_vm)]
-        except Exception:
-            pass
-
-        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
             results = []
@@ -407,22 +355,9 @@ class VMManager:
 
     def list_all(self) -> list[VMInstance]:
         """List all VMs."""
-        # Try SQLite first
-        try:
-            db = MVMDatabase()
-            db_vms = db.list_vms()
-            if db_vms:
-                return [_db_state_to_vm_instance(vm) for vm in db_vms]
-        except Exception:
-            pass
-
-        # Fall back to JSON
         with self._locked(exclusive=False):
             state = self._load_state()
-            vms = []
-            for vm_id, vm_data in state["vms"].items():
-                vms.append(VMInstance.from_dict(vm_data))
-            return vms
+            return [VMInstance.from_dict(vm_data) for vm_data in state["vms"].values()]
 
     def count_vms(self) -> int:
         """Return the number of VMs without loading full metadata."""
@@ -442,11 +377,10 @@ class VMManager:
                 del state["vms"][vm_id]
                 self._save_state(state)
 
-        # NEW: Also delete from SQLite
         try:
             db = MVMDatabase()
             db.delete_vm(vm_id)
-        except Exception:
+        except sqlite3.OperationalError:
             pass
 
 

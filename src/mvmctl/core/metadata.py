@@ -9,6 +9,7 @@ from __future__ import annotations
 import fcntl
 import json
 import logging
+import sqlite3
 import threading
 import time
 from collections import OrderedDict
@@ -222,6 +223,8 @@ def _now_utc() -> str:
 
 def _dict_to_db_image(image_id: str, entry: dict[str, Any]) -> Image:
     """Convert JSON image entry to DB Image model."""
+    created_at = entry.get("created_at") or _now_utc()
+    updated_at = entry.get("updated_at") or created_at
     return Image(
         id=image_id,
         os_slug=entry.get("internal_id", ""),
@@ -235,8 +238,8 @@ def _dict_to_db_image(image_id: str, entry: dict[str, Any]) -> Image:
         compressed_format=entry.get("compressed_format"),
         pulled_at=entry.get("pulled_at"),
         is_default=entry.get("is_default", 0) == 1,
-        created_at=entry.get("created_at"),
-        updated_at=entry.get("updated_at"),
+        created_at=created_at,
+        updated_at=updated_at,
     )
 
 
@@ -262,6 +265,8 @@ def _db_image_to_dict(image: Image) -> dict[str, Any]:
 def _dict_to_db_kernel(kernel_id: str, entry: dict[str, Any]) -> Kernel:
     """Convert JSON kernel entry to DB Kernel model."""
     filename = entry.get("filename", "")
+    created_at = entry.get("created_at") or _now_utc()
+    updated_at = entry.get("last_modified") or created_at
     return Kernel(
         id=kernel_id,
         name=entry.get("name", filename),
@@ -271,8 +276,8 @@ def _dict_to_db_kernel(kernel_id: str, entry: dict[str, Any]) -> Kernel:
         base_name=entry.get("base_name"),
         type=entry.get("type"),
         is_default=entry.get("is_default", 0) == 1,
-        created_at=entry.get("created_at"),
-        updated_at=entry.get("last_modified"),
+        created_at=created_at,
+        updated_at=updated_at,
     )
 
 
@@ -324,18 +329,26 @@ def _db_binary_to_dict(binary: Binary) -> dict[str, Any]:
 
 def _dict_to_db_network(network_name: str, entry: dict[str, Any]) -> Network:
     """Convert JSON network entry to DB Network model."""
+    from mvmctl.utils.full_hash import generate_full_hash_network
+
+    cidr = entry.get("cidr", "")
+    created_at = entry.get("created_at") or _now_utc()
+    updated_at = entry.get("updated_at") or created_at
+    network_id = entry.get("network_id") or generate_full_hash_network(
+        network_name, cidr, created_at
+    )
     return Network(
-        id=entry.get("network_id", ""),
+        id=network_id,
         name=network_name,
-        subnet=entry.get("cidr", ""),
+        subnet=cidr,
         bridge=entry.get("bridge", ""),
         ipv4_gateway=entry.get("gateway", ""),
         bridge_active=entry.get("bridge_active", False),
         nat_gateways=",".join(entry.get("nat_gateways", [])) if entry.get("nat_gateways") else None,
         nat_enabled=entry.get("nat_enabled", True),
         is_default=entry.get("is_default", 0) == 1,
-        created_at=entry.get("created_at"),
-        updated_at=entry.get("updated_at"),
+        created_at=created_at,
+        updated_at=updated_at,
     )
 
 
@@ -371,12 +384,11 @@ def update_kernel_entry(cache_dir: Path, kernel_name: str, **fields: Any) -> Non
     data["kernels"][kernel_name] = kernel_data
     write_metadata(cache_dir, data)
 
-    # NEW: Also write to SQLite
     try:
         db = MVMDatabase()
         db_kernel = _dict_to_db_kernel(kernel_name, kernel_data)
         db.upsert_kernel(db_kernel)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -421,11 +433,10 @@ def _find_default_entry(cache_dir: Path, section: str) -> tuple[str, dict[str, A
 def set_default_kernel_entry(cache_dir: Path, kernel_id: str) -> None:
     _set_default_entry(cache_dir, "kernels", kernel_id)
 
-    # NEW: Also update SQLite
     try:
         db = MVMDatabase()
         db.set_default_kernel(kernel_id)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -446,7 +457,7 @@ def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | No
         for kernel in kernels:
             if kernel.is_default:
                 return kernel.id, _db_kernel_to_dict(kernel)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -461,7 +472,7 @@ def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
         kernel = db.get_kernel(kernel_name)
         if kernel:
             return _db_kernel_to_dict(kernel)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -500,7 +511,7 @@ def list_kernel_entries(
                     result[kernel.id] = _db_kernel_to_dict(kernel)
             if result:
                 return result
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -548,11 +559,10 @@ def remove_kernel_entry(cache_dir: Path, kernel_name: str) -> None:
             del data["kernels"][kernel_name]
             write_metadata(cache_dir, data)
 
-    # NEW: Also delete from SQLite
     try:
         db = MVMDatabase()
         db.delete_kernel(kernel_name)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -572,12 +582,11 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
     data["images"][image_id] = image_data
     write_metadata(cache_dir, data)
 
-    # NEW: Also write to SQLite
     try:
         db = MVMDatabase()
         db_image = _dict_to_db_image(image_id, image_data)
         db.upsert_image(db_image)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -589,7 +598,7 @@ def get_image_entry(cache_dir: Path, image_id: str) -> dict[str, Any]:
         image = db.get_image(image_id)
         if image:
             return _db_image_to_dict(image)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -629,7 +638,7 @@ def list_image_entries(
                     result[image.id] = _db_image_to_dict(image)
             if result:
                 return result
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -675,22 +684,20 @@ def remove_image_entry(cache_dir: Path, image_id: str) -> None:
             del data["images"][image_id]
             write_metadata(cache_dir, data)
 
-    # NEW: Also delete from SQLite
     try:
         db = MVMDatabase()
         db.delete_image(image_id)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
 def set_default_image_entry(cache_dir: Path, image_id: str) -> None:
     _set_default_entry(cache_dir, "images", image_id)
 
-    # NEW: Also update SQLite
     try:
         db = MVMDatabase()
         db.set_default_image(image_id)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -711,7 +718,7 @@ def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | Non
         for image in images:
             if image.is_default:
                 return image.id, _db_image_to_dict(image)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -726,7 +733,7 @@ def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str
         images = db.find_images_by_prefix(prefix)
         if len(images) == 1:
             return images[0].id, _db_image_to_dict(images[0])
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -748,7 +755,7 @@ def find_images_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, di
         images = db.find_images_by_prefix(prefix)
         if images:
             return [(img.id, _db_image_to_dict(img)) for img in images]
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -905,7 +912,6 @@ def update_binary_entry(cache_dir: Path, version: str, **fields: Any) -> None:
 
     write_metadata(cache_dir, data)
 
-    # NEW: Also write to SQLite
     try:
         db = MVMDatabase()
         for binary_name in _BINARY_METADATA_NAMES:
@@ -914,7 +920,7 @@ def update_binary_entry(cache_dir: Path, version: str, **fields: Any) -> None:
                 db_binary = _dict_to_db_binary(binary_name, entry)
                 if db_binary:
                     db.upsert_binary(db_binary)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -926,7 +932,7 @@ def get_binary_entry(cache_dir: Path, version: str) -> dict[str, Any]:
             binary = db.get_binary(binary_name)
             if binary and _binary_matches_version(_db_binary_to_dict(binary), version):
                 return _db_binary_to_dict(binary)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -954,7 +960,7 @@ def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
         binaries = db.list_binaries()
         if binaries:
             return {binary.name: _db_binary_to_dict(binary) for binary in binaries}
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -998,7 +1004,6 @@ def set_default_binary_entry(cache_dir: Path, version: str) -> None:
 
     write_metadata(cache_dir, data)
 
-    # NEW: Also update SQLite
     try:
         db = MVMDatabase()
         for binary_name in _BINARY_METADATA_NAMES:
@@ -1007,7 +1012,7 @@ def set_default_binary_entry(cache_dir: Path, version: str) -> None:
                 binary_path = entry.get("binary_path", "")
                 full_version = entry.get("full_version", version)
                 db.set_default_binary(binary_name, full_version, binary_path)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -1021,7 +1026,7 @@ def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | No
             default = db.get_binary_default(binary.name)
             if default and default.version == binary.version:
                 return binary.version, _db_binary_to_dict(binary)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON
@@ -1056,27 +1061,16 @@ def update_network_entry(cache_dir: Path, network_name: str, **fields: Any) -> N
     data["networks"][network_name] = network_data
     write_metadata(cache_dir, data)
 
-    # NEW: Also write to SQLite
     try:
         db = MVMDatabase()
         db_network = _dict_to_db_network(network_name, network_data)
         db.upsert_network(db_network)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
 def get_network_entry(cache_dir: Path, network_name: str) -> dict[str, Any]:
     """Return network metadata entry or {} if not found."""
-    # Try SQLite first
-    try:
-        db = MVMDatabase()
-        network = db.get_network_by_name(network_name)
-        if network:
-            return _db_network_to_dict(network)
-    except Exception:
-        pass
-
-    # Fall back to JSON
     data = read_metadata(cache_dir)
     networks = data.get("networks", {})
     if isinstance(networks, dict):
@@ -1086,16 +1080,6 @@ def get_network_entry(cache_dir: Path, network_name: str) -> dict[str, Any]:
 
 def list_network_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
     """Return all network entries dict keyed by network name."""
-    # Try SQLite first
-    try:
-        db = MVMDatabase()
-        networks = db.list_networks()
-        if networks:
-            return {network.name: _db_network_to_dict(network) for network in networks}
-    except Exception:
-        pass
-
-    # Fall back to JSON
     data = read_metadata(cache_dir)
     networks = data.get("networks", {})
     if isinstance(networks, dict):
@@ -1111,13 +1095,12 @@ def remove_network_entry(cache_dir: Path, network_name: str) -> None:
             del data["networks"][network_name]
             write_metadata(cache_dir, data)
 
-    # NEW: Also delete from SQLite
     try:
         db = MVMDatabase()
         network = db.get_network_by_name(network_name)
         if network:
             db.delete_network(network.id)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -1125,13 +1108,12 @@ def set_default_network_entry(cache_dir: Path, network_name: str) -> None:
     """Set a network as the default, clearing is_default from all others."""
     _set_default_entry(cache_dir, "networks", network_name)
 
-    # NEW: Also update SQLite
     try:
         db = MVMDatabase()
         network = db.get_network_by_name(network_name)
         if network:
             db.set_default_network(network.id)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -1144,7 +1126,7 @@ def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | N
         for network in networks:
             if network.is_default:
                 return network.name, _db_network_to_dict(network)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON

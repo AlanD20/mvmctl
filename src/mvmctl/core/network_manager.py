@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, TypedDict
@@ -33,6 +34,7 @@ from mvmctl.core.network import (
 )
 from mvmctl.exceptions import MVMError, NetworkError
 from mvmctl.utils.fs import get_cache_dir
+from mvmctl.utils.full_hash import generate_full_hash_network
 from mvmctl.utils.validation import (
     validate_bridge_name,
     validate_cidr,
@@ -42,6 +44,33 @@ from mvmctl.utils.validation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _upsert_network_to_sqlite(config: NetworkConfig, bridge_active: bool | None = None) -> None:
+    """Write a NetworkConfig to SQLite (creates or updates the row)."""
+    from mvmctl.db.models import Network as DBNetwork
+
+    now = datetime.now(timezone.utc).isoformat()
+    network_id = generate_full_hash_network(config.name, config.cidr, config.created_at or now)
+    db = MVMDatabase()
+    try:
+        db.upsert_network(
+            DBNetwork(
+                id=network_id,
+                name=config.name,
+                subnet=config.cidr,
+                bridge=config.bridge,
+                ipv4_gateway=config.gateway,
+                bridge_active=bridge_active if bridge_active is not None else False,
+                nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
+                nat_enabled=config.nat_enabled,
+                is_default=config.is_default,
+                created_at=config.created_at or now,
+                updated_at=now,
+            )
+        )
+    except sqlite3.OperationalError:
+        pass
 
 
 @dataclass
@@ -263,24 +292,6 @@ def get_network(name: str) -> NetworkConfig | None:
 
 def get_network_leases(name: str) -> list[NetworkLease]:
     """Get all IP leases for a network."""
-    # Try SQLite first
-    try:
-        db = MVMDatabase()
-        network = db.get_network_by_name(name)
-        if network:
-            db_leases = db.list_leases(network.id)
-            if db_leases:
-                return [
-                    NetworkLease(
-                        vm_id=lease.vm_id or "",
-                        ipv4=lease.ipv4,
-                    )
-                    for lease in db_leases
-                ]
-    except Exception:
-        pass
-
-    # Fall back to JSON
     cache_dir = get_cache_dir()
     entry = get_network_entry(cache_dir, name)
     return _leases_from_entry(entry)
@@ -335,13 +346,12 @@ def set_default_network(name: str) -> None:
     cache_dir = get_cache_dir()
     set_default_network_entry(cache_dir, name)
 
-    # NEW: Also update SQLite
     try:
         db = MVMDatabase()
         network = db.get_network_by_name(name)
         if network:
             db.set_default_network(network.id)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -430,30 +440,7 @@ def create_network(
         bridge_active=True,
     )
 
-    # NEW: Also write to SQLite
-    try:
-        db = MVMDatabase()
-        import hashlib
-
-        from mvmctl.db.models import Network as DBNetwork
-
-        network_id = hashlib.sha256(name.encode()).hexdigest()
-        db_network = DBNetwork(
-            id=network_id,
-            name=name,
-            subnet=cidr,
-            bridge=config.bridge,
-            ipv4_gateway=config.gateway,
-            bridge_active=True,
-            nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
-            nat_enabled=config.nat_enabled,
-            is_default=False,
-            created_at=config.created_at,
-            updated_at=None,
-        )
-        db.upsert_network(db_network)
-    except Exception:
-        pass
+    _upsert_network_to_sqlite(config, bridge_active=True)
 
     _persist_iptables_if_root()
 
@@ -500,13 +487,12 @@ def remove_network(name: str) -> None:
     cache_dir = get_cache_dir()
     remove_network_entry(cache_dir, name)
 
-    # NEW: Also delete from SQLite
     try:
         db = MVMDatabase()
         network = db.get_network_by_name(name)
         if network:
             db.delete_network(network.id)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     _persist_iptables_if_root()
@@ -543,9 +529,9 @@ def inspect_network(name: str) -> NetworkInspect:
     leases = get_network_leases(name)
     active = bridge_exists(config.bridge)
 
-    # Update bridge_active in metadata
     cache_dir = get_cache_dir()
     update_network_entry(cache_dir, name, bridge_active=active)
+    _upsert_network_to_sqlite(config, bridge_active=active)
 
     vm_manager = VMManager()
     enriched_vms: list[_VMLease] = []
@@ -609,13 +595,14 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
     cache_dir = get_cache_dir()
     update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
 
-    # NEW: Also write to SQLite
+    _upsert_network_to_sqlite(config)
     try:
         db = MVMDatabase()
         network = db.get_network_by_name(network_name)
         if network:
-            db.acquire_lease(network.id, ip, vm_name)
-    except Exception:
+            vm = db.get_vm_by_name(vm_name)
+            db.acquire_lease(network.id, ip, vm.id if vm else None)
+    except sqlite3.OperationalError:
         pass
 
     return ip
@@ -636,14 +623,13 @@ def release_network_ip(network_name: str, vm_name: str) -> None:
     cache_dir = get_cache_dir()
     update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
 
-    # NEW: Also release from SQLite
     if released_ip:
         try:
             db = MVMDatabase()
             network = db.get_network_by_name(network_name)
             if network:
                 db.release_lease(network.id, released_ip)
-        except Exception:
+        except sqlite3.OperationalError:
             pass
 
 
@@ -708,15 +694,7 @@ def ensure_default_network() -> NetworkConfig:
                         save_iptables_rules()
                 cache_dir = get_cache_dir()
                 update_network_entry(cache_dir, DEFAULT_NETWORK_NAME, bridge_active=True)
-
-                # NEW: Also update SQLite
-                try:
-                    db = MVMDatabase()
-                    network = db.get_network_by_name(DEFAULT_NETWORK_NAME)
-                    if network:
-                        db.update_network_bridge_active(network.id, True)
-                except Exception:
-                    pass
+                _upsert_network_to_sqlite(config, bridge_active=True)
             except NetworkError:
                 if bridge_missing:
                     try:
@@ -769,17 +747,8 @@ def reconcile_networks() -> list[ReconcileResult]:
 
         stale = (stored_active is True) and (not actual_active)
 
-        # Update bridge_active in metadata
         update_network_entry(cache_dir, config.name, bridge_active=actual_active)
-
-        # NEW: Also update SQLite
-        try:
-            db = MVMDatabase()
-            network = db.get_network_by_name(config.name)
-            if network:
-                db.update_network_bridge_active(network.id, actual_active)
-        except Exception:
-            pass
+        _upsert_network_to_sqlite(config, bridge_active=actual_active)
 
         results.append(
             ReconcileResult(
@@ -870,10 +839,12 @@ def restore_networks() -> list[str]:
 
                 if config.nat_gateways != validated_gateways:
                     update_network_entry(cache_dir, config.name, nat_gateways=validated_gateways)
+                    config.nat_gateways = validated_gateways
             except NetworkError as e:
                 status.append(f"Network '{config.name}': failed to configure NAT: {e}")
 
         update_network_entry(cache_dir, config.name, bridge_active=True)
+        _upsert_network_to_sqlite(config, bridge_active=True)
 
     return status
 

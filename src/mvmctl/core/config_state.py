@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import sqlite3
 import string
 from pathlib import Path
 from typing import Any
@@ -97,7 +98,7 @@ def get_firecracker_config() -> dict[str, str]:
                 "default_version": binary_default.version,
                 "default_binary_path": binary_default.path,
             }
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     data = read_metadata(cache_dir)
@@ -218,11 +219,10 @@ def update_firecracker_config(**fields: str) -> None:
     )
     set_default_binary_entry(cache_dir, normalized_version)
 
-    # NEW: Also update SQLite
     try:
         db = MVMDatabase()
         db.set_default_binary("firecracker", full_version, default_binary_path)
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
 
@@ -288,7 +288,7 @@ def get_defaults_config() -> dict[str, Any]:
             if image.is_default:
                 defaults["image"] = image.os_slug or image.id
                 break
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON for image
@@ -306,7 +306,7 @@ def get_defaults_config() -> dict[str, Any]:
             if kernel.is_default:
                 defaults["kernel"] = kernel.path
                 break
-    except Exception:
+    except sqlite3.OperationalError:
         pass
 
     # Fall back to JSON for kernel
@@ -331,11 +331,10 @@ def set_defaults_value(key: str, value: Any) -> None:
         except KeyError:
             set_default_image_by_internal_id(cache_dir, value)
 
-        # NEW: Also update SQLite
         try:
             db = MVMDatabase()
             db.set_default_image(value)
-        except Exception:
+        except sqlite3.OperationalError:
             pass
         return
 
@@ -344,7 +343,6 @@ def set_defaults_value(key: str, value: Any) -> None:
             raise ValueError("Default kernel must be a string kernel filename")
         set_default_kernel_by_filename(cache_dir, value)
 
-        # NEW: Also update SQLite
         try:
             db = MVMDatabase()
             kernels = db.list_kernels()
@@ -352,7 +350,7 @@ def set_defaults_value(key: str, value: Any) -> None:
                 if kernel.path == value:
                     db.set_default_kernel(kernel.id)
                     break
-        except Exception:
+        except sqlite3.OperationalError:
             pass
         return
 
