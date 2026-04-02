@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import IO, Any
 
 from mvmctl.constants import CONST_FILE_PERMS_METADATA
+from mvmctl.core.mvm_db import MVMDatabase
+from mvmctl.db.models import Binary, Image, Kernel, Network
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +216,146 @@ def _now_utc() -> str:
 
 
 # =============================================================================
+# Conversion helpers for SQLite migration (dual-write pattern)
+# =============================================================================
+
+
+def _dict_to_db_image(image_id: str, entry: dict[str, Any]) -> Image:
+    """Convert JSON image entry to DB Image model."""
+    return Image(
+        id=image_id,
+        os_slug=entry.get("internal_id", ""),
+        path=entry.get("filename", ""),
+        os_name=entry.get("os_name"),
+        fs_type=entry.get("fs_type"),
+        fs_uuid=entry.get("fs_uuid"),
+        compressed_size=entry.get("compressed_size"),
+        original_size=entry.get("original_size"),
+        compression_ratio=entry.get("compression_ratio"),
+        compressed_format=entry.get("compressed_format"),
+        pulled_at=entry.get("pulled_at"),
+        is_default=entry.get("is_default", 0) == 1,
+        created_at=entry.get("created_at"),
+        updated_at=entry.get("updated_at"),
+    )
+
+
+def _db_image_to_dict(image: Image) -> dict[str, Any]:
+    """Convert DB Image model to JSON dict format."""
+    return {
+        "internal_id": image.os_slug,
+        "filename": image.path,
+        "os_name": image.os_name,
+        "fs_type": image.fs_type,
+        "fs_uuid": image.fs_uuid,
+        "compressed_size": image.compressed_size,
+        "original_size": image.original_size,
+        "compression_ratio": image.compression_ratio,
+        "compressed_format": image.compressed_format,
+        "pulled_at": image.pulled_at,
+        "is_default": 1 if image.is_default else 0,
+        "created_at": image.created_at,
+        "updated_at": image.updated_at,
+    }
+
+
+def _dict_to_db_kernel(kernel_id: str, entry: dict[str, Any]) -> Kernel:
+    """Convert JSON kernel entry to DB Kernel model."""
+    filename = entry.get("filename", "")
+    return Kernel(
+        id=kernel_id,
+        name=entry.get("name", filename),
+        version=entry.get("version", ""),
+        arch=entry.get("arch", "x86_64"),
+        path=filename,
+        base_name=entry.get("base_name"),
+        type=entry.get("type"),
+        is_default=entry.get("is_default", 0) == 1,
+        created_at=entry.get("created_at"),
+        updated_at=entry.get("last_modified"),
+    )
+
+
+def _db_kernel_to_dict(kernel: Kernel) -> dict[str, Any]:
+    """Convert DB Kernel model to JSON dict format."""
+    return {
+        "name": kernel.name,
+        "filename": kernel.path,
+        "version": kernel.version,
+        "arch": kernel.arch,
+        "base_name": kernel.base_name,
+        "type": kernel.type,
+        "is_default": 1 if kernel.is_default else 0,
+        "created_at": kernel.created_at,
+        "last_modified": kernel.updated_at,
+    }
+
+
+def _dict_to_db_binary(name: str, entry: dict[str, Any]) -> Binary | None:
+    """Convert JSON binary entry to DB Binary model."""
+    binary_id = entry.get("binary_id") or entry.get("id")
+    if not binary_id:
+        return None
+    return Binary(
+        id=binary_id,
+        name=name,
+        version=entry.get("package_version", ""),
+        path=entry.get("binary_path", ""),
+        full_version=entry.get("full_version"),
+        ci_version=entry.get("ci_version"),
+        created_at=entry.get("created_at"),
+        updated_at=entry.get("updated_at"),
+    )
+
+
+def _db_binary_to_dict(binary: Binary) -> dict[str, Any]:
+    """Convert DB Binary model to JSON dict format."""
+    return {
+        "binary_id": binary.id,
+        "binary_name": binary.name,
+        "package_version": binary.version,
+        "binary_path": binary.path,
+        "full_version": binary.full_version,
+        "ci_version": binary.ci_version,
+        "created_at": binary.created_at,
+        "updated_at": binary.updated_at,
+    }
+
+
+def _dict_to_db_network(network_name: str, entry: dict[str, Any]) -> Network:
+    """Convert JSON network entry to DB Network model."""
+    return Network(
+        id=entry.get("network_id", ""),
+        name=network_name,
+        subnet=entry.get("cidr", ""),
+        bridge=entry.get("bridge", ""),
+        ipv4_gateway=entry.get("gateway", ""),
+        bridge_active=entry.get("bridge_active", False),
+        nat_gateways=",".join(entry.get("nat_gateways", [])) if entry.get("nat_gateways") else None,
+        nat_enabled=entry.get("nat_enabled", True),
+        is_default=entry.get("is_default", 0) == 1,
+        created_at=entry.get("created_at"),
+        updated_at=entry.get("updated_at"),
+    )
+
+
+def _db_network_to_dict(network: Network) -> dict[str, Any]:
+    """Convert DB Network model to JSON dict format."""
+    return {
+        "network_id": network.id,
+        "cidr": network.subnet,
+        "bridge": network.bridge,
+        "gateway": network.ipv4_gateway,
+        "bridge_active": network.bridge_active,
+        "nat_gateways": network.nat_gateways.split(",") if network.nat_gateways else [],
+        "nat_enabled": network.nat_enabled,
+        "is_default": 1 if network.is_default else 0,
+        "created_at": network.created_at,
+        "updated_at": network.updated_at,
+    }
+
+
+# =============================================================================
 # Kernel metadata
 # =============================================================================
 
@@ -228,6 +370,14 @@ def update_kernel_entry(cache_dir: Path, kernel_name: str, **fields: Any) -> Non
     kernel_data.update(fields)
     data["kernels"][kernel_name] = kernel_data
     write_metadata(cache_dir, data)
+
+    # NEW: Also write to SQLite
+    try:
+        db = MVMDatabase()
+        db_kernel = _dict_to_db_kernel(kernel_name, kernel_data)
+        db.upsert_kernel(db_kernel)
+    except Exception:
+        pass
 
 
 def _flag_as_default(value: Any) -> int:
@@ -271,6 +421,13 @@ def _find_default_entry(cache_dir: Path, section: str) -> tuple[str, dict[str, A
 def set_default_kernel_entry(cache_dir: Path, kernel_id: str) -> None:
     _set_default_entry(cache_dir, "kernels", kernel_id)
 
+    # NEW: Also update SQLite
+    try:
+        db = MVMDatabase()
+        db.set_default_kernel(kernel_id)
+    except Exception:
+        pass
+
 
 def set_default_kernel_by_filename(cache_dir: Path, filename: str) -> None:
     kernels = list_kernel_entries(cache_dir)
@@ -282,11 +439,32 @@ def set_default_kernel_by_filename(cache_dir: Path, filename: str) -> None:
 
 
 def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        kernels = db.list_kernels()
+        for kernel in kernels:
+            if kernel.is_default:
+                return kernel.id, _db_kernel_to_dict(kernel)
+    except Exception:
+        pass
+
+    # Fall back to JSON
     return _find_default_entry(cache_dir, "kernels")
 
 
 def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
     """Return kernel metadata entry or {} if not found."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        kernel = db.get_kernel(kernel_name)
+        if kernel:
+            return _db_kernel_to_dict(kernel)
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     kernels = data.get("kernels", {})
     if isinstance(kernels, dict):
@@ -307,6 +485,25 @@ def list_kernel_entries(
         kernels_dir: Optional directory to validate kernel files exist
         include_missing: If True, include entries even if file is missing (for X mark display)
     """
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        kernels = db.list_kernels()
+        if kernels:
+            result: dict[str, dict[str, Any]] = {}
+            for kernel in kernels:
+                if kernels_dir is not None and kernels_dir.exists():
+                    kernel_path = kernels_dir / kernel.path
+                    if kernel_path.exists() or include_missing:
+                        result[kernel.id] = _db_kernel_to_dict(kernel)
+                else:
+                    result[kernel.id] = _db_kernel_to_dict(kernel)
+            if result:
+                return result
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     kernels = data.get("kernels", {})
     if not isinstance(kernels, dict):
@@ -351,6 +548,13 @@ def remove_kernel_entry(cache_dir: Path, kernel_name: str) -> None:
             del data["kernels"][kernel_name]
             write_metadata(cache_dir, data)
 
+    # NEW: Also delete from SQLite
+    try:
+        db = MVMDatabase()
+        db.delete_kernel(kernel_name)
+    except Exception:
+        pass
+
 
 # =============================================================================
 # Image metadata
@@ -368,9 +572,27 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
     data["images"][image_id] = image_data
     write_metadata(cache_dir, data)
 
+    # NEW: Also write to SQLite
+    try:
+        db = MVMDatabase()
+        db_image = _dict_to_db_image(image_id, image_data)
+        db.upsert_image(db_image)
+    except Exception:
+        pass
+
 
 def get_image_entry(cache_dir: Path, image_id: str) -> dict[str, Any]:
     """Return image metadata entry or {} if not found."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        image = db.get_image(image_id)
+        if image:
+            return _db_image_to_dict(image)
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     images = data.get("images", {})
     if isinstance(images, dict):
@@ -391,6 +613,26 @@ def list_image_entries(
         images_dir: Optional directory to validate image files exist
         include_missing: If True, include entries even if file is missing (for X mark display)
     """
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        images = db.list_images()
+        if images:
+            result: dict[str, dict[str, Any]] = {}
+            for image in images:
+                if images_dir is not None and images_dir.exists():
+                    filename = image.path
+                    image_path = images_dir / filename
+                    if image_path.exists() or include_missing:
+                        result[image.id] = _db_image_to_dict(image)
+                else:
+                    result[image.id] = _db_image_to_dict(image)
+            if result:
+                return result
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     images = data.get("images", {})
     if not isinstance(images, dict):
@@ -433,9 +675,23 @@ def remove_image_entry(cache_dir: Path, image_id: str) -> None:
             del data["images"][image_id]
             write_metadata(cache_dir, data)
 
+    # NEW: Also delete from SQLite
+    try:
+        db = MVMDatabase()
+        db.delete_image(image_id)
+    except Exception:
+        pass
+
 
 def set_default_image_entry(cache_dir: Path, image_id: str) -> None:
     _set_default_entry(cache_dir, "images", image_id)
+
+    # NEW: Also update SQLite
+    try:
+        db = MVMDatabase()
+        db.set_default_image(image_id)
+    except Exception:
+        pass
 
 
 def set_default_image_by_internal_id(cache_dir: Path, internal_id: str) -> None:
@@ -448,11 +704,32 @@ def set_default_image_by_internal_id(cache_dir: Path, internal_id: str) -> None:
 
 
 def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        images = db.list_images()
+        for image in images:
+            if image.is_default:
+                return image.id, _db_image_to_dict(image)
+    except Exception:
+        pass
+
+    # Fall back to JSON
     return _find_default_entry(cache_dir, "images")
 
 
 def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str, Any]] | None:
     """Find an image entry whose key starts with prefix. Returns (full_key, meta) or None."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        images = db.find_images_by_prefix(prefix)
+        if len(images) == 1:
+            return images[0].id, _db_image_to_dict(images[0])
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     images = data.get("images", {})
     if not isinstance(images, dict):
@@ -465,6 +742,16 @@ def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str
 
 def find_images_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, dict[str, Any]]]:
     """Return all image entries whose key starts with prefix."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        images = db.find_images_by_prefix(prefix)
+        if images:
+            return [(img.id, _db_image_to_dict(img)) for img in images]
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     images = data.get("images", {})
     if not isinstance(images, dict):
@@ -618,8 +905,31 @@ def update_binary_entry(cache_dir: Path, version: str, **fields: Any) -> None:
 
     write_metadata(cache_dir, data)
 
+    # NEW: Also write to SQLite
+    try:
+        db = MVMDatabase()
+        for binary_name in _BINARY_METADATA_NAMES:
+            entry = data["binaries"].get(binary_name, {})
+            if isinstance(entry, dict):
+                db_binary = _dict_to_db_binary(binary_name, entry)
+                if db_binary:
+                    db.upsert_binary(db_binary)
+    except Exception:
+        pass
+
 
 def get_binary_entry(cache_dir: Path, version: str) -> dict[str, Any]:
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        for binary_name in _BINARY_METADATA_NAMES:
+            binary = db.get_binary(binary_name)
+            if binary and _binary_matches_version(_db_binary_to_dict(binary), version):
+                return _db_binary_to_dict(binary)
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     binaries = data.get("binaries", {})
     if not isinstance(binaries, dict):
@@ -638,6 +948,16 @@ def get_binary_entry(cache_dir: Path, version: str) -> dict[str, Any]:
 
 
 def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        binaries = db.list_binaries()
+        if binaries:
+            return {binary.name: _db_binary_to_dict(binary) for binary in binaries}
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     binaries = data.get("binaries", {})
     if isinstance(binaries, dict):
@@ -678,16 +998,41 @@ def set_default_binary_entry(cache_dir: Path, version: str) -> None:
 
     write_metadata(cache_dir, data)
 
+    # NEW: Also update SQLite
+    try:
+        db = MVMDatabase()
+        for binary_name in _BINARY_METADATA_NAMES:
+            entry = binaries.get(binary_name, {})
+            if isinstance(entry, dict):
+                binary_path = entry.get("binary_path", "")
+                full_version = entry.get("full_version", version)
+                db.set_default_binary(binary_name, full_version, binary_path)
+    except Exception:
+        pass
+
 
 def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    binaries = list_binary_entries(cache_dir)
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        db_binaries = db.list_binaries()
+        for binary in db_binaries:
+            # Check if this is the default via binary_defaults table
+            default = db.get_binary_default(binary.name)
+            if default and default.version == binary.version:
+                return binary.version, _db_binary_to_dict(binary)
+    except Exception:
+        pass
 
-    firecracker = binaries.get("firecracker")
+    # Fall back to JSON
+    json_binaries = list_binary_entries(cache_dir)
+
+    firecracker = json_binaries.get("firecracker")
     if isinstance(firecracker, dict) and _flag_as_default(firecracker.get("is_default")) == 1:
         version = _binary_entry_version(firecracker)
         return version or "firecracker", firecracker
 
-    jailer = binaries.get("jailer")
+    jailer = json_binaries.get("jailer")
     if isinstance(jailer, dict) and _flag_as_default(jailer.get("is_default")) == 1:
         version = _binary_entry_version(jailer)
         return version or "jailer", jailer
@@ -711,9 +1056,27 @@ def update_network_entry(cache_dir: Path, network_name: str, **fields: Any) -> N
     data["networks"][network_name] = network_data
     write_metadata(cache_dir, data)
 
+    # NEW: Also write to SQLite
+    try:
+        db = MVMDatabase()
+        db_network = _dict_to_db_network(network_name, network_data)
+        db.upsert_network(db_network)
+    except Exception:
+        pass
+
 
 def get_network_entry(cache_dir: Path, network_name: str) -> dict[str, Any]:
     """Return network metadata entry or {} if not found."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(network_name)
+        if network:
+            return _db_network_to_dict(network)
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     networks = data.get("networks", {})
     if isinstance(networks, dict):
@@ -723,6 +1086,16 @@ def get_network_entry(cache_dir: Path, network_name: str) -> dict[str, Any]:
 
 def list_network_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
     """Return all network entries dict keyed by network name."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        networks = db.list_networks()
+        if networks:
+            return {network.name: _db_network_to_dict(network) for network in networks}
+    except Exception:
+        pass
+
+    # Fall back to JSON
     data = read_metadata(cache_dir)
     networks = data.get("networks", {})
     if isinstance(networks, dict):
@@ -738,12 +1111,41 @@ def remove_network_entry(cache_dir: Path, network_name: str) -> None:
             del data["networks"][network_name]
             write_metadata(cache_dir, data)
 
+    # NEW: Also delete from SQLite
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(network_name)
+        if network:
+            db.delete_network(network.id)
+    except Exception:
+        pass
+
 
 def set_default_network_entry(cache_dir: Path, network_name: str) -> None:
     """Set a network as the default, clearing is_default from all others."""
     _set_default_entry(cache_dir, "networks", network_name)
 
+    # NEW: Also update SQLite
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(network_name)
+        if network:
+            db.set_default_network(network.id)
+    except Exception:
+        pass
+
 
 def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
     """Return the default network entry as (name, metadata) or None if not set."""
+    # Try SQLite first
+    try:
+        db = MVMDatabase()
+        networks = db.list_networks()
+        for network in networks:
+            if network.is_default:
+                return network.name, _db_network_to_dict(network)
+    except Exception:
+        pass
+
+    # Fall back to JSON
     return _find_default_entry(cache_dir, "networks")
