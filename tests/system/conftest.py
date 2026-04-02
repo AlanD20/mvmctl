@@ -78,9 +78,9 @@ def timing_targets() -> dict[str, float]:
     return {
         "alpine-3.21": 5.0,
         "ubuntu-24.04-minimal": 10.0,
-        "ubuntu-24.04": 30.0,
-        "archlinux": 30.0,
-        "debian-bookworm": 30.0,
+        "ubuntu-24.04": 20.0,
+        "archlinux": 10.0,
+        "debian-bookworm": 10.0,
     }
 
 
