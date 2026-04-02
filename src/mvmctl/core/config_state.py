@@ -23,6 +23,7 @@ from mvmctl.core.metadata import (
     set_default_kernel_by_filename,
     update_binary_entry,
 )
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.utils.fs import get_bin_dir, get_cache_dir
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,21 @@ def get_config_value(key: str, default: Any = None) -> Any:
 
 def get_firecracker_config() -> dict[str, str]:
     cache_dir = get_cache_dir()
+
+    # Try SQLite first for binary defaults
+    try:
+        db = MVMDatabase()
+        binary_default = db.get_binary_default("firecracker")
+        if binary_default:
+            return {
+                "full_version": binary_default.version,
+                "ci_version": binary_default.version,
+                "default_version": binary_default.version,
+                "default_binary_path": binary_default.path,
+            }
+    except Exception:
+        pass
+
     data = read_metadata(cache_dir)
     binaries = data.get("binaries", {})
     defaults = binaries.get("defaults", {}) if isinstance(binaries, dict) else {}
@@ -202,6 +218,13 @@ def update_firecracker_config(**fields: str) -> None:
     )
     set_default_binary_entry(cache_dir, normalized_version)
 
+    # NEW: Also update SQLite
+    try:
+        db = MVMDatabase()
+        db.set_default_binary("firecracker", full_version, default_binary_path)
+    except Exception:
+        pass
+
 
 def get_assets_config() -> dict[str, str]:
     from mvmctl.utils.fs import (
@@ -257,17 +280,43 @@ def get_defaults_config() -> dict[str, Any]:
     cache_dir = get_cache_dir()
     defaults: dict[str, Any] = {"image": None, "kernel": None}
 
-    default_image = get_default_image_entry(cache_dir)
-    if default_image is not None:
-        image_id, image_meta = default_image
-        defaults["image"] = image_meta.get("internal_id") or image_id
+    # Try SQLite first for image default
+    try:
+        db = MVMDatabase()
+        images = db.list_images()
+        for image in images:
+            if image.is_default:
+                defaults["image"] = image.os_slug or image.id
+                break
+    except Exception:
+        pass
 
-    from mvmctl.core.metadata import get_default_kernel_entry
+    # Fall back to JSON for image
+    if defaults["image"] is None:
+        default_image = get_default_image_entry(cache_dir)
+        if default_image is not None:
+            image_id, image_meta = default_image
+            defaults["image"] = image_meta.get("internal_id") or image_id
 
-    default_kernel = get_default_kernel_entry(cache_dir)
-    if default_kernel is not None:
-        _kernel_id, kernel_meta = default_kernel
-        defaults["kernel"] = kernel_meta.get("filename")
+    # Try SQLite first for kernel default
+    try:
+        db = MVMDatabase()
+        kernels = db.list_kernels()
+        for kernel in kernels:
+            if kernel.is_default:
+                defaults["kernel"] = kernel.path
+                break
+    except Exception:
+        pass
+
+    # Fall back to JSON for kernel
+    if defaults["kernel"] is None:
+        from mvmctl.core.metadata import get_default_kernel_entry
+
+        default_kernel = get_default_kernel_entry(cache_dir)
+        if default_kernel is not None:
+            _kernel_id, kernel_meta = default_kernel
+            defaults["kernel"] = kernel_meta.get("filename")
 
     return defaults
 
@@ -279,15 +328,32 @@ def set_defaults_value(key: str, value: Any) -> None:
             raise ValueError("Default image must be a string image identifier")
         try:
             set_default_image_entry(cache_dir, value)
-            return
         except KeyError:
             set_default_image_by_internal_id(cache_dir, value)
-            return
+
+        # NEW: Also update SQLite
+        try:
+            db = MVMDatabase()
+            db.set_default_image(value)
+        except Exception:
+            pass
+        return
 
     if key == "kernel":
         if not isinstance(value, str):
             raise ValueError("Default kernel must be a string kernel filename")
         set_default_kernel_by_filename(cache_dir, value)
+
+        # NEW: Also update SQLite
+        try:
+            db = MVMDatabase()
+            kernels = db.list_kernels()
+            for kernel in kernels:
+                if kernel.path == value:
+                    db.set_default_kernel(kernel.id)
+                    break
+        except Exception:
+            pass
         return
 
     state = _read_raw()
