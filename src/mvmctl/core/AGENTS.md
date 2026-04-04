@@ -8,27 +8,36 @@
 
 ```
 src/mvmctl/core/
-├── vm_lifecycle.py      # VM create/start/stop/remove (2053 lines)
-├── vm_manager.py        # VM registry; state.json keyed by full 64-char hash (306 lines)
-├── network.py           # Low-level: bridge, TAP, NAT, iptables (1293 lines)
-├── network_manager.py   # Named networks with IP lease tracking (908 lines)
-├── host.py              # Host orchestration: clean/prune/reset (145 lines)
+├── vm_lifecycle.py      # VM create/start/stop/remove (1782 lines)
+├── vm_manager.py        # VM registry; state.json keyed by full 16-char hash (285 lines)
+├── vm_monitor.py        # VM reconciliation; detects/cleans orphaned VMs
+├── network.py           # Low-level: bridge, TAP, NAT, iptables (1339 lines)
+├── network_manager.py   # Named networks with IP lease tracking (890 lines)
+├── host.py              # Host orchestration: clean/prune/reset (219 lines)
 ├── host_setup.py        # Host init: KVM, sysctl, binary checks (403 lines)
-├── host_privilege.py    # Group/sudoers management; check_privileges() (296 lines)
-├── host_state.py        # Host state snapshots for rollback (204 lines)
-├── image.py             # Image download, QCOW2→raw conversion, partition extract (1622 lines)
-├── kernel.py            # Kernel fetch (FC CI S3) + build-from-source pipeline (1271 lines)
-├── binary_manager.py    # Firecracker/jailer version management (443 lines)
-├── metadata.py          # SQLite-backed metadata helpers for images/kernels/binaries (637 lines)
-├── config_state.py      # config.json persistence + SQLite-backed default accessors (349 lines)
-├── config_gen.py        # Generates Firecracker boot JSON (202 lines)
-├── firecracker.py       # HTTP API client for live VM control (265 lines)
+├── host_privilege.py    # Group/sudoers management; check_privileges() (331 lines)
+├── host_state.py        # Host state snapshots for rollback (232 lines)
+├── image.py             # Image download, QCOW2→raw conversion, partition extract (1739 lines)
+├── kernel.py            # Kernel fetch (FC CI S3) + build-from-source pipeline (1338 lines)
+├── binary_manager.py    # Firecracker/jailer version management (436 lines)
+├── mvm_db.py            # SQLite ORM — MVMDatabase class; canonical DB interface (868 lines)
+├── metadata.py          # SQLite-backed metadata helpers for images/kernels/binaries (559 lines)
+├── config_state.py      # config.json persistence + SQLite-backed default accessors (264 lines)
+├── config_gen.py        # Generates Firecracker boot JSON (319 lines)
+├── firecracker.py       # HTTP API client for live VM control (298 lines)
+├── firewall.py          # iptables nocloud input chain management for cloud-init security
 ├── ssh.py               # SSH command building + key resolution (211 lines)
 ├── key_manager.py       # SSH key import/create/registry (557 lines)
 ├── cloud_init.py        # cloud-init ISO creation (178 lines)
+├── cloud_init_status.py # Cloud-init boot status polling/wait logic
+├── console.py           # Console relay connection management (connect/disconnect/read/write)
+├── download_engine.py   # Unified download engine with temp staging, resume, retry
+├── cache_manager.py     # Cache init/prune for VMs, images, kernels, networks
+├── partition_detection.py # Root partition detection with weighted heuristics
+├── rootfs_injector.py   # Inject cloud-init into rootfs via libguestfs
 ├── logs.py              # VM log retrieval (149 lines)
-├── config.py            # YAML config loading (204 lines)
-└── user_config.py       # User-specific config get/set (83 lines)
+├── config.py            # YAML config loading (210 lines)
+└── user_config.py       # User-specific config get/set (85 lines)
 ```
 
 ## WHERE TO LOOK
@@ -39,6 +48,7 @@ src/mvmctl/core/
 | Resolve image by ID/hash | `vm_lifecycle.py` | `_resolve_image_path()` |
 | Remove VM | `vm_lifecycle.py` | `remove_vm()` |
 | VM registry (CRUD) | `vm_manager.py` | `VMManager` class |
+| Orphaned VM cleanup | `vm_monitor.py` | reconciliation helpers |
 | Bridge/TAP/NAT | `network.py` | `setup_bridge()`, `create_tap()`, `setup_nat()` |
 | iptables chains | `network.py` | `setup_mvm_chains()`, `teardown_mvm_chains()` |
 | Named networks | `network_manager.py` | `create_network()`, `ensure_default_network()` |
@@ -47,10 +57,17 @@ src/mvmctl/core/
 | Image download/convert | `image.py` | `fetch_image()`, `import_image()` |
 | Kernel fetch/build | `kernel.py` | `download_firecracker_kernel()`, `build_kernel_pipeline()` |
 | Firecracker binary | `binary_manager.py` | `fetch_binary()`, `set_active_version()`, `get_binary_path()` |
-| Binary default lookup | `mvm_db.py` | `db.get_default_binary("firecracker")` — SQLite is canonical; do NOT read `firecracker` symlink for state |
-| Asset metadata | `metadata.py` | `find_images_by_id_prefix()`, `update_kernel_entry()` |
-| Active version/binary | `binary_manager.py` + `mvm_db.py` | `get_binary_path("firecracker")` for path; `db.get_default_binary("firecracker")` for direct SQLite query |
+| Binary default lookup | `mvm_db.py` | `db.get_default_binary("firecracker")` — SQLite is canonical; do NOT read `firecracker` symlink |
+| Asset metadata helpers | `metadata.py` | `find_images_by_id_prefix()`, `update_kernel_entry()` |
+| SQLite ORM (canonical) | `mvm_db.py` | `MVMDatabase` class — single source for all DB queries |
 | Firecracker HTTP API | `firecracker.py` | `FirecrackerClient` |
+| iptables nocloud rules | `firewall.py` | nocloud input chain management |
+| Console relay | `console.py` | `connect()`, `disconnect()`, `read()`, `write()` |
+| Cloud-init status | `cloud_init_status.py` | status polling, wait-for-done |
+| Download (resumable) | `download_engine.py` | `DownloadEngine` |
+| Cache prune | `cache_manager.py` | `prune_cache()`, `init_cache()` |
+| Partition detection | `partition_detection.py` | heuristic root partition detection |
+| Cloud-init inject | `rootfs_injector.py` | inject via libguestfs |
 | Config dataclass | `config.py` | `MVMConfig`, `load_config()` |
 
 ## STATE QUERY PREFERENCE
@@ -75,7 +92,6 @@ if default and Path(default.path).exists():
 When to use filesystem scanning (`list_local_versions`):
 - Only when discovering binaries not yet registered in SQLite (e.g. manual drops into `bin/`)
 - Always pass results back through `update_binary_entry()` + `set_default_binary_entry()` to register them
-- Or when an explicit `bin_dir` override is provided (test isolation / non-standard installs)
 
 ## STATE SCHEMAS
 
@@ -88,26 +104,11 @@ When to use filesystem scanning (`list_local_versions`):
 - Migration: old name-keyed state auto-migrates on first load
 
 **Asset metadata** (SQLite `$MVM_CACHE_DIR/mvmdb.db` — canonical; `metadata.json` is a legacy compatibility shim):
-```json
-{
-  "images":  { "<full-hash>": { "internal_id": "ubuntu-24.04", "filename": "...", "is_default": 0|1, ... } },
-  "kernels": { "<full-hash>": { "filename": "vmlinux", "version": "6.1", "is_default": 0|1, ... } },
-  "binaries": {
-    "firecracker": { "binary_name": "firecracker", "binary_path": ".../firecracker-v1.15.0", "full_version": "v1.15.0", "ci_version": "v1.15", "package_version": "1.15.0", "default_binary_path": ".../firecracker", "is_default": 0|1, ... },
-    "jailer":      { "binary_name": "jailer", "binary_path": ".../jailer-v1.15.0", "full_version": "v1.15.0", "ci_version": "v1.15", "package_version": "1.15.0", "default_binary_path": ".../jailer", "is_default": 0|1, ... }
-  }
-}
-```
 - Use `find_images_by_id_prefix(cache_dir, "abc123")` for prefix lookup
 - Images downloaded via `mvm image fetch` store `internal_id` to link back to images.yaml
 - Exactly one entry per section should carry `is_default: 1` when a default is set
 
 **Config** (`$MVM_CONFIG_DIR/config.json`):
-```json
-{
-  "assets": { "kernels_dir": "...", "images_dir": "...", "bin_dir": "...", ... }
-}
-```
 - Image/kernel/binary defaults are SQLite-backed (not stored under `config.json.defaults`)
 
 **Network state** (`$MVM_CACHE_DIR/networks/{name}/config.json` + `leases.json`):
@@ -145,61 +146,50 @@ Called in `api/` layer before entering core, or explicitly in core for ops needi
 | `except Exception: pass` | Catch specific type, re-raise as MVMError subclass |
 | Large functions (>100 lines) | Extract helpers; early returns to reduce nesting |
 | `subprocess.run(..., shell=True)` | Always use list form |
-| Read `bin/firecracker` symlink for state | Query `db.get_default_binary("firecracker")` — symlink is a side-effect, not source of truth |
+| Read `bin/firecracker` symlink for state | Query `db.get_default_binary("firecracker")` — symlink is a side-effect |
 
 ## KNOWN VIOLATIONS
 
-- `host_privilege.py:check_privileges_interactive()` — interactive messaging in core layer is an intentional exception for privilege setup UX. This function handles first-time user onboarding with interactive prompts and status messages. The core layer otherwise strictly returns data or raises exceptions.
+- `host_privilege.py:check_privileges_interactive()` — interactive messaging in core layer is an intentional exception for privilege setup UX.
 
 ## CORE LAYER OUTPUT RULE
 
 The core layer **must not** produce console output. All output formatting belongs in the CLI layer (`cli/`).
 
-**Correct pattern:**
-```python
-# core/kernel.py — return data
-def build_kernel(...) -> KernelBuildResult:
-    warnings = []
-    if some_condition:
-        warnings.append("Build may take 10-30 minutes")
-    return KernelBuildResult(success=True, warnings=warnings, ...)
-
-# cli/asset.py — format and display
-def kernel_fetch(...):
-    result = build_kernel(...)
-    for warning in result.warnings:
-        print_warning(warning)
-```
-
-**Exception:** `check_privileges_interactive()` in `host_privilege.py` is allowed to print because it's part of the first-time setup wizard (`mvm host init`) where immediate user feedback is essential for privilege configuration.
+**Exception:** `check_privileges_interactive()` in `host_privilege.py` is allowed to print because it's part of the first-time setup wizard (`mvm init`) where immediate user feedback is essential.
 
 ## KEY MODULES
 
-### vm_lifecycle.py (2053 lines)
+### vm_lifecycle.py (1782 lines)
 - `_resolve_image_path(image)` — checks all extensions + metadata ID prefix lookup
 - `generate_vm_id(name)` — `sha256(name:timestamp).hexdigest()[:16]`
 - `create_vm()` — full orchestration: image→rootfs copy, cloud-init, config, network, process, register
 - TAP naming: `mvm-{net[:3]}-{vm[:3]}-{rand3}` (15-char Linux IFNAMSIZ limit)
 
-### network_manager.py (908 lines)
+### mvm_db.py (868 lines) — CANONICAL DB INTERFACE
+- `MVMDatabase` class — single entry point for all SQLite operations
+- `get_default_binary(name)` → `BinaryRecord | None`
+- `get_default_image()`, `get_default_kernel()`
+- `list_binaries()`, `list_images()`, `list_kernels()`
+- Do NOT bypass this with raw sqlite3 calls from `core/` or above
+
+### network_manager.py (890 lines)
 - `NetworkConfig` + `NetworkLease` dataclasses; persisted as JSON under `$MVM_CACHE_DIR/networks/`
 - Bridge = `mvm-{network_name}` (e.g. `mvm-default`)
 - `ensure_default_network()` — idempotent; called at VM create and host init
 
-### kernel.py (1271 lines)
+### kernel.py (1338 lines)
 - `fetch_kernel_sha256(version)` — fetches `.sha256` sidecar before download
 - `build_kernel_pipeline()` — auto-fetches sha256, downloads tarball, patches config, builds, returns `KernelPipelineResult`
 - `download_firecracker_kernel()` — downloads prebuilt from Firecracker CI S3
-- `human_readable_time(iso)` — "5 minutes ago" format; imported by CLI asset.py
-- `parse_kernel_filename(name)` → `ParsedKernelFilename(base_name, version, arch)`
 - Implements config fragments merging and `--clean-build` cache bypassing logic.
 
-### image.py (1622 lines)
+### image.py (1739 lines)
 - `fetch_image(spec, out, force)` — download + sha256 verify + optional QCOW2 convert
 - `import_image(spec, output_dir)` — local file conversion to ext4/btrfs
 - `_detect_and_rename_fs(path)` — uses `blkid` to detect FS, renames `.img` → `.ext4` etc.
 
-### metadata.py (637 lines)
+### metadata.py (559 lines)
 - `find_images_by_id_prefix(cache_dir, prefix)` → `list[tuple[str, dict]]` (full_key, meta)
 - `find_kernels_by_id_prefix(cache_dir, prefix)` → same
 - `update_kernel_entry()`, `update_image_entry()` — upsert by full key

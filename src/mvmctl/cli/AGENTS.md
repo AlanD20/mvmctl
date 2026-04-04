@@ -8,18 +8,17 @@
 
 ```
 src/mvmctl/cli/
-├── vm.py          # VM subcommands: create, rm, ls, ps, ssh, logs, prune, snapshot, load
-├── asset.py       # kernel/image/bin subcommands — THREE Typer apps in one file
-├── configure.py   # Guided onboarding wizard: mvm configure
+├── vm.py          # VM subcommands: create, rm, ls, ps, ssh, logs, prune, snapshot, load (1020 lines)
+├── bin.py         # kernel/image/bin subcommands — THREE Typer apps in one file (1548 lines)
+├── init.py        # Guided onboarding wizard: mvm init (437 lines)
 ├── host.py        # Host subcommands: init, ls, clean, reset
 ├── network.py     # Network subcommands: create, rm, ls, inspect
 ├── key.py         # SSH key subcommands: add, create, ls, rm, inspect
 ├── config.py      # Config subcommands: get, set, show, validate, dump-vm
 ├── console.py     # VM console access via PTY-over-vsock
-├── cache.py       # Cache management commands
-├── ssh.py         # SSH helper commands
-├── logs.py        # Log viewing commands
-├── init.py        # mvm init onboarding wizard
+├── cache.py       # Cache management: init, prune
+├── ssh.py         # VM SSH helper commands
+├── logs.py        # VM log viewing: --follow, --lines, --type
 └── _helpers.py    # Internal: check_name_arg() guard for positional name args
 ```
 
@@ -29,21 +28,25 @@ Root is `LazyMVMGroup` (custom `click.Group`), NOT `typer.Typer`. Sub-apps lazy-
 
 ```python
 _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
-    "vm":        _LazyCommandSpec("mvmctl.cli.vm",        "app",         "VM lifecycle management"),
-    "host":      _LazyCommandSpec("mvmctl.cli.host",      "app",         "Host configuration"),
-    "network":   _LazyCommandSpec("mvmctl.cli.network",   "app",         "Network management"),
-    "key":       _LazyCommandSpec("mvmctl.cli.key",        "app",         "SSH key management"),
-    "config":    _LazyCommandSpec("mvmctl.cli.config",     "app",         "Configuration commands"),
-    "configure": _LazyCommandSpec("mvmctl.cli.configure",  "app",         "Guided setup wizard"),
-    "kernel":    _LazyCommandSpec("mvmctl.cli.asset",     "kernel_app",  "Kernel management"),
-    "image":     _LazyCommandSpec("mvmctl.cli.asset",     "image_app",   "Image management"),
-    "bin":       _LazyCommandSpec("mvmctl.cli.asset",     "bin_app",     "Binary management"),
+    "vm":      _LazyCommandSpec("mvmctl.cli.vm",      "app",        "VM lifecycle management"),
+    "console": _LazyCommandSpec("mvmctl.cli.console", "app",        "VM console access"),
+    "host":    _LazyCommandSpec("mvmctl.cli.host",    "app",        "Host configuration"),
+    "network": _LazyCommandSpec("mvmctl.cli.network", "app",        "Network management"),
+    "key":     _LazyCommandSpec("mvmctl.cli.key",     "app",        "SSH key management"),
+    "config":  _LazyCommandSpec("mvmctl.cli.config",  "app",        "Configuration commands"),
+    "init":    _LazyCommandSpec("mvmctl.cli.init",    "app",        "Initialize mvm"),
+    "kernel":  _LazyCommandSpec("mvmctl.cli.bin",     "kernel_app", "Kernel management"),
+    "image":   _LazyCommandSpec("mvmctl.cli.bin",     "image_app",  "Image management"),
+    "bin":     _LazyCommandSpec("mvmctl.cli.bin",     "bin_app",    "Binary management"),
+    "cache":   _LazyCommandSpec("mvmctl.cli.cache",   "app",        "Cache management"),
+    "logs":    _LazyCommandSpec("mvmctl.cli.logs",    "app",        "VM log management"),
+    "ssh":     _LazyCommandSpec("mvmctl.cli.ssh",     "app",        "VM SSH access"),
 }
 ```
 
 `LazyMVMGroup.get_command()` imports module on first access via `importlib.import_module()`. Typer apps converted via `typer.main.get_command()`.
 
-Root-level commands (`clear`, `version`, `help`) are plain `click.Command` in `main.py`.
+Root-level commands (`version`, `help`) are plain `click.Command` in `main.py`.
 
 ## TYPER APP CONFIGURATION (MANDATORY)
 
@@ -125,13 +128,13 @@ effective_ids = list(ids) if ids else []
 ids: List[str] = typer.Argument([], help="IDs to remove")  # Typer fails
 ```
 
-## ASSET.PY — THREE APPS IN ONE FILE
+## BIN.PY — THREE APPS IN ONE FILE
 
-Single file exports three separate `typer.Typer()` instances:
+Single file (`cli/bin.py`) exports three separate `typer.Typer()` instances:
 
 | App | Attribute | Commands |
 |-----|-----------|----------|
-| `kernel_app` | `kernel_ls`, `kernel_fetch`, `kernel_set_default`, `kernel_rm` | `--type firecracker|official`, `--name`, `--clean-build` for fetch |
+| `kernel_app` | `kernel_ls`, `kernel_fetch`, `kernel_set_default`, `kernel_rm` | `--type firecracker\|official`, `--name`, `--clean-build` for fetch |
 | `image_app` | `image_ls`, `image_fetch`, `image_set_default`, `image_rm`, `image_import` | Hash-based ID; `_find_meta_for_internal_id()` for YAML lookup |
 | `bin_app` | `bin_ls`, `bin_fetch`, `bin_set_default`, `bin_rm` | SHA256 verified against GitHub releases |
 
@@ -139,18 +142,20 @@ Single file exports three separate `typer.Typer()` instances:
 
 **Callbacks:** Each app has empty callback with `invoke_without_command=True` to show help when called without subcommand.
 
-## CONFIGURE.PY — ONBOARDING WIZARD
+## INIT.PY — ONBOARDING WIZARD
 
-`mvm configure` runs 6-step guided setup:
+`mvm init` runs 8-step guided setup:
 
 | Step | Function | Description |
 |------|----------|-------------|
 | 1 | `_step_host()` | Privilege setup via `sudo mvm host init` |
-| 2 | `_step_binary()` | Download Firecracker binary |
-| 3 | `_step_kernel()` | Build kernel from source |
-| 4 | `_step_image()` | Download root filesystem image |
-| 5 | `_step_ssh_key()` | Generate or import SSH key |
-| 6 | `_step_summary()` | Print readiness report |
+| 2 | `_step_cache_init()` | Initialize cache directory structure |
+| 3 | `_step_local_state()` | Initialize local state/SQLite DB |
+| 4 | `_step_binary()` | Download Firecracker binary |
+| 5 | `_step_kernel()` | Build or fetch kernel |
+| 6 | `_step_image()` | Download root filesystem image |
+| 7 | `_step_ssh_key()` | Generate or import SSH key |
+| 8 | `_step_summary()` | Print readiness report |
 
 **Flags:**
 - `--non-interactive` — use defaults, skip all prompts
@@ -212,5 +217,5 @@ def create(
 
 ## KNOWN VIOLATIONS
 
-- `asset.py` — imports `mvmctl.core.metadata` directly (bypasses `api/`)
-- `configure.py` — imports `mvmctl.core.config_state` directly (bypasses `api/`)
+- `bin.py` — imports `mvmctl.core.metadata` directly (bypasses `api/`)
+- `init.py` — imports `mvmctl.core.config_state` directly (bypasses `api/`)

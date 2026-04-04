@@ -8,9 +8,10 @@
 
 ```
 src/mvmctl/assets/
-├── defaults.yaml             # Master config: all runtime defaults (136 lines)
-├── images.yaml               # Image catalog: 5 entries with URLs + convert specs
+├── defaults.yaml             # Master config: all runtime defaults (199 lines)
+├── images.yaml               # Image catalog: 7 entries with URLs + convert specs
 ├── kernels.yaml              # Kernel catalog: build-from-source + prebuilt entries
+├── cloud-init.template.yaml  # Jinja2 cloud-init user-data template (98 lines)
 └── firecracker.template.json # Firecracker boot JSON template with {placeholder} vars
 ```
 
@@ -66,6 +67,8 @@ Each entry → `ImageSpec` dataclass. `id` becomes the CLI argument to `mvm imag
   sha256_url: https://...    # URL to SHA256SUMS file
 ```
 
+**Available images (7):** `ubuntu-24.04`, `ubuntu-24.04-minimal`, `ubuntu-22.04`, `archlinux`, `debian-bookworm`, `ubuntu-fc`, `alpine-3.21`
+
 **Adding an image:** Append YAML entry with unique `id`. No code changes needed.
 
 ### `kernels.yaml` — Kernel Catalog
@@ -95,6 +98,19 @@ Python `str.format()`-style (via `utils/template.py:render_template`). Rendered 
 ```
 
 `{drives}`, `{network_interfaces}`, `{logger}`, `{metrics}` are pre-serialized JSON strings substituted as raw values (not quoted strings).
+
+### `cloud-init.template.yaml` — Cloud-Init User-Data Template
+
+Jinja2 template rendered by `core/cloud_init.py:write_cloud_init()`. Variables injected at VM creation time:
+
+| Variable | Source |
+|----------|--------|
+| `{{ hostname }}` | VM name |
+| `{{ ssh_authorized_keys }}` | Key list from key manager |
+| `{{ ssh_user }}` | defaults.yaml `vm_defaults.ssh_user` |
+| `{{ final_message }}` | defaults.yaml `vm.cloud_init.final_message` |
+
+**Do not edit directly** — changes affect all newly created VMs. Use `--cloud-init` CLI flag to inject custom user-data per VM.
 
 ## ANTI-PATTERNS
 

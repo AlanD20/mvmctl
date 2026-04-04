@@ -156,7 +156,7 @@ To execute the `mvmctl` CLI with proper group privileges, use:
 **Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
 **Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
 **Generated:** 2026-04-04
-**Commit:** a9b4b34
+**Commit:** a706a67
 **Branch:** main
 **Files:** 96 Python source, 69 test files
 
@@ -249,7 +249,7 @@ MVMError (base)
 | Config generation | `core/config_gen.py` — `ConfigGenerator` class |
 | CLI commands | `cli/` — see `cli/AGENTS.md` |
 | API layer | `api/` — see `api/AGENTS.md` |
-| First-time setup | `cli/configure.py` — guided onboarding wizard (`mvm configure`) |
+| First-time setup | `cli/init.py` — guided onboarding wizard (`mvm init`) |
 | Tests | `tests/AGENTS.md` (fixtures, mocks, layout) |
 | CI/CD | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
@@ -270,7 +270,7 @@ User → mvm → main.py:LazyMVMGroup → cli/*.py → api/*.py → core/*.py �
 3. Typer apps converted via `typer.main.get_command()`
 
 ### Sub-app Structure
-- `kernel`, `image`, `bin` — three separate Typer apps in `cli/asset.py`
+- `kernel`, `image`, `bin` — three separate Typer apps in `cli/bin.py`
 - All use `rich_markup_mode=None, add_completion=False` — plain Click help
 
 ### Default Resolution
@@ -392,9 +392,10 @@ These are intentional deviations from the layer architecture:
 
 | File | Deviation | Reason |
 |------|-----------|--------|
-| `cli/asset.py` | Imports `core/metadata` directly | Asset management needs direct metadata access for bulk operations |
-| `cli/configure.py` | Imports `core/config_state` directly | Onboarding wizard needs raw state initialization |
+| `cli/bin.py` | Imports `core/metadata` directly | Asset management needs direct metadata access for bulk operations |
+| `cli/init.py` | Imports `core/config_state` directly | Onboarding wizard needs raw state initialization |
 | `core/host_privilege.py` | `check_privileges_interactive()` prints to console | UX: provides actionable guidance on privilege errors |
+| `cli/__init__.py` | Stale `__all__` (lists `"asset"` which doesn't exist; missing `bin`, `console`, `cache`, `logs`, `ssh`) | Not enforced — only root `main.py` uses `_COMMAND_SPECS` for loading |
 
 ## ANTI-PATTERNS
 

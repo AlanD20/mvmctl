@@ -11,12 +11,12 @@ src/mvmctl/services/
 ├── __init__.py              # Package marker only
 ├── console_relay/           # PTY-to-socket relay for VM serial console
 │   ├── __init__.py
-│   ├── manager.py          # ~230 lines — ConsoleManager lifecycle
-│   └── process.py          # ~138 lines — Standalone PTY relay subprocess
+│   ├── manager.py          # 456 lines — ConsoleRelayManager lifecycle
+│   └── process.py          # 186 lines — Standalone PTY relay subprocess
 └── nocloud_server/          # HTTP server for cloud-init nocloud-net datasource
     ├── __init__.py
-    ├── manager.py          # ~197 lines — NocloudServerManager lifecycle
-    └── process.py          # ~77 lines — Standalone HTTP server subprocess
+    ├── manager.py          # 488 lines — NoCloudNetServerManager lifecycle
+    └── process.py          # 154 lines — Standalone HTTP server subprocess
 ```
 
 ## ARCHITECTURE
@@ -42,18 +42,21 @@ core/vm_lifecycle.py
 
 ## CONSOLE RELAY
 
-**Purpose:** Bridge between Firecracker's vsock serial console and host PTY
+**Purpose:** Bridge between Firecracker's serial console (Unix socket) and host PTY
 
-**Manager:** `console_relay/manager.py:ConsoleManager`
-- `start(vm_name, vsock_port)` → spawns `process.py`, writes PID file
-- `stop(vm_name)` → reads PID, sends SIGTERM, cleans up
-- `is_running(vm_name)` → checks PID file + process exists
+**Manager:** `console_relay/manager.py:ConsoleRelayManager`
+- `start_relay(vm_name, pty_master_fd, vm_dir)` → spawns `process.py`, returns `(socket_path, pid)`
+- `stop_relay(vm_name, vm_hash)` → sends SIGTERM, cleans up PID/socket files
+- `kill_relay(vm_name, vm_hash)` → SIGTERM → wait → SIGKILL
+- `is_relay_running(vm_name, vm_hash)` → checks PID file + process alive
+- `cleanup_orphans()` → scans `$MVM_CACHE_DIR/vms/*/console.pid`, kills stale processes
 
 **Process:** `console_relay/process.py`
-- `main()` entry point with argparse
-- Creates PTY master/slave pair
-- Connects to Firecracker vsock at `vsock_port`
-- Bidirectional relay: PTY ↔ vsock
+- `main()` entry point with argparse (`--vm-name`, `--pty-master-fd`, `--socket-path`, `--pid-file`, `--log-file`, `--buffer-size`)
+- PTY master → reads → writes to `console.log` + forwards to Unix socket
+- Bidirectional relay: PTY ↔ socket client
+- `select.select()` loop multiplexing PTY + socket I/O
+- SIGTERM/SIGINT graceful shutdown
 
 **CLI access:** `mvm vm console --name <vm>` (from `cli/console.py`)
 
@@ -61,20 +64,20 @@ core/vm_lifecycle.py
 
 **Purpose:** HTTP server serving cloud-init meta-data/user-data/network-config to VMs
 
-**Manager:** `nocloud_server/manager.py:NocloudServerManager`
-- `start(vm_name, port, config_dir)` → spawns `process.py`, writes PID file
-- `stop(vm_name)` → reads PID, sends SIGTERM, cleans up
-- Port allocation: 8000-9000 range with collision detection
+**Manager:** `nocloud_server/manager.py:NoCloudNetServerManager`
+- `start_server(vm_name, cloud_init_dir, gateway_ip, vm_hash, preferred_port)` → auto-allocates port 8000–9000, returns `(url, port)`
+- `stop_server(vm_name, vm_hash)` → sends SIGTERM, cleans up PID file
+- Port allocation: `socket.bind((gateway_ip, port))` tests availability before spawning
+- `cleanup_orphans()` → cross-references `$MVM_CACHE_DIR/vms/*/nocloud-server.pid` with running VMs
 
 **Process:** `nocloud_server/process.py`
-- `main()` entry point with argparse
-- HTTP server bound to bridge gateway IP (not 0.0.0.0)
-- Serves from `config_dir` containing:
-  - `meta-data` — instance ID, hostname, public keys
-  - `user-data` — cloud-init configuration
-  - `network-config` — network interface configuration (v2 YAML)
+- `main()` entry point with argparse (`--cloud-init-dir`, `--port`, `--host`, `--pid-file`)
+- `HTTPServer` with `_CloudInitRequestHandler(SimpleHTTPRequestHandler)` — serves from `cloud_init_dir`
+- Binds to `gateway_ip` only (never 0.0.0.0) — firewall-isolated
+- SIGTERM/SIGINT graceful `server.shutdown()`
+- Serves: `meta-data`, `user-data`, `network-config` (netplan v2)
 
-**CLI enable:** `mvm vm create --name <vm> --nocloud-net` (default behavior)
+**CLI enable:** `mvm vm create --name <vm>` (nocloud-net is default behavior)
 
 ## ANTI-PATTERNS
 
@@ -93,15 +96,11 @@ uv run pytest tests/unit/services/console_relay/ -v
 
 # Nocloud server tests
 uv run pytest tests/unit/services/nocloud_server/ -v
-
-# Manual process execution (for debugging)
-python -m mvmctl.services.console_relay.process --vm-name myvm --vsock-port 1024
-python -m mvmctl.services.nocloud_server.process --port 8080 --config-dir /tmp/nocloud
 ```
 
 ## NOTES
 
-- Both services write PID files to `$MVM_STATE_DIR/services/<vm_name>/`
-- Port allocation for nocloud-net: tries 8000-9000, skips in-use ports
-- Firewall rules (iptables) are managed by `core/network.py`, not services/
-- Services auto-exit when parent process (Firecracker VM) terminates
+- PID files: `$MVM_CACHE_DIR/vms/<vm-name>/console.pid` and `nocloud-server.pid`
+- Port allocation for nocloud-net: tries 8000-9000, binds to gateway IP to test availability
+- Firewall rules (iptables) managed by `core/firewall.py`, not services/
+- Services auto-exit when parent process terminates; `cleanup_orphans()` handles stale PIDs

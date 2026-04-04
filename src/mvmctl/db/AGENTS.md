@@ -38,10 +38,12 @@ src/mvmctl/db/
 | `db_migrations` | Migration tracking: version, name, applied_at |
 
 ### Key Constraints
-- `binaries(name, version)` — unique composite key
-- `images(hash)` — unique; `images(os_slug, is_default)` — partial unique for defaults
-- `networks(name)` — unique
-- Foreign keys: `host_state_changes.state_id → host_state.id`
+- `images(os_slug)` — UNIQUE; `is_default` is a plain column (no partial index)
+- `networks(name)` — UNIQUE
+- `network_leases(network_id, ipv4)` — UNIQUE composite; FK → `networks(id)` + FK → `vm_instances(id)`
+- `vm_instances(name)` — UNIQUE
+- `db_migrations(version)` — UNIQUE
+- Foreign keys enabled via `PRAGMA foreign_keys = ON`
 
 ## CONVENTIONS
 

@@ -11,12 +11,12 @@
 | Test file | Source module | Notes |
 |-----------|--------------|-------|
 | `test_cli_vm.py` | `cli/vm.py` | CliRunner + mocker.patch; short-ID vs name resolution |
-| `test_cli_asset.py` | `cli/asset.py` | kernel/image/bin commands; patches `core.metadata` directly (known layer violation) |
+| `test_cli_asset.py` | `cli/bin.py` | kernel/image/bin commands; patches `core.metadata` directly (known layer violation) |
 | `test_cli_host.py` | `cli/host.py` | host init/clean/reset; mocked subprocess |
 | `test_cli_network.py` | `cli/network.py` | network create/rm/ls; patches `api.network.*` |
 | `test_cli_key.py` | `cli/key.py` | key add/create/rm; patches `api.keys.*` |
 | `test_cli_config.py` | `cli/config.py` | config get/set/show; patches `api.config.*` |
-| `test_cli_configure.py` | `cli/configure.py` | wizard steps; mocked binary/kernel/image flows |
+| `test_cli_configure.py` | `cli/init.py` | wizard steps; mocked binary/kernel/image flows |
 
 ### API Layer (6 files)
 
@@ -91,3 +91,20 @@
 - **VMManager mocking**: Always mock both `get_by_name()` and `find_by_id_prefix()` together — `vm rm` tries ID prefix first, then falls back to name.
 - **`test_security.py`**: Not tied to a single source file — validates security properties across modules.
 - **`conftest.py`** (132 lines) — provides VM fixtures (`sample_vm`, `running_vm`, `stopped_vm`, `error_vm`), network fixtures, key fixtures, and subprocess mock fixtures; autouse isolation via parent `tests/conftest.py`.
+
+### Services Layer (tests/unit/services/)
+
+| Test file | Source module | Notes |
+|-----------|--------------|-------|
+| `services/console_relay/test_manager.py` | `services/console_relay/manager.py` | ConsoleManager start/stop/is_running; PID file lifecycle |
+| `services/console_relay/test_process.py` | `services/console_relay/process.py` | PTY relay main() entry point; argparse; vsock connection mocks |
+| `services/nocloud_server/test_process.py` | `services/nocloud_server/process.py` | HTTP server main() entry point; port binding; config-dir serving |
+
+Note: `nocloud_server/test_manager.py` does not exist yet — NocloudServerManager lifecycle is currently tested via integration tests.
+
+### Models Layer (tests/unit/models/)
+
+| Test file | Source module | Notes |
+|-----------|--------------|-------|
+| `models/test_vm.py` | `models/vm.py` | VMStatus (7 values), VMConfig, VMInstance field validation |
+| `models/test_cloud_init.py` | `models/cloud_init.py` | CloudInitMode (4 values), CloudInitStatus (4 values), CloudInitConfig |
