@@ -23,7 +23,7 @@ from mvmctl.core.network_manager import (
 )
 from mvmctl.core.vm_lifecycle import remove_vm
 from mvmctl.core.vm_manager import get_vm_manager
-from mvmctl.models.vm import VMState
+from mvmctl.models.vm import VMStatus
 from mvmctl.utils.fs import (
     get_cache_dir,
     get_images_dir,
@@ -188,11 +188,11 @@ def cache_prune_vms(
     for vm in vms:
         should_remove = False
 
-        if vm.status == VMState.ERROR:
+        if vm.status == VMStatus.ERROR:
             should_remove = True
-        elif vm.status == VMState.STOPPED and include_stopped:
+        elif vm.status == VMStatus.STOPPED and include_stopped:
             should_remove = True
-        elif vm.status == VMState.RUNNING and include_running:
+        elif vm.status == VMStatus.RUNNING and include_running:
             should_remove = True
 
         if should_remove:

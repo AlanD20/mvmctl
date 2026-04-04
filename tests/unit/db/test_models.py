@@ -10,7 +10,7 @@ from mvmctl.db.models import (
     Kernel,
     Network,
     NetworkLease,
-    VMState,
+    VMInstance,
 )
 
 
@@ -405,12 +405,12 @@ class TestNetworkLease:
         assert lease1 == lease2
 
 
-class TestVMState:
+class TestVMInstance:
     """Tests for VMState dataclass."""
 
     def test_vm_state_instantiation_required_fields_only(self) -> None:
         """VMState can be instantiated with required fields only."""
-        vm_state = VMState(
+        vm_state = VMInstance(
             id="e" * 64,
             name="myvm",
             status="RUNNING",
@@ -421,7 +421,7 @@ class TestVMState:
 
     def test_vm_state_optional_fields_default_to_none(self) -> None:
         """VMState optional fields default to None."""
-        vm_state = VMState(
+        vm_state = VMInstance(
             id="e" * 64,
             name="myvm",
             status="RUNNING",
@@ -452,7 +452,7 @@ class TestVMState:
 
     def test_vm_state_with_all_fields(self) -> None:
         """VMState can be instantiated with all fields."""
-        vm_state = VMState(
+        vm_state = VMInstance(
             id="e" * 64,
             name="myvm",
             status="RUNNING",
@@ -487,12 +487,12 @@ class TestVMState:
 
     def test_vm_state_equality(self) -> None:
         """VMStates with same fields are equal."""
-        vm_state1 = VMState(
+        vm_state1 = VMInstance(
             id="e" * 64,
             name="myvm",
             status="RUNNING",
         )
-        vm_state2 = VMState(
+        vm_state2 = VMInstance(
             id="e" * 64,
             name="myvm",
             status="RUNNING",

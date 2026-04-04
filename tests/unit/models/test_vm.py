@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 
 
 def test_vminstance_dataclass_structure():
@@ -13,7 +13,7 @@ def test_vminstance_dataclass_structure():
         ipv4="10.0.0.2",
         mac="02:FC:00:00:00:01",
         pid=1234,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
     )
 
@@ -40,7 +40,7 @@ def test_vminstance_dataclass_structure():
     assert vm.ipv4 == "10.0.0.2"
     assert vm.mac == "02:FC:00:00:00:01"
     assert vm.pid == 1234
-    assert vm.status == VMState.RUNNING
+    assert vm.status == VMStatus.RUNNING
 
 
 def test_vminstance_default_values():
@@ -55,7 +55,7 @@ def test_vminstance_default_values():
     assert vm.mac is None
     assert vm.network_name is None
     assert vm.tap_device is None
-    assert vm.status == VMState.STOPPED
+    assert vm.status == VMStatus.STOPPED
     assert vm.config is None
     assert vm.nocloud_net_port is None
     assert vm.nocloud_server_pid is None
@@ -70,7 +70,7 @@ def test_vminstance_serialization():
         ipv4="10.0.0.3",
         mac="02:FC:00:00:00:02",
         pid=5678,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
     )
 
@@ -114,11 +114,11 @@ def test_vminstance_deserialization():
     assert vm.pid == 9999
     assert vm.ipv4 == "10.0.0.4"
     assert vm.mac == "02:FC:00:00:00:03"
-    assert vm.status == VMState.STOPPED
+    assert vm.status == VMStatus.STOPPED
 
 
 def test_vmstate_enum_values():
     """Verify VMState enum values."""
-    assert VMState.RUNNING.value == "running"
-    assert VMState.STOPPED.value == "stopped"
-    assert VMState.ERROR.value == "error"
+    assert VMStatus.RUNNING.value == "running"
+    assert VMStatus.STOPPED.value == "stopped"
+    assert VMStatus.ERROR.value == "error"

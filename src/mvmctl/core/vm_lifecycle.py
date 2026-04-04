@@ -83,7 +83,7 @@ from mvmctl.exceptions import (
     VMCreateError,
     VMNotFoundError,
 )
-from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMState
+from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMStatus
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.services.nocloud_server import NoCloudNetServerManager
 from mvmctl.utils.fs import get_cache_dir, get_images_dir, get_kernels_dir
@@ -1648,7 +1648,7 @@ def create_vm(
             network_name=network_name,
             tap_device=tap_name,
             created_at=datetime.now(tz=timezone.utc),
-            status=VMState.RUNNING,
+            status=VMStatus.RUNNING,
             config=vm_config,  # Persist VM config with VM-local rootfs_path
             nocloud_net_port=nocloud_net_port,
             nocloud_server_pid=nocloud_server_pid,
@@ -1860,7 +1860,7 @@ def pause_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
 
-    if vm.status != VMState.RUNNING:
+    if vm.status != VMStatus.RUNNING:
         raise MVMError(f"VM '{name}' is not running (current state: {vm.status.value})")
 
     socket_path = vm.api_socket_path
@@ -1870,7 +1870,7 @@ def pause_vm(name: str, vm_manager: VMManager | None = None) -> None:
     client = FirecrackerClient(socket_path)
     try:
         client.pause_vm()
-        manager.update_status(name, VMState.PAUSED)
+        manager.update_status(name, VMStatus.PAUSED)
     finally:
         client.close()
 
@@ -1891,7 +1891,7 @@ def resume_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
 
-    if vm.status != VMState.PAUSED:
+    if vm.status != VMStatus.PAUSED:
         raise MVMError(f"VM '{name}' is not paused (current state: {vm.status.value})")
 
     socket_path = vm.api_socket_path
@@ -1901,7 +1901,7 @@ def resume_vm(name: str, vm_manager: VMManager | None = None) -> None:
     client = FirecrackerClient(socket_path)
     try:
         client.resume_vm()
-        manager.update_status(name, VMState.RUNNING)
+        manager.update_status(name, VMStatus.RUNNING)
     finally:
         client.close()
 
@@ -1923,19 +1923,19 @@ def stop_vm(name: str, vm_manager: VMManager | None = None, force: bool = False)
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
 
-    if vm.status not in (VMState.RUNNING, VMState.PAUSED):
+    if vm.status not in (VMStatus.RUNNING, VMStatus.PAUSED):
         raise MVMError(f"VM '{name}' is not running (current state: {vm.status.value})")
 
     pid = vm.pid
     socket_path = vm.api_socket_path
 
-    manager.update_status(name, VMState.STOPPING)
+    manager.update_status(name, VMStatus.STOPPING)
 
     try:
         graceful_shutdown(pid, socket_path, force=force)
-        manager.update_status(name, VMState.STOPPED)
+        manager.update_status(name, VMStatus.STOPPED)
     except Exception as e:
-        manager.update_status(name, VMState.ERROR)
+        manager.update_status(name, VMStatus.ERROR)
         raise MVMError(f"Failed to stop VM '{name}': {e}") from e
 
 
@@ -1955,7 +1955,7 @@ def start_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
 
-    if vm.status != VMState.STOPPED:
+    if vm.status != VMStatus.STOPPED:
         raise MVMError(f"VM '{name}' is not stopped (current state: {vm.status.value})")
 
     if not vm.id:
@@ -2023,7 +2023,7 @@ def start_vm(name: str, vm_manager: VMManager | None = None) -> None:
 
         vm.pid = proc.pid
         vm.api_socket_path = socket_path
-        vm.status = VMState.RUNNING
+        vm.status = VMStatus.RUNNING
         manager.register(vm)
 
         time.sleep(CONST_VM_START_WAIT_S)

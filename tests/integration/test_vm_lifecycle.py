@@ -13,14 +13,14 @@ from typer.testing import CliRunner
 from mvmctl.cli.logs import app as logs_app
 from mvmctl.cli.ssh import app as ssh_app
 from mvmctl.cli.vm import app as vm_app
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 
 runner = CliRunner()
 
 
 def _make_vm(
     name: str,
-    status: VMState = VMState.RUNNING,
+    status: VMStatus = VMStatus.RUNNING,
     ip: str = "10.20.0.2",
     pid: int = 1234,
     network: str = "default",

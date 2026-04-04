@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.exceptions import FirecrackerError, SocketNotFoundError
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 
 if TYPE_CHECKING:
     from mvmctl.core.vm_manager import VMManager
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def reconcile_vm(vm: VMInstance, manager: "VMManager") -> VMState:
+def reconcile_vm(vm: VMInstance, manager: "VMManager") -> VMStatus:
     """Determine actual VM state from live signals and persist it.
 
     Detection priority:
@@ -64,7 +64,7 @@ def reconcile_vm(vm: VMInstance, manager: "VMManager") -> VMState:
         # Other OS errors, treat as dead
         process_alive = False
 
-    new_state: VMState
+    new_state: VMStatus
 
     if process_alive:
         # Process is alive - query Firecracker API
@@ -87,7 +87,7 @@ def reconcile_vm(vm: VMInstance, manager: "VMManager") -> VMState:
     return new_state
 
 
-def _check_firecracker_state(vm: VMInstance) -> VMState:
+def _check_firecracker_state(vm: VMInstance) -> VMStatus:
     """Query Firecracker API to determine VM state.
 
     Args:
@@ -100,7 +100,7 @@ def _check_firecracker_state(vm: VMInstance) -> VMState:
 
     # If no socket path, we can't query FC, but process is alive
     if socket_path is None:
-        return VMState.RUNNING
+        return VMStatus.RUNNING
 
     try:
         from mvmctl.core.firecracker import FirecrackerClient
@@ -110,29 +110,29 @@ def _check_firecracker_state(vm: VMInstance) -> VMState:
 
         if instance_info is None:
             # Socket reachable but no response - assume running
-            return VMState.RUNNING
+            return VMStatus.RUNNING
 
         fc_state = instance_info.get("state", "")
         fc_state_str = str(fc_state) if fc_state else ""
 
         if fc_state_str == "Paused":
-            return VMState.PAUSED
+            return VMStatus.PAUSED
         elif fc_state_str == "Running":
-            return VMState.RUNNING
+            return VMStatus.RUNNING
         else:
             # Unknown state but process alive - assume running
-            return VMState.RUNNING
+            return VMStatus.RUNNING
 
     except (FirecrackerError, SocketNotFoundError, OSError):
         # Socket not ready or unreachable, but process is alive
-        return VMState.RUNNING
+        return VMStatus.RUNNING
     except Exception:
         # Unexpected error - process is alive so assume running
         logger.exception("Unexpected error checking Firecracker state for %s", vm.name)
-        return VMState.RUNNING
+        return VMStatus.RUNNING
 
 
-def _determine_state_from_exit_code(vm: VMInstance) -> VMState:
+def _determine_state_from_exit_code(vm: VMInstance) -> VMStatus:
     """Determine VM state from process exit code.
 
     Args:
@@ -142,9 +142,9 @@ def _determine_state_from_exit_code(vm: VMInstance) -> VMState:
         VMState based on exit code
     """
     if vm.exit_code is None:
-        return VMState.ERROR
+        return VMStatus.ERROR
 
     if vm.exit_code == 0:
-        return VMState.STOPPED
+        return VMStatus.STOPPED
 
-    return VMState.CRASHED
+    return VMStatus.CRASHED

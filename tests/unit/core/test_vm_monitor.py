@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from pytest_mock import MockerFixture
 
 from mvmctl.core.vm_monitor import reconcile_vm
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 
 
 class TestReconcileVM:
@@ -20,7 +20,7 @@ class TestReconcileVM:
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.api_socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMState.RUNNING
+        sample_vm.status = VMStatus.RUNNING
 
         with patch("os.kill", return_value=None):
             mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
@@ -30,62 +30,62 @@ class TestReconcileVM:
 
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.PAUSED
-        assert sample_vm.status == VMState.PAUSED
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.PAUSED)
+        assert result == VMStatus.PAUSED
+        assert sample_vm.status == VMStatus.PAUSED
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.PAUSED)
 
     def test_reconcile_dead_vm_clean_exit(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test pid dead, exit_code=0 → STOPPED."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.exit_code = 0
-        sample_vm.status = VMState.RUNNING
+        sample_vm.status = VMStatus.RUNNING
 
         with patch("os.kill", side_effect=ProcessLookupError("No such process")):
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.STOPPED
-        assert sample_vm.status == VMState.STOPPED
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.STOPPED)
+        assert result == VMStatus.STOPPED
+        assert sample_vm.status == VMStatus.STOPPED
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.STOPPED)
 
     def test_reconcile_dead_vm_crashed(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test pid dead, exit_code=137 → CRASHED."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.exit_code = 137
-        sample_vm.status = VMState.RUNNING
+        sample_vm.status = VMStatus.RUNNING
 
         with patch("os.kill", side_effect=ProcessLookupError("No such process")):
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.CRASHED
-        assert sample_vm.status == VMState.CRASHED
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.CRASHED)
+        assert result == VMStatus.CRASHED
+        assert sample_vm.status == VMStatus.CRASHED
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.CRASHED)
 
     def test_reconcile_dead_vm_no_exit_code(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test pid dead, exit_code=None → ERROR."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.exit_code = None
-        sample_vm.status = VMState.RUNNING
+        sample_vm.status = VMStatus.RUNNING
 
         with patch("os.kill", side_effect=ProcessLookupError("No such process")):
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.ERROR
-        assert sample_vm.status == VMState.ERROR
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.ERROR)
+        assert result == VMStatus.ERROR
+        assert sample_vm.status == VMStatus.ERROR
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.ERROR)
 
     def test_reconcile_no_pid(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test pid=None → returns existing status unchanged."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = None
-        sample_vm.status = VMState.STOPPED
+        sample_vm.status = VMStatus.STOPPED
 
         result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.STOPPED
-        assert sample_vm.status == VMState.STOPPED
+        assert result == VMStatus.STOPPED
+        assert sample_vm.status == VMStatus.STOPPED
         mock_manager.update_status.assert_not_called()
 
     def test_reconcile_socket_unreachable(self, mocker: MockerFixture, sample_vm: VMInstance):
@@ -94,7 +94,7 @@ class TestReconcileVM:
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.api_socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMState.RUNNING
+        sample_vm.status = VMStatus.RUNNING
 
         with patch("os.kill", return_value=None):
             mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
@@ -104,8 +104,8 @@ class TestReconcileVM:
 
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.RUNNING
-        assert sample_vm.status == VMState.RUNNING
+        assert result == VMStatus.RUNNING
+        assert sample_vm.status == VMStatus.RUNNING
         mock_manager.update_status.assert_not_called()
 
     def test_reconcile_permission_error_treats_as_alive(
@@ -115,7 +115,7 @@ class TestReconcileVM:
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.api_socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMState.STARTING
+        sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", side_effect=PermissionError("Permission denied")):
             mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
@@ -125,34 +125,34 @@ class TestReconcileVM:
 
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.RUNNING
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.RUNNING)
+        assert result == VMStatus.RUNNING
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.RUNNING)
 
     def test_reconcile_oserror_treats_as_dead(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test OSError from os.kill → treats as dead → STOPPED."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.exit_code = 0
-        sample_vm.status = VMState.RUNNING
+        sample_vm.status = VMStatus.RUNNING
 
         with patch("os.kill", side_effect=OSError("Some OS error")):
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.STOPPED
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.STOPPED)
+        assert result == VMStatus.STOPPED
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.STOPPED)
 
     def test_reconcile_no_socket_path(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test pid alive but no socket_path → RUNNING."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.api_socket_path = None
-        sample_vm.status = VMState.STARTING
+        sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", return_value=None):
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.RUNNING
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.RUNNING)
+        assert result == VMStatus.RUNNING
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.RUNNING)
 
     def test_reconcile_firecracker_error(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test FirecrackerError → RUNNING (process alive)."""
@@ -161,7 +161,7 @@ class TestReconcileVM:
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.api_socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMState.STARTING
+        sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", return_value=None):
             mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
@@ -169,8 +169,8 @@ class TestReconcileVM:
 
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.RUNNING
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMState.RUNNING)
+        assert result == VMStatus.RUNNING
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.RUNNING)
 
     def test_reconcile_update_status_failure(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test update_status failure → still returns new state."""
@@ -178,13 +178,13 @@ class TestReconcileVM:
         mock_manager.update_status.side_effect = Exception("Update failed")
         sample_vm.pid = 1234
         sample_vm.exit_code = 0
-        sample_vm.status = VMState.RUNNING
+        sample_vm.status = VMStatus.RUNNING
 
         with patch("os.kill", side_effect=ProcessLookupError("No such process")):
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.STOPPED
-        assert sample_vm.status == VMState.STOPPED
+        assert result == VMStatus.STOPPED
+        assert sample_vm.status == VMStatus.STOPPED
         mock_manager.update_status.assert_called_once()
 
     def test_reconcile_unknown_fc_state(self, mocker: MockerFixture, sample_vm: VMInstance):
@@ -192,7 +192,7 @@ class TestReconcileVM:
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.api_socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMState.STARTING
+        sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", return_value=None):
             mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
@@ -202,14 +202,14 @@ class TestReconcileVM:
 
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.RUNNING
+        assert result == VMStatus.RUNNING
 
     def test_reconcile_none_instance_info(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test describe_instance returns None → RUNNING."""
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.api_socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMState.STARTING
+        sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", return_value=None):
             mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
@@ -219,4 +219,4 @@ class TestReconcileVM:
 
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMState.RUNNING
+        assert result == VMStatus.RUNNING

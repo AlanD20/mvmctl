@@ -244,11 +244,11 @@ def test_clean_shows_warning_lines(mocker: MockerFixture, tmp_path):
 
 
 def test_clean_refuses_running_vms(mocker: MockerFixture):
-    from mvmctl.models.vm import VMState
+    from mvmctl.models.vm import VMStatus
 
     vm = MagicMock()
     vm.name = "myvm"
-    vm.status = VMState.RUNNING
+    vm.status = VMStatus.RUNNING
     mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[vm])
     result = runner.invoke(app, ["clean", "--force"])
     assert result.exit_code == 1
@@ -292,11 +292,11 @@ def test_reset_shows_warning_lines(mocker: MockerFixture, tmp_path):
 
 
 def test_reset_refuses_running_vms(mocker: MockerFixture):
-    from mvmctl.models.vm import VMState
+    from mvmctl.models.vm import VMStatus
 
     vm = MagicMock()
     vm.name = "myvm"
-    vm.status = VMState.RUNNING
+    vm.status = VMStatus.RUNNING
     mocker.patch("mvmctl.core.vm_manager.VMManager.list_all", return_value=[vm])
     result = runner.invoke(app, ["reset", "--force"])
     assert result.exit_code == 1

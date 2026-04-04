@@ -54,11 +54,11 @@ class TestCliClean:
     @patch("mvmctl.core.vm_manager.VMManager.list_all")
     def test_clean_refuses_running_vms(self, mock_list_all):
         from mvmctl.cli.host import app
-        from mvmctl.models.vm import VMState
+        from mvmctl.models.vm import VMStatus
 
         vm = MagicMock()
         vm.name = "myvm"
-        vm.status = VMState.RUNNING
+        vm.status = VMStatus.RUNNING
         mock_list_all.return_value = [vm]
         result = runner.invoke(app, ["clean", "--force"])
         assert result.exit_code == 1
@@ -86,11 +86,11 @@ class TestCliReset:
     @patch("mvmctl.core.vm_manager.VMManager.list_all")
     def test_reset_refuses_running_vms(self, mock_list_all):
         from mvmctl.cli.host import app
-        from mvmctl.models.vm import VMState
+        from mvmctl.models.vm import VMStatus
 
         vm = MagicMock()
         vm.name = "myvm"
-        vm.status = VMState.RUNNING
+        vm.status = VMStatus.RUNNING
         mock_list_all.return_value = [vm]
         result = runner.invoke(app, ["reset", "--force"])
         assert result.exit_code == 1

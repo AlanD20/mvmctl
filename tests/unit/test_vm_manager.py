@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.vm_manager import VMManager
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 
 
 @pytest.mark.parametrize(
@@ -22,7 +22,7 @@ def test_vm_manager_register(vm_manager: VMManager, vm_name: str, pid: int, ipv4
         name=vm_name,
         pid=pid,
         ipv4=ipv4,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
     )
 
     vm_manager.register(vm)
@@ -32,13 +32,13 @@ def test_vm_manager_register(vm_manager: VMManager, vm_name: str, pid: int, ipv4
     assert retrieved.name == vm_name
     assert retrieved.pid == pid
     assert retrieved.ipv4 == ipv4
-    assert retrieved.status == VMState.RUNNING
+    assert retrieved.status == VMStatus.RUNNING
 
 
 def test_vm_manager_list(vm_manager: VMManager):
     """list_all should return all registered VMs."""
-    vm_manager.register(VMInstance(name="vm1", pid=1, status=VMState.RUNNING))
-    vm_manager.register(VMInstance(name="vm2", pid=2, status=VMState.STOPPED))
+    vm_manager.register(VMInstance(name="vm1", pid=1, status=VMStatus.RUNNING))
+    vm_manager.register(VMInstance(name="vm2", pid=2, status=VMStatus.STOPPED))
 
     vms = vm_manager.list_all()
     assert len(vms) == 2
@@ -48,10 +48,10 @@ def test_vm_manager_count_vms(vm_manager: VMManager):
     """count_vms should return the number of VMs without loading full metadata."""
     assert vm_manager.count_vms() == 0
 
-    vm_manager.register(VMInstance(name="vm1", pid=1, status=VMState.RUNNING))
+    vm_manager.register(VMInstance(name="vm1", pid=1, status=VMStatus.RUNNING))
     assert vm_manager.count_vms() == 1
 
-    vm_manager.register(VMInstance(name="vm2", pid=2, status=VMState.STOPPED))
+    vm_manager.register(VMInstance(name="vm2", pid=2, status=VMStatus.STOPPED))
     assert vm_manager.count_vms() == 2
 
     registered = vm_manager.get("vm1")
@@ -61,7 +61,7 @@ def test_vm_manager_count_vms(vm_manager: VMManager):
 
 
 def test_vm_manager_deregister(vm_manager: VMManager):
-    vm = VMInstance(name="test-vm", pid=1234, status=VMState.RUNNING)
+    vm = VMInstance(name="test-vm", pid=1234, status=VMStatus.RUNNING)
     vm_manager.register(vm)
     registered = vm_manager.get("test-vm")
     assert registered is not None
@@ -80,13 +80,13 @@ def test_vm_manager_not_found(vm_manager: VMManager, vm_name: str):
 @pytest.mark.parametrize(
     "vm_name,new_status",
     [
-        ("nonexistent", VMState.STOPPED),
-        ("ghost-vm", VMState.RUNNING),
-        ("missing-vm", VMState.STOPPED),
+        ("nonexistent", VMStatus.STOPPED),
+        ("ghost-vm", VMStatus.RUNNING),
+        ("missing-vm", VMStatus.STOPPED),
     ],
 )
 def test_vm_manager_update_status_not_found(
-    vm_manager: VMManager, vm_name: str, new_status: VMState
+    vm_manager: VMManager, vm_name: str, new_status: VMStatus
 ):
     """update_status should raise VMNotFoundError when the named VM does not exist."""
     from mvmctl.exceptions import VMNotFoundError
@@ -96,7 +96,7 @@ def test_vm_manager_update_status_not_found(
 
 
 def test_vm_manager_find_by_id_prefix(vm_manager: VMManager):
-    vm = VMInstance(name="myvm", pid=1, status=VMState.RUNNING)
+    vm = VMInstance(name="myvm", pid=1, status=VMStatus.RUNNING)
     vm_manager.register(vm)
     registered = vm_manager.get("myvm")
     assert registered is not None
@@ -111,7 +111,7 @@ def test_vm_manager_find_by_id_prefix_no_match(vm_manager: VMManager):
 
 
 def test_vm_manager_get_by_id_prefix_unique(vm_manager: VMManager):
-    vm = VMInstance(name="uniquevm", pid=2, status=VMState.RUNNING)
+    vm = VMInstance(name="uniquevm", pid=2, status=VMStatus.RUNNING)
     vm_manager.register(vm)
     registered = vm_manager.get("uniquevm")
     assert registered is not None
@@ -122,7 +122,7 @@ def test_vm_manager_get_by_id_prefix_unique(vm_manager: VMManager):
 
 def test_vm_manager_get_by_full_id_exact_match(vm_manager: VMManager):
     """Test that get_by_full_id returns exact match by full 16-char hash."""
-    vm = VMInstance(name="testvm", pid=1, status=VMState.RUNNING)
+    vm = VMInstance(name="testvm", pid=1, status=VMStatus.RUNNING)
     vm_manager.register(vm)
     registered = vm_manager.get("testvm")
     assert registered is not None
@@ -142,8 +142,8 @@ def test_vm_manager_get_by_full_id_no_match(vm_manager: VMManager):
 
 def test_vm_manager_get_by_full_id_collision_resistance(vm_manager: VMManager):
     """Test that get_by_full_id handles VMs with same prefix correctly."""
-    vm1 = VMInstance(name="vm1", pid=1, status=VMState.RUNNING, id="abc123" + "a" * 10)
-    vm2 = VMInstance(name="vm2", pid=2, status=VMState.RUNNING, id="abc123" + "b" * 10)
+    vm1 = VMInstance(name="vm1", pid=1, status=VMStatus.RUNNING, id="abc123" + "a" * 10)
+    vm2 = VMInstance(name="vm2", pid=2, status=VMStatus.RUNNING, id="abc123" + "b" * 10)
 
     vm_manager.register(vm1)
     vm_manager.register(vm2)
@@ -163,7 +163,7 @@ def test_vm_manager_get_by_full_id_collision_resistance(vm_manager: VMManager):
 
 
 def test_vm_manager_get_by_name_returns_single(vm_manager: VMManager):
-    vm = VMInstance(name="dup", pid=1, status=VMState.RUNNING)
+    vm = VMInstance(name="dup", pid=1, status=VMStatus.RUNNING)
     vm_manager.register(vm)
     results = vm_manager.get_by_name("dup")
     assert len(results) == 1
@@ -171,12 +171,12 @@ def test_vm_manager_get_by_name_returns_single(vm_manager: VMManager):
 
 
 def test_vm_manager_update_status_success(vm_manager: VMManager):
-    vm = VMInstance(name="statusvm", pid=3, status=VMState.RUNNING)
+    vm = VMInstance(name="statusvm", pid=3, status=VMStatus.RUNNING)
     vm_manager.register(vm)
-    vm_manager.update_status("statusvm", VMState.STOPPED)
+    vm_manager.update_status("statusvm", VMStatus.STOPPED)
     updated = vm_manager.get("statusvm")
     assert updated is not None
-    assert updated.status == VMState.STOPPED
+    assert updated.status == VMStatus.STOPPED
 
 
 def test_vm_manager_persists_to_sqlite(tmp_path: Path):
@@ -188,7 +188,7 @@ def test_vm_manager_persists_to_sqlite(tmp_path: Path):
         name="testvm",
         pid=42,
         ipv4="10.0.0.2",
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         created_at=datetime.now(tz=timezone.utc),
     )
     mgr.register(vm)
@@ -306,14 +306,14 @@ def test_get_vm_status_exited_no_code(mocker, sample_vm, tmp_path):
 def test_get_vm_status_no_pid(mocker, sample_vm):
     """Verify original status when PID is None."""
     sample_vm.pid = None
-    sample_vm.status = VMState.STOPPED
+    sample_vm.status = VMStatus.STOPPED
 
     from mvmctl.api.vms import get_vm_status_with_exit_code
 
     status, exit_code = get_vm_status_with_exit_code(sample_vm)
 
     # Verify returns sample_vm.status
-    assert status == VMState.STOPPED
+    assert status == VMStatus.STOPPED
 
 
 def test_get_exit_code_from_log_parses_various_formats(mocker, sample_vm, tmp_path):

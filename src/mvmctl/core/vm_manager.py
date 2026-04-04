@@ -7,8 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.db.models import VMState as DBVMState
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.db.models import VMInstance as DBVMInstance
+from mvmctl.models.vm import VMInstance, VMStatus
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def _generate_vm_id(name: str, created_at: datetime) -> str:
     return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
-def _vm_instance_to_db_state(vm: VMInstance) -> DBVMState:
+def _vm_instance_to_db_state(vm: VMInstance) -> DBVMInstance:
     """Convert VMInstance to DB VMState for SQLite storage."""
     network_id = None
     if vm.network_name:
@@ -82,7 +82,7 @@ def _vm_instance_to_db_state(vm: VMInstance) -> DBVMState:
     updated_at = datetime.now().isoformat()
     created_at = vm.created_at.isoformat() if vm.created_at else datetime.now().isoformat()
 
-    return DBVMState(
+    return DBVMInstance(
         id=vm.id,
         name=vm.name,
         status=vm.status.value,
@@ -112,7 +112,7 @@ def _vm_instance_to_db_state(vm: VMInstance) -> DBVMState:
     )
 
 
-def _db_state_to_vm_instance(state: DBVMState) -> VMInstance:
+def _db_state_to_vm_instance(state: DBVMInstance) -> VMInstance:
     """Convert DB VMState to VMInstance."""
     from mvmctl.models.cloud_init import CloudInitMode
 
@@ -135,7 +135,7 @@ def _db_state_to_vm_instance(state: DBVMState) -> VMInstance:
         mac=state.mac,
         network_name=network_name,
         tap_device=state.tap_device,
-        status=VMState(state.status) if state.status else VMState.STOPPED,
+        status=VMStatus(state.status) if state.status else VMStatus.STOPPED,
         cloud_init_mode=CloudInitMode(state.cloud_init_mode)
         if state.cloud_init_mode
         else CloudInitMode.INJECT,
@@ -164,7 +164,7 @@ class VMManager:
         db = MVMDatabase()
         db.upsert_vm(_vm_instance_to_db_state(vm))
 
-    def update_status(self, name: str, status: VMState) -> None:
+    def update_status(self, name: str, status: VMStatus) -> None:
         """Update the status of a registered VM."""
         from mvmctl.exceptions import VMNotFoundError
 

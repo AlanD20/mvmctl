@@ -10,12 +10,12 @@ from typer.testing import CliRunner
 from mvmctl.cli.vm import app
 from mvmctl.exceptions import MVMError
 from mvmctl.main import app as main_app
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 
 runner = CliRunner()
 
 
-def _make_vm(name: str, status: VMState = VMState.RUNNING, ip: str = "10.20.0.2") -> VMInstance:
+def _make_vm(name: str, status: VMStatus = VMStatus.RUNNING, ip: str = "10.20.0.2") -> VMInstance:
     return VMInstance(
         id="a" * 64,  # Full 64-char SHA256 hex string
         name=name,
@@ -46,8 +46,8 @@ def test_list_vms_json(mocker: MockerFixture):
 
 
 def test_list_vms_all_flag(mocker: MockerFixture):
-    running_vm = _make_vm("vm-running", VMState.RUNNING, "10.20.0.2")
-    stopped_vm = _make_vm("vm-stopped", VMState.STOPPED, "10.20.0.3")
+    running_vm = _make_vm("vm-running", VMStatus.RUNNING, "10.20.0.2")
+    stopped_vm = _make_vm("vm-stopped", VMStatus.STOPPED, "10.20.0.3")
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[running_vm, stopped_vm])
     result = runner.invoke(app, ["ls", "--all", "--json"])
     assert result.exit_code == 0
@@ -68,7 +68,7 @@ def test_rm_vm_not_found(mocker: MockerFixture):
 
 
 def test_rm_running_vm(mocker: MockerFixture):
-    vm = _make_vm("delvm", VMState.RUNNING)
+    vm = _make_vm("delvm", VMStatus.RUNNING)
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_name.return_value = [vm]
     mock_mgr.find_by_id_prefix.return_value = []
@@ -81,14 +81,14 @@ def test_rm_running_vm(mocker: MockerFixture):
 
 def test_rm_multiple_vms_same_name_errors(mocker: MockerFixture):
     """Test that rm errors when multiple VMs share the same name."""
-    vm1 = _make_vm("test-dup", VMState.STOPPED, "192.168.1.10")
+    vm1 = _make_vm("test-dup", VMStatus.STOPPED, "192.168.1.10")
     vm2 = VMInstance(
         id="def456abc1237890abcd1234567890ab",
         name="test-dup",
         ipv4="192.168.1.11",
         mac="02:FC:ee:ff:00:11",
         pid=2345,
-        status=VMState.STOPPED,
+        status=VMStatus.STOPPED,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
     )
 
@@ -536,8 +536,8 @@ def test_ps_all_flag(mocker: MockerFixture):
     mocker.patch(
         "mvmctl.cli.vm.list_vms",
         return_value=[
-            _make_vm("running", VMState.RUNNING),
-            _make_vm("stopped", VMState.STOPPED),
+            _make_vm("running", VMStatus.RUNNING),
+            _make_vm("stopped", VMStatus.STOPPED),
         ],
     )
     result = runner.invoke(app, ["ps", "--all"])
@@ -652,7 +652,7 @@ def test_inspect_vm_not_found(mocker: MockerFixture):
 
 def test_vm_ls_shows_x_mark_for_missing_directory(mocker: MockerFixture):
     """Verify X prefix when VM directory missing."""
-    vm = _make_vm("testvm", VMState.STOPPED)
+    vm = _make_vm("testvm", VMStatus.STOPPED)
 
     # Mock list_vms to return the VM
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
@@ -671,7 +671,7 @@ def test_vm_ls_shows_x_mark_for_missing_directory(mocker: MockerFixture):
 
 def test_vm_ls_shows_x_mark_for_dead_process(mocker: MockerFixture):
     """Verify X prefix when PID not running."""
-    vm = _make_vm("testvm", VMState.RUNNING)
+    vm = _make_vm("testvm", VMStatus.RUNNING)
     vm.pid = 1234  # Set a PID
 
     # Mock list_vms to return the VM
@@ -694,7 +694,7 @@ def test_vm_ls_shows_x_mark_for_dead_process(mocker: MockerFixture):
 
 def test_vm_ls_no_x_mark_for_running_vm(mocker: MockerFixture):
     """Verify no X prefix when VM directory exists and PID running."""
-    vm = _make_vm("testvm", VMState.RUNNING)
+    vm = _make_vm("testvm", VMStatus.RUNNING)
     vm.pid = 1234  # Set a PID
 
     # Mock list_vms to return the VM
@@ -720,7 +720,7 @@ def test_vm_ls_no_x_mark_for_running_vm(mocker: MockerFixture):
 
 def test_vm_ls_shows_x_mark_for_missing_pid_file(mocker: MockerFixture):
     """Verify X prefix when PID file missing (can't verify process)."""
-    vm = _make_vm("testvm", VMState.RUNNING)
+    vm = _make_vm("testvm", VMStatus.RUNNING)
     vm.pid = 1234
 
     # Mock list_vms to return the VM
@@ -750,7 +750,7 @@ def test_vm_ls_shows_x_mark_for_missing_pid_file(mocker: MockerFixture):
 
 def test_vm_ls_shows_exit_code_in_status(mocker: MockerFixture):
     """Verify vm ls displays 'exited(N)' format."""
-    vm = _make_vm("exitedvm", VMState.STOPPED)
+    vm = _make_vm("exitedvm", VMStatus.STOPPED)
     vm.exit_code = 1
 
     # Mock list_vms returning VM with exit_code
@@ -768,7 +768,7 @@ def test_vm_ls_shows_exit_code_in_status(mocker: MockerFixture):
 
 def test_vm_ls_shows_running_status(mocker: MockerFixture):
     """Verify vm ls displays 'running' for active VMs."""
-    vm = _make_vm("runningvm", VMState.RUNNING)
+    vm = _make_vm("runningvm", VMStatus.RUNNING)
 
     # Mock list_vms returning running VM
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
@@ -785,7 +785,7 @@ def test_vm_ls_shows_running_status(mocker: MockerFixture):
 
 def test_vm_ls_json_includes_exit_code(mocker: MockerFixture):
     """Verify JSON output includes exit_code field."""
-    vm = _make_vm("testvm", VMState.STOPPED)
+    vm = _make_vm("testvm", VMStatus.STOPPED)
     vm.exit_code = 1
 
     # Mock list_vms returning VM with exit_code

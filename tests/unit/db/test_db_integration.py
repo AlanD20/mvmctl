@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.db.models import Binary, Image, Kernel, Network, VMState
+from mvmctl.db.models import Binary, Image, Kernel, Network, VMInstance
 
 # Full 64-char hash IDs for testing
 IMAGE_ID = "i" * 64
@@ -87,9 +87,9 @@ def make_vm(
     binary_id: str = BINARY_ID,
     network_id: str = NETWORK_ID,
     name: str = "testvm",
-) -> VMState:
+) -> VMInstance:
     """Create a test VMState."""
-    return VMState(
+    return VMInstance(
         id=vm_id,
         name=name,
         status="STOPPED",
@@ -479,7 +479,7 @@ class TestSchemaIntegrity:
             "binaries",
             "networks",
             "network_leases",
-            "vm_states",
+            "vm_instances",
             "host_state",
             "host_state_changes",
             "db_migrations",
@@ -487,7 +487,6 @@ class TestSchemaIntegrity:
         assert tables == expected_tables
 
     def test_pragma_user_version_is_one_after_migration(self, db: MVMDatabase) -> None:
-        """Verify PRAGMA user_version is set to 1."""
         assert db.get_current_version() == 1
 
     def test_images_os_slug_unique_constraint(self, db: MVMDatabase) -> None:

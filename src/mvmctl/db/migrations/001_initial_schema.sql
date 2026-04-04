@@ -86,7 +86,7 @@ CREATE TABLE network_leases (
     expires_at TIMESTAMP NULL,
     UNIQUE(network_id, ipv4),
     FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE,
-    FOREIGN KEY (vm_id) REFERENCES vm_states(id) ON DELETE CASCADE
+    FOREIGN KEY (vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_leases_network ON network_leases(network_id);
 CREATE INDEX idx_leases_vm ON network_leases(vm_id);
@@ -94,7 +94,7 @@ CREATE INDEX idx_leases_ipv4 ON network_leases(ipv4);
 
 -- VM_STATES: VM runtime state
 -- JSON mappings: socket_path -> api_socket_path, ip -> ipv4, network_name -> network_id
-CREATE TABLE vm_states (
+CREATE TABLE vm_instances (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL,
@@ -126,8 +126,8 @@ CREATE TABLE vm_states (
     FOREIGN KEY (kernel_id) REFERENCES kernels(id) ON DELETE RESTRICT,
     FOREIGN KEY (binary_id) REFERENCES binaries(id) ON DELETE RESTRICT
 );
-CREATE INDEX idx_vm_states_name ON vm_states(name);
-CREATE INDEX idx_vm_states_status ON vm_states(status);
+CREATE INDEX idx_vm_instances_name ON vm_instances(name);
+CREATE INDEX idx_vm_instances_status ON vm_instances(status);
 
 -- HOST_STATE: Host initialization state (singleton, always id=1)
 CREATE TABLE host_state (

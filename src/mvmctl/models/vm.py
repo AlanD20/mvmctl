@@ -28,16 +28,16 @@ from mvmctl.constants import (
 )
 
 
-class VMState(StrEnum):
+class VMStatus(StrEnum):
     """VM lifecycle states."""
 
-    STARTING = auto()  # FC process just spawned, boot not yet confirmed
-    RUNNING = auto()  # Process alive + FC API reports "Running"
-    PAUSED = auto()  # FC API reports "Paused" (snapshot in progress)
-    STOPPING = auto()  # Graceful shutdown initiated (Ctrl+Alt+Del sent)
-    STOPPED = auto()  # Process exited with code 0
-    CRASHED = auto()  # Process exited with non-zero exit code
-    ERROR = auto()  # Process dead but exit code unknown
+    STARTING = auto()
+    RUNNING = auto()
+    PAUSED = auto()
+    STOPPING = auto()
+    STOPPED = auto()
+    CRASHED = auto()
+    ERROR = auto()
 
 
 @dataclass
@@ -230,7 +230,7 @@ class VMInstance:
     network_name: str | None = None
     tap_device: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    status: VMState = VMState.STOPPED
+    status: VMStatus = VMStatus.STOPPED
     config: VMConfig | None = None
     cloud_init_mode: CloudInitMode = CloudInitMode.INJECT
     nocloud_net_port: int | None = None
@@ -297,7 +297,7 @@ class VMInstance:
             network_name=data.get("network_name"),
             tap_device=data.get("tap_device"),
             created_at=created_at,
-            status=VMState(data["status"]) if data.get("status") else VMState.STOPPED,
+            status=VMStatus(data["status"]) if data.get("status") else VMStatus.STOPPED,
             config=config,
             cloud_init_mode=cloud_init_mode,
             nocloud_net_port=data.get("nocloud_net_port"),

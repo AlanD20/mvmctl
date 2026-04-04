@@ -7,7 +7,7 @@ import pytest
 
 from mvmctl.api import vms
 from mvmctl.exceptions import MVMError, VMNotFoundError
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 
 
 class TestAttachConsole:
@@ -19,7 +19,7 @@ class TestAttachConsole:
         """attach_console returns socket_path when VM exists and relay is running."""
         # Setup mock VM manager
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMState.RUNNING)
+        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -58,7 +58,7 @@ class TestAttachConsole:
     def test_attach_console_relay_not_running(self, mock_get_manager, mock_console_mgr_cls):
         """attach_console raises MVMError when no relay is running."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMState.RUNNING)
+        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -97,7 +97,7 @@ class TestKillConsole:
     def test_kill_console_success(self, mock_get_manager, mock_console_mgr_cls):
         """kill_console returns True when VM exists and relay is killed."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMState.RUNNING)
+        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -116,7 +116,7 @@ class TestKillConsole:
     def test_kill_console_no_relay_running(self, mock_get_manager, mock_console_mgr_cls):
         """kill_console returns False when VM exists but no relay is running."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMState.RUNNING)
+        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -150,7 +150,7 @@ class TestGetConsoleState:
     def test_get_console_state_relay_running(self, mock_get_manager, mock_core_get_state):
         """get_console_state returns state when VM exists and relay is running."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMState.RUNNING)
+        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -173,7 +173,7 @@ class TestGetConsoleState:
     def test_get_console_state_relay_not_running(self, mock_get_manager, mock_core_get_state):
         """get_console_state returns state when VM exists but relay is not running."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMState.STOPPED)
+        mock_vm = VMInstance(name="testvm", status=VMStatus.STOPPED)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 

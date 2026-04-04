@@ -28,7 +28,7 @@ from mvmctl.db.models import (
     Kernel,
     Network,
     NetworkLease,
-    VMState,
+    VMInstance,
 )
 from mvmctl.utils.fs import get_mvm_db_path
 
@@ -399,55 +399,55 @@ class MVMDatabase:
         return Binary(**dict(row))
 
     # -------------------------------------------------------------------------
-    # vm_states
+    # vm_instances
     # -------------------------------------------------------------------------
 
-    def get_vm(self, vm_id: str) -> Optional[VMState]:
-        """Return a VM state by its full 64-char ID, or None if not found."""
+    def get_vm(self, vm_id: str) -> Optional[VMInstance]:
+        """Return a VM by its full 64-char ID, or None if not found."""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM vm_states WHERE id = ?", (vm_id,)).fetchone()
+            row = conn.execute("SELECT * FROM vm_instances WHERE id = ?", (vm_id,)).fetchone()
         if row is None:
             return None
-        return VMState(**dict(row))
+        return VMInstance(**dict(row))
 
-    def get_vm_by_name(self, name: str) -> Optional[VMState]:
-        """Return a VM state by name, or None if not found."""
+    def get_vm_by_name(self, name: str) -> Optional[VMInstance]:
+        """Return a VM by name, or None if not found."""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM vm_states WHERE name = ?", (name,)).fetchone()
+            row = conn.execute("SELECT * FROM vm_instances WHERE name = ?", (name,)).fetchone()
         if row is None:
             return None
-        return VMState(**dict(row))
+        return VMInstance(**dict(row))
 
-    def find_vm_by_name(self, name: str) -> Optional[VMState]:
+    def find_vm_by_name(self, name: str) -> Optional[VMInstance]:
         return self.get_vm_by_name(name)
 
-    def find_vm_by_ip(self, ipv4: str) -> Optional[VMState]:
+    def find_vm_by_ip(self, ipv4: str) -> Optional[VMInstance]:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM vm_states WHERE ipv4 = ?", (ipv4,)).fetchone()
+            row = conn.execute("SELECT * FROM vm_instances WHERE ipv4 = ?", (ipv4,)).fetchone()
         if row is None:
             return None
-        return VMState(**dict(row))
+        return VMInstance(**dict(row))
 
-    def find_vms_by_prefix(self, prefix: str) -> list[VMState]:
+    def find_vms_by_prefix(self, prefix: str) -> list[VMInstance]:
         """Return all VMs whose ID starts with prefix."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM vm_states WHERE id LIKE ?", (f"{prefix}%",)
+                "SELECT * FROM vm_instances WHERE id LIKE ?", (f"{prefix}%",)
             ).fetchall()
-        return [VMState(**dict(row)) for row in rows]
+        return [VMInstance(**dict(row)) for row in rows]
 
-    def list_vms(self) -> list[VMState]:
-        """Return all VM states."""
+    def list_vms(self) -> list[VMInstance]:
+        """Return all VM records."""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM vm_states ORDER BY created_at").fetchall()
-        return [VMState(**dict(row)) for row in rows]
+            rows = conn.execute("SELECT * FROM vm_instances ORDER BY created_at").fetchall()
+        return [VMInstance(**dict(row)) for row in rows]
 
-    def upsert_vm(self, vm: VMState) -> None:
-        """Insert or replace a VM state record."""
+    def upsert_vm(self, vm: VMInstance) -> None:
+        """Insert or replace a VM record."""
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO vm_states (
+                INSERT INTO vm_instances (
                     id, name, status, pid, ipv4, mac, network_id, tap_device,
                     image_id, kernel_id, binary_id, api_socket_path,
                     console_socket_path, config_path, cloud_init_mode,
@@ -518,7 +518,7 @@ class MVMDatabase:
         """Update only the VM status field (row-level lock via WHERE id = ?)."""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE vm_states SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (status, vm_id),
             )
 
@@ -526,14 +526,14 @@ class MVMDatabase:
         """Update only the VM PID field."""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE vm_states SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (pid, vm_id),
             )
 
     def delete_vm(self, vm_id: str) -> None:
-        """Delete a VM state by ID. No-op if not found."""
+        """Delete a VM by ID. No-op if not found."""
         with self._connect() as conn:
-            conn.execute("DELETE FROM vm_states WHERE id = ?", (vm_id,))
+            conn.execute("DELETE FROM vm_instances WHERE id = ?", (vm_id,))
 
     # -------------------------------------------------------------------------
     # networks

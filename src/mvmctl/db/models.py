@@ -103,8 +103,8 @@ class NetworkLease:
 
 
 @dataclass
-class VMState:
-    """VM runtime state — maps to the vm_states table."""
+class VMInstance:
+    """VM runtime state — maps to the vm_instances table."""
 
     id: str  # 64-char SHA256 hash (primary key)
     name: str

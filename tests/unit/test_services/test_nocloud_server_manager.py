@@ -374,9 +374,9 @@ class TestCleanupOrphans:
         # Mock VM manager to return a running VM
         mock_vm_manager = MagicMock()
         mock_vm = MagicMock()
-        from mvmctl.models.vm import VMState
+        from mvmctl.models.vm import VMStatus
 
-        mock_vm.status = VMState.RUNNING  # Use enum, not string
+        mock_vm.status = VMStatus.RUNNING  # Use enum, not string
         mock_vm_manager.get_by_full_id.return_value = mock_vm
         mock_get_vm_manager.return_value = mock_vm_manager
 
@@ -452,7 +452,7 @@ class TestCleanupOrphans:
         tmp_path: Path,
     ):
         """Test that VMs with status=VMState.RUNNING are not cleaned up."""
-        from mvmctl.models.vm import VMState
+        from mvmctl.models.vm import VMStatus
 
         cache_dir = tmp_path / "cache_running"
         cache_dir.mkdir(exist_ok=True)
@@ -471,7 +471,7 @@ class TestCleanupOrphans:
         # Mock VM manager to return a RUNNING VM (using VMState enum)
         mock_vm_manager = MagicMock()
         mock_vm = MagicMock()
-        mock_vm.status = VMState.RUNNING  # Use enum, not string
+        mock_vm.status = VMStatus.RUNNING  # Use enum, not string
         mock_vm_manager.get_by_full_id.return_value = mock_vm
         mock_get_vm_manager.return_value = mock_vm_manager
 
@@ -495,7 +495,7 @@ class TestCleanupOrphans:
         tmp_path: Path,
     ):
         """Test that VMs with status=VMState.STOPPED are properly cleaned up."""
-        from mvmctl.models.vm import VMState
+        from mvmctl.models.vm import VMStatus
 
         cache_dir = tmp_path / "cache_stopped"
         cache_dir.mkdir(exist_ok=True)
@@ -514,7 +514,7 @@ class TestCleanupOrphans:
         # Mock VM manager to return a STOPPED VM
         mock_vm_manager = MagicMock()
         mock_vm = MagicMock()
-        mock_vm.status = VMState.STOPPED  # Use enum
+        mock_vm.status = VMStatus.STOPPED  # Use enum
         mock_vm_manager.get_by_full_id.return_value = mock_vm
         mock_get_vm_manager.return_value = mock_vm_manager
 
@@ -538,7 +538,7 @@ class TestCleanupOrphans:
         tmp_path: Path,
     ):
         """Test that VMs with status=VMState.ERROR are properly cleaned up."""
-        from mvmctl.models.vm import VMState
+        from mvmctl.models.vm import VMStatus
 
         cache_dir = tmp_path / "cache_error"
         cache_dir.mkdir(exist_ok=True)
@@ -557,7 +557,7 @@ class TestCleanupOrphans:
         # Mock VM manager to return an ERROR VM
         mock_vm_manager = MagicMock()
         mock_vm = MagicMock()
-        mock_vm.status = VMState.ERROR  # Use enum
+        mock_vm.status = VMStatus.ERROR  # Use enum
         mock_vm_manager.get_by_full_id.return_value = mock_vm
         mock_get_vm_manager.return_value = mock_vm_manager
 

@@ -137,10 +137,10 @@ def _add_network_to_metadata(cache_dir: Path, name: str, **fields) -> None:
                 if isinstance(lease, dict) and "vm_id" in lease and "ipv4" in lease:
                     vm_id = lease["vm_id"]
                     try:
-                        from mvmctl.db.models import VMState as DBVMState
+                        from mvmctl.db.models import VMInstance as DBVMInstance
 
                         db.upsert_vm(
-                            DBVMState(
+                            DBVMInstance(
                                 id=vm_id,
                                 name=vm_id,
                                 status="stopped",
@@ -309,13 +309,13 @@ def test_inspect_network_not_found():
 
 @patch("mvmctl.core.network_manager.allocate_ip")
 def test_allocate_network_ip(mock_allocate_ip, mock_cache_dir: Path):
-    from mvmctl.db.models import VMState as DBVMState
+    from mvmctl.db.models import VMInstance as DBVMInstance
 
     _add_network_to_metadata(mock_cache_dir, "mynet", leases=[])
 
     db = MVMDatabase()
     db.upsert_vm(
-        DBVMState(
+        DBVMInstance(
             id="vm1",
             name="vm1",
             status="stopped",

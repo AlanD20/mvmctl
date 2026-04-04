@@ -13,7 +13,7 @@ from mvmctl.core.ssh import (
     resolve_ssh_key,
 )
 from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 
 
 def test_find_ssh_keys_empty_dir(tmp_path: Path):
@@ -157,7 +157,7 @@ def test_connect_to_vm_by_name(
     tmp_path: Path,
 ):
     """Connect by name: looks up VM, uses its IP."""
-    vm = VMInstance(name="myvm", ipv4="10.20.0.3", status=VMState.RUNNING)
+    vm = VMInstance(name="myvm", ipv4="10.20.0.3", status=VMStatus.RUNNING)
     mock_manager = MagicMock()
     mock_manager.get.return_value = vm
     mock_vm_manager_cls.return_value = mock_manager
@@ -274,7 +274,7 @@ class TestConnectToVm:
     def test_connect_vm_no_ip(self, tmp_path):
         """connect_to_vm should raise MVMError when VM has no IP."""
         mock_mgr = MagicMock()
-        vm = VMInstance(name="noip", status=VMState.STOPPED)
+        vm = VMInstance(name="noip", status=VMStatus.STOPPED)
         mock_mgr.get.return_value = vm
 
         with pytest.raises(MVMError, match="has no IP address"):
@@ -283,7 +283,7 @@ class TestConnectToVm:
     def test_connect_no_keys_found(self, tmp_path):
         """connect_to_vm should raise MVMKeyError when no keys found."""
         mock_mgr = MagicMock()
-        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMState.RUNNING)
+        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMStatus.RUNNING)
         mock_mgr.get.return_value = vm
 
         keys_dir = tmp_path / "empty_keys"
@@ -296,7 +296,7 @@ class TestConnectToVm:
     def test_connect_key_path_not_exists(self, tmp_path):
         """connect_to_vm should raise MVMKeyError when key file doesn't exist."""
         mock_mgr = MagicMock()
-        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMState.RUNNING)
+        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMStatus.RUNNING)
         mock_mgr.get.return_value = vm
 
         missing_key = tmp_path / "missing_key"
@@ -306,7 +306,7 @@ class TestConnectToVm:
     def test_connect_exec_mode(self, tmp_path):
         """connect_to_vm should call exec_ssh in exec mode."""
         mock_mgr = MagicMock()
-        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMState.RUNNING)
+        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMStatus.RUNNING)
         mock_mgr.get.return_value = vm
 
         key = tmp_path / "id_rsa"

@@ -70,10 +70,10 @@ def _abort_if_vms_running(action: str) -> None:
     Args:
         action: Short description of the action being blocked (used in the error message).
     """
-    from mvmctl.models.vm import VMState
+    from mvmctl.models.vm import VMStatus
 
     manager = get_vm_manager()
-    running = [v for v in manager.list_all() if v.status == VMState.RUNNING]
+    running = [v for v in manager.list_all() if v.status == VMStatus.RUNNING]
     if running:
         names = ", ".join(v.name for v in running)
         print_error(f"Cannot {action}: {len(running)} VM(s) still running: {names}")

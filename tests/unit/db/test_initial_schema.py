@@ -23,21 +23,14 @@ from mvmctl.db.migrations.runner import MigrationRunner
 
 @pytest.fixture
 def migrations_dir(tmp_path: Path) -> Path:
-    """Create a temporary migrations directory with 001_initial_schema.sql."""
+    """Create a temporary migrations directory with all migration SQL files."""
     d = tmp_path / "migrations"
     d.mkdir()
-    # Copy the actual migration file
-    migration_src = (
-        Path(__file__).parent.parent.parent.parent
-        / "src"
-        / "mvmctl"
-        / "db"
-        / "migrations"
-        / "001_initial_schema.sql"
+    migrations_src_dir = (
+        Path(__file__).parent.parent.parent.parent / "src" / "mvmctl" / "db" / "migrations"
     )
-    if migration_src.exists():
-        migration_dst = d / "001_initial_schema.sql"
-        migration_dst.write_text(migration_src.read_text())
+    for sql_file in sorted(migrations_src_dir.glob("[0-9]*_*.sql")):
+        (d / sql_file.name).write_text(sql_file.read_text())
     return d
 
 
@@ -57,7 +50,7 @@ class TestMigrationExecution:
     """Test that the migration runs successfully."""
 
     def test_migration_applies_successfully(self, runner: MigrationRunner) -> None:
-        """Verify migration 001_initial_schema applies without errors."""
+        """Verify all schema migrations apply without errors."""
         applied = runner.migrate()
         assert applied == 1
         assert runner.get_current_version() == 1
@@ -88,7 +81,7 @@ class TestTableCreation:
             "binaries",
             "networks",
             "network_leases",
-            "vm_states",
+            "vm_instances",
             "host_state",
             "host_state_changes",
             "db_migrations",
@@ -205,12 +198,12 @@ class TestTableCreation:
         }
         assert columns == expected_columns
 
-    def test_vm_states_table_structure(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify vm_states table has correct columns."""
+    def test_vm_instances_table_structure(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify vm_instances table has correct columns."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
-                cursor = conn.execute("PRAGMA table_info(vm_states)")
+                cursor = conn.execute("PRAGMA table_info(vm_instances)")
                 columns = {row[1]: row[2] for row in cursor.fetchall()}
 
         expected_columns = {
@@ -374,17 +367,17 @@ class TestIndexes:
         expected_indexes = {"idx_leases_network", "idx_leases_vm", "idx_leases_ipv4"}
         assert expected_indexes.issubset(indexes)
 
-    def test_vm_states_indexes_exist(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify vm_states table indexes."""
+    def test_vm_instances_indexes_exist(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify vm_instances table indexes."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 cursor = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='vm_states'"
+                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='vm_instances'"
                 )
                 indexes = {row[0] for row in cursor.fetchall()}
 
-        expected_indexes = {"idx_vm_states_name", "idx_vm_states_status"}
+        expected_indexes = {"idx_vm_instances_name", "idx_vm_instances_status"}
         assert expected_indexes.issubset(indexes)
 
     def test_host_state_changes_indexes_exist(self, runner: MigrationRunner, db_path: Path) -> None:
@@ -444,21 +437,21 @@ class TestUniqueConstraints:
                         ("net2", "default", "10.1.0.0/24", "mvm-other", "10.1.0.1"),
                     )
 
-    def test_vm_states_name_unique(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify name is unique in vm_states table."""
+    def test_vm_instances_name_unique(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify name is unique in vm_instances table."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert first VM
                 conn.execute(
-                    "INSERT INTO vm_states (id, name, status) VALUES (?, ?, ?)",
+                    "INSERT INTO vm_instances (id, name, status) VALUES (?, ?, ?)",
                     ("vm1", "myvm", "running"),
                 )
                 # Try to insert duplicate name
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_states (id, name, status) VALUES (?, ?, ?)",
+                        "INSERT INTO vm_instances (id, name, status) VALUES (?, ?, ?)",
                         ("vm2", "myvm", "stopped"),
                     )
 
@@ -506,7 +499,9 @@ class TestCheckConstraints:
                     ("net1", "10.0.0.2"),
                 )
                 # Verify it was inserted
-                cursor = conn.execute("SELECT ipv4 FROM network_leases WHERE network_id = ?", ("net1",))
+                cursor = conn.execute(
+                    "SELECT ipv4 FROM network_leases WHERE network_id = ?", ("net1",)
+                )
                 assert cursor.fetchone()[0] == "10.0.0.2"
 
     def test_network_leases_ipv4_check_invalid(
@@ -529,40 +524,40 @@ class TestCheckConstraints:
                         ("net1", "not-an-ip"),
                     )
 
-    def test_vm_states_ipv4_check_valid(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify valid IPv4 in vm_states passes CHECK constraint."""
+    def test_vm_instances_ipv4_check_valid(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify valid IPv4 in vm_instances passes CHECK constraint."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert VM with valid IPv4
                 conn.execute(
-                    "INSERT INTO vm_states (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO vm_instances (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
                     ("vm1", "myvm", "running", "10.0.0.5"),
                 )
                 # Verify it was inserted
-                cursor = conn.execute("SELECT ipv4 FROM vm_states WHERE id = ?", ("vm1",))
+                cursor = conn.execute("SELECT ipv4 FROM vm_instances WHERE id = ?", ("vm1",))
                 assert cursor.fetchone()[0] == "10.0.0.5"
 
-    def test_vm_states_ipv4_check_null_allowed(
+    def test_vm_instances_ipv4_check_null_allowed(
         self, runner: MigrationRunner, db_path: Path
     ) -> None:
-        """Verify NULL ipv4 is allowed in vm_states."""
+        """Verify NULL ipv4 is allowed in vm_instances."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert VM with NULL IPv4
                 conn.execute(
-                    "INSERT INTO vm_states (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO vm_instances (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
                     ("vm1", "myvm", "stopped", None),
                 )
                 # Verify it was inserted
-                cursor = conn.execute("SELECT ipv4 FROM vm_states WHERE id = ?", ("vm1",))
+                cursor = conn.execute("SELECT ipv4 FROM vm_instances WHERE id = ?", ("vm1",))
                 assert cursor.fetchone()[0] is None
 
-    def test_vm_states_ipv4_check_invalid(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify invalid IPv4 in vm_states fails CHECK constraint."""
+    def test_vm_instances_ipv4_check_invalid(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify invalid IPv4 in vm_instances fails CHECK constraint."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -570,42 +565,44 @@ class TestCheckConstraints:
                 # Try to insert VM with invalid IPv4
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_states (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO vm_instances (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
                         ("vm1", "myvm", "running", "invalid-ip"),
                     )
 
-    def test_vm_states_mac_check_valid(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify valid MAC address in vm_states passes CHECK constraint."""
+    def test_vm_instances_mac_check_valid(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify valid MAC address in vm_instances passes CHECK constraint."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert VM with valid MAC
                 conn.execute(
-                    "INSERT INTO vm_states (id, name, status, mac) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO vm_instances (id, name, status, mac) VALUES (?, ?, ?, ?)",
                     ("vm1", "myvm", "running", "aa:bb:cc:dd:ee:ff"),
                 )
                 # Verify it was inserted
-                cursor = conn.execute("SELECT mac FROM vm_states WHERE id = ?", ("vm1",))
+                cursor = conn.execute("SELECT mac FROM vm_instances WHERE id = ?", ("vm1",))
                 assert cursor.fetchone()[0] == "aa:bb:cc:dd:ee:ff"
 
-    def test_vm_states_mac_check_null_allowed(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify NULL mac is allowed in vm_states."""
+    def test_vm_instances_mac_check_null_allowed(
+        self, runner: MigrationRunner, db_path: Path
+    ) -> None:
+        """Verify NULL mac is allowed in vm_instances."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert VM with NULL MAC
                 conn.execute(
-                    "INSERT INTO vm_states (id, name, status, mac) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO vm_instances (id, name, status, mac) VALUES (?, ?, ?, ?)",
                     ("vm1", "myvm", "stopped", None),
                 )
                 # Verify it was inserted
-                cursor = conn.execute("SELECT mac FROM vm_states WHERE id = ?", ("vm1",))
+                cursor = conn.execute("SELECT mac FROM vm_instances WHERE id = ?", ("vm1",))
                 assert cursor.fetchone()[0] is None
 
-    def test_vm_states_mac_check_invalid(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify invalid MAC address in vm_states fails CHECK constraint."""
+    def test_vm_instances_mac_check_invalid(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify invalid MAC address in vm_instances fails CHECK constraint."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -613,7 +610,7 @@ class TestCheckConstraints:
                 # Try to insert VM with invalid MAC
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_states (id, name, status, mac) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO vm_instances (id, name, status, mac) VALUES (?, ?, ?, ?)",
                         ("vm1", "myvm", "running", "not-a-mac"),
                     )
 
@@ -652,8 +649,8 @@ class TestForeignKeyConstraints:
                         ("net1", "10.0.0.2", "nonexistent"),
                     )
 
-    def test_vm_states_network_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify network_id foreign key constraint in vm_states."""
+    def test_vm_instances_network_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify network_id foreign key constraint in vm_instances."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -661,12 +658,12 @@ class TestForeignKeyConstraints:
                 # Try to insert VM with non-existent network_id
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_states (id, name, status, network_id) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO vm_instances (id, name, status, network_id) VALUES (?, ?, ?, ?)",
                         ("vm1", "myvm", "running", "nonexistent"),
                     )
 
-    def test_vm_states_image_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify image_id foreign key constraint in vm_states."""
+    def test_vm_instances_image_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify image_id foreign key constraint in vm_instances."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -674,12 +671,12 @@ class TestForeignKeyConstraints:
                 # Try to insert VM with non-existent image_id
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_states (id, name, status, image_id) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO vm_instances (id, name, status, image_id) VALUES (?, ?, ?, ?)",
                         ("vm1", "myvm", "running", "nonexistent"),
                     )
 
-    def test_vm_states_kernel_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify kernel_id foreign key constraint in vm_states."""
+    def test_vm_instances_kernel_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify kernel_id foreign key constraint in vm_instances."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -687,12 +684,12 @@ class TestForeignKeyConstraints:
                 # Try to insert VM with non-existent kernel_id
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_states (id, name, status, kernel_id) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO vm_instances (id, name, status, kernel_id) VALUES (?, ?, ?, ?)",
                         ("vm1", "myvm", "running", "nonexistent"),
                     )
 
-    def test_vm_states_binary_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify binary_id foreign key constraint in vm_states."""
+    def test_vm_instances_binary_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
+        """Verify binary_id foreign key constraint in vm_instances."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -700,7 +697,7 @@ class TestForeignKeyConstraints:
                 # Try to insert VM with non-existent binary_id
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_states (id, name, status, binary_id) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO vm_instances (id, name, status, binary_id) VALUES (?, ?, ?, ?)",
                         ("vm1", "myvm", "running", "nonexistent"),
                     )
 
@@ -743,7 +740,7 @@ class TestForeignKeyConstraints:
                     ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
                 )
                 conn.execute(
-                    "INSERT INTO vm_states (id, name, status) VALUES (?, ?, ?)",
+                    "INSERT INTO vm_instances (id, name, status) VALUES (?, ?, ?)",
                     ("vm1", "myvm", "running"),
                 )
                 # Insert lease with VM reference
@@ -752,15 +749,17 @@ class TestForeignKeyConstraints:
                     ("net1", "10.0.0.2", "vm1"),
                 )
                 # Delete VM
-                conn.execute("DELETE FROM vm_states WHERE id = ?", ("vm1",))
+                conn.execute("DELETE FROM vm_instances WHERE id = ?", ("vm1",))
                 # Verify lease was deleted
-                cursor = conn.execute("SELECT COUNT(*) FROM network_leases WHERE vm_id = ?", ("vm1",))
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM network_leases WHERE vm_id = ?", ("vm1",)
+                )
                 assert cursor.fetchone()[0] == 0
 
-    def test_vm_states_restrict_delete_on_network(
+    def test_vm_instances_restrict_delete_on_network(
         self, runner: MigrationRunner, db_path: Path
     ) -> None:
-        """Verify vm_states cannot delete network (RESTRICT)."""
+        """Verify vm_instances cannot delete network (RESTRICT)."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -771,7 +770,7 @@ class TestForeignKeyConstraints:
                     ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
                 )
                 conn.execute(
-                    "INSERT INTO vm_states (id, name, status, network_id) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO vm_instances (id, name, status, network_id) VALUES (?, ?, ?, ?)",
                     ("vm1", "myvm", "running", "net1"),
                 )
                 # Try to delete network (should fail due to RESTRICT)
@@ -783,7 +782,6 @@ class TestPragmaUserVersion:
     """Test PRAGMA user_version is set correctly."""
 
     def test_pragma_user_version_is_one(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify PRAGMA user_version is set to 1 after migration."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -836,12 +834,12 @@ class TestDataIntegrity:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert VM
                 conn.execute(
-                    "INSERT INTO vm_states (id, name, status, vcpu_count, mem_size_mib) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO vm_instances (id, name, status, vcpu_count, mem_size_mib) VALUES (?, ?, ?, ?, ?)",
                     ("vm1", "myvm", "running", 2, 1024),
                 )
                 # Retrieve VM
                 cursor = conn.execute(
-                    "SELECT name, status, vcpu_count, mem_size_mib FROM vm_states WHERE id = ?",
+                    "SELECT name, status, vcpu_count, mem_size_mib FROM vm_instances WHERE id = ?",
                     ("vm1",),
                 )
                 row = cursor.fetchone()

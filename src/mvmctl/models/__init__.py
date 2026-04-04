@@ -3,7 +3,7 @@
 from mvmctl.models.cloud_init import CloudInitConfig, CloudInitMode, CloudInitStatus
 from mvmctl.models.image import ImageSpec
 from mvmctl.models.kernel import KernelSpec
-from mvmctl.models.vm import VMConfig, VMInstance, VMState
+from mvmctl.models.vm import VMConfig, VMInstance, VMStatus
 
 __all__ = [
     "CloudInitConfig",
@@ -13,5 +13,5 @@ __all__ = [
     "KernelSpec",
     "VMConfig",
     "VMInstance",
-    "VMState",
+    "VMStatus",
 ]

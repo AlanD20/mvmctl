@@ -6,7 +6,7 @@ import pytest
 
 from mvmctl.core.key_manager import KeyInfo
 from mvmctl.core.vm_manager import VMManager
-from mvmctl.models.vm import VMConfig, VMInstance, VMState
+from mvmctl.models.vm import VMConfig, VMInstance, VMStatus
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +64,7 @@ def sample_vm() -> VMInstance:
         ipv4="10.20.0.2",
         mac="02:FC:aa:bb:cc:dd",
         pid=1234,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
     )
 
@@ -77,7 +77,7 @@ def stopped_vm() -> VMInstance:
         ipv4="10.20.0.3",
         mac="02:FC:11:22:33:44",
         pid=None,
-        status=VMState.STOPPED,
+        status=VMStatus.STOPPED,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
     )
 
@@ -111,7 +111,7 @@ def running_vm() -> VMInstance:
         ipv4="10.20.0.5",
         mac="02:FC:aa:bb:cc:01",
         pid=5678,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         created_at=datetime(2026, 1, 15, 8, 30, 0),
         api_socket_path=Path("/tmp/running-vm.sock"),
         network_name="default",
@@ -127,7 +127,7 @@ def error_vm() -> VMInstance:
         ipv4="10.20.0.6",
         mac="02:FC:aa:bb:cc:02",
         pid=None,
-        status=VMState.ERROR,
+        status=VMStatus.ERROR,
         created_at=datetime(2026, 1, 15, 9, 0, 0),
     )
 

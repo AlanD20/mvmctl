@@ -16,12 +16,12 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.db.models import Binary, Network, VMState
+from mvmctl.db.models import Binary, Network, VMInstance
 
 
-def make_vm(name: str = "testvm", status: str = "STOPPED") -> VMState:
-    """Create a minimal VMState for testing."""
-    return VMState(id="a" * 64, name=name, status=status)
+def make_vm(name: str = "testvm", status: str = "STOPPED") -> VMInstance:
+    """Create a minimal VMInstance for testing."""
+    return VMInstance(id="a" * 64, name=name, status=status)
 
 
 def make_network(name: str = "default") -> Network:
@@ -99,7 +99,7 @@ class TestVMStateOperations:
         vm1 = make_vm(name="myvm", status="STOPPED")
         db.upsert_vm(vm1)
 
-        vm2 = VMState(
+        vm2 = VMInstance(
             id="a" * 64,
             name="myvm",
             status="RUNNING",
@@ -135,13 +135,13 @@ class TestVMStateOperations:
 
     def test_list_vms_multiple(self, db: MVMDatabase) -> None:
         """Test listing multiple VMs ordered by created_at."""
-        vm1 = VMState(
+        vm1 = VMInstance(
             id="a" * 64,
             name="vm1",
             status="STOPPED",
             created_at="2026-04-01T10:00:00Z",
         )
-        vm2 = VMState(
+        vm2 = VMInstance(
             id="b" * 64,
             name="vm2",
             status="RUNNING",
@@ -157,7 +157,7 @@ class TestVMStateOperations:
 
     def test_find_vms_by_prefix_exact(self, db: MVMDatabase) -> None:
         """Test finding VM by exact prefix match."""
-        vm = VMState(
+        vm = VMInstance(
             id="abc123" + "d" * 58,
             name="myvm",
             status="STOPPED",
@@ -170,12 +170,12 @@ class TestVMStateOperations:
 
     def test_find_vms_by_prefix_multiple(self, db: MVMDatabase) -> None:
         """Test finding multiple VMs with same prefix."""
-        vm1 = VMState(
+        vm1 = VMInstance(
             id="abc000" + "d" * 58,
             name="vm1",
             status="STOPPED",
         )
-        vm2 = VMState(
+        vm2 = VMInstance(
             id="abc111" + "d" * 58,
             name="vm2",
             status="RUNNING",
@@ -188,7 +188,7 @@ class TestVMStateOperations:
 
     def test_find_vms_by_prefix_no_match(self, db: MVMDatabase) -> None:
         """Test finding VMs with non-matching prefix."""
-        vm = VMState(
+        vm = VMInstance(
             id="xyz" + "a" * 61,
             name="myvm",
             status="STOPPED",
@@ -247,7 +247,7 @@ class TestVMStateOperations:
         )
         db.upsert_network(network)
 
-        vm = VMState(
+        vm = VMInstance(
             id="c" * 64,
             name="fullvm",
             status="RUNNING",
@@ -692,7 +692,7 @@ class TestForeignKeyConstraints:
         self, db: MVMDatabase
     ) -> None:
         """Test that upsert_vm with non-existent network_id raises IntegrityError."""
-        vm = VMState(
+        vm = VMInstance(
             id="a" * 64,
             name="myvm",
             status="RUNNING",
@@ -707,7 +707,7 @@ class TestForeignKeyConstraints:
         network = make_network(name="mynet")
         db.upsert_network(network)
 
-        vm = VMState(
+        vm = VMInstance(
             id="a" * 64,
             name="myvm",
             status="RUNNING",
@@ -779,7 +779,7 @@ class TestEdgeCases:
 
     def test_find_by_prefix_case_insensitive(self, db: MVMDatabase) -> None:
         """Test that prefix search is case-insensitive (SQLite LIKE default)."""
-        vm = VMState(
+        vm = VMInstance(
             id="ABC123" + "d" * 58,
             name="myvm",
             status="STOPPED",
@@ -809,7 +809,7 @@ class TestFindVmByName:
 
 class TestFindVmByIp:
     def test_returns_vm_when_ip_matches(self, db: MVMDatabase) -> None:
-        vm = VMState(id="c" * 64, name="ipvm", status="RUNNING", ipv4="10.0.0.5")
+        vm = VMInstance(id="c" * 64, name="ipvm", status="RUNNING", ipv4="10.0.0.5")
         db.upsert_vm(vm)
         result = db.find_vm_by_ip("10.0.0.5")
         assert result is not None

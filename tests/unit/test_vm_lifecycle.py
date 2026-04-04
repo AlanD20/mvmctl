@@ -21,7 +21,7 @@ from mvmctl.core.vm_lifecycle import (
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode
-from mvmctl.models.vm import VMInstance, VMState
+from mvmctl.models.vm import VMInstance, VMStatus
 from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
 
 
@@ -341,7 +341,7 @@ def test_remove_vm_success(
         name="myvm",
         ipv4="10.20.0.5",
         pid=123,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         network_name="default",
     )
     mock_manager.get.return_value = vm
@@ -396,7 +396,7 @@ def test_remove_vm_no_nat_skips_teardown(
         name="vm2",
         ipv4="10.20.0.6",
         pid=456,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         network_name="isolated",
     )
     mock_manager.get.return_value = vm
@@ -445,7 +445,7 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
         name="shared",
         ipv4="10.20.0.7",
         pid=789,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         network_name="default",
     )
     mock_manager.get.return_value = vm
@@ -507,7 +507,7 @@ def test_remove_vm_stops_nocloud_server(
         name="nocloud-vm",
         ipv4="10.20.0.10",
         pid=999,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         network_name="default",
         nocloud_net_port=8080,
     )
@@ -559,7 +559,7 @@ def test_remove_vm_removes_firewall_rule(
         name="fw-test",
         ipv4="10.20.0.15",
         pid=777,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         network_name="default",
         nocloud_net_port=9090,
     )
@@ -610,7 +610,7 @@ def test_remove_vm_cleanup_is_idempotent(
         name="idempotent-vm",
         ipv4="10.20.0.20",
         pid=555,
-        status=VMState.RUNNING,
+        status=VMStatus.RUNNING,
         network_name="default",
         nocloud_net_port=7070,
     )
@@ -2863,7 +2863,7 @@ class TestRemoveVMNATOrdering:
         NAT rules, breaking connectivity for all remaining VMs on the bridge.
         """
         from mvmctl.core.vm_lifecycle import remove_vm
-        from mvmctl.models.vm import VMInstance, VMState
+        from mvmctl.models.vm import VMInstance, VMStatus
 
         # Create a mock VM
         vm = VMInstance(
@@ -2872,7 +2872,7 @@ class TestRemoveVMNATOrdering:
             ipv4="10.0.0.2",
             mac="02:FC:00:00:00:01",
             pid=1234,
-            status=VMState.STOPPED,
+            status=VMStatus.STOPPED,
             tap_device="mvm-def-tes-123",
             network_name="default",
         )
@@ -2947,7 +2947,7 @@ class TestRemoveVMNATOrdering:
     ):
         """teardown_nat should be called with force=False to enable guard check."""
         from mvmctl.core.vm_lifecycle import remove_vm
-        from mvmctl.models.vm import VMInstance, VMState
+        from mvmctl.models.vm import VMInstance, VMStatus
 
         vm = VMInstance(
             id="a" * 64,
@@ -2955,7 +2955,7 @@ class TestRemoveVMNATOrdering:
             ipv4="10.0.0.2",
             mac="02:FC:00:00:00:01",
             pid=1234,
-            status=VMState.STOPPED,
+            status=VMStatus.STOPPED,
             tap_device="mvm-def-tes-123",
             network_name="default",
         )
@@ -2994,7 +2994,7 @@ def mock_vm_manager_for_stop(mocker):
     """Fixture providing a mock VMManager with a running VM."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.RUNNING
+    mock_vm.status = VMStatus.RUNNING
     mock_vm.pid = 12345
     mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
@@ -3006,7 +3006,7 @@ def mock_vm_manager_for_start(mocker):
     """Fixture providing a mock VMManager with a stopped VM."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_vm.id = "abc123def4567890"
     mock_vm.config = MagicMock()
     mock_vm.config.enable_api_socket = True
@@ -3022,7 +3022,7 @@ def test_stop_vm_success(mock_get_mgr, mock_graceful_shutdown):
     """stop_vm stops a running VM and updates status."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.RUNNING
+    mock_vm.status = VMStatus.RUNNING
     mock_vm.pid = 12345
     mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
@@ -3031,7 +3031,7 @@ def test_stop_vm_success(mock_get_mgr, mock_graceful_shutdown):
     stop_vm("myvm")
 
     mock_graceful_shutdown.assert_called_once_with(12345, Path("/fake/socket"), force=False)
-    mock_mgr.update_status.assert_called_with("myvm", VMState.STOPPED)
+    mock_mgr.update_status.assert_called_with("myvm", VMStatus.STOPPED)
 
 
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
@@ -3050,7 +3050,7 @@ def test_stop_vm_already_stopped(mock_get_mgr):
     """stop_vm raises error if VM is already stopped."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_mgr.get.return_value = mock_vm
     mock_get_mgr.return_value = mock_mgr
 
@@ -3064,7 +3064,7 @@ def test_stop_vm_force(mock_get_mgr, mock_graceful_shutdown):
     """stop_vm passes force=True to graceful_shutdown."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.RUNNING
+    mock_vm.status = VMStatus.RUNNING
     mock_vm.pid = 12345
     mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
@@ -3073,7 +3073,7 @@ def test_stop_vm_force(mock_get_mgr, mock_graceful_shutdown):
     stop_vm("myvm", force=True)
 
     mock_graceful_shutdown.assert_called_once_with(12345, Path("/fake/socket"), force=True)
-    mock_mgr.update_status.assert_called_with("myvm", VMState.STOPPED)
+    mock_mgr.update_status.assert_called_with("myvm", VMStatus.STOPPED)
 
 
 @patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
@@ -3082,7 +3082,7 @@ def test_stop_vm_handles_paused(mock_get_mgr, mock_graceful_shutdown):
     """stop_vm can stop a paused VM."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.PAUSED
+    mock_vm.status = VMStatus.PAUSED
     mock_vm.pid = 12345
     mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
@@ -3091,7 +3091,7 @@ def test_stop_vm_handles_paused(mock_get_mgr, mock_graceful_shutdown):
     stop_vm("myvm")
 
     mock_graceful_shutdown.assert_called_once_with(12345, Path("/fake/socket"), force=False)
-    mock_mgr.update_status.assert_called_with("myvm", VMState.STOPPED)
+    mock_mgr.update_status.assert_called_with("myvm", VMStatus.STOPPED)
 
 
 @patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
@@ -3100,7 +3100,7 @@ def test_stop_vm_failure_sets_error(mock_get_mgr, mock_graceful_shutdown):
     """stop_vm sets ERROR status on failure."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.RUNNING
+    mock_vm.status = VMStatus.RUNNING
     mock_vm.pid = 12345
     mock_vm.api_socket_path = Path("/fake/socket")
     mock_mgr.get.return_value = mock_vm
@@ -3111,7 +3111,7 @@ def test_stop_vm_failure_sets_error(mock_get_mgr, mock_graceful_shutdown):
     with pytest.raises(MVMError, match="Failed to stop VM"):
         stop_vm("myvm")
 
-    mock_mgr.update_status.assert_called_with("myvm", VMState.ERROR)
+    mock_mgr.update_status.assert_called_with("myvm", VMStatus.ERROR)
 
 
 # -----------------------------------------------------------------------------
@@ -3127,7 +3127,7 @@ def test_start_vm_success(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_
     """start_vm starts a stopped VM and updates status."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_vm.id = "abc123def4567890"
     mock_vm.config = MagicMock()
     mock_vm.config.enable_api_socket = True
@@ -3171,7 +3171,7 @@ def test_start_vm_already_running(mock_get_mgr):
     """start_vm raises error if VM is already running."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.RUNNING
+    mock_vm.status = VMStatus.RUNNING
     mock_mgr.get.return_value = mock_vm
     mock_get_mgr.return_value = mock_mgr
 
@@ -3184,7 +3184,7 @@ def test_start_vm_no_id(mock_get_mgr):
     """start_vm raises error if VM has no ID."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_vm.id = None
     mock_mgr.get.return_value = mock_vm
     mock_get_mgr.return_value = mock_mgr
@@ -3200,7 +3200,7 @@ def test_start_vm_failure_cleanup(mock_get_mgr, mock_get_vm_dir, mock_popen):
     """start_vm cleans up resources on failure."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_vm.id = "abc123def4567890"
     mock_vm.config = MagicMock()
     mock_vm.config.enable_api_socket = True
@@ -3264,7 +3264,7 @@ def test_start_vm_with_console(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_w
     """start_vm handles console-enabled VMs."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_vm.id = "abc123def4567890"
     mock_vm.config = MagicMock()
     mock_vm.config.enable_api_socket = False
@@ -3297,7 +3297,7 @@ def test_start_vm_missing_config_file(mock_get_mgr, mock_get_vm_dir):
     """start_vm raises error if firecracker.json is missing."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_vm.id = "abc123def4567890"
     mock_vm.config = MagicMock()
     mock_vm.config.enable_api_socket = True
@@ -3325,7 +3325,7 @@ def test_start_vm_missing_firecracker_binary(
     """start_vm raises error if firecracker binary is missing (absolute path)."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_vm.id = "abc123def4567890"
     mock_vm.config = MagicMock()
     mock_vm.config.enable_api_socket = True
@@ -3364,7 +3364,7 @@ def test_start_vm_log_close_oserror(mock_get_mgr, mock_get_vm_dir, mock_popen, m
     """start_vm handles OSError when closing log file by raising MVMError."""
     mock_mgr = MagicMock()
     mock_vm = MagicMock()
-    mock_vm.status = VMState.STOPPED
+    mock_vm.status = VMStatus.STOPPED
     mock_vm.id = "abc123def4567890"
     mock_vm.config = MagicMock()
     mock_vm.config.enable_api_socket = True

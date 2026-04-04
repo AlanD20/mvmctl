@@ -64,7 +64,7 @@ from mvmctl.core.vm_lifecycle import (
     snapshot_vm as _snapshot_vm,
 )
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
-from mvmctl.models import CloudInitMode, VMInstance, VMState
+from mvmctl.models import CloudInitMode, VMInstance, VMStatus
 from mvmctl.services.console_relay import ConsoleRelayManager
 
 __all__ = [
@@ -338,7 +338,7 @@ def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) 
             vm.status = new_state
 
     if not include_stopped:
-        terminal_states = {VMState.STOPPED, VMState.ERROR, VMState.CRASHED}
+        terminal_states = {VMStatus.STOPPED, VMStatus.ERROR, VMStatus.CRASHED}
         return [vm for vm in all_vms if vm.status not in terminal_states]
     return all_vms
 
@@ -422,7 +422,7 @@ def cleanup_vms(
     manager = vm_manager or get_vm_manager()
     vms = manager.list_all()
 
-    targets = vms if all_vms else [v for v in vms if v.status != VMState.RUNNING]
+    targets = vms if all_vms else [v for v in vms if v.status != VMStatus.RUNNING]
 
     if dry_run or not targets:
         return targets
@@ -648,7 +648,7 @@ def get_vm_status_with_exit_code(vm: VMInstance) -> tuple[str, int | None]:
     """
     import os
 
-    from mvmctl.models import VMState
+    from mvmctl.models import VMStatus
 
     # Check if process is running
     if vm.pid is not None:
@@ -666,7 +666,7 @@ def get_vm_status_with_exit_code(vm: VMInstance) -> tuple[str, int | None]:
         return f"exited({exit_code})", exit_code
 
     # Check VM state from metadata
-    if vm.status == VMState.RUNNING:
+    if vm.status == VMStatus.RUNNING:
         return "exited", None  # Was running but process died
     return vm.status.value, None
 

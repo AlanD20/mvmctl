@@ -13,7 +13,7 @@ from .models import (
     Kernel,
     Network,
     NetworkLease,
-    VMState,
+    VMInstance,
 )
 
 __all__ = [
@@ -23,7 +23,7 @@ __all__ = [
     "Binary",
     "Network",
     "NetworkLease",
-    "VMState",
+    "VMInstance",
     "HostState",
     "HostStateChange",
 ]
