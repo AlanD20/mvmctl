@@ -29,7 +29,8 @@ def test_vminstance_dataclass_structure():
     assert hasattr(vm, "created_at")
     assert hasattr(vm, "status")
     assert hasattr(vm, "config")
-    assert hasattr(vm, "cloud_init_mode")
+    assert hasattr(vm, "ipv4_gateway")
+    assert hasattr(vm, "subnet_mask")
     assert hasattr(vm, "nocloud_net_port")
     assert hasattr(vm, "nocloud_server_pid")
     assert hasattr(vm, "console_relay_pid")
@@ -96,10 +97,11 @@ def test_vminstance_deserialization():
         "mac": "02:FC:00:00:00:03",
         "network_name": "default",
         "tap_device": "tap0",
+        "ipv4_gateway": "10.0.0.1",
+        "subnet_mask": "255.255.255.0",
         "created_at": "2026-01-01T12:00:00+00:00",
         "status": "stopped",
         "config": None,
-        "cloud_init_mode": "inject",
         "nocloud_net_port": None,
         "nocloud_server_pid": None,
         "console_relay_pid": None,

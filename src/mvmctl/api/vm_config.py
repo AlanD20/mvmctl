@@ -66,13 +66,12 @@ def build_vm_config_file(
     effective_pci = enable_pci if enable_pci is not None else vm_defaults.enable_pci
     effective_bin = firecracker_bin if firecracker_bin is not None else DEFAULT_FIRECRACKER_BIN_NAME
 
+    from mvmctl.models.vm import VMInstance
+
     vm_config_kwargs: dict[str, Any] = {
         "name": name,
         "vcpu_count": effective_vcpus,
         "mem_size_mib": effective_mem,
-        "guest_ip": ip,
-        "guest_mac": mac,
-        "tap_device": tap_device,
         "enable_api_socket": effective_api_socket,
         "enable_pci": effective_pci,
     }
@@ -80,13 +79,18 @@ def build_vm_config_file(
         vm_config_kwargs["kernel_path"] = Path(kernel)
     if rootfs_path is not None:
         vm_config_kwargs["rootfs_path"] = rootfs_path
-    if ipv4_gateway is not None:
-        vm_config_kwargs["ipv4_gateway"] = ipv4_gateway
-    if subnet_mask is not None:
-        vm_config_kwargs["subnet_mask"] = subnet_mask
+
+    vm_instance = VMInstance(
+        name=name,
+        ipv4=ip,
+        mac=mac,
+        tap_device=tap_device,
+        ipv4_gateway=ipv4_gateway,
+        subnet_mask=subnet_mask,
+    )
 
     try:
-        generator = ConfigGenerator(VMConfig(**vm_config_kwargs))
+        generator = ConfigGenerator(VMConfig(**vm_config_kwargs), vm_instance)
         firecracker_config: dict[str, Any] = dict(generator.generate())
     except Exception:
         firecracker_config = {}

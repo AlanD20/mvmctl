@@ -1522,15 +1522,11 @@ def create_vm(
 
         vm_config = VMConfig(
             name=name,
+            vm_id=vm_id,
             vcpu_count=vcpus,
             mem_size_mib=mem,
             kernel_path=kernel_path_resolved,
             rootfs_path=rootfs_path,
-            guest_ip=guest_ip,
-            guest_mac=guest_mac,
-            ipv4_gateway=net_config.ipv4_gateway,
-            subnet_mask=_subnet_mask,
-            tap_device=tap_name,
             root_uuid=image_fs_uuid,
             root_fs_type=image_fs_type,
             enable_api_socket=enable_api_socket,
@@ -1542,8 +1538,26 @@ def create_vm(
             nocloud_net_url=nocloud_net_url,
             extra_drives=extra_drives,
         )
+
+        vm_instance = VMInstance(
+            name=name,
+            id=vm_id,
+            ipv4=guest_ip,
+            mac=guest_mac,
+            network_name=network_name,
+            tap_device=tap_name,
+            ipv4_gateway=net_config.ipv4_gateway,
+            subnet_mask=_subnet_mask,
+            created_at=datetime.now(tz=timezone.utc),
+            status=VMStatus.RUNNING,
+            config=vm_config,
+            rootfs_suffix=rootfs_ext,
+            kernel_id=str(kernel_path_resolved),
+            image_id=str(resolved_image_path),
+        )
+
         config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
-        ConfigGenerator(vm_config, vm_dir).write_to_file(config_file)
+        ConfigGenerator(vm_config, vm_instance, vm_dir).write_to_file(config_file)
 
         console_socket_path: Path | None = None
         console_relay_pid: int | None = None
@@ -1638,26 +1652,12 @@ def create_vm(
 
         _write_pid_file(pid_file, proc.pid)
 
-        vm_instance = VMInstance(
-            name=name,
-            id=vm_id,  # Use the pre-generated ID
-            pid=proc.pid,
-            api_socket_path=socket_path,
-            ipv4=guest_ip,
-            mac=guest_mac,
-            network_name=network_name,
-            tap_device=tap_name,
-            created_at=datetime.now(tz=timezone.utc),
-            status=VMStatus.RUNNING,
-            config=vm_config,  # Persist VM config with VM-local rootfs_path
-            nocloud_net_port=nocloud_net_port,
-            nocloud_server_pid=nocloud_server_pid,
-            console_relay_pid=console_relay_pid,
-            console_socket_path=console_socket_path,
-            rootfs_suffix=rootfs_ext,
-            kernel_id=str(kernel_path_resolved),
-            image_id=str(resolved_image_path),
-        )
+        vm_instance.pid = proc.pid
+        vm_instance.api_socket_path = socket_path
+        vm_instance.nocloud_net_port = nocloud_net_port
+        vm_instance.nocloud_server_pid = nocloud_server_pid
+        vm_instance.console_relay_pid = console_relay_pid
+        vm_instance.console_socket_path = console_socket_path
         manager.register(vm_instance)
 
         return vm_instance

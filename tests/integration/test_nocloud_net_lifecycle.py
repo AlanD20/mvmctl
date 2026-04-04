@@ -28,6 +28,9 @@ def _make_vm(
     nocloud_net_port: int | None = None,
 ) -> VMInstance:
     """Create a sample VMInstance for testing."""
+    from mvmctl.models.vm import VMConfig
+
+    mode = CloudInitMode.NET if nocloud_net_port else CloudInitMode.INJECT
     return VMInstance(
         name=name,
         ipv4=ip,
@@ -37,7 +40,7 @@ def _make_vm(
         created_at=datetime(2026, 1, 1, 12, 0, 0),
         network_name=network,
         api_socket_path=Path(f"/tmp/mvm/{name}.sock"),
-        cloud_init_mode=CloudInitMode.NET if nocloud_net_port else CloudInitMode.INJECT,
+        config=VMConfig(name=name, cloud_init_mode=mode),
         nocloud_net_port=nocloud_net_port,
     )
 

@@ -575,7 +575,7 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
         "mac": vm.mac,
         "network_name": vm.network_name,
         "tap_device": vm.tap_device,
-        "cloud_init_mode": vm.cloud_init_mode.value,
+        "cloud_init_mode": vm.config.cloud_init_mode.value if vm.config else "inject",
         "image_id": vm.image_id,
         "kernel_id": vm.kernel_id,
         "paths": {

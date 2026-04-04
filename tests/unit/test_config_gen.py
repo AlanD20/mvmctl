@@ -7,7 +7,7 @@ import pytest
 from mvmctl.constants import DEFAULT_LIBGUESTFS_SEED_DIR
 from mvmctl.core.config_gen import ConfigGenerator
 from mvmctl.models import CloudInitMode
-from mvmctl.models.vm import VMConfig
+from mvmctl.models.vm import VMConfig, VMInstance
 
 
 def test_config_generator_basic():
@@ -18,12 +18,12 @@ def test_config_generator_basic():
         mem_size_mib=512,
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        guest_ip="10.0.0.2",
-        guest_mac="02:FC:00:00:00:01",
-        tap_device="fc-tap0",
+    )
+    instance = VMInstance(
+        name="test-vm", ipv4="10.0.0.2", mac="02:FC:00:00:00:01", tap_device="fc-tap0"
     )
 
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
 
     assert config["machine-config"]["vcpu_count"] == 2
@@ -41,7 +41,7 @@ def test_config_generator_sets_root_uuid_in_boot_args():
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
     )
 
-    config = ConfigGenerator(vm_config).generate()
+    config = ConfigGenerator(vm_config, VMInstance(name="test-vm")).generate()
 
     assert config["drives"][0]["partuuid"] is None
     assert "root=UUID=123e4567-e89b-12d3-a456-426614174000" in config["boot-source"]["boot_args"]
@@ -56,7 +56,7 @@ def test_config_generator_overrides_existing_root_arg_with_uuid():
         boot_args="console=ttyS0 root=/dev/vda rw",
     )
 
-    config = ConfigGenerator(vm_config).generate()
+    config = ConfigGenerator(vm_config, VMInstance(name="test-vm")).generate()
     boot_args = config["boot-source"]["boot_args"]
 
     assert "root=/dev/vda" not in boot_args
@@ -69,11 +69,10 @@ def test_config_generator_network():
         name="test-vm",
         kernel_path=Path("vmlinux"),
         rootfs_path=Path("rootfs.ext4"),
-        tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
     )
+    instance = VMInstance(name="test-vm", tap_device="fc-tap0", mac="02:FC:00:00:00:01")
 
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
 
     assert len(config["network-interfaces"]) == 1
@@ -91,7 +90,7 @@ def test_config_generator_no_network():
         rootfs_path=Path("rootfs.ext4"),
     )
 
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="test-vm"))
     config = generator.generate()
 
     assert len(config["network-interfaces"]) == 0
@@ -107,16 +106,17 @@ def test_boot_args_rejects_shell_injection_in_guest_ip():
     from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
+        name="test-vm", kernel_path=Path("vmlinux"), rootfs_path=Path("rootfs.ext4")
+    )
+    instance = VMInstance(
         name="test-vm",
-        kernel_path=Path("vmlinux"),
-        rootfs_path=Path("rootfs.ext4"),
-        guest_ip="10.0.0.2;rm -rf /",
+        ipv4="10.0.0.2;rm -rf /",
         ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
+        mac="02:FC:00:00:00:01",
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, instance)
     with pytest.raises(MVMError, match="guest_ip"):
         generator.validate()
 
@@ -126,16 +126,17 @@ def test_boot_args_rejects_shell_injection_in_gateway():
     from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
+        name="test-vm", kernel_path=Path("vmlinux"), rootfs_path=Path("rootfs.ext4")
+    )
+    instance = VMInstance(
         name="test-vm",
-        kernel_path=Path("vmlinux"),
-        rootfs_path=Path("rootfs.ext4"),
-        guest_ip="10.0.0.2",
+        ipv4="10.0.0.2",
         ipv4_gateway="10.0.0.1|evil",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
+        mac="02:FC:00:00:00:01",
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, instance)
     with pytest.raises(MVMError, match="ipv4_gateway"):
         generator.validate()
 
@@ -143,16 +144,17 @@ def test_boot_args_rejects_shell_injection_in_gateway():
 def test_boot_args_accepts_normal_ip():
     """Normal IP addresses should pass validation without error."""
     vm_config = VMConfig(
+        name="test-vm", kernel_path=Path("vmlinux"), rootfs_path=Path("rootfs.ext4")
+    )
+    instance = VMInstance(
         name="test-vm",
-        kernel_path=Path("vmlinux"),
-        rootfs_path=Path("rootfs.ext4"),
-        guest_ip="10.0.0.2",
+        ipv4="10.0.0.2",
         ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
+        mac="02:FC:00:00:00:01",
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
     assert "10.0.0.2" in config["boot-source"]["boot_args"]
 
@@ -168,7 +170,7 @@ def test_config_gen_empty_vm_name():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name=""))
     config = generator.generate()
     assert config["boot-source"]["kernel_image_path"] == "/tmp/vmlinux"
     assert config["drives"][0]["path_on_host"] == "/tmp/rootfs.ext4"
@@ -198,14 +200,14 @@ def test_config_gen_zero_memory():
 
 def test_config_gen_missing_kernel_path_default():
     vm_config = VMConfig(name="no-kernel")
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="no-kernel"))
     config = generator.generate()
     assert config["boot-source"]["kernel_image_path"] == "vmlinux"
 
 
 def test_config_gen_missing_rootfs_path_default():
     vm_config = VMConfig(name="no-rootfs")
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="no-rootfs"))
     config = generator.generate()
     assert config["drives"][0]["path_on_host"] == "rootfs.ext4"
 
@@ -214,16 +216,17 @@ def test_config_gen_invalid_ip_with_shell_chars():
     from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
+        name="bad-ip", kernel_path=Path("/tmp/vmlinux"), rootfs_path=Path("/tmp/rootfs.ext4")
+    )
+    instance = VMInstance(
         name="bad-ip",
-        kernel_path=Path("/tmp/vmlinux"),
-        rootfs_path=Path("/tmp/rootfs.ext4"),
-        guest_ip="not-a-valid;ip",
+        ipv4="not-a-valid;ip",
         ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
+        mac="02:FC:00:00:00:01",
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, instance)
     with pytest.raises(MVMError, match="guest_ip"):
         generator.validate()
 
@@ -237,10 +240,9 @@ def test_config_gen_write_to_file(tmp_path):
         mem_size_mib=256,
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
-    generator = ConfigGenerator(vm_config)
+    instance = VMInstance(name="file-test", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
+    generator = ConfigGenerator(vm_config, instance)
     out_file = tmp_path / "subdir" / "firecracker.json"
     generator.write_to_file(out_file)
 
@@ -256,10 +258,9 @@ def test_config_gen_pci_enabled():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         enable_pci=True,
-        tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
     )
-    generator = ConfigGenerator(vm_config)
+    instance = VMInstance(name="pci-vm", tap_device="fc-tap0", mac="02:FC:00:00:00:01")
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
     assert "pci=off" not in config["boot-source"]["boot_args"]
 
@@ -271,7 +272,7 @@ def test_config_gen_custom_boot_args():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         boot_args="console=ttyS0 custom=yes",
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="custom-boot"))
     config = generator.generate()
     assert config["boot-source"]["boot_args"] == "console=ttyS0 custom=yes"
 
@@ -281,10 +282,9 @@ def test_config_gen_no_guest_ip_omits_ip_arg():
         name="no-ip",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
     )
-    generator = ConfigGenerator(vm_config)
+    instance = VMInstance(name="no-ip", tap_device="fc-tap0", mac="02:FC:00:00:00:01")
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
     assert "ip=" not in config["boot-source"]["boot_args"]
 
@@ -309,7 +309,7 @@ def test_config_gen_extra_drives():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         extra_drives=[extra],
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="multi-drive"))
     config = generator.generate()
 
     assert len(config["drives"]) == 2
@@ -328,7 +328,7 @@ def test_config_gen_cloud_init_drive_added_once():
         cloud_init_iso_path=Path("/tmp/cloud-init.iso"),
     )
 
-    config = ConfigGenerator(vm_config).generate()
+    config = ConfigGenerator(vm_config, VMInstance(name="ci-vm")).generate()
     cloud_init_drives = [drive for drive in config["drives"] if drive["drive_id"] == "cloud-init"]
 
     assert len(cloud_init_drives) == 1
@@ -342,7 +342,7 @@ def test_config_gen_logging_disabled():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         enable_logging=False,
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="no-log"))
     config = generator.generate()
     assert config["logger"] is None
 
@@ -353,7 +353,7 @@ def test_config_gen_logging_enabled_by_default():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="with-log"))
     config = generator.generate()
     assert config["logger"] is not None
     assert "log_path" in config["logger"]
@@ -365,7 +365,7 @@ def test_config_gen_metrics_disabled_by_default():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="no-metrics"))
     config = generator.generate()
     assert config["metrics"] is None
 
@@ -377,7 +377,7 @@ def test_config_gen_metrics_enabled():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         enable_metrics=True,
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="with-metrics"))
     config = generator.generate()
     assert config["metrics"] is not None
     assert "metrics_path" in config["metrics"]
@@ -390,7 +390,7 @@ def test_boot_args_nocloud_ds_default():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="nocloud-vm"))
     config = generator.generate()
     assert "ds=nocloud" in config["boot-source"]["boot_args"]
 
@@ -404,7 +404,7 @@ def test_boot_args_nocloud_net_ds():
         cloud_init_mode=CloudInitMode.NET,
         nocloud_net_url="http://192.168.1.1:8123/",
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="nocloud-net-vm"))
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "ds=nocloud;seedfrom=http://192.168.1.1:8123/" in boot_args
@@ -418,7 +418,7 @@ def test_boot_args_direct_injection_seed_dir_uses_constant():
         cloud_init_mode=CloudInitMode.INJECT,
     )
 
-    config = ConfigGenerator(vm_config).generate()
+    config = ConfigGenerator(vm_config, VMInstance(name="direct-injection-vm")).generate()
 
     assert (
         f"ds=nocloud;s=file://{DEFAULT_LIBGUESTFS_SEED_DIR}/" in config["boot-source"]["boot_args"]
@@ -435,7 +435,7 @@ def test_boot_args_nocloud_net_requires_url():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         cloud_init_mode=CloudInitMode.NET,
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="nocloud-net-vm"))
     with pytest.raises(ConfigError, match="nocloud_net_url must be set"):
         generator.generate()
 
@@ -448,7 +448,7 @@ def test_boot_args_cloud_init_disabled():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         cloud_init_mode=CloudInitMode.OFF,
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, VMInstance(name="no-ci-vm"))
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "ds=" not in boot_args
@@ -461,10 +461,9 @@ def test_boot_args_uses_root_fs_type_from_config():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.btrfs"),
         root_fs_type="btrfs",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
-    generator = ConfigGenerator(vm_config)
+    instance = VMInstance(name="btrfs-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "rootfstype=btrfs" in boot_args
@@ -477,10 +476,9 @@ def test_boot_args_falls_back_to_ext4_when_root_fs_type_none():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_fs_type=None,
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
-    generator = ConfigGenerator(vm_config)
+    instance = VMInstance(name="ext4-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "rootfstype=ext4" in boot_args
@@ -493,10 +491,9 @@ def test_boot_args_rootfstype_from_metadata():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.xfs"),
         root_fs_type="xfs",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
-    generator = ConfigGenerator(vm_config)
+    instance = VMInstance(name="xfs-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "rootfstype=xfs" in boot_args
@@ -505,16 +502,17 @@ def test_boot_args_rootfstype_from_metadata():
 def test_boot_args_includes_net_ifnames_zero():
     """Boot args should include net.ifnames=0 to prevent interface renaming."""
     vm_config = VMConfig(
+        name="test-vm", kernel_path=Path("/tmp/vmlinux"), rootfs_path=Path("/tmp/rootfs.ext4")
+    )
+    instance = VMInstance(
         name="test-vm",
-        kernel_path=Path("/tmp/vmlinux"),
-        rootfs_path=Path("/tmp/rootfs.ext4"),
-        guest_ip="10.0.0.2",
+        ipv4="10.0.0.2",
         ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
+        mac="02:FC:00:00:00:01",
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "net.ifnames=0" in boot_args
@@ -523,16 +521,17 @@ def test_boot_args_includes_net_ifnames_zero():
 def test_boot_args_includes_eth0_none_when_guest_ip_set():
     """Boot args should include ::eth0:none when guest_ip is set."""
     vm_config = VMConfig(
+        name="test-vm", kernel_path=Path("/tmp/vmlinux"), rootfs_path=Path("/tmp/rootfs.ext4")
+    )
+    instance = VMInstance(
         name="test-vm",
-        kernel_path=Path("/tmp/vmlinux"),
-        rootfs_path=Path("/tmp/rootfs.ext4"),
-        guest_ip="10.0.0.2",
+        ipv4="10.0.0.2",
         ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
-        guest_mac="02:FC:00:00:00:01",
+        mac="02:FC:00:00:00:01",
     )
-    generator = ConfigGenerator(vm_config)
+    generator = ConfigGenerator(vm_config, instance)
     config = generator.generate()
     boot_args = config["boot-source"]["boot_args"]
     assert "::eth0:off" in boot_args
@@ -553,12 +552,11 @@ def test_config_gen_validates_root_uuid_format():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="invalid-uuid",
         root_fs_type="ext4",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
+    instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
     with pytest.raises(MVMError, match="Invalid.*format"):
-        ConfigGenerator(vm_config).validate()
+        ConfigGenerator(vm_config, instance).validate()
 
 
 def test_config_gen_validates_root_fs_type():
@@ -571,12 +569,11 @@ def test_config_gen_validates_root_fs_type():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="ntfs",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
+    instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
     with pytest.raises(MVMError, match="Invalid.*fs_type"):
-        ConfigGenerator(vm_config).validate()
+        ConfigGenerator(vm_config, instance).validate()
 
 
 def test_config_gen_accepts_valid_uuid_and_fs_type():
@@ -587,12 +584,10 @@ def test_config_gen_accepts_valid_uuid_and_fs_type():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="ext4",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
+    instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
-    # Should not raise
-    ConfigGenerator(vm_config).validate()
+    ConfigGenerator(vm_config, instance).validate()
 
 
 def test_config_gen_accepts_btrfs_fs_type():
@@ -603,13 +598,11 @@ def test_config_gen_accepts_btrfs_fs_type():
         rootfs_path=Path("/tmp/rootfs.btrfs"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="btrfs",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
+    instance = VMInstance(name="btrfs-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
-    # Should not raise
-    ConfigGenerator(vm_config).validate()
-    config = ConfigGenerator(vm_config).generate()
+    ConfigGenerator(vm_config, instance).validate()
+    config = ConfigGenerator(vm_config, instance).generate()
     assert "rootfstype=btrfs" in config["boot-source"]["boot_args"]
 
 
@@ -621,13 +614,11 @@ def test_config_gen_accepts_xfs_fs_type():
         rootfs_path=Path("/tmp/rootfs.xfs"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="xfs",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
+    instance = VMInstance(name="xfs-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
-    # Should not raise
-    ConfigGenerator(vm_config).validate()
-    config = ConfigGenerator(vm_config).generate()
+    ConfigGenerator(vm_config, instance).validate()
+    config = ConfigGenerator(vm_config, instance).generate()
     assert "rootfstype=xfs" in config["boot-source"]["boot_args"]
 
 
@@ -640,12 +631,11 @@ def test_config_gen_validates_uuid_in_boot_args_generation():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="not-a-valid-uuid",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
+    instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
     with pytest.raises(MVMError, match="Invalid.*format"):
-        ConfigGenerator(vm_config).generate()
+        ConfigGenerator(vm_config, instance).generate()
 
 
 def test_config_gen_validates_fs_type_in_boot_args_generation():
@@ -657,9 +647,8 @@ def test_config_gen_validates_fs_type_in_boot_args_generation():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_fs_type="invalidfs",
-        ipv4_gateway="10.0.0.1",
-        subnet_mask="255.255.255.0",
     )
+    instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
     with pytest.raises(MVMError, match="Invalid.*fs_type"):
-        ConfigGenerator(vm_config).generate()
+        ConfigGenerator(vm_config, instance).generate()

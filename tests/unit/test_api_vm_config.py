@@ -130,8 +130,9 @@ class TestBuildVmConfigFile:
                     subnet_mask="255.255.255.0",
                 )
                 assert result.kernel == "/boot/vmlinux"
-                call_kwargs = mock_gen.call_args[0][0]
-                assert call_kwargs.kernel_path.as_posix().endswith("vmlinux")
-                assert call_kwargs.rootfs_path.as_posix().endswith("root.ext4")
-                assert call_kwargs.ipv4_gateway == "10.0.0.1"
-                assert call_kwargs.subnet_mask == "255.255.255.0"
+                vm_config_arg = mock_gen.call_args[0][0]
+                vm_instance_arg = mock_gen.call_args[0][1]
+                assert vm_config_arg.kernel_path.as_posix().endswith("vmlinux")
+                assert vm_config_arg.rootfs_path.as_posix().endswith("root.ext4")
+                assert vm_instance_arg.ipv4_gateway == "10.0.0.1"
+                assert vm_instance_arg.subnet_mask == "255.255.255.0"

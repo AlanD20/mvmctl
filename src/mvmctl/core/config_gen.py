@@ -25,6 +25,7 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import ConfigError, MVMError
 from mvmctl.models import CloudInitMode, VMConfig
+from mvmctl.models.vm import VMInstance
 from mvmctl.utils.fs import get_vm_dir
 from mvmctl.utils.validation import validate_boot_arg_component, validate_fs_type, validate_fs_uuid
 
@@ -89,8 +90,9 @@ FirecrackerConfig = TypedDict(
 class ConfigGenerator:
     """Generates Firecracker JSON configuration."""
 
-    def __init__(self, vm_config: VMConfig, vm_dir: Path | None = None):
+    def __init__(self, vm_config: VMConfig, instance: VMInstance, vm_dir: Path | None = None):
         self.vm_config = vm_config
+        self.instance = instance
         self.vm_dir = vm_dir
 
     def validate(self) -> None:
@@ -105,15 +107,15 @@ class ConfigGenerator:
         self._validate_boot_components()
 
     def _validate_boot_components(self) -> None:
-        if not self.vm_config.ipv4_gateway:
+        if not self.instance.ipv4_gateway:
             raise MVMError("VM IPv4 gateway is required but not set")
-        if not self.vm_config.subnet_mask:
+        if not self.instance.subnet_mask:
             raise MVMError("VM subnet mask is required but not set")
 
-        if self.vm_config.guest_ip:
-            validate_boot_arg_component(self.vm_config.guest_ip, "guest_ip")
-        validate_boot_arg_component(self.vm_config.ipv4_gateway, "ipv4_gateway")
-        validate_boot_arg_component(self.vm_config.subnet_mask, "subnet_mask")
+        if self.instance.ipv4:
+            validate_boot_arg_component(self.instance.ipv4, "guest_ip")
+        validate_boot_arg_component(self.instance.ipv4_gateway, "ipv4_gateway")
+        validate_boot_arg_component(self.instance.subnet_mask, "subnet_mask")
 
         lsm_flags = self.vm_config.lsm_flags or None
         if lsm_flags:
@@ -219,15 +221,15 @@ class ConfigGenerator:
 
     def _build_default_boot_args(self) -> str:
         pci_arg = DEFAULT_BOOT_PCI_OFF if not self.vm_config.enable_pci else ""
-        ipv4_gateway = self.vm_config.ipv4_gateway or ""
-        subnet_mask = self.vm_config.subnet_mask or ""
+        ipv4_gateway = self.instance.ipv4_gateway or ""
+        subnet_mask = self.instance.subnet_mask or ""
 
         # Use static kernel ip= parameter for early network bringup
         # This ensures network is ready before cloud-init runs
         # For NO_CLOUD_NET mode, also include kernel ip= for initial network bringup
         # cloud-init's network-config will ensure the IP stays consistent
-        if self.vm_config.guest_ip:
-            ip_arg = f"ip={self.vm_config.guest_ip}::{ipv4_gateway}:{subnet_mask}::eth0:{DEFAULT_GUEST_NETWORK_BOOT_MODE}"
+        if self.instance.ipv4:
+            ip_arg = f"ip={self.instance.ipv4}::{ipv4_gateway}:{subnet_mask}::eth0:{DEFAULT_GUEST_NETWORK_BOOT_MODE}"
         else:
             ip_arg = ""
         lsm_flags = self.vm_config.lsm_flags or None
@@ -298,14 +300,14 @@ class ConfigGenerator:
         return f"{boot_args} {replacement}".strip()
 
     def _build_network_config(self) -> list[NetworkInterfaceConfig]:
-        if not self.vm_config.tap_device:
+        if not self.instance.tap_device:
             return []
 
         return [
             {
                 "iface_id": DEFAULT_GUEST_NETWORK_IFACE,
-                "guest_mac": self.vm_config.guest_mac or DEFAULT_GUEST_MAC_DEFAULT,
-                "host_dev_name": self.vm_config.tap_device,
+                "guest_mac": self.instance.mac or DEFAULT_GUEST_MAC_DEFAULT,
+                "host_dev_name": self.instance.tap_device,
             }
         ]
 

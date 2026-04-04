@@ -97,7 +97,9 @@ def _vm_instance_to_db_state(vm: VMInstance) -> DBVMInstance:
         api_socket_path=str(vm.api_socket_path) if vm.api_socket_path else None,
         console_socket_path=str(vm.console_socket_path) if vm.console_socket_path else None,
         config_path=None,
-        cloud_init_mode=vm.cloud_init_mode.value if vm.cloud_init_mode else None,
+        cloud_init_mode=vm.config.cloud_init_mode.value
+        if vm.config and vm.config.cloud_init_mode
+        else None,
         nocloud_net_port=vm.nocloud_net_port,
         nocloud_server_pid=vm.nocloud_server_pid,
         console_relay_pid=vm.console_relay_pid,
@@ -114,7 +116,13 @@ def _vm_instance_to_db_state(vm: VMInstance) -> DBVMInstance:
 
 def _db_state_to_vm_instance(state: DBVMInstance) -> VMInstance:
     """Convert DB VMState to VMInstance."""
+    from mvmctl.constants import (
+        DEFAULT_VM_MEM_MIB,
+        DEFAULT_VM_ROOTFS_FILENAME,
+        DEFAULT_VM_VCPU_COUNT,
+    )
     from mvmctl.models.cloud_init import CloudInitMode
+    from mvmctl.models.vm import VMConfig
 
     network_name = None
     if state.network_id:
@@ -126,6 +134,19 @@ def _db_state_to_vm_instance(state: DBVMInstance) -> VMInstance:
         except (sqlite3.OperationalError, Exception):
             network_name = None
 
+    config = VMConfig(
+        name=state.name,
+        vm_id=state.id,
+        vcpu_count=state.vcpu_count if state.vcpu_count is not None else DEFAULT_VM_VCPU_COUNT,
+        mem_size_mib=state.mem_size_mib if state.mem_size_mib is not None else DEFAULT_VM_MEM_MIB,
+        rootfs_path=Path(state.rootfs_path)
+        if state.rootfs_path
+        else Path(DEFAULT_VM_ROOTFS_FILENAME),
+        cloud_init_mode=CloudInitMode(state.cloud_init_mode)
+        if state.cloud_init_mode
+        else CloudInitMode.INJECT,
+    )
+
     vm = VMInstance(
         name=state.name,
         id=state.id,
@@ -136,15 +157,13 @@ def _db_state_to_vm_instance(state: DBVMInstance) -> VMInstance:
         network_name=network_name,
         tap_device=state.tap_device,
         status=VMStatus(state.status) if state.status else VMStatus.STOPPED,
-        cloud_init_mode=CloudInitMode(state.cloud_init_mode)
-        if state.cloud_init_mode
-        else CloudInitMode.INJECT,
+        config=config,
         nocloud_net_port=state.nocloud_net_port,
         nocloud_server_pid=state.nocloud_server_pid,
         console_relay_pid=state.console_relay_pid,
         console_socket_path=Path(state.console_socket_path) if state.console_socket_path else None,
         exit_code=state.exit_code,
-        rootfs_suffix=state.rootfs_suffix or None,
+        rootfs_suffix=state.rootfs_suffix or ".ext4",
         image_id=state.image_id,
         kernel_id=state.kernel_id,
     )

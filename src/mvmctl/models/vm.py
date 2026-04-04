@@ -41,19 +41,15 @@ class VMStatus(StrEnum):
 
 @dataclass
 class VMConfig:
-    """VM configuration parameters.
+    """VM static creation parameters.
 
     Attributes:
         name: VM name; also used as hostname inside the guest.
+        vm_id: Pre-generated unique VM ID (16-char hex string).
         vcpu_count: Number of vCPUs to allocate (1-32).
         mem_size_mib: Memory in MiB (128-65536).
         kernel_path: Path to vmlinux kernel image.
         rootfs_path: Path to root filesystem ext4 image.
-        guest_ip: Static IP address for the guest NIC.
-        guest_mac: MAC address for the guest NIC (auto-generated if None).
-        gateway: Host-side gateway IP for the guest.
-        subnet_mask: Subnet mask for the guest network.
-        tap_device: Host TAP interface name (auto-created if None).
         boot_args: Override kernel boot arguments (uses defaults if None).
         enable_api_socket: Enable Firecracker HTTP API socket.
         enable_pci: Enable PCI device support.
@@ -65,15 +61,11 @@ class VMConfig:
     """
 
     name: str
+    vm_id: str = ""
     vcpu_count: int = DEFAULT_VM_VCPU_COUNT
     mem_size_mib: int = DEFAULT_VM_MEM_MIB
     kernel_path: Path = field(default_factory=lambda: Path(DEFAULT_VM_KERNEL_FILENAME))
     rootfs_path: Path = field(default_factory=lambda: Path(DEFAULT_VM_ROOTFS_FILENAME))
-    guest_ip: str | None = None
-    guest_mac: str | None = None
-    ipv4_gateway: str | None = None
-    subnet_mask: str | None = None
-    tap_device: str | None = None
     boot_args: str | None = None
     root_uuid: str | None = None
     root_fs_type: str | None = None
@@ -104,15 +96,11 @@ class VMConfig:
         """Serialize VMConfig to a dictionary."""
         return {
             "name": self.name,
+            "vm_id": self.vm_id,
             "vcpu_count": self.vcpu_count,
             "mem_size_mib": self.mem_size_mib,
             "kernel_path": str(self.kernel_path),
             "rootfs_path": str(self.rootfs_path),
-            "guest_ip": self.guest_ip,
-            "guest_mac": self.guest_mac,
-            "ipv4_gateway": self.ipv4_gateway,
-            "subnet_mask": self.subnet_mask,
-            "tap_device": self.tap_device,
             "boot_args": self.boot_args,
             "root_uuid": self.root_uuid,
             "root_fs_type": self.root_fs_type,
@@ -166,15 +154,11 @@ class VMConfig:
 
         return cls(
             name=data.get("name", ""),
+            vm_id=data.get("vm_id", ""),
             vcpu_count=data.get("vcpu_count", DEFAULT_VM_VCPU_COUNT),
             mem_size_mib=data.get("mem_size_mib", DEFAULT_VM_MEM_MIB),
             kernel_path=Path(data.get("kernel_path", DEFAULT_VM_KERNEL_FILENAME)),
             rootfs_path=Path(data.get("rootfs_path", DEFAULT_VM_ROOTFS_FILENAME)),
-            guest_ip=data.get("guest_ip"),
-            guest_mac=data.get("guest_mac"),
-            ipv4_gateway=data.get("ipv4_gateway"),
-            subnet_mask=data.get("subnet_mask"),
-            tap_device=data.get("tap_device"),
             boot_args=data.get("boot_args"),
             root_uuid=data.get("root_uuid"),
             root_fs_type=data.get("root_fs_type"),
@@ -211,10 +195,11 @@ class VMInstance:
         mac: Assigned guest MAC address.
         network_name: Name of the attached named network (if any).
         tap_device: TAP device name for this VM's network interface.
+        ipv4_gateway: Host-side gateway IP for the guest (runtime network info).
+        subnet_mask: Subnet mask for the guest network (runtime network info).
         created_at: Creation timestamp (UTC).
         status: Current lifecycle state.
         config: Original VM configuration used to launch this instance.
-        cloud_init_mode: Cloud-init configuration mode for this VM instance.
         nocloud_net_port: HTTP port for nocloud-net datasource server (if enabled).
         nocloud_server_pid: PID of the running nocloud-net HTTP server process (None if stopped).
         rootfs_suffix: File extension suffix of the rootfs image (e.g., '.ext4', '.btrfs').
@@ -230,10 +215,11 @@ class VMInstance:
     mac: str | None = None
     network_name: str | None = None
     tap_device: str | None = None
+    ipv4_gateway: str | None = None
+    subnet_mask: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     status: VMStatus = VMStatus.STOPPED
     config: VMConfig | None = None
-    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT
     nocloud_net_port: int | None = None
     nocloud_server_pid: int | None = None
     console_relay_pid: int | None = None
@@ -254,10 +240,11 @@ class VMInstance:
             "mac": self.mac,
             "network_name": self.network_name,
             "tap_device": self.tap_device,
+            "ipv4_gateway": self.ipv4_gateway,
+            "subnet_mask": self.subnet_mask,
             "created_at": self.created_at.isoformat(),
             "status": self.status.value,
             "config": self.config.to_dict() if self.config else None,
-            "cloud_init_mode": self.cloud_init_mode.value,
             "nocloud_net_port": self.nocloud_net_port,
             "nocloud_server_pid": self.nocloud_server_pid,
             "console_relay_pid": self.console_relay_pid,
@@ -277,10 +264,6 @@ class VMInstance:
         if data.get("config") and isinstance(data["config"], dict):
             config = VMConfig.from_dict(data["config"])
 
-        cloud_init_mode = CloudInitMode.INJECT
-        if data.get("cloud_init_mode"):
-            cloud_init_mode = CloudInitMode(data["cloud_init_mode"])
-
         created_at = datetime.now(tz=timezone.utc)
         if data.get("created_at"):
             try:
@@ -299,10 +282,11 @@ class VMInstance:
             mac=data.get("mac"),
             network_name=data.get("network_name"),
             tap_device=data.get("tap_device"),
+            ipv4_gateway=data.get("ipv4_gateway"),
+            subnet_mask=data.get("subnet_mask"),
             created_at=created_at,
             status=VMStatus(data["status"]) if data.get("status") else VMStatus.STOPPED,
             config=config,
-            cloud_init_mode=cloud_init_mode,
             nocloud_net_port=data.get("nocloud_net_port"),
             nocloud_server_pid=data.get("nocloud_server_pid"),
             console_relay_pid=data.get("console_relay_pid"),
