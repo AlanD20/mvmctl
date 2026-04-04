@@ -131,6 +131,7 @@ def test_boot_args_rejects_shell_injection_in_gateway():
         rootfs_path=Path("rootfs.ext4"),
         guest_ip="10.0.0.2",
         ipv4_gateway="10.0.0.1|evil",
+        subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
     )

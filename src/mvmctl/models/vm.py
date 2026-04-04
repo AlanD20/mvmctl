@@ -23,7 +23,6 @@ from mvmctl.constants import (
     DEFAULT_VM_LSM_FLAGS,
     DEFAULT_VM_MEM_MIB,
     DEFAULT_VM_ROOTFS_FILENAME,
-    DEFAULT_VM_SUBNET_MASK,
     DEFAULT_VM_VCPU_COUNT,
 )
 
@@ -73,7 +72,7 @@ class VMConfig:
     guest_ip: str | None = None
     guest_mac: str | None = None
     ipv4_gateway: str | None = None
-    subnet_mask: str = DEFAULT_VM_SUBNET_MASK
+    subnet_mask: str | None = None
     tap_device: str | None = None
     boot_args: str | None = None
     root_uuid: str | None = None
@@ -132,9 +131,9 @@ class VMConfig:
             "enable_metrics": self.enable_metrics,
             "enable_console": self.enable_console,
             "cloud_init_mode": self.cloud_init_mode.value,
-            "cloud_init_iso_path": str(self.cloud_init_iso_path)
-            if self.cloud_init_iso_path
-            else None,
+            "cloud_init_iso_path": (
+                str(self.cloud_init_iso_path) if self.cloud_init_iso_path else None
+            ),
             "keep_cloud_init_iso": self.keep_cloud_init_iso,
             "nocloud_net_url": self.nocloud_net_url,
         }
@@ -174,7 +173,7 @@ class VMConfig:
             guest_ip=data.get("guest_ip"),
             guest_mac=data.get("guest_mac"),
             ipv4_gateway=data.get("ipv4_gateway"),
-            subnet_mask=data.get("subnet_mask", DEFAULT_VM_SUBNET_MASK),
+            subnet_mask=data.get("subnet_mask"),
             tap_device=data.get("tap_device"),
             boot_args=data.get("boot_args"),
             root_uuid=data.get("root_uuid"),
@@ -186,12 +185,14 @@ class VMConfig:
             enable_logging=data.get("enable_logging", DEFAULT_VM_ENABLE_LOGGING),
             enable_metrics=data.get("enable_metrics", DEFAULT_VM_ENABLE_METRICS),
             enable_console=data.get("enable_console", DEFAULT_VM_ENABLE_CONSOLE),
-            cloud_init_mode=CloudInitMode(data["cloud_init_mode"])
-            if data.get("cloud_init_mode")
-            else CloudInitMode.INJECT,
-            cloud_init_iso_path=Path(data["cloud_init_iso_path"])
-            if data.get("cloud_init_iso_path")
-            else None,
+            cloud_init_mode=(
+                CloudInitMode(data["cloud_init_mode"])
+                if data.get("cloud_init_mode")
+                else CloudInitMode.INJECT
+            ),
+            cloud_init_iso_path=(
+                Path(data["cloud_init_iso_path"]) if data.get("cloud_init_iso_path") else None
+            ),
             keep_cloud_init_iso=data.get("keep_cloud_init_iso", False),
             nocloud_net_url=data.get("nocloud_net_url"),
         )
@@ -206,7 +207,7 @@ class VMInstance:
         id: Full 16-char hex string (unique identifier).
         pid: PID of the running firecracker process (None if stopped).
         socket_path: Path to Firecracker API socket (if enabled).
-        ip: Assigned guest IP address.
+        ipv4: Assigned guest IP address.
         mac: Assigned guest MAC address.
         network_name: Name of the attached named network (if any).
         tap_device: TAP device name for this VM's network interface.
@@ -222,7 +223,7 @@ class VMInstance:
     """
 
     name: str
-    id: str = ""  # Full 16-char hex string
+    id: str = ""
     pid: int | None = None
     api_socket_path: Path | None = None
     ipv4: str | None = None
@@ -238,9 +239,9 @@ class VMInstance:
     console_relay_pid: int | None = None
     console_socket_path: Path | None = None
     exit_code: int | None = None
-    rootfs_suffix: str = ".ext4"  # Default to .ext4 for backward compatibility
-    kernel_id: str | None = None  # Kernel path or hash for asset removal protection
-    image_id: str | None = None  # Image path or hash for asset removal protection
+    rootfs_suffix: str = ".ext4"
+    kernel_id: str | None = None
+    image_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize VMInstance to a dictionary."""
@@ -248,7 +249,7 @@ class VMInstance:
             "name": self.name,
             "id": self.id,
             "pid": self.pid,
-            "api_socket_path": str(self.api_socket_path) if self.api_socket_path else None,
+            "api_socket_path": (str(self.api_socket_path) if self.api_socket_path else None),
             "ipv4": self.ipv4,
             "mac": self.mac,
             "network_name": self.network_name,
@@ -260,9 +261,9 @@ class VMInstance:
             "nocloud_net_port": self.nocloud_net_port,
             "nocloud_server_pid": self.nocloud_server_pid,
             "console_relay_pid": self.console_relay_pid,
-            "console_socket_path": str(self.console_socket_path)
-            if self.console_socket_path
-            else None,
+            "console_socket_path": (
+                str(self.console_socket_path) if self.console_socket_path else None
+            ),
             "exit_code": self.exit_code,
             "rootfs_suffix": self.rootfs_suffix,
             "kernel_id": self.kernel_id,
@@ -291,7 +292,9 @@ class VMInstance:
             name=data.get("name", ""),
             id=data.get("id", ""),
             pid=data.get("pid"),
-            api_socket_path=Path(data["api_socket_path"]) if data.get("api_socket_path") else None,
+            api_socket_path=(
+                Path(data["api_socket_path"]) if data.get("api_socket_path") else None
+            ),
             ipv4=data.get("ipv4"),
             mac=data.get("mac"),
             network_name=data.get("network_name"),
@@ -303,9 +306,9 @@ class VMInstance:
             nocloud_net_port=data.get("nocloud_net_port"),
             nocloud_server_pid=data.get("nocloud_server_pid"),
             console_relay_pid=data.get("console_relay_pid"),
-            console_socket_path=Path(data["console_socket_path"])
-            if data.get("console_socket_path")
-            else None,
+            console_socket_path=(
+                Path(data["console_socket_path"]) if data.get("console_socket_path") else None
+            ),
             exit_code=data.get("exit_code"),
             rootfs_suffix=data.get("rootfs_suffix", ".ext4"),
             kernel_id=data.get("kernel_id"),

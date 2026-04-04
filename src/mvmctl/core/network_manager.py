@@ -13,7 +13,6 @@ from typing import Any, TypedDict
 from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
     DEFAULT_NETWORK_SUBNET,
-    device_prefix,
 )
 from mvmctl.core.metadata import (
     get_default_network_entry,
@@ -37,6 +36,15 @@ from mvmctl.models.network import NetworkConfig as NetworkConfig
 from mvmctl.models.network import NetworkLease as NetworkLease
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.full_hash import generate_full_hash_network
+from mvmctl.utils.network import (
+    bridge_name_for as _bridge_name_for_util,
+)
+from mvmctl.utils.network import (
+    ipv4_gateway_for_subnet as _ipv4_gateway_for_subnet_util,
+)
+from mvmctl.utils.network import (
+    prefix_len_from_cidr as _prefix_len_util,
+)
 from mvmctl.utils.validation import (
     validate_bridge_name,
     validate_entity_name,
@@ -85,15 +93,11 @@ def _upsert_network_to_sqlite(config: NetworkConfig, bridge_active: bool | None 
 
 
 def _bridge_name_for(network_name: str) -> str:
-    prefix = device_prefix()
-    truncated = network_name[:10]
-    return f"{prefix}-{truncated}"
+    return _bridge_name_for_util(network_name)
 
 
 def _ipv4_gateway_for_subnet(subnet: str) -> str:
-    """Return the first usable host IP in a subnet as the ipv4 gateway."""
-    net = ipaddress.IPv4Network(subnet, strict=False)
-    return str(next(iter(net.hosts())))
+    return _ipv4_gateway_for_subnet_util(subnet)
 
 
 # ---------------------------------------------------------------------------
@@ -872,7 +876,7 @@ def restore_networks() -> list[str]:
 
 
 def _prefix_len(subnet: str) -> int:
-    return ipaddress.IPv4Network(subnet, strict=False).prefixlen
+    return _prefix_len_util(subnet)
 
 
 def _validate_subnet_no_overlap(subnet: str, exclude_name: str = "") -> None:

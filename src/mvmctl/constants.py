@@ -84,7 +84,6 @@ _CONFIG_KEY_MAP: Final[dict[str, str]] = {
     "DEFAULT_VM_ENABLE_LOGGING": "default_vm_enable_logging",
     "DEFAULT_VM_ENABLE_METRICS": "default_vm_enable_metrics",
     "DEFAULT_VM_ENABLE_CONSOLE": "default_vm_enable_console",
-    "DEFAULT_VM_SUBNET_MASK": "default_vm_subnet_mask",
     "DEFAULT_VM_NETWORK_INTERFACE": "default_vm_network_interface",
     "DEFAULT_VM_BOOT_ARGS": "default_vm_boot_args",
     "DEFAULT_VM_LSM_FLAGS": "default_vm_lsm_flags",
@@ -378,9 +377,6 @@ DEFAULT_VM_ENABLE_CONSOLE: Final[bool] = _resolve_with_config_override(
 )
 
 # VM network defaults
-DEFAULT_VM_SUBNET_MASK: Final[str] = _resolve_with_config_override(
-    "DEFAULT_VM_SUBNET_MASK", _require_str(("vm_defaults", "subnet_mask"))
-)
 DEFAULT_VM_NETWORK_INTERFACE: Final[str] = _resolve_with_config_override(
     "DEFAULT_VM_NETWORK_INTERFACE", _require_str(("vm_defaults", "network_interface"))
 )

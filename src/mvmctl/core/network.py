@@ -9,13 +9,11 @@
 
 import ipaddress
 import logging
-import secrets
 import subprocess
 from pathlib import Path
 
 from mvmctl.constants import (
     BRIDGE_NAME,
-    DEFAULT_GUEST_MAC_PREFIX,
     DEFAULT_NETWORK_IPV4_GATEWAY,
     DEFAULT_NETWORK_SUBNET,
     IPTABLES_CHAINS,
@@ -23,6 +21,7 @@ from mvmctl.constants import (
     MVM_POSTROUTING_CHAIN,
 )
 from mvmctl.exceptions import NetworkError
+from mvmctl.utils.network import generate_mac as _generate_mac_util
 from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
 logger = logging.getLogger(__name__)
@@ -1227,15 +1226,7 @@ def get_iptables_rules_for_bridge(bridge: str) -> list[str]:
 
 
 def generate_mac() -> str:
-    """Generate a random MAC address with {DEFAULT_GUEST_MAC_PREFIX} prefix.
-
-    Uses ``secrets`` for cryptographically strong randomness.
-
-    Format: {DEFAULT_GUEST_MAC_PREFIX}:XX:XX:XX:XX where X is random hex.
-    """
-    rand_bytes = secrets.token_bytes(4)
-    suffix = ":".join(f"{b:02x}" for b in rand_bytes)
-    return f"{DEFAULT_GUEST_MAC_PREFIX}:{suffix}"
+    return _generate_mac_util()
 
 
 def validate_network_interface(interface: str) -> bool:

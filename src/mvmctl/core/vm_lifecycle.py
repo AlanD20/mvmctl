@@ -1234,6 +1234,7 @@ def create_vm(
     import ipaddress as _ipaddress
     import re
 
+    from mvmctl.utils.network import subnet_mask_from_cidr
     from mvmctl.utils.validation import validate_entity_name
 
     # Resource tracking for comprehensive cleanup
@@ -1517,8 +1518,7 @@ def create_vm(
                     raise MVMError(f"Failed to create cloud-init ISO: {e}") from e
 
         socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
-        _net = _ipaddress.IPv4Network(net_config.subnet, strict=False)
-        _subnet_mask = str(_net.netmask)
+        _subnet_mask = subnet_mask_from_cidr(net_config.subnet)
 
         vm_config = VMConfig(
             name=name,
