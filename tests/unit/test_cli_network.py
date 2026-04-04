@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.network import app
 from mvmctl.models.network import NetworkConfig
-from mvmctl.exceptions import NetworkError
+from mvmctl.exceptions import MVMError, NetworkError
 
 runner = CliRunner()
 
@@ -364,3 +364,228 @@ def test_network_ls_no_prefix_for_non_default(mock_leases, mock_list):
     for line in lines:
         if "custom" in line and "Name" not in line:
             assert not line.startswith("* ")
+
+
+# ---------------------------------------------------------------------------
+# network help subcommand (covers lines 49-50)
+# ---------------------------------------------------------------------------
+
+
+def test_network_help_subcommand():
+    """Help subcommand echoes help text and exits 0."""
+    result = runner.invoke(app, ["help"])
+    assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# network set-default NetworkError branch (covers lines 119-121)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.network.set_default_network", side_effect=NetworkError("no such network"))
+def test_set_default_network_error(mock_set):
+    result = runner.invoke(app, ["set-default", "missing"])
+    assert result.exit_code == 1
+    assert "no such network" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# network create — ipv4_gateway validation error (covers lines 160-162)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
+@patch("mvmctl.cli.network.validate_ipv4_address", side_effect=MVMError("bad address"))
+def test_create_invalid_ipv4_gateway(mock_validate, mock_ifaces):
+    result = runner.invoke(
+        app, ["create", "testnet", "--subnet", "192.168.100.0/24", "--ipv4-gateway", "not-an-ip"]
+    )
+    assert result.exit_code == 1
+    assert "invalid ipv4 gateway" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# network create — no interfaces found (covers lines 166-168)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=[])
+def test_create_no_interfaces(mock_ifaces):
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
+    assert result.exit_code == 1
+    assert "no network interfaces" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# network create — multiple interfaces, user selects one (covers lines 172-192)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0", "wlan0"])
+@patch("mvmctl.cli.network.create_network", return_value=_FAKE_NET)
+@patch("mvmctl.cli.network.Prompt.ask", return_value="1")
+def test_create_multiple_interfaces_select_first(mock_prompt, mock_create, mock_ifaces):
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
+    assert result.exit_code == 0
+    mock_create.assert_called_once_with(
+        name="testnet",
+        subnet="192.168.100.0/24",
+        ipv4_gateway=None,
+        nat=True,
+        nat_gateways=["eth0"],
+    )
+
+
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0", "wlan0"])
+@patch("mvmctl.cli.network.Prompt.ask", return_value="99")
+def test_create_multiple_interfaces_invalid_index(mock_prompt, mock_ifaces):
+    """All selected indices out of range → error."""
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
+    assert result.exit_code == 1
+    assert "no valid interface indices" in result.output.lower()
+
+
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0", "wlan0"])
+@patch("mvmctl.cli.network.Prompt.ask", return_value="notanumber")
+def test_create_multiple_interfaces_non_integer_selection(mock_prompt, mock_ifaces):
+    """Non-integer input → ValueError → error message."""
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
+    assert result.exit_code == 1
+    assert "invalid interface selection" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# network create — validate_nat_gateways raises MVMError (covers lines 197-199)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.network.validate_nat_gateways", side_effect=MVMError("bad gateway"))
+def test_create_invalid_nat_gateways(mock_validate):
+    result = runner.invoke(
+        app, ["create", "testnet", "--subnet", "192.168.100.0/24", "--nat-gateways", "bad0"]
+    )
+    assert result.exit_code == 1
+    assert "invalid nat gateways" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# network create NetworkError branches (covers lines 226-231)
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
+@patch(
+    "mvmctl.cli.network.create_network",
+    side_effect=NetworkError("bridge mvm-x conflicts with existing bridge"),
+)
+def test_create_error_bridge_conflicts(mock_create, mock_ifaces):
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
+    assert result.exit_code == 1
+    assert "different network name" in result.output.lower()
+
+
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
+@patch(
+    "mvmctl.cli.network.create_network",
+    side_effect=NetworkError("privilege denied"),
+)
+def test_create_error_privilege(mock_create, mock_ifaces):
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
+    assert result.exit_code == 1
+    assert "sudo mvm host init" in result.output
+
+
+# ---------------------------------------------------------------------------
+# network create — nat_gateways printed on success (covers line 240)
+# ---------------------------------------------------------------------------
+
+_FAKE_NET_WITH_GATEWAYS = NetworkConfig(
+    name="testnet",
+    subnet="192.168.100.0/24",
+    ipv4_gateway="192.168.100.1",
+    bridge="mvm-testnet",
+    nat_enabled=True,
+    nat_gateways=["eth0"],
+    created_at="2024-01-01T00:00:00+00:00",
+)
+
+
+@patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
+@patch("mvmctl.cli.network.create_network", return_value=_FAKE_NET_WITH_GATEWAYS)
+def test_create_success_prints_nat_gateways(mock_create, mock_ifaces):
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
+    assert result.exit_code == 0
+    assert "nat gateways" in result.output.lower()
+    assert "eth0" in result.output
+
+
+# ---------------------------------------------------------------------------
+# network inspect — NAT section with iptables rules (covers lines 317-333)
+# ---------------------------------------------------------------------------
+
+_FAKE_INSPECT_NAT = {
+    "name": "testnet",
+    "subnet": "192.168.100.0/24",
+    "ipv4_gateway": "192.168.100.1",
+    "bridge": "mvm-testnet",
+    "nat_enabled": True,
+    "bridge_exists": True,
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "vms": [],
+}
+
+
+@patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_NAT)
+@patch(
+    "mvmctl.cli.network.get_iptables_rules_for_bridge",
+    return_value=["-A POSTROUTING -o eth0 -j MASQUERADE"],
+)
+def test_inspect_nat_section_with_iptables_rule(mock_rules, mock_inspect):
+    """NAT CONFIG section printed and interface extracted from iptables rule."""
+    result = runner.invoke(app, ["inspect", "testnet"])
+    assert result.exit_code == 0
+    assert "NAT CONFIG" in result.output
+    assert "eth0" in result.output
+
+
+@patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_NAT)
+@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
+def test_inspect_nat_section_no_iptables_rules(mock_rules, mock_inspect):
+    """NAT CONFIG section printed even when no iptables rules found."""
+    result = runner.invoke(app, ["inspect", "testnet"])
+    assert result.exit_code == 0
+    assert "NAT CONFIG" in result.output
+
+
+# ---------------------------------------------------------------------------
+# network inspect — VMs section (covers lines 336-339)
+# ---------------------------------------------------------------------------
+
+_FAKE_INSPECT_WITH_VMS = {
+    "name": "testnet",
+    "subnet": "192.168.100.0/24",
+    "ipv4_gateway": "192.168.100.1",
+    "bridge": "mvm-testnet",
+    "nat_enabled": False,
+    "bridge_exists": True,
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "vms": [{"vm_id": "abc123", "ipv4": "192.168.100.2"}],
+}
+
+
+@patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_WITH_VMS)
+@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
+def test_inspect_shows_vms_section(mock_rules, mock_inspect):
+    """VMS section printed when vms list is non-empty."""
+    result = runner.invoke(app, ["inspect", "testnet"])
+    assert result.exit_code == 0
+    assert "VMS" in result.output
+    assert "abc123" in result.output
+
+
+@patch("mvmctl.cli.network.set_default_network")
+def test_set_default_network_success(mock_set):
+    result = runner.invoke(app, ["set-default", "mynet"])
+    assert result.exit_code == 0
+    assert "mynet" in result.output
+    mock_set.assert_called_once_with("mynet")

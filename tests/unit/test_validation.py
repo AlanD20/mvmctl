@@ -679,3 +679,24 @@ def test_validate_nat_gateways_returns_list():
     assert len(result) == 2
     assert "eth0" in result
     assert "eth1" in result
+
+
+def test_validate_interface_name_rejects_at_sign():
+    from mvmctl.utils.validation import validate_interface_name
+
+    with pytest.raises(MVMError):
+        validate_interface_name("eth@0")
+
+
+def test_validate_nat_gateways_empty_after_split():
+    from mvmctl.utils.validation import validate_nat_gateways
+
+    with pytest.raises(MVMError, match="cannot be empty"):
+        validate_nat_gateways(",")
+
+
+def test_sanitize_metadata_string_allow_hyphen_error_message():
+    from mvmctl.utils.validation import sanitize_metadata_string
+
+    with pytest.raises(MVMError, match="hyphen"):
+        sanitize_metadata_string("value@here", "field", allow_hyphen=True)

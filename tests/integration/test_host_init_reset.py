@@ -20,7 +20,8 @@ runner = CliRunner()
 @pytest.fixture(autouse=True)
 def _mock_default_network_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep host integration tests isolated from privileged network setup."""
-    monkeypatch.setattr("mvmctl.api.network.ensure_default_network", lambda: None)
+    monkeypatch.setattr("mvmctl.cli.host.restore_networks", lambda: [])
+    monkeypatch.setattr("mvmctl.cli.host.ensure_default_network", lambda: None)
 
 
 def _make_host_state(changes: list | None = None) -> HostState:

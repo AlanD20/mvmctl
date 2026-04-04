@@ -184,3 +184,20 @@ class TestRollback:
     def test_raises_not_implemented(self, runner: MigrationRunner) -> None:
         with pytest.raises(NotImplementedError):
             runner.rollback()
+
+
+class TestValidateMigrationsEdgeCases:
+    def test_invalid_filename_in_glob_adds_error(
+        self, runner: MigrationRunner, migrations_dir: Path
+    ) -> None:
+        (migrations_dir / "1abc_name.sql").write_text("SELECT 1;\n")
+        errors = runner.validate_migrations()
+        assert any("Invalid migration filename" in e for e in errors)
+
+    def test_only_invalid_filenames_no_gap_check(
+        self, runner: MigrationRunner, migrations_dir: Path
+    ) -> None:
+        (migrations_dir / "1abc_name.sql").write_text("SELECT 1;\n")
+        errors = runner.validate_migrations()
+        assert len(errors) >= 1
+        assert not any("Missing" in e for e in errors)

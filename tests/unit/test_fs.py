@@ -202,3 +202,211 @@ def test_get_real_home_with_invalid_sudo_user(monkeypatch):
     monkeypatch.setenv("SUDO_USER", "nonexistent_user_xyz_123")
     result = _get_real_home()
     assert result == Path.home()
+
+
+def test_read_pid_file_invalid_content(tmp_path):
+    from mvmctl.utils.fs import read_pid_file
+
+    pid_file = tmp_path / "bad.pid"
+    pid_file.write_text("not_a_number")
+    assert read_pid_file(pid_file) is None
+
+
+def test_read_pid_file_no_such_process(tmp_path, monkeypatch):
+    import os as _os
+
+    from mvmctl.utils.fs import read_pid_file
+
+    pid_file = tmp_path / "ghost.pid"
+    pid_file.write_text("999999")
+
+    monkeypatch.setattr(_os, "kill", lambda pid, sig: (_ for _ in ()).throw(ProcessLookupError()))
+    assert read_pid_file(pid_file) is None
+
+
+def test_write_exit_code_creates_file(tmp_path):
+    from mvmctl.utils.fs import write_exit_code
+
+    write_exit_code(tmp_path, 0, "exit.txt")
+    assert (tmp_path / "exit.txt").read_text() == "0"
+
+
+def test_write_exit_code_oserror_is_swallowed(tmp_path, monkeypatch):
+    import builtins
+
+    from mvmctl.utils.fs import write_exit_code
+
+    real_open = builtins.open
+
+    def _raise(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(builtins, "open", _raise)
+    write_exit_code(tmp_path, 1, "exit.txt")
+
+
+def test_get_config_dir_valid_override(tmp_path, monkeypatch):
+    from mvmctl.utils.fs import get_config_dir
+
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
+    result = get_config_dir()
+    assert result == tmp_path
+
+
+def test_chown_to_real_user_with_directory(tmp_path, monkeypatch):
+    import os as _os
+
+    from mvmctl.utils.fs import chown_to_real_user
+
+    monkeypatch.setattr(_os, "getuid", lambda: 0)
+    monkeypatch.setenv("SUDO_USER", "root")
+    chown = []
+    monkeypatch.setattr(_os, "chown", lambda p, u, g: chown.append(p))
+    child = tmp_path / "child.txt"
+    child.write_text("x")
+    chown_to_real_user(tmp_path)
+    assert len(chown) >= 1
+
+
+def test_get_real_user_ids_not_root(monkeypatch):
+    import os as _os
+
+    from mvmctl.utils.fs import get_real_user_ids
+
+    monkeypatch.setattr(_os, "getuid", lambda: 1000)
+    assert get_real_user_ids() is None
+
+
+def test_get_real_user_ids_root_no_sudo_user(monkeypatch):
+    import os as _os
+
+    from mvmctl.utils.fs import get_real_user_ids
+
+    monkeypatch.setattr(_os, "getuid", lambda: 0)
+    monkeypatch.delenv("SUDO_USER", raising=False)
+    assert get_real_user_ids() is None
+
+
+def test_secure_mkdir_raises_when_dir_exists(tmp_path):
+    from mvmctl.exceptions import MVMError
+    from mvmctl.utils.fs import secure_mkdir
+
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    with pytest.raises(MVMError, match="already exists"):
+        secure_mkdir(existing, "existing")
+
+
+def test_secure_mkdir_raises_on_symlink(tmp_path):
+    import os as _os
+
+    from mvmctl.exceptions import MVMError
+    from mvmctl.utils.fs import secure_mkdir
+
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    with pytest.raises(MVMError, match="symlink"):
+        secure_mkdir(link, "link")
+
+
+def test_chown_to_real_user_oserror_is_swallowed(tmp_path, monkeypatch):
+    import os as _os
+
+    from mvmctl.utils.fs import chown_to_real_user
+
+    monkeypatch.setattr(_os, "getuid", lambda: 0)
+    monkeypatch.setenv("SUDO_USER", "root")
+    monkeypatch.setattr(_os, "chown", lambda p, u, g: (_ for _ in ()).throw(OSError("fail")))
+    child = tmp_path / "f.txt"
+    child.write_text("x")
+    chown_to_real_user(child)
+
+
+def test_get_config_dir_no_env_var_returns_home_default(monkeypatch):
+    from mvmctl.utils.fs import get_config_dir
+
+    monkeypatch.delenv("MVM_CONFIG_DIR", raising=False)
+    result = get_config_dir()
+    assert result.name == "mvmctl"
+    assert ".config" in str(result)
+
+
+def test_write_exit_code_oserror_path_write_text(tmp_path, monkeypatch):
+    from pathlib import Path as _Path
+
+    from mvmctl.utils.fs import write_exit_code
+
+    def _raise(self, *a, **k):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(_Path, "write_text", _raise)
+    write_exit_code(tmp_path, 42, "exit.txt")
+
+
+def test_secure_mkdir_race_condition_fileexistserror(tmp_path):
+    import os as _os
+    from pathlib import Path as _Path
+    from unittest.mock import patch
+
+    from mvmctl.exceptions import MVMError
+    from mvmctl.utils.fs import secure_mkdir
+
+    new_dir = tmp_path / "new"
+    with patch.object(_os, "lstat", side_effect=FileNotFoundError):
+        with patch.object(_Path, "mkdir", side_effect=FileExistsError):
+            with patch.object(_os.path, "islink", return_value=False):
+                with pytest.raises(MVMError, match="already exists"):
+                    secure_mkdir(new_dir, "new")
+
+
+def test_secure_mkdir_post_mkdir_symlink_security_violation(tmp_path):
+    import os as _os
+    from pathlib import Path as _Path
+    from unittest.mock import patch
+
+    from mvmctl.exceptions import MVMError
+    from mvmctl.utils.fs import secure_mkdir
+
+    new_dir = tmp_path / "new2"
+    with patch.object(_os, "lstat", side_effect=FileNotFoundError):
+
+        def _mkdir_ok(self, *a, **k):
+            pass
+
+        with patch.object(_Path, "mkdir", _mkdir_ok):
+            with patch.object(_os.path, "islink", return_value=True):
+                with pytest.raises(MVMError, match="symlink"):
+                    secure_mkdir(new_dir, "new2")
+
+
+def test_secure_mkdir_fileexistserror_islink_raises_symlink_error(tmp_path):
+    import os as _os
+    from pathlib import Path as _Path
+    from unittest.mock import patch
+
+    from mvmctl.exceptions import MVMError
+    from mvmctl.utils.fs import secure_mkdir
+
+    new_dir = tmp_path / "new3"
+    with patch.object(_os, "lstat", side_effect=FileNotFoundError):
+        with patch.object(_Path, "mkdir", side_effect=FileExistsError):
+            with patch.object(_os.path, "islink", return_value=True):
+                with pytest.raises(MVMError, match="symlink"):
+                    secure_mkdir(new_dir, "new3")
+
+
+def test_chown_to_real_user_file_no_dir_recursion(tmp_path, monkeypatch):
+    import os as _os
+
+    from mvmctl.utils.fs import chown_to_real_user
+
+    monkeypatch.setattr(_os, "getuid", lambda: 0)
+    monkeypatch.setenv("SUDO_USER", "root")
+    chowned = []
+    monkeypatch.setattr(_os, "chown", lambda p, u, g: chowned.append(p))
+    f = tmp_path / "single_file.txt"
+    f.write_text("x")
+    chown_to_real_user(f)
+    assert len(chowned) == 1

@@ -976,3 +976,51 @@ class TestEdgeCases:
         # Uppercase should also match
         results = db.find_images_by_prefix("ABC123")
         assert len(results) == 1
+
+
+class TestKernelByName:
+    def test_get_kernel_by_name_found(self, db: MVMDatabase) -> None:
+        kernel = Kernel(
+            id="n" * 64,
+            name="vmlinux-5.10",
+            version="5.10.0",
+            arch="x86_64",
+            path="/cache/kernels/vmlinux-5.10",
+        )
+        db.upsert_kernel(kernel)
+        result = db.get_kernel_by_name("vmlinux-5.10")
+        assert result is not None
+        assert result.name == "vmlinux-5.10"
+
+    def test_get_kernel_by_name_not_found(self, db: MVMDatabase) -> None:
+        result = db.get_kernel_by_name("nonexistent-kernel")
+        assert result is None
+
+
+class TestDeleteBinaryByNameAndVersion:
+    def test_delete_by_plain_version(self, db: MVMDatabase) -> None:
+        binary = Binary(
+            id="dv" * 32,
+            name="firecracker",
+            version="1.15.0",
+            path="/cache/bin/firecracker-v1.15.0",
+        )
+        db.upsert_binary(binary)
+        assert db.get_binary("dv" * 32) is not None
+        db.delete_binary_by_name_and_version("firecracker", "1.15.0")
+        assert db.get_binary("dv" * 32) is None
+
+    def test_delete_by_prefixed_version(self, db: MVMDatabase) -> None:
+        binary = Binary(
+            id="pv" * 32,
+            name="firecracker",
+            version="1.16.0",
+            path="/cache/bin/firecracker-v1.16.0",
+        )
+        db.upsert_binary(binary)
+        db.delete_binary_by_name_and_version("firecracker", "v1.16.0")
+        assert db.get_binary("pv" * 32) is None
+
+    def test_delete_noop_when_not_found(self, db: MVMDatabase) -> None:
+        db.delete_binary_by_name_and_version("firecracker", "9.9.9")
+        assert db.list_binaries() == []

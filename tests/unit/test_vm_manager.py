@@ -390,3 +390,190 @@ def test_get_by_name_returns_empty_list(vm_manager: VMManager):
     """get_by_name should return empty list when no VM matches."""
     results = vm_manager.get_by_name("nonexistent")
     assert results == []
+
+
+# ---------------------------------------------------------------------------
+# _vm_instance_to_db_state branch coverage
+# ---------------------------------------------------------------------------
+
+
+def test_vm_instance_to_db_state_with_network_name(vm_manager: VMManager):
+    """network_id is resolved when network_name is set and found in DB."""
+    from unittest.mock import MagicMock, patch
+
+    from mvmctl.core.vm_manager import _vm_instance_to_db_state
+
+    mock_network = MagicMock()
+    mock_network.id = "net-id-abc"
+
+    mock_db = MagicMock()
+    mock_db.get_network_by_name.return_value = mock_network
+
+    vm = VMInstance(name="netvm", pid=1, status=VMStatus.RUNNING, network_name="testnet")
+    with patch("mvmctl.core.vm_manager.MVMDatabase", return_value=mock_db):
+        result = _vm_instance_to_db_state(vm)
+
+    assert result.network_id == "net-id-abc"
+
+
+def test_vm_instance_to_db_state_network_name_not_found(vm_manager: VMManager):
+    """network_id stays None when get_network_by_name returns None."""
+    from unittest.mock import MagicMock, patch
+
+    from mvmctl.core.vm_manager import _vm_instance_to_db_state
+
+    mock_db = MagicMock()
+    mock_db.get_network_by_name.return_value = None
+    mock_db.find_images_by_prefix.return_value = []
+    mock_db.get_image_by_os_slug.return_value = None
+    mock_db.find_kernels_by_prefix.return_value = []
+    mock_db.get_default_binary.return_value = None
+
+    vm = VMInstance(name="netvm2", pid=1, status=VMStatus.RUNNING, network_name="missing-net")
+    with patch("mvmctl.core.vm_manager.MVMDatabase", return_value=mock_db):
+        result = _vm_instance_to_db_state(vm)
+
+    assert result.network_id is None
+
+
+def test_vm_instance_to_db_state_image_id_prefix_match(vm_manager: VMManager):
+    """image_id resolved via find_images_by_prefix when exactly 1 match."""
+    from unittest.mock import MagicMock, patch
+
+    from mvmctl.core.vm_manager import _vm_instance_to_db_state
+
+    mock_image = MagicMock()
+    mock_image.id = "img-full-id"
+
+    mock_db = MagicMock()
+    mock_db.get_network_by_name.return_value = None
+    mock_db.find_images_by_prefix.return_value = [mock_image]
+    mock_db.find_kernels_by_prefix.return_value = []
+    mock_db.get_default_binary.return_value = None
+
+    vm = VMInstance(name="imgvm", pid=1, status=VMStatus.RUNNING, image_id="abc123")
+    with patch("mvmctl.core.vm_manager.MVMDatabase", return_value=mock_db):
+        result = _vm_instance_to_db_state(vm)
+
+    assert result.image_id == "img-full-id"
+
+
+def test_vm_instance_to_db_state_image_id_slug_fallback(vm_manager: VMManager):
+    """image_id falls back to get_image_by_os_slug when prefix matches nothing."""
+    from unittest.mock import MagicMock, patch
+
+    from mvmctl.core.vm_manager import _vm_instance_to_db_state
+
+    mock_image = MagicMock()
+    mock_image.id = "img-slug-id"
+
+    mock_db = MagicMock()
+    mock_db.get_network_by_name.return_value = None
+    mock_db.find_images_by_prefix.return_value = []
+    mock_db.get_image_by_os_slug.return_value = mock_image
+    mock_db.find_kernels_by_prefix.return_value = []
+    mock_db.get_default_binary.return_value = None
+
+    vm = VMInstance(name="imgvm2", pid=1, status=VMStatus.RUNNING, image_id="ubuntu-24.04")
+    with patch("mvmctl.core.vm_manager.MVMDatabase", return_value=mock_db):
+        result = _vm_instance_to_db_state(vm)
+
+    assert result.image_id == "img-slug-id"
+
+
+def test_vm_instance_to_db_state_kernel_id_prefix_match(vm_manager: VMManager):
+    """kernel_id resolved via find_kernels_by_prefix when exactly 1 match."""
+    from unittest.mock import MagicMock, patch
+
+    from mvmctl.core.vm_manager import _vm_instance_to_db_state
+
+    mock_kernel = MagicMock()
+    mock_kernel.id = "ker-full-id"
+
+    mock_db = MagicMock()
+    mock_db.get_network_by_name.return_value = None
+    mock_db.find_images_by_prefix.return_value = []
+    mock_db.get_image_by_os_slug.return_value = None
+    mock_db.find_kernels_by_prefix.return_value = [mock_kernel]
+    mock_db.get_default_binary.return_value = None
+
+    vm = VMInstance(name="kervm", pid=1, status=VMStatus.RUNNING, kernel_id="ker123")
+    with patch("mvmctl.core.vm_manager.MVMDatabase", return_value=mock_db):
+        result = _vm_instance_to_db_state(vm)
+
+    assert result.kernel_id == "ker-full-id"
+
+
+def test_vm_instance_to_db_state_binary_id_resolved(vm_manager: VMManager):
+    """binary_id resolved from get_default_binary."""
+    from unittest.mock import MagicMock, patch
+
+    from mvmctl.core.vm_manager import _vm_instance_to_db_state
+
+    mock_binary = MagicMock()
+    mock_binary.id = "bin-full-id"
+
+    mock_db = MagicMock()
+    mock_db.get_network_by_name.return_value = None
+    mock_db.find_images_by_prefix.return_value = []
+    mock_db.get_image_by_os_slug.return_value = None
+    mock_db.find_kernels_by_prefix.return_value = []
+    mock_db.get_default_binary.return_value = mock_binary
+
+    vm = VMInstance(name="binvm", pid=1, status=VMStatus.RUNNING)
+    with patch("mvmctl.core.vm_manager.MVMDatabase", return_value=mock_db):
+        result = _vm_instance_to_db_state(vm)
+
+    assert result.binary_id == "bin-full-id"
+
+
+# ---------------------------------------------------------------------------
+# _db_state_to_vm_instance branch coverage
+# ---------------------------------------------------------------------------
+
+
+def test_db_state_to_vm_instance_network_id_resolves_name():
+    """network_name is populated when state.network_id found in DB."""
+    from unittest.mock import MagicMock, patch
+
+    from mvmctl.core.vm_manager import _db_state_to_vm_instance
+    from mvmctl.db.models import VMInstance as DBVMInstance
+
+    mock_network = MagicMock()
+    mock_network.name = "mynet"
+
+    mock_db = MagicMock()
+    mock_db.get_network.return_value = mock_network
+
+    state = DBVMInstance(
+        id="abc123def456abcd",
+        name="testvm",
+        status="running",
+        network_id="some-net-id",
+        pid=None,
+        ipv4=None,
+        mac=None,
+        tap_device=None,
+        image_id=None,
+        kernel_id=None,
+        binary_id=None,
+        api_socket_path=None,
+        console_socket_path=None,
+        config_path=None,
+        cloud_init_mode=None,
+        nocloud_net_port=None,
+        nocloud_server_pid=None,
+        console_relay_pid=None,
+        exit_code=None,
+        vcpu_count=None,
+        mem_size_mib=None,
+        disk_size_mib=None,
+        rootfs_path=None,
+        rootfs_suffix=None,
+        created_at=None,
+        updated_at=None,
+    )
+    with patch("mvmctl.core.vm_manager.MVMDatabase", return_value=mock_db):
+        result = _db_state_to_vm_instance(state)
+
+    assert result.network_name == "mynet"

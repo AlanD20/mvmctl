@@ -1555,7 +1555,6 @@ class TestValidateNetworkInterface:
                     assert result is True
 
     def test_ip_command_not_found(self):
-        """validate_network_interface should raise NetworkError if ip command missing."""
         from mvmctl.utils.network import validate_network_interface
         from mvmctl.exceptions import NetworkError
 
@@ -1568,3 +1567,202 @@ class TestValidateNetworkInterface:
                     with pytest.raises(NetworkError) as exc_info:
                         validate_network_interface("eth0")
                     assert "ip" in str(exc_info.value).lower()
+
+
+def test_list_bridges_returns_empty_on_failure():
+    from unittest.mock import MagicMock
+    from mvmctl.utils.network import list_bridges
+
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = ""
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+        assert list_bridges() == []
+
+
+def test_list_bridges_parses_output():
+    from unittest.mock import MagicMock
+    from mvmctl.utils.network import list_bridges
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = (
+        "1: mvm-default: <BROADCAST> mtu 1500 qdisc noqueue\n2: mvm-test: <BROADCAST>\n"
+    )
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+        bridges = list_bridges()
+        assert "mvm-default" in bridges
+        assert "mvm-test" in bridges
+
+
+def test_bridge_has_ip_true():
+    from unittest.mock import MagicMock
+    from mvmctl.utils.network import _bridge_has_ip
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "inet 172.35.0.0/24 scope global mvm-default"
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+        assert _bridge_has_ip("mvm-default", "172.35.0.0/24") is True
+
+
+def test_bridge_has_ip_false_not_found():
+    from unittest.mock import MagicMock
+    from mvmctl.utils.network import _bridge_has_ip
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "inet 10.0.0.1/24 scope global mvm-other"
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+        assert _bridge_has_ip("mvm-other", "172.35.0.0/24") is False
+
+
+def test_bridge_has_ip_returncode_nonzero():
+    from unittest.mock import MagicMock
+    from mvmctl.utils.network import _bridge_has_ip
+
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = ""
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+        assert _bridge_has_ip("mvm-missing", "172.35.0.0/24") is False
+
+
+def test_iptables_rule_exists_true():
+    from unittest.mock import MagicMock
+    from mvmctl.utils.network import _iptables_rule_exists
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+        with patch(
+            "mvmctl.utils.network._privileged_cmd"
+            if False
+            else "mvmctl.utils.process.privileged_cmd",
+            return_value=["iptables", "-C", "FORWARD", "-j", "ACCEPT"],
+        ):
+            assert _iptables_rule_exists(["-C", "FORWARD", "-j", "ACCEPT"]) is True
+
+
+def test_ensure_iptables_rule_already_exists():
+    from mvmctl.utils.network import _ensure_iptables_rule
+
+    with patch("mvmctl.utils.network._iptables_rule_exists", return_value=True):
+        _ensure_iptables_rule(
+            ["-C", "FORWARD", "-j", "ACCEPT"], ["-A", "FORWARD", "-j", "ACCEPT"], "test"
+        )
+
+
+def test_ensure_iptables_rule_adds_when_missing():
+    from unittest.mock import MagicMock
+    from mvmctl.utils.network import _ensure_iptables_rule
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    with patch("mvmctl.utils.network._iptables_rule_exists", return_value=False):
+        with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+            with patch(
+                "mvmctl.utils.process.privileged_cmd", return_value=["iptables", "-A", "FORWARD"]
+            ):
+                _ensure_iptables_rule(["-C", "FORWARD"], ["-A", "FORWARD"], "test rule")
+
+
+def test_get_iptables_rules_for_bridge():
+    from unittest.mock import MagicMock
+    from mvmctl.utils.network import get_iptables_rules_for_bridge
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "1 ACCEPT mvm-default bridge stuff\n2 MASQUERADE mvm-default nat rule"
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+        rules = get_iptables_rules_for_bridge("mvm-default")
+        assert len(rules) >= 1
+
+
+def test_get_bridge_name_returns_string():
+    from mvmctl.utils.network import _get_bridge_name
+
+    result = _get_bridge_name()
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_detect_subnet_for_bridge_returns_none_on_error():
+    from mvmctl.utils.network import _detect_subnet_for_bridge
+
+    with patch(
+        "mvmctl.utils.network.subprocess.run",
+        side_effect=subprocess.CalledProcessError(1, "iptables"),
+    ):
+        result = _detect_subnet_for_bridge("mvm-default")
+        assert result is None
+
+
+def test_list_network_interfaces_no_sys_path():
+    from mvmctl.exceptions import NetworkError
+    from mvmctl.utils.network import list_network_interfaces
+
+    with patch("mvmctl.utils.network.Path.exists", return_value=False):
+        with pytest.raises(NetworkError, match="Unable to access"):
+            list_network_interfaces()
+
+
+def test_validate_network_interface_operstate_oserror():
+    from mvmctl.exceptions import NetworkError
+    from mvmctl.utils.network import validate_network_interface
+
+    with patch("mvmctl.utils.network.Path.exists", return_value=True):
+        with patch("mvmctl.utils.network.Path.read_text", side_effect=OSError("no operstate")):
+            with patch(
+                "mvmctl.utils.network.subprocess.run",
+                return_value=MagicMock(
+                    returncode=0, stdout="2: eth0    inet 192.168.1.1/24 scope global eth0"
+                ),
+            ):
+                result = validate_network_interface("eth0")
+                assert result is True
+
+
+def test_ensure_iptables_rule_raises_on_calledprocesserror():
+    from mvmctl.exceptions import NetworkError
+    from mvmctl.utils.network import _ensure_iptables_rule
+
+    check_args = ["iptables", "-C", "FORWARD", "-i", "mvm-default", "-j", "ACCEPT"]
+    add_args = ["iptables", "-A", "FORWARD", "-i", "mvm-default", "-j", "ACCEPT"]
+
+    with patch("mvmctl.utils.network._iptables_rule_exists", return_value=False):
+        with patch(
+            "mvmctl.utils.network.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "iptables"),
+        ):
+            with patch("mvmctl.utils.process.privileged_cmd", side_effect=lambda c: c):
+                with pytest.raises(NetworkError):
+                    _ensure_iptables_rule(check_args, add_args, "iptables error")
+
+
+def test_detect_subnet_for_bridge_returns_none_when_no_slash_in_source():
+    from mvmctl.utils.network import _detect_subnet_for_bridge
+
+    output_no_slash = (
+        "1   100  5000 MASQUERADE  all  --  *  *  mvm-nat:mvm-default   192.168.1.1  anywhere\n"
+    )
+    with patch(
+        "mvmctl.utils.network.subprocess.run",
+        return_value=MagicMock(returncode=0, stdout=output_no_slash),
+    ):
+        with patch("mvmctl.utils.process.privileged_cmd", side_effect=lambda c: c):
+            result = _detect_subnet_for_bridge("mvm-default")
+            assert result is None
+
+
+def test_detect_subnet_for_bridge_returns_none_when_line_too_short():
+    from mvmctl.utils.network import _detect_subnet_for_bridge
+
+    short_line = "MASQUERADE mvm-nat:mvm-default\n"
+    with patch(
+        "mvmctl.utils.network.subprocess.run",
+        return_value=MagicMock(returncode=0, stdout=short_line),
+    ):
+        with patch("mvmctl.utils.process.privileged_cmd", side_effect=lambda c: c):
+            result = _detect_subnet_for_bridge("mvm-default")
+            assert result is None

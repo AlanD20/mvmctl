@@ -117,3 +117,65 @@ def test_config_get_missing(tmp_path: Path, monkeypatch):
     result = runner.invoke(app, ["get", "nonexistent_key"])
     assert result.exit_code == 0
     assert "not set" in result.output
+
+
+def test_config_callback_no_subcommand():
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0
+    assert "Usage" in result.output
+
+
+def test_show_config_mvm_error():
+    from mvmctl.exceptions import MVMError
+
+    with patch("mvmctl.cli.config.load_config", side_effect=MVMError("bad config")):
+        result = runner.invoke(app, ["show"])
+        assert result.exit_code == 1
+
+
+def test_validate_config_mvm_error():
+    from mvmctl.exceptions import MVMError
+
+    with patch("mvmctl.cli.config.load_config", side_effect=MVMError("load failed")):
+        result = runner.invoke(app, ["validate"])
+        assert result.exit_code == 1
+
+
+def test_dump_vm_config_file_missing(tmp_path: Path):
+    vm_dir = tmp_path / "myvm"
+    vm_dir.mkdir()
+
+    mock_vm = MagicMock()
+    mock_vm.id = "abcdef1234567890"
+    mock_manager = MagicMock()
+    mock_manager.get.return_value = mock_vm
+
+    with patch("mvmctl.api.vms.get_vm_manager", return_value=mock_manager):
+        with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir):
+            result = runner.invoke(app, ["dump-vm", "--name", "myvm"])
+            assert result.exit_code == 1
+
+
+def test_dump_vm_invalid_json(tmp_path: Path):
+    vm_dir = tmp_path / "myvm"
+    vm_dir.mkdir()
+    from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
+
+    (vm_dir / DEFAULT_FC_CONFIG_FILENAME).write_text("{ not valid json !!!")
+
+    mock_vm = MagicMock()
+    mock_vm.id = "abcdef1234567890"
+    mock_manager = MagicMock()
+    mock_manager.get.return_value = mock_vm
+
+    with patch("mvmctl.api.vms.get_vm_manager", return_value=mock_manager):
+        with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir):
+            result = runner.invoke(app, ["dump-vm", "--name", "myvm"])
+            assert result.exit_code == 1
+
+
+def test_config_set_error(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
+    with patch("mvmctl.cli.config.set_config_value", side_effect=ValueError("bad key")):
+        result = runner.invoke(app, ["set", "bad_key", "val"])
+        assert result.exit_code == 1

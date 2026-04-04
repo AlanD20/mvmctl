@@ -493,3 +493,144 @@ def test_key_ls_no_def_column(mock_is_missing, mock_get_defaults, mock_list):
     assert result.exit_code == 0
     # Verify "Def" column not in output
     assert "Def" not in result.output
+
+
+def test_help_cmd():
+    result = runner.invoke(app, ["help"])
+    assert result.exit_code == 0
+
+
+@patch("mvmctl.cli.key.add_key")
+def test_add_not_pub_extension_with_pub_sibling(mock_add, tmp_path):
+    key_file = tmp_path / "mykey"
+    key_file.write_text("private")
+    pub_file = tmp_path / "mykey.pub"
+    pub_file.write_text("ssh-ed25519 AAAA test")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
+    assert result.exit_code == 1
+    assert ".pub" in result.output
+
+
+@patch("mvmctl.cli.key.add_key")
+def test_add_not_pub_extension_no_pub_sibling(mock_add, tmp_path):
+    key_file = tmp_path / "mykey_nopub"
+    key_file.write_text("private")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
+    assert result.exit_code == 1
+    assert "public key" in result.output.lower()
+
+
+@patch("mvmctl.cli.key.add_key", side_effect=MVMKeyError("already exists"))
+def test_add_mvm_key_error_already_exists(mock_add, tmp_path):
+    key_file = tmp_path / "mykey.pub"
+    key_file.write_text("ssh-ed25519 AAAA test")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
+    assert result.exit_code == 1
+    assert "already" in result.output.lower()
+
+
+@patch("mvmctl.cli.key.add_key", side_effect=MVMKeyError("private key provided"))
+def test_add_mvm_key_error_private_key(mock_add, tmp_path):
+    key_file = tmp_path / "mykey.pub"
+    key_file.write_text("ssh-ed25519 AAAA test")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
+    assert result.exit_code == 1
+    assert "private key" in result.output.lower()
+
+
+@patch("mvmctl.cli.key.add_key", side_effect=MVMKeyError("not found"))
+def test_add_mvm_key_error_not_found(mock_add, tmp_path):
+    key_file = tmp_path / "mykey.pub"
+    key_file.write_text("ssh-ed25519 AAAA test")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()
+
+
+@patch("mvmctl.cli.key.add_key", side_effect=MVMKeyError("something else"))
+def test_add_mvm_key_error_generic(mock_add, tmp_path):
+    key_file = tmp_path / "mykey.pub"
+    key_file.write_text("ssh-ed25519 AAAA test")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
+    assert result.exit_code == 1
+    assert "permission" in result.output.lower() or "path" in result.output.lower()
+
+
+@patch("mvmctl.cli.key.add_key", return_value=_FAKE_KEY)
+def test_add_success_with_comment(mock_add, tmp_path):
+    key_file = tmp_path / "mykey.pub"
+    key_file.write_text("ssh-ed25519 AAAA test")
+    result = runner.invoke(app, ["add", "testkey", str(key_file)])
+    assert result.exit_code == 0
+    assert "Comment" in result.output
+
+
+@patch("mvmctl.cli.key.create_key", return_value=(_FAKE_KEY, Path("/tmp/testkey")))
+def test_create_confirm_no_aborts(mock_create, tmp_path):
+    priv = tmp_path / "testkey"
+    priv.write_text("existing")
+    result = runner.invoke(app, ["create", "testkey", "--out", str(tmp_path)], input="n\n")
+    assert result.exit_code == 0
+
+
+@patch("mvmctl.cli.key.export_key", return_value=(Path("/tmp/k"), Path("/tmp/k.pub")))
+def test_export_confirm_no_aborts(mock_export, tmp_path):
+    existing = tmp_path / "testkey"
+    existing.write_text("key")
+    result = runner.invoke(
+        app,
+        ["export", "testkey", "--out", str(tmp_path)],
+        input="n\n",
+    )
+    assert result.exit_code == 0
+
+
+@patch("mvmctl.cli.key.inspect_key")
+def test_inspect_shows_private_and_public_paths(mock_inspect):
+    mock_inspect.return_value = {
+        "name": "testkey",
+        "algorithm": "ssh-ed25519",
+        "fingerprint": "SHA256:abc",
+        "comment": "test",
+        "added_at": "2024-01-01T00:00:00",
+        "public_key": "ssh-ed25519 AAAA",
+        "private_key_path": "/home/user/.ssh/testkey",
+        "public_key_path": "/home/user/.ssh/testkey.pub",
+    }
+    result = runner.invoke(app, ["inspect", "testkey"])
+    assert result.exit_code == 0
+    assert "Private key path" in result.output
+    assert "Public key path" in result.output
+
+
+@patch("mvmctl.cli.key.clear_default_keys")
+def test_set_default_clear(mock_clear):
+    result = runner.invoke(app, ["set-default", "--clear"])
+    assert result.exit_code == 0
+    assert "Cleared" in result.output
+
+
+@patch("mvmctl.cli.key.clear_default_keys", side_effect=MVMKeyError("oops"))
+def test_set_default_clear_error(mock_clear):
+    result = runner.invoke(app, ["set-default", "--clear"])
+    assert result.exit_code == 1
+
+
+def test_set_default_no_keys():
+    result = runner.invoke(app, ["set-default"])
+    assert result.exit_code == 1
+    assert "at least one" in result.output.lower()
+
+
+@patch("mvmctl.cli.key.resolve_key_inputs", return_value=["testkey"])
+@patch("mvmctl.cli.key.set_default_keys")
+def test_set_default_success(mock_set, mock_resolve):
+    result = runner.invoke(app, ["set-default", "testkey"])
+    assert result.exit_code == 0
+    assert "testkey" in result.output
+
+
+@patch("mvmctl.cli.key.resolve_key_inputs", side_effect=MVMKeyError("key not found"))
+def test_set_default_error(mock_resolve):
+    result = runner.invoke(app, ["set-default", "badkey"])
+    assert result.exit_code == 1

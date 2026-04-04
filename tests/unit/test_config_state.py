@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 from mvmctl.core.config_state import (
     get_assets_config,
@@ -418,3 +419,146 @@ def test_get_defaults_value_returns_default() -> None:
 def test_get_defaults_value_returns_none_by_default() -> None:
     result = get_defaults_value("nonexistent")
     assert result is None
+
+
+def test_get_defaults_config_image_from_sqlite(cache_dir: Path) -> None:
+    import hashlib
+
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import Image
+
+    db = MVMDatabase()
+    db.migrate()
+    img_id = hashlib.sha256(b"test-image-default").hexdigest()
+    img = Image(
+        id=img_id,
+        os_slug="ubuntu-24.04",
+        path=str(cache_dir / "images" / "ubuntu-24.04.ext4"),
+        is_default=True,
+    )
+    db.upsert_image(img)
+    db.set_default_image(img_id)
+
+    defaults = get_defaults_config()
+    assert defaults["image"] == "ubuntu-24.04"
+
+
+def test_get_defaults_config_kernel_from_sqlite(cache_dir: Path) -> None:
+    import hashlib
+
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import Kernel
+
+    db = MVMDatabase()
+    db.migrate()
+    kernel_path = str(cache_dir / "kernels" / "vmlinux-5.10")
+    k_id = hashlib.sha256(b"test-kernel-default").hexdigest()
+    k = Kernel(
+        id=k_id,
+        name="vmlinux",
+        arch="x86_64",
+        version="5.10",
+        path=kernel_path,
+        is_default=True,
+    )
+    db.upsert_kernel(k)
+    db.set_default_kernel(k_id)
+
+    defaults = get_defaults_config()
+    assert defaults["kernel"] == kernel_path
+
+
+def test_get_defaults_config_image_sqlite_operational_error(
+    mocker: "MockerFixture", cache_dir: Path
+) -> None:
+    import sqlite3
+
+    mocker.patch(
+        "mvmctl.core.config_state.MVMDatabase",
+        side_effect=sqlite3.OperationalError("db gone"),
+    )
+
+    defaults = get_defaults_config()
+    assert defaults["image"] is None
+
+
+def test_get_defaults_config_kernel_sqlite_operational_error(
+    mocker: "MockerFixture", cache_dir: Path
+) -> None:
+    import sqlite3
+
+    mocker.patch(
+        "mvmctl.core.config_state.MVMDatabase",
+        side_effect=sqlite3.OperationalError("db gone"),
+    )
+
+    defaults = get_defaults_config()
+    assert defaults["kernel"] is None
+
+
+def test_set_defaults_value_image_key_error_falls_back_to_os_slug(
+    mocker: "MockerFixture", cache_dir: Path
+) -> None:
+    mocker.patch(
+        "mvmctl.core.config_state.set_default_image_entry",
+        side_effect=KeyError("not found"),
+    )
+    mock_slug = mocker.patch("mvmctl.core.config_state.set_default_image_by_os_slug")
+    mocker.patch("mvmctl.core.config_state.MVMDatabase")
+
+    set_defaults_value("image", "ubuntu-24.04")
+    mock_slug.assert_called_once_with(cache_dir, "ubuntu-24.04")
+
+
+def test_set_defaults_value_image_sqlite_operational_error(
+    mocker: "MockerFixture", cache_dir: Path
+) -> None:
+    import sqlite3
+
+    mocker.patch("mvmctl.core.config_state.set_default_image_entry")
+    mocker.patch(
+        "mvmctl.core.config_state.MVMDatabase",
+        side_effect=sqlite3.OperationalError("db gone"),
+    )
+    set_defaults_value("image", "ubuntu-24.04")
+
+
+def test_set_defaults_value_kernel_sqlite_operational_error(
+    mocker: "MockerFixture", cache_dir: Path
+) -> None:
+    import sqlite3
+
+    mocker.patch("mvmctl.core.config_state.set_default_kernel_by_filename")
+    mocker.patch(
+        "mvmctl.core.config_state.MVMDatabase",
+        side_effect=sqlite3.OperationalError("db gone"),
+    )
+    set_defaults_value("kernel", "vmlinux-5.10")
+
+
+def test_set_defaults_value_kernel_found_in_sqlite(cache_dir: Path) -> None:
+    import hashlib
+    from unittest.mock import patch
+
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import Kernel
+
+    db = MVMDatabase()
+    db.migrate()
+    kernel_path = "vmlinux-5.10"
+    k_id = hashlib.sha256(b"kernel-for-set-default").hexdigest()
+    k = Kernel(
+        id=k_id,
+        name="vmlinux",
+        arch="x86_64",
+        version="5.10",
+        path=kernel_path,
+        is_default=False,
+    )
+    db.upsert_kernel(k)
+
+    with patch("mvmctl.core.config_state.set_default_kernel_by_filename"):
+        set_defaults_value("kernel", kernel_path)
+
+    updated = db.list_kernels()
+    assert any(kern.is_default and kern.path == kernel_path for kern in updated)

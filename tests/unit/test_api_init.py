@@ -139,3 +139,20 @@ class TestBuildDefaultKernel:
                         build_default_kernel()
 
                         mock_kernels.assert_called_once()
+
+    def test_builds_kernel_with_non_official_spec(self):
+        with patch("mvmctl.api.init.get_kernels_dir") as mock_kernels:
+            with patch("mvmctl.api.init.load_kernel_spec") as mock_load:
+                with patch("mvmctl.api.init.build_kernel_pipeline") as mock_build:
+                    with patch("mvmctl.api.init.get_cache_dir") as mock_cache:
+                        mock_kernels.return_value = Path("/tmp/kernels")
+                        mock_cache.return_value = Path("/tmp/cache")
+                        mock_spec = MagicMock()
+                        mock_spec.kernel_type = "custom"
+                        mock_load.return_value = mock_spec
+
+                        result = build_default_kernel()
+
+                        assert result == Path("/tmp/kernels/vmlinux")
+                        call_kwargs = mock_build.call_args[1]
+                        assert call_kwargs["kernel_spec"] is None

@@ -119,3 +119,96 @@ def test_resolve_ssh_key_from_path_empty_dir(tmp_path: Path):
 
     result = _find_ssh_key_from_path(tmp_path)
     assert result is None
+
+
+def test_resolve_key_path_not_found_raises(tmp_path: Path):
+    nonexistent = tmp_path / "no_key_here"
+    from pytest import raises
+
+    with raises(Exception):
+        _resolve_ssh_key_for_vm(nonexistent)
+
+
+def test_resolve_key_mvm_keys_dir_returns_private_key(tmp_path: Path, monkeypatch):
+    keys_dir = tmp_path / ".cache" / "mvmctl" / "keys"
+    keys_dir.mkdir(parents=True)
+    private_key = keys_dir / "mykey"
+    private_key.write_text("private")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    import importlib
+    import mvmctl.utils.fs as fs_mod
+
+    monkeypatch.setattr(fs_mod, "get_keys_dir", lambda: keys_dir)
+
+    result = _resolve_ssh_key_for_vm(None)
+    assert result == private_key
+
+
+def test_resolve_key_ssh_dir_fallback(tmp_path: Path, monkeypatch):
+    cache_dir = tmp_path / ".cache" / "mvmctl" / "keys"
+    cache_dir.mkdir(parents=True)
+
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    private_key = ssh_dir / "id_rsa"
+    private_key.write_text("private")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    import mvmctl.utils.fs as fs_mod
+
+    monkeypatch.setattr(fs_mod, "get_keys_dir", lambda: cache_dir)
+
+    result = _resolve_ssh_key_for_vm(None)
+    assert result == private_key
+
+
+def test_ssh_with_ip_flag(mocker):
+    mock_ssh = mocker.patch("mvmctl.cli.ssh.ssh_vm", return_value=0)
+    result = runner.invoke(app, ["--ip", "1.2.3.4"])
+    assert result.exit_code == 0
+    mock_ssh.assert_called_once()
+    assert mock_ssh.call_args.kwargs.get("name") == "1.2.3.4"
+
+
+def test_ssh_vm_id_matches_single_prefix(mocker):
+    from mvmctl.models.vm import VMInstance, VMStatus
+
+    mock_vm = VMInstance(name="prefixed-vm", id="abc123def456abcd", status=VMStatus.RUNNING)
+    mock_manager = mocker.MagicMock()
+    mock_manager.find_by_id_prefix.return_value = [mock_vm]
+    mocker.patch("mvmctl.cli.ssh.get_vm_manager", return_value=mock_manager)
+    mock_ssh = mocker.patch("mvmctl.cli.ssh.ssh_vm", return_value=0)
+
+    result = runner.invoke(app, ["abc123"])
+    assert result.exit_code == 0
+    mock_ssh.assert_called_once()
+    assert mock_ssh.call_args.kwargs.get("name") == "prefixed-vm"
+
+
+def test_ssh_vm_id_ambiguous_prefix(mocker):
+    from mvmctl.models.vm import VMInstance, VMStatus
+
+    vm1 = VMInstance(name="vm1", id="abc123def456abcd", status=VMStatus.RUNNING)
+    vm2 = VMInstance(name="vm2", id="abc123ffff00ffff", status=VMStatus.RUNNING)
+    mock_manager = mocker.MagicMock()
+    mock_manager.find_by_id_prefix.return_value = [vm1, vm2]
+    mocker.patch("mvmctl.cli.ssh.get_vm_manager", return_value=mock_manager)
+
+    result = runner.invoke(app, ["abc123"])
+    assert result.exit_code == 1
+    assert "ambiguous" in result.output.lower()
+
+
+def test_ssh_vm_id_no_prefix_match_falls_back_to_name_validation(mocker):
+    mock_manager = mocker.MagicMock()
+    mock_manager.find_by_id_prefix.return_value = []
+    mocker.patch("mvmctl.cli.ssh.get_vm_manager", return_value=mock_manager)
+    mock_ssh = mocker.patch("mvmctl.cli.ssh.ssh_vm", return_value=0)
+
+    result = runner.invoke(app, ["myvm"])
+    assert result.exit_code == 0
+    mock_ssh.assert_called_once()
+    assert mock_ssh.call_args.kwargs.get("name") == "myvm"
