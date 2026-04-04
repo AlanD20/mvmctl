@@ -218,7 +218,7 @@ uv run pytest tests/integration/ -v
 uv run pytest tests/layer_compliance/ -v
 
 # Coverage report (fails if <80% branch)
-uv run pytest tests/ --cov=mvmctl --cov-fail-under=80
+uv run pytest tests/ --cov=src/mvmctl --cov-fail-under=80
 
 # Run specific test class
 uv run pytest tests/unit/test_vm_manager.py::TestVMManagerGetByName -v

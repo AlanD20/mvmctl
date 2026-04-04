@@ -112,7 +112,7 @@ uv run pytest tests/integration/ -v
 uv run pytest tests/integration/test_vm_lifecycle.py -v
 
 # Integration tests with coverage
-uv run pytest tests/integration/ --cov=mvmctl --cov-branch
+uv run pytest tests/integration/ --cov=src/mvmctl --cov-branch
 
 # Stop on first failure
 uv run pytest tests/integration/ -x -v

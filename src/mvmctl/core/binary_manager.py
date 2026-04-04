@@ -163,9 +163,10 @@ def _list_local_versions_from_fs(bin_dir: Path) -> list[BinaryVersion]:
     return result
 
 
-def list_remote_versions(limit: int = DEFAULT_REMOTE_VERSION_LIMIT) -> list[str]:
+def list_remote_versions(limit: int | None = None) -> list[str]:
     """Fetch recent Firecracker release versions from GitHub."""
-    url = f"{GITHUB_RELEASES_URL}?per_page={limit}"
+    effective_limit = limit if limit is not None else DEFAULT_REMOTE_VERSION_LIMIT
+    url = f"{GITHUB_RELEASES_URL}?per_page={effective_limit}"
     req = Request(url, headers={"User-Agent": HTTP_USER_AGENT, "Accept": "application/json"})
 
     try:

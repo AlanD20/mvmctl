@@ -284,7 +284,9 @@ def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
     return _snapshot_vm(name=name, mem_out=mem_out, state_out=state_out)
 
 
-def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = True) -> None:
+def load_snapshot(
+    name: str, mem_in: Path, state_in: Path, resume_after: bool | None = None
+) -> None:
     return _load_snapshot(name=name, mem_in=mem_in, state_in=state_in, resume_after=resume_after)
 
 

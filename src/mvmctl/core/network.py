@@ -13,12 +13,12 @@ import subprocess
 from pathlib import Path
 
 from mvmctl.constants import (
-    BRIDGE_NAME,
     DEFAULT_NETWORK_IPV4_GATEWAY,
     DEFAULT_NETWORK_SUBNET,
     IPTABLES_CHAINS,
     MVM_FORWARD_CHAIN,
     MVM_POSTROUTING_CHAIN,
+    bridge_name,
 )
 from mvmctl.exceptions import NetworkError
 from mvmctl.utils.network import generate_mac as _generate_mac_util
@@ -36,6 +36,10 @@ def _run_ip_batch(commands: list[str]) -> None:
         check=True,
         capture_output=True,
     )
+
+
+def _get_bridge_name() -> str:
+    return bridge_name()
 
 
 # Derived defaults from constants — kept as module-level aliases so existing
@@ -116,10 +120,11 @@ def get_default_interface() -> str:
     raise NetworkError("Could not detect default network interface from 'ip route show default'")
 
 
-def bridge_exists(bridge: str = BRIDGE_NAME) -> bool:
+def bridge_exists(bridge: str | None = None) -> bool:
     """Return True if the bridge interface exists."""
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
     result = subprocess.run(
-        ["ip", "link", "show", bridge],
+        ["ip", "link", "show", effective_bridge],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -141,7 +146,7 @@ def _bridge_has_ip(bridge: str, subnet: str) -> bool:
 
 
 def setup_bridge(
-    bridge: str = BRIDGE_NAME, subnet: str = BRIDGE_SUBNET, ipv4_gateway_subnet: str | None = None
+    bridge: str | None = None, subnet: str = BRIDGE_SUBNET, ipv4_gateway_subnet: str | None = None
 ) -> None:
     """Create and configure the bridge interface.
 
@@ -152,31 +157,32 @@ def setup_bridge(
     - Raises NetworkError on failure.
     - Is idempotent: if bridge already exists, does nothing.
     """
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
     effective_subnet = ipv4_gateway_subnet if ipv4_gateway_subnet else subnet
 
-    if bridge_exists(bridge):
-        logger.debug("Bridge %s already exists, reconciling state", bridge)
+    if bridge_exists(effective_bridge):
+        logger.debug("Bridge %s already exists, reconciling state", effective_bridge)
         reconcile_cmds: list[str] = []
-        if not _bridge_has_ip(bridge, effective_subnet):
-            reconcile_cmds.append(f"addr add {effective_subnet} dev {bridge}")
-        reconcile_cmds.append(f"link set {bridge} up")
+        if not _bridge_has_ip(effective_bridge, effective_subnet):
+            reconcile_cmds.append(f"addr add {effective_subnet} dev {effective_bridge}")
+        reconcile_cmds.append(f"link set {effective_bridge} up")
         try:
             _run_ip_batch(reconcile_cmds)
         except subprocess.CalledProcessError as e:
             # Sanitize: don't expose batch commands in error message
-            raise NetworkError(f"Failed to setup bridge {bridge}") from e
+            raise NetworkError(f"Failed to setup bridge {effective_bridge}") from e
     else:
         try:
             _run_ip_batch(
                 [
-                    f"link add name {bridge} type bridge",
-                    f"addr add {effective_subnet} dev {bridge}",
-                    f"link set {bridge} up",
+                    f"link add name {effective_bridge} type bridge",
+                    f"addr add {effective_subnet} dev {effective_bridge}",
+                    f"link set {effective_bridge} up",
                 ]
             )
         except subprocess.CalledProcessError as e:
             # Sanitize: don't expose batch commands in error message
-            raise NetworkError(f"Failed to setup bridge {bridge}") from e
+            raise NetworkError(f"Failed to setup bridge {effective_bridge}") from e
 
     try:
         Path("/proc/sys/net/ipv4/ip_forward").write_text("1\n")
@@ -191,23 +197,26 @@ def setup_bridge(
             logger.debug("Failed to enable IP forwarding", exc_info=True)
             raise NetworkError("Failed to enable IP forwarding") from e
 
-    logger.info("Bridge %s created with subnet %s", bridge, subnet)
+    logger.info("Bridge %s created with subnet %s", effective_bridge, subnet)
 
 
-def teardown_bridge(bridge: str = BRIDGE_NAME) -> None:
+def teardown_bridge(bridge: str | None = None) -> None:
     """Remove the bridge interface.
 
     - `ip link set {bridge} down`
     - `ip link delete {bridge} type bridge`
     - Raises NetworkError on failure.
     """
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
     try:
-        _run_ip_batch([f"link set {bridge} down", f"link delete {bridge} type bridge"])
+        _run_ip_batch(
+            [f"link set {effective_bridge} down", f"link delete {effective_bridge} type bridge"]
+        )
     except subprocess.CalledProcessError as e:
         # Sanitize: don't expose batch commands in error message
-        raise NetworkError(f"Failed to teardown bridge {bridge}") from e
+        raise NetworkError(f"Failed to teardown bridge {effective_bridge}") from e
 
-    logger.info("Bridge %s removed", bridge)
+    logger.info("Bridge %s removed", effective_bridge)
 
 
 def _iptables_rule_exists(rule_args: list[str]) -> bool:
@@ -613,7 +622,7 @@ def teardown_all_mvm_chains_with_status() -> list[str]:
 
 
 def setup_nat(
-    bridge: str = BRIDGE_NAME,
+    bridge: str | None = None,
     nat_gateways: list[str] | None = None,
     *,
     subnet: str | None = None,
@@ -632,6 +641,7 @@ def setup_nat(
         nat_gateways: Physical interfaces for NAT (defaults to [default route interface]).
         subnet: Source SUBNET for NAT rules (defaults to SUBNET).
     """
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
     if nat_gateways is None:
         nat_gateways = [get_default_interface()]
 
@@ -645,7 +655,7 @@ def setup_nat(
 
     # Create MASQUERADE rules for each gateway interface
     for gateway_iface in nat_gateways:
-        comment = f"mvm-nat:{bridge}:{gateway_iface}"
+        comment = f"mvm-nat:{effective_bridge}:{gateway_iface}"
 
         # MASQUERADE rule with source filtering and comment
         masquerade_check = [
@@ -685,7 +695,7 @@ def setup_nat(
         _ensure_iptables_rule(
             masquerade_check,
             masquerade_add,
-            f"Failed to add MASQUERADE rule for {bridge} via {gateway_iface}",
+            f"Failed to add MASQUERADE rule for {effective_bridge} via {gateway_iface}",
         )
 
         # FORWARD out rule with source filtering
@@ -698,7 +708,7 @@ def setup_nat(
             "-s",
             subnet,
             "-i",
-            bridge,
+            effective_bridge,
             "-o",
             gateway_iface,
             "-j",
@@ -737,7 +747,7 @@ def setup_nat(
             "-i",
             gateway_iface,
             "-o",
-            bridge,
+            effective_bridge,
             "-j",
             "ACCEPT",
         ]
@@ -752,26 +762,26 @@ def setup_nat(
             "-i",
             gateway_iface,
             "-o",
-            bridge,
+            effective_bridge,
             "-j",
             "ACCEPT",
         ]
         _ensure_iptables_rule(
             forward_in_check,
             forward_in_add,
-            f"Failed to add FORWARD rule for {bridge} via {gateway_iface}",
+            f"Failed to add FORWARD rule for {effective_bridge} via {gateway_iface}",
         )
 
     logger.info(
         "NAT rules configured for bridge %s via %s (source %s)",
-        bridge,
+        effective_bridge,
         ", ".join(nat_gateways),
         subnet,
     )
 
 
 def teardown_nat(
-    bridge: str = BRIDGE_NAME,
+    bridge: str | None = None,
     force: bool = False,
     *,
     subnet: str | None = None,
@@ -796,13 +806,14 @@ def teardown_nat(
         NetworkError: If the MASQUERADE deletion fails.
         FORWARD rule deletions are best-effort (ignored if missing).
     """
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
     if not force:
-        tap_devices = get_tap_devices(bridge)
+        tap_devices = get_tap_devices(effective_bridge)
         if len(tap_devices) > 0:
             logger.debug(
                 "Skipping NAT teardown: %d TAP device(s) still attached to %s",
                 len(tap_devices),
-                bridge,
+                effective_bridge,
             )
             return
 
@@ -822,9 +833,9 @@ def teardown_nat(
 
     # If subnet not provided, try to detect it from existing rules
     if subnet is None:
-        subnet = _detect_subnet_for_bridge(bridge)
+        subnet = _detect_subnet_for_bridge(effective_bridge)
 
-    comment = f"mvm-nat:{bridge}"
+    comment = f"mvm-nat:{effective_bridge}"
 
     # Build MASQUERADE deletion rule - use source filtering if subnet known
     masquerade_del_args: list[str] = [
@@ -869,7 +880,7 @@ def teardown_nat(
                 "-s",
                 subnet,
                 "-i",
-                bridge,
+                effective_bridge,
                 "-o",
                 internet_iface,
                 "-j",
@@ -884,21 +895,41 @@ def teardown_nat(
                 "-i",
                 internet_iface,
                 "-o",
-                bridge,
+                effective_bridge,
                 "-j",
                 "ACCEPT",
             ],
         ]
     else:
         forward_del_rules = [
-            ["iptables", "-D", forward_chain, "-i", bridge, "-o", internet_iface, "-j", "ACCEPT"],
-            ["iptables", "-D", forward_chain, "-i", internet_iface, "-o", bridge, "-j", "ACCEPT"],
+            [
+                "iptables",
+                "-D",
+                forward_chain,
+                "-i",
+                effective_bridge,
+                "-o",
+                internet_iface,
+                "-j",
+                "ACCEPT",
+            ],
+            [
+                "iptables",
+                "-D",
+                forward_chain,
+                "-i",
+                internet_iface,
+                "-o",
+                effective_bridge,
+                "-j",
+                "ACCEPT",
+            ],
         ]
 
     for rule in forward_del_rules:
         subprocess.run(_privileged_cmd(rule), capture_output=True, check=False)
 
-    logger.info("NAT rules removed for bridge %s via %s", bridge, internet_iface)
+    logger.info("NAT rules removed for bridge %s via %s", effective_bridge, internet_iface)
 
 
 def _detect_subnet_for_bridge(bridge: str) -> str | None:
@@ -951,7 +982,7 @@ def tap_exists(tap_name: str) -> bool:
     return result.returncode == 0
 
 
-def create_tap(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
+def create_tap(tap_name: str, bridge: str | None = None) -> None:
     """Create a TAP device and attach it to the bridge.
 
     - `ip tuntap add dev {tap_name} mode tap`
@@ -959,6 +990,7 @@ def create_tap(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
     - `ip link set {tap_name} up`
     - Raises NetworkError if tap already exists or creation fails.
     """
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
     if tap_exists(tap_name):
         raise NetworkError(f"TAP device {tap_name} already exists")
 
@@ -966,7 +998,7 @@ def create_tap(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
         _run_ip_batch(
             [
                 f"tuntap add dev {tap_name} mode tap",
-                f"link set {tap_name} master {bridge}",
+                f"link set {tap_name} master {effective_bridge}",
                 f"link set {tap_name} up",
             ]
         )
@@ -974,7 +1006,7 @@ def create_tap(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
         # Sanitize: don't expose batch commands in error message
         raise NetworkError(f"Failed to create TAP {tap_name}") from e
 
-    logger.info("TAP device %s created and attached to bridge %s", tap_name, bridge)
+    logger.info("TAP device %s created and attached to bridge %s", tap_name, effective_bridge)
 
 
 def delete_tap(tap_name: str) -> None:
@@ -998,8 +1030,9 @@ def delete_tap(tap_name: str) -> None:
     logger.info("TAP device %s deleted", tap_name)
 
 
-def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
+def add_iptables_forward_rules(tap_name: str, bridge: str | None = None) -> None:
     forward_chain = MVM_FORWARD_CHAIN
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
 
     setup_mvm_chains()
 
@@ -1010,7 +1043,7 @@ def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None
         "-C",
         forward_chain,
         "-i",
-        bridge,
+        effective_bridge,
         "-o",
         tap_name,
         "-j",
@@ -1023,7 +1056,7 @@ def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None
         "-A",
         forward_chain,
         "-i",
-        bridge,
+        effective_bridge,
         "-o",
         tap_name,
         "-j",
@@ -1067,10 +1100,10 @@ def add_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None
         f"Failed to add FORWARD rule for {tap_name}",
     )
 
-    logger.debug("FORWARD rules added for TAP %s ↔ bridge %s", tap_name, bridge)
+    logger.debug("FORWARD rules added for TAP %s ↔ bridge %s", tap_name, effective_bridge)
 
 
-def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> None:
+def remove_iptables_forward_rules(tap_name: str, bridge: str | None = None) -> None:
     """Remove iptables FORWARD rules for a specific TAP device from MVM chain.
 
     - `iptables -D MVM-FORWARD -i {bridge} -o {tap_name} -j ACCEPT`
@@ -1078,6 +1111,7 @@ def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> N
     - Safe to call even if rules don't exist (ignore errors).
     """
     forward_chain = MVM_FORWARD_CHAIN
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
 
     # Only try to remove rules if MVM chain exists
     if not chain_exists(forward_chain, "filter"):
@@ -1088,7 +1122,17 @@ def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> N
 
     result1 = subprocess.run(
         _privileged_cmd(
-            ["iptables", "-D", forward_chain, "-i", bridge, "-o", tap_name, "-j", "ACCEPT"]
+            [
+                "iptables",
+                "-D",
+                forward_chain,
+                "-i",
+                effective_bridge,
+                "-o",
+                tap_name,
+                "-j",
+                "ACCEPT",
+            ]
         ),
         capture_output=True,
         check=False,
@@ -1102,7 +1146,17 @@ def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> N
 
     result2 = subprocess.run(
         _privileged_cmd(
-            ["iptables", "-D", forward_chain, "-i", tap_name, "-o", bridge, "-j", "ACCEPT"]
+            [
+                "iptables",
+                "-D",
+                forward_chain,
+                "-i",
+                tap_name,
+                "-o",
+                effective_bridge,
+                "-j",
+                "ACCEPT",
+            ]
         ),
         capture_output=True,
         check=False,
@@ -1114,17 +1168,18 @@ def remove_iptables_forward_rules(tap_name: str, bridge: str = BRIDGE_NAME) -> N
             result2.returncode,
         )
 
-    logger.debug("FORWARD rules removed for TAP %s ↔ bridge %s", tap_name, bridge)
+    logger.debug("FORWARD rules removed for TAP %s ↔ bridge %s", tap_name, effective_bridge)
 
 
-def get_tap_devices(bridge: str = BRIDGE_NAME) -> list[str]:
+def get_tap_devices(bridge: str | None = None) -> list[str]:
     """List all TAP devices currently attached to the bridge.
 
     Uses `ip link show master {bridge}` and parses output.
     Returns list of interface names.
     """
+    effective_bridge = bridge if bridge is not None else _get_bridge_name()
     result = subprocess.run(
-        ["ip", "link", "show", "master", bridge],
+        ["ip", "link", "show", "master", effective_bridge],
         capture_output=True,
         text=True,
         check=False,

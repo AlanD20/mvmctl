@@ -34,14 +34,15 @@ def config_callback(ctx: typer.Context) -> None:
 def show(
     section: str | None = typer.Option(None, "--section", help="Config section to show"),
     config_dir: Path = typer.Option(
-        get_assets_dir(),
+        None,
         "--config-dir",
         help="Configuration directory",
     ),
 ) -> None:
     """Print resolved configuration."""
+    effective_config_dir = config_dir if config_dir is not None else get_assets_dir()
     try:
-        config = load_config(config_dir)
+        config = load_config(effective_config_dir)
         data = dump_config(config, section)
         typer.echo(json.dumps(data, indent=2))
     except MVMError as e:
@@ -51,14 +52,15 @@ def show(
 @app.command()
 def validate(
     config_dir: Path = typer.Option(
-        get_assets_dir(),
+        None,
         "--config-dir",
         help="Configuration directory",
     ),
 ) -> None:
     """Validate all YAML config files."""
+    effective_config_dir = config_dir if config_dir is not None else get_assets_dir()
     try:
-        config = load_config(config_dir)
+        config = load_config(effective_config_dir)
         errors = validate_config(config)
 
         if errors:

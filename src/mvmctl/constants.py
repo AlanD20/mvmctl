@@ -306,6 +306,10 @@ def device_prefix() -> str:
     return CLI_NAME
 
 
+def bridge_name() -> str:
+    return f"{device_prefix()}-br0"
+
+
 def config_filename() -> str:
     """Return the config file name for the CLI."""
     return f"{CLI_NAME}.yaml"

@@ -336,7 +336,41 @@ def _extract_partition_with_guestfs(...):  # DON'T DO THIS
 
 **Rule:** If a function uses an external tool (libguestfs, qemu-img, tar, etc.), it belongs in `utils/`. The `core/` layer should import and use these utilities, not implement them.
 
-### Default Values Rule
+### Default Values Rule (STRICT ENFORCEMENT - ZERO TOLERANCE)
+
+**ABSOLUTE RULES (VIOLATION = IMMEDIATE CI REJECTION):**
+
+| Forbidden Pattern | Why It's Banned | Consequence |
+|-------------------|-----------------|-------------|
+| `typer.Option(DEFAULT_*, ...)` | Hardcoded constants bypass runtime config resolution | Help shows stale values; ignores user config |
+| `typer.Option(get_assets_dir(), ...)` | Function evaluated at **import time**, not runtime | Breaks when `MVM_CONFIG_DIR` env var is set after import |
+| `typer.Option([], ...)` for lists | Breaks Typer internals; mutable default | Use `None` with `list(values) if values else []` |
+| `typer.Option(True/False, ...)` for config-backed booleans | Must support tri-state (CLI/config/default) | Use `None` and resolve at runtime |
+| Any non-None default for config-backed values | Bypasses SQLite/defaults.yaml configuration | User settings are silently ignored |
+
+**MANDATORY CORRECT PATTERN:**
+```python
+# Step 1: typer param with None default
+vcpus: Optional[int] = typer.Option(None, "--vcpus", help="Number of vCPUs")
+
+# Step 2: Runtime resolution inside function
+defaults = _get_vm_defaults()
+effective_vcpus = vcpus if vcpus is not None else defaults.vcpu_count
+```
+
+**VERIFICATION CHECKLIST (Before submitting any CLI PR):**
+- [ ] No `typer.Option(DEFAULT_*` patterns exist in changed files
+- [ ] No `typer.Option(get_*_dir()` patterns exist
+- [ ] No `typer.Option([])` or `typer.Argument([])` patterns exist
+- [ ] No `typer.Option(True/False)` for values that should be config-backed
+- [ ] All config-backed values resolve at **runtime** inside function body
+- [ ] Help text does not show hardcoded numbers/strings for config-backed options
+
+**ENFORCEMENT:**
+- `layer_compliance/test_constants.py` validates no hardcoded defaults
+- CI will reject PRs with violations
+- **NO EXCEPTIONS. NO WORKAROUNDS. NO DISCUSSION.**
+
 - Fallback defaults → `constants.py` with `FALLBACK_` prefix: `FALLBACK_FC_CI_VERSION`, `FALLBACK_FIRECRACKER_BIN`, `FALLBACK_KERNEL_BUILD_JOBS`
 - User-facing asset defaults (image/kernel/binary) → SQLite (`$MVM_CACHE_DIR/mvmdb.db`) via `is_default` column; `metadata.json` is a compatibility shim and is NOT canonical
 - NEVER hardcode defaults in function parameters or as inline variables

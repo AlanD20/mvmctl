@@ -31,7 +31,6 @@ from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
     DEFAULT_CLOUD_INIT_SEED_PATH,
     DEFAULT_NETWORK_NAME,
-    DEFAULT_SNAPSHOT_RESUME,
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode, VMInstance
@@ -515,8 +514,8 @@ def create(
 @app.command(name="rm")
 def rm(
     ids: Optional[List[str]] = typer.Argument(None, help="VM ID prefixes to remove"),
-    name: List[str] = typer.Option(
-        [], "--name", "-n", help="VM name to remove (can be specified multiple times)"
+    name: Optional[List[str]] = typer.Option(
+        None, "--name", "-n", help="VM name to remove (can be specified multiple times)"
     ),
 ) -> None:
     """Stop and remove VMs by ID prefix or name.
@@ -548,7 +547,8 @@ def rm(
             targets.append(matches[0])
 
     # Resolve names
-    for n in name:
+    effective_names = name if name is not None else []
+    for n in effective_names:
         matches = manager.get_by_name(n)
         if len(matches) == 0:
             errors.append(f"No VM found with name '{n}'")
@@ -689,9 +689,7 @@ def load(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     mem_in: Path = typer.Option(..., "--mem-in", help="Memory snapshot input path"),
     state_in: Path = typer.Option(..., "--state-in", help="VM state input path"),
-    resume_after: bool = typer.Option(
-        DEFAULT_SNAPSHOT_RESUME, "--resume/--no-resume", help="Resume VM after loading"
-    ),
+    resume_after: bool = typer.Option(None, "--resume/--no-resume", help="Resume VM after loading"),
 ) -> None:
     """Load VM from snapshot. Requires --enable-api-socket."""
     from mvmctl.utils.validation import validate_entity_name

@@ -1300,7 +1300,7 @@ def test_bin_ls_default_limit():
     from mvmctl.cli.bin import bin_app
 
     result = runner.invoke(bin_app, ["ls", "--help"])
-    assert "5" in result.output
+    assert "--limit" in result.output
 
 
 def test_kernel_ls_auto_creates_dir(tmp_path: Path):

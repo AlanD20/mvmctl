@@ -33,6 +33,7 @@ from mvmctl.constants import (
     DEFAULT_FC_PID_FILENAME,
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
+    DEFAULT_SNAPSHOT_RESUME,
     DEFAULT_VM_ENABLE_API_SOCKET,
     DEFAULT_VM_ENABLE_CONSOLE,
     DEFAULT_VM_ENABLE_PCI,
@@ -1830,7 +1831,10 @@ def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
         client.close()
 
 
-def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = True) -> None:
+def load_snapshot(
+    name: str, mem_in: Path, state_in: Path, resume_after: bool | None = None
+) -> None:
+    effective_resume = resume_after if resume_after is not None else DEFAULT_SNAPSHOT_RESUME
     socket_path = get_vm_socket_path(name)
     if not socket_path:
         raise MVMError(
@@ -1839,7 +1843,7 @@ def load_snapshot(name: str, mem_in: Path, state_in: Path, resume_after: bool = 
 
     client = FirecrackerClient(socket_path)
     try:
-        client.load_snapshot(mem_in, state_in, resume_after)
+        client.load_snapshot(mem_in, state_in, effective_resume)
     finally:
         client.close()
 

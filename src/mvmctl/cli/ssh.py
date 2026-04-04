@@ -13,7 +13,7 @@ from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 if TYPE_CHECKING:
-    from mvmctl.core.config import VMDefaultsConfig
+    from mvmctl.api.config import VMDefaultsConfig
 
 app = typer.Typer(
     help="VM SSH access",

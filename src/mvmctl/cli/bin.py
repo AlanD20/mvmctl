@@ -42,11 +42,8 @@ from mvmctl.cli._helpers import get_combined_marker, is_file_missing
 from mvmctl.constants import (
     COMPRESSION_EXTENSION_MAP,
     DEFAULT_FC_KERNEL_ARCH,
-    DEFAULT_IMAGE_CONVERT_TO,
     DEFAULT_IMAGE_IMPORT_FORMAT,
-    DEFAULT_IMAGE_IMPORT_SIZE_MIB,
     DEFAULT_KERNEL_VERSION,
-    DEFAULT_REMOTE_VERSION_LIMIT,
     IMAGE_IMPORT_FORMAT_MAP,
     KERNEL_TYPE_FIRECRACKER,
     KERNEL_TYPE_OFFICIAL,
@@ -333,9 +330,7 @@ def kernel_fetch(
         "--version",
         help="Kernel spec version from kernels.yaml (required if multiple specs share the same type)",
     ),
-    arch: str = typer.Option(
-        DEFAULT_FC_KERNEL_ARCH, "--arch", help="Architecture (for firecracker type)"
-    ),
+    arch: str = typer.Option(None, "--arch", help="Architecture (for firecracker type)"),
     out: Optional[Path] = typer.Option(None, "--out", help="Output path/name"),
     name: Optional[str] = typer.Option(
         None,
@@ -410,7 +405,8 @@ def kernel_fetch(
 
     elif spec.kernel_type == KERNEL_TYPE_OFFICIAL:
         effective_version = spec.version or DEFAULT_KERNEL_VERSION
-        effective_arch = arch or DEFAULT_FC_KERNEL_ARCH
+        # Runtime resolution: use provided arch or fall back to default
+        effective_arch = arch if arch is not None else DEFAULT_FC_KERNEL_ARCH
         output_path = (
             out
             if out is not None
@@ -1280,16 +1276,12 @@ def image_import(
     name: str = typer.Argument(..., help="Display name for the imported image"),
     source_path: Path = typer.Argument(..., help="Path to local image file"),
     format: str = typer.Option(
-        DEFAULT_IMAGE_IMPORT_FORMAT,
+        None,
         "--format",
         help="Image format: qcow2, raw, tar-rootfs, or auto",
     ),
-    convert_to: str = typer.Option(
-        DEFAULT_IMAGE_CONVERT_TO, "--convert-to", help="Target filesystem format"
-    ),
-    size_mib: int = typer.Option(
-        DEFAULT_IMAGE_IMPORT_SIZE_MIB, "--size-mib", help="Size in MiB for tar-rootfs import"
-    ),
+    convert_to: str = typer.Option(None, "--convert-to", help="Target filesystem format"),
+    size_mib: int = typer.Option(None, "--size-mib", help="Size in MiB for tar-rootfs import"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing"),
     set_default: bool = typer.Option(False, "--set-default", help="Set as default after import"),
     images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Output directory"),
@@ -1334,6 +1326,9 @@ def image_import(
     image_id = full_id_hash
 
     resolved_format: str | None = format
+    # Runtime resolution: if no format specified, use default and auto-detect from filename
+    if resolved_format is None:
+        resolved_format = DEFAULT_IMAGE_IMPORT_FORMAT
     if resolved_format == DEFAULT_IMAGE_IMPORT_FORMAT:
         fname = source_path.name.lower()
         resolved_format = next(
@@ -1413,9 +1408,7 @@ def _format_bin_row(bv: BinaryVersion, is_missing: bool = False) -> list[str]:
 @bin_app.command(name="ls")
 def bin_ls(
     remote: bool = typer.Option(False, "--remote", "-r", help="Also show remote versions"),
-    limit: int = typer.Option(
-        DEFAULT_REMOTE_VERSION_LIMIT, "--limit", help="Max remote versions to show"
-    ),
+    limit: int = typer.Option(None, "--limit", help="Max remote versions to show"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List local (and optionally remote) Firecracker versions."""

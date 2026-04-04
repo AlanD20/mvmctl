@@ -60,26 +60,57 @@ app = typer.Typer(
 
 Missing `rich_markup_mode=None` causes Rich markup in help output.
 
-## NONE-DEFAULT + RUNTIME RESOLUTION
+## NONE-DEFAULT + RUNTIME RESOLUTION (STRICT ENFORCEMENT)
 
-Typer option defaults must be `None`. Config-backed values resolved at runtime.
+Typer option defaults **MUST BE `None`**. NO EXCEPTIONS for config-backed values.
 
-**Why:** Defaults come from state/config at runtime (SQLite `$MVM_CACHE_DIR/mvmdb.db` for image/kernel/binary defaults and `assets/defaults.yaml` for static defaults). Hardcoding in `typer.Option()` bypasses user config/state.
+### Why This Rule Exists
+
+Defaults come from SQLite state (`$MVM_CACHE_DIR/mvmdb.db`) or `assets/defaults.yaml` at **runtime**, not at import time. Hardcoding in `typer.Option()`:
+1. Bypasses user config changes
+2. Ignores environment variable overrides  
+3. Breaks the configuration priority chain
+4. Makes CLI help text show stale/incorrect values
+
+### Absolute Rules (VIOLATION = IMMEDIATE REJECTION)
+
+| Forbidden | Consequence |
+|-----------|-------------|
+| `typer.Option(DEFAULT_*, ...)` using any constant | Hardcoded default bypasses runtime config |
+| `typer.Option(get_assets_dir(), ...)` | Function evaluated at import time, ignores env vars |
+| `typer.Option([], ...)` for list types | Breaks Typer internals; use `None` with runtime list() conversion |
+| `typer.Option(True/False, ...)` for config-backed booleans | Must use `None` for tri-state (user/config/default resolution) |
+
+### Correct Pattern (MANDATORY)
 
 ```python
-# CORRECT — default None, resolve at runtime
+# Step 1: All typer params use None default
 vcpus: Optional[int] = typer.Option(None, "--vcpus", ...)
+lines: int = typer.Option(None, "--lines", ...)  # int, not Optional[int], but still None default
+
+# Step 2: Runtime resolution inside function
 defaults = _get_vm_defaults()
 effective_vcpus = vcpus if vcpus is not None else defaults.vcpu_count
-
-# WRONG — hardcoded default bypasses config
-vcpus: int = typer.Option(2, "--vcpus", ...)
+effective_lines = lines if lines is not None else DEFAULT_VM_LOG_LINES
 ```
 
-**Pattern:**
-1. Typer param: `typer.Option(None, ...)`
-2. Runtime: `_defaults = _get_vm_defaults()`
-3. Resolution: `value if value is not None else _defaults.field`
+### Verification Checklist
+
+Before submitting any CLI change, verify:
+- [ ] No `typer.Option(DEFAULT_*` patterns exist
+- [ ] No `typer.Option(get_*_dir()` patterns exist  
+- [ ] No `typer.Option([])` patterns exist
+- [ ] All config-backed values resolve at runtime, not import time
+- [ ] Help text does not show hardcoded defaults for config-backed options
+
+### Enforcement
+
+CI checks will reject PRs containing:
+- Named constants in `typer.Option()` defaults
+- Function calls as `typer.Option()` defaults
+- Non-None defaults for values that should be config-backed
+
+**NO EXCEPTIONS. NO WORKAROUNDS. NO DISCUSSION.**
 
 ## MULTIPLE POSITIONAL ARGS
 

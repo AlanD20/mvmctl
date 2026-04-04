@@ -25,10 +25,10 @@ app = typer.Typer(
 @app.command()
 def logs(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
-    follow: bool = typer.Option(DEFAULT_VM_LOG_FOLLOW, "--follow", "-f", help="Follow log output"),
-    lines: int = typer.Option(DEFAULT_VM_LOG_LINES, "--lines", help="Number of lines to show"),
+    follow: bool = typer.Option(None, "--follow", "-f", help="Follow log output"),
+    lines: int = typer.Option(None, "--lines", help="Number of lines to show"),
     log_type: str = typer.Option(
-        DEFAULT_VM_LOG_TYPE,
+        None,
         "--type",
         help="Log type: boot (serial console) or os (firecracker process log)",
     ),
@@ -40,7 +40,12 @@ def logs(
     """
     try:
         validate_entity_name(name, "VM")
-        log_lines = get_logs(name=name, log_type=log_type, lines=lines, follow=follow)
+        effective_follow = follow if follow is not None else DEFAULT_VM_LOG_FOLLOW
+        effective_lines = lines if lines is not None else DEFAULT_VM_LOG_LINES
+        effective_log_type = log_type if log_type is not None else DEFAULT_VM_LOG_TYPE
+        log_lines = get_logs(
+            name=name, log_type=effective_log_type, lines=effective_lines, follow=effective_follow
+        )
         for line in log_lines:
             print(line, end="" if line.endswith("\n") else "\n")
         raise typer.Exit(code=0)
