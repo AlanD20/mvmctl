@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 from mvmctl.api.host import check_privileges_interactive
-from mvmctl.core.network import (
-    get_iptables_rules_for_bridge,
-    list_network_interfaces,
-    validate_network_interface,
-)
 from mvmctl.core.network_manager import (
     NetworkConfig,
     NetworkLease,
@@ -27,6 +22,11 @@ from mvmctl.core.network_manager import (
 )
 from mvmctl.core.network_manager import (
     remove_network as _remove_network,
+)
+from mvmctl.utils.network import (
+    get_iptables_rules_for_bridge,
+    list_network_interfaces,
+    validate_network_interface,
 )
 
 __all__ = [

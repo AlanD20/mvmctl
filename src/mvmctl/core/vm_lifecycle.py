@@ -59,15 +59,14 @@ from mvmctl.core.image import copy_from_ready_pool, ensure_image_in_ready_pool
 from mvmctl.core.metadata import list_image_entries
 from mvmctl.core.network import (
     add_iptables_forward_rules,
-    bridge_exists,
     create_tap,
     delete_tap,
-    generate_mac,
     remove_iptables_forward_rules,
     setup_bridge,
     setup_nat,
     teardown_nat,
 )
+from mvmctl.utils.network import bridge_exists, generate_mac
 from mvmctl.core.network_manager import (
     allocate_network_ip,
     ensure_default_network,
@@ -965,8 +964,6 @@ WantedBy=multi-user.target
         )
         # Don't re-raise - allow VM creation to continue
         return
-    except VMCreateError:
-        raise
     except Exception as e:
         raise VMCreateError(f"Failed to inject SSH keys: {e}") from e
 

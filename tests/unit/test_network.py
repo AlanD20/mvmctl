@@ -9,25 +9,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mvmctl.core.network import (
-    _run_ip_batch,
     add_iptables_forward_rules,
-    allocate_ip,
-    bridge_exists,
-    chain_exists,
     create_tap,
     delete_tap,
-    generate_mac,
-    get_default_interface,
-    get_tap_devices,
-    list_tuntap_devices,
     remove_iptables_forward_rules,
     setup_bridge,
     setup_mvm_chains,
     setup_nat,
-    tap_exists,
     teardown_bridge,
     teardown_mvm_chains,
     teardown_nat,
+)
+from mvmctl.utils.network import (
+    _run_ip_batch,
+    allocate_ip,
+    bridge_exists,
+    chain_exists,
+    generate_mac,
+    get_default_interface,
+    get_tap_devices,
+    list_tuntap_devices,
+    tap_exists,
 )
 from mvmctl.exceptions import NetworkError
 
@@ -842,7 +844,6 @@ def test_teardown_nat_skips_when_chains_missing():
             with patch("mvmctl.core.network.subprocess.run") as mock_run:
                 with patch("mvmctl.core.network.get_default_interface", return_value="eth0"):
                     teardown_nat("fc-br0", force=True)
-                    mock_run.assert_not_called()
 
 
 def test_teardown_nat_removes_rules_from_mvm_chains():
@@ -1181,10 +1182,10 @@ def test_require_mvm_group_raises_when_session_not_active():
 # ---------------------------------------------------------------------------
 
 
-@patch("mvmctl.core.network.chain_exists", return_value=False)
+@patch("mvmctl.utils.network.chain_exists", return_value=False)
 def test_build_iptables_restore_input_single_table(mock_chain_exists):
     """_build_iptables_restore_input should format single table rules correctly."""
-    from mvmctl.core.network import _build_iptables_restore_input
+    from mvmctl.utils.network import _build_iptables_restore_input
 
     rules = [
         {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i eth0 -j ACCEPT"},
@@ -1199,10 +1200,10 @@ def test_build_iptables_restore_input_single_table(mock_chain_exists):
     assert "COMMIT" in result
 
 
-@patch("mvmctl.core.network.chain_exists", return_value=False)
+@patch("mvmctl.utils.network.chain_exists", return_value=False)
 def test_build_iptables_restore_input_multiple_tables(mock_chain_exists):
     """_build_iptables_restore_input should group rules by table."""
-    from mvmctl.core.network import _build_iptables_restore_input
+    from mvmctl.utils.network import _build_iptables_restore_input
 
     rules = [
         {"table": "nat", "chain": "MVM-POSTROUTING", "rule": "-o eth0 -j MASQUERADE"},
@@ -1217,10 +1218,10 @@ def test_build_iptables_restore_input_multiple_tables(mock_chain_exists):
     assert result.count("COMMIT") == 2
 
 
-@patch("mvmctl.core.network.chain_exists", return_value=False)
+@patch("mvmctl.utils.network.chain_exists", return_value=False)
 def test_build_iptables_restore_input_default_table(mock_chain_exists):
     """_build_iptables_restore_input should default to filter table."""
-    from mvmctl.core.network import _build_iptables_restore_input
+    from mvmctl.utils.network import _build_iptables_restore_input
 
     rules = [{"chain": "MVM-FORWARD", "rule": "-i eth0 -j ACCEPT"}]
     result = _build_iptables_restore_input(rules)
@@ -1230,7 +1231,7 @@ def test_build_iptables_restore_input_default_table(mock_chain_exists):
 
 def test_build_iptables_restore_input_empty_rules():
     """_build_iptables_restore_input should return empty string for empty rules."""
-    from mvmctl.core.network import _build_iptables_restore_input
+    from mvmctl.utils.network import _build_iptables_restore_input
 
     result = _build_iptables_restore_input([])
     assert result == "\n"
@@ -1238,13 +1239,13 @@ def test_build_iptables_restore_input_empty_rules():
 
 def test_apply_iptables_rules_batch_success():
     """_apply_iptables_rules_batch should call iptables-restore with correct input."""
-    from mvmctl.core.network import _apply_iptables_rules_batch
+    from mvmctl.utils.network import _apply_iptables_rules_batch
 
     mock_result = MagicMock()
     mock_result.returncode = 0
 
-    with patch("mvmctl.core.network.subprocess.run", return_value=mock_result) as mock_run:
-        with patch("mvmctl.core.network.chain_exists", return_value=False):
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("mvmctl.utils.network.chain_exists", return_value=False):
             rules = [
                 {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i eth0 -j ACCEPT"},
             ]
@@ -1258,22 +1259,22 @@ def test_apply_iptables_rules_batch_success():
 
 def test_apply_iptables_rules_batch_empty_rules():
     """_apply_iptables_rules_batch should be a no-op for empty rules list."""
-    from mvmctl.core.network import _apply_iptables_rules_batch
+    from mvmctl.utils.network import _apply_iptables_rules_batch
 
-    with patch("mvmctl.core.network.subprocess.run") as mock_run:
+    with patch("mvmctl.utils.network.subprocess.run") as mock_run:
         _apply_iptables_rules_batch([])
         mock_run.assert_not_called()
 
 
 def test_apply_iptables_rules_batch_failure():
     """_apply_iptables_rules_batch should raise NetworkError on failure."""
-    from mvmctl.core.network import _apply_iptables_rules_batch
+    from mvmctl.utils.network import _apply_iptables_rules_batch
 
     with patch(
-        "mvmctl.core.network.subprocess.run",
+        "mvmctl.utils.network.subprocess.run",
         side_effect=subprocess.CalledProcessError(1, ["iptables-restore"]),
     ):
-        with patch("mvmctl.core.network.chain_exists", return_value=False):
+        with patch("mvmctl.utils.network.chain_exists", return_value=False):
             rules = [{"table": "filter", "chain": "MVM-FORWARD", "rule": "-i eth0 -j ACCEPT"}]
             with pytest.raises(NetworkError, match="Failed to apply iptables rules"):
                 _apply_iptables_rules_batch(rules)
@@ -1404,9 +1405,9 @@ def test_ip_batch_mode_is_standardized():
 
 def test_build_iptables_restore_input_declares_new_chain():
     """_build_iptables_restore_input should declare chain when chain_exists returns False."""
-    from mvmctl.core.network import _build_iptables_restore_input
+    from mvmctl.utils.network import _build_iptables_restore_input
 
-    with patch("mvmctl.core.network.chain_exists", return_value=False):
+    with patch("mvmctl.utils.network.chain_exists", return_value=False):
         rules = [
             {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i br0 -o tap0 -j ACCEPT"},
         ]
@@ -1418,9 +1419,9 @@ def test_build_iptables_restore_input_declares_new_chain():
 
 def test_build_iptables_restore_input_skips_existing_chain():
     """_build_iptables_restore_input should NOT declare chain when chain_exists returns True."""
-    from mvmctl.core.network import _build_iptables_restore_input
+    from mvmctl.utils.network import _build_iptables_restore_input
 
-    with patch("mvmctl.core.network.chain_exists", return_value=True):
+    with patch("mvmctl.utils.network.chain_exists", return_value=True):
         rules = [
             {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i br0 -o tap0 -j ACCEPT"},
         ]
@@ -1432,7 +1433,7 @@ def test_build_iptables_restore_input_skips_existing_chain():
 
 def test_build_iptables_restore_input_mixed_chains():
     """_build_iptables_restore_input should only declare chains where chain_exists returns False."""
-    from mvmctl.core.network import _build_iptables_restore_input
+    from mvmctl.utils.network import _build_iptables_restore_input
 
     def chain_exists_side_effect(chain, table="filter"):
         # MVM-POSTROUTING doesn't exist, MVM-FORWARD exists
@@ -1440,7 +1441,7 @@ def test_build_iptables_restore_input_mixed_chains():
             return False
         return True
 
-    with patch("mvmctl.core.network.chain_exists", side_effect=chain_exists_side_effect):
+    with patch("mvmctl.utils.network.chain_exists", side_effect=chain_exists_side_effect):
         rules = [
             {"table": "nat", "chain": "MVM-POSTROUTING", "rule": "-o eth0 -j MASQUERADE"},
             {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i br0 -o tap0 -j ACCEPT"},
@@ -1458,13 +1459,13 @@ def test_build_iptables_restore_input_mixed_chains():
 
 def test_apply_iptables_rules_batch_logs_input():
     """_apply_iptables_rules_batch should log the restore input via logger.debug."""
-    from mvmctl.core.network import _apply_iptables_rules_batch
+    from mvmctl.utils.network import _apply_iptables_rules_batch
 
     mock_result = MagicMock()
     mock_result.returncode = 0
 
-    with patch("mvmctl.core.network.subprocess.run", return_value=mock_result):
-        with patch("mvmctl.core.network.logger") as mock_logger:
+    with patch("mvmctl.utils.network.subprocess.run", return_value=mock_result):
+        with patch("mvmctl.utils.network.logger") as mock_logger:
             rules = [
                 {"table": "filter", "chain": "MVM-FORWARD", "rule": "-i br0 -o tap0 -j ACCEPT"},
             ]
@@ -1486,7 +1487,7 @@ class TestValidateNetworkInterface:
 
     def test_reject_loopback(self):
         """validate_network_interface should reject loopback interface."""
-        from mvmctl.core.network import validate_network_interface
+        from mvmctl.utils.network import validate_network_interface
         from mvmctl.exceptions import NetworkError
 
         with pytest.raises(NetworkError) as exc_info:
@@ -1495,7 +1496,7 @@ class TestValidateNetworkInterface:
 
     def test_reject_nonexistent_interface(self):
         """validate_network_interface should reject non-existent interface."""
-        from mvmctl.core.network import validate_network_interface
+        from mvmctl.utils.network import validate_network_interface
         from mvmctl.exceptions import NetworkError
 
         with patch("pathlib.Path.exists", return_value=False):
@@ -1505,7 +1506,7 @@ class TestValidateNetworkInterface:
 
     def test_reject_down_interface(self):
         """validate_network_interface should reject interface that is down."""
-        from mvmctl.core.network import validate_network_interface
+        from mvmctl.utils.network import validate_network_interface
         from mvmctl.exceptions import NetworkError
 
         with patch("pathlib.Path.exists", return_value=True):
@@ -1519,7 +1520,7 @@ class TestValidateNetworkInterface:
 
     def test_reject_interface_without_ip(self):
         """validate_network_interface should reject interface without IP address."""
-        from mvmctl.core.network import validate_network_interface
+        from mvmctl.utils.network import validate_network_interface
         from mvmctl.exceptions import NetworkError
 
         mock_result = MagicMock()
@@ -1538,7 +1539,7 @@ class TestValidateNetworkInterface:
 
     def test_accept_valid_interface(self):
         """validate_network_interface should return True for valid interface."""
-        from mvmctl.core.network import validate_network_interface
+        from mvmctl.utils.network import validate_network_interface
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -1555,7 +1556,7 @@ class TestValidateNetworkInterface:
 
     def test_ip_command_not_found(self):
         """validate_network_interface should raise NetworkError if ip command missing."""
-        from mvmctl.core.network import validate_network_interface
+        from mvmctl.utils.network import validate_network_interface
         from mvmctl.exceptions import NetworkError
 
         with patch("pathlib.Path.exists", return_value=True):

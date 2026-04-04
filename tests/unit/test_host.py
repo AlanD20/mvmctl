@@ -1612,10 +1612,10 @@ class TestCleanHost:
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-def-vm0-aaa", "eth0"])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=["mvm-def-vm0-aaa", "eth0"])
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_no_networks(
         self,
@@ -1638,10 +1638,10 @@ class TestCleanHost:
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network.teardown_nat")
     @patch("mvmctl.core.network.teardown_bridge")
     @patch("mvmctl.core.network_manager.list_networks")
@@ -1678,10 +1678,10 @@ class TestCleanHost:
             "MVM Networking: chain MVM-NOCLOUD-INPUT already deleted, skipping",
         ],
     )
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_handles_network_failure(
         self,
@@ -1710,10 +1710,10 @@ class TestCleanHost:
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
     @patch(
         "mvmctl.core.network_manager.list_networks",
         side_effect=NetworkError("list failed"),
@@ -1739,10 +1739,10 @@ class TestCleanHost:
             "Warning: MVM Networking: failed to delete chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap", side_effect=NetworkError("permission denied"))
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-denied-tap"])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=["mvm-denied-tap"])
     @patch("mvmctl.core.network.teardown_nat")
     @patch("mvmctl.core.network.teardown_bridge", side_effect=NetworkError("permission denied"))
     @patch("mvmctl.core.network_manager.list_networks")
@@ -1775,10 +1775,10 @@ class TestCleanHost:
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=["mvm-abc-vm1-xyz", "mvm-stale"])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=["mvm-abc-vm1-xyz", "mvm-stale"])
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_removes_stale_taps_without_metadata(
         self,
@@ -1803,10 +1803,10 @@ class TestCleanHost:
     )
     @patch("mvmctl.core.network.teardown_bridge")
     @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=True)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=True)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_removes_default_bridge_when_present(
         self,
@@ -1833,10 +1833,10 @@ class TestCleanHost:
     )
     @patch("mvmctl.core.network.teardown_bridge")
     @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.core.network.list_bridges", return_value=["mvm-orphan", "virbr0", "mvm-default"])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=["mvm-orphan", "virbr0", "mvm-default"])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_removes_orphan_mvm_bridges_only(
         self,
@@ -1864,10 +1864,10 @@ class TestCleanHost:
     )
     @patch("mvmctl.core.network.teardown_bridge")
     @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.core.network.list_bridges", return_value=["mvm-custom"])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=["mvm-custom"])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_skips_metadata_tracked_bridge_in_orphan_scan(
         self,
@@ -2006,10 +2006,10 @@ class TestCleanHostErrorPaths:
             "MVM Networking: chain MVM-NOCLOUD-INPUT already deleted, skipping",
         ],
     )
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network_manager.list_networks", return_value=[])
     def test_clean_host_bridge_doesnt_exist(
         self,
@@ -2034,10 +2034,10 @@ class TestCleanHostErrorPaths:
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.core.network.list_bridges", return_value=[])
-    @patch("mvmctl.core.network.bridge_exists", return_value=False)
+    @patch("mvmctl.utils.network.list_bridges", return_value=[])
+    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
     @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.core.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
     @patch("mvmctl.core.network_manager.remove_network")
     @patch("mvmctl.core.network_manager.list_networks")
     def test_clean_host_remove_network_subprocess_error(

@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 from pytest_mock import MockerFixture
 
 from mvmctl.core.network import (
-    _detect_subnet_for_bridge,
     setup_nat,
     teardown_nat,
 )
+from mvmctl.utils.network import _detect_subnet_for_bridge
 
 
 class TestSetupNat:

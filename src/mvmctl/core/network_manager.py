@@ -23,14 +23,7 @@ from mvmctl.core.metadata import (
     update_network_entry,
 )
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.core.network import (
-    allocate_ip,
-    bridge_exists,
-    setup_bridge,
-    setup_nat,
-    teardown_bridge,
-    teardown_nat,
-)
+from mvmctl.core.network import setup_bridge, setup_nat, teardown_bridge, teardown_nat
 from mvmctl.exceptions import MVMError, NetworkError
 from mvmctl.models.network import NetworkConfig as NetworkConfig
 from mvmctl.models.network import NetworkLease as NetworkLease
@@ -39,6 +32,7 @@ from mvmctl.utils.full_hash import generate_full_hash_network
 from mvmctl.utils.network import (
     bridge_name_for as _bridge_name_for_util,
 )
+from mvmctl.utils.network import allocate_ip, bridge_exists
 from mvmctl.utils.network import (
     ipv4_gateway_for_subnet as _ipv4_gateway_for_subnet_util,
 )
@@ -519,8 +513,8 @@ class _VMLease(TypedDict):
 
 class NetworkInspect(TypedDict):
     name: str
-    cidr: str
-    gateway: str
+    subnet: str
+    ipv4_gateway: str
     bridge: str
     nat_enabled: bool
     nat_gateways: list[str]
@@ -654,12 +648,14 @@ def ensure_default_network() -> NetworkConfig:
     from mvmctl.constants import MVM_POSTROUTING_CHAIN
     from mvmctl.core.host_setup import save_iptables_rules
     from mvmctl.core.network import (
-        _iptables_rule_exists,
-        bridge_exists,
-        get_default_interface,
         setup_bridge,
         setup_mvm_chains,
         setup_nat,
+    )
+    from mvmctl.utils.network import (
+        _iptables_rule_exists,
+        bridge_exists,
+        get_default_interface,
     )
 
     config = get_network(DEFAULT_NETWORK_NAME)
@@ -798,10 +794,12 @@ def restore_networks() -> list[str]:
         List of status messages describing what was restored.
     """
     from mvmctl.core.network import (
-        bridge_exists,
-        get_default_interface,
         setup_bridge,
         setup_nat,
+    )
+    from mvmctl.utils.network import (
+        bridge_exists,
+        get_default_interface,
         validate_network_interface,
     )
 

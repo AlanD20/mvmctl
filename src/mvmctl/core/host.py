@@ -89,14 +89,12 @@ def clean_host(cache_dir: Path) -> list[str]:
     """
     from mvmctl.constants import DEFAULT_NETWORK_NAME, TAP_PREFIX, device_prefix
     from mvmctl.core.network import (
-        bridge_exists,
         delete_tap,
-        list_bridges,
-        list_tuntap_devices,
         teardown_all_mvm_chains_with_status,
         teardown_bridge,
         teardown_nat,
     )
+    from mvmctl.utils.network import bridge_exists, list_bridges, list_tuntap_devices
     from mvmctl.core.network_manager import list_networks
     from mvmctl.exceptions import NetworkError
 

@@ -207,7 +207,7 @@ def test_get_network_leases_empty(mock_cache_dir: Path):
 
 @patch("mvmctl.core.network_manager.setup_nat")
 @patch("mvmctl.core.network_manager.setup_bridge")
-@patch("mvmctl.core.network.list_network_interfaces", return_value=["eth0"])
+@patch("mvmctl.utils.network.list_network_interfaces", return_value=["eth0"])
 def test_create_network_success(
     mock_interfaces, mock_setup_bridge, mock_setup_nat, mock_cache_dir: Path
 ):
@@ -359,7 +359,7 @@ def test_release_network_ip(mock_cache_dir: Path):
     assert leases[0].vm_id == "vm2"
 
 
-@patch("mvmctl.core.network.get_default_interface")
+@patch("mvmctl.utils.network.get_default_interface")
 @patch("mvmctl.core.network_manager.create_network")
 @patch("mvmctl.core.network_manager.set_default_network")
 def test_ensure_default_network_creates_when_missing(
@@ -391,7 +391,7 @@ def test_create_network_does_not_mark_default_network_created_in_sqlite(
     with (
         patch("mvmctl.core.network_manager.setup_bridge"),
         patch("mvmctl.core.network_manager.setup_nat"),
-        patch("mvmctl.core.network.list_network_interfaces", return_value=["eth0"]),
+        patch("mvmctl.utils.network.list_network_interfaces", return_value=["eth0"]),
     ):
         config = create_network(name="default", subnet="10.20.0.0/24")
 
@@ -401,7 +401,7 @@ def test_create_network_does_not_mark_default_network_created_in_sqlite(
     assert state is None or bool(state.default_network_created) is False
 
 
-@patch("mvmctl.core.network.bridge_exists", return_value=True)
+@patch("mvmctl.utils.network.bridge_exists", return_value=True)
 @patch("mvmctl.core.network.setup_nat")
 @patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
 def test_ensure_default_network_returns_existing(
@@ -438,7 +438,7 @@ def test_ensure_default_network_marks_default_network_created_in_sqlite(
     )
 
     with (
-        patch("mvmctl.core.network.bridge_exists", return_value=True),
+        patch("mvmctl.utils.network.bridge_exists", return_value=True),
         patch("mvmctl.core.network.setup_nat"),
         patch("mvmctl.core.network.setup_mvm_chains", return_value=True),
     ):
@@ -460,7 +460,7 @@ def test_ensure_default_network_sets_default_when_none_exists(mock_cache_dir: Pa
     )
 
     with (
-        patch("mvmctl.core.network.bridge_exists", return_value=True),
+        patch("mvmctl.utils.network.bridge_exists", return_value=True),
         patch("mvmctl.core.network.setup_nat"),
         patch("mvmctl.core.network.setup_mvm_chains", return_value=True),
     ):
@@ -491,7 +491,7 @@ def test_ensure_default_network_preserves_existing_other_default(mock_cache_dir:
     )
 
     with (
-        patch("mvmctl.core.network.bridge_exists", return_value=True),
+        patch("mvmctl.utils.network.bridge_exists", return_value=True),
         patch("mvmctl.core.network.setup_nat"),
         patch("mvmctl.core.network.setup_mvm_chains", return_value=True),
     ):
@@ -503,11 +503,11 @@ def test_ensure_default_network_preserves_existing_other_default(mock_cache_dir:
     assert default_entry[0] == "custom"
 
 
-@patch("mvmctl.core.network.bridge_exists", return_value=False)
+@patch("mvmctl.utils.network.bridge_exists", return_value=False)
 @patch("mvmctl.core.network.setup_bridge")
 @patch("mvmctl.core.network.setup_nat")
 @patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
-@patch("mvmctl.core.network.get_default_interface", return_value="eth0")
+@patch("mvmctl.utils.network.get_default_interface", return_value="eth0")
 def test_ensure_default_network_recreates_missing_bridge(
     mock_get_iface,
     mock_setup_chains,
@@ -535,11 +535,11 @@ def test_ensure_default_network_recreates_missing_bridge(
     )
 
 
-@patch("mvmctl.core.network.bridge_exists", return_value=True)
+@patch("mvmctl.utils.network.bridge_exists", return_value=True)
 @patch("mvmctl.core.network.setup_bridge")
 @patch("mvmctl.core.network.setup_nat")
 @patch("mvmctl.core.network.setup_mvm_chains", return_value=False)
-@patch("mvmctl.core.network.get_default_interface", return_value="eth0")
+@patch("mvmctl.utils.network.get_default_interface", return_value="eth0")
 def test_ensure_default_network_recreates_missing_chains(
     mock_get_iface,
     mock_setup_chains,
@@ -567,11 +567,11 @@ def test_ensure_default_network_recreates_missing_chains(
     )
 
 
-@patch("mvmctl.core.network.bridge_exists", return_value=True)
+@patch("mvmctl.utils.network.bridge_exists", return_value=True)
 @patch("mvmctl.core.network.setup_bridge")
 @patch("mvmctl.core.network.setup_nat")
 @patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
-@patch("mvmctl.core.network._iptables_rule_exists", return_value=True)
+@patch("mvmctl.utils.network._iptables_rule_exists", return_value=True)
 def test_ensure_default_network_idempotent_when_all_exists(
     mock_rule_exists,
     mock_setup_chains,
@@ -729,7 +729,7 @@ class TestRestoreNetworks:
         )
 
         with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
-            with patch("mvmctl.core.network.bridge_exists", return_value=True):
+            with patch("mvmctl.utils.network.bridge_exists", return_value=True):
                 result = restore_networks()
                 assert len(result) == 1
                 assert "bridge already exists" in result[0]
@@ -748,7 +748,7 @@ class TestRestoreNetworks:
         )
 
         with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
-            with patch("mvmctl.core.network.bridge_exists", return_value=False):
+            with patch("mvmctl.utils.network.bridge_exists", return_value=False):
                 with patch("mvmctl.core.network.setup_bridge") as mock_setup:
                     with patch("mvmctl.core.network_manager.update_network_entry"):
                         result = restore_networks()
@@ -771,9 +771,11 @@ class TestRestoreNetworks:
         )
 
         with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
-            with patch("mvmctl.core.network.bridge_exists", return_value=False):
+            with patch("mvmctl.utils.network.bridge_exists", return_value=False):
                 with patch("mvmctl.core.network.setup_bridge"):
-                    with patch("mvmctl.core.network.validate_network_interface", return_value=True):
+                    with patch(
+                        "mvmctl.utils.network.validate_network_interface", return_value=True
+                    ):
                         with patch("mvmctl.core.network.setup_nat") as mock_nat:
                             with patch("mvmctl.core.network_manager.update_network_entry"):
                                 result = restore_networks()
@@ -795,9 +797,9 @@ class TestRestoreNetworks:
         )
 
         with patch("mvmctl.core.network_manager.list_networks", return_value=[config]):
-            with patch("mvmctl.core.network.bridge_exists", return_value=False):
+            with patch("mvmctl.utils.network.bridge_exists", return_value=False):
                 with patch("mvmctl.core.network.setup_bridge"):
-                    with patch("mvmctl.core.network.validate_network_interface") as mock_validate:
+                    with patch("mvmctl.utils.network.validate_network_interface") as mock_validate:
                         mock_validate.return_value = True
                         with patch(
                             "mvmctl.core.network.get_default_interface", return_value="eth0"
