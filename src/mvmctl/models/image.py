@@ -48,7 +48,7 @@ class ImageRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "internal_id": self.os_slug,
+            "os_slug": self.os_slug,
             "filename": self.path,
             "os_name": self.os_name,
             "fs_type": self.fs_type,

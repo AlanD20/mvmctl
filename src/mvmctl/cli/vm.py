@@ -83,9 +83,9 @@ def _resolve_default_image() -> str | None:
         if default_entry is None:
             return None
         image_id, meta = default_entry
-        internal_id = meta.get("internal_id")
-        if isinstance(internal_id, str) and internal_id:
-            return internal_id
+        os_slug = meta.get("os_slug")
+        if isinstance(os_slug, str) and os_slug:
+            return os_slug
         return image_id
     except Exception:
         return None
@@ -894,9 +894,9 @@ def _print_vm_details(info: dict[str, Any]) -> None:
             matches = find_images_by_id_prefix(get_cache_dir(), image_id)
             if matches:
                 _, meta = matches[0]
-                internal_id = meta.get("internal_id")
-                if internal_id:
-                    image_name = internal_id
+                os_slug = meta.get("os_slug")
+                if os_slug:
+                    image_name = os_slug
         except Exception:
             pass
         print_key_value("Image", f"{image_name} ({image_display})")
@@ -985,9 +985,9 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
             matches = find_images_by_id_prefix(get_cache_dir(), image_id)
             if matches:
                 _, meta = matches[0]
-                internal_id = meta.get("internal_id")
-                if internal_id:
-                    image_name = internal_id
+                os_slug = meta.get("os_slug")
+                if os_slug:
+                    image_name = os_slug
         except Exception:
             pass
         tree_lines.append(f"├── Image:      {image_name} ({image_display})")

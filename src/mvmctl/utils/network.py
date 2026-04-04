@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import random
 import secrets
+import string
 import subprocess
 from pathlib import Path
 
-from mvmctl.constants import DEFAULT_GUEST_MAC_PREFIX, bridge_name
+from mvmctl.constants import CLI_NAME, DEFAULT_GUEST_MAC_PREFIX, bridge_name
 from mvmctl.exceptions import NetworkError
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,11 @@ def generate_mac() -> str:
     rand_bytes = secrets.token_bytes(4)
     suffix = ":".join(f"{b:02x}" for b in rand_bytes)
     return f"{DEFAULT_GUEST_MAC_PREFIX}:{suffix}"
+
+
+def generate_tap_name(network_name: str, vm_name: str) -> str:
+    rand_suffix = "".join(random.choices(string.ascii_lowercase, k=3))
+    return f"{CLI_NAME}-{network_name[:3]}-{vm_name[:3]}-{rand_suffix}"
 
 
 def list_network_interfaces() -> list[str]:

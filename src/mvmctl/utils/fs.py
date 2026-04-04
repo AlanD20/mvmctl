@@ -1,5 +1,4 @@
-"""Filesystem path helpers for MVM cache directories."""
-
+import fcntl
 import os
 from pathlib import Path
 
@@ -184,13 +183,58 @@ def get_real_user_ids() -> tuple[int, int] | None:
         return None
 
 
-def chown_to_real_user(path: Path) -> None:
-    """Recursively chown *path* to the real invoking user when running under sudo.
+def write_pid_file(pid_file: Path, pid: int, mode: int = 0o600) -> None:
+    fd = os.open(str(pid_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        os.write(fd, str(pid).encode())
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
-    This corrects ownership of cache/config files created as root so the
-    non-root user can access them after ``sudo mvm host init``.
-    No-op when not running under sudo or when the path does not exist.
-    """
+
+def read_pid_file(pid_file: Path) -> int | None:
+    if not pid_file.exists():
+        return None
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (ValueError, OSError):
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        pass
+    return pid
+
+
+def write_exit_code(vm_dir: Path, exit_code: int, filename: str) -> None:
+    try:
+        (vm_dir / filename).write_text(str(exit_code))
+    except OSError:
+        pass
+
+
+def secure_mkdir(directory: Path, name: str) -> None:
+    try:
+        os.lstat(directory)
+        if os.path.islink(directory):
+            raise MVMError(f"'{name}' path is a symlink (possible attack): {directory}")
+        raise MVMError(f"'{name}' already exists at {directory}")
+    except FileNotFoundError:
+        pass
+    try:
+        directory.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        if os.path.islink(directory):
+            raise MVMError(f"'{name}' path is a symlink (race condition detected): {directory}")
+        raise MVMError(f"'{name}' already exists at {directory}")
+    if os.path.islink(directory):
+        raise MVMError(f"'{name}' directory is a symlink (security violation): {directory}")
+
+
+def chown_to_real_user(path: Path) -> None:
     ids = get_real_user_ids()
     if ids is None or not path.exists():
         return

@@ -166,7 +166,7 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
 
     image = Image(
         id=image_id,
-        os_slug=fields.get("internal_id", ""),
+        os_slug=fields.get("os_slug") or fields.get("internal_id", ""),
         path=fields.get("filename", ""),
         os_name=fields.get("os_name"),
         fs_type=fields.get("fs_type"),
@@ -238,22 +238,19 @@ def set_default_image_entry(cache_dir: Path, image_id: str) -> None:
     db.set_default_image(image_id)
 
 
-def set_default_image_by_internal_id(cache_dir: Path, internal_id: str) -> None:
-    """Set an image as default by its internal_id (os_slug)."""
+def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
     db = MVMDatabase()
-    image = db.get_image_by_os_slug(internal_id)
+    image = db.get_image_by_os_slug(os_slug)
     if image:
         db.set_default_image(image.id)
         return
 
-    # Fallback: search through all images
-    images = db.list_images()
-    for image in images:
-        if image.os_slug == internal_id:
+    for image in db.list_images():
+        if image.os_slug == os_slug:
             db.set_default_image(image.id)
             return
 
-    raise KeyError(f"Image internal_id '{internal_id}' not found in metadata")
+    raise KeyError(f"Image os_slug '{os_slug}' not found in metadata")
 
 
 def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:

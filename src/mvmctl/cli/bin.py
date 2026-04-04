@@ -33,7 +33,7 @@ from mvmctl.api.metadata import (
     list_image_entries,
     remove_image_entry,
     remove_kernel_entry,
-    set_default_image_by_internal_id,
+    set_default_image_by_os_slug,
     set_default_image_entry,
     update_image_entry,
 )
@@ -70,7 +70,7 @@ from mvmctl.utils.fs import (
     get_images_dir,
     get_kernels_dir,
 )
-from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
+from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
 
 def _format_size_human_readable(size_sectors: int) -> str:
@@ -631,11 +631,11 @@ def image_ls(
         # Pre-load all metadata for lookup
         _all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
 
-        def _find_meta_for_internal_id_remote(
-            internal_id: str,
+        def _find_meta_for_os_slug_remote(
+            os_slug: str,
         ) -> tuple[str, dict[str, object]] | None:
             for _k, _v in _all_meta.items():
-                if str(_v.get("internal_id", "")) == internal_id:
+                if str(_v.get("os_slug", "")) == os_slug:
                     return _k, _v
             return None
 
@@ -655,7 +655,7 @@ def image_ls(
             # Get compression format from metadata if downloaded
             compression = "-"
             if found_path and not is_missing:
-                entry = _find_meta_for_internal_id_remote(img.id)
+                entry = _find_meta_for_os_slug_remote(img.id)
                 if entry:
                     _, meta = entry
                     compression = str(meta.get("compressed_format", "-"))
@@ -687,20 +687,20 @@ def image_ls(
         return
 
     default_img = _get_default_image()
-    internal_ids = {img.id for img in images}
+    os_slugs = {img.id for img in images}
 
     _all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
 
-    def _find_meta_for_internal_id(internal_id: str) -> tuple[str, dict[str, object]] | None:
+    def _find_meta_for_os_slug(os_slug: str) -> tuple[str, dict[str, object]] | None:
         for _k, _v in _all_meta.items():
-            if str(_v.get("internal_id", "")) == internal_id:
+            if str(_v.get("os_slug", "")) == os_slug:
                 return _k, _v
         return None
 
     if json_output:
         result = []
         for img in images:
-            entry = _find_meta_for_internal_id(img.id)
+            entry = _find_meta_for_os_slug(img.id)
             if entry:
                 meta_key, meta = entry
                 display_id = meta_key
@@ -716,7 +716,7 @@ def image_ls(
                     }
                 )
         for meta_id, meta in _all_meta.items():
-            if str(meta.get("internal_id", meta_id)) in internal_ids:
+            if str(meta.get("os_slug", meta_id)) in os_slugs:
                 continue
             display_id = meta_id
             result.append(
@@ -745,12 +745,12 @@ def image_ls(
             None,
         )
         # Check metadata first - show metadata-only entries even if file missing
-        entry = _find_meta_for_internal_id(img.id) if found_path is None else None
+        entry = _find_meta_for_os_slug(img.id) if found_path is None else None
         if found_path is None and entry is None:
             continue  # No file and no metadata - skip entirely
         # If file missing but metadata exists, we will show it with X marker below
         if entry is None:
-            entry = _find_meta_for_internal_id(img.id)
+            entry = _find_meta_for_os_slug(img.id)
         if entry:
             meta_key, meta = entry
             display_id_base = meta_key
@@ -774,7 +774,7 @@ def image_ls(
         rows_local.append([display_id, img.name, fs_type, size_str, added])
 
     for meta_id, meta in _all_meta.items():
-        if str(meta.get("internal_id", meta_id)) in internal_ids:
+        if str(meta.get("os_slug", meta_id)) in os_slugs:
             continue
         found_path = next(
             (
@@ -816,9 +816,9 @@ def _get_default_image() -> str | None:
         if default_entry is None:
             return None
         image_id, meta = default_entry
-        internal_id = meta.get("internal_id")
-        if isinstance(internal_id, str) and internal_id:
-            return internal_id
+        os_slug = meta.get("os_slug")
+        if isinstance(os_slug, str) and os_slug:
+            return os_slug
         return image_id
     except Exception:
         return None
@@ -920,7 +920,7 @@ def image_fetch(
                 print_info("Skipping download. Use --force to overwrite.")
                 if set_default:
                     try:
-                        set_default_image_by_internal_id(get_cache_dir(), spec.id)
+                        set_default_image_by_os_slug(get_cache_dir(), spec.id)
                     except KeyError:
                         pass
                     print_success(f"Default image set to: {spec.id}")
@@ -965,7 +965,7 @@ def image_fetch(
             result_path,
             {
                 "os_name": spec.name,
-                "internal_id": spec.id,
+                "os_slug": spec.id,
                 "full_hash": full_id,
                 "filename": result_path.name,
             },
@@ -978,7 +978,7 @@ def image_fetch(
         print_success(f"Image ready: {result_path}")
         print_info(f"  ID: {full_id}")
         if set_default:
-            set_default_image_by_internal_id(get_cache_dir(), spec.id)
+            set_default_image_by_os_slug(get_cache_dir(), spec.id)
             print_success(f"Default image set to: {spec.id}")
         raise typer.Exit(code=0)
     else:
@@ -1176,7 +1176,7 @@ def image_inspect(
     info = {
         "id": full_id,
         "name": str(meta.get("os_name", "-")),
-        "internal_id": str(meta.get("internal_id", "-")),
+        "os_slug": str(meta.get("os_slug", "-")),
         "filename": filename or "-",
         "fs_type": str(meta.get("fs_type", "-")),
         "fs_uuid": str(meta.get("fs_uuid", "-")),
@@ -1208,15 +1208,15 @@ def _print_image_details(info: dict[str, Any], found_path: Path | None) -> None:
     )
 
     name = info.get("name", "-")
-    internal_id = info.get("internal_id", "-")
+    os_slug = info.get("os_slug", "-")
     missing_marker = " (missing)" if info.get("missing") else ""
 
-    print_inspect_header(f"Image: {internal_id}{missing_marker}")
+    print_inspect_header(f"Image: {os_slug}{missing_marker}")
 
     print_section_header("BASIC INFO")
     print_key_value("ID", info.get("id", "-"))
     print_key_value("Name", name)
-    print_key_value("Internal ID", internal_id)
+    print_key_value("OS Slug", os_slug)
     print_key_value("Pulled", format_timestamp(info.get("pulled_at")))
 
     print_section_header("STORAGE")
@@ -1234,15 +1234,15 @@ def _print_image_details(info: dict[str, Any], found_path: Path | None) -> None:
 
 def _print_image_details_tree(info: dict[str, Any], found_path: Path | None) -> None:
     name = info.get("name", "-")
-    internal_id = info.get("internal_id", "-")
+    os_slug = info.get("os_slug", "-")
     missing_marker = " (missing)" if info.get("missing") else ""
 
-    print(f"{internal_id}{missing_marker}")
+    print(f"{os_slug}{missing_marker}")
 
     tree_lines = [
         f"├── ID:          {info.get('id', '-')}",
         f"├── Name:        {name}",
-        f"├── Internal ID: {internal_id}",
+        f"├── OS Slug: {os_slug}",
         f"├── Pulled:      {info.get('pulled_at', '-')}",
     ]
 

@@ -30,7 +30,7 @@ from mvmctl.constants import (
     HTTP_TIMEOUT_SHA256_FETCH_S,
     HTTP_USER_AGENT,
 )
-from mvmctl.exceptions import ConfigError, ImageError
+from mvmctl.exceptions import ConfigError, ImageError, MVMError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.guestfs import extract_partition_with_guestfs
 from mvmctl.utils.http import download_file as _download_file
@@ -1620,3 +1620,120 @@ def clean_ready_pool() -> int:
 
     logger.info("Cleaned ready pool: removed %d file(s)", removed_count)
     return removed_count
+
+
+def resolve_image_path(image: str) -> Path:
+    from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
+    from mvmctl.utils.fs import get_cache_dir, get_images_dir
+
+    images_dir = get_images_dir()
+    for ext in SUPPORTED_IMAGE_EXTENSIONS:
+        compressed = images_dir / f"{image}{ext}.zst"
+        if compressed.exists():
+            return compressed
+        candidate = images_dir / f"{image}{ext}"
+        if candidate.exists():
+            return candidate
+
+    direct = Path(image)
+    if direct.is_absolute() and direct.exists():
+        return direct
+
+    from mvmctl.core.metadata import find_images_by_id_prefix
+
+    matches = find_images_by_id_prefix(get_cache_dir(), image)
+    if len(matches) == 1:
+        full_key, meta = matches[0]
+        filename = str(meta.get("filename", ""))
+        if filename:
+            compressed = images_dir / f"{filename}.zst"
+            if compressed.exists():
+                return compressed
+            candidate = images_dir / filename
+            if candidate.exists():
+                return candidate
+        for ext in SUPPORTED_IMAGE_EXTENSIONS:
+            compressed = images_dir / f"{full_key}{ext}.zst"
+            if compressed.exists():
+                return compressed
+            candidate = images_dir / f"{full_key}{ext}"
+            if candidate.exists():
+                return candidate
+
+    if direct.exists():
+        return direct
+
+    raise MVMError(f"Image not found: {image!r}")
+
+
+def resolve_image_fs_uuid(image: str) -> str | None:
+    from mvmctl.core.metadata import find_images_by_id_prefix, list_image_entries
+    from mvmctl.utils.fs import get_cache_dir
+
+    cache_dir = get_cache_dir()
+    for _full_key, meta in list_image_entries(cache_dir).items():
+        if image not in {str(meta.get("os_slug", "")), str(meta.get("filename", ""))}:
+            continue
+        fs_uuid = meta.get("fs_uuid")
+        if isinstance(fs_uuid, str) and fs_uuid.strip():
+            return fs_uuid.strip()
+
+    matches = find_images_by_id_prefix(cache_dir, image)
+    if len(matches) == 1:
+        _, meta = matches[0]
+        fs_uuid = meta.get("fs_uuid")
+        if isinstance(fs_uuid, str) and fs_uuid.strip():
+            return fs_uuid.strip()
+    return None
+
+
+def resolve_image_fs_type(image: str) -> str | None:
+    from mvmctl.core.metadata import find_images_by_id_prefix, list_image_entries
+    from mvmctl.utils.fs import get_cache_dir
+
+    cache_dir = get_cache_dir()
+    for _full_key, meta in list_image_entries(cache_dir).items():
+        if image not in {str(meta.get("os_slug", "")), str(meta.get("filename", ""))}:
+            continue
+        fs_type = meta.get("fs_type")
+        if isinstance(fs_type, str) and fs_type.strip():
+            return fs_type.strip()
+
+    matches = find_images_by_id_prefix(cache_dir, image)
+    if len(matches) == 1:
+        _, meta = matches[0]
+        fs_type = meta.get("fs_type")
+        if isinstance(fs_type, str) and fs_type.strip():
+            return fs_type.strip()
+    return None
+
+
+def resolve_image_id_path(image: str) -> Path:
+    from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
+    from mvmctl.core.metadata import find_images_by_id_prefix
+    from mvmctl.utils.fs import get_cache_dir, get_images_dir
+    from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
+
+    images_dir = get_images_dir()
+    match = resolve_single_by_id_prefix(image, find_images_by_id_prefix, get_cache_dir())
+    if match is None:
+        raise MVMError(f"Image ID not found or ambiguous: {image!r}")
+
+    full_key, meta = match
+    filename = str(meta.get("filename", ""))
+    if filename:
+        compressed = images_dir / f"{filename}.zst"
+        if compressed.exists():
+            return compressed
+        candidate = images_dir / filename
+        if candidate.exists():
+            return candidate
+    for ext in SUPPORTED_IMAGE_EXTENSIONS:
+        compressed = images_dir / f"{full_key}{ext}.zst"
+        if compressed.exists():
+            return compressed
+        candidate = images_dir / f"{full_key}{ext}"
+        if candidate.exists():
+            return candidate
+
+    raise MVMError(f"Image not found: {image!r}")

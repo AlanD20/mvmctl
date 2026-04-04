@@ -1,19 +1,13 @@
-"""Full hash generation for database primary keys.
-
-All assets (images, kernels, binaries, networks, VMs) use 64-character SHA256
-hashes as their primary keys in the database.
-
-Hash generation is deterministic given the same inputs, with timestamps used
-to ensure uniqueness when content alone is ambiguous.
-
-Located in utils/ because hash generation is a pure utility function used
-across multiple layers.
-"""
-
 from __future__ import annotations
 
 import hashlib
+import time
 from pathlib import Path
+
+
+def generate_vm_id(name: str) -> str:
+    data = f"{name}:{time.time()}"
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
 def generate_full_hash_image(

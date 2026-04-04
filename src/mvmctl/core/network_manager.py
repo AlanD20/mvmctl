@@ -29,10 +29,10 @@ from mvmctl.models.network import NetworkConfig as NetworkConfig
 from mvmctl.models.network import NetworkLease as NetworkLease
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.full_hash import generate_full_hash_network
+from mvmctl.utils.network import allocate_ip, bridge_exists
 from mvmctl.utils.network import (
     bridge_name_for as _bridge_name_for_util,
 )
-from mvmctl.utils.network import allocate_ip, bridge_exists
 from mvmctl.utils.network import (
     ipv4_gateway_for_subnet as _ipv4_gateway_for_subnet_util,
 )

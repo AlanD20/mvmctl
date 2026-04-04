@@ -12,7 +12,7 @@ from mvmctl.constants import (
 )
 from mvmctl.core.metadata import (
     get_default_image_entry,
-    set_default_image_by_internal_id,
+    set_default_image_by_os_slug,
     set_default_image_entry,
     set_default_kernel_by_filename,
 )
@@ -196,7 +196,7 @@ def get_defaults_config() -> dict[str, Any]:
         default_image = get_default_image_entry(cache_dir)
         if default_image is not None:
             image_id, image_meta = default_image
-            defaults["image"] = image_meta.get("internal_id") or image_id
+            defaults["image"] = image_meta.get("os_slug") or image_id
 
     # Try SQLite first for kernel default
     try:
@@ -229,7 +229,7 @@ def set_defaults_value(key: str, value: Any) -> None:
         try:
             set_default_image_entry(cache_dir, value)
         except KeyError:
-            set_default_image_by_internal_id(cache_dir, value)
+            set_default_image_by_os_slug(cache_dir, value)
 
         try:
             db = MVMDatabase()

@@ -1,11 +1,7 @@
-import fcntl
-import hashlib
 import logging
 import os
-import random
 import shutil
 import signal
-import string
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -14,7 +10,6 @@ from typing import Any
 
 from mvmctl.constants import (
     BRIDGE_NAME,
-    CLI_NAME,
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_PID_FILE,
     CONST_MEBIBYTE_BYTES,
@@ -45,7 +40,6 @@ from mvmctl.constants import (
     FIRECRACKER_SHUTDOWN_POLL_INTERVAL_S,
     FIRECRACKER_SIGTERM_WAIT_S,
     MAX_VMS,
-    SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
 from mvmctl.core.config_gen import ConfigGenerator, DriveConfig
@@ -55,7 +49,22 @@ from mvmctl.core.firewall import (
     remove_nocloud_input_rule,
     setup_nocloud_input_chain,
 )
-from mvmctl.core.image import copy_from_ready_pool, ensure_image_in_ready_pool
+from mvmctl.core.image import (
+    copy_from_ready_pool,
+    ensure_image_in_ready_pool,
+)
+from mvmctl.core.image import (
+    resolve_image_fs_type as _resolve_image_fs_type,
+)
+from mvmctl.core.image import (
+    resolve_image_fs_uuid as _resolve_image_fs_uuid,
+)
+from mvmctl.core.image import (
+    resolve_image_path as _resolve_image_path,
+)
+from mvmctl.core.kernel import (
+    resolve_kernel_path as _resolve_kernel_path,
+)
 from mvmctl.core.metadata import list_image_entries
 from mvmctl.core.network import (
     add_iptables_forward_rules,
@@ -66,7 +75,6 @@ from mvmctl.core.network import (
     setup_nat,
     teardown_nat,
 )
-from mvmctl.utils.network import bridge_exists, generate_mac
 from mvmctl.core.network_manager import (
     allocate_network_ip,
     ensure_default_network,
@@ -86,233 +94,17 @@ from mvmctl.exceptions import (
 from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMStatus
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.services.nocloud_server import NoCloudNetServerManager
-from mvmctl.utils.fs import get_cache_dir, get_images_dir, get_kernels_dir
-
-
-def get_vm_dir(vm_hash: str) -> Path:
-    """Return the directory for a specific VM by its hash.
-
-    This is a compatibility shim for tests that patch get_vm_dir.
-    All internal code should use this function instead of get_vm_dir_by_hash.
-
-    Uses dynamic import to respect test patches on mvmctl.utils.fs.get_vm_dir_by_hash.
-    """
-    from mvmctl.utils.fs import get_vm_dir_by_hash
-
-    return get_vm_dir_by_hash(vm_hash)
-
-
-# Compatibility alias for tests that patch get_vm_dir_by_hash
-get_vm_dir_by_hash = get_vm_dir
-
-
-def _resolve_image_path(image: str) -> Path:
-    images_dir = get_images_dir()
-
-    # Check for compressed images first (.zst), then uncompressed
-    for ext in SUPPORTED_IMAGE_EXTENSIONS:
-        # Check for compressed version first
-        compressed_candidate = images_dir / f"{image}{ext}.zst"
-        if compressed_candidate.exists():
-            return compressed_candidate
-        # Fall back to uncompressed
-        candidate = images_dir / f"{image}{ext}"
-        if candidate.exists():
-            return candidate
-
-    direct = Path(image)
-    if direct.is_absolute() and direct.exists():
-        return direct
-
-    from mvmctl.core.metadata import find_images_by_id_prefix
-    from mvmctl.utils.fs import get_cache_dir
-
-    matches = find_images_by_id_prefix(get_cache_dir(), image)
-    if len(matches) == 1:
-        full_key, meta = matches[0]
-        filename = str(meta.get("filename", ""))
-        if filename:
-            # Check for compressed version first
-            compressed_candidate = images_dir / f"{filename}.zst"
-            if compressed_candidate.exists():
-                return compressed_candidate
-            candidate = images_dir / filename
-            if candidate.exists():
-                return candidate
-        for ext in SUPPORTED_IMAGE_EXTENSIONS:
-            # Check for compressed version first
-            compressed_candidate = images_dir / f"{full_key}{ext}.zst"
-            if compressed_candidate.exists():
-                return compressed_candidate
-            candidate = images_dir / f"{full_key}{ext}"
-            if candidate.exists():
-                return candidate
-
-    if direct.exists():
-        return direct
-
-    raise MVMError(f"Image not found: {image!r}")
-
-
-def _resolve_image_fs_uuid(image: str) -> str | None:
-    from mvmctl.core.metadata import find_images_by_id_prefix, list_image_entries
-    from mvmctl.utils.fs import get_cache_dir
-
-    cache_dir = get_cache_dir()
-
-    all_entries = list_image_entries(cache_dir)
-    for _full_key, meta in all_entries.items():
-        internal_id = str(meta.get("internal_id", ""))
-        filename = str(meta.get("filename", ""))
-        if image not in {internal_id, filename}:
-            continue
-
-        fs_uuid = meta.get("fs_uuid")
-        if isinstance(fs_uuid, str) and fs_uuid.strip():
-            return fs_uuid.strip()
-
-    matches = find_images_by_id_prefix(cache_dir, image)
-    if len(matches) == 1:
-        _, meta = matches[0]
-        fs_uuid = meta.get("fs_uuid")
-        if isinstance(fs_uuid, str) and fs_uuid.strip():
-            return fs_uuid.strip()
-
-    return None
-
-
-def _resolve_image_fs_type(image: str) -> str | None:
-    from mvmctl.core.metadata import find_images_by_id_prefix, list_image_entries
-    from mvmctl.utils.fs import get_cache_dir
-
-    cache_dir = get_cache_dir()
-
-    all_entries = list_image_entries(cache_dir)
-    for _full_key, meta in all_entries.items():
-        internal_id = str(meta.get("internal_id", ""))
-        filename = str(meta.get("filename", ""))
-        if image not in {internal_id, filename}:
-            continue
-        fs_type = meta.get("fs_type")
-        if isinstance(fs_type, str) and fs_type.strip():
-            return fs_type.strip()
-
-    matches = find_images_by_id_prefix(cache_dir, image)
-    if len(matches) == 1:
-        _, meta = matches[0]
-        fs_type = meta.get("fs_type")
-        if isinstance(fs_type, str) and fs_type.strip():
-            return fs_type.strip()
-
-    return None
-
-
-def _resolve_image_id_path(image: str) -> Path:
-    from mvmctl.core.metadata import find_images_by_id_prefix
-    from mvmctl.utils.fs import get_cache_dir
-    from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
-
-    images_dir = get_images_dir()
-    match = resolve_single_by_id_prefix(image, find_images_by_id_prefix, get_cache_dir())
-    if match is None:
-        raise MVMError(f"Image ID not found or ambiguous: {image!r}")
-
-    full_key, meta = match
-    filename = str(meta.get("filename", ""))
-    if filename:
-        # Check for compressed version first
-        compressed_candidate = images_dir / f"{filename}.zst"
-        if compressed_candidate.exists():
-            return compressed_candidate
-        candidate = images_dir / filename
-        if candidate.exists():
-            return candidate
-    for ext in SUPPORTED_IMAGE_EXTENSIONS:
-        # Check for compressed version first
-        compressed_candidate = images_dir / f"{full_key}{ext}.zst"
-        if compressed_candidate.exists():
-            return compressed_candidate
-        candidate = images_dir / f"{full_key}{ext}"
-        if candidate.exists():
-            return candidate
-
-    raise MVMError(f"Image not found: {image!r}")
-
-
-def _resolve_kernel_path(kernel: str) -> Path:
-    kernels_dir = get_kernels_dir()
-
-    candidate = kernels_dir / kernel
-    if candidate.exists():
-        return candidate
-
-    direct = Path(kernel)
-    if direct.is_absolute() and direct.exists():
-        return direct
-
-    from mvmctl.core.metadata import list_kernel_entries
-    from mvmctl.utils.fs import get_cache_dir
-
-    matches = [
-        (full_key, meta)
-        for full_key, meta in list_kernel_entries(get_cache_dir(), kernels_dir).items()
-        if full_key.startswith(kernel)
-    ]
-    if len(matches) == 1:
-        full_key, meta = matches[0]
-        filename = str(meta.get("filename", ""))
-        if filename:
-            candidate = kernels_dir / filename
-            if candidate.exists():
-                return candidate
-        candidate = kernels_dir / full_key
-        if candidate.exists():
-            return candidate
-
-    if direct.exists():
-        return direct
-
-    raise MVMError(f"Kernel not found: {kernel!r}")
-
-
-def _resolve_kernel_id_path(kernel: str) -> Path:
-    from mvmctl.core.metadata import list_kernel_entries
-    from mvmctl.utils.fs import get_cache_dir
-    from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
-
-    kernels_dir = get_kernels_dir()
-
-    def _find_kernels_by_id_prefix(
-        cache_dir: Path, prefix: str
-    ) -> list[tuple[str, dict[str, object]]]:
-        return [
-            (full_key, meta)
-            for full_key, meta in list_kernel_entries(cache_dir, kernels_dir).items()
-            if full_key.startswith(prefix)
-        ]
-
-    match = resolve_single_by_id_prefix(kernel, _find_kernels_by_id_prefix, get_cache_dir())
-    if match is None:
-        raise MVMError(f"Kernel ID not found or ambiguous: {kernel!r}")
-
-    full_key, meta = match
-    filename = str(meta.get("filename", ""))
-    if filename:
-        candidate = kernels_dir / filename
-        if candidate.exists():
-            return candidate
-    candidate = kernels_dir / full_key
-    if candidate.exists():
-        return candidate
-
-    raise MVMError(f"Kernel not found: {kernel!r}")
-
-
-def generate_vm_id(name: str) -> str:
-    """Generate a unique VM ID from name and current time."""
-    data = f"{name}:{time.time()}"
-    return hashlib.sha256(data.encode()).hexdigest()[:16]
-
+from mvmctl.utils.fs import (
+    get_cache_dir,
+    get_kernels_dir,
+    get_vm_dir_by_hash,
+    read_pid_file,
+    secure_mkdir,
+    write_exit_code,
+    write_pid_file,
+)
+from mvmctl.utils.full_hash import generate_vm_id
+from mvmctl.utils.network import bridge_exists, generate_mac, generate_tap_name
 
 logger = logging.getLogger(__name__)
 
@@ -1052,91 +844,23 @@ def _cleanup_vm_creation_resources(
 
 
 def _generate_tap_name(network_name: str, vm_name: str) -> str:
-    rand_suffix = "".join(random.choices(string.ascii_lowercase, k=3))
-    net_part = network_name[:3]
-    vm_part = vm_name[:3]
-    return f"{CLI_NAME}-{net_part}-{vm_part}-{rand_suffix}"
+    return generate_tap_name(network_name, vm_name)
 
 
 def _write_pid_file(pid_file: Path, pid: int) -> None:
-    """Write PID to file with an exclusive advisory lock."""
-    fd = os.open(str(pid_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, CONST_FILE_PERMS_PID_FILE)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        os.write(fd, str(pid).encode())
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
+    write_pid_file(pid_file, pid, CONST_FILE_PERMS_PID_FILE)
 
 
 def _read_pid_file(pid_file: Path) -> int | None:
-    """Read PID from file and verify the process actually exists."""
-    if not pid_file.exists():
-        return None
-    try:
-        pid = int(pid_file.read_text().strip())
-    except (ValueError, OSError):
-        return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return None
-    except PermissionError:
-        pass  # process exists but we can't signal it
-    return pid
+    return read_pid_file(pid_file)
 
 
 def _write_exit_code(vm_dir: Path, exit_code: int) -> None:
-    """Write exit code to firecracker.exitcode file."""
-    exitcode_file = vm_dir / DEFAULT_FC_EXITCODE_FILENAME
-    try:
-        exitcode_file.write_text(str(exit_code))
-    except OSError:
-        pass  # Best effort - don't fail if we can't write exit code
+    write_exit_code(vm_dir, exit_code, DEFAULT_FC_EXITCODE_FILENAME)
 
 
 def _secure_mkdir_vm(vm_dir: Path, name: str) -> None:
-    """Atomically create VM directory with TOCTOU protection.
-
-    Uses atomic mkdir with symlink detection to prevent race conditions
-    where an attacker creates a symlink between check and create.
-
-    Args:
-        vm_dir: Path to the VM directory to create
-        name: VM name for error messages
-
-    Raises:
-        MVMError: If directory exists, is a symlink, or race condition detected
-    """
-    # SECURITY: Use os.lstat() to detect symlinks before attempting creation
-    # This prevents the TOCTOU race between check and mkdir
-    try:
-        # Check if path exists and is a symlink BEFORE attempting creation
-        os.lstat(vm_dir)  # Raises FileNotFoundError if path doesn't exist
-        if os.path.islink(vm_dir):
-            raise MVMError(f"VM '{name}' path is a symlink (possible attack): {vm_dir}")
-        raise MVMError(f"VM '{name}' already exists at {vm_dir}")
-    except FileNotFoundError:
-        # Expected - path doesn't exist, safe to proceed with atomic mkdir
-        pass
-
-    # SECURITY: Attempt atomic directory creation
-    # exist_ok=False ensures we fail if path was created between check and mkdir
-    try:
-        vm_dir.mkdir(parents=True, exist_ok=False)
-    except FileExistsError:
-        # Race condition: path created between our check and mkdir
-        # Re-verify to detect symlinks
-        if os.path.islink(vm_dir):
-            raise MVMError(f"VM '{name}' path is a symlink (race condition detected): {vm_dir}")
-        raise MVMError(f"VM '{name}' already exists at {vm_dir}")
-
-    # SECURITY: Verify the created directory is not a symlink
-    # This catches cases where mkdir followed a symlink to a different parent
-    if os.path.islink(vm_dir):
-        # Attempt cleanup - but the symlink attack may have already succeeded
-        # We can't safely clean up, just report the security issue
-        raise MVMError(f"VM '{name}' directory is a symlink (security violation): {vm_dir}")
+    secure_mkdir(vm_dir, name)
 
 
 def graceful_shutdown(pid: int | None, socket_path: Path | None, force: bool = False) -> None:
@@ -1293,7 +1017,7 @@ def create_vm(
                 )
 
         vm_id = generate_vm_id(name)
-        vm_dir = get_vm_dir(vm_id)
+        vm_dir = get_vm_dir_by_hash(vm_id)
         _secure_mkdir_vm(vm_dir, name)
         resources_created["vm_dir"] = True
 
@@ -1725,7 +1449,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
 
-    vm_dir = get_vm_dir(vm.id)
+    vm_dir = get_vm_dir_by_hash(vm.id)
     net_name = vm.network_name or DEFAULT_NETWORK_NAME
     tap_name = vm.tap_device or _generate_tap_name(net_name, name)
 
@@ -1962,7 +1686,7 @@ def start_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if not vm.id:
         raise MVMError(f"VM '{name}' has no ID")
 
-    vm_dir = get_vm_dir(vm.id)
+    vm_dir = get_vm_dir_by_hash(vm.id)
     config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
     pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
 

@@ -29,22 +29,22 @@ from mvmctl.core.console import (
 from mvmctl.core.console import (
     get_console_state as _get_console_state,
 )
+from mvmctl.core.image import (
+    resolve_image_id_path as _core_resolve_image_id_path,
+)
+from mvmctl.core.image import (
+    resolve_image_path as _core_resolve_image_path,
+)
+from mvmctl.core.kernel import (
+    resolve_kernel_id_path as _core_resolve_kernel_id_path,
+)
+from mvmctl.core.kernel import (
+    resolve_kernel_path as _core_resolve_kernel_path,
+)
 from mvmctl.core.logs import show_logs
 from mvmctl.core.network import teardown_nat
 from mvmctl.core.network_manager import get_network
 from mvmctl.core.ssh import connect_to_vm
-from mvmctl.core.vm_lifecycle import (
-    _resolve_image_id_path as _core_resolve_image_id_path,
-)
-from mvmctl.core.vm_lifecycle import (
-    _resolve_image_path as _core_resolve_image_path,
-)
-from mvmctl.core.vm_lifecycle import (
-    _resolve_kernel_id_path as _core_resolve_kernel_id_path,
-)
-from mvmctl.core.vm_lifecycle import (
-    _resolve_kernel_path as _core_resolve_kernel_path,
-)
 from mvmctl.core.vm_lifecycle import (
     create_vm as _create_vm,
 )
@@ -128,7 +128,7 @@ def resolve_image_multi_strategy(value: str) -> Path:
 
     Resolution order:
     1. Direct path (if contains '/' or ends with .ext4/.btrfs)
-    2. YAML image name lookup (via metadata internal_id)
+    2. YAML image name lookup (via os_slug)
     3. Short-ID resolution against metadata.json
     """
     from mvmctl.core.metadata import list_image_entries
@@ -143,11 +143,11 @@ def resolve_image_multi_strategy(value: str) -> Path:
         if path.exists():
             return path
 
-    # YAML image name lookup (check internal_id in metadata)
+    # YAML image name lookup (check os_slug in metadata)
     all_entries = list_image_entries(cache_dir)
     for full_key, meta in all_entries.items():
-        internal_id = str(meta.get("internal_id", ""))
-        if internal_id == value:
+        os_slug = str(meta.get("os_slug", ""))
+        if os_slug == value:
             filename = str(meta.get("filename", ""))
             if filename:
                 candidate = images_dir / filename

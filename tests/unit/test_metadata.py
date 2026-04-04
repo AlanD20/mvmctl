@@ -19,7 +19,7 @@ from mvmctl.core.metadata import (
     remove_image_entry,
     remove_kernel_entry,
     set_default_binary_entry,
-    set_default_image_by_internal_id,
+    set_default_image_by_os_slug,
     set_default_image_entry,
     set_default_kernel_by_filename,
     set_default_network_entry,
@@ -107,14 +107,14 @@ class TestImageMetadata:
         update_image_entry(
             cache_dir,
             "img123",
-            internal_id="ubuntu-24.04",
+            os_slug="ubuntu-24.04",
             filename="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
             fs_type="ext4",
         )
 
         entry = get_image_entry(cache_dir, "img123")
-        assert entry["internal_id"] == "ubuntu-24.04"
+        assert entry["os_slug"] == "ubuntu-24.04"
         assert entry["os_name"] == "Ubuntu 24.04"
         assert entry["fs_type"] == "ext4"
 
@@ -123,10 +123,10 @@ class TestImageMetadata:
         cache_dir = make_test_paths(tmp_path).cache
 
         update_image_entry(
-            cache_dir, "img1", internal_id="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
+            cache_dir, "img1", os_slug="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
         )
         update_image_entry(
-            cache_dir, "img2", internal_id="debian-12", os_name="Debian", fs_type="ext4"
+            cache_dir, "img2", os_slug="debian-12", os_name="Debian", fs_type="ext4"
         )
 
         entries = list_image_entries(cache_dir)
@@ -151,7 +151,7 @@ class TestImageMetadata:
         update_image_entry(
             cache_dir,
             "img1",
-            internal_id="ubuntu-24.04",
+            os_slug="ubuntu-24.04",
             filename="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
         )
@@ -161,18 +161,18 @@ class TestImageMetadata:
         assert default is not None
         assert default[0] == "img1"
 
-    def test_set_default_image_by_internal_id(self, tmp_path: Path):
+    def test_set_default_image_by_os_slug(self, tmp_path: Path):
         """Test setting a default image by internal ID."""
         cache_dir = make_test_paths(tmp_path).cache
 
         update_image_entry(
             cache_dir,
             "img1",
-            internal_id="ubuntu-24.04",
+            os_slug="ubuntu-24.04",
             filename="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
         )
-        set_default_image_by_internal_id(cache_dir, "ubuntu-24.04")
+        set_default_image_by_os_slug(cache_dir, "ubuntu-24.04")
 
         default = get_default_image_entry(cache_dir)
         assert default is not None
@@ -182,13 +182,13 @@ class TestImageMetadata:
         cache_dir = make_test_paths(tmp_path).cache
 
         update_image_entry(
-            cache_dir, "abc123", internal_id="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
+            cache_dir, "abc123", os_slug="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
         )
         update_image_entry(
-            cache_dir, "abc456", internal_id="debian-12", os_name="Debian", fs_type="ext4"
+            cache_dir, "abc456", os_slug="debian-12", os_name="Debian", fs_type="ext4"
         )
         update_image_entry(
-            cache_dir, "def789", internal_id="fedora-40", os_name="Fedora", fs_type="ext4"
+            cache_dir, "def789", os_slug="fedora-40", os_name="Fedora", fs_type="ext4"
         )
 
         matches = find_images_by_id_prefix(cache_dir, "abc")
@@ -365,9 +365,9 @@ class TestOrphanedEntryCleanup:
 
         # Add entries - one with matching file, one orphaned
         update_image_entry(
-            cache_dir, "valid123", internal_id="ubuntu-24.04", filename="ubuntu.ext4"
+            cache_dir, "valid123", os_slug="ubuntu-24.04", filename="ubuntu.ext4"
         )
-        update_image_entry(cache_dir, "orphan456", internal_id="debian-12", filename="missing.ext4")
+        update_image_entry(cache_dir, "orphan456", os_slug="debian-12", filename="missing.ext4")
 
         # List with validation
         entries = list_image_entries(cache_dir, images_dir)

@@ -723,7 +723,7 @@ def setup_nat(
             "-s",
             subnet,
             "-i",
-            bridge,
+            effective_bridge,
             "-o",
             gateway_iface,
             "-j",
@@ -1077,7 +1077,7 @@ def add_iptables_forward_rules(tap_name: str, bridge: str | None = None) -> None
         "-i",
         tap_name,
         "-o",
-        bridge,
+        effective_bridge,
         "-j",
         "ACCEPT",
     ]
@@ -1090,7 +1090,7 @@ def add_iptables_forward_rules(tap_name: str, bridge: str | None = None) -> None
         "-i",
         tap_name,
         "-o",
-        bridge,
+        effective_bridge,
         "-j",
         "ACCEPT",
     ]

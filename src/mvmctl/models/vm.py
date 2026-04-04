@@ -294,7 +294,7 @@ class VMInstance:
                 Path(data["console_socket_path"]) if data.get("console_socket_path") else None
             ),
             exit_code=data.get("exit_code"),
-            rootfs_suffix=data.get("rootfs_suffix"),
+            rootfs_suffix=data.get("rootfs_suffix", ""),
             kernel_id=data.get("kernel_id"),
             image_id=data.get("image_id"),
         )

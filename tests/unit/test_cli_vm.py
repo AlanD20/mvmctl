@@ -831,7 +831,7 @@ def test_resolve_image_yaml_name(mocker: MockerFixture, tmp_path: Path, monkeypa
     # Mock metadata to return internal_id match
     mock_entries = {
         "abc123fullhash": {
-            "internal_id": "ubuntu-24.04",
+            "os_slug": "ubuntu-24.04",
             "filename": "ubuntu-24.04.ext4",
         }
     }

@@ -6,25 +6,29 @@ from unittest.mock import MagicMock, patch
 
 from mvmctl.constants import env_var
 from mvmctl.models import VMInstance
+from mvmctl.models.network import NetworkConfig
 
 
 class TestConsoleWorkflow:
+    @patch("mvmctl.core.vm_manager.VMManager.register")
+    @patch("mvmctl.core.vm_lifecycle.ensure_default_network")
+    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
     @patch("mvmctl.core.vm_lifecycle.os.openpty")
-    @patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
-    @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-    @patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-    @patch("mvmctl.core.vm_lifecycle.get_images_dir")
-    @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
-    @patch("mvmctl.core.vm_lifecycle.get_network")
-    @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
-    @patch("mvmctl.core.vm_lifecycle.generate_mac")
-    @patch("mvmctl.core.vm_lifecycle.bridge_exists")
+    @patch("mvmctl.utils.fs.secure_mkdir")
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_images_dir")
+    @patch("mvmctl.utils.fs.get_kernels_dir")
+    @patch("mvmctl.core.network_manager.get_network")
+    @patch("mvmctl.core.network_manager.allocate_network_ip")
+    @patch("mvmctl.utils.network.generate_mac")
+    @patch("mvmctl.utils.network.bridge_exists")
     @patch("mvmctl.core.vm_lifecycle.create_tap")
     @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
     @patch("mvmctl.core.vm_lifecycle.setup_nat")
-    @patch("mvmctl.core.vm_lifecycle._write_pid_file")
+    @patch("mvmctl.utils.fs.write_pid_file")
     @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
     @patch("mvmctl.core.cloud_init.write_cloud_init")
     @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
@@ -63,6 +67,9 @@ class TestConsoleWorkflow:
         mock_openpty,
         mock_fc_popen,
         mock_copy2,
+        mock_resolve_kernel,
+        mock_ensure_default_net,
+        mock_vm_register,
         tmp_path: Path,
     ):
         from mvmctl.core.vm_lifecycle import create_vm
@@ -74,8 +81,18 @@ class TestConsoleWorkflow:
 
         # Patch shutil.copy2 to avoid MagicMock path objects reaching real copy2
         mock_copy2.return_value = None
-        # Mock shutil.which to return a valid firecracker binary path
         mock_which.return_value = "/usr/bin/firecracker"
+        kernel_path = tmp_path / "cache" / "kernels" / "vmlinux"
+        kernel_path.parent.mkdir(parents=True, exist_ok=True)
+        kernel_path.touch()
+        mock_resolve_kernel.return_value = kernel_path
+
+        mock_ensure_default_net.return_value = NetworkConfig(
+            name="default",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
+            bridge="mvm-br0",
+        )
 
         # Debug: Ensure subprocess.Popen mock is working
         mock_fc_popen.side_effect = lambda *args, **kwargs: MagicMock(pid=1000)
@@ -91,16 +108,18 @@ class TestConsoleWorkflow:
         mock_images_dir.__truediv__.return_value = mock_image
         mock_get_images.return_value = mock_images_dir
 
-        mock_kernels_dir = MagicMock()
-        mock_kernel = MagicMock()
-        mock_kernel.exists.return_value = True
-        mock_kernels_dir.__truediv__.return_value = mock_kernel
-        mock_get_kernels.return_value = mock_kernels_dir
+        kernels_dir = tmp_path / "cache" / "kernels"
+        kernels_dir.mkdir(parents=True, exist_ok=True)
+        kernel_file = kernels_dir / "vmlinux"
+        kernel_file.touch()
+        mock_get_kernels.return_value = kernels_dir
 
-        mock_net = MagicMock()
-        mock_net.subnet = "10.20.0.0/24"
-        mock_net.ipv4_gateway = "10.20.0.1"
-        mock_net.bridge = "mvm-br0"
+        mock_net = NetworkConfig(
+            name="default",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
+            bridge="mvm-br0",
+        )
         mock_get_network.return_value = mock_net
 
         mock_alloc_ip.return_value = "10.20.0.5"
@@ -110,6 +129,7 @@ class TestConsoleWorkflow:
         mock_manager = MagicMock()
         mock_get_vm_mgr.return_value = mock_manager
         mock_manager.count_vms.return_value = 0
+        mock_manager.register.return_value = None
 
         mock_fc_proc = MagicMock()
         mock_fc_proc.pid = 1000
@@ -172,21 +192,24 @@ class TestConsoleWorkflow:
         # Verify console relay manager was called to start relay
         assert mock_console_instance.start_relay.call_count == 1
 
+    @patch("mvmctl.core.vm_manager.VMManager.register")
+    @patch("mvmctl.core.vm_lifecycle.ensure_default_network")
+    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-    @patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
-    @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-    @patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-    @patch("mvmctl.core.vm_lifecycle.get_images_dir")
-    @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
-    @patch("mvmctl.core.vm_lifecycle.get_network")
-    @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
-    @patch("mvmctl.core.vm_lifecycle.generate_mac")
-    @patch("mvmctl.core.vm_lifecycle.bridge_exists")
+    @patch("mvmctl.utils.fs.secure_mkdir")
+    @patch("mvmctl.core.vm_manager.get_vm_manager")
+    @patch("mvmctl.utils.fs.get_vm_dir")
+    @patch("mvmctl.utils.fs.get_images_dir")
+    @patch("mvmctl.utils.fs.get_kernels_dir")
+    @patch("mvmctl.core.network_manager.get_network")
+    @patch("mvmctl.core.network_manager.allocate_network_ip")
+    @patch("mvmctl.utils.network.generate_mac")
+    @patch("mvmctl.utils.network.bridge_exists")
     @patch("mvmctl.core.vm_lifecycle.create_tap")
     @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
     @patch("mvmctl.core.vm_lifecycle.setup_nat")
-    @patch("mvmctl.core.vm_lifecycle._write_pid_file")
+    @patch("mvmctl.utils.fs.write_pid_file")
     @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
     @patch("mvmctl.core.cloud_init.write_cloud_init")
     @patch("mvmctl.core.firewall.subprocess.run")
@@ -218,6 +241,9 @@ class TestConsoleWorkflow:
         mock_secure_mkdir,
         mock_popen,
         mock_copy2,
+        mock_resolve_kernel,
+        mock_ensure_default_net,
+        mock_vm_register,
         tmp_path: Path,
     ):
         from mvmctl.core.vm_lifecycle import create_vm
@@ -227,11 +253,19 @@ class TestConsoleWorkflow:
         mock_run_result.returncode = 0
         mock_subprocess_run.return_value = mock_run_result
 
-        # Patch shutil.copy2 to avoid MagicMock path objects reaching real copy2
         mock_copy2.return_value = None
-
-        # Mock shutil.which to return a valid firecracker binary path
         mock_which.return_value = "/usr/bin/firecracker"
+        kernel_path = tmp_path / "cache" / "kernels" / "vmlinux"
+        kernel_path.parent.mkdir(parents=True, exist_ok=True)
+        kernel_path.touch()
+        mock_resolve_kernel.return_value = kernel_path
+
+        mock_ensure_default_net.return_value = NetworkConfig(
+            name="default",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
+            bridge="mvm-br0",
+        )
 
         # Debug: Ensure write_cloud_init mock is working
         mock_write_ci.side_effect = lambda *args, **kwargs: None
@@ -247,16 +281,18 @@ class TestConsoleWorkflow:
         mock_images_dir.__truediv__.return_value = mock_image
         mock_get_images.return_value = mock_images_dir
 
-        mock_kernels_dir = MagicMock()
-        mock_kernel = MagicMock()
-        mock_kernel.exists.return_value = True
-        mock_kernels_dir.__truediv__.return_value = mock_kernel
-        mock_get_kernels.return_value = mock_kernels_dir
+        kernels_dir = tmp_path / "cache" / "kernels"
+        kernels_dir.mkdir(parents=True, exist_ok=True)
+        kernel_file = kernels_dir / "vmlinux"
+        kernel_file.touch()
+        mock_get_kernels.return_value = kernels_dir
 
-        mock_net = MagicMock()
-        mock_net.subnet = "10.20.0.0/24"
-        mock_net.ipv4_gateway = "10.20.0.1"
-        mock_net.bridge = "mvm-br0"
+        mock_net = NetworkConfig(
+            name="default",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
+            bridge="mvm-br0",
+        )
         mock_get_network.return_value = mock_net
 
         mock_alloc_ip.return_value = "10.20.0.5"
@@ -266,6 +302,7 @@ class TestConsoleWorkflow:
         mock_manager = MagicMock()
         mock_get_vm_mgr.return_value = mock_manager
         mock_manager.count_vms.return_value = 0
+        mock_manager.register.return_value = None
 
         mock_proc = MagicMock()
         mock_proc.pid = 1000

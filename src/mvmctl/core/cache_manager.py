@@ -257,11 +257,11 @@ def cache_prune_images(dry_run: bool = False, include_all: bool = False) -> list
                 if image_path in referenced_paths:
                     continue
 
-            internal_id = str(meta.get("internal_id", ""))
-            if internal_id:
+            os_slug = str(meta.get("os_slug", ""))
+            if os_slug:
                 is_referenced = False
                 for ref_path in referenced_paths:
-                    if internal_id in ref_path:
+                    if os_slug in ref_path:
                         is_referenced = True
                         break
                 if is_referenced:

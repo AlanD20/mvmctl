@@ -3,11 +3,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mvmctl.core.image import resolve_image_fs_type as _resolve_image_fs_type
+from mvmctl.core.image import resolve_image_path as _resolve_image_path
+from mvmctl.core.kernel import resolve_kernel_path as _resolve_kernel_path
 from mvmctl.core.vm_lifecycle import (
     _read_pid_file,
-    _resolve_image_fs_type,
-    _resolve_image_path,
-    _resolve_kernel_path,
     _secure_mkdir_vm,
     _write_pid_file,
     create_vm,
@@ -22,7 +22,7 @@ from mvmctl.core.vm_lifecycle import (
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode
 from mvmctl.models.vm import VMInstance, VMStatus
-from mvmctl.utils.id_prefix import resolve_single_by_id_prefix
+from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
 
 def test_write_read_pid_file(tmp_path):
@@ -90,8 +90,8 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -102,7 +102,7 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -204,8 +204,8 @@ def test_create_vm_core_success(
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -216,7 +216,7 @@ def test_create_vm_core_success(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -321,8 +321,8 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
 @patch("mvmctl.core.vm_lifecycle.release_network_ip")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle._read_pid_file")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.core.vm_lifecycle.read_pid_file")
 def test_remove_vm_success(
     mock_read_pid,
     mock_get_vm_dir,
@@ -377,8 +377,8 @@ def test_remove_vm_success(
 @patch("mvmctl.core.vm_lifecycle.release_network_ip")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle._read_pid_file")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.core.vm_lifecycle.read_pid_file")
 def test_remove_vm_no_nat_skips_teardown(
     mock_read_pid,
     mock_get_vm_dir,
@@ -426,8 +426,8 @@ def test_remove_vm_no_nat_skips_teardown(
 @patch("mvmctl.core.vm_lifecycle.release_network_ip")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle._read_pid_file")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.core.vm_lifecycle.read_pid_file")
 def test_remove_vm_does_not_teardown_shared_network_nat(
     mock_read_pid,
     mock_get_vm_dir,
@@ -485,8 +485,8 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
 @patch("mvmctl.core.vm_lifecycle.release_network_ip")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle._read_pid_file")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.core.vm_lifecycle.read_pid_file")
 def test_remove_vm_stops_nocloud_server(
     mock_read_pid,
     mock_get_vm_dir,
@@ -537,8 +537,8 @@ def test_remove_vm_stops_nocloud_server(
 @patch("mvmctl.core.vm_lifecycle.release_network_ip")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle._read_pid_file")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.core.vm_lifecycle.read_pid_file")
 def test_remove_vm_removes_firewall_rule(
     mock_read_pid,
     mock_get_vm_dir,
@@ -588,8 +588,8 @@ def test_remove_vm_removes_firewall_rule(
 @patch("mvmctl.core.vm_lifecycle.release_network_ip")
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle._read_pid_file")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.core.vm_lifecycle.read_pid_file")
 def test_remove_vm_cleanup_is_idempotent(
     mock_read_pid,
     mock_get_vm_dir,
@@ -691,7 +691,7 @@ def test_resolve_image_path_by_ext4(tmp_path, monkeypatch):
     images_dir.mkdir()
     img = images_dir / "ubuntu-24.04.ext4"
     img.write_bytes(b"\x00" * 64)
-    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.utils.fs.get_images_dir", return_value=images_dir):
         result = _resolve_image_path("ubuntu-24.04")
     assert result == img
 
@@ -701,7 +701,7 @@ def test_resolve_image_path_by_btrfs(tmp_path, monkeypatch):
     images_dir.mkdir()
     img = images_dir / "archlinux.btrfs"
     img.write_bytes(b"\x00" * 64)
-    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.utils.fs.get_images_dir", return_value=images_dir):
         result = _resolve_image_path("archlinux")
     assert result == img
 
@@ -709,7 +709,7 @@ def test_resolve_image_path_by_btrfs(tmp_path, monkeypatch):
 def test_resolve_image_path_by_absolute(tmp_path):
     img = tmp_path / "custom.img"
     img.write_bytes(b"\x00")
-    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=tmp_path / "images"):
+    with patch("mvmctl.utils.fs.get_images_dir", return_value=tmp_path / "images"):
         result = _resolve_image_path(str(img))
     assert result == img
 
@@ -763,13 +763,13 @@ def test_resolve_image_path_by_short_hash(tmp_path):
 
     _seed_image(full_hash, img.name, os_name="MyImage", fs_type="ext4")
 
-    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.utils.fs.get_images_dir", return_value=images_dir):
         result = _resolve_image_path(full_hash[:6])
     assert result == img
 
 
 def test_resolve_image_fs_uuid_by_short_hash(tmp_path):
-    from mvmctl.core.vm_lifecycle import _resolve_image_fs_uuid
+    from mvmctl.core.image import resolve_image_fs_uuid as _resolve_image_fs_uuid
 
     full_hash = "a" * 64
     _seed_image(full_hash, "ubuntu-24.04.ext4", fs_uuid="11111111-2222-3333-4444-555555555555")
@@ -779,7 +779,7 @@ def test_resolve_image_fs_uuid_by_short_hash(tmp_path):
 
 
 def test_resolve_image_fs_uuid_missing_returns_none(tmp_path):
-    from mvmctl.core.vm_lifecycle import _resolve_image_fs_uuid
+    from mvmctl.core.image import resolve_image_fs_uuid as _resolve_image_fs_uuid
 
     full_hash = "b" * 64
     _seed_image(full_hash, "ubuntu-24.04.ext4")
@@ -809,7 +809,7 @@ def test_resolve_image_fs_type_missing_returns_none(tmp_path):
 def test_resolve_image_path_not_found(tmp_path):
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.utils.fs.get_images_dir", return_value=images_dir):
         with pytest.raises(MVMError, match="Image not found"):
             _resolve_image_path("nonexistent")
 
@@ -839,7 +839,7 @@ def test_resolve_kernel_path_by_filename(tmp_path):
     kernels_dir.mkdir()
     kernel = kernels_dir / "vmlinux-test"
     kernel.write_bytes(b"kernel")
-    with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir):
+    with patch("mvmctl.utils.fs.get_kernels_dir", return_value=kernels_dir):
         result = _resolve_kernel_path("vmlinux-test")
     assert result == kernel
 
@@ -847,7 +847,7 @@ def test_resolve_kernel_path_by_filename(tmp_path):
 def test_resolve_kernel_path_by_absolute(tmp_path):
     kernel = tmp_path / "custom-vmlinux"
     kernel.write_bytes(b"kernel")
-    with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=tmp_path / "kernels"):
+    with patch("mvmctl.utils.fs.get_kernels_dir", return_value=tmp_path / "kernels"):
         result = _resolve_kernel_path(str(kernel))
     assert result == kernel
 
@@ -861,7 +861,7 @@ def test_resolve_kernel_path_by_short_hash(tmp_path):
 
     _seed_kernel(full_hash, kernel.name, version="6.12.0", name=kernel.name)
 
-    with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir):
+    with patch("mvmctl.utils.fs.get_kernels_dir", return_value=kernels_dir):
         result = _resolve_kernel_path(full_hash[:6])
     assert result == kernel
 
@@ -869,13 +869,13 @@ def test_resolve_kernel_path_by_short_hash(tmp_path):
 def test_resolve_kernel_path_not_found(tmp_path):
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
-    with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir):
+    with patch("mvmctl.utils.fs.get_kernels_dir", return_value=kernels_dir):
         with pytest.raises(MVMError, match="Kernel not found"):
             _resolve_kernel_path("nonexistent")
 
 
 def test_resolve_image_id_path_unique(tmp_path):
-    from mvmctl.core.vm_lifecycle import _resolve_image_id_path
+    from mvmctl.core.image import resolve_image_id_path as _resolve_image_id_path
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -885,13 +885,13 @@ def test_resolve_image_id_path_unique(tmp_path):
 
     _seed_image(full_hash, img.name)
 
-    with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
+    with patch("mvmctl.utils.fs.get_images_dir", return_value=images_dir):
         result = _resolve_image_id_path(full_hash[:6])
     assert result == img
 
 
 def test_resolve_kernel_id_path_unique(tmp_path):
-    from mvmctl.core.vm_lifecycle import _resolve_kernel_id_path
+    from mvmctl.core.kernel import resolve_kernel_id_path as _resolve_kernel_id_path
 
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
@@ -901,7 +901,7 @@ def test_resolve_kernel_id_path_unique(tmp_path):
 
     _seed_kernel(full_hash, kernel.name)
 
-    with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir):
+    with patch("mvmctl.utils.fs.get_kernels_dir", return_value=kernels_dir):
         result = _resolve_kernel_id_path(full_hash[:6])
     assert result == kernel
 
@@ -977,9 +977,9 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
     # create_vm should detect the symlink and fail
     with (
         patch("mvmctl.core.vm_lifecycle.get_vm_manager") as mock_mgr,
-        patch("mvmctl.core.vm_lifecycle.get_vm_dir", return_value=vm_dir),
-        patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir),
-        patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir),
+        patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash", return_value=vm_dir),
+        patch("mvmctl.utils.fs.get_images_dir", return_value=images_dir),
+        patch("mvmctl.utils.fs.get_kernels_dir", return_value=kernels_dir),
         patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain"),
     ):
         mock_manager = MagicMock()
@@ -995,8 +995,8 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1009,7 +1009,7 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
@@ -1106,8 +1106,8 @@ def test_create_vm_uses_cached_image_path_not_copy(
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1120,7 +1120,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
@@ -1218,8 +1218,8 @@ def test_create_vm_disk_size_resizes_local_copy_only(
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1232,7 +1232,7 @@ def test_create_vm_disk_size_resizes_local_copy_only(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
@@ -1336,8 +1336,8 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1350,7 +1350,7 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
@@ -1459,8 +1459,8 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1471,7 +1471,7 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -1562,8 +1562,8 @@ def test_create_vm_nocloud_net_starts_server(
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1574,7 +1574,7 @@ def test_create_vm_nocloud_net_starts_server(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -1673,8 +1673,8 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1685,7 +1685,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -1782,8 +1782,8 @@ def test_create_vm_nocloud_net_success_sets_port(
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1794,7 +1794,7 @@ def test_create_vm_nocloud_net_success_sets_port(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -1892,8 +1892,8 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -1904,7 +1904,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
@@ -2018,8 +2018,8 @@ def test_firewall_failure_stops_server_and_raises(
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -2030,7 +2030,7 @@ def test_firewall_failure_stops_server_and_raises(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -2123,8 +2123,8 @@ def test_create_vm_returns_immediately_with_nocloud_net(
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -2135,7 +2135,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -2226,11 +2226,11 @@ def test_create_vm_starts_nocloud_server(
     mock_net_mgr.return_value.start_server.assert_called_once()
 
 
-@patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
+@patch("mvmctl.core.vm_lifecycle.secure_mkdir")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -2240,7 +2240,7 @@ def test_create_vm_starts_nocloud_server(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -2341,11 +2341,11 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
     )
 
 
-@patch("mvmctl.core.vm_lifecycle._secure_mkdir_vm")
+@patch("mvmctl.core.vm_lifecycle.secure_mkdir")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -2355,7 +2355,7 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -2453,8 +2453,8 @@ def test_direct_injection_cleanup_on_injection_failure(
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -2465,7 +2465,7 @@ def test_direct_injection_cleanup_on_injection_failure(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -2554,8 +2554,8 @@ def test_create_vm_without_ssh_key_injects_default_keys(
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -2566,7 +2566,7 @@ def test_create_vm_without_ssh_key_injects_default_keys(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -2645,8 +2645,8 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
 @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -2657,7 +2657,7 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
 @patch("mvmctl.core.vm_lifecycle.create_tap")
 @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
 @patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
@@ -2735,8 +2735,8 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
 @patch("mvmctl.core.vm_lifecycle.subprocess.run")
 @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
-@patch("mvmctl.core.vm_lifecycle.get_images_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
+@patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.core.vm_lifecycle.get_kernels_dir")
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
@@ -2827,7 +2827,7 @@ class TestRemoveVMNATOrdering:
 
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-    @patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+    @patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
     @patch("mvmctl.core.vm_lifecycle.get_network")
     @patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
     @patch("mvmctl.core.vm_lifecycle.cleanup_tap")
@@ -2916,7 +2916,7 @@ class TestRemoveVMNATOrdering:
 
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
-    @patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+    @patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
     @patch("mvmctl.core.vm_lifecycle.get_network")
     @patch("mvmctl.core.vm_lifecycle.graceful_shutdown")
     @patch("mvmctl.core.vm_lifecycle.cleanup_tap")
@@ -3119,9 +3119,9 @@ def test_stop_vm_failure_sets_error(mock_get_mgr, mock_graceful_shutdown):
 # -----------------------------------------------------------------------------
 
 
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 def test_start_vm_success(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
     """start_vm starts a stopped VM and updates status."""
@@ -3194,7 +3194,7 @@ def test_start_vm_no_id(mock_get_mgr):
 
 
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 def test_start_vm_failure_cleanup(mock_get_mgr, mock_get_vm_dir, mock_popen):
     """start_vm cleans up resources on failure."""
@@ -3256,9 +3256,9 @@ def test_reboot_vm_stop_fails(mock_stop):
         reboot_vm("myvm")
 
 
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 def test_start_vm_with_console(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
     """start_vm handles console-enabled VMs."""
@@ -3291,7 +3291,7 @@ def test_start_vm_with_console(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_w
     mock_write_pid.assert_called_once()
 
 
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 def test_start_vm_missing_config_file(mock_get_mgr, mock_get_vm_dir):
     """start_vm raises error if firecracker.json is missing."""
@@ -3315,9 +3315,9 @@ def test_start_vm_missing_config_file(mock_get_mgr, mock_get_vm_dir):
             start_vm("myvm")
 
 
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 def test_start_vm_missing_firecracker_binary(
     mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid
@@ -3356,9 +3356,9 @@ def test_start_vm_missing_firecracker_binary(
     mock_write_pid.assert_called_once()
 
 
-@patch("mvmctl.core.vm_lifecycle._write_pid_file")
+@patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-@patch("mvmctl.core.vm_lifecycle.get_vm_dir")
+@patch("mvmctl.core.vm_lifecycle.get_vm_dir_by_hash")
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
 def test_start_vm_log_close_oserror(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
     """start_vm handles OSError when closing log file by raising MVMError."""

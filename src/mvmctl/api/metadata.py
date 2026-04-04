@@ -24,9 +24,7 @@ from mvmctl.core.metadata import list_kernel_entries as _list_kernel_entries
 from mvmctl.core.metadata import remove_image_entry as _remove_image_entry
 from mvmctl.core.metadata import remove_kernel_entry as _remove_kernel_entry
 from mvmctl.core.metadata import set_default_binary_entry as _set_default_binary_entry
-from mvmctl.core.metadata import (
-    set_default_image_by_internal_id as _set_default_image_by_internal_id,
-)
+from mvmctl.core.metadata import set_default_image_by_os_slug as _set_default_image_by_os_slug
 from mvmctl.core.metadata import set_default_image_entry as _set_default_image_entry
 from mvmctl.core.metadata import update_image_entry as _update_image_entry
 
@@ -43,7 +41,7 @@ __all__ = [
     "remove_kernel_entry",
     "set_default_binary_entry",
     "set_default_image_entry",
-    "set_default_image_by_internal_id",
+    "set_default_image_by_os_slug",
     "update_image_entry",
 ]
 
@@ -136,8 +134,8 @@ def set_default_image_entry(cache_dir: Path, image_id: str) -> None:
     _set_default_image_entry(cache_dir, image_id)
 
 
-def set_default_image_by_internal_id(cache_dir: Path, internal_id: str) -> None:
-    _set_default_image_by_internal_id(cache_dir, internal_id)
+def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
+    _set_default_image_by_os_slug(cache_dir, os_slug)
 
 
 def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:

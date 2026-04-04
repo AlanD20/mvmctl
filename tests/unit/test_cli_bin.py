@@ -959,7 +959,7 @@ def _write_image_meta(cache_dir: Path, full_hash: str, filename: str, **extra: o
     db.upsert_image(
         Image(
             id=full_hash,
-            os_slug=str(extra.get("internal_id")) if extra.get("internal_id") else full_hash,
+            os_slug=str(extra.get("os_slug")) if extra.get("os_slug") else full_hash,
             path=filename,
             os_name=extra.get("os_name"),
             fs_type=extra.get("fs_type", "ext4"),
@@ -1541,7 +1541,7 @@ def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         full_hash,
         "ubuntu-24.04.ext4",
         os_name="Ubuntu 24.04 LTS",
-        internal_id="ubuntu-24.04",
+        os_slug="ubuntu-24.04",
     )
     with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(
@@ -2177,7 +2177,7 @@ def test_image_inspect_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         full_hash,
         img_file.name,
         os_name="Ubuntu 24.04 LTS",
-        internal_id="ubuntu-24.04",
+        os_slug="ubuntu-24.04",
         fs_type="ext4",
         fs_uuid="test-uuid-1234",
         compressed_format="zst",
@@ -2211,7 +2211,7 @@ def test_image_inspect_json_output(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         full_hash,
         img_file.name,
         os_name="Test Image",
-        internal_id="test-image",
+        os_slug="test-image",
         fs_type="ext4",
         pulled_at="2026-01-15T10:30:00+00:00",
     )
@@ -2224,7 +2224,7 @@ def test_image_inspect_json_output(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     data = json.loads(result.output)
     assert data["id"] == full_hash
     assert data["name"] == "Test Image"
-    assert data["internal_id"] == "test-image"
+    assert data["os_slug"] == "test-image"
 
 
 def test_image_inspect_tree_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -2240,7 +2240,7 @@ def test_image_inspect_tree_output(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         full_hash,
         img_file.name,
         os_name="Tree Test",
-        internal_id="tree-test",
+        os_slug="tree-test",
         fs_type="ext4",
         pulled_at="2026-01-15T10:30:00+00:00",
     )
@@ -2300,7 +2300,7 @@ def test_image_inspect_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         full_hash,
         f"{full_hash}.ext4",
         os_name="Missing Image",
-        internal_id="missing-image",
+        os_slug="missing-image",
         pulled_at="2026-01-15T10:30:00+00:00",
     )
 
@@ -2332,7 +2332,7 @@ def test_image_ls_remote_shows_compression_column(tmp_path: Path, monkeypatch: p
         full_hash,
         "ubuntu-24.04.ext4",
         os_name="Ubuntu 24.04 LTS",
-        internal_id="ubuntu-24.04",
+        os_slug="ubuntu-24.04",
         compressed_format="zst",
         original_size=200 * 1024 * 1024,
         compressed_size=100 * 1024 * 1024,
@@ -2387,7 +2387,7 @@ def test_image_ls_remote_missing_file_shows_x_marker(
         full_hash,
         "ubuntu-24.04.ext4",
         os_name="Ubuntu 24.04 LTS",
-        internal_id="ubuntu-24.04",
+        os_slug="ubuntu-24.04",
         compressed_format="zst",
         pulled_at="2026-01-15T10:30:00+00:00",
     )
@@ -2415,7 +2415,7 @@ def test_image_inspect_with_compression_metadata(tmp_path: Path, monkeypatch: py
         full_hash,
         img_file.name,
         os_name="Compressed Image",
-        internal_id="compressed-img",
+        os_slug="compressed-img",
         fs_type="ext4",
         fs_uuid="uuid-1234",
         original_size=100 * 1024 * 1024,
@@ -2449,7 +2449,7 @@ def test_image_inspect_with_internal_id(tmp_path: Path, monkeypatch: pytest.Monk
         full_hash,
         img_file.name,
         os_name="Ubuntu 24.04",
-        internal_id="ubuntu-24.04",
+        os_slug="ubuntu-24.04",
         fs_type="ext4",
         pulled_at="2026-01-15T10:30:00+00:00",
     )
@@ -2460,7 +2460,7 @@ def test_image_inspect_with_internal_id(tmp_path: Path, monkeypatch: pytest.Monk
 
     assert result.exit_code == 0
     assert "ubuntu-24.04" in result.output
-    assert "Internal ID" in result.output
+    assert "OS Slug" in result.output
 
 
 def test_image_ls_remote_with_compression_in_metadata(
@@ -2479,7 +2479,7 @@ def test_image_ls_remote_with_compression_in_metadata(
         full_hash,
         "ubuntu-24.04.ext4",
         os_name="Ubuntu 24.04 LTS",
-        internal_id="ubuntu-24.04",
+        os_slug="ubuntu-24.04",
         compressed_format="zst",
         original_size=200 * 1024 * 1024,
         compressed_size=100 * 1024 * 1024,
@@ -2510,7 +2510,7 @@ def test_image_inspect_with_filename_lookup(tmp_path: Path, monkeypatch: pytest.
         full_hash,
         "custom-image.ext4",
         os_name="Custom Image",
-        internal_id="custom",
+        os_slug="custom",
         fs_type="ext4",
         pulled_at="2026-01-15T10:30:00+00:00",
     )
@@ -2537,7 +2537,7 @@ def test_image_inspect_tree_format(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         full_hash,
         img_file.name,
         os_name="Tree Test Image",
-        internal_id="tree-test",
+        os_slug="tree-test",
         fs_type="ext4",
         fs_uuid="test-uuid",
         pulled_at="2026-01-15T10:30:00+00:00",
@@ -2566,7 +2566,7 @@ def test_image_inspect_json_format(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         full_hash,
         img_file.name,
         os_name="JSON Test",
-        internal_id="json-test",
+        os_slug="json-test",
         fs_type="ext4",
         fs_uuid="json-uuid",
         pulled_at="2026-01-15T10:30:00+00:00",
@@ -2580,6 +2580,6 @@ def test_image_inspect_json_format(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     data = json.loads(result.output)
     assert data["id"] == full_hash
     assert data["name"] == "JSON Test"
-    assert data["internal_id"] == "json-test"
+    assert data["os_slug"] == "json-test"
     assert data["fs_type"] == "ext4"
     assert data["fs_uuid"] == "json-uuid"

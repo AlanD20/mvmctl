@@ -94,9 +94,9 @@ def clean_host(cache_dir: Path) -> list[str]:
         teardown_bridge,
         teardown_nat,
     )
-    from mvmctl.utils.network import bridge_exists, list_bridges, list_tuntap_devices
     from mvmctl.core.network_manager import list_networks
     from mvmctl.exceptions import NetworkError
+    from mvmctl.utils.network import bridge_exists, list_bridges, list_tuntap_devices
 
     summary: list[str] = []
 

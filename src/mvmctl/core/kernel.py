@@ -1269,3 +1269,70 @@ def download_firecracker_kernel(
     )
     logger.info("Firecracker CI kernel saved: %s", resolved_output_path)
     return resolved_output_path
+
+
+def resolve_kernel_path(kernel: str) -> Path:
+    from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
+
+    kernels_dir = get_kernels_dir()
+    candidate = kernels_dir / kernel
+    if candidate.exists():
+        return candidate
+
+    direct = Path(kernel)
+    if direct.is_absolute() and direct.exists():
+        return direct
+
+    from mvmctl.core.metadata import list_kernel_entries
+
+    matches = [
+        (k, m)
+        for k, m in list_kernel_entries(get_cache_dir(), kernels_dir).items()
+        if k.startswith(kernel)
+    ]
+    if len(matches) == 1:
+        full_key, meta = matches[0]
+        filename = str(meta.get("filename", ""))
+        if filename:
+            candidate = kernels_dir / filename
+            if candidate.exists():
+                return candidate
+        candidate = kernels_dir / full_key
+        if candidate.exists():
+            return candidate
+
+    if direct.exists():
+        return direct
+
+    raise MVMError(f"Kernel not found: {kernel!r}")
+
+
+def resolve_kernel_id_path(kernel: str) -> Path:
+    from mvmctl.core.metadata import list_kernel_entries
+    from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
+    from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
+
+    kernels_dir = get_kernels_dir()
+
+    def _find(cache_dir: Path, prefix: str) -> list[tuple[str, dict[str, object]]]:
+        return [
+            (k, m)
+            for k, m in list_kernel_entries(cache_dir, kernels_dir).items()
+            if k.startswith(prefix)
+        ]
+
+    match = resolve_single_by_id_prefix(kernel, _find, get_cache_dir())
+    if match is None:
+        raise MVMError(f"Kernel ID not found or ambiguous: {kernel!r}")
+
+    full_key, meta = match
+    filename = str(meta.get("filename", ""))
+    if filename:
+        candidate = kernels_dir / filename
+        if candidate.exists():
+            return candidate
+    candidate = kernels_dir / full_key
+    if candidate.exists():
+        return candidate
+
+    raise MVMError(f"Kernel not found: {kernel!r}")
