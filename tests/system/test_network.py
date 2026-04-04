@@ -1,8 +1,9 @@
 """Network management system tests."""
 
 import os
-import pytest
 import subprocess
+
+import pytest
 
 pytestmark = [pytest.mark.system, pytest.mark.requires_network]
 

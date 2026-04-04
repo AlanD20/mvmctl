@@ -159,3 +159,101 @@ def test_download_file_no_content_length(mock_urlopen: MagicMock, tmp_path: Path
 
     assert result is True
     assert dest.read_bytes() == full_data
+
+
+class TestParseContentLength:
+    """Tests for _parse_content_length."""
+
+    def test_returns_none_for_no_get_method(self):
+        from mvmctl.utils.http import _parse_content_length
+
+        assert _parse_content_length("not an object") is None
+
+    def test_returns_none_for_missing_header(self):
+        from mvmctl.utils.http import _parse_content_length
+
+        headers = MagicMock()
+        headers.get.return_value = None
+        assert _parse_content_length(headers) is None
+
+    def test_returns_none_for_invalid_content_length(self):
+        from mvmctl.utils.http import _parse_content_length
+
+        headers = MagicMock()
+        headers.get.return_value = "not-a-number"
+        assert _parse_content_length(headers) is None
+
+    def test_returns_int_for_valid_content_length(self):
+        from mvmctl.utils.http import _parse_content_length
+
+        headers = MagicMock()
+        headers.get.return_value = "12345"
+        assert _parse_content_length(headers) == 12345
+
+
+class TestRetryDecorator:
+    """Tests for _with_retry decorator."""
+
+    def test_retries_on_failure(self):
+        from mvmctl.utils.http import _with_retry
+
+        call_count = 0
+
+        @_with_retry(max_retries=2, retry_delay=0.01)
+        def flaky_func():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise ConnectionError("fail")
+            return "success"
+
+        result = flaky_func()
+        assert result == "success"
+        assert call_count == 3
+
+    def test_raises_after_max_retries(self):
+        from mvmctl.utils.http import _with_retry
+
+        @_with_retry(max_retries=1, retry_delay=0.01)
+        def always_fail():
+            raise ConnectionError("always fails")
+
+        with pytest.raises(ConnectionError, match="always fails"):
+            always_fail()
+
+    def test_no_retry_on_success(self):
+        from mvmctl.utils.http import _with_retry
+
+        call_count = 0
+
+        @_with_retry(max_retries=2, retry_delay=0.01)
+        def succeed_first():
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        result = succeed_first()
+        assert result == "ok"
+        assert call_count == 1
+
+
+@patch("mvmctl.utils.http.urlopen")
+def test_download_file_with_progress(mock_urlopen: MagicMock, tmp_path: Path):
+    dest = tmp_path / "target_file.bin"
+    full_data = b"Complete file content for progress test"
+
+    mock_urlopen.return_value = _mock_urlopen_response(
+        full_data,
+        status=200,
+        content_length=str(len(full_data)),
+    )
+
+    result = download_file(
+        "https://example.com/file.bin",
+        dest,
+        expected_sha256=hashlib.sha256(full_data).hexdigest(),
+        show_progress=True,
+    )
+
+    assert result is True
+    assert dest.read_bytes() == full_data

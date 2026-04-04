@@ -105,14 +105,14 @@ class ConfigGenerator:
         self._validate_boot_components()
 
     def _validate_boot_components(self) -> None:
-        if not self.vm_config.gateway:
-            raise MVMError("VM gateway IP is required but not set")
+        if not self.vm_config.ipv4_gateway:
+            raise MVMError("VM IPv4 gateway is required but not set")
         if not self.vm_config.subnet_mask:
             raise MVMError("VM subnet mask is required but not set")
 
         if self.vm_config.guest_ip:
             validate_boot_arg_component(self.vm_config.guest_ip, "guest_ip")
-        validate_boot_arg_component(self.vm_config.gateway, "gateway")
+        validate_boot_arg_component(self.vm_config.ipv4_gateway, "ipv4_gateway")
         validate_boot_arg_component(self.vm_config.subnet_mask, "subnet_mask")
 
         lsm_flags = self.vm_config.lsm_flags or None
@@ -219,7 +219,7 @@ class ConfigGenerator:
 
     def _build_default_boot_args(self) -> str:
         pci_arg = DEFAULT_BOOT_PCI_OFF if not self.vm_config.enable_pci else ""
-        gateway = self.vm_config.gateway or ""
+        ipv4_gateway = self.vm_config.ipv4_gateway or ""
         subnet_mask = self.vm_config.subnet_mask or ""
 
         # Use static kernel ip= parameter for early network bringup
@@ -227,7 +227,7 @@ class ConfigGenerator:
         # For NO_CLOUD_NET mode, also include kernel ip= for initial network bringup
         # cloud-init's network-config will ensure the IP stays consistent
         if self.vm_config.guest_ip:
-            ip_arg = f"ip={self.vm_config.guest_ip}::{gateway}:{subnet_mask}::eth0:{DEFAULT_GUEST_NETWORK_BOOT_MODE}"
+            ip_arg = f"ip={self.vm_config.guest_ip}::{ipv4_gateway}:{subnet_mask}::eth0:{DEFAULT_GUEST_NETWORK_BOOT_MODE}"
         else:
             ip_arg = ""
         lsm_flags = self.vm_config.lsm_flags or None

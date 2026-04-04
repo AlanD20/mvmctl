@@ -111,7 +111,7 @@ def test_boot_args_rejects_shell_injection_in_guest_ip():
         kernel_path=Path("vmlinux"),
         rootfs_path=Path("rootfs.ext4"),
         guest_ip="10.0.0.2;rm -rf /",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
@@ -130,12 +130,12 @@ def test_boot_args_rejects_shell_injection_in_gateway():
         kernel_path=Path("vmlinux"),
         rootfs_path=Path("rootfs.ext4"),
         guest_ip="10.0.0.2",
-        gateway="10.0.0.1|evil",
+        ipv4_gateway="10.0.0.1|evil",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
     )
     generator = ConfigGenerator(vm_config)
-    with pytest.raises(MVMError, match="gateway"):
+    with pytest.raises(MVMError, match="ipv4_gateway"):
         generator.validate()
 
 
@@ -146,7 +146,7 @@ def test_boot_args_accepts_normal_ip():
         kernel_path=Path("vmlinux"),
         rootfs_path=Path("rootfs.ext4"),
         guest_ip="10.0.0.2",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
@@ -217,7 +217,7 @@ def test_config_gen_invalid_ip_with_shell_chars():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         guest_ip="not-a-valid;ip",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
@@ -236,7 +236,7 @@ def test_config_gen_write_to_file(tmp_path):
         mem_size_mib=256,
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
     generator = ConfigGenerator(vm_config)
@@ -460,7 +460,7 @@ def test_boot_args_uses_root_fs_type_from_config():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.btrfs"),
         root_fs_type="btrfs",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
     generator = ConfigGenerator(vm_config)
@@ -476,7 +476,7 @@ def test_boot_args_falls_back_to_ext4_when_root_fs_type_none():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_fs_type=None,
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
     generator = ConfigGenerator(vm_config)
@@ -492,7 +492,7 @@ def test_boot_args_rootfstype_from_metadata():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.xfs"),
         root_fs_type="xfs",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
     generator = ConfigGenerator(vm_config)
@@ -508,7 +508,7 @@ def test_boot_args_includes_net_ifnames_zero():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         guest_ip="10.0.0.2",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
@@ -526,7 +526,7 @@ def test_boot_args_includes_eth0_none_when_guest_ip_set():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         guest_ip="10.0.0.2",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
         tap_device="fc-tap0",
         guest_mac="02:FC:00:00:00:01",
@@ -552,7 +552,7 @@ def test_config_gen_validates_root_uuid_format():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="invalid-uuid",
         root_fs_type="ext4",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
 
@@ -570,7 +570,7 @@ def test_config_gen_validates_root_fs_type():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="ntfs",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
 
@@ -586,7 +586,7 @@ def test_config_gen_accepts_valid_uuid_and_fs_type():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="ext4",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
 
@@ -602,7 +602,7 @@ def test_config_gen_accepts_btrfs_fs_type():
         rootfs_path=Path("/tmp/rootfs.btrfs"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="btrfs",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
 
@@ -620,7 +620,7 @@ def test_config_gen_accepts_xfs_fs_type():
         rootfs_path=Path("/tmp/rootfs.xfs"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="xfs",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
 
@@ -639,7 +639,7 @@ def test_config_gen_validates_uuid_in_boot_args_generation():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="not-a-valid-uuid",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
 
@@ -656,7 +656,7 @@ def test_config_gen_validates_fs_type_in_boot_args_generation():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_fs_type="invalidfs",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         subnet_mask="255.255.255.0",
     )
 

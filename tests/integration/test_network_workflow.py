@@ -20,8 +20,8 @@ def _make_network(name: str = "testnet", cidr: str = "192.168.100.0/24") -> Netw
     """Create a sample NetworkConfig for testing."""
     return NetworkConfig(
         name=name,
-        cidr=cidr,
-        gateway="192.168.100.1",
+        subnet=cidr,
+        ipv4_gateway="192.168.100.1",
         bridge=f"mvm-{name}",
         nat_enabled=True,
         created_at="2024-01-01T00:00:00+00:00",
@@ -47,7 +47,7 @@ class TestNetworkLifecycleWorkflow:
 
         result = runner.invoke(
             network_app,
-            ["create", "integration-net", "--cidr", "10.50.0.0/24"],
+            ["create", "integration-net", "--subnet", "10.50.0.0/24"],
         )
         assert result.exit_code == 0
         assert "created" in result.output.lower()
@@ -79,8 +79,8 @@ class TestNetworkLifecycleWorkflow:
         mock_create.return_value = network
         mock_inspect.return_value = {
             "name": "inspect-net",
-            "cidr": "172.16.0.0/24",
-            "gateway": "172.16.0.1",
+            "subnet": "172.16.0.0/24",
+            "ipv4_gateway": "172.16.0.1",
             "bridge": "mvm-inspect-net",
             "nat_enabled": True,
             "bridge_exists": True,
@@ -91,7 +91,7 @@ class TestNetworkLifecycleWorkflow:
 
         result = runner.invoke(
             network_app,
-            ["create", "inspect-net", "--cidr", "172.16.0.0/24"],
+            ["create", "inspect-net", "--subnet", "172.16.0.0/24"],
         )
         assert result.exit_code == 0
 
@@ -123,7 +123,7 @@ class TestNetworkLifecycleWorkflow:
 
         result = runner.invoke(
             network_app,
-            ["create", "lifecycle-net", "--cidr", "192.168.200.0/24"],
+            ["create", "lifecycle-net", "--subnet", "192.168.200.0/24"],
         )
         assert result.exit_code == 0
         assert "lifecycle-net" in result.output
@@ -151,7 +151,7 @@ class TestNetworkLifecycleWorkflow:
 
         result = runner.invoke(
             network_app,
-            ["create", "no-nat-net", "--cidr", "10.100.0.0/24", "--no-nat"],
+            ["create", "no-nat-net", "--subnet", "10.100.0.0/24", "--no-nat"],
         )
         assert result.exit_code == 0
 
@@ -164,11 +164,11 @@ class TestNetworkLifecycleWorkflow:
     def test_create_network_with_custom_gateway(
         self, mock_interfaces, mock_check_priv, mock_create
     ):
-        """Test creating a network with a custom gateway."""
+        """Test creating a network with a custom IPv4 gateway."""
         mock_check_priv.return_value = None
 
         network = _make_network("custom-gw-net", "10.99.0.0/24")
-        network.gateway = "10.99.0.254"
+        network.ipv4_gateway = "10.99.0.254"
         mock_create.return_value = network
 
         result = runner.invoke(
@@ -176,16 +176,16 @@ class TestNetworkLifecycleWorkflow:
             [
                 "create",
                 "custom-gw-net",
-                "--cidr",
+                "--subnet",
                 "10.99.0.0/24",
-                "--gateway",
+                "--ipv4-gateway",
                 "10.99.0.254",
             ],
         )
         assert result.exit_code == 0
 
         call_kwargs = mock_create.call_args.kwargs
-        assert call_kwargs.get("gateway") == "10.99.0.254"
+        assert call_kwargs.get("ipv4_gateway") == "10.99.0.254"
 
 
 class TestNetworkWorkflowEdgeCases:
@@ -201,7 +201,7 @@ class TestNetworkWorkflowEdgeCases:
 
         result = runner.invoke(
             network_app,
-            ["create", "duplicate-net", "--cidr", "10.88.0.0/24"],
+            ["create", "duplicate-net", "--subnet", "10.88.0.0/24"],
         )
         assert result.exit_code == 1
         assert "already exists" in result.output.lower()
@@ -244,7 +244,7 @@ class TestNetworkWorkflowEdgeCases:
 
         result = runner.invoke(
             network_app,
-            ["create", "invalid-cidr", "--cidr", "not-a-cidr"],
+            ["create", "invalid-cidr", "--subnet", "not-a-cidr"],
         )
         assert result.exit_code == 1
 
@@ -267,10 +267,10 @@ class TestNetworkWithSubprocessMocking:
 
         with patch("mvmctl.core.network_manager._validate_subnet_no_overlap"):
             with patch("mvmctl.core.network_manager.setup_nat"):
-                result = create_network("subprocess-net", cidr="10.77.0.0/24")
+                result = create_network("subprocess-net", subnet="10.77.0.0/24")
 
         assert result.name == "subprocess-net"
-        assert result.cidr == "10.77.0.0/24"
+        assert result.subnet == "10.77.0.0/24"
         # Verify persisted in metadata
         assert get_network("subprocess-net") is not None
 
@@ -292,7 +292,7 @@ class TestNetworkWithSubprocessMocking:
         update_network_entry(
             mock_cache_dir,
             "teardown-net",
-            cidr="10.66.0.0/24",
+            subnet="10.66.0.0/24",
             gateway="10.66.0.1",
             bridge="mvm-teardown-n",
             nat_enabled=True,

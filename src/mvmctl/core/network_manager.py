@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from typing import Any, TypedDict
 
 from mvmctl.constants import (
-    DEFAULT_NETWORK_CIDR,
     DEFAULT_NETWORK_NAME,
+    DEFAULT_NETWORK_SUBNET,
     device_prefix,
 )
 from mvmctl.core.metadata import (
@@ -37,7 +37,7 @@ from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.full_hash import generate_full_hash_network
 from mvmctl.utils.validation import (
     validate_bridge_name,
-    validate_cidr,
+    validate_subnet,
     validate_entity_name,
     validate_interface_name,
     validate_ipv4_address,
@@ -46,21 +46,30 @@ from mvmctl.utils.validation import (
 logger = logging.getLogger(__name__)
 
 
+def _mark_default_network_created_in_db() -> None:
+    try:
+        db = MVMDatabase()
+        db.initialize_host_state()
+        db.update_host_component("default_network_created", True)
+    except (MVMError, sqlite3.OperationalError):
+        pass
+
+
 def _upsert_network_to_sqlite(config: NetworkConfig, bridge_active: bool | None = None) -> None:
     """Write a NetworkConfig to SQLite (creates or updates the row)."""
     from mvmctl.db.models import Network as DBNetwork
 
     now = datetime.now(timezone.utc).isoformat()
-    network_id = generate_full_hash_network(config.name, config.cidr, config.created_at or now)
+    network_id = generate_full_hash_network(config.name, config.subnet, config.created_at or now)
     db = MVMDatabase()
     try:
         db.upsert_network(
             DBNetwork(
                 id=network_id,
                 name=config.name,
-                subnet=config.cidr,
+                subnet=config.subnet,
                 bridge=config.bridge,
-                ipv4_gateway=config.gateway,
+                ipv4_gateway=config.ipv4_gateway,
                 bridge_active=bridge_active if bridge_active is not None else False,
                 nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
                 nat_enabled=config.nat_enabled,
@@ -78,8 +87,8 @@ class NetworkConfig:
     """Persistent configuration for a named network."""
 
     name: str
-    cidr: str
-    gateway: str
+    subnet: str
+    ipv4_gateway: str
     bridge: str
     nat_enabled: bool = True
     nat_gateways: list[str] = field(default_factory=list)
@@ -101,8 +110,8 @@ def _bridge_name_for(network_name: str) -> str:
     return f"{prefix}-{truncated}"
 
 
-def _gateway_for_subnet(subnet: str) -> str:
-    """Return the first usable host IP in a subnet as the gateway."""
+def _ipv4_gateway_for_subnet(subnet: str) -> str:
+    """Return the first usable host IP in a subnet as the ipv4 gateway."""
     net = ipaddress.IPv4Network(subnet, strict=False)
     return str(next(iter(net.hosts())))
 
@@ -119,8 +128,8 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
     - name: validated via validate_entity_name()
     - bridge: validated via validate_bridge_name()
     - nat_gateways: validated via validate_nat_gateways()
-    - cidr: validated via validate_cidr()
-    - gateway: validated via validate_ipv4_address()
+    - subnet: validated via validate_subnet()
+    - ipv4_gateway: validated via validate_ipv4_address()
 
     Invalid entries are logged as warnings and skipped.
     """
@@ -134,26 +143,26 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
         logger.warning("Invalid network name in metadata: %s", e)
         return None
 
-    # Extract and validate CIDR
-    cidr = entry.get("cidr")
-    if not isinstance(cidr, str):
-        logger.warning("Invalid CIDR in metadata for network '%s': not a string", name)
+    # Extract and validate subent
+    subnet = entry.get("subnet")
+    if not isinstance(subnet, str):
+        logger.warning("Invalid SUBNET in metadata for network '%s': not a string", name)
         return None
     try:
-        cidr = validate_cidr(cidr)
+        subnet = validate_subnet(subnet)
     except MVMError as e:
-        logger.warning("Invalid CIDR in metadata for network '%s': %s", name, e)
+        logger.warning("Invalid SUBNET in metadata for network '%s': %s", name, e)
         return None
 
-    # Extract and validate gateway
-    gateway = entry.get("gateway")
-    if not isinstance(gateway, str):
-        logger.warning("Invalid gateway in metadata for network '%s': not a string", name)
+    # Extract and validate ipv4_gateway
+    ipv4_gateway = entry.get("ipv4_gateway")
+    if not isinstance(ipv4_gateway, str):
+        logger.warning("Invalid ipv4_gateway in metadata for network '%s': not a string", name)
         return None
     try:
-        gateway = validate_ipv4_address(gateway)
+        ipv4_gateway = validate_ipv4_address(ipv4_gateway)
     except MVMError as e:
-        logger.warning("Invalid gateway in metadata for network '%s': %s", name, e)
+        logger.warning("Invalid ipv4_gateway in metadata for network '%s': %s", name, e)
         return None
 
     # Extract and validate bridge
@@ -190,8 +199,8 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
 
     return NetworkConfig(
         name=name,
-        cidr=cidr,
-        gateway=gateway,
+        subnet=subnet,
+        ipv4_gateway=ipv4_gateway,
         bridge=bridge,
         nat_enabled=entry.get("nat_enabled", True),
         nat_gateways=nat_gateways,
@@ -232,8 +241,8 @@ def list_networks() -> list[NetworkConfig]:
             for network in db_networks:
                 config = NetworkConfig(
                     name=network.name,
-                    cidr=network.subnet,
-                    gateway=network.ipv4_gateway,
+                    subnet=network.subnet,
+                    ipv4_gateway=network.ipv4_gateway,
                     bridge=network.bridge,
                     nat_enabled=network.nat_enabled,
                     nat_gateways=network.nat_gateways.split(",") if network.nat_gateways else [],
@@ -273,8 +282,8 @@ def get_network(name: str) -> NetworkConfig | None:
         if network:
             return NetworkConfig(
                 name=network.name,
-                cidr=network.subnet,
-                gateway=network.ipv4_gateway,
+                subnet=network.subnet,
+                ipv4_gateway=network.ipv4_gateway,
                 bridge=network.bridge,
                 nat_enabled=network.nat_enabled,
                 nat_gateways=network.nat_gateways.split(",") if network.nat_gateways else [],
@@ -292,6 +301,15 @@ def get_network(name: str) -> NetworkConfig | None:
 
 def get_network_leases(name: str) -> list[NetworkLease]:
     """Get all IP leases for a network."""
+    try:
+        db = MVMDatabase()
+        network = db.get_network_by_name(name)
+        if network:
+            db_leases = db.list_leases(network.id)
+            return [NetworkLease(vm_id=lease.vm_id or "", ipv4=lease.ipv4) for lease in db_leases]
+    except Exception:
+        pass
+
     cache_dir = get_cache_dir()
     entry = get_network_entry(cache_dir, name)
     return _leases_from_entry(entry)
@@ -355,6 +373,16 @@ def set_default_network(name: str) -> None:
         pass
 
 
+def _should_preserve_current_default(name: str) -> bool:
+    try:
+        db = MVMDatabase()
+        current_default = db.get_default_network()
+    except sqlite3.OperationalError:
+        return False
+
+    return current_default is not None and current_default.name != name
+
+
 def _persist_iptables_if_root() -> None:
     if os.getuid() != 0:
         return
@@ -365,8 +393,8 @@ def _persist_iptables_if_root() -> None:
 
 def create_network(
     name: str,
-    cidr: str,
-    gateway: str | None = None,
+    subnet: str,
+    ipv4_gateway: str | None = None,
     nat: bool = True,
     nat_gateways: list[str] | None = None,
 ) -> NetworkConfig:
@@ -377,8 +405,8 @@ def create_network(
 
     Args:
         name: Network name.
-        cidr: IP subnet in CIDR notation (e.g., "192.168.100.0/24").
-        gateway: Gateway IP for the bridge. Defaults to first host in subnet.
+        subnet: IP subnet in SUBNET notation (e.g., "192.168.100.0/24").
+        ipv4_gateway: Gateway IPv4 for the bridge. Defaults to first host in subnet.
         nat: Whether to configure NAT/masquerade. Default True.
         nat_gateways: Physical interfaces for NAT (auto-detected if not provided).
 
@@ -393,10 +421,10 @@ def create_network(
     if get_network(name) is not None:
         raise NetworkError(f"Network '{name}' already exists")
 
-    _validate_subnet_no_overlap(cidr, name)
+    _validate_subnet_no_overlap(subnet, name)
 
-    if gateway is None:
-        gateway = _gateway_for_subnet(cidr)
+    if ipv4_gateway is None:
+        ipv4_gateway = _ipv4_gateway_for_subnet(subnet)
 
     bridge = _bridge_name_for(name)
 
@@ -408,17 +436,17 @@ def create_network(
 
     config = NetworkConfig(
         name=name,
-        cidr=cidr,
-        gateway=gateway,
+        subnet=subnet,
+        ipv4_gateway=ipv4_gateway,
         bridge=bridge,
         nat_enabled=nat,
         nat_gateways=nat_gateways or [],
     )
 
     try:
-        setup_bridge(bridge, gateway_cidr=f"{gateway}/{_prefix_len(cidr)}")
+        setup_bridge(bridge, ipv4_gateway_subnet=f"{ipv4_gateway}/{_prefix_len(subnet)}")
         if nat:
-            setup_nat(bridge, nat_gateways=nat_gateways, cidr=cidr)
+            setup_nat(bridge, nat_gateways=nat_gateways, subnet=subnet)
     except NetworkError:
         try:
             teardown_bridge(bridge)
@@ -430,8 +458,8 @@ def create_network(
     update_network_entry(
         cache_dir,
         name,
-        cidr=cidr,
-        gateway=config.gateway,
+        subnet=subnet,
+        gateway=config.ipv4_gateway,
         bridge=config.bridge,
         nat_enabled=config.nat_enabled,
         nat_gateways=config.nat_gateways,
@@ -441,7 +469,6 @@ def create_network(
     )
 
     _upsert_network_to_sqlite(config, bridge_active=True)
-
     _persist_iptables_if_root()
 
     return config
@@ -478,7 +505,7 @@ def remove_network(name: str) -> None:
     # Teardown host resources
     try:
         if config.nat_enabled:
-            teardown_nat(bridge=config.bridge, force=True, cidr=config.cidr)
+            teardown_nat(bridge=config.bridge, force=True, subnet=config.subnet)
         teardown_bridge(config.bridge)
     except NetworkError as e:
         logger.warning("Partial teardown for network '%s': %s", name, e)
@@ -560,8 +587,8 @@ def inspect_network(name: str) -> NetworkInspect:
 
     return {
         "name": config.name,
-        "cidr": config.cidr,
-        "gateway": config.gateway,
+        "subnet": config.subnet,
+        "ipv4_gateway": config.ipv4_gateway,
         "bridge": config.bridge,
         "nat_enabled": config.nat_enabled,
         "nat_gateways": config.nat_gateways,
@@ -586,9 +613,9 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
     leases = get_network_leases(network_name)
     used_ips = [lease.ipv4 for lease in leases]
     # Also reserve the gateway
-    used_ips.append(config.gateway)
+    used_ips.append(config.ipv4_gateway)
 
-    ip = allocate_ip(used_ips, subnet=config.cidr)
+    ip = allocate_ip(used_ips, subnet=config.subnet)
     leases.append(NetworkLease(vm_id=vm_name, ipv4=ip))
 
     # Persist updated leases to metadata
@@ -670,7 +697,7 @@ def ensure_default_network() -> NetworkConfig:
                         "-C",
                         MVM_POSTROUTING_CHAIN,
                         "-s",
-                        config.cidr,
+                        config.subnet,
                         "-o",
                         gateway_iface,
                         "-j",
@@ -683,18 +710,21 @@ def ensure_default_network() -> NetworkConfig:
                 nat_missing = True
 
         if bridge_missing or chains_missing or nat_missing:
-            gateway_cidr = f"{config.gateway}/{_prefix_len(config.cidr)}"
+            ipv4_gateway_subnet = f"{config.ipv4_gateway}/{_prefix_len(config.subnet)}"
             try:
                 if bridge_missing:
-                    setup_bridge(config.bridge, gateway_cidr=gateway_cidr)
+                    setup_bridge(config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet)
                 if config.nat_enabled:
                     nat_gateways = config.nat_gateways or [get_default_interface()]
-                    setup_nat(config.bridge, nat_gateways=nat_gateways, cidr=config.cidr)
+                    setup_nat(config.bridge, nat_gateways=nat_gateways, subnet=config.subnet)
                     if os.getuid() == 0:
                         save_iptables_rules()
                 cache_dir = get_cache_dir()
                 update_network_entry(cache_dir, DEFAULT_NETWORK_NAME, bridge_active=True)
                 _upsert_network_to_sqlite(config, bridge_active=True)
+                _mark_default_network_created_in_db()
+                if not _should_preserve_current_default(DEFAULT_NETWORK_NAME):
+                    set_default_network(DEFAULT_NETWORK_NAME)
             except NetworkError:
                 if bridge_missing:
                     try:
@@ -702,6 +732,10 @@ def ensure_default_network() -> NetworkConfig:
                     except NetworkError:
                         pass
                 raise
+        else:
+            _mark_default_network_created_in_db()
+            if not _should_preserve_current_default(DEFAULT_NETWORK_NAME):
+                set_default_network(DEFAULT_NETWORK_NAME)
         return config
 
     # Auto-detect internet-facing interface for NAT gateway
@@ -712,9 +746,12 @@ def ensure_default_network() -> NetworkConfig:
             "Please create the default network manually with: "
             "mvm network create default --nat-gateways <interface>"
         )
-    return create_network(
-        DEFAULT_NETWORK_NAME, cidr=DEFAULT_NETWORK_CIDR, nat=True, nat_gateways=[default_iface]
+    config = create_network(
+        DEFAULT_NETWORK_NAME, subnet=DEFAULT_NETWORK_SUBNET, nat=True, nat_gateways=[default_iface]
     )
+    if not _should_preserve_current_default(DEFAULT_NETWORK_NAME):
+        set_default_network(DEFAULT_NETWORK_NAME)
+    return config
 
 
 @dataclass
@@ -796,10 +833,10 @@ def restore_networks() -> list[str]:
             status.append(f"Network '{config.name}': bridge already exists, skipping")
             continue
 
-        gateway_cidr = f"{config.gateway}/{_prefix_len(config.cidr)}"
+        ipv4_gateway_subnet = f"{config.ipv4_gateway}/{_prefix_len(config.subnet)}"
 
         try:
-            setup_bridge(config.bridge, gateway_cidr=gateway_cidr)
+            setup_bridge(config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet)
             status.append(f"Network '{config.name}': created bridge {config.bridge}")
         except NetworkError as e:
             status.append(f"Network '{config.name}': failed to create bridge: {e}")
@@ -832,7 +869,7 @@ def restore_networks() -> list[str]:
                     continue
 
             try:
-                setup_nat(config.bridge, nat_gateways=validated_gateways, cidr=config.cidr)
+                setup_nat(config.bridge, nat_gateways=validated_gateways, subnet=config.subnet)
                 status.append(
                     f"Network '{config.name}': NAT configured via {', '.join(validated_gateways)}"
                 )
@@ -864,8 +901,8 @@ def _validate_subnet_no_overlap(subnet: str, exclude_name: str = "") -> None:
     for existing in list_networks():
         if existing.name == exclude_name:
             continue
-        existing_net = ipaddress.IPv4Network(existing.cidr, strict=False)
+        existing_net = ipaddress.IPv4Network(existing.subnet, strict=False)
         if new_net.overlaps(existing_net):
             raise NetworkError(
-                f"Subnet {subnet} overlaps with network '{existing.name}' ({existing.cidr})"
+                f"Subnet {subnet} overlaps with network '{existing.name}' ({existing.subnet})"
             )

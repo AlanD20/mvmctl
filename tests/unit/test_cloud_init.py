@@ -39,7 +39,7 @@ def test_write_cloud_init_basic(tmp_path):
     paths = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.20.0.1",
+        ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
@@ -98,7 +98,7 @@ def test_write_cloud_init_custom_user_data(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.20.0.1",
+        ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         ssh_pub_key="ssh-rsa CUSTOM",
@@ -128,7 +128,7 @@ def test_validate_user_data_rejects_dangerous_directives(tmp_path):
         write_cloud_init(
             cloud_init_dir=cloud_init_dir,
             vm_name="testvm",
-            gateway="10.20.0.1",
+            ipv4_gateway="10.20.0.1",
             guest_ip="10.20.0.10",
             user="myuser",
             custom_user_data=custom_ud,
@@ -146,7 +146,7 @@ def test_validate_user_data_rejects_runcmd(tmp_path):
         write_cloud_init(
             cloud_init_dir=cloud_init_dir,
             vm_name="testvm",
-            gateway="10.20.0.1",
+            ipv4_gateway="10.20.0.1",
             guest_ip="10.20.0.10",
             user="myuser",
             custom_user_data=custom_ud,
@@ -272,7 +272,7 @@ def test_write_cloud_init_skips_network_config_when_requested(tmp_path):
     paths = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.20.0.1",
+        ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
@@ -313,7 +313,7 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
     paths = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.20.0.1",
+        ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
@@ -362,7 +362,7 @@ def test_write_cloud_init_custom_user_data_no_network_disable(tmp_path, monkeypa
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.20.0.1",
+        ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         skip_network_config=True,
@@ -394,7 +394,7 @@ def test_write_cloud_init_custom_user_data_with_network_key_warns(tmp_path, monk
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.20.0.1",
+        ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         skip_network_config=True,
@@ -420,7 +420,7 @@ def test_write_cloud_init_uses_template(tmp_path):
     paths = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="templatevm",
-        gateway="10.30.0.1",
+        ipv4_gateway="10.30.0.1",
         guest_ip="10.30.0.50",
         user="testuser",
         ssh_pub_key="ssh-ed25519 AAAAC3... test@example.com",
@@ -466,7 +466,7 @@ def test_render_cloud_init_template_all_placeholders(tmp_path):
     paths: Any = write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="myvm",
-        gateway="192.168.1.1",
+        ipv4_gateway="192.168.1.1",
         guest_ip="192.168.1.100",
         user="ubuntu",
         ssh_pub_key="ssh-rsa AAAAB3...",
@@ -496,7 +496,7 @@ def test_render_cloud_init_template_all_placeholders(tmp_path):
         vm_name="myvm",
         user="ubuntu",
         guest_ip="192.168.1.100",
-        gateway="192.168.1.1",
+        ipv4_gateway="192.168.1.1",
         prefix_len=24,
         ssh_pub_key="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDTest",
     )
@@ -546,7 +546,7 @@ def test_render_cloud_init_template_without_ssh_key():
         vm_name="nokeyvm",
         user="root",
         guest_ip="10.0.0.5",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         prefix_len=24,
         ssh_pub_key=None,
     )
@@ -572,7 +572,7 @@ def test_write_cloud_init_dhcp_no_systemd_network_workaround(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.20.0.1",
+        ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
@@ -596,7 +596,7 @@ def test_write_cloud_init_dhcp_no_wait_online_masking(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.20.0.1",
+        ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
@@ -627,7 +627,7 @@ def test_write_cloud_init_with_multiple_keys_template(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="multivm",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         guest_ip="10.0.0.10",
         user="ubuntu",
         ssh_pub_key=keys,
@@ -653,7 +653,7 @@ def test_write_cloud_init_with_empty_key_list_omits_ssh_section(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="nokeyvm",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         guest_ip="10.0.0.10",
         user="ubuntu",
         ssh_pub_key=[],
@@ -684,7 +684,7 @@ def test_write_cloud_init_custom_userdata_appends_multiple_keys(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         guest_ip="10.0.0.10",
         user="ubuntu",
         ssh_pub_key=keys,
@@ -718,7 +718,7 @@ def test_write_cloud_init_custom_userdata_existing_user_appends_keys(tmp_path):
     write_cloud_init(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         guest_ip="10.0.0.10",
         user="ubuntu",
         ssh_pub_key=["ssh-rsa AAAA existing-key", new_key],
@@ -748,7 +748,7 @@ def test_render_cloud_init_template_with_multiple_keys():
         vm_name="multivm",
         user="ubuntu",
         guest_ip="10.0.0.5",
-        gateway="10.0.0.1",
+        ipv4_gateway="10.0.0.1",
         prefix_len=24,
         ssh_pub_key=keys,
     )

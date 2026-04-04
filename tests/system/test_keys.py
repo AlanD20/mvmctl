@@ -1,8 +1,9 @@
 """SSH key management system tests."""
 
 import os
-import pytest
 import subprocess
+
+import pytest
 
 pytestmark = pytest.mark.system
 

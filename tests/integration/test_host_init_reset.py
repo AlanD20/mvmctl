@@ -11,7 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mvmctl.cli.host import app as host_app
-from mvmctl.core.host_state import HostChange, HostState
+from mvmctl.core.host_state import HostStateChange, HostState
 from mvmctl.exceptions import HostError
 
 runner = CliRunner()
@@ -27,8 +27,8 @@ def _make_host_state(changes: list | None = None) -> HostState:
     return HostState(init_timestamp="2024-01-01T00:00:00+00:00", changes=changes or [])
 
 
-def _host_change(setting: str, original: str | None, applied: str, mechanism: str) -> HostChange:
-    return HostChange(
+def _host_change(setting: str, original: str | None, applied: str, mechanism: str) -> HostStateChange:
+    return HostStateChange(
         setting=setting,
         original_value=original,
         applied_value=applied,
@@ -179,15 +179,10 @@ class TestHostWithSubprocessMocking:
                             assert len(result) > 0
 
     @patch("mvmctl.core.host.restore_host")
-    @patch("mvmctl.core.host_state._state_file")
-    def test_reset_with_subprocess_mocking(self, mock_state_file, mock_restore):
+    def test_reset_with_subprocess_mocking(self, mock_restore):
         from mvmctl.core.host import reset_host
 
         mock_restore.return_value = []
-
-        state_file = MagicMock()
-        state_file.exists.return_value = True
-        mock_state_file.return_value = state_file
 
         with patch("mvmctl.core.host.clean_host", return_value=[]):
             with patch("mvmctl.core.host._remove_sudoers", return_value=False):
@@ -286,21 +281,18 @@ class TestHostStateManagement:
         assert len(deserialized["changes"]) == 2
         assert deserialized["init_timestamp"] == "2024-01-01T00:00:00+00:00"
 
-    @patch("mvmctl.core.host_state._state_file")
-    def test_save_and_load_state(self, mock_state_file, tmp_path):
-        """Test saving and loading host state."""
+    def test_save_and_load_state(self, tmp_path):
+        """Test saving and loading host state via SQLite."""
         from mvmctl.core.host_state import _save_state, get_host_state
 
         changes = [_host_change("test", "a", "b", "manual")]
 
-        state_file = tmp_path / "state.json"
-        mock_state_file.return_value = state_file
-
         _save_state(tmp_path, changes)
-
-        assert state_file.exists()
 
         loaded = get_host_state(tmp_path)
         assert loaded is not None
         assert len(loaded.changes) == 1
         assert loaded.changes[0].setting == "test"
+        assert loaded.changes[0].original_value == "a"
+        assert loaded.changes[0].applied_value == "b"
+        assert loaded.changes[0].mechanism == "manual"

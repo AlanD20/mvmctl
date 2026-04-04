@@ -38,8 +38,7 @@ class TestThreadLock:
 
 
 class TestGetPidFilePath:
-    def test_get_pid_file_path(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_get_pid_file_path(self, tmp_path: Path):
         mgr = ConsoleRelayManager()
         path = mgr._get_pid_file_path("testvm")
         assert path.name == "console.pid"
@@ -47,8 +46,7 @@ class TestGetPidFilePath:
 
 
 class TestGetSocketPath:
-    def test_get_socket_path(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_get_socket_path(self, tmp_path: Path):
         mgr = ConsoleRelayManager()
         path = mgr._get_socket_path("testvm")
         assert path.name == "console.sock"
@@ -58,14 +56,13 @@ class TestGetSocketPath:
 class TestStartRelay:
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
     @patch("mvmctl.services.console_relay.manager.sys.executable", "/usr/bin/python")
-    def test_start_relay_spawns_process(self, mock_popen, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_start_relay_spawns_process(self, mock_popen, tmp_path: Path):
         mock_proc = MagicMock()
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
 
         mgr = ConsoleRelayManager()
-        vm_dir = tmp_path / "vms" / "testvm"
+        vm_dir = tmp_path / "cache" / "vms" / "testvm"
         vm_dir.mkdir(parents=True)
 
         socket_path, pid = mgr.start_relay("testvm", 10, vm_dir)
@@ -76,14 +73,13 @@ class TestStartRelay:
         assert "testvm" in mgr._relays
 
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
-    def test_start_relay_raises_if_already_running(self, mock_popen, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_start_relay_raises_if_already_running(self, mock_popen, tmp_path: Path):
         mock_proc = MagicMock()
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
 
         mgr = ConsoleRelayManager()
-        vm_dir = tmp_path / "vms" / "testvm"
+        vm_dir = tmp_path / "cache" / "vms" / "testvm"
         vm_dir.mkdir(parents=True)
 
         mgr.start_relay("testvm", 10, vm_dir)
@@ -92,12 +88,11 @@ class TestStartRelay:
             mgr.start_relay("testvm", 10, vm_dir)
 
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
-    def test_start_relay_handles_spawn_error(self, mock_popen, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_start_relay_handles_spawn_error(self, mock_popen, tmp_path: Path):
         mock_popen.side_effect = OSError("spawn failed")
 
         mgr = ConsoleRelayManager()
-        vm_dir = tmp_path / "vms" / "testvm"
+        vm_dir = tmp_path / "cache" / "vms" / "testvm"
         vm_dir.mkdir(parents=True)
 
         with pytest.raises(MVMError, match="Failed to spawn"):
@@ -107,14 +102,13 @@ class TestStartRelay:
 class TestStopRelay:
     @patch("mvmctl.services.console_relay.manager.os.kill")
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
-    def test_stop_relay_sends_sigterm(self, mock_popen, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_stop_relay_sends_sigterm(self, mock_popen, mock_kill, tmp_path: Path):
         mock_proc = MagicMock()
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
 
         mgr = ConsoleRelayManager()
-        vm_dir = tmp_path / "vms" / "testvm"
+        vm_dir = tmp_path / "cache" / "vms" / "testvm"
         vm_dir.mkdir(parents=True)
 
         mgr.start_relay("testvm", 10, vm_dir)
@@ -124,40 +118,36 @@ class TestStopRelay:
         assert "testvm" not in mgr._relays
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_stop_relay_handles_process_lookup_error(self, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_stop_relay_handles_process_lookup_error(self, mock_kill, tmp_path: Path):
         mock_kill.side_effect = ProcessLookupError()
 
         mgr = ConsoleRelayManager()
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+        pid_file = tmp_path / "cache" / "vms" / "testvm" / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("12345")
 
         mgr.stop_relay("testvm")
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_stop_relay_handles_permission_error(self, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_stop_relay_handles_permission_error(self, mock_kill, tmp_path: Path):
         mock_kill.side_effect = PermissionError()
 
         mgr = ConsoleRelayManager()
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+        pid_file = tmp_path / "cache" / "vms" / "testvm" / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("12345")
 
         mgr.stop_relay("testvm")
 
-    def test_stop_relay_noop_if_not_running(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_stop_relay_noop_if_not_running(self, tmp_path: Path):
         mgr = ConsoleRelayManager()
         mgr.stop_relay("nonexistent")
 
 
 class TestStopByPidFile:
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_stop_by_pid_file_sends_sigterm(self, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+    def test_stop_by_pid_file_sends_sigterm(self, mock_kill, tmp_path: Path):
+        pid_file = tmp_path / "cache" / "vms" / "testvm" / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("12345")
 
@@ -169,11 +159,8 @@ class TestStopByPidFile:
         mock_kill.assert_any_call(12345, signal.SIGTERM)
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_stop_by_pid_file_handles_process_lookup_error(
-        self, mock_kill, tmp_path: Path, monkeypatch
-    ):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+    def test_stop_by_pid_file_handles_process_lookup_error(self, mock_kill, tmp_path: Path):
+        pid_file = tmp_path / "cache" / "vms" / "testvm" / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("12345")
         mock_kill.side_effect = [None, ProcessLookupError()]
@@ -183,15 +170,13 @@ class TestStopByPidFile:
 
         assert result is True
 
-    def test_stop_by_pid_file_returns_false_if_no_pid_file(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_stop_by_pid_file_returns_false_if_no_pid_file(self, tmp_path: Path):
         mgr = ConsoleRelayManager()
         result = mgr._stop_by_pid_file("testvm")
         assert result is False
 
-    def test_stop_by_pid_file_handles_invalid_pid(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+    def test_stop_by_pid_file_handles_invalid_pid(self, tmp_path: Path):
+        pid_file = tmp_path / "cache" / "vms" / "testvm" / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("invalid")
 
@@ -203,10 +188,7 @@ class TestStopByPidFile:
 class TestKillRelay:
     @patch("mvmctl.services.console_relay.manager.os.kill")
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
-    def test_kill_relay_sends_sigterm_then_sigkill(
-        self, mock_popen, mock_kill, tmp_path: Path, monkeypatch
-    ):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_kill_relay_sends_sigterm_then_sigkill(self, mock_popen, mock_kill, tmp_path: Path):
         mock_proc = MagicMock()
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
@@ -225,7 +207,7 @@ class TestKillRelay:
         mock_kill.side_effect = kill_side_effect
 
         mgr = ConsoleRelayManager()
-        vm_dir = tmp_path / "vms" / "testvm"
+        vm_dir = tmp_path / "cache" / "vms" / "testvm"
         vm_dir.mkdir(parents=True)
 
         mgr.start_relay("testvm", 10, vm_dir)
@@ -234,12 +216,11 @@ class TestKillRelay:
         assert result is True
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_kill_relay_returns_false_if_not_running(self, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_kill_relay_returns_false_if_not_running(self, mock_kill, tmp_path: Path):
         mock_kill.side_effect = ProcessLookupError()
 
         mgr = ConsoleRelayManager()
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+        pid_file = tmp_path / "cache" / "vms" / "testvm" / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("12345")
 
@@ -249,14 +230,13 @@ class TestKillRelay:
 
 class TestGetRelayPid:
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
-    def test_get_relay_pid_from_registry(self, mock_popen, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_get_relay_pid_from_registry(self, mock_popen, tmp_path: Path):
         mock_proc = MagicMock()
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
 
         mgr = ConsoleRelayManager()
-        vm_dir = tmp_path / "vms" / "testvm"
+        vm_dir = tmp_path / "cache" / "vms" / "testvm"
         vm_dir.mkdir(parents=True)
 
         mgr.start_relay("testvm", 10, vm_dir)
@@ -265,9 +245,8 @@ class TestGetRelayPid:
         assert pid == 12345
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_get_relay_pid_from_file(self, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+    def test_get_relay_pid_from_file(self, mock_kill, tmp_path: Path):
+        pid_file = tmp_path / "cache" / "vms" / "testvm" / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("12345")
 
@@ -276,8 +255,7 @@ class TestGetRelayPid:
 
         assert pid == 12345
 
-    def test_get_relay_pid_returns_none_if_not_found(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_get_relay_pid_returns_none_if_not_found(self, tmp_path: Path):
         mgr = ConsoleRelayManager()
         pid = mgr.get_relay_pid("nonexistent")
         assert pid is None
@@ -287,15 +265,14 @@ class TestIsRelayRunning:
     @patch("mvmctl.services.console_relay.manager.os.kill")
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
     def test_is_relay_running_returns_true_when_running(
-        self, mock_popen, mock_kill, tmp_path: Path, monkeypatch
+        self, mock_popen, mock_kill, tmp_path: Path
     ):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
         mock_proc = MagicMock()
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
 
         mgr = ConsoleRelayManager()
-        vm_dir = tmp_path / "vms" / "testvm"
+        vm_dir = tmp_path / "cache" / "vms" / "testvm"
         vm_dir.mkdir(parents=True)
 
         mgr.start_relay("testvm", 10, vm_dir)
@@ -304,22 +281,18 @@ class TestIsRelayRunning:
         assert running is True
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_is_relay_running_returns_false_when_not_running(
-        self, mock_kill, tmp_path: Path, monkeypatch
-    ):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_is_relay_running_returns_false_when_not_running(self, mock_kill, tmp_path: Path):
         mock_kill.side_effect = ProcessLookupError()
 
         mgr = ConsoleRelayManager()
-        pid_file = tmp_path / "vms" / "testvm" / "console.pid"
+        pid_file = tmp_path / "cache" / "vms" / "testvm" / "console.pid"
         pid_file.parent.mkdir(parents=True)
         pid_file.write_text("12345")
 
         running = mgr.is_relay_running("testvm")
         assert running is False
 
-    def test_is_relay_running_returns_false_if_not_in_registry(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_is_relay_running_returns_false_if_not_in_registry(self, tmp_path: Path):
         mgr = ConsoleRelayManager()
         running = mgr.is_relay_running("nonexistent")
         assert running is False
@@ -327,11 +300,10 @@ class TestIsRelayRunning:
 
 class TestCleanupOrphans:
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_cleanup_orphans_removes_stale_pid_files(self, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_cleanup_orphans_removes_stale_pid_files(self, mock_kill, tmp_path: Path):
         mock_kill.side_effect = ProcessLookupError()
 
-        vms_dir = tmp_path / "vms"
+        vms_dir = tmp_path / "cache" / "vms"
         vm_dir = vms_dir / "oldvm"
         vm_dir.mkdir(parents=True)
         pid_file = vm_dir / "console.pid"
@@ -342,10 +314,8 @@ class TestCleanupOrphans:
         assert not pid_file.exists()
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_cleanup_orphans_skips_running_processes(self, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-
-        vms_dir = tmp_path / "vms"
+    def test_cleanup_orphans_skips_running_processes(self, mock_kill, tmp_path: Path):
+        vms_dir = tmp_path / "cache" / "vms"
         vm_dir = vms_dir / "runningvm"
         vm_dir.mkdir(parents=True)
         pid_file = vm_dir / "console.pid"
@@ -356,10 +326,8 @@ class TestCleanupOrphans:
         assert pid_file.exists()
 
     @patch("mvmctl.services.console_relay.manager.os.kill")
-    def test_cleanup_orphans_handles_invalid_pid(self, mock_kill, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-
-        vms_dir = tmp_path / "vms"
+    def test_cleanup_orphans_handles_invalid_pid(self, mock_kill, tmp_path: Path):
+        vms_dir = tmp_path / "cache" / "vms"
         vm_dir = vms_dir / "badvm"
         vm_dir.mkdir(parents=True)
         pid_file = vm_dir / "console.pid"
@@ -369,7 +337,6 @@ class TestCleanupOrphans:
 
         assert not pid_file.exists()
 
-    def test_cleanup_orphans_no_vms_dir(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    def test_cleanup_orphans_no_vms_dir(self, tmp_path: Path):
         mgr = ConsoleRelayManager()
         mgr.cleanup_orphans()

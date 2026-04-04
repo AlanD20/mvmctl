@@ -24,6 +24,7 @@ ENV/
 htmlcov/
 .tox/
 coverage.xml
+coverage.json
 *.cover
 
 # Type checkers

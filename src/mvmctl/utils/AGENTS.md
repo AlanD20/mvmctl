@@ -1,109 +1,3 @@
-# Subagent Instructions
- 
-## Agent Role: ORCHESTRATOR ONLY
- 
-You are the **orchestrating agent**. You **NEVER** read files or edit code yourself. ALL work is done via subagents.
- 
----
- 
-### ⚠️ ABSOLUTE RULES
- 
-1. **NEVER read files yourself** — spawn a subagent to do it
-2. **NEVER edit/create code yourself** — spawn a subagent to do it
-3. **ALWAYS use default subagent** — NEVER use `agentName: "Plan"` (omit `agentName` entirely)
-
-### User Confirmation Required
-
-**NEVER implement changes immediately without user confirmation.**
-
-Before making any code changes:
-1. Present your proposed approach to the user
-2. Explain what you intend to do and why
-3. Wait for explicit user approval
-4. Only proceed with implementation after receiving confirmation
-
-This applies to all edits, fixes, features, and refactoring. No exceptions.
-
----
-
-### Mandatory Workflow (NO EXCEPTIONS)
- 
-```
-User Request
-    ↓
-SUBAGENT #1: Research & Spec
-    - Reads files, analyzes codebase
-    - Creates spec/analysis doc in docs/analyses/
-    - Returns summary to you
-    ↓
-YOU: Receive results, spawn next subagent
-    ↓
-SUBAGENT #2: Implementation (FRESH context)
-    - Receives the spec file path
-    - Implements/codes based on spec
-    - Returns completion summary
-```
- 
----
- 
-### runSubagent Tool Usage
- 
-```
-runSubagent(
-  description: "3-5 word summary",  // REQUIRED
-  prompt: "Detailed instructions"   // REQUIRED
-)
-```
- 
-**NEVER include `agentName`** — always use default subagent (has full read/write capability).
- 
-**If you get errors:**
-- "disabled by user" → You may have included `agentName`. Remove it.
-- "missing required property" → Include BOTH `description` and `prompt`
- 
----
- 
-### Subagent Prompt Templates
- 
-**Research Subagent:**
-```
-Research [topic]. Analyze relevant files in the codebase.
-Create a spec/analysis doc at: docs/analyses/[NAME].md
-Return: summary of findings and the spec file path.
-```
- 
-**Implementation Subagent:**
-```
-Read the spec at: docs/analyses/[NAME].md
-Implement according to the spec.
-Return: summary of changes made.
-```
- 
----
- 
-### What YOU Do (Orchestrator)
- 
-✅ Receive user requests  
-✅ Spawn subagents with clear prompts  
-✅ Pass spec paths between subagents  
-✅ Run terminal commands  
- 
-### What YOU DON'T Do
- 
-❌ Read files (use subagent)  
-❌ Edit/create code (use subagent)  
-❌ Use `agentName: "Plan"` (always omit it)  
-❌ "Quick look" at files before delegating
-
----
-
-### Agent CLI Execution
- 
-To execute the `mvmctl` CLI with proper group privileges, use:
-`sg mvm -c 'mvm ...'`
-
----
-
 # mvmctl/utils/ — Shared Helpers
 
 **Scope:** Pure, domain-agnostic utilities; no business logic, no Firecracker knowledge
@@ -115,15 +9,26 @@ To execute the `mvmctl` CLI with proper group privileges, use:
 ```
 src/mvmctl/utils/
 ├── console.py      # Lazy Rich console + print_* helpers
-├── fs.py           # Cache/config path resolution; SUDO_USER-aware home
+├── fs.py           # Cache/config path resolution; SUDO_USER-aware home; test path helpers
 ├── http.py         # Resumable download with SHA256 verify
 ├── process.py      # subprocess wrappers raising ProcessError
 ├── validation.py   # Entity name, boot arg, and IP validators
-└── audit.py        # Append-only audit log → ~/.cache/mvmctl/audit.log
+├── audit.py        # Append-only audit log → ~/.cache/mvmctl/audit.log
+├── guestfs.py      # ALL libguestfs operations (OptimizedGuestfs, check_libguestfs, extract_partition_with_guestfs)
+├── template.py     # Template rendering for Firecracker boot config
+├── time.py         # Human-readable time formatting ("5 minutes ago")
+├── yaml.py         # YAML loading helpers
+├── id_prefix.py    # Short-ID prefix matching utilities
+├── progress.py     # Download progress bars
+├── disk_size.py    # Disk size parsing/formatting
+├── resize.py       # Image resize utilities
+├── full_hash.py    # Full SHA256 hash generation
+├── debug_state.py  # Debug state dumping
+└── error_handler.py # Error handling utilities
 ```
 
 **Package `__all__`:** Only `console`, `fs`, `http` are re-exported from `utils/__init__.py`.
-`process`, `validation`, and `audit` are used throughout the codebase but not package-exported — import them directly.
+Other modules are used throughout the codebase but not package-exported — import them directly.
 
 ## MODULE DETAILS
 
@@ -158,6 +63,12 @@ src/mvmctl/utils/
 - `log_audit(action, details)` — appends JSON line to `$MVM_CACHE_DIR/audit.log`
 - Called from `cli/` layer (`cli/host.py`, `cli/vm.py`) — NOT from `api/`
 
+### guestfs.py
+- `OptimizedGuestfs` — libguestfs wrapper with connection pooling
+- `check_libguestfs()` — availability check
+- `extract_partition_with_guestfs(...)` — partition extraction
+- **ALL** libguestfs operations belong here — never in `core/`
+
 ## ANTI-PATTERNS
 
 | Forbidden | Correct |
@@ -166,3 +77,4 @@ src/mvmctl/utils/
 | `print()` in utils | `console.py` helpers only, and only where appropriate |
 | Raise domain exceptions | Raise `ValueError` or `ProcessError` — not `VMError` etc. |
 | Hardcode paths | Always read from env via `fs.get_cache_dir()` / `fs.get_config_dir()` |
+| Scatter tool wrappers in `core/` | Centralize in `utils/` (guestfs, http, process) |

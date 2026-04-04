@@ -41,11 +41,18 @@ class TestCloudInitISOCreation:
     """Test cloud-init ISO creation during VM creation."""
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.utils.process.run_cmd")
     def test_vm_create_with_iso_cloud_init(
-        self, mock_run_cmd, mock_create_vm, mock_resolve_image, mock_check_priv, tmp_path
+        self,
+        mock_run_cmd,
+        mock_create_vm,
+        mock_resolve_image,
+        mock_fc_bin,
+        mock_check_priv,
+        tmp_path,
     ):
         """Test VM creation with automatic ISO cloud-init generation.
 
@@ -55,6 +62,7 @@ class TestCloudInitISOCreation:
         - ISO is cleaned up after VM start (by default)
         """
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         # Mock successful subprocess call for cloud-localds
@@ -77,10 +85,11 @@ class TestCloudInitISOCreation:
         assert call_kwargs["image"] == "abc123"
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_vm_create_with_custom_iso(
-        self, mock_create_vm, mock_resolve_image, mock_check_priv, tmp_path
+        self, mock_create_vm, mock_resolve_image, mock_fc_bin, mock_check_priv, tmp_path
     ):
         """Test VM creation with custom cloud-init ISO path.
 
@@ -90,6 +99,7 @@ class TestCloudInitISOCreation:
         - CloudInitMode.ISO is used
         """
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         custom_iso = tmp_path / "custom-cloud-init.iso"
@@ -120,10 +130,11 @@ class TestCloudInitISOCreation:
         assert call_kwargs["cloud_init_iso_path"] == custom_iso
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_vm_create_disabled_cloud_init(
-        self, mock_create_vm, mock_resolve_image, mock_check_priv
+        self, mock_create_vm, mock_resolve_image, mock_fc_bin, mock_check_priv
     ):
         """Test VM creation with disabled cloud-init.
 
@@ -133,6 +144,7 @@ class TestCloudInitISOCreation:
         - No ISO is created or attached
         """
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("no-cloud-init-vm")
@@ -158,9 +170,12 @@ class TestCloudInitISOCreation:
         assert call_kwargs["name"] == "no-cloud-init-vm"
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
-    def test_vm_create_keep_iso_flag(self, mock_create_vm, mock_resolve_image, mock_check_priv):
+    def test_vm_create_keep_iso_flag(
+        self, mock_create_vm, mock_resolve_image, mock_fc_bin, mock_check_priv
+    ):
         """Test VM creation with --keep-cloud-init-iso flag.
 
         Verifies that:
@@ -169,6 +184,7 @@ class TestCloudInitISOCreation:
         - ISO file is retained after VM start
         """
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("keep-iso-vm")
@@ -200,10 +216,17 @@ class TestCloudInitISOSubprocessMocking:
 
     @patch("mvmctl.utils.process.run_cmd")
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_iso_creation_with_cloud_localds_mock(
-        self, mock_create_vm, mock_resolve_image, mock_check_priv, mock_run_cmd, tmp_path
+        self,
+        mock_create_vm,
+        mock_resolve_image,
+        mock_fc_bin,
+        mock_check_priv,
+        mock_run_cmd,
+        tmp_path,
     ):
         """Test that cloud-localds subprocess is called correctly.
 
@@ -213,6 +236,7 @@ class TestCloudInitISOSubprocessMocking:
         - ISO output path is correct
         """
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         # Track subprocess calls
@@ -266,10 +290,12 @@ class TestCloudInitISOEdgeCases:
     """Test edge cases in cloud-init ISO workflows."""
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    def test_custom_iso_not_found(self, mock_resolve_image, mock_check_priv, tmp_path):
+    def test_custom_iso_not_found(self, mock_resolve_image, mock_fc_bin, mock_check_priv, tmp_path):
         """Test error when custom ISO path doesn't exist."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         nonexistent_iso = tmp_path / "nonexistent.iso"
@@ -318,9 +344,12 @@ class TestCloudInitISOEdgeCases:
         assert "are mutually exclusive" in result.output.lower()
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
-    def test_nocloud_net_mode(self, mock_create_vm, mock_resolve_image, mock_check_priv):
+    def test_nocloud_net_mode(
+        self, mock_create_vm, mock_resolve_image, mock_fc_bin, mock_check_priv
+    ):
         """Test VM creation with nocloud-net mode.
 
         Verifies that:
@@ -329,6 +358,7 @@ class TestCloudInitISOEdgeCases:
         - No ISO is created
         """
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("nocloud-vm")
@@ -352,12 +382,14 @@ class TestCloudInitISOEdgeCases:
         assert call_kwargs["name"] == "nocloud-vm"
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     def test_nocloud_net_with_custom_iso_conflict(
-        self, mock_resolve_image, mock_check_priv, tmp_path
+        self, mock_resolve_image, mock_fc_bin, mock_check_priv, tmp_path
     ):
         """Test that --nocloud-net and --cloud-init-iso are mutually exclusive."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         custom_iso = tmp_path / "custom.iso"
@@ -380,10 +412,14 @@ class TestCloudInitISOEdgeCases:
         assert "only one of" in result.output.lower()
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
-    def test_nocloud_net_with_no_cloud_init_conflict(self, mock_resolve_image, mock_check_priv):
+    def test_nocloud_net_with_no_cloud_init_conflict(
+        self, mock_resolve_image, mock_fc_bin, mock_check_priv
+    ):
         """Test that --nocloud-net and --no-cloud-init are mutually exclusive."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         result = runner.invoke(

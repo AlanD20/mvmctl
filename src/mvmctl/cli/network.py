@@ -29,7 +29,7 @@ from mvmctl.utils.console import (
 )
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import (
-    validate_cidr,
+    validate_subnet,
     validate_entity_name,
     validate_ipv4_address,
     validate_nat_gateways,
@@ -61,8 +61,8 @@ def ls(
         data = [
             {
                 "name": n.name,
-                "cidr": n.cidr,
-                "gateway": n.gateway,
+                "subnet": n.subnet,
+                "ipv4_gateway": n.ipv4_gateway,
                 "bridge": n.bridge,
                 "nat_enabled": n.nat_enabled,
                 "created_at": n.created_at,
@@ -80,8 +80,7 @@ def ls(
     rows = []
     for n in networks:
         is_bridge_missing = not is_bridge_alive(n.bridge)
-        # Treat network named "default" as default regardless of is_default flag
-        is_default = n.is_default or n.name == "default"
+        is_default = n.is_default
         # Prioritize default marker (*) over missing marker (X) for consistent UX
         if is_default:
             name_col = "* " + n.name
@@ -90,8 +89,8 @@ def ls(
         rows.append(
             [
                 name_col,
-                n.cidr,
-                n.gateway,
+                n.subnet,
+                n.ipv4_gateway,
                 n.bridge,
                 "yes" if n.nat_enabled else "no",
                 str(len(get_network_leases(n.name))),
@@ -100,7 +99,7 @@ def ls(
         )
     print_table(
         title="Networks",
-        columns=["Name", "Network", "Gateway", "Bridge", "NAT", "VMs", "Created"],
+        columns=["Name", "Network", "IPv4 Gateway", "Bridge", "NAT", "VMs", "Created"],
         rows=rows,
     )
 
@@ -127,10 +126,12 @@ def set_default(
 def create(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
-    cidr: str | None = typer.Option(
-        None, "--cidr", help="IP subnet in CIDR notation (e.g. 192.168.100.0/24)"
+    subnet: str | None = typer.Option(
+        None, "--subnet", help="IP subnet in SUBNET notation (e.g. 192.168.100.0/24)"
     ),
-    gateway: str | None = typer.Option(None, "--gateway", help="Gateway IP for the bridge"),
+    ipv4_gateway: str | None = typer.Option(
+        None, "--ipv4-gateway", help="Gateway IPv4 for the bridge"
+    ),
     no_nat: bool = typer.Option(False, "--no-nat", help="Disable NAT/masquerade"),
     nat_gateways: str | None = typer.Option(
         None,
@@ -140,24 +141,24 @@ def create(
 ) -> None:
     """Create a named network."""
     name = check_name_arg(ctx, name)
-    if cidr is None:
-        print_error("Missing required option '--cidr'")
+    if subnet is None:
+        print_error("Missing required option '--subnet'")
         raise typer.Exit(code=1)
     validate_entity_name(name, "network")
 
-    # Validate CIDR notation
+    # Validate SUBNET notation
     try:
-        cidr = validate_cidr(cidr)
+        subnet = validate_subnet(subnet)
     except MVMError as e:
-        print_error(f"Invalid CIDR: {e}")
+        print_error(f"Invalid SUBNET: {e}")
         raise typer.Exit(code=1)
 
     # Validate gateway if provided
-    if gateway is not None:
+    if ipv4_gateway is not None:
         try:
-            gateway = validate_ipv4_address(gateway)
+            ipv4_gateway = validate_ipv4_address(ipv4_gateway)
         except MVMError as e:
-            print_error(f"Invalid gateway: {e}")
+            print_error(f"Invalid IPv4 gateway: {e}")
             raise typer.Exit(code=1)
 
     if nat_gateways is None:
@@ -168,15 +169,27 @@ def create(
         elif len(interfaces) == 1:
             nat_gateways = interfaces[0]
         else:
-            print_info("Select interface for NAT (internet access):")
+            print_info("Select interface(s) for NAT (internet access):")
             for i, iface in enumerate(interfaces, 1):
                 print_info(f"  [{i}] {iface}")
             selected = Prompt.ask(
-                "Select interface number",
-                choices=[str(i) for i in range(1, len(interfaces) + 1)],
+                "Select interface number(s) [comma-separated]",
                 default="1",
             )
-            nat_gateways = interfaces[int(selected) - 1]
+            # Parse comma-separated indices
+            try:
+                indices = [int(x.strip()) for x in selected.split(",") if x.strip()]
+                selected_interfaces = []
+                for idx in indices:
+                    if 1 <= idx <= len(interfaces):
+                        selected_interfaces.append(interfaces[idx - 1])
+                if not selected_interfaces:
+                    print_error("No valid interface indices selected")
+                    raise typer.Exit(code=1)
+                nat_gateways = ",".join(selected_interfaces)
+            except ValueError:
+                print_error(f"Invalid interface selection: {selected}")
+                raise typer.Exit(code=1)
 
     # Validate and parse NAT gateways
     try:
@@ -188,8 +201,8 @@ def create(
     try:
         config = create_network(
             name=name,
-            cidr=cidr,
-            gateway=gateway,
+            subnet=subnet,
+            ipv4_gateway=ipv4_gateway,
             nat=not no_nat,
             nat_gateways=nat_gateways_list,
         )
@@ -204,7 +217,7 @@ def create(
             print_info("To remove the existing network:")
             print_info(f"  mvm network rm {name}")
         elif "overlaps" in error_msg.lower():
-            print_info("Choose a different CIDR that doesn't conflict with existing networks.")
+            print_info("Choose a different SUBNET that doesn't conflict with existing networks.")
             print_info("Common private ranges:")
             print_info("  10.0.0.0/8     (very large)")
             print_info("  172.16.0.0/12  (large)")
@@ -219,8 +232,8 @@ def create(
         raise typer.Exit(code=1)
 
     print_success(f"Network '{config.name}' created")
-    print_info(f"  CIDR:    {config.cidr}")
-    print_info(f"  Gateway: {config.gateway}")
+    print_info(f"  SUBNET:    {config.subnet}")
+    print_info(f"  IPv4 Gateway: {config.ipv4_gateway}")
     print_info(f"  Bridge:  {config.bridge}")
     print_info(f"  NAT:     {'enabled' if config.nat_enabled else 'disabled'}")
     if config.nat_gateways:
@@ -285,8 +298,8 @@ def inspect(
 
     print_section_header("BASIC INFO")
     print_key_value("Name", info["name"])
-    print_key_value("CIDR", info.get("cidr", info.get("subnet", "-")))
-    print_key_value("Gateway", info["gateway"])
+    print_key_value("SUBNET", info.get("subnet", info.get("subnet", "-")))
+    print_key_value("IPv4 Gateway", info.get("ipv4_gateway", "-"))
     print_key_value("Bridge", info["bridge"])
     print_key_value("NAT", "enabled" if info["nat_enabled"] else "disabled")
     print_key_value("Created", format_timestamp(info.get("created_at")))

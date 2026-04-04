@@ -6,7 +6,7 @@ from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
 from mvmctl.cli.host import app
-from mvmctl.core.host import HostChange, HostState
+from mvmctl.core.host import HostStateChange, HostState
 from mvmctl.exceptions import HostError
 
 runner = CliRunner()
@@ -21,7 +21,7 @@ def test_init_success_with_changes(mocker: MockerFixture, tmp_path):
     mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mock_init = mocker.patch("mvmctl.cli.host.init_host")
     mock_init.return_value = [
-        HostChange(
+        HostStateChange(
             setting="net.ipv4.ip_forward",
             original_value="0",
             applied_value="1",
@@ -39,13 +39,13 @@ def test_init_success_multiple_changes(mocker: MockerFixture, tmp_path):
     mocker.patch("mvmctl.cli.host.get_cache_dir", return_value=tmp_path)
     mock_init = mocker.patch("mvmctl.cli.host.init_host")
     mock_init.return_value = [
-        HostChange(
+        HostStateChange(
             setting="net.ipv4.ip_forward",
             original_value="0",
             applied_value="1",
             mechanism="sysctl",
         ),
-        HostChange(
+        HostStateChange(
             setting="sysctl_persist_file",
             original_value=None,
             applied_value="/etc/sysctl.d/fc.conf",
@@ -74,7 +74,7 @@ def test_init_warns_when_chains_already_exist(mocker: MockerFixture, tmp_path):
     mocker.patch(
         "mvmctl.cli.host.init_host",
         return_value=[
-            HostChange(
+            HostStateChange(
                 setting="iptables_chains",
                 original_value=None,
                 applied_value="MVM chains already exist",
@@ -167,7 +167,7 @@ def test_ls_state_exists_with_timestamp(mocker: MockerFixture, tmp_path):
         return_value=HostState(
             init_timestamp="2025-06-15T10:30:00+00:00",
             changes=[
-                HostChange("net.ipv4.ip_forward", "0", "1", "sysctl"),
+                HostStateChange("net.ipv4.ip_forward", "0", "1", "sysctl"),
             ],
         ),
     )

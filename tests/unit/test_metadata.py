@@ -1,667 +1,456 @@
-"""Tests for the unified metadata.json store."""
+"""Tests for the unified metadata storage (SQLite-only)."""
 
-import json
-import multiprocessing
-import time
 from pathlib import Path
-from unittest.mock import patch
 
 from mvmctl.core.metadata import (
-    MetadataCache,
+    find_images_by_id_prefix,
     get_binary_entry,
+    get_default_binary_entry,
+    get_default_image_entry,
+    get_default_kernel_entry,
+    get_default_network_entry,
     get_image_entry,
     get_kernel_entry,
+    get_network_entry,
+    list_binary_entries,
     list_image_entries,
     list_kernel_entries,
-    read_metadata,
+    list_network_entries,
     remove_image_entry,
     remove_kernel_entry,
+    set_default_binary_entry,
+    set_default_image_by_internal_id,
+    set_default_image_entry,
+    set_default_kernel_by_filename,
+    set_default_network_entry,
     update_binary_entry,
     update_image_entry,
     update_kernel_entry,
-    write_metadata,
+    update_network_entry,
 )
-
-
-def _concurrent_writer(cache_dir_str: str, writer_id: int, num_writes: int) -> int:
-    """Worker function for concurrent write test. Writes unique entries and returns success count."""
-    cache_dir = Path(cache_dir_str)
-    success_count = 0
-    for i in range(num_writes):
-        try:
-            entry_key = f"writer{writer_id}_entry{i}"
-            update_kernel_entry(cache_dir, entry_key, writer_id=writer_id, entry_index=i)
-            success_count += 1
-        except Exception:
-            pass
-    return success_count
-
-
-def _writer_process(cache_dir_str: str, writer_id: int, num_operations: int) -> int:
-    """Writer process for concurrent read/write test."""
-    cache_dir = Path(cache_dir_str)
-    success = 0
-    for i in range(num_operations):
-        try:
-            update_kernel_entry(cache_dir, f"writer{writer_id}_entry{i}", version=f"{i}")
-            success += 1
-        except Exception:
-            pass
-    return success
-
-
-def _reader_process(cache_dir_str: str, reader_id: int, num_operations: int) -> int:
-    """Reader process for concurrent read/write test."""
-    cache_dir = Path(cache_dir_str)
-    success = 0
-    for _ in range(num_operations * 2):
-        try:
-            meta = read_metadata(cache_dir)
-            _ = meta.get("kernels", {})
-            success += 1
-        except Exception:
-            pass
-    return success
-
-
-def test_read_metadata_missing_returns_empty(tmp_path: Path):
-    result = read_metadata(tmp_path)
-    assert result == {}
-
-
-def test_read_metadata_invalid_json_returns_empty(tmp_path: Path):
-    (tmp_path / "metadata.json").write_text("not valid json {{{")
-    result = read_metadata(tmp_path)
-    assert result == {}
-
-
-def test_read_metadata_non_dict_returns_empty(tmp_path: Path):
-    (tmp_path / "metadata.json").write_text("[1, 2, 3]")
-    result = read_metadata(tmp_path)
-    assert result == {}
-
-
-def test_list_kernel_entries_removes_orphaned_on_read(tmp_path: Path):
-    kernels_dir = tmp_path / "kernels"
-    kernels_dir.mkdir()
-    valid_kernel = kernels_dir / "vmlinux"
-    valid_kernel.write_bytes(b"\x7fELF")
-
-    valid_id = "a" * 64
-    orphan_id = "b" * 64
-    write_metadata(
-        tmp_path,
-        {
-            "kernels": {
-                valid_id: {"filename": "vmlinux", "version": "6.1"},
-                orphan_id: {"filename": "missing-kernel", "version": "6.2"},
-            }
-        },
-    )
-
-    result = list_kernel_entries(tmp_path, kernels_dir)
-
-    assert result == {valid_id: {"filename": "vmlinux", "version": "6.1"}}
-    persisted = json.loads((tmp_path / "metadata.json").read_text())
-    assert persisted["kernels"] == {valid_id: {"filename": "vmlinux", "version": "6.1"}}
-
-
-def test_list_image_entries_removes_orphaned_on_read(tmp_path: Path):
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    image_path = images_dir / "valid.ext4"
-    image_path.write_text("image")
-
-    write_metadata(
-        tmp_path,
-        {
-            "images": {
-                "valid": {"filename": "valid.ext4", "fs_type": "ext4"},
-                "stale": {"filename": "stale.ext4", "fs_type": "ext4"},
-            }
-        },
-    )
-
-    result = list_image_entries(tmp_path, images_dir)
-
-    assert set(result.keys()) == {"valid"}
-    persisted = json.loads((tmp_path / "metadata.json").read_text())
-    assert set(persisted["images"].keys()) == {"valid"}
-
-
-def test_write_metadata_creates_file(tmp_path: Path):
-    write_metadata(tmp_path, {"kernels": {}, "images": {}})
-    meta_file = tmp_path / "metadata.json"
-    assert meta_file.exists()
-    data = json.loads(meta_file.read_text())
-    assert "kernels" in data
-
-
-def test_write_metadata_sets_permissions(tmp_path: Path):
-    write_metadata(tmp_path, {"x": 1})
-    mode = (tmp_path / "metadata.json").stat().st_mode & 0o777
-    assert mode == 0o600
-
-
-def test_update_kernel_entry_creates_metadata_json(tmp_path: Path):
-    update_kernel_entry(tmp_path, "vmlinux", name="vmlinux", version="6.1")
-    meta = read_metadata(tmp_path)
-    assert "vmlinux" in meta["kernels"]
-    assert meta["kernels"]["vmlinux"]["version"] == "6.1"
-
-
-def test_update_kernel_entry_merges_with_existing(tmp_path: Path):
-    update_kernel_entry(tmp_path, "vmlinux", version="6.1")
-    update_kernel_entry(tmp_path, "vmlinux", type="official")
-    entry = get_kernel_entry(tmp_path, "vmlinux")
-    assert entry["version"] == "6.1"
-    assert entry["type"] == "official"
-
-
-def test_list_kernel_entries_empty(tmp_path: Path):
-    result = list_kernel_entries(tmp_path)
-    assert result == {}
-
-
-def test_list_kernel_entries_returns_all(tmp_path: Path):
-    update_kernel_entry(tmp_path, "vmlinux-a", version="6.1")
-    update_kernel_entry(tmp_path, "vmlinux-b", version="6.2")
-    result = list_kernel_entries(tmp_path)
-    assert set(result.keys()) == {"vmlinux-a", "vmlinux-b"}
-
-
-def test_remove_kernel_entry(tmp_path: Path):
-    update_kernel_entry(tmp_path, "vmlinux", version="6.1")
-    remove_kernel_entry(tmp_path, "vmlinux")
-    assert get_kernel_entry(tmp_path, "vmlinux") == {}
-
-
-def test_remove_kernel_entry_noop_if_missing(tmp_path: Path):
-    remove_kernel_entry(tmp_path, "nonexistent")
-
-
-def test_get_kernel_entry_missing_returns_empty(tmp_path: Path):
-    result = get_kernel_entry(tmp_path, "nonexistent")
-    assert result == {}
-
-
-def test_update_image_entry(tmp_path: Path):
-    update_image_entry(tmp_path, "ubuntu-24.04", os_name="Ubuntu", fs_type="ext4")
-    entry = get_image_entry(tmp_path, "ubuntu-24.04")
-    assert entry["os_name"] == "Ubuntu"
-    assert entry["fs_type"] == "ext4"
-
-
-def test_get_image_entry_missing_returns_empty(tmp_path: Path):
-    result = get_image_entry(tmp_path, "no-such-image")
-    assert result == {}
-
-
-def test_list_image_entries(tmp_path: Path):
-    update_image_entry(tmp_path, "img-a", fs_type="ext4")
-    update_image_entry(tmp_path, "img-b", fs_type="btrfs")
-    result = list_image_entries(tmp_path)
-    assert set(result.keys()) == {"img-a", "img-b"}
-
-
-def test_remove_image_entry(tmp_path: Path):
-    update_image_entry(tmp_path, "ubuntu-24.04", fs_type="ext4")
-    remove_image_entry(tmp_path, "ubuntu-24.04")
-    assert get_image_entry(tmp_path, "ubuntu-24.04") == {}
-
-
-def test_update_binary_entry(tmp_path: Path):
-    update_binary_entry(
-        tmp_path,
-        "1.15.0",
-        firecracker_path="/bin/firecracker-v1.15.0",
-        jailer_path="/bin/jailer-v1.15.0",
-        default_binary_path="/bin/firecracker",
-        default_jailer_path="/bin/jailer",
-    )
-    raw = read_metadata(tmp_path)
-    assert "binaries" in raw
-    # Check for firecracker, jailer, and defaults keys
-    assert set(raw["binaries"].keys()) == {"firecracker", "jailer", "defaults"}
-
-    # Check individual binary entries (no default_binary_path or active_binary_path)
-    firecracker = raw["binaries"]["firecracker"]
-    jailer = raw["binaries"]["jailer"]
-    assert firecracker["binary_name"] == "firecracker"
-    assert jailer["binary_name"] == "jailer"
-    assert firecracker["binary_path"] == "/bin/firecracker-v1.15.0"
-    assert jailer["binary_path"] == "/bin/jailer-v1.15.0"
-    assert firecracker["package_version"] == "1.15.0"
-    assert jailer["package_version"] == "1.15.0"
-    # default_binary_path should NOT be in individual entries
-    assert "default_binary_path" not in firecracker
-    assert "default_binary_path" not in jailer
-    # active_binary_path should NOT be in individual entries
-    assert "active_binary_path" not in firecracker
-    assert "active_binary_path" not in jailer
-
-    # Check defaults section
-    defaults = raw["binaries"]["defaults"]
-    assert "firecracker" in defaults
-    assert "jailer" in defaults
-    assert defaults["firecracker"]["binary_path"] == "/bin/firecracker"
-    assert defaults["jailer"]["binary_path"] == "/bin/jailer"
-    assert defaults["firecracker"]["full_version"] == "v1.15.0"
-    assert defaults["jailer"]["full_version"] == "v1.15.0"
-
-    entry = get_binary_entry(tmp_path, "1.15.0")
-    assert entry["package_version"] == "1.15.0"
-
-
-def test_get_binary_entry_missing_returns_empty(tmp_path: Path):
-    assert get_binary_entry(tmp_path, "99.0.0") == {}
-
-
-def test_concurrent_writes_no_corruption(tmp_path: Path):
-    """Test that concurrent writes to metadata.json do not corrupt the file.
-
-    Spawns multiple processes that simultaneously write to the same metadata file.
-    Verifies that the file remains valid JSON and operations complete without crashes.
-    File locking ensures atomic writes - no partial/corrupted JSON.
-    """
-    cache_dir = tmp_path / "concurrent_test_cache"
-    cache_dir.mkdir(exist_ok=True)
-
-    num_processes = 4
-    num_writes_per_process = 10
-
-    with multiprocessing.Pool(processes=num_processes) as pool:
-        results = [
-            pool.apply_async(_concurrent_writer, (str(cache_dir), i, num_writes_per_process))
-            for i in range(num_processes)
-        ]
-        success_counts = [r.get(timeout=30) for r in results]
-
-    # All operations should complete without exceptions
-    assert sum(success_counts) == num_processes * num_writes_per_process
-
-    # Metadata should be valid JSON (not corrupted)
-    meta = read_metadata(cache_dir)
-    assert isinstance(meta, dict)
-    assert "kernels" in meta
-    assert isinstance(meta["kernels"], dict)
-
-    # Verify at least some entries were written (file locking allows atomic writes)
-    # Note: With read-modify-write pattern, last writer wins per key,
-    # but file locking prevents JSON corruption from interleaved writes
-    total_entries = len(meta["kernels"])
-    assert total_entries > 0
-
-
-def test_concurrent_reads_and_writes_no_corruption(tmp_path: Path):
-    """Test that concurrent reads and writes do not cause corruption or crashes.
-
-    Spawns processes that simultaneously read and write to the same metadata file.
-    File locking ensures readers get consistent views and writers don't corrupt file.
-    """
-    cache_dir = tmp_path / "concurrent_rw_test_cache"
-    cache_dir.mkdir(exist_ok=True)
-
-    update_kernel_entry(cache_dir, "initial", version="1.0")
-
-    num_writers = 3
-    num_readers = 3
-    num_operations = 20
-
-    with multiprocessing.Pool(processes=num_writers + num_readers) as pool:
-        writer_results = [
-            pool.apply_async(_writer_process, (str(cache_dir), i, num_operations))
-            for i in range(num_writers)
-        ]
-        reader_results = [
-            pool.apply_async(_reader_process, (str(cache_dir), i, num_operations))
-            for i in range(num_readers)
-        ]
-
-        writer_success = sum(r.get(timeout=30) for r in writer_results)
-        reader_success = sum(r.get(timeout=30) for r in reader_results)
-
-    # All writes should succeed
-    assert writer_success == num_writers * num_operations
-
-    # All reads should succeed (shared lock allows concurrent reads)
-    assert reader_success == num_readers * num_operations * 2
-
-    # Verify final state is valid JSON
-    meta = read_metadata(cache_dir)
-    assert isinstance(meta, dict)
-    assert "kernels" in meta
-    assert "initial" in meta["kernels"]
-    assert meta["kernels"]["initial"]["version"] == "1.0"
-
-
-def test_lock_file_created_separate_from_metadata(tmp_path: Path):
-    """Test that the lock file is created separately from metadata.json."""
-    cache_dir = tmp_path / "lock_test_cache"
-    cache_dir.mkdir(exist_ok=True)
-
-    write_metadata(cache_dir, {"test": "data"})
-
-    assert (cache_dir / "metadata.json").exists()
-    assert (cache_dir / "metadata.json.lock").exists()
-
-    meta_stat = (cache_dir / "metadata.json").stat()
-    lock_stat = (cache_dir / "metadata.json.lock").stat()
-    assert meta_stat.st_ino != lock_stat.st_ino
-
-
-# =============================================================================
-# MetadataCache tests
-# =============================================================================
-
-
-def test_metadata_cache_returns_cached_data(tmp_path: Path):
-    """Test that cache returns data without file I/O on cache hit."""
-    data = {"kernels": {"vmlinux": {"version": "6.1"}}}
-
-    # Pre-populate the file
-    write_metadata(tmp_path, data)
-
-    # First read should populate cache
-    result = read_metadata(tmp_path)
-    assert result == data
-
-    with patch.object(Path, "read_text") as mock_read_text:
-        cached_result = read_metadata(tmp_path)
-        mock_read_text.assert_not_called()
-
-    assert cached_result == data
-
-
-def test_metadata_cache_invalidates_on_file_change(tmp_path: Path):
-    """Test that cache invalidates when file mtime changes."""
-    cache_dir = tmp_path / "cache_test"
-    cache_dir.mkdir()
-
-    # Write initial data
-    write_metadata(cache_dir, {"kernels": {"vmlinux": {"version": "6.1"}}})
-
-    # Read to populate cache
-    result1 = read_metadata(cache_dir)
-    assert result1["kernels"]["vmlinux"]["version"] == "6.1"
-
-    # Modify the file
-    time.sleep(0.1)  # Ensure mtime changes
-    write_metadata(cache_dir, {"kernels": {"vmlinux": {"version": "6.2"}}})
-
-    # Read should return new data (cache invalidated)
-    result2 = read_metadata(cache_dir)
-    assert result2["kernels"]["vmlinux"]["version"] == "6.2"
-
-
-def test_metadata_cache_expires_after_ttl(tmp_path: Path):
-    """Test that cache entries expire after TTL."""
-    cache = MetadataCache(ttl=0.1)  # 100ms TTL
-
-    # Pre-populate the file
-    write_metadata(tmp_path, {"kernels": {"vmlinux": {"version": "6.1"}}})
-
-    # Populate cache
-    cache.set(tmp_path, {"kernels": {"vmlinux": {"version": "6.1"}}})
-
-    # Should return cached data immediately
-    assert cache.get(tmp_path) is not None
-
-    # Wait for TTL to expire
-    time.sleep(0.15)
-
-    assert cache.get(tmp_path) == {"kernels": {"vmlinux": {"version": "6.1"}}}
-
-
-def test_metadata_cache_refreshes_ttl_when_mtime_unchanged(tmp_path: Path):
-    """Test expired entries are reused when file mtime is unchanged."""
-    cache = MetadataCache(ttl=0.05)
-
-    write_metadata(tmp_path, {"kernels": {"vmlinux": {"version": "6.1"}}})
-    cache.set(tmp_path, {"kernels": {"vmlinux": {"version": "6.1"}}})
-
-    time.sleep(0.06)
-
-    refreshed = cache.get(tmp_path)
-    assert refreshed == {"kernels": {"vmlinux": {"version": "6.1"}}}
-
-
-def test_metadata_cache_evicts_oldest_entry(tmp_path: Path):
-    """Test LRU eviction when cache exceeds max_entries."""
-    cache = MetadataCache(ttl=5.0, max_entries=2)
-
-    cache_dir_a = tmp_path / "cache_a"
-    cache_dir_b = tmp_path / "cache_b"
-    cache_dir_c = tmp_path / "cache_c"
-    cache_dir_a.mkdir()
-    cache_dir_b.mkdir()
-    cache_dir_c.mkdir()
-
-    write_metadata(cache_dir_a, {"data": "a"})
-    write_metadata(cache_dir_b, {"data": "b"})
-    write_metadata(cache_dir_c, {"data": "c"})
-
-    cache.set(cache_dir_a, {"data": "a"})
-    cache.set(cache_dir_b, {"data": "b"})
-    cache.set(cache_dir_c, {"data": "c"})
-
-    assert cache.get(cache_dir_a) is None
-    assert cache.get(cache_dir_b) == {"data": "b"}
-    assert cache.get(cache_dir_c) == {"data": "c"}
-
-
-def test_metadata_cache_thread_safety(tmp_path: Path):
-    """Test that cache is thread-safe."""
-    import threading
-
-    cache = MetadataCache(ttl=5.0)
-    errors = []
-    results = []
-
-    def reader():
-        try:
-            for _ in range(100):
-                result = cache.get(tmp_path)
-                results.append(result)
-        except Exception as e:
-            errors.append(e)
-
-    def writer():
-        try:
-            for i in range(100):
-                cache.set(tmp_path, {"version": i})
-        except Exception as e:
-            errors.append(e)
-
-    # Start multiple threads
-    threads = []
-    for _ in range(3):
-        t = threading.Thread(target=reader)
-        threads.append(t)
-        t.start()
-
-    for _ in range(2):
-        t = threading.Thread(target=writer)
-        threads.append(t)
-        t.start()
-
-    for t in threads:
-        t.join()
-
-    assert not errors, f"Thread errors: {errors}"
-
-
-def test_metadata_cache_invalidate_single(tmp_path: Path):
-    """Test invalidating a single cache entry."""
-    cache = MetadataCache(ttl=5.0)
-
-    # Create the metadata file first
-    write_metadata(tmp_path, {"data": "test"})
-
-    # Now set in cache
-    cache.set(tmp_path, {"data": "test"})
-    assert cache.get(tmp_path) is not None
-
-    cache.invalidate(tmp_path)
-    assert cache.get(tmp_path) is None
-
-
-def test_metadata_cache_invalidate_all(tmp_path: Path):
-    """Test invalidating all cache entries."""
-    cache = MetadataCache(ttl=5.0)
-
-    cache_dir_a = tmp_path / "cache_a"
-    cache_dir_b = tmp_path / "cache_b"
-    cache_dir_a.mkdir()
-    cache_dir_b.mkdir()
-
-    # Create metadata files
-    write_metadata(cache_dir_a, {"data": "a"})
-    write_metadata(cache_dir_b, {"data": "b"})
-
-    # Set in cache
-    cache.set(cache_dir_a, {"data": "a"})
-    cache.set(cache_dir_b, {"data": "b"})
-
-    assert cache.get(cache_dir_a) is not None
-    assert cache.get(cache_dir_b) is not None
-
-    cache.invalidate()
-
-    assert cache.get(cache_dir_a) is None
-    assert cache.get(cache_dir_b) is None
-
-
-def test_write_metadata_invalidates_cache(tmp_path: Path):
-    """Test that write_metadata invalidates the read cache."""
-    # Pre-populate
-    write_metadata(tmp_path, {"kernels": {"vmlinux": {"version": "6.1"}}})
-
-    # Read to populate cache
-    result1 = read_metadata(tmp_path)
-    assert result1["kernels"]["vmlinux"]["version"] == "6.1"
-
-    # Write new data (should invalidate cache)
-    write_metadata(tmp_path, {"kernels": {"vmlinux": {"version": "6.2"}}})
-
-    # Read should return new data
-    result2 = read_metadata(tmp_path)
-    assert result2["kernels"]["vmlinux"]["version"] == "6.2"
-
-
-def test_metadata_cache_handles_missing_file(tmp_path: Path):
-    """Test that cache handles missing files gracefully."""
-    cache = MetadataCache(ttl=5.0)
-
-    # Try to get from cache for non-existent file
-    result = cache.get(tmp_path)
-    assert result is None
-
-
-def test_metadata_cache_returns_none_for_stale_mtime(tmp_path: Path):
-    """Test that cache returns None when file mtime doesn't match."""
-    cache = MetadataCache(ttl=5.0)
-
-    # Create file and cache entry
-    write_metadata(tmp_path, {"version": "1.0"})
-    cache.set(tmp_path, {"version": "1.0"})
-
-    # Verify cache hit
-    assert cache.get(tmp_path) is not None
-
-    # Modify file directly (simulating external change)
-    time.sleep(0.1)
-    (tmp_path / "metadata.json").write_text(json.dumps({"version": "2.0"}))
-
-    # Cache should detect mtime change and return None
-    assert cache.get(tmp_path) is None
-
-
-# ---------------------------------------------------------------------------
-# Issue #19: Stale Cache Risk - Validation on read
-# ---------------------------------------------------------------------------
-
-
-def test_list_kernel_entries_removes_orphaned_entries(tmp_path: Path):
-    """Test that list_kernel_entries removes entries for non-existent files."""
-    kernels_dir = tmp_path / "kernels"
-    kernels_dir.mkdir()
-
-    # Create a kernel file
-    (kernels_dir / "vmlinux-6.1").write_bytes(b"\x7fELF")
-
-    # Add metadata for existing and non-existing kernels
-    update_kernel_entry(tmp_path, "vmlinux-6.1", version="6.1", type="official")
-    update_kernel_entry(tmp_path, "vmlinux-orphan", version="6.2", type="official")
-
-    # List with validation
-    entries = list_kernel_entries(tmp_path, kernels_dir)
-
-    # Should only return existing kernel
-    assert "vmlinux-6.1" in entries
-    assert "vmlinux-orphan" not in entries
-
-    # Verify orphan was removed from metadata
-    meta = read_metadata(tmp_path)
-    assert "vmlinux-orphan" not in meta.get("kernels", {})
-
-
-def test_list_kernel_entries_without_kernels_dir(tmp_path: Path):
-    """Test that list_kernel_entries works without validation when kernels_dir is None."""
-    update_kernel_entry(tmp_path, "vmlinux-6.1", version="6.1")
-    update_kernel_entry(tmp_path, "vmlinux-orphan", version="6.2")
-
-    # List without validation
-    entries = list_kernel_entries(tmp_path, None)
-
-    # Should return all entries
-    assert "vmlinux-6.1" in entries
-    assert "vmlinux-orphan" in entries
-
-
-def test_list_image_entries_removes_orphaned_entries(tmp_path: Path):
-    """Test that list_image_entries removes entries for non-existent files."""
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-
-    # Create an image file
-    (images_dir / "ubuntu-24.04.ext4").write_bytes(b"ext4 data")
-
-    # Add metadata for existing and non-existing images
-    update_image_entry(tmp_path, "ubuntu-24.04", os_name="Ubuntu", filename="ubuntu-24.04.ext4")
-    update_image_entry(tmp_path, "debian-12", os_name="Debian", filename="debian-12.ext4")
-
-    # List with validation
-    entries = list_image_entries(tmp_path, images_dir)
-
-    # Should only return existing image
-    assert "ubuntu-24.04" in entries
-    assert "debian-12" not in entries
-
-    # Verify orphan was removed from metadata
-    meta = read_metadata(tmp_path)
-    assert "debian-12" not in meta.get("images", {})
-
-
-def test_list_image_entries_without_images_dir(tmp_path: Path):
-    """Test that list_image_entries works without validation when images_dir is None."""
-    update_image_entry(tmp_path, "ubuntu-24.04", os_name="Ubuntu")
-    update_image_entry(tmp_path, "debian-12", os_name="Debian")
-
-    # List without validation
-    entries = list_image_entries(tmp_path, None)
-
-    # Should return all entries
-    assert "ubuntu-24.04" in entries
-    assert "debian-12" in entries
-
-
-def test_list_kernel_entries_handles_missing_kernels_dir(tmp_path: Path):
-    """Test that list_kernel_entries handles non-existent kernels_dir gracefully."""
-    update_kernel_entry(tmp_path, "vmlinux-6.1", version="6.1")
-
-    # Pass non-existent directory
-    entries = list_kernel_entries(tmp_path, tmp_path / "nonexistent")
-
-    # Should return entries without validation
-    assert "vmlinux-6.1" in entries
+from mvmctl.core.mvm_db import MVMDatabase
+from tests.helpers.paths import make_test_paths
+
+
+class TestKernelMetadata:
+    """Tests for kernel metadata operations."""
+
+    def test_update_and_get_kernel_entry(self, tmp_path: Path):
+        """Test updating and retrieving a kernel entry."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_kernel_entry(
+            cache_dir,
+            "kernel123",
+            name="vmlinux-test",
+            version="6.1.0",
+            arch="x86_64",
+            filename="vmlinux-test",
+            type="official",
+        )
+
+        entry = get_kernel_entry(cache_dir, "kernel123")
+        assert entry["name"] == "vmlinux-test"
+        assert entry["version"] == "6.1.0"
+        assert entry["arch"] == "x86_64"
+
+    def test_list_kernel_entries(self, tmp_path: Path):
+        """Test listing all kernel entries."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_kernel_entry(cache_dir, "kernel1", name="vmlinux-1", version="6.1.0")
+        update_kernel_entry(cache_dir, "kernel2", name="vmlinux-2", version="6.2.0")
+
+        entries = list_kernel_entries(cache_dir)
+        assert len(entries) == 2
+        assert "kernel1" in entries
+        assert "kernel2" in entries
+
+    def test_remove_kernel_entry(self, tmp_path: Path):
+        """Test removing a kernel entry."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_kernel_entry(cache_dir, "kernel1", name="vmlinux-1", version="6.1.0")
+        remove_kernel_entry(cache_dir, "kernel1")
+
+        entry = get_kernel_entry(cache_dir, "kernel1")
+        assert entry == {}
+
+    def test_set_default_kernel(self, tmp_path: Path):
+        """Test setting a default kernel."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_kernel_entry(
+            cache_dir, "kernel1", name="vmlinux-1", version="6.1.0", filename="vmlinux-1"
+        )
+        set_default_kernel_by_filename(cache_dir, "vmlinux-1")
+
+        default = get_default_kernel_entry(cache_dir)
+        assert default is not None
+        assert default[1]["name"] == "vmlinux-1"
+
+    def test_get_kernel_entry_missing_returns_empty(self, tmp_path: Path):
+        """Test that missing kernel entries return empty dict."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        entry = get_kernel_entry(cache_dir, "nonexistent")
+        assert entry == {}
+
+
+class TestImageMetadata:
+    """Tests for image metadata operations."""
+
+    def test_update_and_get_image_entry(self, tmp_path: Path):
+        """Test updating and retrieving an image entry."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_image_entry(
+            cache_dir,
+            "img123",
+            internal_id="ubuntu-24.04",
+            filename="ubuntu-24.04.ext4",
+            os_name="Ubuntu 24.04",
+            fs_type="ext4",
+        )
+
+        entry = get_image_entry(cache_dir, "img123")
+        assert entry["internal_id"] == "ubuntu-24.04"
+        assert entry["os_name"] == "Ubuntu 24.04"
+        assert entry["fs_type"] == "ext4"
+
+    def test_list_image_entries(self, tmp_path: Path):
+        """Test listing all image entries."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_image_entry(
+            cache_dir, "img1", internal_id="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
+        )
+        update_image_entry(
+            cache_dir, "img2", internal_id="debian-12", os_name="Debian", fs_type="ext4"
+        )
+
+        entries = list_image_entries(cache_dir)
+        assert len(entries) == 2
+        assert "img1" in entries
+        assert "img2" in entries
+
+    def test_remove_image_entry(self, tmp_path: Path):
+        """Test removing an image entry."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_image_entry(cache_dir, "img1", os_name="Ubuntu", fs_type="ext4")
+        remove_image_entry(cache_dir, "img1")
+
+        entry = get_image_entry(cache_dir, "img1")
+        assert entry == {}
+
+    def test_set_default_image(self, tmp_path: Path):
+        """Test setting a default image."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_image_entry(
+            cache_dir,
+            "img1",
+            internal_id="ubuntu-24.04",
+            filename="ubuntu-24.04.ext4",
+            os_name="Ubuntu 24.04",
+        )
+        set_default_image_entry(cache_dir, "img1")
+
+        default = get_default_image_entry(cache_dir)
+        assert default is not None
+        assert default[0] == "img1"
+
+    def test_set_default_image_by_internal_id(self, tmp_path: Path):
+        """Test setting a default image by internal ID."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_image_entry(
+            cache_dir,
+            "img1",
+            internal_id="ubuntu-24.04",
+            filename="ubuntu-24.04.ext4",
+            os_name="Ubuntu 24.04",
+        )
+        set_default_image_by_internal_id(cache_dir, "ubuntu-24.04")
+
+        default = get_default_image_entry(cache_dir)
+        assert default is not None
+
+    def test_find_images_by_prefix(self, tmp_path: Path):
+        """Test finding images by ID prefix."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_image_entry(
+            cache_dir, "abc123", internal_id="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
+        )
+        update_image_entry(
+            cache_dir, "abc456", internal_id="debian-12", os_name="Debian", fs_type="ext4"
+        )
+        update_image_entry(
+            cache_dir, "def789", internal_id="fedora-40", os_name="Fedora", fs_type="ext4"
+        )
+
+        matches = find_images_by_id_prefix(cache_dir, "abc")
+        assert len(matches) == 2
+
+        single = find_images_by_id_prefix(cache_dir, "def")
+        assert len(single) == 1
+
+    def test_find_image_by_id_prefix(self, tmp_path: Path):
+        """Test finding a single image by ID prefix."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_image_entry(cache_dir, "abc123", os_name="Ubuntu", fs_type="ext4")
+
+        from mvmctl.core.metadata import find_image_by_id_prefix
+
+        match = find_image_by_id_prefix(cache_dir, "abc")
+        assert match is not None
+        assert match[0] == "abc123"
+
+
+class TestBinaryMetadata:
+    """Tests for binary metadata operations."""
+
+    def test_update_and_get_binary_entry(self, tmp_path: Path):
+        """Test updating and retrieving a binary entry."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        # Create fake binary files
+        bin_dir = cache_dir / "bin"
+        bin_dir.mkdir()
+        fc_path = bin_dir / "firecracker-v1.15.0"
+        jl_path = bin_dir / "jailer-v1.15.0"
+        fc_path.write_bytes(b"firecracker")
+        jl_path.write_bytes(b"jailer")
+
+        update_binary_entry(
+            cache_dir,
+            "1.15.0",
+            firecracker_path=str(fc_path),
+            jailer_path=str(jl_path),
+        )
+
+        entry = get_binary_entry(cache_dir, "1.15.0")
+        assert entry["package_version"] == "1.15.0"
+
+    def test_list_binary_entries(self, tmp_path: Path):
+        """Test listing all binary entries."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        bin_dir = cache_dir / "bin"
+        bin_dir.mkdir()
+        fc_path = bin_dir / "firecracker-v1.15.0"
+        jl_path = bin_dir / "jailer-v1.15.0"
+        fc_path.write_bytes(b"firecracker")
+        jl_path.write_bytes(b"jailer")
+
+        update_binary_entry(
+            cache_dir,
+            "1.15.0",
+            firecracker_path=str(fc_path),
+            jailer_path=str(jl_path),
+        )
+
+        entries = list_binary_entries(cache_dir)
+        assert "firecracker" in entries
+        assert "jailer" in entries
+
+    def test_set_and_get_default_binary(self, tmp_path: Path):
+        """Test setting and retrieving default binary."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        bin_dir = cache_dir / "bin"
+        bin_dir.mkdir()
+        fc_path = bin_dir / "firecracker-v1.15.0"
+        jl_path = bin_dir / "jailer-v1.15.0"
+        fc_path.write_bytes(b"firecracker")
+        jl_path.write_bytes(b"jailer")
+
+        update_binary_entry(
+            cache_dir,
+            "1.15.0",
+            firecracker_path=str(fc_path),
+            jailer_path=str(jl_path),
+        )
+        set_default_binary_entry(cache_dir, "1.15.0")
+
+        default = get_default_binary_entry(cache_dir)
+        assert default is not None
+        assert default[0] == "1.15.0"
+
+
+class TestNetworkMetadata:
+    """Tests for network metadata operations."""
+
+    def test_update_and_get_network_entry(self, tmp_path: Path):
+        """Test updating and retrieving a network entry."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_network_entry(
+            cache_dir,
+            "testnet",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
+            bridge="mvm-testnet",
+        )
+
+        entry = get_network_entry(cache_dir, "testnet")
+        assert entry["subnet"] == "10.20.0.0/24"
+        assert entry["ipv4_gateway"] == "10.20.0.1"
+
+    def test_list_network_entries(self, tmp_path: Path):
+        """Test listing all network entries."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_network_entry(cache_dir, "net1", subnet="10.20.1.0/24", ipv4_gateway="10.20.1.1")
+        update_network_entry(cache_dir, "net2", subnet="10.20.2.0/24", ipv4_gateway="10.20.2.1")
+
+        entries = list_network_entries(cache_dir)
+        assert len(entries) == 2
+        assert "net1" in entries
+        assert "net2" in entries
+
+    def test_set_and_get_default_network(self, tmp_path: Path):
+        """Test setting and retrieving default network."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        update_network_entry(cache_dir, "default", cidr="172.35.0.0/24", gateway="172.35.0.1")
+        set_default_network_entry(cache_dir, "default")
+
+        default = get_default_network_entry(cache_dir)
+        assert default is not None
+        assert default[0] == "default"
+
+
+class TestOrphanedEntryCleanup:
+    """Tests for orphaned entry cleanup."""
+
+    def test_list_kernel_entries_removes_orphaned(self, tmp_path: Path):
+        """Test that orphaned kernel entries are removed."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        kernels_dir = cache_dir / "kernels"
+        kernels_dir.mkdir()
+
+        # Create a real kernel file
+        valid_kernel = kernels_dir / "vmlinux"
+        valid_kernel.write_bytes(b"\x7fELF")
+
+        # Add entries - one with matching file, one orphaned
+        update_kernel_entry(cache_dir, "valid123", name="vmlinux", filename="vmlinux")
+        update_kernel_entry(cache_dir, "orphan456", name="missing", filename="missing")
+
+        # List with validation
+        entries = list_kernel_entries(cache_dir, kernels_dir)
+
+        # Should only have the valid entry
+        assert "valid123" in entries
+        assert "orphan456" not in entries
+
+        # Orphan should be deleted from DB
+        assert get_kernel_entry(cache_dir, "orphan456") == {}
+
+    def test_list_image_entries_removes_orphaned(self, tmp_path: Path):
+        """Test that orphaned image entries are removed."""
+        cache_dir = make_test_paths(tmp_path).cache
+
+        images_dir = cache_dir / "images"
+        images_dir.mkdir()
+
+        # Create a real image file
+        valid_image = images_dir / "ubuntu.ext4"
+        valid_image.write_bytes(b"ext4 data")
+
+        # Add entries - one with matching file, one orphaned
+        update_image_entry(
+            cache_dir, "valid123", internal_id="ubuntu-24.04", filename="ubuntu.ext4"
+        )
+        update_image_entry(cache_dir, "orphan456", internal_id="debian-12", filename="missing.ext4")
+
+        # List with validation
+        entries = list_image_entries(cache_dir, images_dir)
+
+        # Should only have the valid entry
+        assert "valid123" in entries
+        assert "orphan456" not in entries
+
+
+class TestDualWriteCompatibility:
+    """Tests ensuring SQLite-only behavior works correctly."""
+
+    def test_image_fetch_writes_to_sqlite(self, tmp_path: Path):
+        """Test that image entries are written to SQLite."""
+        cache_dir = make_test_paths(tmp_path).cache
+        db = MVMDatabase()
+
+        image_id = "a" * 64
+        update_image_entry(
+            cache_dir,
+            image_id,
+            internal_id="alpine-3.21",
+            filename="alpine-3.21.ext4",
+            os_name="Alpine Linux",
+            is_default=0,
+        )
+
+        row = db.get_image(image_id)
+        assert row is not None
+        assert row.os_slug == "alpine-3.21"
+        assert row.path == "alpine-3.21.ext4"
+        assert row.os_name == "Alpine Linux"
+
+    def test_kernel_fetch_writes_to_sqlite(self, tmp_path: Path):
+        """Test that kernel entries are written to SQLite."""
+        cache_dir = make_test_paths(tmp_path).cache
+        db = MVMDatabase()
+
+        kernel_id = "c" * 64
+        update_kernel_entry(
+            cache_dir,
+            kernel_id,
+            name="vmlinux-6.1",
+            version="6.1.102",
+            arch="x86_64",
+            filename="vmlinux-6.1",
+            type="official",
+            is_default=0,
+        )
+
+        row = db.get_kernel(kernel_id)
+        assert row is not None
+        assert row.name == "vmlinux-6.1"
+        assert row.version == "6.1.102"
+        assert row.arch == "x86_64"
+
+    def test_bin_set_default_writes_to_sqlite(self, tmp_path: Path):
+        """Test that binary defaults are written to SQLite."""
+        cache_dir = make_test_paths(tmp_path).cache
+        db = MVMDatabase()
+
+        bin_dir = cache_dir / "bin"
+        bin_dir.mkdir()
+        fc_path = bin_dir / "firecracker-v1.15.0"
+        jl_path = bin_dir / "jailer-v1.15.0"
+        fc_path.write_bytes(b"firecracker")
+        jl_path.write_bytes(b"jailer")
+
+        update_binary_entry(
+            cache_dir,
+            "1.15.0",
+            firecracker_path=str(fc_path),
+            jailer_path=str(jl_path),
+        )
+        set_default_binary_entry(cache_dir, "1.15.0")
+
+        fc_default = db.get_default_binary("firecracker")
+        jl_default = db.get_default_binary("jailer")
+
+        assert fc_default is not None
+        assert fc_default.version == "1.15.0"
+        assert bool(fc_default.is_default) is True
+
+        assert jl_default is not None
+        assert jl_default.version == "1.15.0"
+        assert bool(jl_default.is_default) is True

@@ -2,30 +2,23 @@ from __future__ import annotations
 
 import json
 import logging
-import random
 import sqlite3
-import string
 from pathlib import Path
 from typing import Any
 
 from mvmctl.constants import (
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_CONFIG,
-    DEFAULT_FIRECRACKER_CI_VERSION,
-    DEFAULT_FIRECRACKER_VERSION,
 )
 from mvmctl.core.metadata import (
-    get_default_binary_entry,
     get_default_image_entry,
-    read_metadata,
-    set_default_binary_entry,
     set_default_image_by_internal_id,
     set_default_image_entry,
     set_default_kernel_by_filename,
-    update_binary_entry,
 )
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.utils.fs import get_bin_dir, get_cache_dir
+from mvmctl.exceptions import AssetNotFoundError
+from mvmctl.utils.fs import get_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +53,6 @@ def _write_raw(state: dict[str, Any]) -> None:
     path.chmod(CONST_FILE_PERMS_CONFIG)
 
 
-def _rand_suffix(n: int = 3) -> str:
-    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
-
-
 def get_config() -> dict[str, Any]:
     return _read_raw()
 
@@ -85,62 +74,21 @@ def get_config_value(key: str, default: Any = None) -> Any:
 
 
 def get_firecracker_config() -> dict[str, str]:
-    cache_dir = get_cache_dir()
-
-    # Try SQLite first for binary defaults
-    try:
-        db = MVMDatabase()
-        binary_default = db.get_binary_default("firecracker")
-        if binary_default:
-            return {
-                "full_version": binary_default.version,
-                "ci_version": binary_default.version,
-                "default_version": binary_default.version,
-                "default_binary_path": binary_default.path,
-            }
-    except sqlite3.OperationalError:
-        pass
-
-    data = read_metadata(cache_dir)
-    binaries = data.get("binaries", {})
-    defaults = binaries.get("defaults", {}) if isinstance(binaries, dict) else {}
-
-    # Read default paths from new defaults section
-    fc_defaults = defaults.get("firecracker", {}) if isinstance(defaults, dict) else {}
-    default_binary_path = fc_defaults.get("binary_path") if isinstance(fc_defaults, dict) else None
-    if not default_binary_path:
-        default_binary_path = str(Path(get_bin_dir()) / "firecracker")
-
-    default_binary = get_default_binary_entry(cache_dir)
-    if default_binary is not None:
-        version_key, entry = default_binary
-        result: dict[str, str] = {k: v for k, v in entry.items() if isinstance(v, str)}
-        full_version = result.get("full_version") or f"v{version_key.removeprefix('v')}"
-        ci_version = result.get("ci_version")
-        if not ci_version:
-            normalized = version_key.removeprefix("v")
-            parts = normalized.split(".")
-            ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{normalized}"
-
-        merged = {
-            "full_version": full_version,
-            "ci_version": ci_version,
-            "default_version": full_version,
-            "default_binary_path": default_binary_path,
-        }
-        merged.update(result)
-        return merged
-
-    raw = _read_raw()
-    section = raw.get(_FIRECRACKER_KEY, {})
-    if not isinstance(section, dict):
-        section = {}
-    result = {k: v for k, v in section.items() if isinstance(v, str)}
-    if "full_version" not in result:
-        result["full_version"] = DEFAULT_FIRECRACKER_VERSION
-    if "ci_version" not in result:
-        result["ci_version"] = DEFAULT_FIRECRACKER_CI_VERSION
-    return result
+    db = MVMDatabase()
+    binary_default = db.get_default_binary("firecracker")
+    if binary_default is None:
+        raise AssetNotFoundError(
+            "No active binary for 'firecracker' found — "
+            "run 'mvm bin fetch <version>' to download one."
+        )
+    full_version = binary_default.full_version or f"v{binary_default.version}"
+    return {
+        "full_version": full_version,
+        "ci_version": binary_default.ci_version or f"v{binary_default.version}",
+        "default_version": full_version,
+        "active_version": full_version,
+        "binary_path": binary_default.path or "",
+    }
 
 
 def initialize_default_config() -> dict[str, Any]:
@@ -154,28 +102,15 @@ def initialize_default_config() -> dict[str, Any]:
         The config dictionary with defaults applied.
     """
     state = _read_raw()
-    changed = False
 
-    if _FIRECRACKER_KEY not in state or not isinstance(state.get(_FIRECRACKER_KEY), dict):
-        state[_FIRECRACKER_KEY] = {}
-        changed = True
-
-    fc_section = state[_FIRECRACKER_KEY]
-    if "full_version" not in fc_section:
-        fc_section["full_version"] = DEFAULT_FIRECRACKER_VERSION
-        changed = True
-    if "ci_version" not in fc_section:
-        fc_section["ci_version"] = DEFAULT_FIRECRACKER_CI_VERSION
-        changed = True
-
-    # Write firecracker section BEFORE calling get_assets_config so it isn't
-    # lost when we re-read the file after get_assets_config() writes assets.
-    if changed:
+    if _FIRECRACKER_KEY in state:
+        del state[_FIRECRACKER_KEY]
         _write_raw(state)
-        changed = False
 
     get_assets_config()
     state = _read_raw()
+
+    changed = False
 
     if _DEFAULTS_KEY in state:
         del state[_DEFAULTS_KEY]
@@ -189,41 +124,6 @@ def initialize_default_config() -> dict[str, Any]:
         _write_raw(state)
 
     return state
-
-
-def update_firecracker_config(**fields: str) -> None:
-    normalized_fields = {k: v for k, v in fields.items() if isinstance(v, str)}
-    existing = get_firecracker_config()
-    full_version = normalized_fields.get(
-        "full_version", existing.get("full_version", DEFAULT_FIRECRACKER_VERSION)
-    )
-    ci_version = normalized_fields.get(
-        "ci_version", existing.get("ci_version", DEFAULT_FIRECRACKER_CI_VERSION)
-    )
-    normalized_version = full_version.removeprefix("v")
-    default_binary_path = normalized_fields.get(
-        "default_binary_path", str(Path(get_bin_dir()) / "firecracker")
-    )
-
-    cache_dir = get_cache_dir()
-    payload = dict(normalized_fields)
-    payload["full_version"] = full_version
-    payload["ci_version"] = ci_version
-    payload["default_version"] = payload.get("default_version", full_version)
-    payload["default_binary_path"] = payload.get("default_binary_path", default_binary_path)
-
-    update_binary_entry(
-        cache_dir,
-        normalized_version,
-        **payload,
-    )
-    set_default_binary_entry(cache_dir, normalized_version)
-
-    try:
-        db = MVMDatabase()
-        db.set_default_binary("firecracker", full_version, default_binary_path)
-    except sqlite3.OperationalError:
-        pass
 
 
 def get_assets_config() -> dict[str, str]:

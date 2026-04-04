@@ -84,7 +84,7 @@ network_config: |
         - {{guest_ip}}/{{prefix_len}}
       routes:
         - to: default
-          via: {{gateway}}
+          via: {{ipv4_gateway}}
       nameservers:
         addresses:
           - 8.8.8.8

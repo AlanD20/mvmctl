@@ -39,8 +39,8 @@ def get_cache_dir() -> Path:
         tmp = Path("/tmp").resolve()
         var_tmp = Path("/var/tmp").resolve()
         under_home = resolved.is_relative_to(home)
-        under_tmp = (os.getuid() != 0) and resolved.is_relative_to(tmp)
-        under_var_tmp = (os.getuid() != 0) and resolved.is_relative_to(var_tmp)
+        under_tmp = resolved.is_relative_to(tmp)
+        under_var_tmp = resolved.is_relative_to(var_tmp)
         if not (under_home or under_tmp or under_var_tmp):
             raise MVMError(
                 f"Unsafe {env_var('CACHE_DIR')} path '{override}': "
@@ -63,8 +63,8 @@ def get_config_dir() -> Path:
         tmp = Path("/tmp").resolve()
         var_tmp = Path("/var/tmp").resolve()
         under_home = resolved.is_relative_to(home)
-        under_tmp = (os.getuid() != 0) and resolved.is_relative_to(tmp)
-        under_var_tmp = (os.getuid() != 0) and resolved.is_relative_to(var_tmp)
+        under_tmp = resolved.is_relative_to(tmp)
+        under_var_tmp = resolved.is_relative_to(var_tmp)
         if not (under_home or under_tmp or under_var_tmp):
             raise MVMError(
                 f"Unsafe {env_var('CONFIG_DIR')} path '{override}': "

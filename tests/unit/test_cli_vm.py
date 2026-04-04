@@ -105,6 +105,9 @@ def test_rm_multiple_vms_same_name_errors(mocker: MockerFixture):
 
 def test_create_vm_success(mocker: MockerFixture):
     vm = _make_vm("newvm")
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value="/tmp/image.ext4")
     mocker.patch("mvmctl.cli.vm.create_vm", return_value=vm)
     result = runner.invoke(app, ["create", "--name", "newvm", "--image", "abc123"])
@@ -113,6 +116,9 @@ def test_create_vm_success(mocker: MockerFixture):
 
 
 def test_create_vm_fail(mocker: MockerFixture):
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value="/tmp/image.ext4")
     mocker.patch("mvmctl.cli.vm.create_vm", side_effect=MVMError("Kernel not found"))
     result = runner.invoke(app, ["create", "--name", "newvm", "--image", "abc123"])
@@ -135,6 +141,9 @@ def test_create_vm_rejects_non_matching_image_id_prefix(mocker: MockerFixture):
 def test_create_vm_id_prefix_preserves_identifier_for_uuid_lookup(mocker: MockerFixture):
     vm = _make_vm("newvm")
     image_path = "/cache/images/ubuntu-24.04.ext4"
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
     mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value="/tmp/vmlinux")
     mock_create = mocker.patch("mvmctl.cli.vm.create_vm", return_value=vm)
@@ -166,6 +175,9 @@ def test_create_output_config_uses_resolved_absolute_paths(mocker: MockerFixture
     kernel_path = tmp_path / "vmlinux"
     output_path = tmp_path / "vm.json"
 
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
     mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
     mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
@@ -193,7 +205,7 @@ def test_create_output_config_uses_resolved_absolute_paths(mocker: MockerFixture
     assert mock_build.call_args.kwargs["kernel"] == str(kernel_path)
     assert mock_build.call_args.kwargs["rootfs_path"] == image_path
     assert mock_build.call_args.kwargs["tap_device"] is None
-    assert mock_build.call_args.kwargs["gateway"] is None
+    assert mock_build.call_args.kwargs["ipv4_gateway"] is None
     mock_create.assert_not_called()
     mock_config.to_json_file.assert_called_once_with(output_path)
 
@@ -296,6 +308,9 @@ def test_create_invalid_image_not_found(mocker: MockerFixture):
 
 def test_create_duplicate_vm_name(mocker: MockerFixture):
     """Creating a VM whose name already exists should fail with exit code 1."""
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value="/tmp/image.ext4")
     mocker.patch(
         "mvmctl.cli.vm.create_vm",
@@ -338,6 +353,9 @@ def test_main_app_create_invalid_image(mocker: MockerFixture):
 
 def test_main_app_create_duplicate(mocker: MockerFixture):
     """Duplicate VM name via the top-level app should exit 1."""
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value="/tmp/image.ext4")
     mocker.patch(
         "mvmctl.cli.vm.create_vm",
@@ -804,11 +822,9 @@ def test_resolve_image_yaml_name(mocker: MockerFixture, tmp_path: Path, monkeypa
     """resolve_image_multi_strategy resolves YAML image name via internal_id lookup."""
     from mvmctl.api.vms import resolve_image_multi_strategy
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-
     # Create images directory with a file named after the full hash
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    images_dir = tmp_path / "cache" / "images"
+    images_dir.mkdir(parents=True)
     image_file = images_dir / "ubuntu-24.04.ext4"
     image_file.write_text("dummy")
 
@@ -828,8 +844,6 @@ def test_resolve_image_yaml_name(mocker: MockerFixture, tmp_path: Path, monkeypa
 def test_resolve_image_id_prefix(mocker: MockerFixture, tmp_path: Path, monkeypatch):
     """resolve_image_multi_strategy falls back to ID prefix resolution."""
     from mvmctl.api.vms import resolve_image_multi_strategy
-
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
 
     # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "images" / "abc123.ext4"
@@ -853,14 +867,12 @@ def test_resolve_kernel_direct_path(tmp_path: Path, monkeypatch):
     assert result == kernel_file
 
 
-def test_resolve_kernel_id_prefix(mocker: MockerFixture, tmp_path: Path, monkeypatch):
+def test_resolve_kernel_id_prefix(mocker: MockerFixture, tmp_path: Path):
     """resolve_kernel_multi_strategy falls back to ID prefix resolution."""
     from mvmctl.api.vms import resolve_kernel_multi_strategy
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-
     # Mock ID prefix resolution to return a path
-    mock_path = tmp_path / "kernels" / "abc123"
+    mock_path = tmp_path / "cache" / "kernels" / "abc123"
     mocker.patch(
         "mvmctl.api.vms._core_resolve_kernel_id_path",
         return_value=mock_path,
@@ -977,6 +989,9 @@ def test_create_output_config_with_cloud_init_mode(mocker: MockerFixture, tmp_pa
     kernel_path = tmp_path / "vmlinux"
     output_path = tmp_path / "vm.json"
 
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
     mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
     mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
@@ -1015,6 +1030,9 @@ def test_create_output_config_with_no_cloud_init(mocker: MockerFixture, tmp_path
     kernel_path = tmp_path / "vmlinux"
     output_path = tmp_path / "vm.json"
 
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
     mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
     mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
@@ -1054,6 +1072,9 @@ def test_create_output_config_with_user_data(mocker: MockerFixture, tmp_path):
     user_data_path = tmp_path / "user-data.yaml"
     user_data_path.write_text("#cloud-config\n")
 
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
     mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
     mock_create = mocker.patch("mvmctl.cli.vm.create_vm")
@@ -1091,6 +1112,9 @@ def test_create_output_config_with_nocloud_net_flag(mocker: MockerFixture, tmp_p
     kernel_path = tmp_path / "vmlinux"
     output_path = tmp_path / "vm.json"
 
+    mocker.patch(
+        "mvmctl.cli.vm._resolve_active_firecracker_bin", return_value="/usr/local/bin/firecracker"
+    )
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value=image_path)
     mocker.patch("mvmctl.cli.vm.resolve_kernel_multi_strategy", return_value=kernel_path)
     mock_create = mocker.patch("mvmctl.cli.vm.create_vm")

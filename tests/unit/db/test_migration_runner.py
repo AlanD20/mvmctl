@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -125,8 +127,9 @@ class TestMigrate:
             "CREATE TABLE foo (id INTEGER PRIMARY KEY);\nPRAGMA user_version = 1;\n"
         )
         runner.migrate()
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute("SELECT version, name FROM db_migrations").fetchall()
+        with closing(sqlite3.connect(db_path)) as conn:
+            with conn:
+                rows = conn.execute("SELECT version, name FROM db_migrations").fetchall()
         assert len(rows) == 1
         assert rows[0][0] == 1
         assert rows[0][1] == "001_init.sql"

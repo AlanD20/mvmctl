@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from pytest_mock import MockerFixture
 
 from mvmctl.core.network import (
-    _detect_cidr_for_bridge,
+    _detect_subnet_for_bridge,
     setup_nat,
     teardown_nat,
 )
@@ -25,7 +25,7 @@ class TestSetupNat:
         # Mock subprocess.run for the iptables command
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
-        setup_nat(bridge="mvm-test", nat_gateways=["eth0"], cidr="10.0.0.0/24")
+        setup_nat(bridge="mvm-test", nat_gateways=["eth0"], subnet="10.0.0.0/24")
 
         # Verify subprocess.run was called with the MASQUERADE rule containing -s CIDR
         calls = mock_run.call_args_list
@@ -82,8 +82,8 @@ class TestTeardownNat:
         mocker.patch("mvmctl.core.network.get_default_interface", return_value="eth0")
         # Mock chain_exists to return True
         mocker.patch("mvmctl.core.network.chain_exists", return_value=True)
-        # Mock _detect_cidr_for_bridge
-        mocker.patch("mvmctl.core.network._detect_cidr_for_bridge", return_value="10.0.0.0/24")
+        # Mock _detect_subnet_for_bridge
+        mocker.patch("mvmctl.core.network._detect_subnet_for_bridge", return_value="10.0.0.0/24")
         # Mock subprocess.run
         mock_run = mocker.patch("subprocess.run", return_value=MagicMock(returncode=0))
 
@@ -95,7 +95,7 @@ class TestTeardownNat:
         assert len(delete_calls) > 0
         assert any("-s" in str(c) and "10.0.0.0/24" in str(c) for c in delete_calls)
 
-    def test_detect_cidr_for_bridge(self, mocker: MockerFixture):
+    def test_detect_subnet_for_bridge(self, mocker: MockerFixture):
         """Test CIDR detection from existing rules."""
         # Mock subprocess.run to return iptables list output with MASQUERADE rule
         mock_result = MagicMock()
@@ -106,6 +106,6 @@ num   packets   bytes target     prot opt in     out     source               de
 """
         mocker.patch("subprocess.run", return_value=mock_result)
 
-        result = _detect_cidr_for_bridge("mvm-test")
+        result = _detect_subnet_for_bridge("mvm-test")
 
         assert result == "10.0.0.0/24"

@@ -8,8 +8,8 @@ import yaml
 
 from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BINARY_PATH,
-    DEFAULT_NETWORK_CIDR,
-    DEFAULT_NETWORK_GATEWAY,
+    DEFAULT_NETWORK_SUBNET,
+    DEFAULT_NETWORK_IPV4_GATEWAY,
     DEFAULT_NETWORK_NAME,
     DEFAULT_VM_BOOT_ARGS,
     DEFAULT_VM_DISK_SIZE,
@@ -53,8 +53,8 @@ class VMDefaultsConfig:
 @dataclass
 class NetworkDefaultsConfig:
     name: str = DEFAULT_NETWORK_NAME
-    cidr: str = DEFAULT_NETWORK_CIDR
-    gateway: str = DEFAULT_NETWORK_GATEWAY
+    subnet: str = DEFAULT_NETWORK_SUBNET
+    ipv4_gateway: str = DEFAULT_NETWORK_IPV4_GATEWAY
 
 
 @dataclass
@@ -171,14 +171,14 @@ def validate_config(config: MVMConfig) -> list[str]:
     try:
         import ipaddress
 
-        ipaddress.ip_network(config.network.defaults.cidr, strict=False)
+        ipaddress.ip_network(config.network.defaults.subnet, strict=False)
     except ValueError as e:
         errors.append(f"network.defaults.cidr: Invalid CIDR: {e}")
 
     try:
         import ipaddress
 
-        ipaddress.ip_address(config.network.defaults.gateway)
+        ipaddress.ip_address(config.network.defaults.ipv4_gateway)
     except ValueError as e:
         errors.append(f"network.defaults.gateway: Invalid IP: {e}")
 

@@ -1,13 +1,13 @@
 # Subagent Instructions
- 
+
 ## Agent Role: ORCHESTRATOR ONLY
- 
+
 You are the **orchestrating agent**. You **NEVER** read files or edit code yourself. ALL work is done via subagents.
- 
+
 ---
- 
+
 ### ⚠️ ABSOLUTE RULES
- 
+
 1. **NEVER read files yourself** — spawn a subagent to do it
 2. **NEVER edit/create code yourself** — spawn a subagent to do it
 3. **ALWAYS use default subagent** — NEVER use `agentName: "Plan"` (omit `agentName` entirely)
@@ -27,7 +27,7 @@ This applies to all edits, fixes, features, and refactoring. No exceptions.
 ---
 
 ### Mandatory Workflow (NO EXCEPTIONS)
- 
+
 ```
 User Request
     ↓
@@ -43,56 +43,56 @@ SUBAGENT #2: Implementation (FRESH context)
     - Implements/codes based on spec
     - Returns completion summary
 ```
- 
+
 ---
- 
+
 ### runSubagent Tool Usage
- 
+
 ```
 runSubagent(
   description: "3-5 word summary",  // REQUIRED
   prompt: "Detailed instructions"   // REQUIRED
 )
 ```
- 
+
 **NEVER include `agentName`** — always use default subagent (has full read/write capability).
- 
+
 **If you get errors:**
 - "disabled by user" → You may have included `agentName`. Remove it.
 - "missing required property" → Include BOTH `description` and `prompt`
- 
+
 ---
- 
+
 ### Subagent Prompt Templates
- 
+
 **Research Subagent:**
 ```
 Research [topic]. Analyze relevant files in the codebase.
 Create a spec/analysis doc at: docs/analyses/[NAME].md
 Return: summary of findings and the spec file path.
 ```
- 
+
 **Implementation Subagent:**
 ```
 Read the spec at: docs/analyses/[NAME].md
 Implement according to the spec.
 Return: summary of changes made.
 ```
- 
+
 ---
- 
+
 ### What YOU Do (Orchestrator)
- 
-✅ Receive user requests  
-✅ Spawn subagents with clear prompts  
-✅ Pass spec paths between subagents  
-✅ Run terminal commands  
- 
+
+✅ Receive user requests
+✅ Spawn subagents with clear prompts
+✅ Pass spec paths between subagents
+✅ Run terminal commands
+
 ### What YOU DON'T Do
 
-❌ Read files (use subagent)  
-❌ Edit/create code (use subagent)  
-❌ Use `agentName: "Plan"` (always omit it)  
+❌ Read files (use subagent)
+❌ Edit/create code (use subagent)
+❌ Use `agentName: "Plan"` (always omit it)
 ❌ "Quick look" at files before delegating
 
 ---
@@ -143,7 +143,7 @@ Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this chang
 ---
 
 ### Agent CLI Execution
- 
+
 To execute the `mvmctl` CLI with proper group privileges, use:
 `sg mvm -c 'mvm ...'`
 
@@ -155,10 +155,10 @@ To execute the `mvmctl` CLI with proper group privileges, use:
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
 **Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
-**Generated:** 2026-03-30  
-**Commit:** a20b3ed  
+**Generated:** 2026-04-04
+**Commit:** a9b4b34
 **Branch:** main
-**Files:** 75 Python source, 64 test files
+**Files:** 96 Python source, 69 test files
 
 ## STRUCTURE
 
@@ -172,13 +172,14 @@ mvmctl/
 │   ├── api/             # Stable public Python API boundary. Performs privilege checks before delegating to core/
 │   ├── core/            # All business logic, subprocesses, and Firecracker interactions
 │   ├── models/          # Pure @dataclass objects containing domain data (VMInstance, VMConfig, etc.)
-│   ├── utils/           # Shared helpers (console, process, fs, http, audit, validation)
+│   ├── utils/           # Shared helpers (console, process, fs, http, audit, validation, guestfs, template, time)
 │   ├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
-│   └── services/        # Runtime subprocess services (console_relay, nocloud_server)
+│   ├── services/        # Runtime subprocess services (console_relay, nocloud_server)
+│   └── db/              # SQLite schema, migrations, and ORM models (mvmdb.db)
 ├── docs/                # Project documentation
 │   ├── DEPENDENCIES.md  # Detailed map of all binary and system dependencies per command
 │   └── RELEASE.md       # Release process and build instructions (Nuitka/PyInstaller)
-├── tests/               # 64 test files (unit, integration, layer_compliance); see tests/AGENTS.md
+├── tests/               # 69 test files (unit, integration, system, layer_compliance); see tests/AGENTS.md
 └── pyproject.toml       # Build, ruff, mypy strict, pytest (80% branch coverage gate)
 ```
 
@@ -237,8 +238,9 @@ MVMError (base)
 | Network setup | `core/network.py` (bridge/TAP/iptables), `core/network_manager.py` (named networks) |
 | Host init | `core/host_setup.py` — `init_host()` |
 | Privilege checks | `core/host_privilege.py` — `check_privileges()` |
-| Asset metadata | `core/metadata.py` — single `metadata.json`, keyed by full 64-char hash |
-| Active binary/version | `core/config_state.py` — `get_firecracker_config()`, `update_firecracker_config()` |
+| Asset metadata | `core/metadata.py` — SQLite-backed metadata helpers for images/kernels/binaries |
+| Active binary/version | `core/binary_manager.py` + `core/mvm_db.py` | `get_binary_path("firecracker")` for path lookup; `db.get_default_binary("firecracker")` for direct SQLite query; do NOT use filesystem symlinks for state |
+| SQLite schema/migrations | `db/migrations/` — `001_initial_schema.sql`, `runner.py` |
 | Firecracker HTTP API | `core/firecracker.py` — `FirecrackerClient` |
 | SSH operations | `core/ssh.py` — `connect_to_vm()`, `build_ssh_command()`, `find_ssh_keys()` |
 | Key management | `core/key_manager.py` — `add_key()`, `create_key()`, `list_keys()`, `remove_key()` |
@@ -284,10 +286,10 @@ User → mvm → main.py:LazyMVMGroup → cli/*.py → api/*.py → core/*.py �
 
 Every downloaded/imported asset (image, kernel, VM) gets a **full 64-char SHA256 hash** as its persistent ID:
 
-- `sha256(file_content + ":" + timestamp)` → stored as JSON key in `metadata.json`
+- `sha256(file_content + ":" + timestamp)` → stored in SQLite (`mvmdb.db`)
 - CLI always displays only the **first 6 chars** of the hash
 - Removal and lookup accept the 6-char prefix; `find_images_by_short_id()` / `find_kernels_by_short_id()` do the prefix search
-- YAML images (e.g. `ubuntu-24.04`) keep their YAML filename on disk; their hash is only in `metadata.json`
+- YAML images (e.g. `ubuntu-24.04`) keep their YAML filename on disk; their hash is only in SQLite
 
 ## CONVENTIONS
 
@@ -336,12 +338,12 @@ def _extract_partition_with_guestfs(...):  # DON'T DO THIS
 
 ### Default Values Rule
 - Fallback defaults → `constants.py` with `FALLBACK_` prefix: `FALLBACK_FC_CI_VERSION`, `FALLBACK_FIRECRACKER_BIN`, `FALLBACK_KERNEL_BUILD_JOBS`
-- User-facing asset defaults (image/kernel/binary) → `$MVM_CACHE_DIR/metadata.json` via `is_default` flags
+- User-facing asset defaults (image/kernel/binary) → SQLite (`$MVM_CACHE_DIR/mvmdb.db`) via `is_default` column; `metadata.json` is a compatibility shim and is NOT canonical
 - NEVER hardcode defaults in function parameters or as inline variables
 
 ### Configuration Priority (lowest → highest)
 1. `constants.py` fallbacks
-2. State files (`~/.config/mvmctl/config.json` for general config + `$MVM_CACHE_DIR/metadata.json` for asset defaults)
+2. State files (`~/.config/mvmctl/config.json` for general config + `$MVM_CACHE_DIR/mvmdb.db` SQLite for asset defaults)
 3. `MVM_*` environment variables
 4. CLI flags
 
@@ -396,9 +398,14 @@ See `tests/AGENTS.md` for complete testing documentation.
 @pytest.fixture(autouse=True)
 def _mock_sudo_cache():  # Prevents real sudo calls
 
-# Unit conftest (autouse for unit tests)
 @pytest.fixture(autouse=True)
 def isolate_config_and_cache(tmp_path, monkeypatch):  # Isolates ~/.config and ~/.cache
+
+@pytest.fixture(autouse=True)
+def _isolate_iptables_rules():  # Clears iptables before each test
+
+@pytest.fixture(autouse=True)
+def _setup_database():  # Sets up test database
 
 # VM fixtures: vm_manager, sample_vm, stopped_vm, running_vm, error_vm
 # Network fixtures: sample_network_config
@@ -428,7 +435,7 @@ result = runner.invoke(app, ["rm", "--name", "myvm", "--force"])
 
 ```bash
 uv sync --group dev            # Install all deps
-uv run pytest tests/ -x -q    # Test (stop at first failure)
+uv run pytest tests/ -x -q    # Test (stop on first failure)
 uv run ruff check src/ && uv run mypy src/  # Lint + types
 
 # Build standalone binary (Nuitka - Recommended for performance)
@@ -442,10 +449,11 @@ uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/m
 
 - **Cache:** `~/.cache/mvmctl/` (`MVM_CACHE_DIR`)
 - **Config:** `~/.config/mvmctl/config.json` (`MVM_CONFIG_DIR`) — JSON, not YAML (general runtime config)
-- **Metadata:** `$MVM_CACHE_DIR/metadata.json` — single file for all images, kernels, binaries, and their `is_default` flags
+- **State:** `$MVM_CACHE_DIR/mvmdb.db` — SQLite is canonical for all `is_default` and state queries; `metadata.json` is a legacy compatibility shim
 - **Network prefix:** bridge = `mvm-{network_name}` (e.g. `mvm-default`), TAP = `mvm-{net[:3]}-{vm[:3]}-{rand3}`
 - **Env var prefix:** `MVM_` (e.g. `MVM_CACHE_DIR`, `MVM_KERNEL`)
 - **reconcile_networks():** called on every subcommand invocation in `main.py`; errors are swallowed (not user-visible)
+- **Test path isolation:** `tests/helpers/paths.py:make_test_paths(tmp_path)` is the single source of truth for canonical test paths
 
 ## Related AGENTS.md
 
@@ -457,6 +465,7 @@ uv run --group build pyinstaller --onefile --name mvm --collect-all mvmctl src/m
 - `src/mvmctl/utils/AGENTS.md` — Shared helpers (console, fs, http, process, audit, validation)
 - `src/mvmctl/assets/AGENTS.md` — Bundled YAML configs and templates
 - `src/mvmctl/services/AGENTS.md` — Runtime subprocess services (console_relay, nocloud_server)
+- `src/mvmctl/db/AGENTS.md` — SQLite schema, migrations, and ORM models
 - `tests/AGENTS.md` — Test fixtures, mock conventions, coverage
 
 ### Legacy

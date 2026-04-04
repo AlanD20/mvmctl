@@ -68,6 +68,9 @@ markers = [
     "requires_kvm: requires /dev/kvm access",
     "requires_network: requires network setup",
 ]
+filterwarnings = [
+    "ignore::ResourceWarning:coverage.collector",
+]
 
 [dependency-groups]
 dev = [

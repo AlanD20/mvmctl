@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.core.host import (
-    HostChange,
+    HostStateChange,
     HostState,
     check_kvm_access,
     check_privileges,
@@ -75,7 +75,7 @@ def default_cache_dir() -> Path:
 
 def escalate_and_init_host(
     argv: Sequence[str] | None = None,
-) -> list[HostChange]:
+) -> list[HostStateChange]:
     """Initialize host with sudo escalation if needed.
 
     Attempts to run host init. If it fails due to missing root privileges,

@@ -64,20 +64,8 @@ class Binary:
     path: str
     full_version: Optional[str] = None
     ci_version: Optional[str] = None
+    is_default: bool = False
     created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-
-@dataclass
-class BinaryDefault:
-    """Default binary path — maps to the binary_defaults table.
-
-    Primary key is name (TEXT), not a hash.
-    """
-
-    name: str  # "firecracker" or "jailer" (primary key)
-    version: str  # Maps from JSON full_version
-    path: str
     updated_at: Optional[str] = None
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -55,9 +56,10 @@ class MigrationRunner:
         Returns:
             Current schema version (0 if database is new/empty).
         """
-        with sqlite3.connect(self.db_path) as conn:
-            result = conn.execute("PRAGMA user_version").fetchone()
-            return result[0] if result else 0
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            with conn:
+                result = conn.execute("PRAGMA user_version").fetchone()
+                return result[0] if result else 0
 
     def get_pending_migrations(self) -> list[Path]:
         """Get list of migration files not yet applied.
@@ -117,7 +119,7 @@ class MigrationRunner:
 
         applied_count = 0
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             conn.execute("PRAGMA foreign_keys = ON")
             conn.execute("PRAGMA busy_timeout = 5000")
             self._ensure_migrations_table(conn)
@@ -137,6 +139,7 @@ class MigrationRunner:
                     "INSERT INTO db_migrations (version, name, applied_at) VALUES (?, ?, ?)",
                     (version, migration_file.name, datetime.now().isoformat()),
                 )
+                conn.commit()
                 applied_count += 1
 
         return applied_count

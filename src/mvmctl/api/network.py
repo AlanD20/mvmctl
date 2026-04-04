@@ -52,14 +52,14 @@ __all__ = [
 
 def create_network(
     name: str,
-    cidr: str,
-    gateway: str | None = None,
+    subnet: str,
+    ipv4_gateway: str | None = None,
     nat: bool = True,
     nat_gateways: list[str] | None = None,
 ) -> NetworkConfig:
     """Create a named network, setting up bridge and NAT rules."""
     check_privileges_interactive("/usr/sbin/ip", f"create network '{name}'")
-    return _create_network(name, cidr=cidr, gateway=gateway, nat=nat, nat_gateways=nat_gateways)
+    return _create_network(name, subnet=subnet, ipv4_gateway=ipv4_gateway, nat=nat, nat_gateways=nat_gateways)
 
 
 def remove_network(name: str) -> None:

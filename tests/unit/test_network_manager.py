@@ -5,11 +5,12 @@ from unittest.mock import patch
 
 import pytest
 
-from mvmctl.core.metadata import update_network_entry
+from mvmctl.core.metadata import get_default_network_entry, update_network_entry
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.network_manager import (
     NetworkConfig,
     _bridge_name_for,
-    _gateway_for_subnet,
+    _ipv4_gateway_for_subnet,
     _leases_from_entry,
     _network_entry_to_config,
     _validate_subnet_no_overlap,
@@ -31,9 +32,9 @@ def test_bridge_name_for():
     assert _bridge_name_for("custom_net_name") == "mvm-custom_net"
 
 
-def test_gateway_for_subnet():
-    assert _gateway_for_subnet("10.20.0.0/24") == "10.20.0.1"
-    assert _gateway_for_subnet("192.168.100.0/24") == "192.168.100.1"
+def test_ipv4_gateway_for_subnet():
+    assert _ipv4_gateway_for_subnet("10.20.0.0/24") == "10.20.0.1"
+    assert _ipv4_gateway_for_subnet("192.168.100.0/24") == "192.168.100.1"
 
 
 class TestNetworkEntryConversion:
@@ -41,8 +42,8 @@ class TestNetworkEntryConversion:
 
     def test_network_entry_to_config_success(self):
         entry = {
-            "cidr": "10.20.1.0/24",
-            "gateway": "10.20.1.1",
+            "subnet": "10.20.1.0/24",
+            "ipv4_gateway": "10.20.1.1",
             "bridge": "mvm-testnet",
             "nat_enabled": True,
             "created_at": "2026-01-01T00:00:00Z",
@@ -51,8 +52,8 @@ class TestNetworkEntryConversion:
         config = _network_entry_to_config("testnet", entry)
         assert config is not None
         assert config.name == "testnet"
-        assert config.cidr == "10.20.1.0/24"
-        assert config.gateway == "10.20.1.1"
+        assert config.subnet == "10.20.1.0/24"
+        assert config.ipv4_gateway == "10.20.1.1"
         assert config.bridge == "mvm-testnet"
         assert config.nat_enabled is True
         assert config.is_default is False
@@ -62,21 +63,21 @@ class TestNetworkEntryConversion:
 
     def test_network_entry_to_config_missing_required_fields(self):
         # Missing gateway
-        entry = {"cidr": "10.20.1.0/24", "bridge": "mvm-testnet"}
+        entry = {"subnet": "10.20.1.0/24", "bridge": "mvm-testnet"}
         assert _network_entry_to_config("testnet", entry) is None
 
-        # Missing cidr
-        entry = {"gateway": "10.20.1.1", "bridge": "mvm-testnet"}
+        # Missing subnet
+        entry = {"ipv4_gateway": "10.20.1.1", "bridge": "mvm-testnet"}
         assert _network_entry_to_config("testnet", entry) is None
 
         # Missing bridge
-        entry = {"cidr": "10.20.1.0/24", "gateway": "10.20.1.1"}
+        entry = {"subnet": "10.20.1.0/24", "ipv4_gateway": "10.20.1.1"}
         assert _network_entry_to_config("testnet", entry) is None
 
     def test_network_entry_to_config_is_default_flag(self):
         entry = {
-            "cidr": "10.20.1.0/24",
-            "gateway": "10.20.1.1",
+            "subnet": "10.20.1.0/24",
+            "ipv4_gateway": "10.20.1.1",
             "bridge": "mvm-testnet",
             "is_default": 1,
         }
@@ -115,10 +116,9 @@ class TestLeasesFromEntry:
 
 
 def _add_network_to_metadata(cache_dir: Path, name: str, **fields) -> None:
-    """Helper to add a network entry to metadata.json."""
     defaults = {
-        "cidr": "10.20.1.0/24",
-        "gateway": "10.20.1.1",
+        "subnet": "10.20.1.0/24",
+        "ipv4_gateway": "10.20.1.1",
         "bridge": f"mvm-{name}",
         "nat_enabled": True,
         "created_at": "2026-01-01T00:00:00Z",
@@ -128,15 +128,39 @@ def _add_network_to_metadata(cache_dir: Path, name: str, **fields) -> None:
     defaults.update(fields)
     update_network_entry(cache_dir, name, **defaults)
 
+    leases = defaults.get("leases", [])
+    if leases:
+        db = MVMDatabase()
+        network = db.get_network_by_name(name)
+        if network:
+            for lease in leases:
+                if isinstance(lease, dict) and "vm_id" in lease and "ipv4" in lease:
+                    vm_id = lease["vm_id"]
+                    try:
+                        from mvmctl.db.models import VMState as DBVMState
+
+                        db.upsert_vm(
+                            DBVMState(
+                                id=vm_id,
+                                name=vm_id,
+                                status="stopped",
+                                created_at="2026-01-01T00:00:00Z",
+                                updated_at="2026-01-01T00:00:00Z",
+                            )
+                        )
+                        db.acquire_lease(network.id, lease["ipv4"], vm_id)
+                    except Exception:
+                        pass
+
 
 def test_list_networks(mock_cache_dir: Path):
     assert list_networks() == []
 
     _add_network_to_metadata(
-        mock_cache_dir, "net1", cidr="10.20.1.0/24", gateway="10.20.1.1", bridge="mvm-net1"
+        mock_cache_dir, "net1", subnet="10.20.1.0/24", ipv4_gateway="10.20.1.1", bridge="mvm-net1"
     )
     _add_network_to_metadata(
-        mock_cache_dir, "net2", cidr="10.20.2.0/24", gateway="10.20.2.1", bridge="mvm-net2"
+        mock_cache_dir, "net2", subnet="10.20.2.0/24", ipv4_gateway="10.20.2.1", bridge="mvm-net2"
     )
 
     networks = list_networks()
@@ -149,13 +173,13 @@ def test_get_network(mock_cache_dir: Path):
     assert get_network("nonexistent") is None
 
     _add_network_to_metadata(
-        mock_cache_dir, "testnet", cidr="10.20.1.0/24", gateway="10.20.1.1", bridge="mvm-testnet"
+        mock_cache_dir, "testnet", subnet="10.20.1.0/24", ipv4_gateway="10.20.1.1", bridge="mvm-testnet"
     )
 
     config = get_network("testnet")
     assert config is not None
     assert config.name == "testnet"
-    assert config.cidr == "10.20.1.0/24"
+    assert config.subnet == "10.20.1.0/24"
 
 
 def test_get_network_leases(mock_cache_dir: Path):
@@ -183,22 +207,22 @@ def test_get_network_leases_empty(mock_cache_dir: Path):
 def test_create_network_success(
     mock_interfaces, mock_setup_bridge, mock_setup_nat, mock_cache_dir: Path
 ):
-    config = create_network(name="mynet", cidr="10.20.0.0/24")
+    config = create_network(name="mynet", subnet="10.20.0.0/24")
     assert config.name == "mynet"
-    assert config.cidr == "10.20.0.0/24"
-    assert config.gateway == "10.20.0.1"
+    assert config.subnet == "10.20.0.0/24"
+    assert config.ipv4_gateway == "10.20.0.1"
 
     # Verify persistence in metadata
     assert get_network("mynet") is not None
-    mock_setup_bridge.assert_called_once_with("mvm-mynet", gateway_cidr="10.20.0.1/24")
-    mock_setup_nat.assert_called_once_with("mvm-mynet", nat_gateways=None, cidr="10.20.0.0/24")
+    mock_setup_bridge.assert_called_once_with("mvm-mynet", ipv4_gateway_subnet="10.20.0.1/24")
+    mock_setup_nat.assert_called_once_with("mvm-mynet", nat_gateways=None, subnet="10.20.0.0/24")
 
 
 def test_create_network_already_exists(mock_cache_dir: Path):
     _add_network_to_metadata(mock_cache_dir, "mynet")
 
     with pytest.raises(NetworkError, match="already exists"):
-        create_network(name="mynet", cidr="10.20.1.0/24")
+        create_network(name="mynet", subnet="10.20.1.0/24")
 
 
 @patch("mvmctl.core.network_manager.setup_bridge")
@@ -209,7 +233,7 @@ def test_create_network_setup_failure(
     mock_setup_bridge.side_effect = NetworkError("Failed to setup bridge")
 
     with pytest.raises(NetworkError, match="Failed to setup bridge"):
-        create_network(name="mynet", cidr="10.20.0.0/24")
+        create_network(name="mynet", subnet="10.20.0.0/24")
 
     mock_teardown_bridge.assert_called_once()
     assert get_network("mynet") is None
@@ -222,7 +246,7 @@ def test_remove_network(mock_teardown_nat, mock_teardown_bridge, mock_cache_dir:
 
     remove_network("mynet")
 
-    mock_teardown_nat.assert_called_once_with(bridge="mvm-mynet", force=True, cidr="10.20.1.0/24")
+    mock_teardown_nat.assert_called_once_with(bridge="mvm-mynet", force=True, subnet="10.20.1.0/24")
     mock_teardown_bridge.assert_called_once_with("mvm-mynet")
     assert get_network("mynet") is None
 
@@ -281,14 +305,26 @@ def test_inspect_network_not_found():
 
 @patch("mvmctl.core.network_manager.allocate_ip")
 def test_allocate_network_ip(mock_allocate_ip, mock_cache_dir: Path):
+    from mvmctl.db.models import VMState as DBVMState
+
     _add_network_to_metadata(mock_cache_dir, "mynet", leases=[])
+
+    db = MVMDatabase()
+    db.upsert_vm(
+        DBVMState(
+            id="vm1",
+            name="vm1",
+            status="stopped",
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+        )
+    )
 
     mock_allocate_ip.return_value = "10.20.1.2"
 
     ip = allocate_network_ip("mynet", "vm1")
     assert ip == "10.20.1.2"
 
-    # Also reserves the gateway
     mock_allocate_ip.assert_called_once_with(["10.20.1.1"], subnet="10.20.1.0/24")
 
     leases = get_network_leases("mynet")
@@ -321,8 +357,9 @@ def test_release_network_ip(mock_cache_dir: Path):
 
 @patch("mvmctl.core.network.get_default_interface")
 @patch("mvmctl.core.network_manager.create_network")
+@patch("mvmctl.core.network_manager.set_default_network")
 def test_ensure_default_network_creates_when_missing(
-    mock_create_network, mock_get_default_iface, mock_cache_dir: Path
+    mock_set_default, mock_create_network, mock_get_default_iface, mock_cache_dir: Path
 ):
     # Doesn't exist, will be created
     mock_get_default_iface.return_value = "wlo1"
@@ -332,8 +369,32 @@ def test_ensure_default_network_creates_when_missing(
     config = ensure_default_network()
     assert config is not None
     mock_create_network.assert_called_once_with(
-        "default", cidr="172.35.0.0/24", nat=True, nat_gateways=["wlo1"]
+        "default", subnet="172.35.0.0/24", nat=True, nat_gateways=["wlo1"]
     )
+    mock_set_default.assert_called_once_with("default")
+
+
+def test_create_network_does_not_mark_default_network_created_in_sqlite(
+    mock_cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Creating a network named 'default' no longer marks host state - only ensure_default_network does."""
+    db_path = mock_cache_dir / "mvmdb.db"
+    monkeypatch.setattr("mvmctl.core.mvm_db.get_mvm_db_path", lambda: db_path)
+
+    db = MVMDatabase(db_path=db_path)
+    db.migrate()
+
+    with (
+        patch("mvmctl.core.network_manager.setup_bridge"),
+        patch("mvmctl.core.network_manager.setup_nat"),
+        patch("mvmctl.core.network.list_network_interfaces", return_value=["eth0"]),
+    ):
+        config = create_network(name="default", subnet="10.20.0.0/24")
+
+    assert config.name == "default"
+    # Host state should NOT be marked - only ensure_default_network does that now
+    state = db.get_host_state()
+    assert state is None or bool(state.default_network_created) is False
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=True)
@@ -345,14 +406,97 @@ def test_ensure_default_network_returns_existing(
     _add_network_to_metadata(
         mock_cache_dir,
         "default",
-        cidr="172.35.0.0/24",
-        gateway="172.35.0.1",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
         bridge="mvm-default",
     )
 
     config = ensure_default_network()
     assert config is not None
     assert config.name == "default"
+
+
+def test_ensure_default_network_marks_default_network_created_in_sqlite(
+    mock_cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    db_path = mock_cache_dir / "mvmdb.db"
+    monkeypatch.setattr("mvmctl.core.mvm_db.get_mvm_db_path", lambda: db_path)
+
+    db = MVMDatabase(db_path=db_path)
+    db.migrate()
+
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "default",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
+        bridge="mvm-default",
+    )
+
+    with (
+        patch("mvmctl.core.network.bridge_exists", return_value=True),
+        patch("mvmctl.core.network.setup_nat"),
+        patch("mvmctl.core.network.setup_mvm_chains", return_value=True),
+    ):
+        config = ensure_default_network()
+
+    assert config is not None
+    state = db.get_host_state()
+    assert state is not None
+    assert bool(state.default_network_created) is True
+
+
+def test_ensure_default_network_sets_default_when_none_exists(mock_cache_dir: Path):
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "default",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
+        bridge="mvm-default",
+    )
+
+    with (
+        patch("mvmctl.core.network.bridge_exists", return_value=True),
+        patch("mvmctl.core.network.setup_nat"),
+        patch("mvmctl.core.network.setup_mvm_chains", return_value=True),
+    ):
+        config = ensure_default_network()
+
+    assert config is not None
+    default_entry = get_default_network_entry(mock_cache_dir)
+    assert default_entry is not None
+    assert default_entry[0] == "default"
+
+
+def test_ensure_default_network_preserves_existing_other_default(mock_cache_dir: Path):
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "custom",
+        subnet="10.20.0.0/24",
+        ipv4_gateway="10.20.0.1",
+        bridge="mvm-custom",
+        is_default=True,
+    )
+    _add_network_to_metadata(
+        mock_cache_dir,
+        "default",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
+        bridge="mvm-default",
+        is_default=False,
+    )
+
+    with (
+        patch("mvmctl.core.network.bridge_exists", return_value=True),
+        patch("mvmctl.core.network.setup_nat"),
+        patch("mvmctl.core.network.setup_mvm_chains", return_value=True),
+    ):
+        config = ensure_default_network()
+
+    assert config is not None
+    default_entry = get_default_network_entry(mock_cache_dir)
+    assert default_entry is not None
+    assert default_entry[0] == "custom"
 
 
 @patch("mvmctl.core.network.bridge_exists", return_value=False)
@@ -372,8 +516,8 @@ def test_ensure_default_network_recreates_missing_bridge(
     _add_network_to_metadata(
         mock_cache_dir,
         "default",
-        cidr="172.35.0.0/24",
-        gateway="172.35.0.1",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
         bridge="mvm-default",
         nat_enabled=True,
     )
@@ -381,9 +525,9 @@ def test_ensure_default_network_recreates_missing_bridge(
     config = ensure_default_network()
     assert config is not None
     assert config.name == "default"
-    mock_setup_bridge.assert_called_once_with("mvm-default", gateway_cidr="172.35.0.1/24")
+    mock_setup_bridge.assert_called_once_with("mvm-default", ipv4_gateway_subnet="172.35.0.1/24")
     mock_setup_nat.assert_called_once_with(
-        "mvm-default", nat_gateways=["eth0"], cidr="172.35.0.0/24"
+        "mvm-default", nat_gateways=["eth0"], subnet="172.35.0.0/24"
     )
 
 
@@ -404,8 +548,8 @@ def test_ensure_default_network_recreates_missing_chains(
     _add_network_to_metadata(
         mock_cache_dir,
         "default",
-        cidr="172.35.0.0/24",
-        gateway="172.35.0.1",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
         bridge="mvm-default",
         nat_enabled=True,
     )
@@ -415,7 +559,7 @@ def test_ensure_default_network_recreates_missing_chains(
     assert config.name == "default"
     mock_setup_bridge.assert_not_called()
     mock_setup_nat.assert_called_once_with(
-        "mvm-default", nat_gateways=["eth0"], cidr="172.35.0.0/24"
+        "mvm-default", nat_gateways=["eth0"], subnet="172.35.0.0/24"
     )
 
 
@@ -436,8 +580,8 @@ def test_ensure_default_network_idempotent_when_all_exists(
     _add_network_to_metadata(
         mock_cache_dir,
         "default",
-        cidr="172.35.0.0/24",
-        gateway="172.35.0.1",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
         bridge="mvm-default",
         nat_enabled=True,
     )
@@ -452,7 +596,7 @@ def test_ensure_default_network_idempotent_when_all_exists(
 
 def test_validate_subnet_no_overlap(mock_cache_dir: Path):
     _add_network_to_metadata(
-        mock_cache_dir, "net1", cidr="10.20.0.0/24", gateway="10.20.0.1", bridge="mvm-net1"
+        mock_cache_dir, "net1", subnet="10.20.0.0/24", ipv4_gateway="10.20.0.1", bridge="mvm-net1"
     )
 
     # Should raise error on overlap
@@ -498,8 +642,8 @@ class TestNatGatewaysField:
     def test_network_entry_to_config_with_nat_gateways(self):
         """NetworkConfig should include nat_gateways when present in entry."""
         entry = {
-            "cidr": "10.20.1.0/24",
-            "gateway": "10.20.1.1",
+            "subnet": "10.20.1.0/24",
+            "ipv4_gateway": "10.20.1.1",
             "bridge": "mvm-testnet",
             "nat_enabled": True,
             "nat_gateways": ["eth0", "eth1"],
@@ -513,8 +657,8 @@ class TestNatGatewaysField:
     def test_network_entry_to_config_without_nat_gateways(self):
         """NetworkConfig should have nat_gateways=[] when not in entry."""
         entry = {
-            "cidr": "10.20.1.0/24",
-            "gateway": "10.20.1.1",
+            "subnet": "10.20.1.0/24",
+            "ipv4_gateway": "10.20.1.1",
             "bridge": "mvm-testnet",
             "nat_enabled": True,
             "created_at": "2026-01-01T00:00:00Z",
@@ -527,8 +671,8 @@ class TestNatGatewaysField:
     def test_network_entry_to_config_invalid_nat_gateways_type(self):
         """NetworkConfig should set nat_gateways=[] for invalid types."""
         entry = {
-            "cidr": "10.20.1.0/24",
-            "gateway": "10.20.1.1",
+            "subnet": "10.20.1.0/24",
+            "ipv4_gateway": "10.20.1.1",
             "bridge": "mvm-testnet",
             "nat_enabled": True,
             "nat_gateways": "eth0",  # Should be list, not string
@@ -542,8 +686,8 @@ class TestNatGatewaysField:
     def test_network_entry_to_config_invalid_gateway_in_list(self):
         """NetworkConfig should skip invalid gateways in list."""
         entry = {
-            "cidr": "10.20.1.0/24",
-            "gateway": "10.20.1.1",
+            "subnet": "10.20.1.0/24",
+            "ipv4_gateway": "10.20.1.1",
             "bridge": "mvm-testnet",
             "nat_enabled": True,
             "nat_gateways": ["eth0", 12345, "eth1"],  # 12345 is invalid
@@ -572,8 +716,8 @@ class TestRestoreNetworks:
 
         config = NetworkConfig(
             name="testnet",
-            cidr="10.20.0.0/24",
-            gateway="10.20.0.1",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
             bridge="mvm-testnet",
             nat_enabled=True,
             nat_gateways=["eth0"],
@@ -591,8 +735,8 @@ class TestRestoreNetworks:
 
         config = NetworkConfig(
             name="testnet",
-            cidr="10.20.0.0/24",
-            gateway="10.20.0.1",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
             bridge="mvm-testnet",
             nat_enabled=False,
         )
@@ -612,8 +756,8 @@ class TestRestoreNetworks:
 
         config = NetworkConfig(
             name="testnet",
-            cidr="10.20.0.0/24",
-            gateway="10.20.0.1",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
             bridge="mvm-testnet",
             nat_enabled=True,
             nat_gateways=["eth0"],
@@ -635,8 +779,8 @@ class TestRestoreNetworks:
 
         config = NetworkConfig(
             name="testnet",
-            cidr="10.20.0.0/24",
-            gateway="10.20.0.1",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
             bridge="mvm-testnet",
             nat_enabled=True,
             nat_gateways=["invalid0"],

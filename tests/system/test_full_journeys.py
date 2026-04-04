@@ -1,9 +1,10 @@
 """End-to-end journey system tests."""
 
 import os
-import pytest
-import time
 import subprocess
+import time
+
+import pytest
 
 pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow]
 
@@ -30,7 +31,7 @@ class TestQuickStartJourney:
             env={**os.environ, "NO_COLOR": "1"},
         )
         assert result.returncode == 0
-        create_time = time.monotonic() - start
+        time.monotonic() - start
 
         # Get VM info
         result = subprocess.run(

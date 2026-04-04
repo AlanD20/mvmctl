@@ -79,7 +79,7 @@ def _render_cloud_init_template(
     vm_name: str,
     user: str,
     guest_ip: str,
-    gateway: str,
+    ipv4_gateway: str,
     prefix_len: int,
     ssh_pub_key: "str | list[str] | None" = None,
 ) -> dict[str, str]:
@@ -93,7 +93,7 @@ def _render_cloud_init_template(
         vm_name=vm_name,
         user=user,
         guest_ip=guest_ip,
-        gateway=gateway,
+        ipv4_gateway=ipv4_gateway,
         prefix_len=prefix_len,
         ssh_pub_keys=ssh_pub_keys,
     )
@@ -143,7 +143,7 @@ def write_cloud_init(
     guest_ip: str,
     user: str,
     *,
-    gateway: str,
+    ipv4_gateway: str,
     ssh_pub_key: "str | list[str] | None" = None,
     custom_user_data: Path | None = None,
     prefix_len: int = 24,
@@ -155,7 +155,7 @@ def write_cloud_init(
         vm_name=vm_name,
         user=user,
         guest_ip=guest_ip,
-        gateway=gateway,
+        ipv4_gateway=ipv4_gateway,
         prefix_len=prefix_len,
         ssh_pub_key=ssh_pub_keys,
     )

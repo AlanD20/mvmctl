@@ -42,14 +42,22 @@ class TestVMLifecycleWorkflow:
     """Test complete VM lifecycle workflow end-to-end."""
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.list_vms")
     def test_create_and_list_vm(
-        self, mock_list_vms, mock_create_vm, mock_resolve_image, mock_check_priv, tmp_path
+        self,
+        mock_list_vms,
+        mock_create_vm,
+        mock_resolve_image,
+        mock_fc_bin,
+        mock_check_priv,
+        tmp_path,
     ):
         """Test creating a VM and then listing it."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("lifecycle-vm")
@@ -68,12 +76,16 @@ class TestVMLifecycleWorkflow:
         assert data[0]["name"] == "lifecycle-vm"
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.ssh.ssh_vm")
-    def test_create_and_ssh_vm(self, mock_ssh, mock_create_vm, mock_resolve_image, mock_check_priv):
+    def test_create_and_ssh_vm(
+        self, mock_ssh, mock_create_vm, mock_resolve_image, mock_fc_bin, mock_check_priv
+    ):
         """Test creating a VM and then SSHing into it."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("ssh-test-vm", ip="10.20.0.5")
@@ -88,14 +100,22 @@ class TestVMLifecycleWorkflow:
         mock_ssh.assert_called_once()
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.snapshot_vm")
     def test_create_snapshot_and_remove(
-        self, mock_snapshot, mock_create_vm, mock_resolve_image, mock_check_priv, tmp_path
+        self,
+        mock_snapshot,
+        mock_create_vm,
+        mock_resolve_image,
+        mock_fc_bin,
+        mock_check_priv,
+        tmp_path,
     ):
         """Test creating a VM, taking a snapshot, then removing it."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("snapshot-vm")
@@ -124,15 +144,17 @@ class TestVMLifecycleWorkflow:
             name="snapshot-vm", mem_out=mem_path, state_out=state_path
         )
 
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.cli.vm.remove_vm")
     @patch("mvmctl.cli.vm.list_vms")
     def test_full_lifecycle_create_remove(
-        self, mock_list, mock_remove, mock_manager, mock_create, mock_resolve_image
+        self, mock_list, mock_remove, mock_manager, mock_create, mock_resolve_image, mock_fc_bin
     ):
         """Test full lifecycle: create VM, verify it exists, then remove it."""
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
         vm = _make_vm("full-lifecycle-vm")
         mock_create.return_value = vm
@@ -157,14 +179,16 @@ class TestVMLifecycleWorkflow:
         mock_remove.assert_called_once_with("full-lifecycle-vm")
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.logs.get_logs")
     def test_create_and_check_logs(
-        self, mock_logs, mock_create, mock_resolve_image, mock_check_priv
+        self, mock_logs, mock_create, mock_resolve_image, mock_fc_bin, mock_check_priv
     ):
         """Test creating a VM and checking its logs."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("logs-vm")
@@ -179,6 +203,7 @@ class TestVMLifecycleWorkflow:
         assert "Boot log line 1" in result.output
         mock_logs.assert_called_once()
 
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.cli.vm.snapshot_vm")
@@ -193,9 +218,11 @@ class TestVMLifecycleWorkflow:
         mock_snapshot,
         mock_create,
         mock_resolve_image,
+        mock_fc_bin,
         tmp_path,
     ):
         """Test full snapshot workflow: create -> snapshot -> load -> remove."""
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
         vm = _make_vm("restore-vm")
         mock_create.return_value = vm
@@ -260,13 +287,17 @@ class TestVMLifecycleEdgeCases:
         assert "no vm found" in result.output.lower()
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
-    def test_create_duplicate_vm_name(self, mock_create, mock_resolve_image, mock_check_priv):
+    def test_create_duplicate_vm_name(
+        self, mock_create, mock_resolve_image, mock_fc_bin, mock_check_priv
+    ):
         """Test attempting to create a VM with a duplicate name."""
         from mvmctl.exceptions import MVMError
 
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
         mock_create.side_effect = MVMError("VM 'duplicate-vm' already exists")
 

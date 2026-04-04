@@ -24,8 +24,8 @@ vm_defaults:
 network:
   defaults:
     name: default
-    cidr: 172.35.0.0/24
-    gateway: 172.35.0.1
+    subnet: 172.35.0.0/24
+    ipv4_gateway: 172.35.0.1
 vm:
   files:
     kernel_filename: vmlinux
@@ -54,7 +54,7 @@ vm:
     mac_default: 02:FC:00:00:00:01
     mac_prefix: 02:FC
     iface: eth0
-    boot_mode: "off"  # Kernel IP boot parameter: "off" | "none" | "on"
+    boot_mode: "off" # Kernel IP boot parameter: "off" | "none" | "on"
   firecracker:
     log_level: Debug
     drive_cache_type: Unsafe
@@ -96,8 +96,8 @@ image:
   remote:
     version_limit: 5
     max_parallel_downloads: 4
-  shrink_safety_margin: 1.01  # 1% safety margin when truncating shrunk images
-  ratio_min: 1.0  # minimum compression ratio (fallback when division by zero)
+  shrink_safety_margin: 1.01 # 1% safety margin when truncating shrunk images
+  ratio_min: 1.0 # minimum compression ratio (fallback when division by zero)
 host:
   system_dirs:
     sysctl_conf_dir: /etc/sysctl.d
@@ -137,17 +137,17 @@ host:
         table: filter
         built_in: INPUT
 http:
-  download_chunk_size: 1048576  # 1MB - optimal balance for high-speed throughput
+  download_chunk_size: 1048576 # 1MB - optimal balance for high-speed throughput
   download_max_retries: 3
-  download_retry_delay: 1.0  # seconds
-  download_retry_backoff: 2.0  # exponential multiplier
+  download_retry_delay: 1.0 # seconds
+  download_retry_backoff: 2.0 # exponential multiplier
 kernel:
   defaults:
     version: 6.19.9
     arch: x86_64
     build_jobs: 1
 fallbacks:
-  fc_ci_version: '1.15'
+  fc_ci_version: "1.15"
   firecracker_bin: firecracker
   kernel_build_jobs: 1
   max_parallel_downloads: 4

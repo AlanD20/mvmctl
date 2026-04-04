@@ -12,8 +12,8 @@ runner = CliRunner()
 
 _FAKE_NET = NetworkConfig(
     name="testnet",
-    cidr="192.168.100.0/24",
-    gateway="192.168.100.1",
+    subnet="192.168.100.0/24",
+    ipv4_gateway="192.168.100.1",
     bridge="mvm-testnet",
     nat_enabled=True,
     created_at="2024-01-01T00:00:00+00:00",
@@ -38,7 +38,7 @@ def test_ls_with_networks(mock_leases, mock_list):
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
     assert "testnet" in result.output
-    # Verify column header is "Network" not "CIDR"
+    # Verify column header is "Network" not "SUBNET"
     assert "Network" in result.output
 
 
@@ -58,13 +58,13 @@ def test_ls_json(mock_leases, mock_list):
 @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
 @patch("mvmctl.cli.network.create_network", return_value=_FAKE_NET)
 def test_create_success(mock_create, mock_interfaces):
-    result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
     assert result.exit_code == 0
     assert "created" in result.output.lower()
     mock_create.assert_called_once_with(
         name="testnet",
-        cidr="192.168.100.0/24",
-        gateway=None,
+        subnet="192.168.100.0/24",
+        ipv4_gateway=None,
         nat=True,
         nat_gateways=["eth0"],
     )
@@ -73,7 +73,7 @@ def test_create_success(mock_create, mock_interfaces):
 @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
 @patch("mvmctl.cli.network.create_network", side_effect=NetworkError("already exists"))
 def test_create_error(mock_create, mock_interfaces):
-    result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
     assert result.exit_code == 1
     assert "already exists" in result.output.lower()
 
@@ -86,15 +86,15 @@ def test_create_error(mock_create, mock_interfaces):
     ),
 )
 def test_create_error_subnet_overlap(mock_create, mock_interfaces):
-    result = runner.invoke(app, ["create", "testnet", "--cidr", "192.168.100.0/24"])
+    result = runner.invoke(app, ["create", "testnet", "--subnet", "192.168.100.0/24"])
     assert result.exit_code == 1
     assert "overlaps" in result.output.lower()
 
 
-def test_create_missing_cidr():
+def test_create_missing_subnet():
     result = runner.invoke(app, ["create", "testnet"])
     assert result.exit_code == 1
-    assert "--cidr" in result.output
+    assert "--subnet" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +132,8 @@ def test_rm_alias(mock_remove):
 
 _FAKE_INSPECT = {
     "name": "testnet",
-    "cidr": "192.168.100.0/24",
-    "gateway": "192.168.100.1",
+    "subnet": "192.168.100.0/24",
+    "ipv4_gateway": "192.168.100.1",
     "bridge": "mvm-testnet",
     "nat_enabled": True,
     "bridge_exists": False,
@@ -200,7 +200,7 @@ def test_inspect_help_arg_shows_help():
 
 
 def test_create_rejects_invalid_name():
-    result = runner.invoke(app, ["create", "../evil", "--cidr", "192.168.1.0/24"])
+    result = runner.invoke(app, ["create", "../evil", "--subnet", "192.168.1.0/24"])
     assert result.exit_code != 0
     assert isinstance(result.exception, Exception)
     assert "Invalid network name" in str(result.exception)
@@ -230,8 +230,8 @@ def test_network_ls_shows_x_mark_for_missing_bridge(mock_leases, mock_list, mock
     # Mock NetworkConfig with bridge
     net = NetworkConfig(
         name="testnet",
-        cidr="192.168.100.0/24",
-        gateway="192.168.100.1",
+        subnet="192.168.100.0/24",
+        ipv4_gateway="192.168.100.1",
         bridge="mvm-testnet",
         nat_enabled=True,
         created_at="2024-01-01T00:00:00+00:00",
@@ -256,8 +256,8 @@ def test_network_ls_no_x_mark_for_existing_bridge(mock_leases, mock_list, mocker
     # Mock NetworkConfig with bridge
     net = NetworkConfig(
         name="testnet",
-        cidr="192.168.100.0/24",
-        gateway="192.168.100.1",
+        subnet="192.168.100.0/24",
+        ipv4_gateway="192.168.100.1",
         bridge="mvm-testnet",
         nat_enabled=True,
         created_at="2024-01-01T00:00:00+00:00",
@@ -291,8 +291,8 @@ def test_network_ls_shows_default_prefix(mock_bridge_alive, mock_leases, mock_li
     # Mock list_networks returning network with is_default=True
     net = NetworkConfig(
         name="default",
-        cidr="10.0.0.0/24",
-        gateway="10.0.0.1",
+        subnet="10.0.0.0/24",
+        ipv4_gateway="10.0.0.1",
         bridge="mvm-default",
         nat_enabled=True,
         created_at="2024-01-01T00:00:00+00:00",
@@ -319,8 +319,8 @@ def test_network_ls_default_prefix_takes_priority_over_missing_bridge(
     # Mock list_networks returning default network with missing bridge
     net = NetworkConfig(
         name="default",
-        cidr="10.0.0.0/24",
-        gateway="10.0.0.1",
+        subnet="10.0.0.0/24",
+        ipv4_gateway="10.0.0.1",
         bridge="mvm-default",
         nat_enabled=True,
         created_at="2024-01-01T00:00:00+00:00",
@@ -346,8 +346,8 @@ def test_network_ls_no_prefix_for_non_default(mock_leases, mock_list):
     # Mock list_networks returning network with is_default=False
     net = NetworkConfig(
         name="custom",
-        cidr="192.168.1.0/24",
-        gateway="192.168.1.1",
+        subnet="192.168.1.0/24",
+        ipv4_gateway="192.168.1.1",
         bridge="mvm-custom",
         nat_enabled=True,
         created_at="2024-01-01T00:00:00+00:00",

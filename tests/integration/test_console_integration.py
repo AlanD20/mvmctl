@@ -98,8 +98,8 @@ class TestConsoleWorkflow:
         mock_get_kernels.return_value = mock_kernels_dir
 
         mock_net = MagicMock()
-        mock_net.cidr = "10.20.0.0/24"
-        mock_net.gateway = "10.20.0.1"
+        mock_net.subnet = "10.20.0.0/24"
+        mock_net.ipv4_gateway = "10.20.0.1"
         mock_net.bridge = "mvm-br0"
         mock_get_network.return_value = mock_net
 
@@ -254,8 +254,8 @@ class TestConsoleWorkflow:
         mock_get_kernels.return_value = mock_kernels_dir
 
         mock_net = MagicMock()
-        mock_net.cidr = "10.20.0.0/24"
-        mock_net.gateway = "10.20.0.1"
+        mock_net.subnet = "10.20.0.0/24"
+        mock_net.ipv4_gateway = "10.20.0.1"
         mock_net.bridge = "mvm-br0"
         mock_get_network.return_value = mock_net
 

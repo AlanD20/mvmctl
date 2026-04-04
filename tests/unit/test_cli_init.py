@@ -36,8 +36,8 @@ def test_init_skip_host(mock_cache, mock_list_networks, tmp_path):
     mock_list_networks.return_value = [
         NetworkConfig(
             name="default",
-            cidr="172.35.0.0/24",
-            gateway="172.35.0.1",
+            subnet="172.35.0.0/24",
+            ipv4_gateway="172.35.0.1",
             bridge="mvm-default",
             nat_enabled=True,
             created_at="2024-01-01T00:00:00",
@@ -123,6 +123,7 @@ def test_step_host_uses_shutil_which_for_mvm(mock_cache, mock_state, mock_kvm, t
 
 
 @patch("mvmctl.api.network.ensure_default_network")
+@patch("mvmctl.cli.init.set_active_version")
 @patch("mvmctl.cli.init.fetch_binary")
 @patch("mvmctl.cli.init.build_kernel_pipeline")
 @patch("mvmctl.cli.init.fetch_image")
@@ -140,6 +141,7 @@ def test_init_non_interactive_no_kernel_image_key(
     mock_fetch_image,
     mock_build_kernel,
     mock_fetch_binary,
+    mock_set_active,
     mock_ensure_net,
     tmp_path,
 ):
@@ -157,6 +159,7 @@ def test_init_non_interactive_no_kernel_image_key(
 
 
 @patch("mvmctl.api.network.ensure_default_network")
+@patch("mvmctl.cli.init.set_active_version")
 @patch("mvmctl.cli.init.fetch_binary")
 @patch("mvmctl.cli.init.list_local_versions", return_value=[])  # No local binaries
 @patch("mvmctl.cli.init.list_remote_versions")
@@ -172,6 +175,7 @@ def test_init_non_interactive_fetches_binary_when_none_cached(
     mock_list_remote,
     mock_list_local,
     mock_fetch_binary,
+    mock_set_active,
     mock_ensure_net,
     tmp_path,
 ):
@@ -190,3 +194,37 @@ def test_init_non_interactive_fetches_binary_when_none_cached(
     assert result.exit_code == 0
 
     mock_fetch_binary.assert_called_once()
+
+
+@patch("mvmctl.api.network.ensure_default_network")
+@patch("mvmctl.cli.init.ensure_default_binary", return_value="1.12.0")
+@patch("mvmctl.cli.init.list_local_versions")
+@patch("mvmctl.api.network.list_networks", return_value=[])
+@patch("mvmctl.cli.init.check_kvm_access", return_value=True)
+@patch("mvmctl.cli.init.get_host_state", return_value=MagicMock(init_timestamp="2024-01-01"))
+@patch("mvmctl.cli.init.get_cache_dir")
+def test_step_binary_repairs_default_when_no_active(
+    mock_cache,
+    mock_host_state,
+    mock_kvm,
+    mock_list_networks,
+    mock_list_local,
+    mock_ensure_default,
+    mock_ensure_net,
+    tmp_path,
+):
+    """When local binaries exist but none is active, ensure_default_binary should be called."""
+    mock_cache.return_value = tmp_path
+
+    inactive_bv = BinaryVersion(
+        version="1.12.0",
+        firecracker_path=tmp_path / "bin" / "firecracker-v1.12.0",
+        jailer_path=tmp_path / "bin" / "jailer-v1.12.0",
+        is_active=False,
+    )
+    mock_list_local.return_value = [inactive_bv]
+
+    result = runner.invoke(app, ["--non-interactive"])
+    assert result.exit_code == 0
+    mock_ensure_default.assert_called_once()
+    assert "1.12.0" in result.output

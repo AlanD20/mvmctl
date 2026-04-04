@@ -208,41 +208,41 @@ def validate_bridge_name(name: str, field_name: str = "bridge") -> str:
     return validate_interface_name(name, field_name)
 
 
-def validate_cidr(cidr: str, field_name: str = "CIDR") -> str:
-    """Validate CIDR notation and return sanitized version.
+def validate_subnet(subnet: str, field_name: str = "SUBNET") -> str:
+    """Validate SUBNET notation and return sanitized version.
 
-    Validates that the CIDR is a valid IPv4 network notation.
+    Validates that the SUBNET is a valid IPv4 network notation.
 
     Args:
-        cidr: CIDR notation string (e.g., "192.168.1.0/24")
+        subnet: SUBNET notation string (e.g., "192.168.1.0/24")
         field_name: Field name for error messages
 
     Returns:
-        The validated CIDR string
+        The validated SUBNET string
 
     Raises:
-        MVMError: If the CIDR is invalid
+        MVMError: If the SUBNET is invalid
     """
-    if not cidr:
-        raise MVMError(f"Invalid {field_name}: CIDR cannot be empty")
+    if not subnet:
+        raise MVMError(f"Invalid {field_name}: SUBNET cannot be empty")
 
     # Check for shell metacharacters and control characters (but allow . and /)
-    # CIDR notation legitimately contains dots and slashes
+    # SUBNET notation legitimately contains dots and slashes
     dangerous_chars = _SHELL_METACHARACTERS | _CONTROL_CHARS
-    if any(c in dangerous_chars for c in cidr):
+    if any(c in dangerous_chars for c in subnet):
         raise MVMError(
-            f"Invalid {field_name}: '{cidr}' contains forbidden characters "
+            f"Invalid {field_name}: '{subnet}' contains forbidden characters "
             "(shell metacharacters or control characters)"
         )
 
-    if " " in cidr:
-        raise MVMError(f"Invalid {field_name}: '{cidr}' cannot contain spaces")
+    if " " in subnet:
+        raise MVMError(f"Invalid {field_name}: '{subnet}' cannot contain spaces")
 
     try:
-        network = ipaddress.IPv4Network(cidr, strict=False)
+        network = ipaddress.IPv4Network(subnet, strict=False)
         return str(network)
     except ValueError as e:
-        raise MVMError(f"Invalid {field_name}: '{cidr}' is not a valid IPv4 CIDR: {e}") from e
+        raise MVMError(f"Invalid {field_name}: '{subnet}' is not a valid IPv4 CIDR: {e}") from e
 
 
 def validate_ipv4_address(ip: str, field_name: str = "IP address") -> str:

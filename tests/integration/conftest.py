@@ -10,20 +10,18 @@ import pytest
 
 
 @pytest.fixture
-def mock_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Creates a mock cache directory with standard subdirectories.
+def mock_cache_dir(tmp_path: Path) -> Path:
+    from tests.helpers.paths import make_test_paths
 
-    Sets MVM_CACHE_DIR to tmp_path and creates common subdirectories.
-    Returns the cache directory path for tests that need to interact
-    with metadata directly.
-    """
-    kernels_dir = tmp_path / "kernels"
+    cache_dir = make_test_paths(tmp_path).cache
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    kernels_dir = cache_dir / "kernels"
     kernels_dir.mkdir(parents=True)
     (kernels_dir / "vmlinux").write_text("fake kernel")
 
-    images_dir = tmp_path / "images"
+    images_dir = cache_dir / "images"
     images_dir.mkdir(parents=True)
     (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    return tmp_path
+    return cache_dir

@@ -2037,8 +2037,15 @@ def test_import_image_unsupported_format(tmp_path: Path):
         import_image(spec, output_dir)
 
 
+@patch("mvmctl.core.image.compress_image")
+@patch("mvmctl.core.image.shrink_image_with_guestfs")
 @patch("mvmctl.core.image.shutil.copy2")
-def test_import_image_force_overwrite(mock_copy: MagicMock, tmp_path: Path):
+def test_import_image_force_overwrite(
+    mock_copy: MagicMock,
+    mock_shrink: MagicMock,
+    mock_compress: MagicMock,
+    tmp_path: Path,
+):
     """Test import_image overwrites existing image when force=True."""
     source = tmp_path / "source.raw"
     source.write_text("new image data")
@@ -2056,12 +2063,19 @@ def test_import_image_force_overwrite(mock_copy: MagicMock, tmp_path: Path):
     output_dir.mkdir()
     final_path = output_dir / "my-image.ext4"
     final_path.write_text("old image data")
+    compressed_path = final_path.with_suffix(".ext4.zst")
+    compressed_path.write_text("compressed image data")
+
+    mock_shrink.return_value = (final_path, 1024, 512)
+    mock_compress.return_value = compressed_path
 
     result = import_image(spec, output_dir, force=True)
 
     # Result path should be the compressed version
-    assert result.path == final_path.with_suffix(".ext4.zst")
+    assert result.path == compressed_path
     mock_copy.assert_called_once()
+    mock_shrink.assert_called_once_with(final_path)
+    mock_compress.assert_called_once_with(final_path)
 
 
 # ---------------------------------------------------------------------------
@@ -2749,7 +2763,13 @@ def test_fetch_image_cleans_download_on_unknown_format(
     assert not download_path.exists()
 
 
-def test_fetch_image_no_stale_cleanup_without_force(tmp_path: Path):
+@patch("mvmctl.core.image.compress_image")
+@patch("mvmctl.core.image.shrink_image_with_guestfs")
+def test_fetch_image_no_stale_cleanup_without_force(
+    mock_shrink: MagicMock,
+    mock_compress: MagicMock,
+    tmp_path: Path,
+):
     """Test that stale .download file is cleaned when resuming from ext4."""
     from mvmctl.core.image import fetch_image
 
@@ -2770,13 +2790,24 @@ def test_fetch_image_no_stale_cleanup_without_force(tmp_path: Path):
     download_path.write_bytes(b"stale download data")
     final_path = tmp_path / "alpine.ext4"
     final_path.write_bytes(b"existing image")
+    compressed_path = final_path.with_suffix(".ext4.zst")
+
+    mock_shrink.return_value = (final_path, 1024, 512)
+
+    def compress_side_effect(path: Path) -> Path:
+        compressed_path.write_text("compressed image")
+        return compressed_path
+
+    mock_compress.side_effect = compress_side_effect
 
     with patch("mvmctl.core.image.download_file") as mock_download:
         result = fetch_image(spec, tmp_path, force=False)
 
         # Should resume from ext4 and compress (no download needed)
-        assert result.path == final_path.with_suffix(".ext4.zst")
+        assert result.path == compressed_path
         mock_download.assert_not_called()
+        mock_shrink.assert_called_once_with(final_path)
+        mock_compress.assert_called_once_with(final_path)
         # Stale .download file should be cleaned up after successful processing
         assert not download_path.exists()
 

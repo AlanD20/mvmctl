@@ -913,7 +913,7 @@ ExecStart=/bin/bash -c '
             apk add --no-cache openssh 2>/dev/null || true
         fi
     fi
-    
+
     # Enable SSH service
     if command -v systemctl >/dev/null 2>&1; then
         systemctl enable --now sshd 2>/dev/null || systemctl enable --now ssh 2>/dev/null || true
@@ -921,7 +921,7 @@ ExecStart=/bin/bash -c '
         rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true
         rc-service sshd start 2>/dev/null || rc-service ssh start 2>/dev/null || true
     fi
-    
+
     # Mark service to not run again
     systemctl disable first-boot-ssh-installer.service 2>/dev/null || true
 '
@@ -1354,10 +1354,10 @@ def create_vm(
 
         if ip:
             try:
-                ip_net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
+                ip_net = _ipaddress.IPv4Network(net_config.subnet, strict=False)
                 if _ipaddress.IPv4Address(ip.split("/")[0]) not in ip_net:
                     raise NetworkError(
-                        f"IP {ip} is outside network '{network_name}' subnet {net_config.cidr}"
+                        f"IP {ip} is outside network '{network_name}' subnet {net_config.subnet}"
                     )
             except ValueError as e:
                 raise NetworkError(f"Invalid IP address: {e}")
@@ -1468,7 +1468,7 @@ def create_vm(
                 else:
                     ssh_pub_key = resolve_ssh_key(None)
 
-            _prefix_len = _ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen
+            _prefix_len = _ipaddress.IPv4Network(net_config.subnet, strict=False).prefixlen
 
             write_cloud_init(
                 cloud_init_dir,
@@ -1477,7 +1477,7 @@ def create_vm(
                 user,
                 ssh_pub_key=ssh_pub_key,
                 custom_user_data=user_data,
-                gateway=net_config.gateway,
+                ipv4_gateway=net_config.ipv4_gateway,
                 prefix_len=_prefix_len,
                 skip_network_config=False,
             )
@@ -1491,7 +1491,11 @@ def create_vm(
             elif effective_mode == CloudInitMode.NET:
                 net_manager = NoCloudNetServerManager()
                 url, port = net_manager.start_server(
-                    name, cloud_init_dir, net_config.gateway, vm_id, preferred_port=nocloud_net_port
+                    name,
+                    cloud_init_dir,
+                    net_config.ipv4_gateway,
+                    vm_id,
+                    preferred_port=nocloud_net_port,
                 )
                 nocloud_net_url = url
                 nocloud_net_port = port
@@ -1513,7 +1517,7 @@ def create_vm(
                     raise MVMError(f"Failed to create cloud-init ISO: {e}") from e
 
         socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
-        _net = _ipaddress.IPv4Network(net_config.cidr, strict=False)
+        _net = _ipaddress.IPv4Network(net_config.subnet, strict=False)
         _subnet_mask = str(_net.netmask)
 
         vm_config = VMConfig(
@@ -1524,7 +1528,7 @@ def create_vm(
             rootfs_path=rootfs_path,
             guest_ip=guest_ip,
             guest_mac=guest_mac,
-            gateway=net_config.gateway,
+            ipv4_gateway=net_config.ipv4_gateway,
             subnet_mask=_subnet_mask,
             tap_device=tap_name,
             root_uuid=image_fs_uuid,
@@ -1552,13 +1556,13 @@ def create_vm(
         if not bridge_exists(bridge):
             logger.info("Bridge %s not found — recreating for network '%s'", bridge, network_name)
             _gw_cidr = (
-                f"{net_config.gateway}"
-                f"/{_ipaddress.IPv4Network(net_config.cidr, strict=False).prefixlen}"
+                f"{net_config.ipv4_gateway}"
+                f"/{_ipaddress.IPv4Network(net_config.subnet, strict=False).prefixlen}"
             )
-            setup_bridge(bridge, gateway_cidr=_gw_cidr)
+            setup_bridge(bridge, ipv4_gateway_subnet=_gw_cidr)
             if net_config.nat_enabled:
                 setup_nat(
-                    bridge, nat_gateways=net_config.nat_gateways or None, cidr=net_config.cidr
+                    bridge, nat_gateways=net_config.nat_gateways or None, subnet=net_config.subnet
                 )
 
         try:
@@ -1774,7 +1778,7 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     remove_iptables_forward_rules(tap_name, bridge=bridge)
 
     try:
-        teardown_nat(bridge, force=False, cidr=net_config.cidr if net_config else None)
+        teardown_nat(bridge, force=False, subnet=net_config.subnet if net_config else None)
     except NetworkError as e:
         logger.debug("NAT teardown for bridge %s: %s", bridge, e)
 

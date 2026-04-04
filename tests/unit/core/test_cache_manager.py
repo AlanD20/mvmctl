@@ -30,13 +30,8 @@ from mvmctl.models.vm import VMInstance
 class TestCacheInitVms:
     """Tests for cache_init_vms function."""
 
-    def test_cache_init_vms_creates_directory(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_cache_init_vms_creates_directory(self, tmp_path: Path):
         """Test VM directory creation."""
-        cache_dir = tmp_path / "cache"
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
-
         result = cache_init_vms()
 
         assert result.exists()
@@ -51,13 +46,8 @@ class TestCacheInitVms:
 class TestCacheInitImages:
     """Tests for cache_init_images function."""
 
-    def test_cache_init_images_creates_directory(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_cache_init_images_creates_directory(self, tmp_path: Path):
         """Test images directory creation."""
-        cache_dir = tmp_path / "cache"
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
-
         result = cache_init_images()
 
         assert result.exists()
@@ -68,13 +58,8 @@ class TestCacheInitImages:
 class TestCacheInitKernels:
     """Tests for cache_init_kernels function."""
 
-    def test_cache_init_kernels_creates_directory(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_cache_init_kernels_creates_directory(self, tmp_path: Path):
         """Test kernels directory creation."""
-        cache_dir = tmp_path / "cache"
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
-
         result = cache_init_kernels()
 
         assert result.exists()
@@ -85,11 +70,8 @@ class TestCacheInitKernels:
 class TestCacheInitAll:
     """Tests for cache_init_all function."""
 
-    def test_cache_init_all_calls_all_inits(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_cache_init_all_calls_all_inits(self, tmp_path: Path):
         """Test orchestration of all init functions."""
-        cache_dir = tmp_path / "cache"
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
-
         result = cache_init_all()
 
         assert "vms" in result
@@ -294,7 +276,6 @@ class TestCachePruneImages:
         cache_dir = tmp_path / "cache"
         images_dir = cache_dir / "images"
         images_dir.mkdir(parents=True)
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
 
         # Create unused image file
         unused_image = images_dir / "unused.ext4"
@@ -322,14 +303,12 @@ class TestCachePruneImages:
         self,
         mocker: MockerFixture,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         sample_vm: VMInstance,
     ):
         """Keep images referenced by VMs."""
         cache_dir = tmp_path / "cache"
         images_dir = cache_dir / "images"
         images_dir.mkdir(parents=True)
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
 
         # Create image file
         image_path = images_dir / "used.ext4"
@@ -363,13 +342,11 @@ class TestCachePruneImages:
         self,
         mocker: MockerFixture,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ):
         """Never prune default image."""
         cache_dir = tmp_path / "cache"
         images_dir = cache_dir / "images"
         images_dir.mkdir(parents=True)
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
 
         # Create default image file
         default_image = images_dir / "default.ext4"
@@ -409,13 +386,11 @@ class TestCachePruneKernels:
         self,
         mocker: MockerFixture,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ):
         """Prune unused kernels."""
         cache_dir = tmp_path / "cache"
         kernels_dir = cache_dir / "kernels"
         kernels_dir.mkdir(parents=True)
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
 
         # Create unused kernel file
         unused_kernel = kernels_dir / "unused-vmlinux"
@@ -441,14 +416,12 @@ class TestCachePruneKernels:
         self,
         mocker: MockerFixture,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         sample_vm: VMInstance,
     ):
         """Keep kernels referenced by VMs."""
         cache_dir = tmp_path / "cache"
         kernels_dir = cache_dir / "kernels"
         kernels_dir.mkdir(parents=True)
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
 
         # Create kernel file
         kernel_path = kernels_dir / "used-vmlinux"
@@ -481,13 +454,11 @@ class TestCachePruneKernels:
         self,
         mocker: MockerFixture,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ):
         """Never prune default kernel."""
         cache_dir = tmp_path / "cache"
         kernels_dir = cache_dir / "kernels"
         kernels_dir.mkdir(parents=True)
-        monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
 
         # Create default kernel file
         default_kernel = kernels_dir / "default-vmlinux"

@@ -16,6 +16,9 @@ def _user_config_path() -> Path:
     override = os.environ.get(f"{CLI_NAME.upper()}_CONFIG")
     if override:
         return Path(override)
+    dir_override = os.environ.get(f"{CLI_NAME.upper()}_CONFIG_DIR")
+    if dir_override:
+        return Path(dir_override) / "config.json"
     return Path.home() / ".config" / CLI_NAME / "config.json"
 
 

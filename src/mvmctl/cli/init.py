@@ -8,11 +8,13 @@ import typer
 
 from mvmctl.api.assets import (
     build_kernel_pipeline,
+    ensure_default_binary,
     fetch_binary,
     fetch_image,
     list_local_versions,
     list_remote_versions,
     load_images_config,
+    set_active_version,
 )
 from mvmctl.api.config import initialize_default_config
 from mvmctl.api.host import check_kvm_access, get_host_state, init_host
@@ -157,8 +159,14 @@ def _step_binary(non_interactive: bool) -> None:
     local = list_local_versions()
     if local:
         active = [v for v in local if v.is_active]
-        label = active[0].version if active else local[0].version
-        print_success(f"  Binary available (v{label})")
+        if active:
+            print_success(f"  Binary available (v{active[0].version})")
+        else:
+            repaired = ensure_default_binary()
+            if repaired:
+                print_success(f"  Binary available (v{repaired}) — set as default")
+            else:
+                print_success(f"  Binary available (v{local[0].version})")
         return
 
     if non_interactive:
@@ -166,6 +174,7 @@ def _step_binary(non_interactive: bool) -> None:
             versions = list_remote_versions(limit=1)
             if versions:
                 bv = fetch_binary(versions[0])
+                set_active_version(bv.version)
                 print_success(f"  Downloaded v{bv.version}")
             else:
                 print_warning("  No remote versions found")
@@ -189,6 +198,7 @@ def _step_binary(non_interactive: bool) -> None:
     if typer.confirm(f"  Download v{versions[0]}?", default=True):
         try:
             bv = fetch_binary(versions[0])
+            set_active_version(bv.version)
             print_success(f"  Downloaded v{bv.version}")
         except BinaryError as e:
             print_warning(f"  Download failed: {e}")
@@ -418,8 +428,10 @@ def init(
 
     initialize_default_config()
 
+    # DB migration must run before host/network steps so SQLite tables exist
+    # when host_setup.py and network_manager.py attempt dual-writes.
+    _step_local_state()
     _step_host(skip=skip_host, non_interactive=non_interactive)
     _step_cache_init()
-    _step_local_state()
     _step_binary(non_interactive)
     _step_summary()

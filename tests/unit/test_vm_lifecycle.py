@@ -157,8 +157,8 @@ def test_create_vm_core_success(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -270,8 +270,8 @@ def test_create_vm_inject_mode_is_default(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -687,7 +687,6 @@ def test_load_snapshot(mock_client, mock_socket_path):
 
 
 def test_resolve_image_path_by_ext4(tmp_path, monkeypatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     img = images_dir / "ubuntu-24.04.ext4"
@@ -698,7 +697,6 @@ def test_resolve_image_path_by_ext4(tmp_path, monkeypatch):
 
 
 def test_resolve_image_path_by_btrfs(tmp_path, monkeypatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     img = images_dir / "archlinux.btrfs"
@@ -716,134 +714,99 @@ def test_resolve_image_path_by_absolute(tmp_path):
     assert result == img
 
 
-def test_resolve_image_path_by_short_hash(tmp_path, monkeypatch):
-    import json
+def _seed_image(full_hash: str, filename: str, **extra) -> None:
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import Image
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+    db = MVMDatabase()
+    db.upsert_image(
+        Image(
+            id=full_hash,
+            os_slug=extra.get("os_slug", ""),
+            os_name=extra.get("os_name"),
+            path=filename,
+            fs_type=extra.get("fs_type"),
+            fs_uuid=extra.get("fs_uuid"),
+            pulled_at=extra.get("pulled_at"),
+            created_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
+            updated_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
+        )
+    )
+
+
+def _seed_kernel(full_hash: str, filename: str, **extra) -> None:
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import Kernel
+
+    db = MVMDatabase()
+    db.upsert_kernel(
+        Kernel(
+            id=full_hash,
+            name=extra.get("name", filename),
+            path=filename,
+            version=extra.get("version", ""),
+            base_name=extra.get("base_name"),
+            type=extra.get("type"),
+            arch=extra.get("arch", "x86_64"),
+            created_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
+            updated_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
+        )
+    )
+
+
+def test_resolve_image_path_by_short_hash(tmp_path):
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     full_hash = "f" * 64
     img = images_dir / f"{full_hash}.ext4"
     img.write_bytes(b"\x00" * 64)
-    meta_file = tmp_path / "metadata.json"
-    meta_file.write_text(
-        json.dumps(
-            {
-                "images": {
-                    full_hash: {
-                        "os_name": "MyImage",
-                        "filename": img.name,
-                        "fs_type": "ext4",
-                        "pulled_at": "2026-01-01T00:00:00+00:00",
-                        "full_hash": full_hash,
-                    }
-                }
-            }
-        )
-    )
+
+    _seed_image(full_hash, img.name, os_name="MyImage", fs_type="ext4")
+
     with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
         result = _resolve_image_path(full_hash[:6])
     assert result == img
 
 
-def test_resolve_image_fs_uuid_by_short_hash(tmp_path, monkeypatch):
-    import json
-
+def test_resolve_image_fs_uuid_by_short_hash(tmp_path):
     from mvmctl.core.vm_lifecycle import _resolve_image_fs_uuid
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "a" * 64
-    meta_file = tmp_path / "metadata.json"
-    meta_file.write_text(
-        json.dumps(
-            {
-                "images": {
-                    full_hash: {
-                        "filename": "ubuntu-24.04.ext4",
-                        "fs_uuid": "11111111-2222-3333-4444-555555555555",
-                    }
-                }
-            }
-        )
-    )
+    _seed_image(full_hash, "ubuntu-24.04.ext4", fs_uuid="11111111-2222-3333-4444-555555555555")
 
     result = _resolve_image_fs_uuid(full_hash[:6])
     assert result == "11111111-2222-3333-4444-555555555555"
 
 
-def test_resolve_image_fs_uuid_missing_returns_none(tmp_path, monkeypatch):
-    import json
-
+def test_resolve_image_fs_uuid_missing_returns_none(tmp_path):
     from mvmctl.core.vm_lifecycle import _resolve_image_fs_uuid
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "b" * 64
-    meta_file = tmp_path / "metadata.json"
-    meta_file.write_text(
-        json.dumps(
-            {
-                "images": {
-                    full_hash: {
-                        "filename": "ubuntu-24.04.ext4",
-                    }
-                }
-            }
-        )
-    )
+    _seed_image(full_hash, "ubuntu-24.04.ext4")
 
     result = _resolve_image_fs_uuid(full_hash[:6])
     assert result is None
 
 
-def test_resolve_image_fs_type_by_short_hash(tmp_path, monkeypatch):
+def test_resolve_image_fs_type_by_short_hash(tmp_path):
     """_resolve_image_fs_type returns fs_type from metadata by short hash."""
-    import json
-
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "c" * 64
-    meta_file = tmp_path / "metadata.json"
-    meta_file.write_text(
-        json.dumps(
-            {
-                "images": {
-                    full_hash: {
-                        "filename": "ubuntu-24.04.ext4",
-                        "fs_type": "ext4",
-                    }
-                }
-            }
-        )
-    )
+    _seed_image(full_hash, "ubuntu-24.04.ext4", fs_type="ext4")
 
     result = _resolve_image_fs_type(full_hash[:6])
     assert result == "ext4"
 
 
-def test_resolve_image_fs_type_missing_returns_none(tmp_path, monkeypatch):
+def test_resolve_image_fs_type_missing_returns_none(tmp_path):
     """_resolve_image_fs_type returns None when fs_type is not in metadata."""
-    import json
-
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     full_hash = "d" * 64
-    meta_file = tmp_path / "metadata.json"
-    meta_file.write_text(
-        json.dumps(
-            {
-                "images": {
-                    full_hash: {
-                        "filename": "ubuntu-24.04.ext4",
-                    }
-                }
-            }
-        )
-    )
+    _seed_image(full_hash, "ubuntu-24.04.ext4")
 
     result = _resolve_image_fs_type(full_hash[:6])
     assert result is None
 
 
-def test_resolve_image_path_not_found(tmp_path, monkeypatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+def test_resolve_image_path_not_found(tmp_path):
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
@@ -871,8 +834,7 @@ def test_resolve_single_by_id_prefix_none_for_ambiguous(tmp_path):
     assert resolve_single_by_id_prefix("abc123", _find, tmp_path) is None
 
 
-def test_resolve_kernel_path_by_filename(tmp_path, monkeypatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+def test_resolve_kernel_path_by_filename(tmp_path):
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
     kernel = kernels_dir / "vmlinux-test"
@@ -890,36 +852,21 @@ def test_resolve_kernel_path_by_absolute(tmp_path):
     assert result == kernel
 
 
-def test_resolve_kernel_path_by_short_hash(tmp_path, monkeypatch):
-    import json
-
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+def test_resolve_kernel_path_by_short_hash(tmp_path):
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
     full_hash = "a" * 64
     kernel = kernels_dir / "vmlinux-6.12"
     kernel.write_bytes(b"kernel")
-    meta_file = tmp_path / "metadata.json"
-    meta_file.write_text(
-        json.dumps(
-            {
-                "kernels": {
-                    full_hash: {
-                        "filename": kernel.name,
-                        "version": "6.12.0",
-                        "name": kernel.name,
-                    }
-                }
-            }
-        )
-    )
+
+    _seed_kernel(full_hash, kernel.name, version="6.12.0", name=kernel.name)
+
     with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir):
         result = _resolve_kernel_path(full_hash[:6])
     assert result == kernel
 
 
-def test_resolve_kernel_path_not_found(tmp_path, monkeypatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+def test_resolve_kernel_path_not_found(tmp_path):
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
     with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir):
@@ -927,40 +874,32 @@ def test_resolve_kernel_path_not_found(tmp_path, monkeypatch):
             _resolve_kernel_path("nonexistent")
 
 
-def test_resolve_image_id_path_unique(tmp_path, monkeypatch):
-    import json
-
+def test_resolve_image_id_path_unique(tmp_path):
     from mvmctl.core.vm_lifecycle import _resolve_image_id_path
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     full_hash = "b" * 16
     img = images_dir / "ubuntu.ext4"
     img.write_bytes(b"img")
-    (tmp_path / "metadata.json").write_text(
-        json.dumps({"images": {full_hash: {"filename": img.name}}})
-    )
+
+    _seed_image(full_hash, img.name)
 
     with patch("mvmctl.core.vm_lifecycle.get_images_dir", return_value=images_dir):
         result = _resolve_image_id_path(full_hash[:6])
     assert result == img
 
 
-def test_resolve_kernel_id_path_unique(tmp_path, monkeypatch):
-    import json
-
+def test_resolve_kernel_id_path_unique(tmp_path):
     from mvmctl.core.vm_lifecycle import _resolve_kernel_id_path
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
     full_hash = "c" * 16
     kernel = kernels_dir / "vmlinux-short"
     kernel.write_bytes(b"kernel")
-    (tmp_path / "metadata.json").write_text(
-        json.dumps({"kernels": {full_hash: {"filename": kernel.name}}})
-    )
+
+    _seed_kernel(full_hash, kernel.name)
 
     with patch("mvmctl.core.vm_lifecycle.get_kernels_dir", return_value=kernels_dir):
         result = _resolve_kernel_id_path(full_hash[:6])
@@ -1016,21 +955,19 @@ def test_secure_mkdir_vm_rejects_symlink_in_parent(tmp_path):
 
 def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
     """create_vm uses _secure_mkdir_vm to prevent TOCTOU attacks."""
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-
     # Create minimal required files/directories
-    images_dir = tmp_path / "images"
+    images_dir = tmp_path / "cache" / "images"
     images_dir.mkdir(parents=True)
     img = images_dir / "ubuntu-24.04.ext4"
     img.write_bytes(b"\x00" * 64)
 
-    kernels_dir = tmp_path / "kernels"
+    kernels_dir = tmp_path / "cache" / "kernels"
     kernels_dir.mkdir(parents=True)
     kernel = kernels_dir / "vmlinux"
     kernel.write_bytes(b"\x00" * 64)
 
     # Create a symlink at the VM directory location (simulating attack)
-    vms_dir = tmp_path / "vms"
+    vms_dir = tmp_path / "cache" / "vms"
     vms_dir.mkdir()
     vm_dir = vms_dir / "attackvm"
     target_file = tmp_path / "target_file"
@@ -1132,8 +1069,8 @@ def test_create_vm_uses_cached_image_path_not_copy(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -1245,8 +1182,8 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -1357,8 +1294,8 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -1478,8 +1415,8 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -1589,8 +1526,8 @@ def test_create_vm_nocloud_net_starts_server(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -1697,10 +1634,11 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
+    mock_net.name = "default"
     mock_get_net.return_value = mock_net
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -1802,8 +1740,8 @@ def test_create_vm_nocloud_net_success_sets_port(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -1912,8 +1850,8 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -2030,8 +1968,8 @@ def test_firewall_failure_stops_server_and_raises(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -2148,8 +2086,8 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -2253,8 +2191,8 @@ def test_create_vm_starts_nocloud_server(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -2355,8 +2293,8 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = True
     mock_get_net.return_value = mock_net
@@ -2474,8 +2412,8 @@ def test_direct_injection_cleanup_on_injection_failure(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = True
     mock_get_net.return_value = mock_net
@@ -2563,10 +2501,8 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     monkeypatch,
 ):
     """create_vm without ssh_key reads default keys from registry and passes list to write_cloud_init."""
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-
-    keys_dir = tmp_path / "keys"
-    keys_dir.mkdir()
+    keys_dir = tmp_path / "cache" / "keys"
+    keys_dir.mkdir(parents=True)
     (keys_dir / "mykey.pub").write_text("ssh-rsa AAAA key1")
     (keys_dir / "otherkey.pub").write_text("ssh-ed25519 AAAC key2")
 
@@ -2590,8 +2526,8 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     mock_img_dir.__truediv__.return_value = img_ext4
     mock_get_images.return_value = mock_img_dir
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -2683,8 +2619,8 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     mock_img_dir.__truediv__.return_value = img_ext4
     mock_get_images.return_value = mock_img_dir
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -2777,8 +2713,8 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_img_dir.__truediv__.return_value = img_ext4
     mock_get_images.return_value = mock_img_dir
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
@@ -2860,8 +2796,8 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
-    mock_net.cidr = "10.20.0.0/24"
-    mock_net.gateway = "10.20.0.1"
+    mock_net.subnet = "10.20.0.0/24"
+    mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net

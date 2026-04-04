@@ -48,7 +48,7 @@ def build_vm_config_file(
     enable_pci: bool | None = None,
     firecracker_bin: str | None = None,
     rootfs_path: Path | None = None,
-    gateway: str | None = None,
+    ipv4_gateway: str | None = None,
     subnet_mask: str | None = None,
     tap_device: str | None = None,
     cloud_init: dict[str, Any] | None = None,
@@ -80,8 +80,8 @@ def build_vm_config_file(
         vm_config_kwargs["kernel_path"] = Path(kernel)
     if rootfs_path is not None:
         vm_config_kwargs["rootfs_path"] = rootfs_path
-    if gateway is not None:
-        vm_config_kwargs["gateway"] = gateway
+    if ipv4_gateway is not None:
+        vm_config_kwargs["ipv4_gateway"] = ipv4_gateway
     if subnet_mask is not None:
         vm_config_kwargs["subnet_mask"] = subnet_mask
 

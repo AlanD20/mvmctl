@@ -309,11 +309,16 @@ class TestCleanupOrphans:
         tmp_path: Path,
     ) -> None:
         """Test that cleanup_orphans removes PID files for terminated processes."""
+        from mvmctl.core.mvm_db import MVMDatabase
+
         # Set up fake cache directory structure with unique names to avoid conflicts
         cache_dir = tmp_path / "cache1"
         cache_dir.mkdir(exist_ok=True)
         vms_dir = cache_dir / "vms"
         vms_dir.mkdir(exist_ok=True)
+
+        # Initialize database for this cache dir
+        MVMDatabase(cache_dir / "mvmdb.db").migrate()
 
         # Create two VM directories
         vm1_dir = vms_dir / "vm1"
@@ -676,10 +681,15 @@ class TestCleanupOrphansInit:
         tmp_path: Path,
     ) -> None:
         """Test that cleanup_orphans is called during initialization."""
+        from mvmctl.core.mvm_db import MVMDatabase
+
         cache_dir = tmp_path / "cache5"
         cache_dir.mkdir(exist_ok=True)
         vms_dir = cache_dir / "vms"
         vms_dir.mkdir(exist_ok=True)
+
+        # Initialize database for this cache dir
+        MVMDatabase(cache_dir / "mvmdb.db").migrate()
 
         # Create a VM with a stale PID file
         vm_dir = vms_dir / "stale-vm"

@@ -10,6 +10,7 @@ from mvmctl.core.ssh import (
     connect_to_vm,
     extract_ip_from_config,
     find_ssh_keys,
+    resolve_ssh_key,
 )
 from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
 from mvmctl.models.vm import VMInstance, VMState
@@ -256,3 +257,134 @@ def test_exec_ssh_oserror(mock_execvp):
     mock_execvp.side_effect = OSError("No such file or directory")
     with pytest.raises(OSError, match="No such file"):
         exec_ssh("10.0.0.1", "root", Path("key"))
+
+
+class TestConnectToVm:
+    """Tests for connect_to_vm edge cases."""
+
+    def test_connect_with_ip_address(self, tmp_path):
+        """connect_to_vm should accept an IP address directly."""
+        key = tmp_path / "id_rsa"
+        key.write_text("fake key")
+        with patch("mvmctl.core.ssh.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = connect_to_vm("10.0.0.1", key_path=key, exec_mode=False)
+            assert result == 0
+
+    def test_connect_vm_no_ip(self, tmp_path):
+        """connect_to_vm should raise MVMError when VM has no IP."""
+        mock_mgr = MagicMock()
+        vm = VMInstance(name="noip", status=VMState.STOPPED)
+        mock_mgr.get.return_value = vm
+
+        with pytest.raises(MVMError, match="has no IP address"):
+            connect_to_vm("noip", vm_manager=mock_mgr)
+
+    def test_connect_no_keys_found(self, tmp_path):
+        """connect_to_vm should raise MVMKeyError when no keys found."""
+        mock_mgr = MagicMock()
+        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMState.RUNNING)
+        mock_mgr.get.return_value = vm
+
+        keys_dir = tmp_path / "empty_keys"
+        keys_dir.mkdir()
+
+        with patch("mvmctl.core.ssh.find_ssh_keys", return_value=[]):
+            with pytest.raises(MVMKeyError, match="No SSH keys found"):
+                connect_to_vm("testvm", vm_manager=mock_mgr)
+
+    def test_connect_key_path_not_exists(self, tmp_path):
+        """connect_to_vm should raise MVMKeyError when key file doesn't exist."""
+        mock_mgr = MagicMock()
+        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMState.RUNNING)
+        mock_mgr.get.return_value = vm
+
+        missing_key = tmp_path / "missing_key"
+        with pytest.raises(MVMKeyError, match="SSH key not found"):
+            connect_to_vm("testvm", key_path=missing_key, vm_manager=mock_mgr)
+
+    def test_connect_exec_mode(self, tmp_path):
+        """connect_to_vm should call exec_ssh in exec mode."""
+        mock_mgr = MagicMock()
+        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMState.RUNNING)
+        mock_mgr.get.return_value = vm
+
+        key = tmp_path / "id_rsa"
+        key.write_text("fake key")
+
+        with patch("mvmctl.core.ssh.exec_ssh") as mock_exec:
+            result = connect_to_vm("testvm", key_path=key, exec_mode=True, vm_manager=mock_mgr)
+            assert result == 0
+            mock_exec.assert_called_once()
+
+
+class TestResolveSshKey:
+    """Tests for resolve_ssh_key."""
+
+    def test_resolve_none_returns_first_pub_key(self, tmp_path):
+        """resolve_ssh_key(None) should return first .pub key content."""
+        keys_dir = tmp_path / "keys"
+        keys_dir.mkdir()
+        pub_key = keys_dir / "id_rsa.pub"
+        pub_key.write_text("ssh-rsa AAAA fake")
+
+        with patch("mvmctl.utils.fs.get_keys_dir", return_value=keys_dir):
+            result = resolve_ssh_key(None)
+            assert result == "ssh-rsa AAAA fake"
+
+    def test_resolve_none_no_keys_dir(self, tmp_path):
+        """resolve_ssh_key(None) should return None when keys dir doesn't exist."""
+        missing_dir = tmp_path / "missing"
+        with patch("mvmctl.utils.fs.get_keys_dir", return_value=missing_dir):
+            result = resolve_ssh_key(None)
+            assert result is None
+
+    def test_resolve_by_store_name(self, tmp_path):
+        """resolve_ssh_key should find key by name in store."""
+        keys_dir = tmp_path / "keys"
+        keys_dir.mkdir()
+        pub_key = keys_dir / "mykey.pub"
+        pub_key.write_text("ssh-ed25519 AAAA fake")
+
+        with patch("mvmctl.utils.fs.get_keys_dir", return_value=keys_dir):
+            result = resolve_ssh_key("mykey")
+            assert result == "ssh-ed25519 AAAA fake"
+
+    def test_resolve_by_file_path(self, tmp_path):
+        """resolve_ssh_key should find key by direct file path."""
+        key_file = tmp_path / "my_key.pub"
+        key_file.write_text("ssh-rsa BBBB fake")
+
+        result = resolve_ssh_key(str(key_file))
+        assert result == "ssh-rsa BBBB fake"
+
+    def test_resolve_not_found_with_available_keys(self, tmp_path):
+        """resolve_ssh_key should list available keys in error message."""
+        keys_dir = tmp_path / "keys"
+        keys_dir.mkdir()
+
+        with patch("mvmctl.utils.fs.get_keys_dir", return_value=keys_dir):
+            with patch("mvmctl.core.key_manager.list_keys") as mock_list:
+                from mvmctl.core.key_manager import KeyInfo
+
+                mock_list.return_value = [
+                    KeyInfo(
+                        name="existing",
+                        fingerprint="SHA256:abc",
+                        algorithm="ssh-ed25519",
+                        comment="test",
+                        added_at="2026-01-01",
+                    )
+                ]
+                with pytest.raises(MVMKeyError, match="Available keys: existing"):
+                    resolve_ssh_key("nonexistent")
+
+    def test_resolve_not_found_no_keys(self, tmp_path):
+        """resolve_ssh_key should suggest adding keys when none exist."""
+        keys_dir = tmp_path / "keys"
+        keys_dir.mkdir()
+
+        with patch("mvmctl.utils.fs.get_keys_dir", return_value=keys_dir):
+            with patch("mvmctl.core.key_manager.list_keys", return_value=[]):
+                with pytest.raises(MVMKeyError, match="No keys found"):
+                    resolve_ssh_key("nonexistent")

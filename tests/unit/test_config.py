@@ -35,9 +35,9 @@ def test_load_yaml_valid_file(tmp_path: Path) -> None:
 
 def test_load_config_defaults(tmp_path: Path) -> None:
     from mvmctl.constants import (
-        DEFAULT_NETWORK_CIDR,
-        DEFAULT_NETWORK_GATEWAY,
+        DEFAULT_NETWORK_IPV4_GATEWAY,
         DEFAULT_NETWORK_NAME,
+        DEFAULT_NETWORK_SUBNET,
         DEFAULT_VM_DISK_SIZE,
         DEFAULT_VM_MEM_MIB,
         DEFAULT_VM_NETWORK_INTERFACE,
@@ -59,8 +59,8 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.enable_pci is False
 
     assert config.network.defaults.name == DEFAULT_NETWORK_NAME
-    assert config.network.defaults.cidr == DEFAULT_NETWORK_CIDR
-    assert config.network.defaults.gateway == DEFAULT_NETWORK_GATEWAY
+    assert config.network.defaults.subnet == DEFAULT_NETWORK_SUBNET
+    assert config.network.defaults.ipv4_gateway == DEFAULT_NETWORK_IPV4_GATEWAY
 
     assert config.paths.assets_dir != ""
 
@@ -72,8 +72,8 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
         "network": {
             "defaults": {
                 "name": "custom",
-                "cidr": "172.16.0.0/16",
-                "gateway": "172.16.0.1",
+                "subnet": "172.16.0.0/16",
+                "ipv4_gateway": "172.16.0.1",
             },
         },
         "paths": {"assets_dir": "/tmp/assets"},
@@ -86,8 +86,8 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
     assert config.vm_defaults.vcpu_count == 8
     assert config.vm_defaults.mem_size_mib == 4096
     assert config.network.defaults.name == "custom"
-    assert config.network.defaults.cidr == "172.16.0.0/16"
-    assert config.network.defaults.gateway == "172.16.0.1"
+    assert config.network.defaults.subnet == "172.16.0.0/16"
+    assert config.network.defaults.ipv4_gateway == "172.16.0.1"
     assert config.paths.assets_dir == "/tmp/assets"
 
 
@@ -125,7 +125,7 @@ def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
 def test_validate_config_invalid_cidr() -> None:
     config = MVMConfig(
         network=NetworkTopologyConfig(
-            defaults=NetworkDefaultsConfig(cidr="not-a-cidr"),
+            defaults=NetworkDefaultsConfig(subnet="not-a-cidr"),
         ),
     )
     errors = validate_config(config)
@@ -238,7 +238,7 @@ def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
     """Nested type mismatches should be handled gracefully."""
     data = {
         "network": {
-            "defaults": {"cidr": 99999}  # Should be string
+            "defaults": {"subnet": 99999}  # Should be string
         }
     }
     (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
@@ -246,7 +246,7 @@ def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
     # Should not crash
     config = load_config(tmp_path)
     # The invalid value may remain or use default
-    assert config.network.defaults.cidr is not None
+    assert config.network.defaults.subnet is not None
 
 
 def test_validate_config_empty_binary_path() -> None:

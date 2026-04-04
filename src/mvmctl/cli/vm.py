@@ -30,7 +30,6 @@ from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
     DEFAULT_CLOUD_INIT_SEED_PATH,
-    DEFAULT_FIRECRACKER_BIN,
     DEFAULT_NETWORK_NAME,
     DEFAULT_SNAPSHOT_RESUME,
 )
@@ -112,21 +111,14 @@ def _get_vm_defaults() -> "VMDefaultsConfig":
 
 
 def _resolve_active_firecracker_bin() -> str:
+    from mvmctl.api.assets import get_binary_path
+    from mvmctl.exceptions import AssetNotFoundError
+
     try:
-        from mvmctl.api.config import get_firecracker_config
-
-        stored = get_firecracker_config().get("default_binary_path")
-        if stored is not None and Path(str(stored)).exists():
-            return str(stored)
-        from mvmctl.api.assets import list_local_versions as _list_local_versions
-
-        local = _list_local_versions()
-        active = next((b for b in local if b.is_active), None)
-        if active:
-            return str(active.firecracker_path)
-    except Exception:
-        pass
-    return DEFAULT_FIRECRACKER_BIN
+        return get_binary_path("firecracker")
+    except AssetNotFoundError as e:
+        print_error(str(e))
+        raise typer.Exit(1) from e
 
 
 def _resolve_default_network() -> str:
@@ -443,7 +435,7 @@ def create(
             enable_pci=effective_pci,
             firecracker_bin=effective_bin,
             rootfs_path=resolved_image_path,
-            gateway=None,
+            ipv4_gateway=None,
             subnet_mask=None,
             tap_device=None,
             cloud_init=cloud_init_config,

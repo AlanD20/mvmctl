@@ -4,18 +4,16 @@ System tests are black-box integration tests that invoke mvm via subprocess.
 NO imports from mvmctl.* — tests must work against the actual CLI.
 """
 
+import json
 import os
 import re
-import json
-import uuid
-import time
-import shutil
 import subprocess
+import time
+import uuid
 from pathlib import Path
-from typing import Optional, Generator
+from typing import Generator, Optional
 
 import pytest
-
 
 # ============================================================================
 # Session-scoped fixtures (expensive setup, run once per session)

@@ -72,7 +72,7 @@ class VMConfig:
     rootfs_path: Path = field(default_factory=lambda: Path(DEFAULT_VM_ROOTFS_FILENAME))
     guest_ip: str | None = None
     guest_mac: str | None = None
-    gateway: str | None = None
+    ipv4_gateway: str | None = None
     subnet_mask: str = DEFAULT_VM_SUBNET_MASK
     tap_device: str | None = None
     boot_args: str | None = None
@@ -111,7 +111,7 @@ class VMConfig:
             "rootfs_path": str(self.rootfs_path),
             "guest_ip": self.guest_ip,
             "guest_mac": self.guest_mac,
-            "gateway": self.gateway,
+            "ipv4_gateway": self.ipv4_gateway,
             "subnet_mask": self.subnet_mask,
             "tap_device": self.tap_device,
             "boot_args": self.boot_args,
@@ -173,7 +173,7 @@ class VMConfig:
             rootfs_path=Path(data.get("rootfs_path", DEFAULT_VM_ROOTFS_FILENAME)),
             guest_ip=data.get("guest_ip"),
             guest_mac=data.get("guest_mac"),
-            gateway=data.get("gateway"),
+            ipv4_gateway=data.get("ipv4_gateway"),
             subnet_mask=data.get("subnet_mask", DEFAULT_VM_SUBNET_MASK),
             tap_device=data.get("tap_device"),
             boot_args=data.get("boot_args"),

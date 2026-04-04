@@ -29,6 +29,28 @@ STARTUP_ALLOWLIST: dict[str, str] = {}
 MAX_STARTUP_MS = 200
 
 
+def _build_startup_env(src_path: Path) -> dict[str, str]:
+    env = dict(os.environ)
+
+    for key in list(env):
+        if key.startswith("COVERAGE"):
+            env.pop(key, None)
+        elif key.startswith("COV_CORE_"):
+            env.pop(key, None)
+        elif key.startswith("PYTEST_"):
+            env.pop(key, None)
+
+    env.update(
+        {
+            "PYTHONPATH": str(src_path),
+            "MVM_LOG_LEVEL": "WARNING",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+    )
+
+    return env
+
+
 def _measure_startup_time(module_path: str | None = None) -> float:
     """Measure cold-start time using subprocess and time.perf_counter."""
     project_root = Path(__file__).parent.parent.parent
@@ -56,12 +78,7 @@ end = time.perf_counter()
 print(f"{{(end - start) * 1000:.2f}}")
 """
 
-    env = {
-        **dict(os.environ),
-        "PYTHONPATH": str(src_path),
-        "MVM_LOG_LEVEL": "WARNING",
-        "PYTHONDONTWRITEBYTECODE": "1",
-    }
+    env = _build_startup_env(src_path)
 
     result = subprocess.run(
         [sys.executable, "-c", wrapper_code],

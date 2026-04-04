@@ -1,24 +1,23 @@
-"""Host configuration state management."""
+"""Host configuration state management using SQLite."""
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from mvmctl.constants import (
     CONST_FILE_PERMS_CONFIG,
-    CONST_FILE_PERMS_STATE_FILE,
     DEFAULT_SUDOERS_DIR,
     DEFAULT_SYSCTL_CONF_DIR,
     IPTABLES_RULES_V4,
     PROJECT_NAME,
     SUDOERS_DROP_IN_PATH,
 )
+from mvmctl.core.mvm_db import MVMDatabase
+from mvmctl.db.models import HostStateChange as DBHostStateChange
 from mvmctl.exceptions import HostError
 
 logger = logging.getLogger(__name__)
@@ -31,7 +30,9 @@ RESTORABLE_FILE_PATHS: frozenset[Path] = frozenset({Path(SUDOERS_DROP_IN_PATH), 
 
 
 @dataclass
-class HostChange:
+class HostStateChange:
+    """Represents a single host configuration change."""
+
     setting: str
     original_value: str | None
     applied_value: str
@@ -40,8 +41,10 @@ class HostChange:
 
 @dataclass
 class HostState:
+    """Represents the host state snapshot for backward compatibility."""
+
     init_timestamp: str
-    changes: list[HostChange]
+    changes: list[HostStateChange]
 
 
 def _state_dir(cache_dir: Path) -> Path:
@@ -50,89 +53,118 @@ def _state_dir(cache_dir: Path) -> Path:
 
 
 def _state_file(cache_dir: Path) -> Path:
-    """Return the path to the JSON host state snapshot file."""
+    """Return the path to the JSON host state snapshot file (legacy, now unused)."""
     return _state_dir(cache_dir) / "state.json"
 
 
 def get_host_state(cache_dir: Path) -> HostState | None:
-    """Load the saved host state snapshot, or return ``None`` if none exists.
+    """Load the saved host state changes, or return None if none exist.
 
     Args:
-        cache_dir: Root cache directory containing the host state snapshot.
+        cache_dir: Root cache directory (unused, kept for API compatibility).
 
     Returns:
-        The deserialized ``HostState``, or ``None`` if no snapshot is present.
-
-    Raises:
-        HostError: If the state file exists but cannot be parsed.
+        HostState object with init_timestamp and changes, or None if no state is saved.
     """
-    path = _state_file(cache_dir)
-    if not path.exists():
+    db = MVMDatabase()
+    db.initialize_host_state()
+
+    host_state_row = db.get_host_state()
+    if host_state_row is None:
         return None
-    try:
-        data = json.loads(path.read_text())
-        return HostState(
-            init_timestamp=data["init_timestamp"],
-            changes=[HostChange(**c) for c in data["changes"]],
+
+    # Get unreverted changes
+    changes = db.list_host_changes(include_reverted=False)
+    if not changes:
+        return None
+
+    host_changes = [
+        HostStateChange(
+            setting=change.setting,
+            original_value=change.original_value,
+            applied_value=change.applied_value,
+            mechanism=change.mechanism,
         )
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        raise HostError(f"Corrupt state file {path}: {e}") from e
+        for change in changes
+    ]
+
+    # Use initialized_at as init_timestamp if available
+    init_timestamp = host_state_row.initialized_at or datetime.now(timezone.utc).isoformat()
+
+    return HostState(init_timestamp=init_timestamp, changes=host_changes)
 
 
-def _save_state(cache_dir: Path, changes: list[HostChange]) -> None:
-    """Persist host changes to the JSON state snapshot file.
+def _generate_session_id() -> str:
+    """Generate a unique session ID for host init."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _save_state(cache_dir: Path, changes: list[HostStateChange]) -> None:
+    """Persist host changes to the SQLite database.
 
     Args:
-        cache_dir: Root cache directory where the snapshot will be written.
+        cache_dir: Root cache directory (unused, kept for API compatibility).
         changes: List of host changes to record.
     """
     from mvmctl.utils.fs import chown_to_real_user
 
-    state_dir = _state_dir(cache_dir)
-    state_dir.mkdir(parents=True, exist_ok=True)
-    state = HostState(
-        init_timestamp=datetime.now(timezone.utc).isoformat(),
-        changes=changes,
-    )
-    data = {
-        "init_timestamp": state.init_timestamp,
-        "changes": [asdict(c) for c in state.changes],
-    }
-    sf = _state_file(cache_dir)
-    sf.write_text(json.dumps(data) + "\n")
-    os.chmod(sf, CONST_FILE_PERMS_CONFIG)
+    db = MVMDatabase()
+    db.initialize_host_state()
+
+    session_id = _generate_session_id()
+    init_timestamp = datetime.now(timezone.utc).isoformat()
+
+    for idx, change in enumerate(changes):
+        db_change = DBHostStateChange(
+            id=None,
+            session_id=session_id,
+            init_timestamp=init_timestamp,
+            setting=change.setting,
+            mechanism=change.mechanism,
+            original_value=change.original_value,
+            applied_value=change.applied_value,
+            reverted=False,
+            reverted_at=None,
+            revert_mechanism=None,
+            change_order=idx,
+            created_at=init_timestamp,
+        )
+        db.add_host_change(db_change)
+
     # Chown the entire cache root so the real user can write to all subdirs
-    # (bin/, kernels/, images/, …) after a sudo-elevated init run.
     chown_to_real_user(cache_dir)
 
 
-def restore_host(cache_dir: Path) -> list[HostChange]:
-    """Revert host changes recorded in the state snapshot.
+def restore_host(cache_dir: Path) -> list[HostStateChange]:
+    """Revert host changes recorded in the database.
 
     Processes changes in reverse order, restoring sysctl values and removing
-    files that were created during ``init_host``. The state snapshot file is
-    deleted after a successful restore.
+    files that were created during host init.
 
     Args:
-        cache_dir: Root cache directory containing the host state snapshot.
+        cache_dir: Root cache directory (unused, kept for API compatibility).
 
     Returns:
-        List of ``HostChange`` records describing each reverted change.
+        List of HostChange records describing each reverted change.
 
     Raises:
         HostError: If no saved state exists, or if a revert operation fails.
     """
-    state = get_host_state(cache_dir)
-    if not state:
+    db = MVMDatabase()
+    db.initialize_host_state()
+
+    # Get unreverted changes
+    changes = db.list_host_changes(include_reverted=False)
+    if not changes:
         raise HostError("No saved host state to restore")
 
-    reverted: list[HostChange] = []
-    for change in reversed(state.changes):
+    reverted: list[HostStateChange] = []
+    reverted_at = datetime.now(timezone.utc).isoformat()
+
+    for change in reversed(changes):
         if change.mechanism == "sysctl" and change.original_value is not None:
             if change.setting not in RESTORABLE_SYSCTL_KEYS:
-                logger.warning(
-                    "Skipping disallowed sysctl key '%s' from state file", change.setting
-                )
+                logger.warning("Skipping disallowed sysctl key '%s' from state", change.setting)
                 continue
             try:
                 subprocess.run(
@@ -142,7 +174,7 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
                     check=True,
                 )
                 reverted.append(
-                    HostChange(
+                    HostStateChange(
                         setting=change.setting,
                         original_value=change.applied_value,
                         applied_value=change.original_value,
@@ -159,13 +191,13 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
             try:
                 if change.original_value is not None:
                     rules_path.write_text(change.original_value)
-                    rules_path.chmod(CONST_FILE_PERMS_STATE_FILE)
+                    rules_path.chmod(CONST_FILE_PERMS_CONFIG)
                     logger.info("Restored original iptables rules to %s", rules_path)
                 elif rules_path.exists():
                     rules_path.unlink()
                     logger.info("Removed %s (did not exist before host init)", rules_path)
                 reverted.append(
-                    HostChange(
+                    HostStateChange(
                         setting=change.setting,
                         original_value=change.applied_value,
                         applied_value=change.original_value or "(removed)",
@@ -178,7 +210,7 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
         elif change.mechanism == "file_create":
             target = Path(change.applied_value).resolve()
             if not any(target == allowed.resolve() for allowed in RESTORABLE_FILE_PATHS):
-                logger.warning("Skipping disallowed file path '%s' from state file", target)
+                logger.warning("Skipping disallowed file path '%s' from state", target)
                 continue
             if target.exists():
                 try:
@@ -193,14 +225,14 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
                             )
                             if result.returncode != 0:
                                 raise HostError(
-                                    f"Sudoers content from state file failed visudo validation: "
+                                    f"Sudoers content from state failed visudo validation: "
                                     f"{result.stderr}"
                                 )
                         target.write_text(change.original_value)
                     else:
                         target.unlink()
                     reverted.append(
-                        HostChange(
+                        HostStateChange(
                             setting=change.setting,
                             original_value=change.applied_value,
                             applied_value=change.original_value or "(removed)",
@@ -210,8 +242,8 @@ def restore_host(cache_dir: Path) -> list[HostChange]:
                 except OSError as e:
                     raise HostError(f"Failed to revert file {target}: {e}") from e
 
-    state_file = _state_file(cache_dir)
-    if state_file.exists():
-        state_file.unlink()
+        # Mark change as reverted in database
+        if change.id is not None:
+            db.mark_change_reverted(change.id, reverted_at)
 
     return reverted

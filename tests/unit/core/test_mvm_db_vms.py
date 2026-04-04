@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.db.models import Network, VMState
+from mvmctl.db.models import Binary, Network, VMState
 
 
 def make_vm(name: str = "testvm", status: str = "STOPPED") -> VMState:
@@ -821,21 +821,62 @@ class TestFindVmByIp:
 
 class TestSetDefaultBinary:
     def test_inserts_new_default(self, db: MVMDatabase) -> None:
+        binary = Binary(
+            id="a" * 64,
+            name="firecracker",
+            version="1.15.0",
+            path="/cache/bin/firecracker",
+        )
+        db.upsert_binary(binary)
         db.set_default_binary("firecracker", "1.15.0", "/cache/bin/firecracker")
-        result = db.get_binary_default("firecracker")
+        result = db.get_default_binary("firecracker")
         assert result is not None
         assert result.version == "1.15.0"
         assert result.path == "/cache/bin/firecracker"
+        assert bool(result.is_default) is True
 
     def test_upserts_existing_default(self, db: MVMDatabase) -> None:
+        binary1 = Binary(
+            id="a" * 64,
+            name="firecracker",
+            version="1.15.0",
+            path="/cache/bin/fc-1.15",
+        )
+        binary2 = Binary(
+            id="b" * 64,
+            name="firecracker",
+            version="1.16.0",
+            path="/cache/bin/fc-1.16",
+        )
+        db.upsert_binary(binary1)
+        db.upsert_binary(binary2)
         db.set_default_binary("firecracker", "1.15.0", "/cache/bin/fc-1.15")
         db.set_default_binary("firecracker", "1.16.0", "/cache/bin/fc-1.16")
-        result = db.get_binary_default("firecracker")
+        result = db.get_default_binary("firecracker")
         assert result is not None
         assert result.version == "1.16.0"
+        assert bool(result.is_default) is True
 
     def test_different_names_are_independent(self, db: MVMDatabase) -> None:
+        fc_binary = Binary(
+            id="a" * 64,
+            name="firecracker",
+            version="1.15.0",
+            path="/bin/fc",
+        )
+        jailer_binary = Binary(
+            id="b" * 64,
+            name="jailer",
+            version="1.15.0",
+            path="/bin/jailer",
+        )
+        db.upsert_binary(fc_binary)
+        db.upsert_binary(jailer_binary)
         db.set_default_binary("firecracker", "1.15.0", "/bin/fc")
         db.set_default_binary("jailer", "1.15.0", "/bin/jailer")
-        assert db.get_binary_default("firecracker") is not None
-        assert db.get_binary_default("jailer") is not None
+        fc_result = db.get_default_binary("firecracker")
+        jailer_result = db.get_default_binary("jailer")
+        assert fc_result is not None
+        assert jailer_result is not None
+        assert fc_result.name == "firecracker"
+        assert jailer_result.name == "jailer"

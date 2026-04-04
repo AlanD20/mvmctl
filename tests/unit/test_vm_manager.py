@@ -142,16 +142,11 @@ def test_vm_manager_get_by_full_id_no_match(vm_manager: VMManager):
 
 def test_vm_manager_get_by_full_id_collision_resistance(vm_manager: VMManager):
     """Test that get_by_full_id handles VMs with same prefix correctly."""
-    # Create two VMs that might have same prefix (forced for test)
     vm1 = VMInstance(name="vm1", pid=1, status=VMState.RUNNING, id="abc123" + "a" * 10)
     vm2 = VMInstance(name="vm2", pid=2, status=VMState.RUNNING, id="abc123" + "b" * 10)
 
-    # Register directly to state to bypass ID generation
-    with vm_manager._locked():
-        state = vm_manager._load_state()
-        state["vms"][vm1.id] = vm1.to_dict()
-        state["vms"][vm2.id] = vm2.to_dict()
-        vm_manager._save_state(state)
+    vm_manager.register(vm1)
+    vm_manager.register(vm2)
 
     # get_by_id_prefix should return None (ambiguous)
     prefix_result = vm_manager.get_by_id_prefix("abc123")
@@ -167,13 +162,12 @@ def test_vm_manager_get_by_full_id_collision_resistance(vm_manager: VMManager):
     assert result2.name == "vm2"
 
 
-def test_vm_manager_get_by_name_multiple(vm_manager: VMManager):
-    vm1 = VMInstance(name="dup", pid=1, status=VMState.RUNNING)
-    vm2 = VMInstance(name="dup", pid=2, status=VMState.RUNNING)
-    vm_manager.register(vm1)
-    vm_manager.register(vm2)
+def test_vm_manager_get_by_name_returns_single(vm_manager: VMManager):
+    vm = VMInstance(name="dup", pid=1, status=VMState.RUNNING)
+    vm_manager.register(vm)
     results = vm_manager.get_by_name("dup")
-    assert len(results) == 2
+    assert len(results) == 1
+    assert results[0].name == "dup"
 
 
 def test_vm_manager_update_status_success(vm_manager: VMManager):
@@ -185,36 +179,24 @@ def test_vm_manager_update_status_success(vm_manager: VMManager):
     assert updated.status == VMState.STOPPED
 
 
-def test_vm_manager_migration(tmp_path: Path):
-    import json
+def test_vm_manager_persists_to_sqlite(tmp_path: Path):
+    """VMManager persists VMs to SQLite database."""
     from datetime import datetime, timezone
 
-    vms_dir = tmp_path / "vms"
-    vms_dir.mkdir()
-    state_file = vms_dir / "state.json"
-    state_file.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "vms": {
-                    "mylegacyvm": {
-                        "pid": 42,
-                        "api_socket_path": None,
-                        "ipv4": "10.0.0.2",
-                        "mac": "02:FC:00:00:00:01",
-                        "network_name": "default",
-                        "tap_device": "mvm-tap0",
-                        "created_at": datetime.now(tz=timezone.utc).isoformat(),
-                        "status": "running",
-                    }
-                },
-            }
-        )
+    mgr = VMManager()
+    vm = VMInstance(
+        name="testvm",
+        pid=42,
+        ipv4="10.0.0.2",
+        status=VMState.RUNNING,
+        created_at=datetime.now(tz=timezone.utc),
     )
-    mgr = VMManager(vms_dir)
+    mgr.register(vm)
+
     vms = mgr.list_all()
     assert len(vms) == 1
-    assert vms[0].name == "mylegacyvm"
+    assert vms[0].name == "testvm"
+    assert vms[0].pid == 42
     assert len(vms[0].id) == 16
 
 
@@ -369,3 +351,42 @@ def test_get_exit_code_from_log_no_match(mocker, sample_vm, tmp_path):
 
     # Verify returns None
     assert result is None
+
+
+def test_get_exit_code_from_log_file_not_exists(tmp_path):
+    """Verify None when log file does not exist."""
+    from mvmctl.core.vm_manager import _get_exit_code_from_log
+
+    log_file = tmp_path / "nonexistent.log"
+    result = _get_exit_code_from_log(log_file)
+    assert result is None
+
+
+def test_is_hex_string_invalid_chars():
+    """_is_hex_string should return False for non-hex characters."""
+    from mvmctl.core.vm_manager import _is_hex_string
+
+    assert _is_hex_string("gggggggggggggggg") is False
+    assert _is_hex_string("xyz123456789abcd") is False
+
+
+def test_is_hex_string_wrong_length():
+    """_is_hex_string should return False for wrong length."""
+    from mvmctl.core.vm_manager import _is_hex_string
+
+    assert _is_hex_string("abc", length=16) is False
+    assert _is_hex_string("a" * 32, length=16) is False
+
+
+def test_is_hex_string_valid():
+    """_is_hex_string should return True for valid hex string."""
+    from mvmctl.core.vm_manager import _is_hex_string
+
+    assert _is_hex_string("0123456789abcdef") is True
+    assert _is_hex_string("a" * 16) is True
+
+
+def test_get_by_name_returns_empty_list(vm_manager: VMManager):
+    """get_by_name should return empty list when no VM matches."""
+    results = vm_manager.get_by_name("nonexistent")
+    assert results == []

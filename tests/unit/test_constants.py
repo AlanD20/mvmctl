@@ -5,9 +5,9 @@ from unittest.mock import patch
 from mvmctl.constants import (
     BRIDGE_NAME,
     CLI_NAME,
-    DEFAULT_NETWORK_CIDR,
-    DEFAULT_NETWORK_GATEWAY,
+    DEFAULT_NETWORK_IPV4_GATEWAY,
     DEFAULT_NETWORK_NAME,
+    DEFAULT_NETWORK_SUBNET,
     FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
     FIRECRACKER_SIGTERM_WAIT_S,
     PRIVILEGED_BINARIES,
@@ -91,12 +91,12 @@ def test_default_network_name():
     assert DEFAULT_NETWORK_NAME == "default"
 
 
-def test_default_network_cidr():
-    assert DEFAULT_NETWORK_CIDR == "172.35.0.0/24"
+def test_default_network_subnet():
+    assert DEFAULT_NETWORK_SUBNET == "172.35.0.0/24"
 
 
 def test_default_network_gateway():
-    assert DEFAULT_NETWORK_GATEWAY == "172.35.0.1"
+    assert DEFAULT_NETWORK_IPV4_GATEWAY == "172.35.0.1"
 
 
 def test_firecracker_graceful_shutdown_timeout():

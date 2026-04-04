@@ -41,8 +41,20 @@ def _format_path(path: tuple[str, ...]) -> str:
 
 @functools.lru_cache(maxsize=1)
 def _load_user_config_json() -> dict[str, Any]:
-    """Lazy load user config from config.json."""
-    config_path = Path.home() / ".config" / _resolve_cli_name() / "config.json"
+    """Lazy load user config from config.json.
+
+    Respects MVM_CONFIG_DIR environment variable so that test isolation
+    fixtures (which set MVM_CONFIG_DIR via monkeypatch) are honored.
+    The function is intentionally NOT decorated with @functools.lru_cache
+    so that monkeypatch.setenv() changes take effect between tests.
+    """
+    import os
+
+    dir_override = os.environ.get(f"{_resolve_cli_name().upper()}_CONFIG_DIR")
+    if dir_override:
+        config_path = Path(dir_override) / "config.json"
+    else:
+        config_path = Path.home() / ".config" / _resolve_cli_name() / "config.json"
     if config_path.exists():
         try:
             with open(config_path, encoding="utf-8") as f:
@@ -218,13 +230,13 @@ def _default_bridge_name(network_name: str) -> str:
     return f"{CLI_NAME}-{network_name[:10]}"
 
 
-def _gateway_cidr(gateway: str, cidr: str) -> str:
-    """Build gateway CIDR from gateway IP + network prefix length."""
+def _ipv4_gateway_subnet(ipv4_gateway: str, subnet: str) -> str:
+    """Build ipv4_gateway SUBNET from ipv4_gateway IP + network prefix length."""
     try:
-        prefix = ipaddress.ip_network(cidr, strict=False).prefixlen
+        prefix = ipaddress.ip_network(subnet, strict=False).prefixlen
     except ValueError as exc:
-        raise RuntimeError(f"Invalid network.defaults.cidr value: {cidr}") from exc
-    return f"{gateway}/{prefix}"
+        raise RuntimeError(f"Invalid network.defaults.subnet value: {subnet}") from exc
+    return f"{ipv4_gateway}/{prefix}"
 
 
 # ---------------------------------------------------------------------------
@@ -392,16 +404,16 @@ DEFAULT_FIRECRACKER_BINARY_PATH: Final[str] = _resolve_with_config_override(
 )
 
 # Network bridge defaults
-DEFAULT_NETWORK_CIDR: Final[str] = _resolve_with_config_override(
-    "DEFAULT_NETWORK_CIDR", _require_str(("network", "defaults", "cidr"))
+DEFAULT_NETWORK_SUBNET: Final[str] = _resolve_with_config_override(
+    "DEFAULT_NETWORK_SUBNET", _require_str(("network", "defaults", "subnet"))
 )
-DEFAULT_NETWORK_GATEWAY: Final[str] = _resolve_with_config_override(
-    "DEFAULT_NETWORK_GATEWAY", _require_str(("network", "defaults", "gateway"))
+DEFAULT_NETWORK_IPV4_GATEWAY: Final[str] = _resolve_with_config_override(
+    "DEFAULT_NETWORK_GATEWAY", _require_str(("network", "defaults", "ipv4_gateway"))
 )
 DEFAULT_BRIDGE_NAME: Final[str] = _default_bridge_name(DEFAULT_NETWORK_NAME)
-DEFAULT_NETWORK_BRIDGE_IP: Final[str] = _gateway_cidr(
-    gateway=DEFAULT_NETWORK_GATEWAY,
-    cidr=DEFAULT_NETWORK_CIDR,
+DEFAULT_NETWORK_BRIDGE_IP: Final[str] = _ipv4_gateway_subnet(
+    ipv4_gateway=DEFAULT_NETWORK_IPV4_GATEWAY,
+    subnet=DEFAULT_NETWORK_SUBNET,
 )
 
 # Image defaults

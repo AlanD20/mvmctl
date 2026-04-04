@@ -422,7 +422,7 @@ def test_validate_bridge_name_rejects_injection_attempts(name: str, reason: str)
 
 
 @pytest.mark.parametrize(
-    "cidr",
+    "subnet",
     [
         "192.168.1.0/24",
         "10.0.0.0/8",
@@ -432,15 +432,15 @@ def test_validate_bridge_name_rejects_injection_attempts(name: str, reason: str)
         "255.255.255.255/32",
     ],
 )
-def test_validate_cidr_accepts_valid(cidr: str):
-    """Test valid CIDR notations are accepted."""
-    from mvmctl.utils.validation import validate_cidr
+def test_validate_subnet_accepts_valid(subnet: str):
+    """Test valid subnet notations are accepted."""
+    from mvmctl.utils.validation import validate_subnet
 
-    assert validate_cidr(cidr) == cidr
+    assert validate_subnet(subnet) == subnet
 
 
 @pytest.mark.parametrize(
-    "cidr,reason",
+    "subnet,reason",
     [
         ("", "empty string"),
         ("192.168.1.0/24; rm -rf /", "semicolon injection"),
@@ -456,20 +456,20 @@ def test_validate_cidr_accepts_valid(cidr: str):
         ("192.168.1.0/24/extra", "extra parts"),
     ],
 )
-def test_validate_cidr_rejects_injection_attempts(cidr: str, reason: str):
-    """Test CIDR validation rejects injection attempts."""
-    from mvmctl.utils.validation import validate_cidr
+def test_validate_subnet_rejects_injection_attempts(subnet: str, reason: str):
+    """Test subnet validation rejects injection attempts."""
+    from mvmctl.utils.validation import validate_subnet
 
-    with pytest.raises(MVMError, match="Invalid.*CIDR"):
-        validate_cidr(cidr)
+    with pytest.raises(MVMError, match="Invalid.*SUBNET"):
+        validate_subnet(subnet)
 
 
-def test_validate_cidr_includes_field_name_in_error():
+def test_validate_subnet_includes_field_name_in_error():
     """Test field name is included in error message."""
-    from mvmctl.utils.validation import validate_cidr
+    from mvmctl.utils.validation import validate_subnet
 
     with pytest.raises(MVMError, match="Invalid subnet"):
-        validate_cidr("192.168.1.0/24;evil", "subnet")
+        validate_subnet("192.168.1.0/24;evil", "subnet")
 
 
 # ---------------------------------------------------------------------------
@@ -528,8 +528,8 @@ def test_validate_ipv4_address_includes_field_name_in_error():
     """Test field name is included in error message."""
     from mvmctl.utils.validation import validate_ipv4_address
 
-    with pytest.raises(MVMError, match="Invalid gateway"):
-        validate_ipv4_address("192.168.1.1;evil", "gateway")
+    with pytest.raises(MVMError, match="Invalid ipv4 gateway"):
+        validate_ipv4_address("192.168.1.1;evil", "ipv4 gateway")
 
 
 # ---------------------------------------------------------------------------

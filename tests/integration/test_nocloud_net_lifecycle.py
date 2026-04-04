@@ -109,8 +109,8 @@ class TestFullNocloudNetLifecycle:
 
         mock_get_network.return_value = NetworkConfig(
             name="default",
-            cidr="10.20.0.0/24",
-            gateway="10.20.0.1",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
             bridge="mvm-br0",
             nat_enabled=True,
             created_at="2024-01-01T00:00:00+00:00",
@@ -121,6 +121,7 @@ class TestFullNocloudNetLifecycle:
         # Mock nocloud-net server manager
         mock_mgr_instance = MagicMock()
         mock_mgr_instance.start_server.return_value = ("http://10.20.0.1:8000/", 8000)
+        mock_mgr_instance.get_server_pid.return_value = 45678
         mock_nocloud_mgr.return_value = mock_mgr_instance
 
         # Mock subprocess for firecracker
@@ -224,8 +225,8 @@ class TestFullNocloudNetLifecycle:
 
         mock_get_network.return_value = NetworkConfig(
             name="default",
-            cidr="10.20.0.0/24",
-            gateway="10.20.0.1",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
             bridge="mvm-br0",
             nat_enabled=True,
             created_at="2024-01-01T00:00:00+00:00",
@@ -236,6 +237,7 @@ class TestFullNocloudNetLifecycle:
         # Mock nocloud-net server manager
         mock_mgr_instance = MagicMock()
         mock_mgr_instance.start_server.return_value = ("http://10.20.0.1:8000/", 8000)
+        mock_mgr_instance.get_server_pid.return_value = 45678
         mock_nocloud_mgr.return_value = mock_mgr_instance
 
         # Mock subprocess for firecracker
@@ -320,9 +322,11 @@ class TestMultipleVMsDifferentPorts:
         # Create two separate mock managers to return different ports
         mock_mgr1 = MagicMock()
         mock_mgr1.start_server.return_value = ("http://10.20.0.1:8001/", 8001)
+        mock_mgr1.get_server_pid.return_value = 45681
 
         mock_mgr2 = MagicMock()
         mock_mgr2.start_server.return_value = ("http://10.20.0.1:8002/", 8002)
+        mock_mgr2.get_server_pid.return_value = 45682
 
         # Make the nocloud_mgr return different instances
         mock_nocloud_mgr.side_effect = [mock_mgr1, mock_mgr2]
@@ -360,8 +364,8 @@ class TestMultipleVMsDifferentPorts:
 
                                                 mock_get_net.return_value = NetworkConfig(
                                                     name="default",
-                                                    cidr="10.20.0.0/24",
-                                                    gateway="10.20.0.1",
+                                                    subnet="10.20.0.0/24",
+                                                    ipv4_gateway="10.20.0.1",
                                                     bridge="mvm-br0",
                                                     nat_enabled=True,
                                                     created_at="2024-01-01T00:00:00+00:00",
@@ -483,8 +487,8 @@ class TestNocloudNetFailureCleanup:
 
         mock_get_network.return_value = NetworkConfig(
             name="default",
-            cidr="10.20.0.0/24",
-            gateway="10.20.0.1",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
             bridge="mvm-br0",
             nat_enabled=True,
             created_at="2024-01-01T00:00:00+00:00",
@@ -494,6 +498,7 @@ class TestNocloudNetFailureCleanup:
         # Mock nocloud-net server that starts successfully
         mock_mgr_instance = MagicMock()
         mock_mgr_instance.start_server.return_value = ("http://10.20.0.1:8000/", 8000)
+        mock_mgr_instance.get_server_pid.return_value = 45678
         mock_nocloud_mgr.return_value = mock_mgr_instance
 
         # Make firewall rule addition fail
@@ -586,8 +591,8 @@ class TestNocloudNetFailureCleanup:
 
         mock_get_network.return_value = NetworkConfig(
             name="default",
-            cidr="10.20.0.0/24",
-            gateway="10.20.0.1",
+            subnet="10.20.0.0/24",
+            ipv4_gateway="10.20.0.1",
             bridge="mvm-br0",
             nat_enabled=True,
             created_at="2024-01-01T00:00:00+00:00",
@@ -598,6 +603,7 @@ class TestNocloudNetFailureCleanup:
         # Mock nocloud-net server
         mock_mgr_instance = MagicMock()
         mock_mgr_instance.start_server.return_value = ("http://10.20.0.1:8000/", 8000)
+        mock_mgr_instance.get_server_pid.return_value = 45678
         mock_nocloud_mgr.return_value = mock_mgr_instance
 
         # Make firecracker Popen raise FileNotFoundError
@@ -697,8 +703,8 @@ class TestVMWithoutNocloudNet:
 
                                                 mock_get_net.return_value = NetworkConfig(
                                                     name="default",
-                                                    cidr="10.20.0.0/24",
-                                                    gateway="10.20.0.1",
+                                                    subnet="10.20.0.0/24",
+                                                    ipv4_gateway="10.20.0.1",
                                                     bridge="mvm-br0",
                                                     nat_enabled=True,
                                                     created_at="2024-01-01T00:00:00+00:00",
@@ -726,13 +732,15 @@ class TestNocloudNetCLIAuthoring:
     """Test CLI integration for nocloud-net VMs."""
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_vm_with_nocloud_net_flag(
-        self, mock_create_vm, mock_resolve_image, mock_check_priv
+        self, mock_create_vm, mock_resolve_image, mock_fc_bin, mock_check_priv
     ):
         """Test creating VM with --nocloud-net flag via CLI."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("cli-nocloud-vm", nocloud_net_port=8000)
@@ -751,13 +759,15 @@ class TestNocloudNetCLIAuthoring:
         assert call_kwargs.get("cloud_init_mode") == CloudInitMode.NET
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_create_vm_with_custom_nocloud_port(
-        self, mock_create_vm, mock_resolve_image, mock_check_priv
+        self, mock_create_vm, mock_resolve_image, mock_fc_bin, mock_check_priv
     ):
         """Test creating VM with custom --nocloud-net-port via CLI."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = Path("/tmp/image.ext4")
 
         vm = _make_vm("custom-port-vm", nocloud_net_port=9999)

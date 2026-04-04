@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.paths import make_test_paths
+
 
 @pytest.fixture(autouse=True)
-def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Ensure tests never write to real config or cache directories.
 
     Skipped for system tests (marked with @pytest.mark.system).
@@ -17,13 +19,24 @@ def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.Monkey
     if request.node.get_closest_marker("system"):
         return
 
-    # Use tmp_path which pytest automatically cleans up after each test
-    config_dir = tmp_path / "config"
-    cache_dir = tmp_path / "cache"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(config_dir))
-    monkeypatch.setenv("MVM_CACHE_DIR", str(cache_dir))
+    paths = make_test_paths(tmp_path)
+    paths.config.mkdir(parents=True, exist_ok=True)
+    paths.cache.mkdir(parents=True, exist_ok=True)
+    paths.temp.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("MVM_CONFIG_DIR", str(paths.config))
+    monkeypatch.setenv("MVM_CACHE_DIR", str(paths.cache))
+    monkeypatch.setenv("MVM_TEMP_DIR", str(paths.temp))
+
+    try:
+        from mvmctl.constants import _load_user_config_json
+
+        _load_user_config_json.cache_clear()
+    except AttributeError:
+        pass
+
+    yield
+
+    shutil.rmtree(tmp_path, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -94,6 +107,21 @@ def _block_real_sudo_invocations(request, monkeypatch: pytest.MonkeyPatch) -> No
         return real_run(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", guarded_run)
+
+
+@pytest.fixture(autouse=True)
+def _setup_database(request, isolate_config_and_cache) -> None:  # type: ignore[return]
+    """Set up SQLite database with migrations for each test.
+
+    Depends on isolate_config_and_cache to ensure MVM_CACHE_DIR is set first.
+    Skipped for system tests (marked with @pytest.mark.system).
+    """
+    if request.node.get_closest_marker("system"):
+        return
+
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    MVMDatabase().migrate()
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

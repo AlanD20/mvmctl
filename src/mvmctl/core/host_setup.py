@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import sqlite3
 import subprocess
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from mvmctl.constants import (
@@ -24,9 +27,9 @@ from mvmctl.core.host_privilege import (
     _validate_sudoers_binaries,
     _write_sudoers,
 )
-from mvmctl.core.host_state import SYSCTL_CONF, SYSCTL_KEY, HostChange, _save_state
+from mvmctl.core.host_state import SYSCTL_CONF, SYSCTL_KEY, HostStateChange, _save_state
 from mvmctl.core.network import setup_mvm_chains
-from mvmctl.exceptions import HostError
+from mvmctl.exceptions import HostError, MVMError
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +103,7 @@ def _load_module(module: str) -> None:
         raise HostError("modprobe command not found") from e
 
 
-def _enable_ip_forward() -> HostChange | None:
+def _enable_ip_forward() -> HostStateChange | None:
     current = get_ip_forward_status()
     if current == "1":
         logger.debug("IP forwarding already enabled")
@@ -118,7 +121,7 @@ def _enable_ip_forward() -> HostChange | None:
     except FileNotFoundError as e:
         raise HostError("sysctl command not found") from e
 
-    return HostChange(
+    return HostStateChange(
         setting=SYSCTL_KEY,
         original_value=current,
         applied_value="1",
@@ -126,7 +129,7 @@ def _enable_ip_forward() -> HostChange | None:
     )
 
 
-def _persist_sysctl() -> HostChange | None:
+def _persist_sysctl() -> HostStateChange | None:
     content = f"{SYSCTL_KEY} = 1\n"
     if SYSCTL_CONF.exists() and SYSCTL_CONF.read_text() == content:
         logger.debug("sysctl persist file already exists with correct content")
@@ -142,7 +145,7 @@ def _persist_sysctl() -> HostChange | None:
     except OSError as e:
         raise HostError(f"Failed to write {SYSCTL_CONF}: {e}") from e
 
-    return HostChange(
+    return HostStateChange(
         setting="sysctl_persist_file",
         original_value=original,
         applied_value=str(SYSCTL_CONF),
@@ -150,15 +153,15 @@ def _persist_sysctl() -> HostChange | None:
     )
 
 
-def _ensure_kvm_modules() -> list[HostChange]:
-    changes: list[HostChange] = []
+def _ensure_kvm_modules() -> list[HostStateChange]:
+    changes: list[HostStateChange] = []
     for module in KVM_MODULES:
         if _is_module_loaded(module):
             logger.debug("Module %s already loaded", module)
             continue
         _load_module(module)
         changes.append(
-            HostChange(
+            HostStateChange(
                 setting=f"module:{module}",
                 original_value=None,
                 applied_value=module,
@@ -172,7 +175,7 @@ def _ensure_kvm_modules() -> list[HostChange]:
             try:
                 _load_module(module)
                 changes.append(
-                    HostChange(
+                    HostStateChange(
                         setting=f"module:{module}",
                         original_value=None,
                         applied_value=module,
@@ -217,7 +220,7 @@ def _strip_tap_rules(rules_text: str) -> str:
     return "".join(filtered)
 
 
-def save_iptables_rules() -> HostChange | None:
+def save_iptables_rules() -> HostStateChange | None:
     rules_path = Path(IPTABLES_RULES_V4)
 
     try:
@@ -258,7 +261,7 @@ def save_iptables_rules() -> HostChange | None:
         raise HostError(f"Failed to write {rules_path}: {e}") from e
 
     logger.info("Persisted iptables rules to %s (TAP rules excluded)", rules_path)
-    return HostChange(
+    return HostStateChange(
         setting="iptables_rules_v4",
         original_value=original,
         applied_value=str(rules_path),
@@ -266,8 +269,8 @@ def save_iptables_rules() -> HostChange | None:
     )
 
 
-def init_host(cache_dir: Path) -> list[HostChange]:
-    changes: list[HostChange] = []
+def init_host(cache_dir: Path) -> list[HostStateChange]:
+    changes: list[HostStateChange] = []
 
     if os.getuid() != 0:
         raise HostError("Root privileges required")
@@ -289,7 +292,7 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     group_created = _create_group(PROJECT_GROUP)
     if group_created:
         changes.append(
-            HostChange(
+            HostStateChange(
                 setting=f"group:{PROJECT_GROUP}",
                 original_value=None,
                 applied_value=PROJECT_GROUP,
@@ -301,7 +304,7 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     user_added = _add_user_to_group(username, PROJECT_GROUP)
     if user_added:
         changes.append(
-            HostChange(
+            HostStateChange(
                 setting=f"group_member:{username}",
                 original_value=None,
                 applied_value=f"{username}:{PROJECT_GROUP}",
@@ -321,7 +324,7 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     if sudoers_stale:
         _write_sudoers(sudoers_path, PROJECT_GROUP)
         changes.append(
-            HostChange(
+            HostStateChange(
                 setting="sudoers_dropin",
                 original_value=None,
                 applied_value=str(sudoers_path),
@@ -344,7 +347,7 @@ def init_host(cache_dir: Path) -> list[HostChange]:
     if chains_already_exist:
         logger.warning("MVM iptables chains already exist; keeping existing chain state")
         changes.append(
-            HostChange(
+            HostStateChange(
                 setting="iptables_chains",
                 original_value=None,
                 applied_value=_CHAIN_EXISTS_MARKER,
@@ -357,4 +360,44 @@ def init_host(cache_dir: Path) -> list[HostChange]:
         changes.append(iptables_change)
 
     _save_state(cache_dir, changes)
+    _persist_host_state_to_db(changes)
     return changes
+
+
+def _persist_host_state_to_db(changes: list[HostStateChange]) -> None:
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import HostStateChange
+
+    try:
+        db = MVMDatabase()
+        now = datetime.now(timezone.utc).isoformat()
+        db.initialize_host_state()
+
+        group_created = any(
+            c.setting.startswith("group:") and c.mechanism == "groupadd" for c in changes
+        )
+        sudoers_written = any(
+            c.setting == "sudoers_dropin" and c.mechanism == "file_create" for c in changes
+        )
+        if group_created:
+            db.update_host_component("mvm_group_created", True)
+        if sudoers_written:
+            db.update_host_component("sudoers_configured", True)
+
+        session_id = str(uuid.uuid4())
+        for order, change in enumerate(changes):
+            db.add_host_change(
+                HostStateChange(
+                    session_id=session_id,
+                    init_timestamp=now,
+                    setting=change.setting,
+                    mechanism=change.mechanism,
+                    original_value=change.original_value,
+                    applied_value=change.applied_value,
+                    change_order=order,
+                )
+            )
+
+        db.set_host_initialized(now)
+    except (MVMError, sqlite3.OperationalError):
+        return

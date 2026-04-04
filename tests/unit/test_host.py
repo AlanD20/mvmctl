@@ -1,7 +1,7 @@
 """Tests for core/host.py."""
 
-import json
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,7 +30,7 @@ from mvmctl.core.host_setup import (
     init_host,
 )
 from mvmctl.core.host_state import (
-    HostChange,
+    HostStateChange,
     HostState,
     _save_state,
     _state_dir,
@@ -496,10 +496,12 @@ def test_ensure_kvm_modules_kvm_already_loaded_vendor_not(mock_loaded, mock_load
 # ---------------------------------------------------------------------------
 
 
-def test_save_state_writes_json(tmp_path):
-    """_save_state should create a state.json with an init_timestamp and the provided changes."""
+def test_save_state_writes_to_sqlite(tmp_path):
+    """_save_state should persist changes to SQLite database."""
+    from mvmctl.core.mvm_db import MVMDatabase
+
     changes = [
-        HostChange(
+        HostStateChange(
             setting="net.ipv4.ip_forward",
             original_value="0",
             applied_value="1",
@@ -507,40 +509,56 @@ def test_save_state_writes_json(tmp_path):
         ),
     ]
     _save_state(tmp_path, changes)
-    state_file = tmp_path / "host" / "state.json"
-    assert state_file.exists()
-    data = json.loads(state_file.read_text())
-    assert "init_timestamp" in data
-    assert len(data["changes"]) == 1
-    assert data["changes"][0]["setting"] == "net.ipv4.ip_forward"
+
+    # Verify in SQLite database
+    db = MVMDatabase()
+    db_changes = db.list_host_changes()
+    assert len(db_changes) == 1
+    assert db_changes[0].setting == "net.ipv4.ip_forward"
+    assert db_changes[0].mechanism == "sysctl"
+    assert db_changes[0].original_value == "0"
+    assert db_changes[0].applied_value == "1"
 
 
-def test_save_state_empty_changes(tmp_path):
-    """_save_state should create a valid state.json with an empty changes list."""
+def test_save_state_empty_changes_sqlite(tmp_path):
+    """_save_state should create valid state entry with empty changes list."""
+    from mvmctl.core.mvm_db import MVMDatabase
+
     _save_state(tmp_path, [])
-    state_file = tmp_path / "host" / "state.json"
-    assert state_file.exists()
-    data = json.loads(state_file.read_text())
-    assert data["changes"] == []
+
+    # Verify in SQLite database
+    db = MVMDatabase()
+    db_changes = db.list_host_changes()
+    assert db_changes == []
 
 
-def test_save_state_creates_directories(tmp_path):
-    """_save_state should create any missing parent directories before writing the state file."""
-    nested = tmp_path / "deep" / "nested"
-    _save_state(nested, [])
-    state_file = nested / "host" / "state.json"
-    assert state_file.exists()
+def test_save_state_initializes_sqlite(tmp_path):
+    """_save_state should initialize host state tables in SQLite."""
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    _save_state(tmp_path, [])
+
+    db = MVMDatabase()
+    state = db.get_host_state()
+    assert state is not None
 
 
-def test_save_state_multiple_changes(tmp_path):
-    """_save_state should persist all provided HostChange entries to the state file."""
+def test_save_state_multiple_changes_sqlite(tmp_path):
+    """_save_state should persist all provided HostChange entries to SQLite."""
+    from mvmctl.core.mvm_db import MVMDatabase
+
     changes = [
-        HostChange("a", "0", "1", "sysctl"),
-        HostChange("b", None, "v", "modprobe"),
+        HostStateChange("a", "0", "1", "sysctl"),
+        HostStateChange("b", None, "v", "modprobe"),
     ]
     _save_state(tmp_path, changes)
-    data = json.loads((tmp_path / "host" / "state.json").read_text())
-    assert len(data["changes"]) == 2
+
+    # Verify in SQLite database
+    db = MVMDatabase()
+    db_changes = db.list_host_changes()
+    assert len(db_changes) == 2
+    assert db_changes[0].setting == "a"
+    assert db_changes[1].setting == "b"
 
 
 # ---------------------------------------------------------------------------
@@ -628,17 +646,12 @@ def test_init_host_ip_forward_already_enabled(
 
         mock_run.side_effect = run_side_effect
 
-        # Mock SYSCTL_CONF as a Path-like that already has the right content
         mock_sysctl_conf.exists.return_value = True
         mock_sysctl_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
 
-        # Mock SUDOERS_DROP_IN_PATH so sudoers_stale evaluates to False
-        # (existing content == generated content -> no sudoers change recorded)
-        mock_sudoers_path = MagicMock()
-        mock_sudoers_path.exists.return_value = True
-        mock_sudoers_path.read_text.return_value = "valid sudoers content"
-        with patch("mvmctl.core.host_setup.Path") as mock_path:
-            mock_path.return_value = mock_sudoers_path
+        with patch("mvmctl.core.host_setup.SUDOERS_DROP_IN_PATH", str(tmp_path / "sudoers")):
+            sudoers_file = tmp_path / "sudoers"
+            sudoers_file.write_text("valid sudoers content")
             mock_gen_sudoers.return_value = "valid sudoers content"
             changes = init_host(tmp_path)
 
@@ -647,9 +660,12 @@ def test_init_host_ip_forward_already_enabled(
     assert changes[0].setting == "iptables_chains"
     assert changes[0].mechanism == "noop"
     assert "already exist" in changes[0].applied_value
-    # State file should be written
-    state_file = tmp_path / "host" / "state.json"
-    assert state_file.exists()
+    # State should be stored in SQLite
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    db_changes = db.list_host_changes()
+    assert len(db_changes) >= 1
 
 
 @patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
@@ -726,7 +742,7 @@ def test_init_host_enables_ip_forward(
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
-def test_init_host_writes_state_file(
+def test_init_host_writes_state_to_sqlite(
     mock_access,
     mock_which,
     mock_run,
@@ -740,7 +756,9 @@ def test_init_host_writes_state_file(
     mock_write_sudoers,
     tmp_path,
 ):
-    """init_host should write a state.json containing init_timestamp and changes fields."""
+    """init_host should persist state to SQLite database."""
+    from mvmctl.core.mvm_db import MVMDatabase
+
     with patch("mvmctl.core.host_setup.Path.exists", return_value=True):
 
         def run_side_effect(cmd, **kwargs):
@@ -757,11 +775,10 @@ def test_init_host_writes_state_file(
 
         init_host(tmp_path)
 
-    state_file = tmp_path / "host" / "state.json"
-    assert state_file.exists()
-    data = json.loads(state_file.read_text())
-    assert "init_timestamp" in data
-    assert "changes" in data
+    db = MVMDatabase()
+    state = db.get_host_state()
+    assert state is not None
+    assert state.initialized
 
 
 @patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
@@ -878,32 +895,44 @@ def test_init_host_with_module_loading(
 # ---------------------------------------------------------------------------
 
 
-def test_get_host_state_no_file(tmp_path):
-    """get_host_state should return None when no state file has been written."""
+def test_get_host_state_no_state(tmp_path):
+    """get_host_state should return None when no state exists in SQLite."""
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    db.initialize_host_state()
+
     result = get_host_state(tmp_path)
     assert result is None
 
 
 def test_get_host_state_valid(tmp_path):
-    """get_host_state should return a HostState object when a valid state file exists."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
-            {
-                "setting": "net.ipv4.ip_forward",
-                "original_value": "0",
-                "applied_value": "1",
-                "mechanism": "sysctl",
-            }
-        ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    """get_host_state should return a HostState object when valid state exists in SQLite."""
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import HostStateChange
+
+    db = MVMDatabase()
+    db.initialize_host_state()
+
+    init_timestamp = "2025-01-01T00:00:00+00:00"
+    change = HostStateChange(
+        id=None,
+        session_id="test-session",
+        init_timestamp=init_timestamp,
+        setting="net.ipv4.ip_forward",
+        mechanism="sysctl",
+        original_value="0",
+        applied_value="1",
+        reverted=False,
+        reverted_at=None,
+        revert_mechanism=None,
+        change_order=0,
+        created_at=init_timestamp,
+    )
+    db.add_host_change(change)
 
     result = get_host_state(tmp_path)
     assert isinstance(result, HostState)
-    assert result.init_timestamp == "2025-01-01T00:00:00+00:00"
     assert len(result.changes) == 1
     assert result.changes[0].setting == "net.ipv4.ip_forward"
     assert result.changes[0].original_value == "0"
@@ -911,80 +940,95 @@ def test_get_host_state_valid(tmp_path):
     assert result.changes[0].mechanism == "sysctl"
 
 
-def test_get_host_state_corrupt_json(tmp_path):
-    """get_host_state should raise HostError when the state file contains invalid JSON."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    (state_dir / "state.json").write_text("{bad json")
-
-    with pytest.raises(HostError, match="Corrupt state file"):
-        get_host_state(tmp_path)
-
-
-def test_get_host_state_missing_key(tmp_path):
-    """get_host_state should raise HostError when the state file is missing required keys."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    (state_dir / "state.json").write_text(json.dumps({"init_timestamp": "t"}))
-
-    with pytest.raises(HostError, match="Corrupt state file"):
-        get_host_state(tmp_path)
-
-
 def test_get_host_state_empty_changes(tmp_path):
-    """get_host_state should return a HostState with an empty changes list when none were recorded."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {"init_timestamp": "2025-01-01T00:00:00+00:00", "changes": []}
-    (state_dir / "state.json").write_text(json.dumps(data))
+    """get_host_state should return None when state exists but has no unreverted changes."""
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    db.initialize_host_state()
 
     result = get_host_state(tmp_path)
-    assert isinstance(result, HostState)
-    assert result.changes == []
-
-
-def test_get_host_state_type_error(tmp_path):
-    """JSON is valid but changes entries have wrong types."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {"init_timestamp": "t", "changes": [{"bad_key": "val"}]}
-    (state_dir / "state.json").write_text(json.dumps(data))
-
-    with pytest.raises(HostError, match="Corrupt state file"):
-        get_host_state(tmp_path)
+    assert result is None
 
 
 def test_get_host_state_multiple_changes(tmp_path):
-    """get_host_state should return all HostChange entries when the state file has multiple changes."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
-            {
-                "setting": "net.ipv4.ip_forward",
-                "original_value": "0",
-                "applied_value": "1",
-                "mechanism": "sysctl",
-            },
-            {
-                "setting": "sysctl_persist_file",
-                "original_value": None,
-                "applied_value": "/etc/sysctl.d/fc.conf",
-                "mechanism": "file_create",
-            },
-        ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    """get_host_state should return all HostChange entries when multiple changes exist in SQLite."""
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import HostStateChange
+
+    db = MVMDatabase()
+    db.initialize_host_state()
+
+    init_timestamp = "2025-01-01T00:00:00+00:00"
+    changes = [
+        HostStateChange(
+            id=None,
+            session_id="test-session",
+            init_timestamp=init_timestamp,
+            setting="net.ipv4.ip_forward",
+            mechanism="sysctl",
+            original_value="0",
+            applied_value="1",
+            reverted=False,
+            reverted_at=None,
+            revert_mechanism=None,
+            change_order=0,
+            created_at=init_timestamp,
+        ),
+        HostStateChange(
+            id=None,
+            session_id="test-session",
+            init_timestamp=init_timestamp,
+            setting="sysctl_persist_file",
+            mechanism="file_create",
+            original_value=None,
+            applied_value="/etc/sysctl.d/fc.conf",
+            reverted=False,
+            reverted_at=None,
+            revert_mechanism=None,
+            change_order=1,
+            created_at=init_timestamp,
+        ),
+    ]
+    for change in changes:
+        db.add_host_change(change)
 
     result = get_host_state(tmp_path)
-    assert result is not None
+    assert isinstance(result, HostState)
     assert len(result.changes) == 2
+    assert result.changes[0].setting == "net.ipv4.ip_forward"
+    assert result.changes[1].setting == "sysctl_persist_file"
 
 
 # ---------------------------------------------------------------------------
 # restore_host
 # ---------------------------------------------------------------------------
+
+
+def _seed_host_changes(cache_dir: Path, changes: list[dict]) -> None:
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import HostStateChange
+
+    db = MVMDatabase()
+    db.initialize_host_state()
+    init_timestamp = "2025-01-01T00:00:00+00:00"
+    for idx, c in enumerate(changes):
+        db.add_host_change(
+            HostStateChange(
+                id=None,
+                session_id="test-session",
+                init_timestamp=init_timestamp,
+                setting=c["setting"],
+                mechanism=c["mechanism"],
+                original_value=c.get("original_value"),
+                applied_value=c["applied_value"],
+                reverted=False,
+                reverted_at=None,
+                revert_mechanism=None,
+                change_order=idx,
+                created_at=init_timestamp,
+            )
+        )
 
 
 def test_restore_host_no_state(tmp_path):
@@ -995,21 +1039,29 @@ def test_restore_host_no_state(tmp_path):
 
 @patch("mvmctl.core.host_state.subprocess.run")
 def test_restore_host_reverts_sysctl(mock_run, tmp_path):
-    """restore_host should revert a sysctl change to its original value and delete the state file."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
-            {
-                "setting": "net.ipv4.ip_forward",
-                "original_value": "0",
-                "applied_value": "1",
-                "mechanism": "sysctl",
-            }
-        ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    """restore_host should revert a sysctl change to its original value and mark change reverted in SQLite."""
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import HostStateChange
+
+    db = MVMDatabase()
+    db.initialize_host_state()
+
+    init_timestamp = "2025-01-01T00:00:00+00:00"
+    change = HostStateChange(
+        id=None,
+        session_id="test-session",
+        init_timestamp=init_timestamp,
+        setting="net.ipv4.ip_forward",
+        mechanism="sysctl",
+        original_value="0",
+        applied_value="1",
+        reverted=False,
+        reverted_at=None,
+        revert_mechanism=None,
+        change_order=0,
+        created_at=init_timestamp,
+    )
+    db.add_host_change(change)
 
     mock_run.return_value = MagicMock(returncode=0)
 
@@ -1027,22 +1079,19 @@ def test_restore_host_reverts_sysctl(mock_run, tmp_path):
         check=True,
     )
 
-    # State file should be deleted
-    assert not (state_dir / "state.json").exists()
+    # Verify change is marked as reverted in database
+    changes = db.list_host_changes(include_reverted=True)
+    assert changes[0].reverted
 
 
 def test_restore_host_reverts_file_create(tmp_path):
     """restore_host should delete a file that was created during init when original_value is None."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-
-    # Create the file that should be removed
     target_file = tmp_path / "test-sysctl.conf"
     target_file.write_text("net.ipv4.ip_forward = 1\n")
 
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
+    _seed_host_changes(
+        tmp_path,
+        [
             {
                 "setting": "sysctl_persist_file",
                 "original_value": None,
@@ -1050,10 +1099,8 @@ def test_restore_host_reverts_file_create(tmp_path):
                 "mechanism": "file_create",
             }
         ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    )
 
-    # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
     with patch(
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
@@ -1064,23 +1111,17 @@ def test_restore_host_reverts_file_create(tmp_path):
     assert reverted[0].applied_value == "(removed)"
     assert reverted[0].mechanism == "file_remove"
 
-    # File should be deleted
     assert not target_file.exists()
-    # State file should be deleted
-    assert not (state_dir / "state.json").exists()
 
 
 def test_restore_host_reverts_file_create_with_original(tmp_path):
     """restore_host should restore a file to its original content when original_value is set."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-
     target_file = tmp_path / "test-sysctl.conf"
     target_file.write_text("net.ipv4.ip_forward = 1\n")
 
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
+    _seed_host_changes(
+        tmp_path,
+        [
             {
                 "setting": "sysctl_persist_file",
                 "original_value": "old content\n",
@@ -1088,68 +1129,25 @@ def test_restore_host_reverts_file_create_with_original(tmp_path):
                 "mechanism": "file_create",
             }
         ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    )
 
-    # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
     with patch(
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
         reverted = restore_host(tmp_path)
     assert len(reverted) == 1
-    # File should be restored to original content, not deleted
     assert target_file.read_text() == "old content\n"
 
 
 @patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_deletes_state_file(mock_run, tmp_path):
-    """restore_host should remove the state.json after a successful restore."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [],
-    }
-    state_file = state_dir / "state.json"
-    state_file.write_text(json.dumps(data))
+def test_restore_host_marks_changes_reverted(mock_run, tmp_path):
+    """restore_host should mark changes as reverted in the database."""
+    from mvmctl.core.mvm_db import MVMDatabase
 
-    restore_host(tmp_path)
-    assert not state_file.exists()
-
-
-@patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path):
-    """restore_host should skip reverting a sysctl change when original_value is None."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
-            {
-                "setting": "net.ipv4.ip_forward",
-                "original_value": None,
-                "applied_value": "1",
-                "mechanism": "sysctl",
-            }
-        ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
-
-    reverted = restore_host(tmp_path)
-    # sysctl with None original_value is not reverted
-    assert reverted == []
-    mock_run.assert_not_called()
-
-
-@patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_sysctl_failure(mock_run, tmp_path):
-    """restore_host should raise HostError when the sysctl revert command fails."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
+    _seed_host_changes(
+        tmp_path,
+        [
             {
                 "setting": "net.ipv4.ip_forward",
                 "original_value": "0",
@@ -1157,8 +1155,51 @@ def test_restore_host_sysctl_failure(mock_run, tmp_path):
                 "mechanism": "sysctl",
             }
         ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    )
+
+    mock_run.return_value = MagicMock(returncode=0)
+    restore_host(tmp_path)
+
+    db = MVMDatabase()
+    changes = db.list_host_changes(include_reverted=True)
+    assert len(changes) == 1
+    assert changes[0].reverted
+
+
+@patch("mvmctl.core.host_state.subprocess.run")
+def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path):
+    """restore_host should skip reverting a sysctl change when original_value is None."""
+    _seed_host_changes(
+        tmp_path,
+        [
+            {
+                "setting": "net.ipv4.ip_forward",
+                "original_value": None,
+                "applied_value": "1",
+                "mechanism": "sysctl",
+            }
+        ],
+    )
+
+    reverted = restore_host(tmp_path)
+    assert reverted == []
+    mock_run.assert_not_called()
+
+
+@patch("mvmctl.core.host_state.subprocess.run")
+def test_restore_host_sysctl_failure(mock_run, tmp_path):
+    """restore_host should raise HostError when the sysctl revert command fails."""
+    _seed_host_changes(
+        tmp_path,
+        [
+            {
+                "setting": "net.ipv4.ip_forward",
+                "original_value": "0",
+                "applied_value": "1",
+                "mechanism": "sysctl",
+            }
+        ],
+    )
 
     mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl")
 
@@ -1169,11 +1210,9 @@ def test_restore_host_sysctl_failure(mock_run, tmp_path):
 @patch("mvmctl.core.host_state.subprocess.run")
 def test_restore_host_sysctl_file_not_found(mock_run, tmp_path):
     """sysctl command not found during restore."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
+    _seed_host_changes(
+        tmp_path,
+        [
             {
                 "setting": "net.ipv4.ip_forward",
                 "original_value": "0",
@@ -1181,8 +1220,7 @@ def test_restore_host_sysctl_file_not_found(mock_run, tmp_path):
                 "mechanism": "sysctl",
             }
         ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    )
 
     mock_run.side_effect = FileNotFoundError("sysctl")
 
@@ -1193,15 +1231,12 @@ def test_restore_host_sysctl_file_not_found(mock_run, tmp_path):
 @patch("mvmctl.core.host_state.subprocess.run")
 def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path):
     """restore_host should revert changes in reverse order so later changes are undone first."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-
     target_file = tmp_path / "test-sysctl.conf"
     target_file.write_text("content")
 
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
+    _seed_host_changes(
+        tmp_path,
+        [
             {
                 "setting": "net.ipv4.ip_forward",
                 "original_value": "0",
@@ -1215,31 +1250,27 @@ def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path):
                 "mechanism": "file_create",
             },
         ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    )
+
     mock_run.return_value = MagicMock(returncode=0)
 
-    # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
     with patch(
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
         reverted = restore_host(tmp_path)
-    # Changes should be reverted in reverse order
     assert len(reverted) == 2
-    # file_create was second, so reverted first
     assert reverted[0].setting == "sysctl_persist_file"
     assert reverted[1].setting == "net.ipv4.ip_forward"
 
 
 def test_restore_host_file_create_target_missing(tmp_path):
     """file_create target doesn't exist anymore — skip silently."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
     target_file = tmp_path / "nonexistent.conf"
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
+
+    _seed_host_changes(
+        tmp_path,
+        [
             {
                 "setting": "sysctl_persist_file",
                 "original_value": None,
@@ -1247,30 +1278,24 @@ def test_restore_host_file_create_target_missing(tmp_path):
                 "mechanism": "file_create",
             }
         ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    )
 
-    # Patch allowlist so the test reaches the target.exists() check (not blocked by S-C2)
     with patch(
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
         reverted = restore_host(tmp_path)
-    # Target file doesn't exist, so nothing to revert
     assert reverted == []
 
 
 def test_restore_host_file_create_os_error(tmp_path):
     """OS error during file revert raises HostError."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-
     target_file = tmp_path / "test.conf"
     target_file.write_text("content")
 
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
+    _seed_host_changes(
+        tmp_path,
+        [
             {
                 "setting": "sysctl_persist_file",
                 "original_value": None,
@@ -1278,10 +1303,8 @@ def test_restore_host_file_create_os_error(tmp_path):
                 "mechanism": "file_create",
             }
         ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    )
 
-    # Patch allowlist to include test file path (S-C2 allowlist blocks test paths)
     with patch(
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
@@ -1293,11 +1316,9 @@ def test_restore_host_file_create_os_error(tmp_path):
 
 def test_restore_host_modprobe_mechanism_ignored(tmp_path):
     """modprobe mechanism changes are not reverted."""
-    state_dir = tmp_path / "host"
-    state_dir.mkdir(parents=True)
-    data = {
-        "init_timestamp": "2025-01-01T00:00:00+00:00",
-        "changes": [
+    _seed_host_changes(
+        tmp_path,
+        [
             {
                 "setting": "module:kvm",
                 "original_value": None,
@@ -1305,8 +1326,7 @@ def test_restore_host_modprobe_mechanism_ignored(tmp_path):
                 "mechanism": "modprobe",
             }
         ],
-    }
-    (state_dir / "state.json").write_text(json.dumps(data))
+    )
 
     reverted = restore_host(tmp_path)
     assert reverted == []
@@ -1319,7 +1339,7 @@ def test_restore_host_modprobe_mechanism_ignored(tmp_path):
 
 def test_host_change_dataclass():
     """HostChange should store and expose all four fields correctly."""
-    change = HostChange(
+    change = HostStateChange(
         setting="test",
         original_value="old",
         applied_value="new",
@@ -2046,49 +2066,38 @@ class TestCleanHostErrorPaths:
 class TestRestoreHostErrorPaths:
     """Error-path tests for restore_host."""
 
-    def test_restore_host_state_file_missing(self, tmp_path):
-        """restore_host raises HostError when no state snapshot exists."""
+    def test_restore_host_no_state_in_db(self, tmp_path):
+        """restore_host raises HostError when no state exists in database."""
         with pytest.raises(HostError, match="No saved host state to restore"):
             restore_host(tmp_path)
 
-    def test_restore_host_state_file_corrupt_json(self, tmp_path):
-        """restore_host raises HostError when state file has invalid JSON."""
-        state_dir = tmp_path / "host"
-        state_dir.mkdir(parents=True)
-        (state_dir / "state.json").write_text("{{not valid json!!")
+    def test_restore_host_no_unreverted_changes(self, tmp_path):
+        """restore_host raises HostError when all changes are already reverted."""
+        from mvmctl.core.mvm_db import MVMDatabase
+        from mvmctl.db.models import HostStateChange
 
-        with pytest.raises(HostError, match="Corrupt state file"):
-            restore_host(tmp_path)
+        db = MVMDatabase()
+        db.initialize_host_state()
 
-    def test_restore_host_state_file_missing_keys(self, tmp_path):
-        """restore_host raises HostError when state file has valid JSON but missing required keys."""
-        state_dir = tmp_path / "host"
-        state_dir.mkdir(parents=True)
-        (state_dir / "state.json").write_text(json.dumps({"foo": "bar"}))
+        init_timestamp = "2025-01-01T00:00:00+00:00"
+        db.add_host_change(
+            HostStateChange(
+                id=None,
+                session_id="test-session",
+                init_timestamp=init_timestamp,
+                setting="net.ipv4.ip_forward",
+                mechanism="sysctl",
+                original_value="0",
+                applied_value="1",
+                reverted=True,
+                reverted_at=init_timestamp,
+                revert_mechanism="sysctl",
+                change_order=0,
+                created_at=init_timestamp,
+            )
+        )
 
-        with pytest.raises(HostError, match="Corrupt state file"):
-            restore_host(tmp_path)
-
-    def test_restore_host_state_file_wrong_change_schema(self, tmp_path):
-        """restore_host raises HostError when changes have unexpected field names."""
-        state_dir = tmp_path / "host"
-        state_dir.mkdir(parents=True)
-        data = {
-            "init_timestamp": "2025-01-01T00:00:00+00:00",
-            "changes": [{"wrong_field": "value"}],
-        }
-        (state_dir / "state.json").write_text(json.dumps(data))
-
-        with pytest.raises(HostError, match="Corrupt state file"):
-            restore_host(tmp_path)
-
-    def test_restore_host_state_file_empty_object(self, tmp_path):
-        """restore_host raises HostError when state file is an empty JSON object."""
-        state_dir = tmp_path / "host"
-        state_dir.mkdir(parents=True)
-        (state_dir / "state.json").write_text("{}")
-
-        with pytest.raises(HostError, match="Corrupt state file"):
+        with pytest.raises(HostError, match="No saved host state to restore"):
             restore_host(tmp_path)
 
 
@@ -2235,3 +2244,69 @@ class TestResetHostErrorPaths:
         assert "Warning: fake group error" in summary
         assert "Removed host state snapshot" in summary
         mock_sf.unlink.assert_called_once()
+
+
+class TestPersistHostStateToDb:
+    def test_writes_host_state_and_changes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db_path = tmp_path / "mvmdb.db"
+        monkeypatch.setattr("mvmctl.core.mvm_db.get_mvm_db_path", lambda: db_path)
+
+        from mvmctl.core.mvm_db import MVMDatabase
+
+        db = MVMDatabase(db_path=db_path)
+        db.migrate()
+
+        from mvmctl.core.host_setup import _persist_host_state_to_db
+        from mvmctl.core.host_state import HostStateChange
+
+        changes = [
+            HostStateChange(
+                setting="group:mvm",
+                mechanism="groupadd",
+                original_value=None,
+                applied_value="created",
+            ),
+            HostStateChange(
+                setting="sudoers_dropin",
+                mechanism="file_create",
+                original_value=None,
+                applied_value="/etc/sudoers.d/mvm",
+            ),
+        ]
+
+        _persist_host_state_to_db(changes)
+
+        state = db.get_host_state()
+        assert state is not None
+        assert state.initialized
+        assert state.mvm_group_created
+        assert state.sudoers_configured
+
+        recorded = db.list_host_changes()
+        assert len(recorded) == 2
+        settings = {c.setting for c in recorded}
+        assert "group:mvm" in settings
+        assert "sudoers_dropin" in settings
+
+    def test_sqlite_failure_is_silent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        unmigrated_db = tmp_path / "empty.db"
+        unmigrated_db.touch()
+        monkeypatch.setattr("mvmctl.core.mvm_db.get_mvm_db_path", lambda: unmigrated_db)
+
+        from mvmctl.core.host_setup import _persist_host_state_to_db
+        from mvmctl.core.host_state import HostStateChange
+
+        _persist_host_state_to_db(
+            [
+                HostStateChange(
+                    setting="ip_forward",
+                    mechanism="sysctl",
+                    original_value="0",
+                    applied_value="1",
+                )
+            ]
+        )

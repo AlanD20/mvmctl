@@ -1,10 +1,9 @@
-"""Tests for MVMDatabase asset operations (images, kernels, binaries, binary_defaults).
+"""Tests for MVMDatabase asset operations (images, kernels, binaries).
 
 Comprehensive test suite covering:
 - Image CRUD operations and default management
 - Kernel CRUD operations and default management
-- Binary CRUD operations
-- Binary defaults CRUD operations
+- Binary CRUD operations and default management
 - Database migrations
 - Edge cases and atomicity constraints
 """
@@ -16,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.db.models import Binary, BinaryDefault, Image, Kernel
+from mvmctl.db.models import Binary, Image, Kernel
 
 
 @pytest.fixture
@@ -644,104 +643,134 @@ class TestBinaryOperations:
 
 
 class TestBinaryDefaultOperations:
-    """Tests for binary_defaults CRUD operations."""
+    """Tests for binary default operations using is_default column."""
 
-    def test_get_binary_default_found(self, db: MVMDatabase) -> None:
-        """Test retrieving a binary default by name."""
-        default = BinaryDefault(
+    def test_get_default_binary_found(self, db: MVMDatabase) -> None:
+        """Test retrieving a default binary by name."""
+        binary = Binary(
+            id="u" * 64,
             name="firecracker",
-            version="v1.15.0",
-            path="/cache/bin/firecracker",
+            version="1.15.0",
+            path="/cache/bin/firecracker-v1.15.0",
+            is_default=True,
         )
-        db.upsert_binary_default(default)
+        db.upsert_binary(binary)
 
-        retrieved = db.get_binary_default("firecracker")
+        retrieved = db.get_default_binary("firecracker")
         assert retrieved is not None
         assert retrieved.name == "firecracker"
-        assert retrieved.version == "v1.15.0"
-        assert retrieved.path == "/cache/bin/firecracker"
+        assert retrieved.version == "1.15.0"
+        assert bool(retrieved.is_default) is True
 
-    def test_get_binary_default_not_found(self, db: MVMDatabase) -> None:
-        """Test that get_binary_default returns None for non-existent name."""
-        result = db.get_binary_default("nonexistent")
+    def test_get_default_binary_not_found(self, db: MVMDatabase) -> None:
+        """Test that get_default_binary returns None when no default set."""
+        result = db.get_default_binary("nonexistent")
         assert result is None
 
-    def test_upsert_binary_default_insert(self, db: MVMDatabase) -> None:
-        """Test inserting a new binary default record."""
-        default = BinaryDefault(
-            name="jailer",
-            version="v1.15.0",
-            path="/cache/bin/jailer",
-        )
-        db.upsert_binary_default(default)
-
-        retrieved = db.get_binary_default("jailer")
-        assert retrieved is not None
-        assert retrieved.name == "jailer"
-
-    def test_upsert_binary_default_update(self, db: MVMDatabase) -> None:
-        """Test updating an existing binary default (ON CONFLICT)."""
-        default1 = BinaryDefault(
+    def test_set_default_binary_sets_flag(self, db: MVMDatabase) -> None:
+        """Test that set_default_binary sets is_default=True."""
+        binary = Binary(
+            id="u" * 64,
             name="firecracker",
-            version="v1.15.0",
+            version="1.15.0",
             path="/cache/bin/firecracker-v1.15.0",
+            is_default=False,
         )
-        db.upsert_binary_default(default1)
+        db.upsert_binary(binary)
 
-        default2 = BinaryDefault(
-            name="firecracker",
-            version="v1.16.0",
-            path="/cache/bin/firecracker-v1.16.0",
-        )
-        db.upsert_binary_default(default2)
+        db.set_default_binary("firecracker", "1.15.0", "/cache/bin/firecracker-v1.15.0")
 
-        retrieved = db.get_binary_default("firecracker")
+        retrieved = db.get_default_binary("firecracker")
         assert retrieved is not None
-        assert retrieved.version == "v1.16.0"
-        assert retrieved.path == "/cache/bin/firecracker-v1.16.0"
+        assert bool(retrieved.is_default) is True
 
-    def test_delete_binary_default_found(self, db: MVMDatabase) -> None:
-        """Test deleting an existing binary default."""
-        default = BinaryDefault(
+    def test_set_default_binary_clears_others_same_name(self, db: MVMDatabase) -> None:
+        """Test that set_default_binary clears is_default on other binaries with same name."""
+        binary1 = Binary(
+            id="u" * 64,
             name="firecracker",
-            version="v1.15.0",
-            path="/cache/bin/firecracker",
+            version="1.15.0",
+            path="/cache/bin/firecracker-v1.15.0",
+            is_default=True,
         )
-        db.upsert_binary_default(default)
-        assert db.get_binary_default("firecracker") is not None
-
-        db.delete_binary_default("firecracker")
-        assert db.get_binary_default("firecracker") is None
-
-    def test_delete_binary_default_not_found(self, db: MVMDatabase) -> None:
-        """Test that deleting non-existent binary default is a no-op."""
-        db.delete_binary_default("nonexistent")
-        assert db.get_binary_default("nonexistent") is None
-
-    def test_list_binary_defaults_empty(self, db: MVMDatabase) -> None:
-        """Test listing binary defaults when none exist."""
-        defaults = db.list_binary_defaults()
-        assert defaults == []
-
-    def test_list_binary_defaults_multiple(self, db: MVMDatabase) -> None:
-        """Test listing multiple binary defaults."""
-        default1 = BinaryDefault(
+        binary2 = Binary(
+            id="v" * 64,
             name="firecracker",
-            version="v1.15.0",
-            path="/cache/bin/firecracker",
+            version="1.16.0",
+            path="/cache/bin/firecracker-v1.16.0",
+            is_default=False,
         )
-        default2 = BinaryDefault(
+        db.upsert_binary(binary1)
+        db.upsert_binary(binary2)
+
+        db.set_default_binary("firecracker", "1.16.0", "/cache/bin/firecracker-v1.16.0")
+
+        b1 = db.get_binary("u" * 64)
+        b2 = db.get_binary("v" * 64)
+        assert b1 is not None
+        assert b2 is not None
+        assert bool(b1.is_default) is False
+        assert bool(b2.is_default) is True
+
+    def test_set_default_binary_different_names_independent(self, db: MVMDatabase) -> None:
+        """Test that set_default_binary only affects binaries with the same name."""
+        fc_binary = Binary(
+            id="u" * 64,
+            name="firecracker",
+            version="1.15.0",
+            path="/cache/bin/firecracker-v1.15.0",
+            is_default=True,
+        )
+        jailer_binary = Binary(
+            id="v" * 64,
             name="jailer",
-            version="v1.15.0",
-            path="/cache/bin/jailer",
+            version="1.15.0",
+            path="/cache/bin/jailer-v1.15.0",
+            is_default=True,
         )
-        db.upsert_binary_default(default1)
-        db.upsert_binary_default(default2)
+        db.upsert_binary(fc_binary)
+        db.upsert_binary(jailer_binary)
 
-        defaults = db.list_binary_defaults()
-        assert len(defaults) == 2
-        names = {d.name for d in defaults}
-        assert names == {"firecracker", "jailer"}
+        fc_binary2 = Binary(
+            id="w" * 64,
+            name="firecracker",
+            version="1.16.0",
+            path="/cache/bin/firecracker-v1.16.0",
+            is_default=False,
+        )
+        db.upsert_binary(fc_binary2)
+        db.set_default_binary("firecracker", "1.16.0", "/cache/bin/firecracker-v1.16.0")
+
+        fc_default = db.get_default_binary("firecracker")
+        jailer_default = db.get_default_binary("jailer")
+        assert fc_default is not None
+        assert fc_default.version == "1.16.0"
+        assert jailer_default is not None
+        assert jailer_default.version == "1.15.0"
+
+    def test_binary_is_default_preserved_in_upsert(self, db: MVMDatabase) -> None:
+        """Test that is_default field is preserved during upsert."""
+        binary = Binary(
+            id="u" * 64,
+            name="firecracker",
+            version="1.15.0",
+            path="/cache/bin/firecracker-v1.15.0",
+            is_default=True,
+        )
+        db.upsert_binary(binary)
+
+        binary_updated = Binary(
+            id="u" * 64,
+            name="firecracker",
+            version="1.15.0",
+            path="/cache/bin/firecracker-v1.15.0",
+            is_default=False,
+        )
+        db.upsert_binary(binary_updated)
+
+        retrieved = db.get_binary("u" * 64)
+        assert retrieved is not None
+        assert bool(retrieved.is_default) is False
 
 
 class TestMigrations:
@@ -840,6 +869,7 @@ class TestEdgeCases:
             path="/cache/bin/firecracker-v1.15.0",
             full_version="v1.15.0",
             ci_version="v1.15",
+            is_default=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
         )
@@ -849,6 +879,7 @@ class TestEdgeCases:
         assert retrieved is not None
         assert retrieved.full_version == "v1.15.0"
         assert retrieved.ci_version == "v1.15"
+        assert bool(retrieved.is_default) is True
         assert retrieved.created_at == "2026-04-02T10:00:00Z"
 
     def test_set_default_image_nonexistent(self, db: MVMDatabase) -> None:
@@ -900,25 +931,33 @@ class TestEdgeCases:
         assert bool(img2.is_default) is False
         assert bool(img3.is_default) is True
 
-    def test_binary_default_name_is_primary_key(self, db: MVMDatabase) -> None:
-        """Test that binary_defaults uses name as primary key (not hash)."""
-        default1 = BinaryDefault(
+    def test_binary_is_default_atomic_update(self, db: MVMDatabase) -> None:
+        """Test that set_default_binary atomically updates is_default flags."""
+        binary1 = Binary(
+            id="4" * 64,
             name="firecracker",
-            version="v1.15.0",
+            version="1.15.0",
             path="/cache/bin/firecracker-v1.15.0",
+            is_default=True,
         )
-        default2 = BinaryDefault(
+        binary2 = Binary(
+            id="5" * 64,
             name="firecracker",
-            version="v1.16.0",
+            version="1.16.0",
             path="/cache/bin/firecracker-v1.16.0",
+            is_default=False,
         )
-        db.upsert_binary_default(default1)
-        db.upsert_binary_default(default2)
+        db.upsert_binary(binary1)
+        db.upsert_binary(binary2)
 
-        # Should have only one entry (updated)
-        defaults = db.list_binary_defaults()
-        assert len(defaults) == 1
-        assert defaults[0].version == "v1.16.0"
+        db.set_default_binary("firecracker", "1.16.0", "/cache/bin/firecracker-v1.16.0")
+
+        b1 = db.get_binary("4" * 64)
+        b2 = db.get_binary("5" * 64)
+        assert b1 is not None
+        assert b2 is not None
+        assert bool(b1.is_default) is False
+        assert bool(b2.is_default) is True
 
     def test_find_by_prefix_case_insensitive(self, db: MVMDatabase) -> None:
         """Test that prefix search is case-insensitive (SQLite LIKE default)."""

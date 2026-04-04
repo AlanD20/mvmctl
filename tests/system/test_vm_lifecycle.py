@@ -1,10 +1,11 @@
 """VM lifecycle system tests — state operations with both approaches."""
 
-import os
-import pytest
-import time
-import subprocess
 import json
+import os
+import subprocess
+import time
+
+import pytest
 
 pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow]
 
@@ -177,7 +178,7 @@ class TestVMSSH:
 
     def test_vm_ssh_available(self, mvm_binary, created_vm, timing_targets):
         """SSH is available after VM boots."""
-        vm_name = created_vm["name"]
+        created_vm["name"]
         vm_ip = created_vm.get("ipv4", "")
 
         if not vm_ip:

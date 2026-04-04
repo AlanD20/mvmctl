@@ -12,6 +12,7 @@ class TestVMDirectInjection:
     """Integration tests for VM creation with direct injection mode."""
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     @patch("mvmctl.core.rootfs_injector.check_libguestfs")
@@ -22,11 +23,13 @@ class TestVMDirectInjection:
         mock_check_guestfs,
         mock_create_vm,
         mock_resolve_image,
+        mock_fc_bin,
         mock_check_priv,
         tmp_path,
     ):
         """Test VM creation with direct injection cloud-init mode."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = tmp_path / "image.ext4"
         mock_check_guestfs.return_value = True
         mock_inject.return_value = None
@@ -58,17 +61,20 @@ class TestVMDirectInjection:
         assert call_kwargs["cloud_init_mode"] == CloudInitMode.INJECT
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     @patch("mvmctl.cli.vm.create_vm")
     def test_vm_create_explicit_direct_mode(
         self,
         mock_create_vm,
         mock_resolve_image,
+        mock_fc_bin,
         mock_check_priv,
         tmp_path,
     ):
         """Test that --cloud-init-mode direct is properly parsed."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = tmp_path / "image.ext4"
 
         mock_vm = MagicMock()
@@ -89,15 +95,18 @@ class TestVMDirectInjection:
         assert kwargs.get("cloud_init_mode") == CloudInitMode.INJECT
 
     @patch("mvmctl.api.vms.check_privileges_interactive")
+    @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
     @patch("mvmctl.cli.vm.resolve_image_multi_strategy")
     def test_vm_create_invalid_mode_rejected(
         self,
         mock_resolve_image,
+        mock_fc_bin,
         mock_check_priv,
         tmp_path,
     ):
         """Test that invalid cloud-init modes are rejected."""
         mock_check_priv.return_value = None
+        mock_fc_bin.return_value = "/usr/local/bin/firecracker"
         mock_resolve_image.return_value = tmp_path / "image.ext4"
 
         runner = CliRunner()

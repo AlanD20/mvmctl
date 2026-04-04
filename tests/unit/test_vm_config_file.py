@@ -149,11 +149,8 @@ def test_merge_cli_overrides_all_fields():
 
 
 def test_build_vm_config_file_includes_firecracker_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-
     with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen_cls:
         mock_gen = MagicMock()
         mock_gen.generate.return_value = {
@@ -176,11 +173,8 @@ def test_build_vm_config_file_includes_firecracker_config(
 
 
 def test_build_vm_config_file_with_firecracker_config_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-
     with patch("mvmctl.api.vm_config.ConfigGenerator", side_effect=Exception("fail")):
         cfg = build_vm_config_file(name="vm", image="img")
 
@@ -245,10 +239,8 @@ def test_vm_create_config_file_cloud_init_in_json_file_roundtrip(tmp_path: Path)
     assert cfg2.cloud_init == cloud_init_data
 
 
-def test_build_vm_config_file_includes_cloud_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_build_vm_config_file_includes_cloud_init(tmp_path: Path):
     """Test that build_vm_config_file includes cloud_init in returned config."""
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
 
     cloud_init_data = {"mode": "nocloud-net", "enabled": True}
 

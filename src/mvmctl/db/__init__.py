@@ -7,7 +7,6 @@ No other file may import from this module directly.
 from .migrations.runner import MigrationRunner
 from .models import (
     Binary,
-    BinaryDefault,
     HostState,
     HostStateChange,
     Image,
@@ -22,7 +21,6 @@ __all__ = [
     "Image",
     "Kernel",
     "Binary",
-    "BinaryDefault",
     "Network",
     "NetworkLease",
     "VMState",

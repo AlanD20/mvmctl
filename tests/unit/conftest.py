@@ -28,26 +28,31 @@ def _mock_mvm_group_membership(request):
 
 
 @pytest.fixture
-def mock_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Creates a mock cache directory with a fake kernel and image."""
-    kernels_dir = tmp_path / "kernels"
+def mock_cache_dir(tmp_path: Path) -> Path:
+    from tests.helpers.paths import make_test_paths
+
+    paths = make_test_paths(tmp_path)
+    cache_dir = paths.cache
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    kernels_dir = cache_dir / "kernels"
     kernels_dir.mkdir(parents=True)
     (kernels_dir / "vmlinux").write_text("fake kernel")
 
-    images_dir = tmp_path / "images"
+    images_dir = cache_dir / "images"
     images_dir.mkdir(parents=True)
     (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
 
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    return tmp_path
+    return cache_dir
 
 
 @pytest.fixture
-def mock_keys_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Creates a mock keys directory."""
-    keys_dir = tmp_path / "keys"
-    keys_dir.mkdir(parents=True)
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
+def mock_keys_dir(tmp_path: Path) -> Path:
+    from tests.helpers.paths import make_test_paths
+
+    cache_dir = make_test_paths(tmp_path).cache
+    keys_dir = cache_dir / "keys"
+    keys_dir.mkdir(parents=True, exist_ok=True)
     return keys_dir
 
 
@@ -134,7 +139,7 @@ def sample_network_config() -> dict:
         "name": "default",
         "bridge": "mvm-br0",
         "subnet": "10.20.0.0/24",
-        "gateway": "10.20.0.1",
+        "ipv4_gateway": "10.20.0.1",
     }
 
 

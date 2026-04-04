@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from mvmctl.db.models import (
     Binary,
-    BinaryDefault,
     HostState,
     HostStateChange,
     Image,
@@ -233,53 +232,43 @@ class TestBinary:
         )
         assert binary1 == binary2
 
-
-class TestBinaryDefault:
-    """Tests for BinaryDefault dataclass."""
-
-    def test_binary_default_instantiation_required_fields_only(self) -> None:
-        """BinaryDefault can be instantiated with required fields only."""
-        binary_default = BinaryDefault(
+    def test_binary_is_default_defaults_to_false(self) -> None:
+        """Binary is_default defaults to False."""
+        binary = Binary(
+            id="c" * 64,
             name="firecracker",
-            version="v1.15.0",
+            version="1.15.0",
             path="/cache/bin/firecracker-1.15.0",
         )
-        assert binary_default.name == "firecracker"
-        assert binary_default.version == "v1.15.0"
-        assert binary_default.path == "/cache/bin/firecracker-1.15.0"
+        assert binary.is_default is False
 
-    def test_binary_default_optional_fields_default_to_none(self) -> None:
-        """BinaryDefault optional fields default to None."""
-        binary_default = BinaryDefault(
+    def test_binary_with_is_default_true(self) -> None:
+        """Binary can be instantiated with is_default=True."""
+        binary = Binary(
+            id="c" * 64,
             name="firecracker",
-            version="v1.15.0",
+            version="1.15.0",
             path="/cache/bin/firecracker-1.15.0",
+            is_default=True,
         )
-        assert binary_default.updated_at is None
+        assert binary.is_default is True
 
-    def test_binary_default_with_all_fields(self) -> None:
-        """BinaryDefault can be instantiated with all fields."""
-        binary_default = BinaryDefault(
+    def test_binary_with_all_fields_including_is_default(self) -> None:
+        """Binary can be instantiated with all fields including is_default."""
+        binary = Binary(
+            id="c" * 64,
             name="firecracker",
-            version="v1.15.0",
+            version="1.15.0",
             path="/cache/bin/firecracker-1.15.0",
+            full_version="v1.15.0",
+            ci_version="1.15.0-ci",
+            is_default=True,
+            created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
         )
-        assert binary_default.updated_at == "2026-04-02T10:00:00Z"
-
-    def test_binary_default_equality(self) -> None:
-        """BinaryDefaults with same fields are equal."""
-        bd1 = BinaryDefault(
-            name="firecracker",
-            version="v1.15.0",
-            path="/cache/bin/firecracker-1.15.0",
-        )
-        bd2 = BinaryDefault(
-            name="firecracker",
-            version="v1.15.0",
-            path="/cache/bin/firecracker-1.15.0",
-        )
-        assert bd1 == bd2
+        assert binary.full_version == "v1.15.0"
+        assert binary.ci_version == "1.15.0-ci"
+        assert binary.is_default is True
 
 
 class TestNetwork:

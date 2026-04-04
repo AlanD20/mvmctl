@@ -1,155 +1,6 @@
-# Subagent Instructions
- 
-## Agent Role: ORCHESTRATOR ONLY
- 
-You are the **orchestrating agent**. You **NEVER** read files or edit code yourself. ALL work is done via subagents.
- 
----
- 
-### ⚠️ ABSOLUTE RULES
- 
-1. **NEVER read files yourself** — spawn a subagent to do it
-2. **NEVER edit/create code yourself** — spawn a subagent to do it
-3. **ALWAYS use default subagent** — NEVER use `agentName: "Plan"` (omit `agentName` entirely)
-
-### User Confirmation Required
-
-**NEVER implement changes immediately without user confirmation.**
-
-Before making any code changes:
-1. Present your proposed approach to the user
-2. Explain what you intend to do and why
-3. Wait for explicit user approval
-4. Only proceed with implementation after receiving confirmation
-
-This applies to all edits, fixes, features, and refactoring. No exceptions.
-
----
-
-### Mandatory Workflow (NO EXCEPTIONS)
- 
-```
-User Request
-    ↓
-SUBAGENT #1: Research & Spec
-    - Reads files, analyzes codebase
-    - Creates spec/analysis doc in docs/analyses/
-    - Returns summary to you
-    ↓
-YOU: Receive results, spawn next subagent
-    ↓
-SUBAGENT #2: Implementation (FRESH context)
-    - Receives the spec file path
-    - Implements/codes based on spec
-    - Returns completion summary
-```
- 
----
- 
-### runSubagent Tool Usage
- 
-```
-runSubagent(
-  description: "3-5 word summary",  // REQUIRED
-  prompt: "Detailed instructions"   // REQUIRED
-)
-```
- 
-**NEVER include `agentName`** — always use default subagent (has full read/write capability).
- 
-**If you get errors:**
-- "disabled by user" → You may have included `agentName`. Remove it.
-- "missing required property" → Include BOTH `description` and `prompt`
- 
----
- 
-### Subagent Prompt Templates
- 
-**Research Subagent:**
-```
-Research [topic]. Analyze relevant files in the codebase.
-Create a spec/analysis doc at: docs/analyses/[NAME].md
-Return: summary of findings and the spec file path.
-```
- 
-**Implementation Subagent:**
-```
-Read the spec at: docs/analyses/[NAME].md
-Implement according to the spec.
-Return: summary of changes made.
-```
- 
----
- 
-### What YOU Do (Orchestrator)
- 
-✅ Receive user requests  
-✅ Spawn subagents with clear prompts  
-✅ Pass spec paths between subagents  
-✅ Run terminal commands  
- 
-### What YOU DON'T Do
-
-❌ Read files (use subagent)  
-❌ Edit/create code (use subagent)  
-❌ Use `agentName: "Plan"` (always omit it)  
-❌ "Quick look" at files before delegating
-
----
-
-### CI Verification (MANDATORY)
-
-**ALL code changes MUST pass CI checks before completion.**
-
-Before finishing any implementation, you MUST verify:
-
-1. **Ruff Linting** — `uv run ruff check src/` must be clean
-2. **Ruff Formatting** — `uv run ruff format --check src/` must pass  
-3. **Type Checking** — `uv run mypy src/` must pass (strict mode)
-4. **Tests** — `uv run pytest tests/ -q --cov=src/mvmctl --cov-fail-under=80` must pass
-
-**If checks fail:**
-- Fix linting/formatting issues with `uv run ruff check src/ --fix` and `uv run ruff format src/`
-- Fix type errors with proper type annotations
-- Fix failing tests — NEVER delete tests to make them pass
-
----
-
-### Commit Authorship (MANDATORY)
-
-**DO NOT add `Co-authored-by` trailers unless the co-author actually contributed to that specific change.**
-
-- Only add co-authors when they **directly contributed code, review, or significant input** to that specific commit
-- Do NOT add co-authors as a blanket practice on every commit
-- Do NOT add co-authors just because they are part of the project or team
-- When in doubt, **omit the co-author trailer entirely**
-
-**Correct:**
-```
-feat: add new VM snapshot feature
-
-Co-authored-by: Alice <alice@example.com>  # Alice wrote part of this feature
-```
-
-**Incorrect:**
-```
-style: fix formatting
-
-Co-authored-by: Adam <adam@example.com>  # WRONG - no contribution to this change
-```
-
----
-
-### Agent CLI Execution
- 
-To execute the `mvmctl` CLI with proper group privileges, use:
-`sg mvm -c 'mvm ...'`
-
----
-
 # mvmctl/cli/ — CLI Layer
 
-**Scope:** Typer command definitions only — arg parsing, output formatting, NO business logic  
+**Scope:** Typer command definitions only — arg parsing, output formatting, NO business logic
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Call `api/` for everything; never import from `core/` directly
 
@@ -164,6 +15,11 @@ src/mvmctl/cli/
 ├── network.py     # Network subcommands: create, rm, ls, inspect
 ├── key.py         # SSH key subcommands: add, create, ls, rm, inspect
 ├── config.py      # Config subcommands: get, set, show, validate, dump-vm
+├── console.py     # VM console access via PTY-over-vsock
+├── cache.py       # Cache management commands
+├── ssh.py         # SSH helper commands
+├── logs.py        # Log viewing commands
+├── init.py        # mvm init onboarding wizard
 └── _helpers.py    # Internal: check_name_arg() guard for positional name args
 ```
 
@@ -179,9 +35,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "key":       _LazyCommandSpec("mvmctl.cli.key",        "app",         "SSH key management"),
     "config":    _LazyCommandSpec("mvmctl.cli.config",     "app",         "Configuration commands"),
     "configure": _LazyCommandSpec("mvmctl.cli.configure",  "app",         "Guided setup wizard"),
-    "kernel":    _LazyCommandSpec("mvmctl.cli.bin",      "kernel_app",  "Kernel management"),
-    "image":     _LazyCommandSpec("mvmctl.cli.bin",      "image_app",   "Image management"),
-    "bin":       _LazyCommandSpec("mvmctl.cli.bin",      "bin_app",     "Binary management"),
+    "kernel":    _LazyCommandSpec("mvmctl.cli.asset",     "kernel_app",  "Kernel management"),
+    "image":     _LazyCommandSpec("mvmctl.cli.asset",     "image_app",   "Image management"),
+    "bin":       _LazyCommandSpec("mvmctl.cli.asset",     "bin_app",     "Binary management"),
 }
 ```
 
@@ -208,7 +64,7 @@ Missing `rich_markup_mode=None` causes Rich markup in help output.
 
 Typer option defaults must be `None`. Config-backed values resolved at runtime.
 
-**Why:** Defaults come from state/config at runtime (`$MVM_CACHE_DIR/metadata.json` for image/kernel/binary defaults and `assets/defaults.yaml` for static defaults). Hardcoding in `typer.Option()` bypasses user config/state.
+**Why:** Defaults come from state/config at runtime (SQLite `$MVM_CACHE_DIR/mvmdb.db` for image/kernel/binary defaults and `assets/defaults.yaml` for static defaults). Hardcoding in `typer.Option()` bypasses user config/state.
 
 ```python
 # CORRECT — default None, resolve at runtime
@@ -244,7 +100,7 @@ Single file exports three separate `typer.Typer()` instances:
 
 | App | Attribute | Commands |
 |-----|-----------|----------|
-| `kernel_app` | `kernel_ls`, `kernel_fetch`, `kernel_set_default`, `kernel_rm` | `--type firecracker\|official`, `--name`, `--clean-build` for fetch |
+| `kernel_app` | `kernel_ls`, `kernel_fetch`, `kernel_set_default`, `kernel_rm` | `--type firecracker|official`, `--name`, `--clean-build` for fetch |
 | `image_app` | `image_ls`, `image_fetch`, `image_set_default`, `image_rm`, `image_import` | Hash-based ID; `_find_meta_for_internal_id()` for YAML lookup |
 | `bin_app` | `bin_ls`, `bin_fetch`, `bin_set_default`, `bin_rm` | SHA256 verified against GitHub releases |
 
@@ -268,15 +124,6 @@ Single file exports three separate `typer.Typer()` instances:
 **Flags:**
 - `--non-interactive` — use defaults, skip all prompts
 - `--skip-host` — bypass privilege setup step
-
-**Entry point:**
-```python
-@app.callback(invoke_without_command=True)
-def configure(
-    non_interactive: bool = typer.Option(False, "--non-interactive", ...),
-    skip_host: bool = typer.Option(False, "--skip-host", ...),
-) -> None:
-```
 
 ## VM RM — ID VS NAME RESOLUTION
 
@@ -313,7 +160,7 @@ def create(
     # ...
 ) -> None:
     defaults = _get_vm_defaults()
-    
+
     effective_image = image or _resolve_default_image()
     effective_kernel = kernel or _resolve_default_kernel()
     effective_vcpus = vcpus if vcpus is not None else defaults.vcpu_count

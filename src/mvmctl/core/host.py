@@ -18,7 +18,7 @@ from mvmctl.core.host_setup import (
     get_ip_forward_status,
     init_host,
 )
-from mvmctl.core.host_state import HostChange, HostState, _state_file, get_host_state, restore_host
+from mvmctl.core.host_state import HostStateChange, HostState, _state_file, get_host_state, restore_host
 from mvmctl.exceptions import HostError
 
 __all__ = [

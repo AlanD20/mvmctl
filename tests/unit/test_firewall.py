@@ -3,6 +3,8 @@
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from mvmctl.core import firewall
 
 
@@ -193,3 +195,122 @@ class TestPrivilegedCmdUsage:
                 )
 
                 mock_priv.assert_called_once()
+
+
+class TestApplyIptablesRulesBatch:
+    """Tests for _apply_iptables_rules_batch."""
+
+    def test_empty_rules_returns_immediately(self):
+        """_apply_iptables_rules_batch should return early for empty rules."""
+        with patch.object(firewall, "subprocess") as mock_subprocess:
+            firewall._apply_iptables_rules_batch([])
+            mock_subprocess.run.assert_not_called()
+
+    def test_raises_network_error_on_failure(self):
+        """_apply_iptables_rules_batch should raise NetworkError on CalledProcessError."""
+        from mvmctl.exceptions import NetworkError
+
+        with patch.object(firewall, "subprocess") as mock_subprocess:
+            mock_subprocess.run.side_effect = subprocess.CalledProcessError(
+                1, ["iptables-restore"], stderr="error"
+            )
+            mock_subprocess.CalledProcessError = subprocess.CalledProcessError
+
+            rules = [{"table": "filter", "chain": "TEST", "rule": "-A TEST -j ACCEPT"}]
+            with pytest.raises(NetworkError):
+                firewall._apply_iptables_rules_batch(rules)
+
+
+class TestCreateChainIfMissing:
+    """Tests for _create_chain_if_missing."""
+
+    def test_returns_false_when_chain_exists(self):
+        """_create_chain_if_missing should return False when chain already exists."""
+        with patch.object(firewall, "_chain_exists", return_value=True):
+            result = firewall._create_chain_if_missing("TEST_CHAIN")
+            assert result is False
+
+    def test_handles_chain_already_exists_error(self):
+        """_create_chain_if_missing should return False on 'Chain already exists' error."""
+        error = subprocess.CalledProcessError(1, ["iptables"], stderr=b"Chain already exists")
+        with patch.object(firewall, "_chain_exists", return_value=False):
+            with patch.object(firewall, "subprocess") as mock_subprocess:
+                mock_subprocess.run.side_effect = error
+                mock_subprocess.CalledProcessError = subprocess.CalledProcessError
+
+                result = firewall._create_chain_if_missing("TEST_CHAIN")
+                assert result is False
+
+    def test_raises_on_other_error(self):
+        """_create_chain_if_missing should raise NetworkError on other errors."""
+        from mvmctl.exceptions import NetworkError
+
+        error = subprocess.CalledProcessError(1, ["iptables"], stderr=b"Permission denied")
+        with patch.object(firewall, "_chain_exists", return_value=False):
+            with patch.object(firewall, "subprocess") as mock_subprocess:
+                mock_subprocess.run.side_effect = error
+                mock_subprocess.CalledProcessError = subprocess.CalledProcessError
+
+                with pytest.raises(NetworkError, match="Failed to create"):
+                    firewall._create_chain_if_missing("TEST_CHAIN")
+
+
+class TestSetupNocloudInputChainErrors:
+    """Tests for setup_nocloud_input_chain error handling."""
+
+    def test_raises_on_jump_insert_failure(self):
+        """setup_nocloud_input_chain should raise NetworkError on jump insert failure."""
+        from mvmctl.exceptions import NetworkError
+
+        error = subprocess.CalledProcessError(1, ["iptables"], stderr="fail")
+        with patch.object(firewall, "_create_chain_if_missing", return_value=True):
+            with patch.object(firewall, "_iptables_rule_exists", return_value=False):
+                with patch.object(firewall, "subprocess") as mock_subprocess:
+                    mock_subprocess.run.side_effect = [
+                        MagicMock(returncode=0),
+                        error,
+                    ]
+                    mock_subprocess.CalledProcessError = subprocess.CalledProcessError
+
+                    with pytest.raises(NetworkError, match="Failed to add jump"):
+                        firewall.setup_nocloud_input_chain()
+
+
+class TestCleanupNocloudInputRulesErrors:
+    """Tests for cleanup_nocloud_input_rules error handling."""
+
+    def test_returns_when_chain_not_exists(self):
+        """cleanup_nocloud_input_rules should return early when chain doesn't exist."""
+        with patch.object(firewall, "_chain_exists", return_value=False):
+            with patch.object(firewall, "subprocess") as mock_subprocess:
+                firewall.cleanup_nocloud_input_rules()
+                mock_subprocess.run.assert_not_called()
+
+    def test_raises_on_flush_failure(self):
+        """cleanup_nocloud_input_rules should raise NetworkError on flush failure."""
+        from mvmctl.exceptions import NetworkError
+
+        error = subprocess.CalledProcessError(1, ["iptables"], stderr="fail")
+        with patch.object(firewall, "_chain_exists", return_value=True):
+            with patch.object(firewall, "subprocess") as mock_subprocess:
+                mock_subprocess.run.side_effect = error
+                mock_subprocess.CalledProcessError = subprocess.CalledProcessError
+
+                with pytest.raises(NetworkError, match="Failed to flush"):
+                    firewall.cleanup_nocloud_input_rules()
+
+
+class TestBuildIptablesRestoreInput:
+    """Tests for _build_iptables_restore_input."""
+
+    def test_groups_rules_by_table(self):
+        """Rules with same table should be grouped together."""
+        rules = [
+            {"table": "filter", "chain": "INPUT", "rule": "-j ACCEPT"},
+            {"table": "filter", "chain": "OUTPUT", "rule": "-j DROP"},
+            {"table": "nat", "chain": "PREROUTING", "rule": "-j DNAT"},
+        ]
+        result = firewall._build_iptables_restore_input(rules)
+        assert "*filter" in result
+        assert "*nat" in result
+        assert "COMMIT" in result

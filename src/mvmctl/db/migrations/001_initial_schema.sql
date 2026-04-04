@@ -50,20 +50,12 @@ CREATE TABLE binaries (
     full_version TEXT,
     ci_version TEXT,
     path TEXT NOT NULL,
+    is_default BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_binaries_name ON binaries(name);
 CREATE INDEX idx_binaries_version ON binaries(version);
-
--- BINARY_DEFAULTS: Default binary paths (replaces symlinks)
--- JSON mappings: full_version -> version
-CREATE TABLE binary_defaults (
-    name TEXT PRIMARY KEY,
-    version TEXT NOT NULL,
-    path TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
 
 -- NETWORKS: Named network definitions
 -- JSON mappings: cidr -> subnet, gateway -> ipv4_gateway

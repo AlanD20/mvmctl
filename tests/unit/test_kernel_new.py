@@ -13,7 +13,10 @@ from mvmctl.core.kernel import (
     save_kernel_metadata,
     set_default_kernel,
 )
+from mvmctl.core.mvm_db import MVMDatabase
+from mvmctl.db.models import Kernel
 from mvmctl.exceptions import KernelError
+from mvmctl.utils.fs import get_cache_dir
 
 
 def test_parse_kernel_filename_fc_with_v_prefix():
@@ -59,175 +62,255 @@ def test_parse_kernel_filename_with_aarch64():
 
 
 def test_save_kernel_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    kernel_file = tmp_path / "vmlinux"
+    """Test saving kernel metadata to SQLite database."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    kernel_file = kernels_dir / "vmlinux"
     kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
-    full_id = save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
-    import json
+
+    full_id = save_kernel_metadata(kernels_dir, "vmlinux", version="6.1.9", kernel_type="official")
 
     assert len(full_id) == 16
-    meta_file = tmp_path / "metadata.json"
-    assert meta_file.exists()
-    data = json.loads(meta_file.read_text())
-    assert full_id in data["kernels"]
-    entry = data["kernels"][full_id]
-    assert entry["filename"] == "vmlinux"
-    assert entry["full_hash"] == full_id
-    assert entry["name"] == "vmlinux"
-    assert entry["base_name"] == "vmlinux"
-    assert entry["version"] == "6.1.9"
-    assert entry["type"] == "official"
-    assert "last_modified" in entry
+
+    # Verify in SQLite database
+    db = MVMDatabase()
+    kernel = db.get_kernel(full_id)
+    assert kernel is not None
+    assert kernel.name == "vmlinux"
+    assert kernel.base_name == "vmlinux"
+    assert kernel.version == "6.1.9"
+    assert kernel.type == "official"
+    assert kernel.path == "vmlinux"
 
 
 def test_save_kernel_metadata_parses_filename(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    kernel_file = tmp_path / "vmlinux-fc-v1.15-x86_64"
+    """Test saving kernel metadata with filename parsing."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    kernel_file = kernels_dir / "vmlinux-fc-v1.15-x86_64"
     kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
-    full_id = save_kernel_metadata(tmp_path, "vmlinux-fc-v1.15-x86_64", kernel_type="firecracker")
-    import json
+
+    full_id = save_kernel_metadata(
+        kernels_dir, "vmlinux-fc-v1.15-x86_64", kernel_type="firecracker"
+    )
 
     assert len(full_id) == 16
-    meta_file = tmp_path / "metadata.json"
-    data = json.loads(meta_file.read_text())
-    assert full_id in data["kernels"]
-    entry = data["kernels"][full_id]
-    assert entry["filename"] == "vmlinux-fc-v1.15-x86_64"
-    assert entry["full_hash"] == full_id
-    assert entry["base_name"] == "vmlinux-fc"
-    assert entry["version"] == "v1.15"
-    assert entry["arch"] == "x86_64"
-    assert entry["type"] == "firecracker"
-    assert "last_modified" in entry
+
+    # Verify in SQLite database
+    db = MVMDatabase()
+    kernel = db.get_kernel(full_id)
+    assert kernel is not None
+    assert kernel.name == "vmlinux-fc-v1.15-x86_64"
+    assert kernel.base_name == "vmlinux-fc"
+    assert kernel.version == "v1.15"
+    assert kernel.arch == "x86_64"
+    assert kernel.type == "firecracker"
 
 
-def test_list_kernels_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    result = list_kernels(tmp_path)
+def test_list_kernels_empty():
+    """Test listing kernels when directory is empty."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    result = list_kernels(kernels_dir)
     assert result == []
 
 
-def test_list_kernels_with_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    (tmp_path / "vmlinux").write_bytes(b"\x7fELF" + b"\x00" * 100)
-    import json as _json
+def test_list_kernels_with_file():
+    """Test listing kernels with a kernel file present."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
 
+    # Create kernel file
+    kernel_file = kernels_dir / "vmlinux"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    # Insert kernel into database directly
+    db = MVMDatabase()
     fake_id = "a" * 16
-    (tmp_path / "metadata.json").write_text(
-        _json.dumps(
-            {
-                "kernels": {
-                    fake_id: {"filename": "vmlinux", "last_modified": "2026-01-01T00:00:00"}
-                },
-                "images": {},
-            }
-        )
+    from datetime import datetime, timezone
+
+    kernel = Kernel(
+        id=fake_id,
+        name="vmlinux",
+        base_name="vmlinux",
+        version="-",
+        arch="-",
+        type="official",
+        path="vmlinux",
+        is_default=False,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        updated_at=datetime.now(timezone.utc).isoformat(),
     )
-    result = list_kernels(tmp_path)
+    db.upsert_kernel(kernel)
+
+    result = list_kernels(kernels_dir)
     assert len(result) == 1
     assert result[0]["id"] == fake_id
     assert result[0]["full_name"] == "vmlinux"
     assert "size" in result[0]
 
 
-def test_list_kernels_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    (tmp_path / "vmlinux").write_bytes(b"\x7fELF" + b"\x00" * 100)
-    save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
-    result = list_kernels(tmp_path)
+def test_list_kernels_with_metadata():
+    """Test listing kernels with metadata from database."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create kernel file
+    kernel_file = kernels_dir / "vmlinux"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    # Save metadata via the function
+    save_kernel_metadata(kernels_dir, "vmlinux", version="6.1.9", kernel_type="official")
+
+    result = list_kernels(kernels_dir)
     assert len(result) == 1
     assert result[0]["version"] == "6.1.9"
     assert result[0]["type"] == "official"
 
 
-def test_list_kernels_skips_json_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
-    import json as _json
+def test_list_kernels_shows_orphaned_entries():
+    """Test that orphaned kernel entries (file missing) are still shown for CLI X mark."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
 
-    (tmp_path / "metadata.json").write_text(
-        _json.dumps(
-            {"kernels": {"vmlinux": {"last_modified": "2026-01-01T00:00:00"}}, "images": {}}
-        )
-    )
-    result = list_kernels(tmp_path)
+    # Create kernel file
+    kernel_file = kernels_dir / "vmlinux"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+    # Save metadata
+    save_kernel_metadata(kernels_dir, "vmlinux", version="6.1.9", kernel_type="official")
+
+    # List should find the kernel
+    result = list_kernels(kernels_dir)
     assert len(result) == 1
 
+    # Remove the file
+    kernel_file.unlink()
 
-def test_set_default_kernel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
-    kernel_id = save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
-    set_default_kernel(tmp_path, "vmlinux")
-    import json
-
-    data = json.loads((tmp_path / "metadata.json").read_text())
-    assert data["kernels"][kernel_id]["is_default"] == 1
+    # List should still show the kernel (orphaned entry shown with X mark in CLI)
+    result = list_kernels(kernels_dir)
+    assert len(result) == 1
+    assert result[0]["size"] == "0.0 MiB"  # Size is 0 when file missing
 
 
-def test_set_default_kernel_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
+def test_set_default_kernel():
+    """Test setting a kernel as default."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create kernel file
+    kernel_file = kernels_dir / "vmlinux"
+    kernel_file.write_bytes(b"\x7fELF")
+
+    # Save metadata
+    kernel_id = save_kernel_metadata(
+        kernels_dir, "vmlinux", version="6.1.9", kernel_type="official"
+    )
+
+    # Set as default
+    set_default_kernel(kernels_dir, "vmlinux")
+
+    # Verify in database
+    db = MVMDatabase()
+    kernel = db.get_kernel(kernel_id)
+    assert kernel is not None
+    assert kernel.is_default
+
+
+def test_set_default_kernel_not_found():
+    """Test setting nonexistent kernel as default raises error."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
     with pytest.raises(KernelError):
-        set_default_kernel(tmp_path, "nonexistent")
+        set_default_kernel(kernels_dir, "nonexistent")
 
 
-def test_get_default_kernel_path_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    vmlinux = tmp_path / "vmlinux"
+def test_get_default_kernel_path_set():
+    """Test getting default kernel path when set."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create kernel file
+    vmlinux = kernels_dir / "vmlinux"
     vmlinux.write_bytes(b"\x7fELF")
-    save_kernel_metadata(tmp_path, "vmlinux", version="6.1.9", kernel_type="official")
-    set_default_kernel(tmp_path, "vmlinux")
-    result = get_default_kernel_path(tmp_path)
+
+    # Save metadata and set as default
+    save_kernel_metadata(kernels_dir, "vmlinux", version="6.1.9", kernel_type="official")
+    set_default_kernel(kernels_dir, "vmlinux")
+
+    result = get_default_kernel_path(kernels_dir)
     assert result == vmlinux
 
 
-def test_get_default_kernel_path_no_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    vmlinux = tmp_path / "vmlinux"
+def test_get_default_kernel_path_no_fallback():
+    """Test getting default kernel returns None when no default set."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create kernel file without setting default
+    vmlinux = kernels_dir / "vmlinux"
     vmlinux.write_bytes(b"\x7fELF")
-    result = get_default_kernel_path(tmp_path)
+    save_kernel_metadata(kernels_dir, "vmlinux", version="6.1.9", kernel_type="official")
+
+    result = get_default_kernel_path(kernels_dir)
     assert result is None
 
 
-def test_get_default_kernel_path_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    result = get_default_kernel_path(tmp_path)
+def test_get_default_kernel_path_none():
+    """Test getting default kernel when no kernels exist."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    result = get_default_kernel_path(kernels_dir)
     assert result is None
 
 
-def test_list_kernels_shows_default_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-    (tmp_path / "vmlinux").write_bytes(b"\x7fELF")
-    import json as _json
+def test_list_kernels_shows_default_marker():
+    """Test that default kernel is marked in list output."""
+    cache_dir = get_cache_dir()
+    kernels_dir = cache_dir / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
 
-    kernel_id = "a" * 64
-    (tmp_path / "metadata.json").write_text(
-        _json.dumps(
-            {
-                "kernels": {
-                    kernel_id: {
-                        "filename": "vmlinux",
-                        "last_modified": "2026-01-01T00:00:00",
-                    }
-                },
-                "images": {},
-            }
-        )
+    # Create kernel file
+    kernel_file = kernels_dir / "vmlinux"
+    kernel_file.write_bytes(b"\x7fELF")
+
+    # Insert kernel into database and set as default
+    db = MVMDatabase()
+    kernel_id = "a" * 16
+    from datetime import datetime, timezone
+
+    kernel = Kernel(
+        id=kernel_id,
+        name="vmlinux",
+        base_name="vmlinux",
+        version="-",
+        arch="-",
+        type="official",
+        path=str(kernel_file.relative_to(cache_dir)),
+        is_default=True,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        updated_at=datetime.now(timezone.utc).isoformat(),
     )
-    set_default_kernel(tmp_path, "vmlinux")
-    result = list_kernels(tmp_path)
+    db.upsert_kernel(kernel)
+    db.set_default_kernel(kernel_id)
+
+    result = list_kernels(kernels_dir)
     assert result[0]["is_default"] == "true"
 
 
@@ -252,10 +335,8 @@ def test_fetch_kernel_sha256_failure(mock_urlopen: MagicMock):
 @patch("mvmctl.core.kernel.download_file")
 @patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_success(
-    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
     xml_response = b"""<?xml version="1.0"?>
 <ListBucketResult>
 <Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
@@ -272,7 +353,10 @@ def test_download_firecracker_kernel_success(
 
     mock_dl.side_effect = fake_download
 
-    result = download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path)
+    kernels_dir = tmp_path / "cache" / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    result = download_firecracker_kernel("1.12", "amd64", kernels_dir=kernels_dir)
     from mvmctl.core.kernel import load_kernel_spec
 
     firecracker_spec = load_kernel_spec("kernel-firecracker")
@@ -368,11 +452,8 @@ def test_download_firecracker_kernel_requires_checksum_when_sha256_url_set(
 @patch("mvmctl.core.kernel.download_file")
 @patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_supports_version_placeholder_in_source(
-    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-
     xml_response = b"""<?xml version="1.0"?>
 <ListBucketResult>
 <Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
@@ -398,7 +479,10 @@ def test_download_firecracker_kernel_supports_version_placeholder_in_source(
 
     mock_dl.side_effect = fake_download
 
-    result = download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path)
+    kernels_dir = tmp_path / "cache" / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    result = download_firecracker_kernel("1.12", "amd64", kernels_dir=kernels_dir)
     assert result.exists()
 
     from mvmctl.core.kernel import load_kernel_spec
@@ -413,11 +497,8 @@ def test_download_firecracker_kernel_supports_version_placeholder_in_source(
 @patch("mvmctl.core.kernel.download_file")
 @patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_output_name_overrides_base_only(
-    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-
     xml_response = b"""<?xml version=\"1.0\"?>
 <ListBucketResult>
 <Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
@@ -436,10 +517,13 @@ def test_download_firecracker_kernel_output_name_overrides_base_only(
 
     mock_dl.side_effect = fake_download
 
+    kernels_dir = tmp_path / "cache" / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
     result = download_firecracker_kernel(
         "1.12",
         "amd64",
-        kernels_dir=tmp_path,
+        kernels_dir=kernels_dir,
         output_name="custom-base",
     )
 
@@ -449,11 +533,8 @@ def test_download_firecracker_kernel_output_name_overrides_base_only(
 @patch("mvmctl.core.kernel.download_file")
 @patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_output_path_is_explicit(
-    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-
     xml_response = b"""<?xml version=\"1.0\"?>
 <ListBucketResult>
 <Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
@@ -472,11 +553,14 @@ def test_download_firecracker_kernel_output_path_is_explicit(
 
     mock_dl.side_effect = fake_download
 
-    explicit_out = tmp_path / "my-explicit-kernel"
+    kernels_dir = tmp_path / "cache" / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
+    explicit_out = kernels_dir / "my-explicit-kernel"
     result = download_firecracker_kernel(
         "1.12",
         "amd64",
-        kernels_dir=tmp_path,
+        kernels_dir=kernels_dir,
         output_name="ignored-base",
         output_path=explicit_out,
     )
@@ -487,11 +571,8 @@ def test_download_firecracker_kernel_output_path_is_explicit(
 @patch("mvmctl.core.kernel.download_file")
 @patch("mvmctl.core.kernel.urlopen")
 def test_download_firecracker_kernel_uses_templated_sha256_url(
-    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
-    monkeypatch.setenv("MVM_CACHE_DIR", str(tmp_path))
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(tmp_path))
-
     xml_response = b"""<?xml version="1.0"?>
 <ListBucketResult>
 <Key>firecracker-ci/1.12/amd64/vmlinux-6.1.9</Key>
@@ -517,13 +598,16 @@ def test_download_firecracker_kernel_uses_templated_sha256_url(
 
     mock_dl.side_effect = fake_download
 
+    kernels_dir = tmp_path / "cache" / "kernels"
+    kernels_dir.mkdir(parents=True, exist_ok=True)
+
     from mvmctl.core.kernel import load_kernel_spec
 
     firecracker_spec = load_kernel_spec("kernel-firecracker")
     firecracker_spec.sha256_url = "https://example.com/{ci_version}/{arch}/vmlinux-{version}.sha256"
 
     result = download_firecracker_kernel(
-        "1.12", "amd64", kernels_dir=tmp_path, kernel_spec=firecracker_spec
+        "1.12", "amd64", kernels_dir=kernels_dir, kernel_spec=firecracker_spec
     )
 
     assert result.exists()

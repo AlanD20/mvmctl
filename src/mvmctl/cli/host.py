@@ -6,7 +6,7 @@ import sys
 import typer
 
 from mvmctl.api.host import (
-    HostChange,
+    HostStateChange,
     check_kvm_access,
     check_required_binaries,
     clean_host,
@@ -28,7 +28,7 @@ from mvmctl.utils.fs import chown_to_real_user, get_cache_dir
 _CHAIN_EXISTS_MARKER = "MVM chains already exist"
 
 
-def _format_change(change: HostChange) -> str:
+def _format_change(change: HostStateChange) -> str:
     """Return a concise one-line description of a host change for display."""
 
     m = change.mechanism

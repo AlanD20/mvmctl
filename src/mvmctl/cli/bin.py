@@ -28,13 +28,11 @@ from mvmctl.api.assets import (
 from mvmctl.api.metadata import (
     find_images_by_id_prefix,
     find_kernels_by_id_prefix,
-    get_default_binary_entry,
     get_default_image_entry,
     get_image_entry,
     list_image_entries,
     remove_image_entry,
     remove_kernel_entry,
-    set_default_binary_entry,
     set_default_image_by_internal_id,
     set_default_image_entry,
     update_image_entry,
@@ -43,7 +41,6 @@ from mvmctl.api.vms import get_vm_manager
 from mvmctl.cli._helpers import get_combined_marker, is_file_missing
 from mvmctl.constants import (
     COMPRESSION_EXTENSION_MAP,
-    DEFAULT_FC_CI_VERSION,
     DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_IMAGE_CONVERT_TO,
     DEFAULT_IMAGE_IMPORT_FORMAT,
@@ -310,14 +307,16 @@ def kernel_ls(
 def _get_ci_version() -> str:
     from mvmctl.api.config import get_firecracker_config
 
-    ci_version = get_firecracker_config().get("ci_version", "")
+    config = get_firecracker_config()
+    ci_version = config.get("ci_version", "")
     if not ci_version:
-        local = list_local_versions()
-        active = next((b for b in local if b.is_active), None)
-        if active:
-            parts = active.version.split(".")
-            ci_version = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else active.version
-    return ci_version or DEFAULT_FC_CI_VERSION
+        from mvmctl.exceptions import AssetNotFoundError
+
+        raise AssetNotFoundError(
+            "No CI version found for firecracker. "
+            "Fetch a binary first with: mvm bin fetch <version>"
+        )
+    return ci_version
 
 
 @kernel_app.command(name="fetch")
@@ -1517,10 +1516,7 @@ def bin_fetch(
         raise typer.Exit(code=1)
 
     print_success(f"Downloaded v{bv.version}: {bv.firecracker_path}")
-
-    cache_dir = get_cache_dir()
-    if get_default_binary_entry(cache_dir) is None:
-        set_default_binary_entry(cache_dir, bv.version)
+    if bv.is_active:
         print_success(f"Default binary set to v{bv.version}")
 
 

@@ -16,8 +16,8 @@ from pathlib import Path
 from mvmctl.constants import (
     BRIDGE_NAME,
     DEFAULT_GUEST_MAC_PREFIX,
-    DEFAULT_NETWORK_CIDR,
-    DEFAULT_NETWORK_GATEWAY,
+    DEFAULT_NETWORK_SUBNET,
+    DEFAULT_NETWORK_IPV4_GATEWAY,
     IPTABLES_CHAINS,
     MVM_FORWARD_CHAIN,
     MVM_POSTROUTING_CHAIN,
@@ -41,10 +41,10 @@ def _run_ip_batch(commands: list[str]) -> None:
 
 # Derived defaults from constants — kept as module-level aliases so existing
 # function signatures that reference them continue to work.
-BRIDGE_IP = DEFAULT_NETWORK_GATEWAY
-BRIDGE_CIDR = f"{DEFAULT_NETWORK_GATEWAY}/24"
-SUBNET = DEFAULT_NETWORK_CIDR
-GATEWAY = DEFAULT_NETWORK_GATEWAY
+BRIDGE_IP = DEFAULT_NETWORK_IPV4_GATEWAY
+BRIDGE_SUBNET = f"{DEFAULT_NETWORK_IPV4_GATEWAY}/24"
+SUBNET = DEFAULT_NETWORK_SUBNET
+IPV4_GATEWAY = DEFAULT_NETWORK_IPV4_GATEWAY
 
 # Interfaces to exclude when listing physical network interfaces
 _VIRTUAL_INTERFACE_PREFIXES = ("mvm-", "tap", "br-", "virbr", "docker", "veth")
@@ -128,8 +128,8 @@ def bridge_exists(bridge: str = BRIDGE_NAME) -> bool:
     return result.returncode == 0
 
 
-def _bridge_has_ip(bridge: str, cidr: str) -> bool:
-    """Return True if the bridge already has the given CIDR assigned."""
+def _bridge_has_ip(bridge: str, subnet: str) -> bool:
+    """Return True if the bridge already has the given subnet assigned."""
     result = subprocess.run(
         ["ip", "-o", "addr", "show", bridge],
         capture_output=True,
@@ -138,28 +138,28 @@ def _bridge_has_ip(bridge: str, cidr: str) -> bool:
     )
     if result.returncode != 0:
         return False
-    return cidr in result.stdout
+    return subnet in result.stdout
 
 
 def setup_bridge(
-    bridge: str = BRIDGE_NAME, cidr: str = BRIDGE_CIDR, gateway_cidr: str | None = None
+    bridge: str = BRIDGE_NAME, subnet: str = BRIDGE_SUBNET, ipv4_gateway_subnet: str | None = None
 ) -> None:
     """Create and configure the bridge interface.
 
     - Creates bridge with `ip link add {bridge} type bridge`
-    - Sets IP with `ip addr add {cidr} dev {bridge}`
+    - Sets IP with `ip addr add {subnet} dev {bridge}`
     - Brings it up with `ip link set {bridge} up`
     - Enables IP forwarding: writes 1 to /proc/sys/net/ipv4/ip_forward
     - Raises NetworkError on failure.
     - Is idempotent: if bridge already exists, does nothing.
     """
-    effective_cidr = gateway_cidr if gateway_cidr else cidr
+    effective_subnet = ipv4_gateway_subnet if ipv4_gateway_subnet else subnet
 
     if bridge_exists(bridge):
         logger.debug("Bridge %s already exists, reconciling state", bridge)
         reconcile_cmds: list[str] = []
-        if not _bridge_has_ip(bridge, effective_cidr):
-            reconcile_cmds.append(f"addr add {effective_cidr} dev {bridge}")
+        if not _bridge_has_ip(bridge, effective_subnet):
+            reconcile_cmds.append(f"addr add {effective_subnet} dev {bridge}")
         reconcile_cmds.append(f"link set {bridge} up")
         try:
             _run_ip_batch(reconcile_cmds)
@@ -171,7 +171,7 @@ def setup_bridge(
             _run_ip_batch(
                 [
                     f"link add name {bridge} type bridge",
-                    f"addr add {effective_cidr} dev {bridge}",
+                    f"addr add {effective_subnet} dev {bridge}",
                     f"link set {bridge} up",
                 ]
             )
@@ -192,7 +192,7 @@ def setup_bridge(
             logger.debug("Failed to enable IP forwarding", exc_info=True)
             raise NetworkError("Failed to enable IP forwarding") from e
 
-    logger.info("Bridge %s created with CIDR %s", bridge, cidr)
+    logger.info("Bridge %s created with subnet %s", bridge, subnet)
 
 
 def teardown_bridge(bridge: str = BRIDGE_NAME) -> None:
@@ -617,12 +617,12 @@ def setup_nat(
     bridge: str = BRIDGE_NAME,
     nat_gateways: list[str] | None = None,
     *,
-    cidr: str | None = None,
+    subnet: str | None = None,
 ) -> None:
     """Set up NAT (MASQUERADE) for the bridge subnet using MVM chains.
 
     - Gets nat_gateways via get_default_interface() if not provided
-    - Uses provided cidr or defaults to SUBNET constant for source filtering
+    - Uses provided subnet or defaults to SUBNET constant for source filtering
     - Adds MASQUERADE rule with source filtering to MVM-POSTROUTING chain for each gateway
     - Adds FORWARD rules to MVM-FORWARD chain for each gateway
     - Is idempotent: uses _ensure_iptables_rule for atomic rule application
@@ -631,13 +631,13 @@ def setup_nat(
     Args:
         bridge: Bridge interface name.
         nat_gateways: Physical interfaces for NAT (defaults to [default route interface]).
-        cidr: Source CIDR for NAT rules (defaults to SUBNET).
+        subnet: Source SUBNET for NAT rules (defaults to SUBNET).
     """
     if nat_gateways is None:
         nat_gateways = [get_default_interface()]
 
-    if cidr is None:
-        cidr = SUBNET
+    if subnet is None:
+        subnet = SUBNET
 
     forward_chain = MVM_FORWARD_CHAIN
     postrouting_chain = MVM_POSTROUTING_CHAIN
@@ -656,7 +656,7 @@ def setup_nat(
             "-C",
             postrouting_chain,
             "-s",
-            cidr,
+            subnet,
             "-o",
             gateway_iface,
             "-j",
@@ -673,7 +673,7 @@ def setup_nat(
             "-A",
             postrouting_chain,
             "-s",
-            cidr,
+            subnet,
             "-o",
             gateway_iface,
             "-j",
@@ -697,7 +697,7 @@ def setup_nat(
             "-C",
             forward_chain,
             "-s",
-            cidr,
+            subnet,
             "-i",
             bridge,
             "-o",
@@ -712,7 +712,7 @@ def setup_nat(
             "-A",
             forward_chain,
             "-s",
-            cidr,
+            subnet,
             "-i",
             bridge,
             "-o",
@@ -734,7 +734,7 @@ def setup_nat(
             "-C",
             forward_chain,
             "-d",
-            cidr,
+            subnet,
             "-i",
             gateway_iface,
             "-o",
@@ -749,7 +749,7 @@ def setup_nat(
             "-A",
             forward_chain,
             "-d",
-            cidr,
+            subnet,
             "-i",
             gateway_iface,
             "-o",
@@ -767,7 +767,7 @@ def setup_nat(
         "NAT rules configured for bridge %s via %s (source %s)",
         bridge,
         ", ".join(nat_gateways),
-        cidr,
+        subnet,
     )
 
 
@@ -775,7 +775,7 @@ def teardown_nat(
     bridge: str = BRIDGE_NAME,
     force: bool = False,
     *,
-    cidr: str | None = None,
+    subnet: str | None = None,
 ) -> None:
     """Remove NAT (MASQUERADE + FORWARD) rules for the bridge from MVM chains.
 
@@ -790,7 +790,7 @@ def teardown_nat(
     Args:
         bridge: Bridge interface name.
         force: If True, remove rules even if TAP devices are attached.
-        cidr: Source CIDR used in NAT rules (for precise rule deletion).
+        subnet: Source SUBNET used in NAT rules (for precise rule deletion).
                If None, attempts to detect from existing rules.
 
     Raises:
@@ -821,13 +821,13 @@ def teardown_nat(
         logger.debug("MVM chains do not exist, skipping NAT teardown")
         return
 
-    # If cidr not provided, try to detect it from existing rules
-    if cidr is None:
-        cidr = _detect_cidr_for_bridge(bridge)
+    # If subnet not provided, try to detect it from existing rules
+    if subnet is None:
+        subnet = _detect_subnet_for_bridge(bridge)
 
     comment = f"mvm-nat:{bridge}"
 
-    # Build MASQUERADE deletion rule - use source filtering if cidr known
+    # Build MASQUERADE deletion rule - use source filtering if subnet known
     masquerade_del_args: list[str] = [
         "iptables",
         "-t",
@@ -835,8 +835,8 @@ def teardown_nat(
         "-D",
         postrouting_chain,
     ]
-    if cidr:
-        masquerade_del_args.extend(["-s", cidr])
+    if subnet:
+        masquerade_del_args.extend(["-s", subnet])
     masquerade_del_args.extend(
         [
             "-o",
@@ -859,16 +859,16 @@ def teardown_nat(
     except subprocess.CalledProcessError as e:
         raise NetworkError("Failed to remove MASQUERADE rule") from e
 
-    # FORWARD rule deletions - use source/destination filtering if cidr known
+    # FORWARD rule deletions - use source/destination filtering if subnet known
     forward_del_rules: list[list[str]] = []
-    if cidr:
+    if subnet:
         forward_del_rules = [
             [
                 "iptables",
                 "-D",
                 forward_chain,
                 "-s",
-                cidr,
+                subnet,
                 "-i",
                 bridge,
                 "-o",
@@ -881,7 +881,7 @@ def teardown_nat(
                 "-D",
                 forward_chain,
                 "-d",
-                cidr,
+                subnet,
                 "-i",
                 internet_iface,
                 "-o",
@@ -902,17 +902,17 @@ def teardown_nat(
     logger.info("NAT rules removed for bridge %s via %s", bridge, internet_iface)
 
 
-def _detect_cidr_for_bridge(bridge: str) -> str | None:
-    """Detect the CIDR used for NAT rules associated with a bridge.
+def _detect_subnet_for_bridge(bridge: str) -> str | None:
+    """Detect the SUBNET used for NAT rules associated with a bridge.
 
     Examines existing iptables rules in MVM-POSTROUTING chain to find
-    the source CIDR used for MASQUERADE rules matching the bridge.
+    the source SUBNET used for MASQUERADE rules matching the bridge.
 
     Args:
         bridge: Bridge interface name.
 
     Returns:
-        The detected CIDR string (e.g. "172.35.0.0/24") or None if not found.
+        The detected SUBNET string (e.g. "172.35.0.0/24") or None if not found.
     """
     postrouting_chain = MVM_POSTROUTING_CHAIN
 
@@ -929,7 +929,7 @@ def _detect_cidr_for_bridge(bridge: str) -> str | None:
     comment = f"mvm-nat:{bridge}"
     for line in result.stdout.splitlines():
         if comment in line and "MASQUERADE" in line:
-            # Parse the line to extract source CIDR
+            # Parse the line to extract source SUBNET
             # Format: num   packets   bytes target     prot opt in     out     source               destination
             parts = line.split()
             if len(parts) >= 9:
@@ -1181,8 +1181,8 @@ def list_bridges() -> list[str]:
 
 def allocate_ip(
     existing_ips: list[str],
-    subnet: str = SUBNET,
-    gateway: str = GATEWAY,
+    subnet: str,
+    ipv4_gateway: str,
 ) -> str:
     """Allocate the next available IP in the subnet.
 
@@ -1195,7 +1195,7 @@ def allocate_ip(
 
     for host in network.hosts():
         ip_str = str(host)
-        if ip_str == gateway:
+        if ip_str == ipv4_gateway:
             continue
         if ip_str not in existing_set:
             return ip_str

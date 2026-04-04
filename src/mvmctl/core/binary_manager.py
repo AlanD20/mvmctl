@@ -23,6 +23,8 @@ from mvmctl.constants import (
     HTTP_USER_AGENT,
 )
 from mvmctl.core.metadata import set_default_binary_entry, update_binary_entry
+from mvmctl.core.mvm_db import MVMDatabase
+from mvmctl.db.models import Binary
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, MVMError
 from mvmctl.utils.fs import get_bin_dir, get_cache_dir
 from mvmctl.utils.progress import download_with_progress
@@ -75,7 +77,56 @@ def _active_target(symlink: Path) -> str | None:
 
 
 def list_local_versions(bin_dir: Path | None = None) -> list[BinaryVersion]:
-    """Scan bin_dir for firecracker-vX.X.X and jailer-vX.X.X files."""
+    """List locally cached Firecracker/jailer binary pairs.
+
+    **Canonical path (production):** Called without ``bin_dir``. Queries
+    SQLite (``MVMDatabase.list_binaries_by_name``) and derives ``is_active``
+    from the ``is_default`` column.  This is the only correct path for CLI
+    and API callers.
+
+    **Filesystem-discovery path (non-production):** When ``bin_dir`` is
+    explicitly provided, falls back to a filesystem scan
+    (``_list_local_versions_from_fs``).  Use only for one-time registration
+    of manually placed binaries.  Never pass ``bin_dir`` from CLI or API
+    code.
+    """
+    if bin_dir is not None:
+        return _list_local_versions_from_fs(bin_dir)
+
+    db = MVMDatabase()
+    fc_binaries = db.list_binaries_by_name("firecracker")
+    jl_binaries = db.list_binaries_by_name("jailer")
+
+    jl_by_version: dict[str, Binary] = {}
+    for jl_bin in jl_binaries:
+        jl_by_version[_normalize_version(jl_bin.version)] = jl_bin
+
+    result: list[BinaryVersion] = []
+    for fc in sorted(fc_binaries, key=lambda b: b.version, reverse=True):
+        normalized = _normalize_version(fc.version)
+        jl_bin_match = jl_by_version.get(normalized)
+        if jl_bin_match is None:
+            continue
+
+        fc_path = Path(fc.path)
+        jl_path = Path(jl_bin_match.path)
+        if not fc_path.exists() or not jl_path.exists():
+            continue
+
+        result.append(
+            BinaryVersion(
+                version=normalized,
+                firecracker_path=fc_path,
+                jailer_path=jl_path,
+                is_active=bool(fc.is_default),
+            )
+        )
+
+    return result
+
+
+def _list_local_versions_from_fs(bin_dir: Path) -> list[BinaryVersion]:
+    """Filesystem-scan implementation used for custom bin_dir / tests."""
     d = _resolve_bin_dir(bin_dir)
 
     fc_symlink = d / "firecracker"
@@ -148,7 +199,9 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     jl_dest = d / f"jailer-v{version}"
 
     if fc_dest.exists() and jl_dest.exists():
-        active = _active_target(d / "firecracker") == fc_dest.name
+        _db = MVMDatabase()
+        _default = _db.get_default_binary("firecracker")
+        active = _default is not None and _normalize_version(_default.version or "") == version
         return BinaryVersion(
             version=version,
             firecracker_path=fc_dest,
@@ -159,7 +212,6 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     tgz_url = f"{GITHUB_DOWNLOAD_URL}/v{version}/firecracker-v{version}-x86_64.tgz"
     sha256_url = f"{tgz_url}.sha256.txt"
 
-    # Fetch checksum first
     expected_sha256: str | None = None
     try:
         req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
@@ -210,7 +262,8 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     finally:
         tgz_path.unlink(missing_ok=True)
 
-    active = _active_target(d / "firecracker") == fc_dest.name
+    db = MVMDatabase()
+    no_default = db.get_default_binary("firecracker") is None
     cache_dir = get_cache_dir()
     update_binary_entry(
         cache_dir,
@@ -221,8 +274,13 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
         else f"v{version}",
         firecracker_path=str(fc_dest),
         jailer_path=str(jl_dest),
-        is_default=1 if active else 0,
+        is_default=1 if no_default else 0,
     )
+
+    active = no_default
+    if no_default:
+        set_active_version(version, d)
+
     return BinaryVersion(
         version=version,
         firecracker_path=fc_dest,
@@ -257,11 +315,6 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
             f"Version {version} not downloaded — run 'mvm bin fetch {version}' first"
         )
 
-    for link_name, target in [("firecracker", fc_src.name), ("jailer", jl_src.name)]:
-        link = d / link_name
-        link.unlink(missing_ok=True)
-        link.symlink_to(target)
-
     parts = version.split(".")
     ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{version}"
     full_version = f"v{version}"
@@ -271,14 +324,88 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
         version,
         full_version=full_version,
         ci_version=ci_version,
-        default_version=full_version,
-        default_binary_path=str(d / "firecracker"),
-        default_jailer_path=str(d / "jailer"),
         firecracker_path=str(fc_src),
         jailer_path=str(jl_src),
         is_default=1,
     )
     set_default_binary_entry(cache_dir, version)
+
+
+def ensure_default_binary(bin_dir: Path | None = None) -> str | None:
+    """Set a default binary if none is recorded; return active version or None."""
+    db = MVMDatabase()
+    existing_default = db.get_default_binary("firecracker")
+    if existing_default is not None and existing_default.path:
+        return _normalize_version(existing_default.version or "")
+
+    local = list_local_versions(bin_dir)
+    if not local:
+        return None
+
+    best = local[0]
+    set_active_version(best.version, bin_dir)
+    return best.version
+
+
+def get_binary_path(name: str, version: str | None = None) -> str:
+    """Return the filesystem path for the named binary.
+
+    Args:
+        name:    Binary name, e.g. "firecracker" or "jailer".
+        version: Specific version string, e.g. "1.15.0". If None, the binary
+                 marked is_default=1 for this name is used.
+
+    Returns:
+        Absolute path string to the binary file.
+
+    Raises:
+        AssetNotFoundError: If ``version`` is specified but not found locally.
+        AssetNotFoundError: If ``version`` is None and no binary for ``name``
+                            is marked as default.
+        AssetNotFoundError: If the resolved path does not exist on disk
+                            (stale/deleted entry).
+    """
+    db = MVMDatabase()
+
+    if version is not None:
+        normalized = _normalize_version(version)
+        binaries = db.list_binaries_by_name(name)
+        for b in binaries:
+            if (
+                b.version == normalized
+                or b.version == version
+                or (b.full_version and b.full_version.removeprefix("v") == normalized)
+            ):
+                if b.path:
+                    if not Path(b.path).exists():
+                        raise AssetNotFoundError(
+                            f"Binary '{name}' version '{version}' is registered but the file "
+                            f"is missing: {b.path} — run 'mvm bin fetch {version}' to re-download it."
+                        )
+                    return b.path
+        raise AssetNotFoundError(
+            f"Binary '{name}' version '{version}' not found locally. "
+            f"Run 'mvm bin fetch {version}' to download it."
+        )
+
+    default = db.get_default_binary(name)
+    if default is None:
+        raise AssetNotFoundError(
+            f"No active binary for '{name}' found — run 'mvm bin fetch <version>' to download "
+            f"one, or 'mvm bin set-default <version>' if you already have a local version."
+        )
+    if not default.path:
+        raise AssetNotFoundError(
+            f"No active binary for '{name}' found — run 'mvm bin fetch <version>' to download "
+            f"one, or 'mvm bin set-default <version>' if you already have a local version."
+        )
+    if not Path(default.path).exists():
+        raise AssetNotFoundError(
+            f"Default binary for '{name}' is registered at '{default.path}' but the file is "
+            f"missing — run 'mvm bin fetch <version>' to re-download it, or "
+            f"'mvm bin set-default <version>' to point to an existing local version."
+        )
+    return default.path
 
 
 def remove_version(version: str, bin_dir: Path | None = None) -> None:
@@ -302,3 +429,7 @@ def remove_version(version: str, bin_dir: Path | None = None) -> None:
 
     fc_path.unlink(missing_ok=True)
     jl_path.unlink(missing_ok=True)
+
+    db = MVMDatabase()
+    db.delete_binary_by_name_and_version("firecracker", version)
+    db.delete_binary_by_name_and_version("jailer", version)

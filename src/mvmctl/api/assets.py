@@ -24,7 +24,9 @@ from mvmctl.constants import (
 from mvmctl.core import kernel as kernel_core
 from mvmctl.core.binary_manager import (
     BinaryVersion,
+    ensure_default_binary,
     fetch_binary,
+    get_binary_path,
     list_local_versions,
     list_remote_versions,
     remove_version,
@@ -50,7 +52,9 @@ __all__ = [
     "AssetInfo",
     "BinaryVersion",
     "ImageSpec",
+    "ensure_default_binary",
     "fetch_binary",
+    "get_binary_path",
     "list_local_versions",
     "list_remote_versions",
     "set_active_version",

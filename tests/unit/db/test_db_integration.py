@@ -465,8 +465,8 @@ class TestMultiTableWorkflows:
 class TestSchemaIntegrity:
     """Test schema-level constraints (10+ tests)."""
 
-    def test_all_ten_tables_exist_after_migration(self, db: MVMDatabase) -> None:
-        """Verify all 10 tables exist after migration."""
+    def test_all_nine_tables_exist_after_migration(self, db: MVMDatabase) -> None:
+        """Verify all 9 tables exist after migration."""
         with db._connect() as conn:
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -477,7 +477,6 @@ class TestSchemaIntegrity:
             "images",
             "kernels",
             "binaries",
-            "binary_defaults",
             "networks",
             "network_leases",
             "vm_states",
@@ -526,16 +525,19 @@ class TestSchemaIntegrity:
             db.upsert_vm(vm2)
 
     def test_networks_name_unique_constraint(self, db: MVMDatabase) -> None:
-        """Verify networks.name UNIQUE constraint."""
         network1 = make_network(network_id="n" * 64)
         network2 = make_network(network_id="o" * 64)
         # Both have name="default"
 
         db.upsert_network(network1)
+        db.upsert_network(network2)
 
-        # Attempt to insert second network with same name — should fail
-        with pytest.raises(sqlite3.IntegrityError):
-            db.upsert_network(network2)
+        networks = db.list_networks()
+        assert len(networks) == 1
+        assert networks[0].id == network1.id
+        assert networks[0].name == network2.name
+        assert networks[0].subnet == network2.subnet
+        assert networks[0].bridge == network2.bridge
 
     def test_network_leases_network_ipv4_unique_constraint(self, db: MVMDatabase) -> None:
         """Verify network_leases.(network_id, ipv4) UNIQUE constraint."""

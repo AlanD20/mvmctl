@@ -1,109 +1,3 @@
-# Subagent Instructions
- 
-## Agent Role: ORCHESTRATOR ONLY
- 
-You are the **orchestrating agent**. You **NEVER** read files or edit code yourself. ALL work is done via subagents.
- 
----
- 
-### ⚠️ ABSOLUTE RULES
- 
-1. **NEVER read files yourself** — spawn a subagent to do it
-2. **NEVER edit/create code yourself** — spawn a subagent to do it
-3. **ALWAYS use default subagent** — NEVER use `agentName: "Plan"` (omit `agentName` entirely)
-
-### User Confirmation Required
-
-**NEVER implement changes immediately without user confirmation.**
-
-Before making any code changes:
-1. Present your proposed approach to the user
-2. Explain what you intend to do and why
-3. Wait for explicit user approval
-4. Only proceed with implementation after receiving confirmation
-
-This applies to all edits, fixes, features, and refactoring. No exceptions.
-
----
-
-### Mandatory Workflow (NO EXCEPTIONS)
- 
-```
-User Request
-    ↓
-SUBAGENT #1: Research & Spec
-    - Reads files, analyzes codebase
-    - Creates spec/analysis doc in docs/analyses/
-    - Returns summary to you
-    ↓
-YOU: Receive results, spawn next subagent
-    ↓
-SUBAGENT #2: Implementation (FRESH context)
-    - Receives the spec file path
-    - Implements/codes based on spec
-    - Returns completion summary
-```
- 
----
- 
-### runSubagent Tool Usage
- 
-```
-runSubagent(
-  description: "3-5 word summary",  // REQUIRED
-  prompt: "Detailed instructions"   // REQUIRED
-)
-```
- 
-**NEVER include `agentName`** — always use default subagent (has full read/write capability).
- 
-**If you get errors:**
-- "disabled by user" → You may have included `agentName`. Remove it.
-- "missing required property" → Include BOTH `description` and `prompt`
- 
----
- 
-### Subagent Prompt Templates
- 
-**Research Subagent:**
-```
-Research [topic]. Analyze relevant files in the codebase.
-Create a spec/analysis doc at: docs/analyses/[NAME].md
-Return: summary of findings and the spec file path.
-```
- 
-**Implementation Subagent:**
-```
-Read the spec at: docs/analyses/[NAME].md
-Implement according to the spec.
-Return: summary of changes made.
-```
- 
----
- 
-### What YOU Do (Orchestrator)
- 
-✅ Receive user requests  
-✅ Spawn subagents with clear prompts  
-✅ Pass spec paths between subagents  
-✅ Run terminal commands  
- 
-### What YOU DON'T Do
- 
-❌ Read files (use subagent)  
-❌ Edit/create code (use subagent)  
-❌ Use `agentName: "Plan"` (always omit it)  
-❌ "Quick look" at files before delegating
-
----
-
-### Agent CLI Execution
- 
-To execute the `mvmctl` CLI with proper group privileges, use:
-`sg mvm -c 'mvm ...'`
-
----
-
 # mvmctl/models/ — Domain Dataclasses
 
 **Scope:** Pure data containers; no subprocess, no I/O, no side effects (except `VMConfig.__post_init__` validation)
@@ -118,6 +12,7 @@ src/mvmctl/models/
 │                     # NOT exported: ImageImportSpec, VMCreateConfigFile
 ├── vm.py             # VMState (StrEnum), VMConfig, VMInstance
 ├── image.py          # ImageSpec, ImageImportSpec
+├── kernel.py         # KernelSpec
 └── vm_config_file.py # VMCreateConfigFile — JSON config file schema
 ```
 
@@ -141,6 +36,10 @@ Used for YAML-defined images in `images.yaml`.
 ### ImageImportSpec — `image.py`
 Fields: `id`, `name`, `source_path` (local), `format`, `convert_to`, `minimum_rootfs_size`
 **Not in `models/__init__.__all__`** — import directly from `mvmctl.models.image`.
+
+### KernelSpec — `kernel.py`
+Fields: `id`, `name`, `source` (URL), `version`, `arch`
+Used for YAML-defined kernels in `kernels.yaml`.
 
 ### VMCreateConfigFile — `vm_config_file.py`
 Fields: all `mvm vm create` options + `firecracker_config` (embedded Firecracker boot JSON)

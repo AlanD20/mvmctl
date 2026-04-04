@@ -22,7 +22,6 @@ from typing import Generator, Optional
 from mvmctl.db import MigrationRunner
 from mvmctl.db.models import (
     Binary,
-    BinaryDefault,
     HostState,
     HostStateChange,
     Image,
@@ -115,6 +114,14 @@ class MVMDatabase:
             rows = conn.execute("SELECT * FROM images WHERE id LIKE ?", (f"{prefix}%",)).fetchall()
         return [Image(**dict(row)) for row in rows]
 
+    def get_image_by_os_slug(self, os_slug: str) -> Optional[Image]:
+        """Return an image by its os_slug, or None if not found."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM images WHERE os_slug = ?", (os_slug,)).fetchone()
+        if row is None:
+            return None
+        return Image(**dict(row))
+
     def list_images(self) -> list[Image]:
         """Return all images."""
         with self._connect() as conn:
@@ -178,6 +185,14 @@ class MVMDatabase:
             conn.execute("UPDATE images SET is_default = 0")
             conn.execute("UPDATE images SET is_default = 1 WHERE id = ?", (image_id,))
             conn.execute("COMMIT")
+
+    def get_default_image(self) -> Optional[Image]:
+        """Return the default image entry, or None if not set."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM images WHERE is_default = 1 LIMIT 1").fetchone()
+        if row is None:
+            return None
+        return Image(**dict(row))
 
     # -------------------------------------------------------------------------
     # kernels
@@ -249,6 +264,22 @@ class MVMDatabase:
             conn.execute("UPDATE kernels SET is_default = 1 WHERE id = ?", (kernel_id,))
             conn.execute("COMMIT")
 
+    def get_default_kernel(self) -> Optional[Kernel]:
+        """Return the default kernel entry, or None if not set."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM kernels WHERE is_default = 1 LIMIT 1").fetchone()
+        if row is None:
+            return None
+        return Kernel(**dict(row))
+
+    def get_kernel_by_name(self, name: str) -> Optional[Kernel]:
+        """Return a kernel by its name, or None if not found."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM kernels WHERE name = ? LIMIT 1", (name,)).fetchone()
+        if row is None:
+            return None
+        return Kernel(**dict(row))
+
     # -------------------------------------------------------------------------
     # binaries
     # -------------------------------------------------------------------------
@@ -275,6 +306,14 @@ class MVMDatabase:
             rows = conn.execute("SELECT * FROM binaries ORDER BY created_at").fetchall()
         return [Binary(**dict(row)) for row in rows]
 
+    def list_binaries_by_name(self, name: str) -> list[Binary]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM binaries WHERE name = ? ORDER BY created_at",
+                (name,),
+            ).fetchall()
+        return [Binary(**dict(row)) for row in rows]
+
     def upsert_binary(self, binary: Binary) -> None:
         """Insert or replace a binary record."""
         with self._connect() as conn:
@@ -282,14 +321,15 @@ class MVMDatabase:
                 """
                 INSERT INTO binaries (
                     id, name, version, full_version, ci_version, path,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    is_default, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     version = excluded.version,
                     full_version = excluded.full_version,
                     ci_version = excluded.ci_version,
                     path = excluded.path,
+                    is_default = excluded.is_default,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -299,6 +339,7 @@ class MVMDatabase:
                     binary.full_version,
                     binary.ci_version,
                     binary.path,
+                    int(binary.is_default),
                     binary.created_at,
                     binary.updated_at,
                 ),
@@ -308,57 +349,54 @@ class MVMDatabase:
         with self._connect() as conn:
             conn.execute("DELETE FROM binaries WHERE id = ?", (binary_id,))
 
-    def set_default_binary(self, name: str, version: str, path: str) -> None:
+    def delete_binary_by_name_and_version(self, name: str, version: str) -> None:
+        """Delete the binary row matching *name* AND *version*.
+
+        Matches both the raw version string and its ``v``-prefixed form so that
+        callers do not need to normalise before calling.  No-op if no row
+        matches.  Scoped to a single (name, version) pair — never deletes
+        rows for other binary names.
+        """
+        normalized = version.removeprefix("v")
+        prefixed = f"v{normalized}"
         with self._connect() as conn:
             conn.execute(
-                """
-                INSERT INTO binary_defaults (name, version, path, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(name) DO UPDATE SET
-                    version = excluded.version,
-                    path = excluded.path,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (name, version, path),
+                "DELETE FROM binaries WHERE name = ? AND (version = ? OR version = ?)",
+                (name, normalized, prefixed),
             )
 
-    # -------------------------------------------------------------------------
-    # binary_defaults
-    # -------------------------------------------------------------------------
+    def set_default_binary(self, name: str, version: str, path: str) -> None:
+        """Set a binary as default, clearing all others with the same name atomically.
 
-    def get_binary_default(self, name: str) -> Optional[BinaryDefault]:
+        Uses explicit BEGIN/COMMIT for atomicity.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            # Clear is_default for all binaries with the same name
+            conn.execute(
+                "UPDATE binaries SET is_default = 0 WHERE name = ?",
+                (name,),
+            )
+            # Set is_default = 1 for the matching binary
+            conn.execute(
+                """
+                UPDATE binaries SET is_default = 1, updated_at = CURRENT_TIMESTAMP
+                WHERE name = ? AND version = ?
+                """,
+                (name, version),
+            )
+            conn.execute("COMMIT")
+
+    def get_default_binary(self, name: str) -> Optional[Binary]:
         """Return the default binary entry for a given name, or None."""
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM binary_defaults WHERE name = ?", (name,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM binaries WHERE name = ? AND is_default = 1 LIMIT 1",
+                (name,),
+            ).fetchone()
         if row is None:
             return None
-        return BinaryDefault(**dict(row))
-
-    def list_binary_defaults(self) -> list[BinaryDefault]:
-        """Return all binary default entries."""
-        with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM binary_defaults").fetchall()
-        return [BinaryDefault(**dict(row)) for row in rows]
-
-    def upsert_binary_default(self, default: BinaryDefault) -> None:
-        """Insert or replace a binary default record."""
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO binary_defaults (name, version, path, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(name) DO UPDATE SET
-                    version = excluded.version,
-                    path = excluded.path,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (default.name, default.version, default.path, default.updated_at),
-            )
-
-    def delete_binary_default(self, name: str) -> None:
-        """Delete a binary default by name. No-op if not found."""
-        with self._connect() as conn:
-            conn.execute("DELETE FROM binary_defaults WHERE name = ?", (name,))
+        return Binary(**dict(row))
 
     # -------------------------------------------------------------------------
     # vm_states
@@ -540,8 +578,7 @@ class MVMDatabase:
                     id, name, subnet, bridge, ipv4_gateway, bridge_active,
                     nat_gateways, nat_enabled, is_default, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
+                ON CONFLICT(name) DO UPDATE SET
                     subnet = excluded.subnet,
                     bridge = excluded.bridge,
                     ipv4_gateway = excluded.ipv4_gateway,
@@ -581,6 +618,14 @@ class MVMDatabase:
             conn.execute("UPDATE networks SET is_default = 0")
             conn.execute("UPDATE networks SET is_default = 1 WHERE id = ?", (network_id,))
             conn.execute("COMMIT")
+
+    def get_default_network(self) -> Optional[Network]:
+        """Return the default network entry, or None if not set."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM networks WHERE is_default = 1 LIMIT 1").fetchone()
+        if row is None:
+            return None
+        return Network(**dict(row))
 
     def delete_network(self, network_id: str) -> None:
         """Delete a network by ID. No-op if not found."""
@@ -662,6 +707,7 @@ class MVMDatabase:
 
         No-op if the row already exists. Returns the current host state.
         """
+        self.migrate()
         with self._connect() as conn:
             conn.execute(
                 """
@@ -669,7 +715,9 @@ class MVMDatabase:
                 VALUES (1, 0, CURRENT_TIMESTAMP)
                 """
             )
-        return self.get_host_state()  # type: ignore[return-value]
+        host_state = self.get_host_state()
+        assert host_state is not None
+        return host_state
 
     def set_host_initialized(self, initialized_at: str) -> None:
         """Mark host as fully initialized.
