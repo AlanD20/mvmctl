@@ -6,12 +6,12 @@ import secrets
 from mvmctl.constants import DEFAULT_GUEST_MAC_PREFIX
 
 
-def subnet_mask_from_cidr(cidr: str) -> str:
-    return str(ipaddress.IPv4Network(cidr, strict=False).netmask)
+def subnet_mask_from_subnet(subnet: str) -> str:
+    return str(ipaddress.IPv4Network(subnet, strict=False).netmask)
 
 
-def prefix_len_from_cidr(cidr: str) -> int:
-    return ipaddress.IPv4Network(cidr, strict=False).prefixlen
+def prefix_len_from_subnet(subnet: str) -> int:
+    return ipaddress.IPv4Network(subnet, strict=False).prefixlen
 
 
 def ipv4_gateway_for_subnet(subnet: str) -> str:

@@ -43,7 +43,7 @@ from mvmctl.utils.network import (
     ipv4_gateway_for_subnet as _ipv4_gateway_for_subnet_util,
 )
 from mvmctl.utils.network import (
-    prefix_len_from_cidr as _prefix_len_util,
+    prefix_len_from_subnet as _prefix_len_util,
 )
 from mvmctl.utils.validation import (
     validate_bridge_name,

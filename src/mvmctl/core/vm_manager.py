@@ -144,7 +144,7 @@ def _db_state_to_vm_instance(state: DBVMInstance) -> VMInstance:
         console_relay_pid=state.console_relay_pid,
         console_socket_path=Path(state.console_socket_path) if state.console_socket_path else None,
         exit_code=state.exit_code,
-        rootfs_suffix=state.rootfs_suffix or ".ext4",
+        rootfs_suffix=state.rootfs_suffix or None,
         image_id=state.image_id,
         kernel_id=state.kernel_id,
     )

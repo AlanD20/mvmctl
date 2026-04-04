@@ -628,8 +628,9 @@ def _resolve_rootfs_path(vm: VMInstance, vm_dir: Path) -> tuple[Path | None, str
             return config_path, "config"
 
     # Priority 2: Fallback to VM-local rootfs file
-    rootfs_suffix = vm.rootfs_suffix or ".ext4"
-    local_path = vm_dir / f"rootfs{rootfs_suffix}"
+    if not vm.rootfs_suffix:
+        return None, "none"
+    local_path = vm_dir / f"rootfs{vm.rootfs_suffix}"
     if local_path.exists():
         return local_path, "local"
 
