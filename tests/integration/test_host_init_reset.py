@@ -11,7 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mvmctl.cli.host import app as host_app
-from mvmctl.core.host_state import HostStateChange, HostState
+from mvmctl.models.host import HostState, HostStateChange
 from mvmctl.exceptions import HostError
 
 runner = CliRunner()
@@ -27,7 +27,9 @@ def _make_host_state(changes: list | None = None) -> HostState:
     return HostState(init_timestamp="2024-01-01T00:00:00+00:00", changes=changes or [])
 
 
-def _host_change(setting: str, original: str | None, applied: str, mechanism: str) -> HostStateChange:
+def _host_change(
+    setting: str, original: str | None, applied: str, mechanism: str
+) -> HostStateChange:
     return HostStateChange(
         setting=setting,
         original_value=original,

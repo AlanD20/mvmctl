@@ -1,6 +1,54 @@
 """Kernel data models."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mvmctl.db.models import Kernel as DBKernel
+
+
+@dataclass
+class KernelRecord:
+    id: str
+    name: str
+    version: str
+    arch: str
+    path: str
+    base_name: str | None = None
+    type: str | None = None
+    is_default: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    @classmethod
+    def from_db(cls, record: "DBKernel") -> "KernelRecord":
+        return cls(
+            id=record.id,
+            name=record.name,
+            version=record.version,
+            arch=record.arch,
+            path=record.path,
+            base_name=record.base_name,
+            type=record.type,
+            is_default=record.is_default,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "filename": self.path,
+            "version": self.version,
+            "arch": self.arch,
+            "base_name": self.base_name,
+            "type": self.type,
+            "is_default": 1 if self.is_default else 0,
+            "created_at": self.created_at,
+            "last_modified": self.updated_at,
+        }
 
 
 @dataclass

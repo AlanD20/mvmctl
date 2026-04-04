@@ -173,7 +173,11 @@ def test_get_network(mock_cache_dir: Path):
     assert get_network("nonexistent") is None
 
     _add_network_to_metadata(
-        mock_cache_dir, "testnet", subnet="10.20.1.0/24", ipv4_gateway="10.20.1.1", bridge="mvm-testnet"
+        mock_cache_dir,
+        "testnet",
+        subnet="10.20.1.0/24",
+        ipv4_gateway="10.20.1.1",
+        bridge="mvm-testnet",
     )
 
     config = get_network("testnet")
@@ -712,7 +716,8 @@ class TestRestoreNetworks:
 
     def test_restore_networks_existing_bridge(self, mock_cache_dir: Path):
         """restore_networks should skip networks with existing bridges."""
-        from mvmctl.core.network_manager import NetworkConfig, restore_networks
+        from mvmctl.core.network_manager import restore_networks
+        from mvmctl.models.network import NetworkConfig
 
         config = NetworkConfig(
             name="testnet",
@@ -731,7 +736,8 @@ class TestRestoreNetworks:
 
     def test_restore_networks_creates_bridge(self, mock_cache_dir: Path):
         """restore_networks should create missing bridges."""
-        from mvmctl.core.network_manager import NetworkConfig, restore_networks
+        from mvmctl.core.network_manager import restore_networks
+        from mvmctl.models.network import NetworkConfig
 
         config = NetworkConfig(
             name="testnet",
@@ -752,7 +758,8 @@ class TestRestoreNetworks:
 
     def test_restore_networks_validates_interface(self, mock_cache_dir: Path):
         """restore_networks should validate stored interface."""
-        from mvmctl.core.network_manager import NetworkConfig, restore_networks
+        from mvmctl.core.network_manager import restore_networks
+        from mvmctl.models.network import NetworkConfig
 
         config = NetworkConfig(
             name="testnet",
@@ -775,7 +782,8 @@ class TestRestoreNetworks:
 
     def test_restore_networks_fallback_to_default_interface(self, mock_cache_dir: Path):
         """restore_networks should fallback to default interface if stored invalid."""
-        from mvmctl.core.network_manager import NetworkConfig, restore_networks
+        from mvmctl.core.network_manager import restore_networks
+        from mvmctl.models.network import NetworkConfig
 
         config = NetworkConfig(
             name="testnet",

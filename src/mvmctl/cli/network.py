@@ -29,10 +29,10 @@ from mvmctl.utils.console import (
 )
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import (
-    validate_subnet,
     validate_entity_name,
     validate_ipv4_address,
     validate_nat_gateways,
+    validate_subnet,
 )
 
 app = typer.Typer(

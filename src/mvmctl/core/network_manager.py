@@ -6,7 +6,7 @@ import ipaddress
 import logging
 import os
 import sqlite3
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, TypedDict
 
@@ -33,14 +33,16 @@ from mvmctl.core.network import (
     teardown_nat,
 )
 from mvmctl.exceptions import MVMError, NetworkError
+from mvmctl.models.network import NetworkConfig as NetworkConfig
+from mvmctl.models.network import NetworkLease as NetworkLease
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.full_hash import generate_full_hash_network
 from mvmctl.utils.validation import (
     validate_bridge_name,
-    validate_subnet,
     validate_entity_name,
     validate_interface_name,
     validate_ipv4_address,
+    validate_subnet,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,28 +82,6 @@ def _upsert_network_to_sqlite(config: NetworkConfig, bridge_active: bool | None 
         )
     except sqlite3.OperationalError:
         pass
-
-
-@dataclass
-class NetworkConfig:
-    """Persistent configuration for a named network."""
-
-    name: str
-    subnet: str
-    ipv4_gateway: str
-    bridge: str
-    nat_enabled: bool = True
-    nat_gateways: list[str] = field(default_factory=list)
-    created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
-    is_default: bool = False
-
-
-@dataclass
-class NetworkLease:
-    """IP lease assignment for a VM within a network."""
-
-    vm_id: str
-    ipv4: str
 
 
 def _bridge_name_for(network_name: str) -> str:

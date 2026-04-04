@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +18,8 @@ from mvmctl.constants import (
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import HostStateChange as DBHostStateChange
 from mvmctl.exceptions import HostError
+from mvmctl.models.host import HostState as HostState
+from mvmctl.models.host import HostStateChange as HostStateChange
 
 logger = logging.getLogger(__name__)
 
@@ -27,24 +28,6 @@ SYSCTL_CONF = Path(f"{DEFAULT_SYSCTL_CONF_DIR}/{PROJECT_NAME}.conf")
 
 RESTORABLE_SYSCTL_KEYS: frozenset[str] = frozenset({"net.ipv4.ip_forward"})
 RESTORABLE_FILE_PATHS: frozenset[Path] = frozenset({Path(SUDOERS_DROP_IN_PATH), SYSCTL_CONF})
-
-
-@dataclass
-class HostStateChange:
-    """Represents a single host configuration change."""
-
-    setting: str
-    original_value: str | None
-    applied_value: str
-    mechanism: str
-
-
-@dataclass
-class HostState:
-    """Represents the host state snapshot for backward compatibility."""
-
-    init_timestamp: str
-    changes: list[HostStateChange]
 
 
 def _state_dir(cache_dir: Path) -> Path:

@@ -13,6 +13,10 @@ from typing import Any
 
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import Binary, Image, Kernel, Network
+from mvmctl.models.binary import BinaryRecord
+from mvmctl.models.image import ImageRecord
+from mvmctl.models.kernel import KernelRecord
+from mvmctl.models.network import NetworkRecord
 from mvmctl.utils.full_hash import generate_full_hash_binary
 
 logger = logging.getLogger(__name__)
@@ -21,75 +25,6 @@ logger = logging.getLogger(__name__)
 def _now_utc() -> str:
     """Return current UTC timestamp as ISO format string."""
     return datetime.now(tz=timezone.utc).isoformat()
-
-
-# =============================================================================
-# Conversion helpers for DB models
-# =============================================================================
-
-
-def _db_image_to_dict(image: Image) -> dict[str, Any]:
-    """Convert DB Image model to dict format expected by callers."""
-    return {
-        "internal_id": image.os_slug,
-        "filename": image.path,
-        "os_name": image.os_name,
-        "fs_type": image.fs_type,
-        "fs_uuid": image.fs_uuid,
-        "compressed_size": image.compressed_size,
-        "original_size": image.original_size,
-        "compression_ratio": image.compression_ratio,
-        "compressed_format": image.compressed_format,
-        "pulled_at": image.pulled_at,
-        "is_default": 1 if image.is_default else 0,
-        "created_at": image.created_at,
-        "updated_at": image.updated_at,
-    }
-
-
-def _db_kernel_to_dict(kernel: Kernel) -> dict[str, Any]:
-    """Convert DB Kernel model to dict format expected by callers."""
-    return {
-        "name": kernel.name,
-        "filename": kernel.path,
-        "version": kernel.version,
-        "arch": kernel.arch,
-        "base_name": kernel.base_name,
-        "type": kernel.type,
-        "is_default": 1 if kernel.is_default else 0,
-        "created_at": kernel.created_at,
-        "last_modified": kernel.updated_at,
-    }
-
-
-def _db_binary_to_dict(binary: Binary) -> dict[str, Any]:
-    """Convert DB Binary model to dict format expected by callers."""
-    return {
-        "binary_id": binary.id,
-        "binary_name": binary.name,
-        "package_version": binary.version,
-        "binary_path": binary.path,
-        "full_version": binary.full_version,
-        "ci_version": binary.ci_version,
-        "created_at": binary.created_at,
-        "updated_at": binary.updated_at,
-    }
-
-
-def _db_network_to_dict(network: Network) -> dict[str, Any]:
-    """Convert DB Network model to dict format expected by callers."""
-    return {
-        "network_id": network.id,
-        "subnet": network.subnet,
-        "bridge": network.bridge,
-        "ipv4_gateway": network.ipv4_gateway,
-        "bridge_active": network.bridge_active,
-        "nat_gateways": network.nat_gateways.split(",") if network.nat_gateways else [],
-        "nat_enabled": network.nat_enabled,
-        "is_default": 1 if network.is_default else 0,
-        "created_at": network.created_at,
-        "updated_at": network.updated_at,
-    }
 
 
 # =============================================================================
@@ -156,7 +91,7 @@ def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | No
     kernel = db.get_default_kernel()
     if kernel is None:
         return None
-    return kernel.id, _db_kernel_to_dict(kernel)
+    return kernel.id, KernelRecord.from_db(kernel).to_dict()
 
 
 def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
@@ -166,12 +101,12 @@ def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
     # Try by ID first
     kernel = db.get_kernel(kernel_name)
     if kernel:
-        return _db_kernel_to_dict(kernel)
+        return KernelRecord.from_db(kernel).to_dict()
 
     # Try by name
     kernel = db.get_kernel_by_name(kernel_name)
     if kernel:
-        return _db_kernel_to_dict(kernel)
+        return KernelRecord.from_db(kernel).to_dict()
 
     return {}
 
@@ -195,13 +130,13 @@ def list_kernel_entries(
         if kernels_dir is not None and kernels_dir.exists():
             full_path = kernels_dir / kernel_path.name
             if full_path.exists():
-                result[kernel.id] = _db_kernel_to_dict(kernel)
+                result[kernel.id] = KernelRecord.from_db(kernel).to_dict()
             elif include_missing:
-                result[kernel.id] = _db_kernel_to_dict(kernel)
+                result[kernel.id] = KernelRecord.from_db(kernel).to_dict()
             else:
                 orphaned.append(kernel.id)
         else:
-            result[kernel.id] = _db_kernel_to_dict(kernel)
+            result[kernel.id] = KernelRecord.from_db(kernel).to_dict()
 
     # Clean up orphaned entries
     for kernel_id in orphaned:
@@ -253,7 +188,7 @@ def get_image_entry(cache_dir: Path, image_id: str) -> dict[str, Any]:
     db = MVMDatabase()
     image = db.get_image(image_id)
     if image:
-        return _db_image_to_dict(image)
+        return ImageRecord.from_db(image).to_dict()
     return {}
 
 
@@ -276,13 +211,13 @@ def list_image_entries(
             filename = image.path
             image_path = images_dir / filename
             if image_path.exists():
-                result[image.id] = _db_image_to_dict(image)
+                result[image.id] = ImageRecord.from_db(image).to_dict()
             elif include_missing:
-                result[image.id] = _db_image_to_dict(image)
+                result[image.id] = ImageRecord.from_db(image).to_dict()
             else:
                 orphaned.append(image.id)
         else:
-            result[image.id] = _db_image_to_dict(image)
+            result[image.id] = ImageRecord.from_db(image).to_dict()
 
     # Clean up orphaned entries
     for image_id in orphaned:
@@ -327,7 +262,7 @@ def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | Non
     image = db.get_default_image()
     if image is None:
         return None
-    return image.id, _db_image_to_dict(image)
+    return image.id, ImageRecord.from_db(image).to_dict()
 
 
 def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str, Any]] | None:
@@ -335,7 +270,7 @@ def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str
     db = MVMDatabase()
     images = db.find_images_by_prefix(prefix)
     if len(images) == 1:
-        return images[0].id, _db_image_to_dict(images[0])
+        return images[0].id, ImageRecord.from_db(images[0]).to_dict()
     return None
 
 
@@ -343,7 +278,7 @@ def find_images_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, di
     """Return all image entries whose key starts with prefix."""
     db = MVMDatabase()
     images = db.find_images_by_prefix(prefix)
-    return [(img.id, _db_image_to_dict(img)) for img in images]
+    return [(img.id, ImageRecord.from_db(img).to_dict()) for img in images]
 
 
 # =============================================================================
@@ -494,7 +429,7 @@ def get_binary_entry(cache_dir: Path, version: str) -> dict[str, Any]:
     db = MVMDatabase()
     binary = _find_db_binary_by_name_and_version(db, version)
     if binary is not None:
-        return _db_binary_to_dict(binary)
+        return BinaryRecord.from_db(binary).to_dict()
     return {}
 
 
@@ -507,7 +442,7 @@ def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for binary in binaries:
         if binary.name in _BINARY_METADATA_NAMES:
-            result[binary.name] = _db_binary_to_dict(binary)
+            result[binary.name] = BinaryRecord.from_db(binary).to_dict()
 
     return result
 
@@ -543,7 +478,7 @@ def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | No
     db = MVMDatabase()
     binary = _find_db_default_binary(db)
     if binary is not None:
-        return binary.version, _db_binary_to_dict(binary)
+        return binary.version, BinaryRecord.from_db(binary).to_dict()
     return None
 
 
@@ -591,7 +526,7 @@ def get_network_entry(cache_dir: Path, network_name: str) -> dict[str, Any]:
     db = MVMDatabase()
     network = db.get_network_by_name(network_name)
     if network:
-        return _db_network_to_dict(network)
+        return NetworkRecord.from_db(network).to_dict()
     return {}
 
 
@@ -599,7 +534,7 @@ def list_network_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
     """Return all network entries dict keyed by network name."""
     db = MVMDatabase()
     networks = db.list_networks()
-    return {network.name: _db_network_to_dict(network) for network in networks}
+    return {network.name: NetworkRecord.from_db(network).to_dict() for network in networks}
 
 
 def remove_network_entry(cache_dir: Path, network_name: str) -> None:
@@ -623,5 +558,5 @@ def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | N
     db = MVMDatabase()
     network = db.get_default_network()
     if network:
-        return network.name, _db_network_to_dict(network)
+        return network.name, NetworkRecord.from_db(network).to_dict()
     return None

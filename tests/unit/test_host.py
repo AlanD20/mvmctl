@@ -2259,7 +2259,7 @@ class TestPersistHostStateToDb:
         db.migrate()
 
         from mvmctl.core.host_setup import _persist_host_state_to_db
-        from mvmctl.core.host_state import HostStateChange
+        from mvmctl.models.host import HostStateChange
 
         changes = [
             HostStateChange(
@@ -2298,7 +2298,7 @@ class TestPersistHostStateToDb:
         monkeypatch.setattr("mvmctl.core.mvm_db.get_mvm_db_path", lambda: unmigrated_db)
 
         from mvmctl.core.host_setup import _persist_host_state_to_db
-        from mvmctl.core.host_state import HostStateChange
+        from mvmctl.models.host import HostStateChange
 
         _persist_host_state_to_db(
             [

@@ -31,7 +31,7 @@ def test_init_skip_host(mock_cache, mock_list_networks, tmp_path):
     """mvm init --skip-host should skip host initialization."""
     mock_cache.return_value = tmp_path
     # Mock default network exists
-    from mvmctl.core.network_manager import NetworkConfig
+    from mvmctl.models.network import NetworkConfig
 
     mock_list_networks.return_value = [
         NetworkConfig(

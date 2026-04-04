@@ -5,7 +5,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from mvmctl.cli.network import app
-from mvmctl.core.network_manager import NetworkConfig
+from mvmctl.models.network import NetworkConfig
 from mvmctl.exceptions import NetworkError
 
 runner = CliRunner()

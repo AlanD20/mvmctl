@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import mvmctl.api.network as network_api
 from mvmctl.api.network import create_network, remove_network
-from mvmctl.core.network_manager import NetworkConfig, NetworkLease
+from mvmctl.models.network import NetworkConfig, NetworkLease
 
 
 @patch("mvmctl.api.network.list_network_interfaces", return_value=["eth0"])

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.core.host import (
-    HostStateChange,
     HostState,
     check_kvm_access,
     check_privileges,
@@ -29,6 +28,7 @@ from mvmctl.core.host import (
 from mvmctl.core.host import (
     reset_host as _reset_host,
 )
+from mvmctl.core.host_state import HostStateChange
 from mvmctl.core.image import clean_ready_pool as _clean_ready_pool
 from mvmctl.core.image import get_ready_pool_dir as _get_ready_pool_dir
 from mvmctl.core.vm_manager import get_vm_manager
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
-    "HostChange",
+    "HostStateChange",
     "HostState",
     "check_kvm_access",
     "check_privileges",
