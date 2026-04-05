@@ -316,52 +316,6 @@ def test_get_vm_status_no_pid(mocker, sample_vm):
     assert status == VMStatus.STOPPED
 
 
-def test_get_exit_code_from_log_parses_various_formats(mocker, sample_vm, tmp_path):
-    """Verify log parsing handles multiple exit code formats."""
-    from mvmctl.core.vm_manager import _get_exit_code_from_log
-
-    test_cases = [
-        ("exit code: 1", 1),
-        ("exited: 1", 1),
-        ("exit 1", 1),
-        ("exit code: 255", 255),
-        ("exited: 0", 0),
-        ("Exit Code: 42", 42),
-        ("EXIT CODE: 99", 99),
-    ]
-
-    for log_content, expected_code in test_cases:
-        log_file = tmp_path / "firecracker.log"
-        log_file.write_text(f"Some log\n{log_content}\nMore log")
-
-        result = _get_exit_code_from_log(log_file)
-
-        assert result == expected_code, f"Failed for format: {log_content}"
-
-
-def test_get_exit_code_from_log_no_match(mocker, sample_vm, tmp_path):
-    """Verify None when log exists but no exit code pattern."""
-    from mvmctl.core.vm_manager import _get_exit_code_from_log
-
-    # Create firecracker.log without exit code
-    log_file = tmp_path / "firecracker.log"
-    log_file.write_text("Some log line\nAnother log line\nNo exit code here")
-
-    result = _get_exit_code_from_log(log_file)
-
-    # Verify returns None
-    assert result is None
-
-
-def test_get_exit_code_from_log_file_not_exists(tmp_path):
-    """Verify None when log file does not exist."""
-    from mvmctl.core.vm_manager import _get_exit_code_from_log
-
-    log_file = tmp_path / "nonexistent.log"
-    result = _get_exit_code_from_log(log_file)
-    assert result is None
-
-
 def test_is_hex_string_invalid_chars():
     """_is_hex_string should return False for non-hex characters."""
     from mvmctl.core.vm_manager import _is_hex_string

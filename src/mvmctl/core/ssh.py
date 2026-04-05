@@ -45,28 +45,6 @@ def find_ssh_keys(keys_dir: Path | None = None) -> list[Path]:
     return keys
 
 
-def extract_ip_from_config(config_path: Path) -> str | None:
-    """Extract IP address from Firecracker JSON config."""
-    import json
-    import re
-
-    if not config_path.exists():
-        return None
-
-    try:
-        with open(config_path) as f:
-            config = json.load(f)
-
-        boot_args = config.get("boot-source", {}).get("boot_args", "")
-        match = re.search(r"ip=(\d+\.\d+\.\d+\.\d+)", boot_args)
-        if match:
-            return match.group(1)
-    except (json.JSONDecodeError, IOError):
-        pass
-
-    return None
-
-
 def build_ssh_command(
     ip: str,
     user: str = DEFAULT_VM_SSH_USER,

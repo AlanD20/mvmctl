@@ -72,23 +72,6 @@ class TestAttachConsole:
         assert "No console relay running" in str(exc_info.value)
 
 
-class TestDetachConsole:
-    """Tests for detach_console function."""
-
-    @patch("mvmctl.api.vms.disconnect_from_relay")
-    def test_detach_console_with_socket(self, mock_disconnect):
-        """detach_console calls disconnect_from_relay when socket is provided."""
-        mock_socket = MagicMock()
-        vms.detach_console(mock_socket)
-        mock_disconnect.assert_called_once_with(mock_socket)
-
-    @patch("mvmctl.api.vms.disconnect_from_relay")
-    def test_detach_console_with_none(self, mock_disconnect):
-        """detach_console does nothing when socket is None."""
-        vms.detach_console(None)
-        mock_disconnect.assert_not_called()
-
-
 class TestKillConsole:
     """Tests for kill_console function."""
 
@@ -235,7 +218,6 @@ class TestReExports:
         """All console functions should be in __all__."""
         expected_exports = [
             "attach_console",
-            "detach_console",
             "kill_console",
             "get_console_state",
             "check_escape_sequence",

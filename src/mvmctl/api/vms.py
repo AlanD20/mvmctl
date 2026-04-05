@@ -71,7 +71,6 @@ __all__ = [
     "get_vm_status_with_exit_code",
     "list_vms",
     "get_vm",
-    "deregister_vm",
     "vm_cache_dir",
     "create_vm",
     "remove_vm",
@@ -94,7 +93,6 @@ __all__ = [
     "resolve_image_multi_strategy",
     "resolve_kernel_multi_strategy",
     "attach_console",
-    "detach_console",
     "kill_console",
     "get_console_state",
     "check_escape_sequence",
@@ -351,16 +349,6 @@ def get_vm(name: str, vm_manager: VMManager | None = None) -> VMInstance | None:
     return manager.get(name)
 
 
-def deregister_vm(name: str, vm_manager: VMManager | None = None) -> None:
-    """Remove a VM from the registry without tearing down its resources."""
-    manager = vm_manager or get_vm_manager()
-    vm = manager.get(name)
-    if vm is not None:
-        manager.deregister(vm.id)
-    else:
-        manager.deregister(name)
-
-
 def vm_cache_dir(vm: VMInstance) -> Path:
     """Return the cache directory path for a VM using its hash ID."""
     from mvmctl.utils.fs import get_vm_dir_by_hash
@@ -504,11 +492,6 @@ def attach_console(name: str) -> dict[str, Any]:
 
     socket_path = mgr.get_socket_path(vm_hash if vm_hash else name)
     return {"socket_path": str(socket_path), "vm_name": name}
-
-
-def detach_console(sock: Any) -> None:
-    if sock is not None:
-        disconnect_from_relay(sock)
 
 
 def kill_console(name: str) -> bool:

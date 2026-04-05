@@ -624,9 +624,6 @@ HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/{_resolve_version()}"
 
 # Buffer sizes (in bytes)
 CONST_BUFFER_SIZE_BYTES: Final[int] = 1024
-CONST_SSH_KEY_SIZE_BITS: Final[int] = 384
-CONST_SSH_KEY_SIZE_BYTES: Final[int] = 384
-CONST_HASH_BUFFER_SIZE: Final[int] = 384
 CONST_SECTOR_SIZE_BYTES: Final[int] = 512
 CONST_MEBIBYTE_BYTES: Final[int] = 1024 * 1024
 CONST_KIBIBYTE_BYTES: Final[int] = 1024
@@ -652,23 +649,14 @@ CONST_FILE_PERMS_NETWORK_CONFIG: Final[int] = 0o600
 CONST_FILE_PERMS_DHCP_LEASES: Final[int] = 0o600
 CONST_FILE_PERMS_VM_STATE: Final[int] = 0o600
 
-# File/directory sizes (in bytes)
-CONST_MIN_IMAGE_SIZE_BYTES: Final[int] = 512
-CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
-CONST_CONFIG_FILE_SIZE_BYTES: Final[int] = 448
-CONST_HOST_STATE_SIZE_BYTES: Final[int] = 416
-CONST_HOST_PRIV_SIZE_BYTES: Final[int] = 288
-
 # HTTP status codes
 CONST_HTTP_STATUS_NO_CONTENT: Final[int] = 204
 CONST_HTTP_STATUS_SUCCESS: Final[int] = 200
 CONST_HTTP_STATUS_CREATED: Final[int] = 201
 CONST_HTTP_RANGE_START: Final[int] = 200
 
-# Port and network constants
-CONST_FIRECRACKER_API_PORT_START: Final[int] = 493
-CONST_FIRECRACKER_API_PORT_MIN: Final[int] = 493
-CONST_FIRECRACKER_API_PORT_MAX: Final[int] = 1024
+# File/directory sizes (in bytes)
+CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
 
 # VM resource limits
 CONST_VM_MEM_MIN_MIB: Final[int] = 128
@@ -685,10 +673,6 @@ CONST_SECONDS_PER_WEEK: Final[int] = 604800
 CONST_SECONDS_PER_MONTH: Final[int] = 2592000
 CONST_SECONDS_PER_YEAR: Final[int] = 31536000
 CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
-
-# HTTP status codes
-CONST_HTTP_STATUS_OK: Final[int] = 200
-CONST_HTTP_STATUS_PARTIAL_CONTENT: Final[int] = 206
 
 # Retry and timeout constants (loaded from assets/defaults.yaml)
 CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = _require_int(("http", "download_chunk_size"))

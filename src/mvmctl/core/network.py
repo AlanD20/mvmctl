@@ -504,65 +504,6 @@ def teardown_mvm_chains_with_status() -> list[str]:
     return status
 
 
-def teardown_all_mvm_chains() -> None:
-    """Remove all MVM iptables chains and their jumps from built-in chains.
-
-    Iterates over IPTABLES_CHAINS from constants and removes each chain
-    along with its jump rule from the appropriate built-in chain.
-
-    Safe to call even if chains don't exist.
-    Raises NetworkError on failure.
-    """
-    for chain_name, table, built_in in IPTABLES_CHAINS:
-        # Check if chain exists
-        if not chain_exists(chain_name, table):
-            continue
-
-        # Remove jump rule (ignore errors - may not exist)
-        if table == "nat":
-            subprocess.run(
-                _privileged_cmd(["iptables", "-t", "nat", "-D", built_in, "-j", chain_name]),
-                capture_output=True,
-                check=False,
-            )
-        else:
-            subprocess.run(
-                _privileged_cmd(["iptables", "-D", built_in, "-j", chain_name]),
-                capture_output=True,
-                check=False,
-            )
-
-        # Flush and delete the chain
-        try:
-            if table == "nat":
-                subprocess.run(
-                    _privileged_cmd(["iptables", "-t", "nat", "-F", chain_name]),
-                    check=True,
-                    capture_output=True,
-                )
-                subprocess.run(
-                    _privileged_cmd(["iptables", "-t", "nat", "-X", chain_name]),
-                    check=True,
-                    capture_output=True,
-                )
-            else:
-                subprocess.run(
-                    _privileged_cmd(["iptables", "-F", chain_name]),
-                    check=True,
-                    capture_output=True,
-                )
-                subprocess.run(
-                    _privileged_cmd(["iptables", "-X", chain_name]),
-                    check=True,
-                    capture_output=True,
-                )
-            logger.debug("Removed iptables chain %s from %s table", chain_name, table)
-        except subprocess.CalledProcessError as e:
-            raise NetworkError(f"Failed to remove {chain_name} chain from {table} table") from e
-
-    logger.info("All MVM iptables chains removed")
-
-
 def teardown_all_mvm_chains_with_status() -> list[str]:
     """Remove all MVM iptables chains with status reporting.
 

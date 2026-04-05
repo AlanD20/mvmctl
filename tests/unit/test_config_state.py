@@ -1,4 +1,3 @@
-import importlib
 import json
 from pathlib import Path
 
@@ -7,15 +6,10 @@ from pytest_mock import MockerFixture
 
 from mvmctl.core.config_state import (
     get_assets_config,
-    get_config,
-    get_config_value,
     get_defaults_config,
-    get_defaults_value,
     get_firecracker_config,
     initialize_default_config,
-    set_config_value,
     set_defaults_value,
-    update_assets_config,
 )
 from mvmctl.exceptions import AssetNotFoundError
 from mvmctl.utils.fs import get_cache_dir, get_config_dir
@@ -84,68 +78,6 @@ def _seed_binary(
         )
         db.upsert_binary(jl_binary)
         db.set_default_binary("jailer", norm_version, jl_path)
-
-
-def test_get_config_empty(config_dir: Path) -> None:
-    assert get_config() == {}
-
-
-def test_set_and_get_flat_value(config_dir: Path) -> None:
-    set_config_value("ci_version", "1.12")
-    assert get_config_value("ci_version") == "1.12"
-
-
-def test_set_multiple_flat_values(config_dir: Path) -> None:
-    set_config_value("key_a", "val_a")
-    set_config_value("key_b", "val_b")
-    assert get_config_value("key_a") == "val_a"
-    assert get_config_value("key_b") == "val_b"
-
-
-def test_get_missing_flat_value_returns_default(config_dir: Path) -> None:
-    assert get_config_value("missing", default="fallback") == "fallback"
-
-
-def test_get_missing_flat_value_returns_none(config_dir: Path) -> None:
-    assert get_config_value("missing") is None
-
-
-def test_corrupt_config_returns_empty(config_dir: Path) -> None:
-    (config_dir / "config.json").write_text("{invalid json")
-    assert get_config() == {}
-
-
-def test_config_persists_to_file(config_dir: Path) -> None:
-    set_config_value("test", "value")
-    assert (config_dir / "config.json").exists()
-
-
-def test_config_file_has_restricted_permissions(config_dir: Path) -> None:
-    set_config_value("x", "y")
-    mode = (config_dir / "config.json").stat().st_mode & 0o777
-    assert mode == 0o600
-
-
-def test_config_directory_has_restricted_permissions(tmp_path: Path, monkeypatch) -> None:
-    # Use a fresh directory that doesn't exist yet
-    fresh_config_dir = tmp_path / "fresh_config"
-    monkeypatch.setenv("MVM_CONFIG_DIR", str(fresh_config_dir))
-    # Reload module to pick up new env var
-    from mvmctl.core import config_state
-
-    importlib.reload(config_state)
-
-    set_config_value("test", "value")
-    # Directory should have restrictive permissions
-    mode = fresh_config_dir.stat().st_mode & 0o777
-    assert mode == 0o700
-
-
-def test_config_written_as_json(config_dir: Path) -> None:
-    set_config_value("test", "value")
-    content = (config_dir / "config.json").read_text()
-    parsed = json.loads(content)
-    assert parsed["test"] == "value"
 
 
 def test_get_firecracker_config_empty_raises_asset_not_found(config_dir: Path) -> None:
@@ -250,26 +182,6 @@ def test_get_assets_config_persisted_as_nested_key(config_dir: Path) -> None:
     assert "kernels_dir" in raw["assets"]
 
 
-def test_update_assets_config_overrides_field(cache_dir: Path) -> None:
-    get_assets_config()
-    update_assets_config(kernels_dir="/custom/kernels")
-    assert get_assets_config()["kernels_dir"] == "/custom/kernels"
-
-
-def test_update_assets_config_merges(cache_dir: Path) -> None:
-    get_assets_config()
-    update_assets_config(images_dir="/alt/images")
-    assets = get_assets_config()
-    assert assets["images_dir"] == "/alt/images"
-    assert assets["bin_dir"].startswith(str(cache_dir))
-
-
-def test_update_assets_config_persisted_as_nested_key(config_dir: Path) -> None:
-    update_assets_config(logs_dir="/var/log/mvm")
-    raw = json.loads((config_dir / "config.json").read_text())
-    assert raw["assets"]["logs_dir"] == "/var/log/mvm"
-
-
 def test_firecracker_and_assets_coexist(config_dir: Path, cache_dir: Path) -> None:
     bin_dir = cache_dir / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -282,27 +194,6 @@ def test_firecracker_and_assets_coexist(config_dir: Path, cache_dir: Path) -> No
         raw = json.loads((config_dir / "config.json").read_text())
         assert "assets" in raw
         assert "firecracker" not in raw
-
-
-def test_flat_key_and_sections_coexist(config_dir: Path, cache_dir: Path) -> None:
-    bin_dir = cache_dir / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    fc_path = str(bin_dir / "firecracker-v1.12.0")
-    (bin_dir / "firecracker-v1.12.0").write_bytes(b"\x7fELF")
-
-    set_config_value("default_image", "ubuntu-24.04")
-    _seed_binary(cache_dir, "v1.12.0", fc_path)
-    raw = json.loads((config_dir / "config.json").read_text())
-    assert raw["default_image"] == "ubuntu-24.04"
-    assert "firecracker" not in raw
-
-
-def test_config_dir_env_var_override(config_dir: Path) -> None:
-    set_config_value("test_key", "test_value")
-    config_path = config_dir / "config.json"
-    assert config_path.exists()
-    content = json.loads(config_path.read_text())
-    assert content["test_key"] == "test_value"
 
 
 def test_initialize_default_config_creates_file(config_dir: Path) -> None:
@@ -361,11 +252,6 @@ def test_rand_suffix_default_length() -> None:
     assert len(result) == 3
 
 
-def test_get_config_value_default_image_from_defaults(config_dir: Path) -> None:
-    result = get_config_value("default_image")
-    assert result is None
-
-
 def test_initialize_default_config_removes_defaults_key(config_dir: Path) -> None:
     raw = {"defaults": {"image": "ubuntu"}, "assets": {"kernels_dir": "/k"}}
     (config_dir / "config.json").write_text(json.dumps(raw))
@@ -409,16 +295,6 @@ def test_set_defaults_value_generic_key(config_dir: Path) -> None:
     set_defaults_value("custom_key", "custom_value")
     raw = json.loads((config_dir / "config.json").read_text())
     assert raw["custom_key"] == "custom_value"
-
-
-def test_get_defaults_value_returns_default() -> None:
-    result = get_defaults_value("nonexistent", default="fallback")
-    assert result == "fallback"
-
-
-def test_get_defaults_value_returns_none_by_default() -> None:
-    result = get_defaults_value("nonexistent")
-    assert result is None
 
 
 def test_get_defaults_config_image_from_sqlite(cache_dir: Path) -> None:

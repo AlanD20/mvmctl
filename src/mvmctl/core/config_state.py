@@ -53,26 +53,6 @@ def _write_raw(state: dict[str, Any]) -> None:
     path.chmod(CONST_FILE_PERMS_CONFIG)
 
 
-def get_config() -> dict[str, Any]:
-    return _read_raw()
-
-
-def set_config_value(key: str, value: Any) -> None:
-    state = _read_raw()
-    state[key] = value
-    _write_raw(state)
-
-
-def get_config_value(key: str, default: Any = None) -> Any:
-    state = _read_raw()
-    if key in state:
-        return state[key]
-    if key == "default_image":
-        defaults = get_defaults_config()
-        return defaults.get("image", default)
-    return default
-
-
 def get_firecracker_config() -> dict[str, str]:
     db = MVMDatabase()
     binary_default = db.get_default_binary("firecracker")
@@ -165,17 +145,6 @@ def get_assets_config() -> dict[str, str]:
     return dict(section)
 
 
-def update_assets_config(**fields: str) -> None:
-    state = _read_raw()
-    section: dict[str, str] = {}
-    existing = state.get(_ASSETS_KEY)
-    if isinstance(existing, dict):
-        section = {k: v for k, v in existing.items() if isinstance(v, str)}
-    section.update(fields)
-    state[_ASSETS_KEY] = section
-    _write_raw(state)
-
-
 def get_defaults_config() -> dict[str, Any]:
     cache_dir = get_cache_dir()
     defaults: dict[str, Any] = {"image": None, "kernel": None}
@@ -257,8 +226,3 @@ def set_defaults_value(key: str, value: Any) -> None:
     state = _read_raw()
     state[key] = value
     _write_raw(state)
-
-
-def get_defaults_value(key: str, default: Any = None) -> Any:
-    """Get a single value from the defaults section."""
-    return get_defaults_config().get(key, default)

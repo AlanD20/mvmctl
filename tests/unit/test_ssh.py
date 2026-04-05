@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,7 +7,6 @@ from mvmctl.core.ssh import (
     _validate_ssh_username,
     build_ssh_command,
     connect_to_vm,
-    extract_ip_from_config,
     find_ssh_keys,
     resolve_ssh_key,
 )
@@ -52,48 +50,6 @@ def test_find_ssh_keys_multiple(tmp_path: Path):
     assert len(result) == 2
     names = sorted(k.name for k in result)
     assert names == ["id_ed25519", "id_rsa"]
-
-
-def test_extract_ip_from_config_valid(tmp_path: Path):
-    """Extracts IP from valid Firecracker JSON config."""
-    config = {
-        "boot-source": {
-            "kernel_image_path": "vmlinux",
-            "boot_args": "console=ttyS0 ip=10.20.0.2::10.20.0.1:255.255.255.0::eth0:none",
-        }
-    }
-    config_path = tmp_path / "firecracker.json"
-    config_path.write_text(json.dumps(config))
-
-    assert extract_ip_from_config(config_path) == "10.20.0.2"
-
-
-def test_extract_ip_from_config_no_ip(tmp_path: Path):
-    """Returns None when boot_args has no ip= parameter."""
-    config = {
-        "boot-source": {
-            "kernel_image_path": "vmlinux",
-            "boot_args": "console=ttyS0 reboot=k panic=1",
-        }
-    }
-    config_path = tmp_path / "firecracker.json"
-    config_path.write_text(json.dumps(config))
-
-    assert extract_ip_from_config(config_path) is None
-
-
-def test_extract_ip_from_config_missing_file(tmp_path: Path):
-    """Returns None for non-existent config file."""
-    config_path = tmp_path / "nonexistent.json"
-    assert extract_ip_from_config(config_path) is None
-
-
-def test_extract_ip_from_config_invalid_json(tmp_path: Path):
-    """Returns None for file with invalid JSON."""
-    config_path = tmp_path / "bad.json"
-    config_path.write_text("{not valid json!!!")
-
-    assert extract_ip_from_config(config_path) is None
 
 
 def test_build_ssh_command_basic():

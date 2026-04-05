@@ -7,7 +7,6 @@ from pytest_mock import MockerFixture
 
 from mvmctl.api.vms import (
     cleanup_vms,
-    deregister_vm,
     get_logs,
     get_vm,
     inspect_vm,
@@ -39,16 +38,13 @@ def test_list_vms(mock_get_manager):
 
 
 @patch("mvmctl.api.vms.get_vm_manager")
-def test_get_vm_and_deregister(mock_get_manager):
-    """get_vm and deregister_vm interact with manager correctly."""
+def test_get_vm(mock_get_manager):
+    """get_vm interacts with manager correctly."""
     mock_manager = MagicMock()
     mock_get_manager.return_value = mock_manager
 
     get_vm("vm1")
     mock_manager.get.assert_called_with("vm1")
-
-    deregister_vm("vm1")
-    mock_manager.deregister.assert_called_once()
 
 
 @patch("mvmctl.utils.fs.get_vm_dir_by_hash")

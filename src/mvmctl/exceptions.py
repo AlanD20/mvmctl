@@ -9,10 +9,6 @@ class VMNotFoundError(MVMError):
     """VM does not exist in state."""
 
 
-class VMAlreadyExistsError(MVMError):
-    """VM name already registered."""
-
-
 class NetworkError(MVMError):
     """Network setup/teardown failure."""
 
@@ -84,34 +80,25 @@ class VMCreateError(MVMError):
     """
 
 
-class RootfsInjectionError(MVMError):
-    """Raised when cloud-init injection into rootfs fails.
-
-    This error indicates a failure during direct filesystem injection
-    using libguestfs. Common causes include missing libguestfs Python
-    bindings, inability to mount the rootfs, or filesystem corruption.
-    """
-
-
-class GuestfsNotAvailableError(RootfsInjectionError):
+class GuestfsNotAvailableError(MVMError):
     """Raised when libguestfs Python bindings are not available."""
 
     pass
 
 
-class GuestfsLaunchError(RootfsInjectionError):
+class GuestfsLaunchError(MVMError):
     """Raised when guestfs appliance fails to launch."""
 
     pass
 
 
-class GuestfsMountError(RootfsInjectionError):
+class GuestfsMountError(MVMError):
     """Raised when unable to mount rootfs in guestfs."""
 
     pass
 
 
-class GuestfsWriteError(RootfsInjectionError):
+class GuestfsWriteError(MVMError):
     """Raised when writing files to guestfs fails."""
 
     pass
