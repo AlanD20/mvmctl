@@ -13,13 +13,13 @@ metadata:
 
 ## What I do
 
-I guide you in making architecture-aligned design decisions when implementing new features or refactoring:
+I guide you in making architecture-aligned design decisions:
 
-- **Layer placement** — Determine where code belongs (cli/api/core/models/utils)
-- **Data flow** — Ensure User → cli → api → core → models flow
-- **Import boundaries** — Prevent circular dependencies and layer violations
-- **Configuration patterns** — Choose correct default resolution strategy
-- **Module responsibilities** — Clarify what each layer should/shouldn't do
+- **Boundary consciousness** — Every layer has a sacred purpose; respect the walls between them
+- **Flow fidelity** — Data MUST travel the correct path; never skip layers
+- **Import integrity** — Prevent circular dependencies before they breed
+- **Configuration hierarchy** — Know which source of truth dominates
+- **Responsibility clarity** — Each module answers to exactly one master
 
 ## When to use me
 
@@ -27,84 +27,142 @@ Use me when designing new features, planning refactors, or deciding where to pla
 
 I am NOT for code review — use `@.agents/skills/code-review/` skill for that.
 
-## Layer Architecture
+## Core Principles
 
-**Data Flow**: User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + utils/
+### Principle 1: RESPECT THE LAYER WALLS
 
-| Layer | Responsibility | Can Import | Must NOT Import |
-|-------|---------------|------------|-----------------|
-| **cli/** | Typer commands, arg parsing, output | api/ | core/, models/ |
-| **api/** | Privilege checks, delegate to core/ | core/, models/, utils/ | cli/ |
-| **core/** | Business logic, subprocess, Firecracker | models/, utils/ | cli/, api/ |
-| **models/** | Pure @dataclass, no side effects | None (leaf node) | All other layers |
-| **utils/** | Pure helpers, no domain knowledge | None (leaf node) | All other layers |
+Each layer has a SACRED purpose. You MUST know which layer owns what:
 
-**Known Violations**: `cli/asset.py` and `cli/configure.py` import from core/ directly (documented exceptions).
+| Layer | It IS | It IS NOT |
+|-------|-------|-----------|
+| **cli/** | The voice — speaks to the user | The brain — does not compute |
+| **api/** | The gatekeeper — checks privileges | The executor — does not perform |
+| **core/** | The workhorse — all business logic | The speaker — does not print |
+| **models/** | The data — pure containers | The actor — has no side effects |
+| **utils/** | The tools — shared helpers | The decider — has no domain knowledge |
 
-## Module Responsibilities
+**MEMO**: "Ask not what the code does — ask which LAYER owns it."
 
-### cli/
+### Principle 2: DATA MUST FLOW DOWNWARD
+
+The path of least resistance is NOT the correct path. Data MUST travel:
+
+```
+User → mvm → main.py → cli/*.py → api/*.py → core/*.py → models/ + utils/
+```
+
+Skipping layers is architectural debt. If you see:
+- `cli/` importing from `core/` → VIOLATION
+- `core/` printing to console → VIOLATION
+- `models/` making network calls → VIOLATION
+
+**MEMO**: "Downward only. Never climb upstream."
+
+### Principle 3: IMPORT BOUNDARIES ARE FENCES, NOT SUGGESTIONS
+
+Circular dependencies are the root of all architectural evil:
+
+- `cli/` can ONLY import from `api/`
+- `api/` can ONLY import from `core/`, `models/`, `utils/`
+- `core/` can ONLY import from `models/`, `utils/`
+- `models/` and `utils/` are LEAF NODES — they import nothing
+
+**MEMO**: "Import only from below. Never from beside."
+
+### Principle 4: TRUST THE CONFIGURATION HIERARCHY
+
+When multiple sources claim to define a default, KNOW WHICH WINS:
+
+```
+1. (lowest) constants.py FALLBACK_* — the desperate last resort
+2. State files — config.json and metadata.json in user space
+3. MVM_* environment variables — user override
+4. (highest) CLI flags — explicit user intent
+```
+
+**MEMO**: "Higher authority always wins. The user knows best."
+
+### Principle 5: EACH MODULE HAS ONE JOB
+
+When placing code, ask: "What is this module's SOLE PURPOSE?"
+
+**cli/ SOLE PURPOSE**: Parse args, format output, call api/
 - Typer app with `no_args_is_help=True`, `rich_markup_mode=None`, `add_completion=False`
-- Runtime default resolution: `_defaults = _get_vm_defaults()`
-- Call api/ only (except known violations)
-- NO business logic here
+- Runtime defaults: `_defaults = _get_vm_defaults()` — NOT typer defaults
+- NO business logic. NO print statements. NO subprocess.
 
-### api/
-- Add `check_privileges(binary_path)` before privileged ops
-- Delegate to core/, return results directly
-- Export with `__all__`
-- NO output formatting
+**api/ SOLE PURPOSE**: Add privilege checks, delegate to core/, return results
+- `check_privileges(binary_path)` before ANY privileged operation
+- `__all__` exports only
+- NO output formatting. NO business logic.
 
-### core/
-- Return data or raise typed exceptions
-- NO `print()` or console output
-- Subprocess calls only here (list form, NO shell=True)
-- Raise MVMError subclasses
+**core/ SOLE PURPOSE**: Execute business logic, raise typed exceptions
+- Return data OR raise MVMError subclasses
+- Subprocess calls ONLY here (list form, NO shell=True)
+- NO console output. NO privilege checks.
 
-### models/
-- @dataclass only
-- `__post_init__` for validation only
-- NO subprocess, I/O, or side effects
-- VMInstance uses 64-char SHA256 hash (6-char prefix display)
+**models/ SOLE PURPOSE**: Contain data
+- `@dataclass` ONLY
+- `__post_init__` for validation
+- NO subprocess, NO I/O, NO side effects
 
-## Configuration Priority
+**utils/ SOLE PURPOSE**: Provide pure helpers
+- No domain knowledge whatsoever
+- Shared across all layers
 
-1. `constants.py` FALLBACK_*
-2. State files (`config.json` + `metadata.json`)
-3. `MVM_*` environment variables
-4. CLI flags
+**MEMO**: "One purpose. One reason to exist. If it needs two reasons, it doesn't belong."
 
-## Design Decision Checklist
+## Architecture Decision Protocol
 
-When adding new functionality:
+### Before placing ANY code, answer:
 
-- [ ] Which layer? (cli/api/core/models/utils)
-- [ ] Does data flow follow cli→api→core→models?
-- [ ] cli/ imports only from api/?
-- [ ] api/ adds privilege checks before privileged ops?
-- [ ] core/ raises typed exceptions (never prints)?
-- [ ] models/ uses @dataclass only?
-- [ ] NO hardcoded defaults (use FALLBACK_*)?
+1. **What is the user trying to do?** → cli/
+2. **Does it need privilege verification?** → api/
+3. **What is the actual operation?** → core/
+4. **Does it hold state or represent domain data?** → models/
+5. **Is it a reusable pure function?** → utils/
+
+### Checklist (verify before committing):
+
+- [ ] Which layer owns this logic? (cli/api/core/models/utils)
+- [ ] Does data flow follow cli → api → core → models?
+- [ ] cli/ imports ONLY from api/?
+- [ ] api/ adds `check_privileges()` before privileged ops?
+- [ ] core/ raises typed exceptions, never prints?
+- [ ] models/ is @dataclass ONLY, no side effects?
+- [ ] NO hardcoded defaults (use FALLBACK_* in constants.py)?
 - [ ] Env vars use `MVM_` prefix?
-- [ ] Subprocess calls only in core/?
+- [ ] Subprocess calls ONLY in core/?
 - [ ] New exceptions extend MVMError hierarchy?
 
-## Entry Point
+## Known Violations (Documented)
+
+These exist and are tolerated — they are NOT patterns to follow:
+
+- `cli/asset.py` imports from `core/` directly
+- `cli/configure.py` imports from `core/` directly
+
+**MEMO**: "The exception proves the rule. Do not make new exceptions."
+
+## Entry Point Mental Model
 
 ```
 main.py:LazyMVMGroup (click.Group)
-├── _COMMAND_SPECS dict for lazy loading
-├── get_command() imports module on first access
-└── Sub-apps via `typer.main.get_command()`
+├── _COMMAND_SPECS dict — deferred loading
+├── get_command() — imports module only when called
+└── Sub-apps via typer.main.get_command()
 ```
+
+Think of it as a librarian who does not fetch books until you ask for them.
 
 ## Quick Reference
 
-| Decision | Answer |
+| Question | Answer |
 |----------|--------|
-| New command? | cli/ → call api/ |
-| Privileged operation? | api/ adds `check_privileges()` → calls core/ |
+| New command? | cli/ calls api/ |
+| Privileged op? | api/ checks privileges → calls core/ |
 | Data container? | models/ @dataclass |
-| Helper function? | utils/ (pure, no domain knowledge) |
+| Helper function? | utils/ (pure, no domain) |
 | Default value? | constants.py FALLBACK_* |
-| Config resolution? | None default → runtime resolution |
+| Config resolution? | `None` default → runtime resolution |
+

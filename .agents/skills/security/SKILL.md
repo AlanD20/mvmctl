@@ -13,13 +13,13 @@ metadata:
 
 ## What I do
 
-I ensure security compliance for code changes:
+I ensure security compliance:
 
-- **Subprocess safety** — Enforce list form, NO shell=True, proper error handling
-- **Privilege model** — Validate one-time setup and runtime checks
-- **File system security** — Secure paths, permissions, and sensitive files
-- **Network security** — Isolate VMs with iptables, bridge binding, TAP permissions
-- **Audit logging** — Log sensitive operations to audit.log
+- **Trust is a liability** — Input is guilty until proven innocent
+- **Least privilege is law** — Ask only for what you need, and no more
+- **Defense in depth** — One wall is a target; multiple walls are a maze
+- **Audit everything that matters** — If you did not log it, it did not happen
+- **Subprocess is a loaded weapon** — List form or death
 
 ## When to use me
 
@@ -31,7 +31,70 @@ Use me when:
 
 I am NOT for general code quality — use `@.agents/skills/code-review/` skill for that.
 
-## Subprocess Security
+## Core Principles
+
+### Principle 1: TRUST IS A LIABILITY
+
+Every input is guilty until proven innocent:
+
+- User input? Validate it.
+- File paths? Sanitize it.
+- Environment variables? Verify it.
+- Network data? Assume it is hostile.
+
+The safest code assumes everything is trying to exploit it.
+
+**MEMO**: "Trust but verify is for diplomats. In code, distrust everything."
+
+### Principle 2: LEAST PRIVILEGE IS LAW
+
+Request ONLY what you need:
+
+- Subprocess calls need to run a command — ONLY that command, NO shell
+- File access needs to read a config — ONLY that file, in ONLY that directory
+- Network access needs to reach one IP — ONLY that IP, on ONLY that port
+
+Escalation is earned, not assumed.
+
+**MEMO**: "Ask for the key to one room, not the master key to the building."
+
+### Principle 3: DEFENSE IN DEPTH
+
+One wall is a target. Multiple walls are a maze:
+
+- VM network isolation via iptables
+- Bridge binding with specific IPs
+- Source-based firewall rules
+- HTTP servers bind to bridge gateway, not 0.0.0.0
+
+Never rely on a single security measure. If one fails, another must hold.
+
+**MEMO**: "One castle wall is an invitation. Three moats are a deterrent."
+
+### Principle 4: AUDIT EVERYTHING THAT MATTERS
+
+If you did not log it, it did not happen:
+
+- Sensitive operations MUST be logged to `$MVM_CACHE_DIR/audit.log`
+- Log WHO did WHAT, WHEN, and with WHAT result
+- The log is append-only — never truncate it
+
+Audit logs are your forensic trail. They are useless if incomplete.
+
+**MEMO**: "If it matters and you did not log it, it never happened."
+
+### Principle 5: SUBPROCESS IS A LOADED WEAPON
+
+The list form is MANDATORY:
+
+```python
+# SAFE
+["ip", "link", "add", name, "type", "bridge"]
+
+# DANGEROUS - NEVER
+"ip link add " + name + " type bridge"  # shell injection vulnerable
+"ip link add \(name\) type bridge"     # shell=True
+```
 
 **ALWAYS**:
 - Use list form: `["ip", "link", "add", name, "type", "bridge"]`
@@ -39,29 +102,42 @@ I am NOT for general code quality — use `@.agents/skills/code-review/` skill f
 - Raise typed `ProcessError` from utils/process.py
 - Call subprocess ONLY in core/ (never cli/ or models/)
 
-**NEVER**:
-- Use `shell=True` in subprocess calls
-- Use shell string form: `"ip link add ..."`
-- Ignore CalledProcessError silently
+**MEMO**: "The list form is safety. The string form is a loaded weapon."
 
-**Example**:
+## Subprocess Security
+
+### The Doctrine
+
+| Aspect | Safe | Forbidden |
+|--------|------|-----------|
+| Command form | List: `["ip", "link", "add", ...]` | String: `"ip link add ..."` |
+| Shell | NEVER | Always dangerous |
+| Error capture | Must include stderr | Silently ignored |
+| Exception type | `ProcessError` from utils/process.py | Bare `Exception` |
+| Location | core/ ONLY | cli/, api/, models/ — NEVER |
+
+### Example (The Correct Way)
 ```python
 try:
-    subprocess.run(["ip", "link", "add", name, "type", "bridge"], 
-                  capture_output=True, text=True, check=True)
+    subprocess.run(
+        ["ip", "link", "add", name, "type", "bridge"],
+        capture_output=True,
+        text=True,
+        check=True
+    )
 except subprocess.CalledProcessError as e:
     raise NetworkError(f"Bridge creation failed: {e.stderr}") from e
 ```
 
 ## Privilege Model
 
-### One-Time Setup
+### One-Time Setup (The Init)
 ```bash
 sudo mvm host init  # Creates mvm group, sudoers drop-in
 ```
 After init: NO sudo needed for normal commands.
 
-### Runtime Checks
+### Runtime Checks (The Gate)
 ```python
 from mvmctl.core.host_privilege import check_privileges
 check_privileges("/usr/sbin/ip")  # Validates mvm group membership
@@ -131,3 +207,4 @@ log_audit("vm_create", {"name": vm_name, "image": image_id})
 | Network rules | `MVM-NOCLOUD-INPUT` chain | core/network.py |
 | Audit logging | `log_audit(action, details)` | cli/ layer |
 | SUDO_USER | Resolve to invoking user | utils/fs.py |
+
