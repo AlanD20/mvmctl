@@ -97,7 +97,6 @@ def network_ls(
             ]
         )
     print_table(
-        title="Networks",
         columns=["Name", "Network", "IPv4 Gateway", "Bridge", "NAT", "VMs", "Created"],
         rows=rows,
     )

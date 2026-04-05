@@ -221,7 +221,7 @@ def ls_cmd(
             state.init_timestamp if state else "no snapshot",
         ],
     ]
-    print_table(title="Host Configuration", columns=["Check", "Status", "Detail"], rows=rows)
+    print_table(columns=["Check", "Status", "Detail"], rows=rows)
 
 
 @app.command(name="clean")

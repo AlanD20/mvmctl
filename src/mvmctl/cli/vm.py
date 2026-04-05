@@ -652,7 +652,6 @@ def ls_vms(
             ]
         )
     print_table(
-        title="",
         columns=["State", "ID", "Name", "IP", "Status", "PID", "API", "Created"],
         rows=rows,
     )

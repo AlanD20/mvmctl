@@ -41,7 +41,7 @@ def test_format_timestamp_invalid():
 def test_print_table_row_with_extra_cells(capsys):
     from mvmctl.utils.console import print_table
 
-    print_table("T", ["Col1", "Col2"], [["a", "b", "EXTRA"]])
+    print_table(["Col1", "Col2"], [["a", "b", "EXTRA"]])
     captured = capsys.readouterr()
     assert "Col1" in captured.out
     assert "Col2" in captured.out

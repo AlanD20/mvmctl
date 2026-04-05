@@ -30,7 +30,7 @@ class _PlainConsole:
 console = _PlainConsole()
 
 
-def print_table(title: str, columns: list[str], rows: list[list[str]]) -> None:
+def print_table(columns: list[str], rows: list[list[str]], title: str | None = None) -> None:
     """Print a plain-text, column-aligned table."""
     if title:
         print(title)

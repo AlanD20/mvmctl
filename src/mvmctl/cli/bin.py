@@ -128,7 +128,6 @@ def _prompt_for_partition_selection(
     print_table(
         columns=["#", "Size", "Type", "Label", "FS Type"],
         rows=rows,
-        title="",
     )
 
     num_partitions = len(partitions)
@@ -404,7 +403,6 @@ def kernel_ls(
             ]
         )
     print_table(
-        title="Downloaded Kernels",
         columns=["ID", "Name", "Version", "Arch", "Type", "Last Modified", "Size"],
         rows=rows,
     )
@@ -886,7 +884,6 @@ def _output_remote_images(images: list[Any], images_dir: Path, json_output: bool
         )
 
     print_table(
-        title="Available Images (Remote)",
         columns=["Image ID", "Name", "Compression", "FS Type", "Size"],
         rows=rows,
     )
@@ -993,7 +990,6 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
         )
 
     print_table(
-        title="Downloaded Images",
         columns=["ID", "OS Name", "FS Type", "Size", "Added"],
         rows=rows,
     )
@@ -1619,7 +1615,7 @@ def bin_ls(
         # Add missing binaries with X mark
         for version, path in missing_binaries:
             rows.append([get_combined_marker(False, True) + version, str(path)])
-        print_table(title="Local Binaries", columns=["Version", "Path"], rows=rows)
+        print_table(columns=["Version", "Path"], rows=rows)
     else:
         # Check if there are any binaries in metadata with existing files
         # that might not be in the standard bin directory
@@ -1636,7 +1632,7 @@ def bin_ls(
                     version_str = get_combined_marker(is_default, False) + version
                     meta_rows.append([version_str, str(path)])
         if found_in_meta:
-            print_table(title="Local Binaries", columns=["Version", "Path"], rows=meta_rows)
+            print_table(columns=["Version", "Path"], rows=meta_rows)
         else:
             print_warning("No local binaries found")
 
@@ -1652,7 +1648,7 @@ def bin_ls(
             cached = "✓" if ver in local_versions else " "
             rows.append([cached, ver])
 
-        print_table(title="Remote Releases", columns=["Downloaded", "Version"], rows=rows)
+        print_table(columns=["Downloaded", "Version"], rows=rows)
 
 
 @bin_app.command(name="fetch")

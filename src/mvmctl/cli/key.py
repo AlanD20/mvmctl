@@ -78,7 +78,6 @@ def ls(
             ]
         )
     print_table(
-        title="SSH Keys",
         columns=["Name", "Fingerprint", "Algorithm", "Comment", "Private Key", "Added"],
         rows=rows,
     )
