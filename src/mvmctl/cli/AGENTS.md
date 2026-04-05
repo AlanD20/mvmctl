@@ -69,11 +69,21 @@ Typer option defaults **MUST BE `None`**. NO EXCEPTIONS for config-backed values
 
 ### Why This Rule Exists
 
-Defaults come from SQLite state (`$MVM_CACHE_DIR/mvmdb.db`) or `assets/defaults.yaml` at **runtime**, not at import time. Hardcoding in `typer.Option()`:
+Defaults come from SQLite state (`$MVM_CACHE_DIR/mvmdb.db`) or `_defaults.py` at **runtime**, not at import time. Hardcoding in `typer.Option()`:
 1. Bypasses user config changes
 2. Ignores environment variable overrides  
 3. Breaks the configuration priority chain
 4. Makes CLI help text show stale/incorrect values
+
+### Default Value Ownership (ARCHITECTURAL RULE)
+
+**ONLY the CLI layer may resolve default values at runtime.** API and Core layers **MUST NOT** have default values in function parameters — they operate on explicit values only.
+
+| Layer | Default Policy | Reason |
+|-------|----------------|--------|
+| **CLI** | Runtime resolution via `_get_vm_defaults()` pattern | User-facing interface needs configurable defaults |
+| **API** | **NO defaults in params** — only privilege checks + delegation | Public boundary should receive explicit values |
+| **Core** | **NO defaults in params** — business logic operates on what it's given | Business logic should not make assumptions about inputs |
 
 ### Absolute Rules (VIOLATION = IMMEDIATE REJECTION)
 
@@ -83,6 +93,8 @@ Defaults come from SQLite state (`$MVM_CACHE_DIR/mvmdb.db`) or `assets/defaults.
 | `typer.Option(get_assets_dir(), ...)` | Function evaluated at import time, ignores env vars |
 | `typer.Option([], ...)` for list types | Breaks Typer internals; use `None` with runtime list() conversion |
 | `typer.Option(True/False, ...)` for config-backed booleans | Must use `None` for tri-state (user/config/default resolution) |
+| Default values in `api/` function parameters | Violates layer boundary — API receives explicit values from CLI |
+| Default values in `core/` function parameters | Violates layer boundary — Core operates on explicit inputs only |
 
 ### Correct Pattern (MANDATORY)
 

@@ -147,6 +147,17 @@ Called in `api/` layer before entering core, or explicitly in core for ops needi
 | Large functions (>100 lines) | Extract helpers; early returns to reduce nesting |
 | `subprocess.run(..., shell=True)` | Always use list form |
 | Read `bin/firecracker` symlink for state | Query `db.get_default_binary("firecracker")` — symlink is a side-effect |
+| **Default values in function parameters** | Core receives explicit values from API; never use `def func(arg=DEFAULT_VALUE)` |
+
+## DEFAULT VALUE POLICY
+
+The **Core layer MUST NOT have default values in function parameters**. Core functions must operate on explicit values passed from the API layer. The CLI layer is the **only** place where defaults are resolved at runtime via `_get_vm_defaults()` or similar patterns.
+
+Core functions should never provide fallback defaults because:
+- It violates the layer boundary (defaults belong in CLI only)
+- It creates hidden behavior that bypasses user configuration
+- It makes testing harder by introducing implicit state
+- It duplicates default logic that should be centralized in CLI
 
 ## KNOWN VIOLATIONS
 

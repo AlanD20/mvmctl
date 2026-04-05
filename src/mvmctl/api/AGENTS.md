@@ -80,3 +80,16 @@ The config file JSON includes a `firecracker_config` key with the Firecracker bo
 | Business logic beyond privilege + delegation | Move to `core/` |
 | Skip `__all__` | Always declare public surface |
 | Import from `cli/` | One-way dependency: `cli` → `api` → `core` |
+| **Default values in function parameters** | API receives explicit values from CLI; never use `def func(arg=DEFAULT_VALUE)` |
+
+## DEFAULT VALUE POLICY
+
+The **API layer MUST NOT have default values in function parameters**. All API functions must receive explicit values from the CLI layer. The CLI is responsible for:
+1. Using `None` as typer option defaults
+2. Runtime resolution via `_get_vm_defaults()` or similar
+3. Passing the resolved explicit values to API functions
+
+API functions should never provide fallback defaults because:
+- It bypasses user configuration
+- It creates inconsistency between what CLI shows and what API uses
+- It duplicates default logic that belongs only in CLI

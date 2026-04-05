@@ -2,7 +2,7 @@
 
 **Scope:** Pure data containers; no subprocess, no I/O, no side effects (except `VMConfig.__post_init__` validation)
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
-**Rule:** `@dataclass` only; no methods with business logic
+**Rule:** `@dataclass` only; no methods with business logic; **NO default values for config-backed fields**
 
 ## STRUCTURE
 
@@ -19,6 +19,50 @@ src/mvmctl/models/
 ├── binary.py         # BinaryRecord
 └── vm_config_file.py # VMCreateConfigFile — JSON config file schema
 ```
+
+## DEFAULT VALUE POLICY
+
+**Models MUST NOT have default values for config-backed fields.** Default values belong **ONLY** in the CLI layer.
+
+### Why This Rule Exists
+
+Models are the data boundary between layers. If models have default values:
+1. They bypass the CLI's runtime configuration resolution
+2. They create hidden behavior that ignores user settings
+3. They make it unclear what value is actually being used
+4. They duplicate default logic that should be centralized in CLI only
+
+### Correct Pattern
+
+```python
+# WRONG — Model with config-backed default
+@dataclass
+class VMConfig:
+    vcpu_count: int = 2  # DON'T DO THIS — default belongs in CLI only
+
+# CORRECT — Model requires explicit values
+@dataclass
+class VMConfig:
+    vcpu_count: int  # Required — CLI layer resolves and passes explicit value
+
+# CORRECT — Model uses Optional for truly optional fields
+@dataclass  
+class CloudInitConfig:
+    iso_path: Path | None = None  # None means "not provided" — CLI decides default behavior
+```
+
+### Layer Responsibility
+
+| Layer | Default Policy |
+|-------|----------------|
+| **CLI** | Runtime resolution via `_get_vm_defaults()` → passes explicit values to API |
+| **API** | Receives explicit values from CLI → passes to Core |
+| **Core** | Receives explicit values from API → operates on what it's given |
+| **Models** | Store exactly what they're given — no default value injection |
+
+### What About `__post_init__` Validation?
+
+`VMConfig.__post_init__` is the **only** behavioral logic allowed on models. It validates ranges (vCPU 1–32, mem 128–65536 MiB) but does NOT provide default values. It raises exceptions for invalid values — it never substitutes defaults.
 
 ## MODELS
 
@@ -42,7 +86,9 @@ Values: `INJECT` ("inject"), `NET` ("net"), `OFF` ("off"), `ISO` ("iso")
 Values: `PENDING`, `RUNNING`, `DONE`, `ERROR`
 
 ### CloudInitConfig — `cloud_init.py`
-Fields: `mode` (CloudInitMode, default INJECT), `iso_path` (Path|None), `keep_iso` (bool), `nocloud_net_url` (str|None)
+Fields: `mode` (CloudInitMode), `iso_path` (Path|None), `keep_iso` (bool), `nocloud_net_url` (str|None)
+
+**Note:** No default values for config-backed fields. CLI layer resolves defaults at runtime.
 Methods: `to_dict()`, `from_dict()`
 
 ### ImageSpec — `image.py`
@@ -91,3 +137,4 @@ Methods: `from_dict()`, `from_json_file()`, `to_json_file()`, `to_dict()`
 | Add fields with `default_factory` side effects | Pure defaults only |
 | Import from `core/`, `api/`, or `cli/` | Models are leaf nodes — no upward deps |
 | Reference `VMState` | Use `VMStatus` — `VMState` no longer exists |
+| **Default values for config-backed fields** | CLI layer resolves at runtime; models receive explicit values |

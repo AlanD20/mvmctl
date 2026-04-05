@@ -294,11 +294,28 @@ Every downloaded/imported asset (image, kernel, VM) gets a **full 64-char SHA256
 ## CONVENTIONS
 
 ### Architecture (Strict Layers)
-- **cli/** — arg parsing + output formatting ONLY; call `api/`
-- **api/** — privilege checks + delegation to `core/`; stable public API with `__all__`
-- **core/** — subprocess, filesystem, business logic; returns data or raises typed exceptions
-- **models/** — `@dataclass` only; no methods with side effects
+- **cli/** — arg parsing + output formatting ONLY; runtime default resolution; call `api/`
+- **api/** — privilege checks + delegation to `core/`; **NO default values in params**; stable public API with `__all__`
+- **core/** — subprocess, filesystem, business logic; **NO default values in params**; returns data or raises typed exceptions
+- **models/** — `@dataclass` only; **NO default values for config-backed fields**; no methods with side effects
 - **utils/** — pure helpers with no domain knowledge
+
+### Default Value Layer Rule (STRICT ENFORCEMENT)
+
+**Default values belong ONLY in the CLI layer.** API, Core, and Models must receive explicit values.
+
+| Layer | Default Policy | Implementation |
+|-------|----------------|----------------|
+| **CLI** | Runtime resolution | `typer.Option(None, ...)` + `_get_vm_defaults()` pattern |
+| **API** | **NO defaults** | Function params must receive explicit values from CLI |
+| **Core** | **NO defaults** | Business logic operates on explicit inputs only |
+| **Models** | **NO defaults** | Dataclasses store exactly what they're given |
+
+This ensures:
+1. Single source of truth for defaults (CLI runtime resolution)
+2. No hidden behavior in API/Core/Models that bypasses user config
+3. Clear data flow: CLI resolves → API passes through → Core executes → Models store
+4. Testability: API, Core, and Model tests use explicit values, not implicit defaults
 
 ### Centralized Tool Wrappers (CRITICAL)
 
