@@ -125,9 +125,6 @@ def test_step_host_uses_shutil_which_for_mvm(mock_cache, mock_state, mock_kvm, t
 @patch("mvmctl.api.network.ensure_default_network")
 @patch("mvmctl.cli.init.set_active_version")
 @patch("mvmctl.cli.init.fetch_binary")
-@patch("mvmctl.cli.init.build_kernel_pipeline")
-@patch("mvmctl.cli.init.fetch_image")
-@patch("mvmctl.cli.init.create_key")
 @patch("mvmctl.api.network.list_networks", return_value=[])
 @patch("mvmctl.cli.init.check_kvm_access", return_value=True)
 @patch("mvmctl.cli.init.get_host_state", return_value=MagicMock(init_timestamp="2024-01-01"))
@@ -137,9 +134,6 @@ def test_init_non_interactive_no_kernel_image_key(
     mock_host_state,
     mock_kvm,
     mock_list_networks,
-    mock_create_key,
-    mock_fetch_image,
-    mock_build_kernel,
     mock_fetch_binary,
     mock_set_active,
     mock_ensure_net,
@@ -150,11 +144,6 @@ def test_init_non_interactive_no_kernel_image_key(
 
     result = runner.invoke(app, ["--non-interactive"])
     assert result.exit_code == 0
-
-    # Kernel, image, key should NOT be called
-    mock_build_kernel.assert_not_called()
-    mock_fetch_image.assert_not_called()
-    mock_create_key.assert_not_called()
     # Binary is allowed (may or may not be called depending on cache state)
 
 

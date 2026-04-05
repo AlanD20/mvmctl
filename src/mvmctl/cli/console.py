@@ -24,6 +24,7 @@ from mvmctl.api.vms import (
 from mvmctl.api.vms import (
     kill_console as _kill_console,
 )
+from mvmctl.cli._helpers import resolve_vm_by_id_or_name
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.error_handler import handle_mvm_error
@@ -37,28 +38,7 @@ app = typer.Typer(
 
 
 def _resolve_vm(vm_id: Optional[str], name: Optional[str]) -> str:
-    manager = get_vm_manager()
-
-    if name:
-        if manager.get(name) is None:
-            print_error(f"VM '{name}' not found")
-            raise typer.Exit(1)
-        return name
-
-    if vm_id:
-        matches = manager.find_by_id_prefix(vm_id)
-        if len(matches) == 1:
-            return matches[0].name
-        if len(matches) > 1:
-            print_error(f"Multiple VMs match ID prefix '{vm_id}' — use a longer prefix or --name")
-            raise typer.Exit(1)
-        if manager.get(vm_id) is not None:
-            return vm_id
-        print_error(f"No VM found with ID prefix or name '{vm_id}'")
-        raise typer.Exit(1)
-
-    print_error("Provide a VM ID prefix or --name")
-    raise typer.Exit(1)
+    return resolve_vm_by_id_or_name(vm_id, name)
 
 
 @app.command()

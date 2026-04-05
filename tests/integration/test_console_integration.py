@@ -180,7 +180,19 @@ class TestConsoleWorkflow:
 
         from mvmctl.models import CloudInitMode
 
-        vm = create_vm(name="testvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
+        vm = create_vm(
+            name="testvm",
+            image="ubuntu-22.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=True,
+            firecracker_bin="firecracker",
+            cloud_init_mode=CloudInitMode.NET,
+        )
 
         assert isinstance(vm, VMInstance)
         assert vm.name == "testvm"
@@ -319,7 +331,14 @@ class TestConsoleWorkflow:
         vm = create_vm(
             name="testvm",
             image="ubuntu-22.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
             enable_console=False,
+            firecracker_bin="firecracker",
             cloud_init_mode=CloudInitMode.NET,
         )
 

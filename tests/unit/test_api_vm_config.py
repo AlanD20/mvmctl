@@ -1,7 +1,7 @@
 """Tests for api/vm_config.py."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -62,77 +62,41 @@ class TestMergeCliOverrides:
 
 class TestBuildVmConfigFile:
     def test_returns_vm_create_config_file(self):
-        with patch("mvmctl.api.vm_config._vm_defaults") as mock_defaults:
-            mock_vm = MagicMock()
-            mock_vm.vcpu_count = 2
-            mock_vm.mem_size_mib = 512
-            mock_vm.ssh_user = "root"
-            mock_vm.enable_api_socket = False
-            mock_vm.enable_pci = False
-            mock_defaults.return_value = mock_vm
-
-            with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
-                mock_gen.return_value.generate.return_value = {"boot-source": {}}
-                result = build_vm_config_file(name="test", image="ubuntu-24.04")
-                assert isinstance(result, VMCreateConfigFile)
-                assert result.name == "test"
-                assert result.image == "ubuntu-24.04"
+        with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
+            mock_gen.return_value.generate.return_value = {"boot-source": {}}
+            result = build_vm_config_file(name="test", image="ubuntu-24.04")
+            assert isinstance(result, VMCreateConfigFile)
+            assert result.name == "test"
+            assert result.image == "ubuntu-24.04"
 
     def test_uses_provided_values_over_defaults(self):
-        with patch("mvmctl.api.vm_config._vm_defaults") as mock_defaults:
-            mock_vm = MagicMock()
-            mock_vm.vcpu_count = 2
-            mock_vm.mem_size_mib = 512
-            mock_vm.ssh_user = "root"
-            mock_vm.enable_api_socket = False
-            mock_vm.enable_pci = False
-            mock_defaults.return_value = mock_vm
-
-            with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
-                mock_gen.return_value.generate.return_value = {}
-                result = build_vm_config_file(name="test", image="ubuntu", vcpus=4, mem=1024)
-                assert result.vcpus == 4
-                assert result.mem == 1024
+        with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
+            mock_gen.return_value.generate.return_value = {}
+            result = build_vm_config_file(name="test", image="ubuntu", vcpus=4, mem=1024)
+            assert result.vcpus == 4
+            assert result.mem == 1024
 
     def test_handles_config_generator_exception(self):
-        with patch("mvmctl.api.vm_config._vm_defaults") as mock_defaults:
-            mock_vm = MagicMock()
-            mock_vm.vcpu_count = 2
-            mock_vm.mem_size_mib = 512
-            mock_vm.ssh_user = "root"
-            mock_vm.enable_api_socket = False
-            mock_vm.enable_pci = False
-            mock_defaults.return_value = mock_vm
-
-            with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
-                mock_gen.return_value.generate.side_effect = RuntimeError("fail")
-                result = build_vm_config_file(name="test", image="ubuntu")
-                assert result.firecracker_config == {}
+        with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
+            mock_gen.return_value.generate.side_effect = RuntimeError("fail")
+            result = build_vm_config_file(name="test", image="ubuntu")
+            assert result.firecracker_config == {}
 
     def test_passes_kernel_rootfs_gateway_subnet(self):
-        with patch("mvmctl.api.vm_config._vm_defaults") as mock_defaults:
-            mock_vm = MagicMock()
-            mock_vm.vcpu_count = 2
-            mock_vm.mem_size_mib = 512
-            mock_vm.ssh_user = "root"
-            mock_vm.enable_api_socket = False
-            mock_vm.enable_pci = False
-            mock_defaults.return_value = mock_vm
-
-            with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
-                mock_gen.return_value.generate.return_value = {}
-                result = build_vm_config_file(
-                    name="test",
-                    image="ubuntu",
-                    kernel="/boot/vmlinux",
-                    rootfs_path=Path("/tmp/root.ext4"),
-                    ipv4_gateway="10.0.0.1",
-                    subnet_mask="255.255.255.0",
-                )
-                assert result.kernel == "/boot/vmlinux"
-                vm_config_arg = mock_gen.call_args[0][0]
-                vm_instance_arg = mock_gen.call_args[0][1]
-                assert vm_config_arg.kernel_path.as_posix().endswith("vmlinux")
-                assert vm_config_arg.rootfs_path.as_posix().endswith("root.ext4")
-                assert vm_instance_arg.ipv4_gateway == "10.0.0.1"
-                assert vm_instance_arg.subnet_mask == "255.255.255.0"
+        with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
+            mock_gen.return_value.generate.return_value = {}
+            result = build_vm_config_file(
+                name="test",
+                image="ubuntu",
+                kernel="/boot/vmlinux",
+                rootfs_path=Path("/tmp/root.ext4"),
+                ipv4_gateway="10.0.0.1",
+                subnet_mask="255.255.255.0",
+            )
+            assert result.kernel == "/boot/vmlinux"
+            vm_config_arg = mock_gen.call_args[0][0]
+            vm_instance_arg = mock_gen.call_args[0][1]
+            assert vm_config_arg.kernel_path.as_posix().endswith("vmlinux")
+            assert vm_config_arg.rootfs_path.as_posix().endswith("root.ext4")
+            assert vm_instance_arg.ipv4_gateway == "10.0.0.1"
+            assert vm_instance_arg.subnet_mask == "255.255.255.0"

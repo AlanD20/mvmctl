@@ -65,6 +65,23 @@ def parse_disk_size(size_str: str) -> int:
     return bytes_count
 
 
+def format_sectors_human_readable(size_sectors: int, sector_size: int = 512) -> str:
+    """Convert size in sectors to human-readable format (MiB/GiB).
+
+    Args:
+        size_sectors: Size in sectors
+        sector_size: Sector size in bytes (default 512)
+
+    Returns:
+        Human-readable string like "512.0 MiB", "2.5 GiB"
+    """
+    size_bytes = size_sectors * sector_size
+    size_mib = size_bytes / (1024 * 1024)
+    if size_mib >= 1024:
+        return f"{size_mib / 1024:.1f} GiB"
+    return f"{size_mib:.1f} MiB"
+
+
 def format_bytes_human_readable(size_bytes: int) -> str:
     """Format bytes using binary (IEC) units — e.g. "512 B", "4.2 MiB", "1.5 GiB"."""
     if size_bytes < 1024:

@@ -25,7 +25,6 @@ from mvmctl.api.vms import (
     start_vm,
     stop_vm,
 )
-from mvmctl.cli._helpers import get_state_marker, is_file_missing, is_vm_process_running
 from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
@@ -33,6 +32,15 @@ from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
 )
 from mvmctl.exceptions import MVMError
+from mvmctl.utils.console import (
+    get_state_marker,
+    print_error,
+    print_info,
+    print_table,
+    print_warning,
+)
+from mvmctl.utils.fs import get_vms_dir, is_file_missing
+from mvmctl.utils.process import is_process_running as is_vm_process_running
 from mvmctl.models import CloudInitMode, VMInstance
 from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.error_handler import handle_mvm_error

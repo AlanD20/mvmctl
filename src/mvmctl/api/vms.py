@@ -6,19 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from mvmctl.api.host import check_privileges_interactive
-from mvmctl.constants import (
-    DEFAULT_FIRECRACKER_BIN_NAME,
-    DEFAULT_NETWORK_NAME,
-    DEFAULT_VM_ENABLE_API_SOCKET,
-    DEFAULT_VM_ENABLE_CONSOLE,
-    DEFAULT_VM_ENABLE_PCI,
-    DEFAULT_VM_LOG_FOLLOW,
-    DEFAULT_VM_LOG_LINES,
-    DEFAULT_VM_LOG_TYPE,
-    DEFAULT_VM_MEM_MIB,
-    DEFAULT_VM_SSH_USER,
-    DEFAULT_VM_VCPU_COUNT,
-)
 from mvmctl.core.console import (
     check_escape_sequence,
     connect_to_relay,
@@ -223,22 +210,22 @@ def resolve_vm_selector(selector: str) -> str:
 def create_vm(
     name: str,
     image: str,
+    vcpus: int,
+    mem: int,
+    network_name: str,
+    user: str,
+    enable_api_socket: bool,
+    enable_pci: bool,
+    enable_console: bool,
+    firecracker_bin: str,
     kernel: str | None = None,
     image_path: Path | None = None,
     kernel_path: Path | None = None,
-    vcpus: int = DEFAULT_VM_VCPU_COUNT,
-    mem: int = DEFAULT_VM_MEM_MIB,
     disk_size: str | None = None,
     ip: str | None = None,
-    network_name: str = DEFAULT_NETWORK_NAME,
     mac: str | None = None,
     ssh_key: str | None = None,
     user_data: Path | None = None,
-    user: str = DEFAULT_VM_SSH_USER,
-    enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET,
-    enable_pci: bool = DEFAULT_VM_ENABLE_PCI,
-    enable_console: bool = DEFAULT_VM_ENABLE_CONSOLE,
-    firecracker_bin: str = DEFAULT_FIRECRACKER_BIN_NAME,
     cloud_init_mode: CloudInitMode = CloudInitMode.INJECT,
     cloud_init_iso_path: Path | None = None,
     keep_cloud_init_iso: bool = False,
@@ -358,7 +345,7 @@ def vm_cache_dir(vm: VMInstance) -> Path:
 
 def ssh_vm(
     name: str,
-    user: str = DEFAULT_VM_SSH_USER,
+    user: str,
     key: Path | None = None,
     cmd: str | None = None,
 ) -> int:
@@ -374,9 +361,9 @@ def ssh_vm(
 
 def get_logs(
     name: str,
-    log_type: str = DEFAULT_VM_LOG_TYPE,
-    lines: int = DEFAULT_VM_LOG_LINES,
-    follow: bool = DEFAULT_VM_LOG_FOLLOW,
+    log_type: str,
+    lines: int,
+    follow: bool,
 ) -> list[str]:
     """View VM logs. Returns log lines."""
     manager = get_vm_manager()

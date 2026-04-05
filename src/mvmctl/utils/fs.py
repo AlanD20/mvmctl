@@ -246,3 +246,10 @@ def chown_to_real_user(path: Path) -> None:
                 os.chown(child, uid, gid)
     except OSError:
         pass
+
+
+def is_file_missing(path: Path | None) -> bool:
+    """Check if a file is missing or None."""
+    if path is None:
+        return True
+    return not path.exists()

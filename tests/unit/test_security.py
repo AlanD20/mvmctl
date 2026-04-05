@@ -251,6 +251,14 @@ def test_create_vm_rejects_malicious_names(
         create_vm(
             name=malicious_name,
             image="ubuntu-24.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
         )
 
 

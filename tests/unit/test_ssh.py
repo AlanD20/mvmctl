@@ -54,7 +54,7 @@ def test_find_ssh_keys_multiple(tmp_path: Path):
 
 def test_build_ssh_command_basic():
     """Basic command has ssh, strict-host options, and user@ip."""
-    cmd = build_ssh_command("10.20.0.2")
+    cmd = build_ssh_command("10.20.0.2", user="root")
     assert cmd == [
         "ssh",
         "-o",
@@ -70,14 +70,14 @@ def test_build_ssh_command_with_key(tmp_path: Path):
     key = tmp_path / "id_rsa"
     key.write_text("private")
 
-    cmd = build_ssh_command("10.20.0.2", key_path=key)
+    cmd = build_ssh_command("10.20.0.2", user="root", key_path=key)
     assert "-i" in cmd
     assert str(key) in cmd
 
 
 def test_build_ssh_command_with_command():
     """Appends command at end."""
-    cmd = build_ssh_command("10.20.0.2", command="echo hi")
+    cmd = build_ssh_command("10.20.0.2", user="root", command="echo hi")
     assert cmd[-1] == "echo hi"
 
 
@@ -96,7 +96,7 @@ def test_connect_to_vm_by_ip(mock_find_keys: MagicMock, mock_run_ssh: MagicMock,
     key.chmod(0o600)
     mock_find_keys.return_value = [key]
 
-    result = connect_to_vm("10.20.0.5", exec_mode=False, command="echo hi")
+    result = connect_to_vm("10.20.0.5", user="root", exec_mode=False, command="echo hi")
 
     assert result == 0
     mock_find_keys.assert_called_once()
@@ -123,7 +123,7 @@ def test_connect_to_vm_by_name(
     key.chmod(0o600)
     mock_find_keys.return_value = [key]
 
-    result = connect_to_vm("myvm", exec_mode=False, command="echo hi")
+    result = connect_to_vm("myvm", user="root", exec_mode=False, command="echo hi")
 
     assert result == 0
     mock_manager.get.assert_called_once_with("myvm")
@@ -138,14 +138,14 @@ def test_connect_to_vm_name_not_found(mock_vm_manager_cls: MagicMock):
     mock_vm_manager_cls.return_value = mock_manager
 
     with pytest.raises(VMNotFoundError, match="not found"):
-        connect_to_vm("nonexistent", exec_mode=False)
+        connect_to_vm("nonexistent", user="root", exec_mode=False)
 
 
 @patch("mvmctl.core.ssh.find_ssh_keys", return_value=[])
 def test_connect_to_vm_no_keys(mock_find_keys: MagicMock):
     """Raises MVMKeyError when no SSH keys found."""
     with pytest.raises(MVMKeyError, match="No SSH keys found"):
-        connect_to_vm("10.20.0.5", exec_mode=False)
+        connect_to_vm("10.20.0.5", user="root", exec_mode=False)
 
     mock_find_keys.assert_called_once()
 
@@ -224,7 +224,7 @@ class TestConnectToVm:
         key.write_text("fake key")
         with patch("mvmctl.core.ssh.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            result = connect_to_vm("10.0.0.1", key_path=key, exec_mode=False)
+            result = connect_to_vm("10.0.0.1", user="root", key_path=key, exec_mode=False)
             assert result == 0
 
     def test_connect_vm_no_ip(self, tmp_path):
@@ -234,7 +234,7 @@ class TestConnectToVm:
         mock_mgr.get.return_value = vm
 
         with pytest.raises(MVMError, match="has no IP address"):
-            connect_to_vm("noip", vm_manager=mock_mgr)
+            connect_to_vm("noip", user="root", vm_manager=mock_mgr)
 
     def test_connect_no_keys_found(self, tmp_path):
         """connect_to_vm should raise MVMKeyError when no keys found."""
@@ -247,7 +247,7 @@ class TestConnectToVm:
 
         with patch("mvmctl.core.ssh.find_ssh_keys", return_value=[]):
             with pytest.raises(MVMKeyError, match="No SSH keys found"):
-                connect_to_vm("testvm", vm_manager=mock_mgr)
+                connect_to_vm("testvm", user="root", vm_manager=mock_mgr)
 
     def test_connect_key_path_not_exists(self, tmp_path):
         """connect_to_vm should raise MVMKeyError when key file doesn't exist."""
@@ -257,7 +257,7 @@ class TestConnectToVm:
 
         missing_key = tmp_path / "missing_key"
         with pytest.raises(MVMKeyError, match="SSH key not found"):
-            connect_to_vm("testvm", key_path=missing_key, vm_manager=mock_mgr)
+            connect_to_vm("testvm", user="root", key_path=missing_key, vm_manager=mock_mgr)
 
     def test_connect_exec_mode(self, tmp_path):
         """connect_to_vm should call exec_ssh in exec mode."""
@@ -269,7 +269,9 @@ class TestConnectToVm:
         key.write_text("fake key")
 
         with patch("mvmctl.core.ssh.exec_ssh") as mock_exec:
-            result = connect_to_vm("testvm", key_path=key, exec_mode=True, vm_manager=mock_mgr)
+            result = connect_to_vm(
+                "testvm", user="root", key_path=key, exec_mode=True, vm_manager=mock_mgr
+            )
             assert result == 0
             mock_exec.assert_called_once()
 

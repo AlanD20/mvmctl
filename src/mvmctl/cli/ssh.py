@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Optional
 
 import typer
 
-from mvmctl.api.vms import get_vm_manager, ssh_vm
+from mvmctl.api.vms import ssh_vm
+from mvmctl.cli._helpers import resolve_ssh_target
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error
-from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 if TYPE_CHECKING:
     from mvmctl.api.config import VMDefaultsConfig
@@ -89,25 +89,7 @@ def ssh(
 ) -> None:
     """Open an SSH session into a VM."""
     try:
-        if ip is not None:
-            target = ip
-        elif name is not None:
-            validate_entity_name(name, "VM")
-            target = name
-        elif vm_id is not None:
-            target = vm_id
-            if not is_ip_address(target):
-                manager = get_vm_manager()
-                matches = manager.find_by_id_prefix(target)
-                if len(matches) == 1:
-                    target = matches[0].name
-                elif len(matches) > 1:
-                    raise MVMError(f"Ambiguous ID prefix '{target}' matches {len(matches)} VMs")
-                else:
-                    validate_entity_name(target, "VM")
-        else:
-            raise MVMError("Provide either a VM identifier, --name, or --ip")
-
+        target = resolve_ssh_target(vm_id, name, ip)
         resolved_key = _resolve_ssh_key_for_vm(key)
         effective_user = user if user is not None else _get_vm_defaults().ssh_user
         exit_code = ssh_vm(name=target, user=effective_user, key=resolved_key, cmd=cmd)

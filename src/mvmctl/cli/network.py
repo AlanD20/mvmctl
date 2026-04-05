@@ -14,7 +14,7 @@ from mvmctl.api.network import (
     remove_network,
     set_default_network,
 )
-from mvmctl.cli._helpers import check_name_arg, is_bridge_alive
+from mvmctl.cli._helpers import check_name_arg
 from mvmctl.exceptions import MVMError, NetworkError
 from mvmctl.utils.console import (
     format_timestamp,
@@ -26,6 +26,7 @@ from mvmctl.utils.console import (
     print_success,
     print_table,
 )
+from mvmctl.utils.network import is_bridge_alive
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import (
     validate_entity_name,

@@ -6,6 +6,11 @@ from typing import Any
 from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
+    DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_PCI,
+    DEFAULT_VM_MEM_MIB,
+    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_VCPU_COUNT,
 )
 from mvmctl.core.config_gen import ConfigGenerator
 from mvmctl.models.vm_config_file import VMCreateConfigFile
@@ -16,13 +21,6 @@ __all__ = [
     "build_vm_config_file",
     "merge_cli_overrides",
 ]
-
-
-def _vm_defaults() -> Any:
-    from mvmctl.core.config import load_config
-    from mvmctl.utils.fs import get_assets_dir
-
-    return load_config(get_assets_dir()).vm_defaults
 
 
 def load_vm_config_file(path: Path) -> VMCreateConfigFile:
@@ -55,15 +53,14 @@ def build_vm_config_file(
 ) -> VMCreateConfigFile:
     from mvmctl.models.vm import VMConfig
 
-    vm_defaults = _vm_defaults()
-    effective_vcpus = vcpus if vcpus is not None else vm_defaults.vcpu_count
-    effective_mem = mem if mem is not None else vm_defaults.mem_size_mib
+    effective_vcpus = vcpus if vcpus is not None else DEFAULT_VM_VCPU_COUNT
+    effective_mem = mem if mem is not None else DEFAULT_VM_MEM_MIB
     effective_network = network if network is not None else DEFAULT_NETWORK_NAME
-    effective_user = user if user is not None else vm_defaults.ssh_user
+    effective_user = user if user is not None else DEFAULT_VM_SSH_USER
     effective_api_socket = (
-        enable_api_socket if enable_api_socket is not None else vm_defaults.enable_api_socket
+        enable_api_socket if enable_api_socket is not None else DEFAULT_VM_ENABLE_API_SOCKET
     )
-    effective_pci = enable_pci if enable_pci is not None else vm_defaults.enable_pci
+    effective_pci = enable_pci if enable_pci is not None else DEFAULT_VM_ENABLE_PCI
     effective_bin = firecracker_bin if firecracker_bin is not None else DEFAULT_FIRECRACKER_BIN_NAME
 
     from mvmctl.models.vm import VMInstance

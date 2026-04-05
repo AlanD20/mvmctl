@@ -250,3 +250,21 @@ def require_mvm_group_membership() -> None:
             f"does not have the group active yet. Please log out and log back in, "
             f"or run: newgrp {PROJECT_GROUP}"
         )
+
+
+def is_process_running(pid: int | None) -> bool:
+    """Check if a process is still running by PID.
+
+    Args:
+        pid: Process ID to check
+
+    Returns:
+        True if process is running, False if not running or PID is None
+    """
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, OSError):
+        return False

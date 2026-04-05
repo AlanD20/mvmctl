@@ -45,7 +45,7 @@ def test_get_log_path_missing_vm(tmp_path: Path) -> None:
 
     with patch("mvmctl.core.logs.get_vm_dir_by_hash", return_value=nonexistent):
         with pytest.raises(VMNotFoundError, match="not found"):
-            get_log_path("b" * 64)
+            get_log_path("b" * 64, log_type="boot")
 
 
 def test_get_log_path_missing_file(tmp_path: Path) -> None:
@@ -84,7 +84,7 @@ def test_show_logs_success(tmp_path: Path) -> None:
     log_file.write_text("boot line 1\nboot line 2\n")
 
     with patch("mvmctl.core.logs.get_log_path", return_value=log_file):
-        result = show_logs("test-vm", log_type="boot", lines=50)
+        result = show_logs("test-vm", log_type="boot", lines=50, follow=False)
 
     assert isinstance(result, list)
     assert len(result) == 2
@@ -97,7 +97,7 @@ def test_show_logs_not_found() -> None:
         side_effect=VMNotFoundError("VM 'nonexistent-vm' not found"),
     ):
         with pytest.raises(VMNotFoundError, match="not found"):
-            show_logs("nonexistent-vm", log_type="boot")
+            show_logs("nonexistent-vm", log_type="boot", lines=50, follow=False)
 
 
 def test_read_log_lines_io_error(tmp_path: Path) -> None:
@@ -111,7 +111,7 @@ def test_show_logs_os_type(tmp_path: Path) -> None:
     log_file.write_text("os line 1\nos line 2\n")
 
     with patch("mvmctl.core.logs.get_log_path", return_value=log_file):
-        result = show_logs("test-vm", log_type="os", lines=50)
+        result = show_logs("test-vm", log_type="os", lines=50, follow=False)
 
     assert isinstance(result, list)
     assert len(result) == 2
@@ -147,7 +147,7 @@ def test_show_logs_follow_keyboard_interrupt(tmp_path: Path) -> None:
         patch("mvmctl.core.logs.get_log_path", return_value=log_file),
         patch("mvmctl.core.logs.follow_log", side_effect=fake_follow),
     ):
-        result = show_logs("test-vm", log_type="boot", follow=True)
+        result = show_logs("test-vm", log_type="boot", lines=50, follow=True)
 
     assert isinstance(result, list)
     assert "line 1" in result

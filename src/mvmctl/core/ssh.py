@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY, DEFAULT_VM_SSH_USER
+from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY
 from mvmctl.core.vm_manager import VMManager
 from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
 from mvmctl.utils.validation import is_ip_address
@@ -47,7 +47,7 @@ def find_ssh_keys(keys_dir: Path | None = None) -> list[Path]:
 
 def build_ssh_command(
     ip: str,
-    user: str = DEFAULT_VM_SSH_USER,
+    user: str,
     key_path: Path | None = None,
     command: str | None = None,
 ) -> list[str]:
@@ -74,7 +74,7 @@ def build_ssh_command(
 
 def exec_ssh(
     ip: str,
-    user: str = DEFAULT_VM_SSH_USER,
+    user: str,
     key_path: Path | None = None,
     command: str | None = None,
 ) -> None:
@@ -85,7 +85,7 @@ def exec_ssh(
 
 def run_ssh(
     ip: str,
-    user: str = DEFAULT_VM_SSH_USER,
+    user: str,
     key_path: Path | None = None,
     command: str | None = None,
 ) -> int:
@@ -97,7 +97,7 @@ def run_ssh(
 
 def connect_to_vm(
     vm_name_or_ip: str,
-    user: str = DEFAULT_VM_SSH_USER,
+    user: str,
     key_path: Path | None = None,
     command: str | None = None,
     exec_mode: bool = True,

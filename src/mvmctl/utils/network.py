@@ -466,3 +466,23 @@ def get_tap_devices(bridge: str | None = None) -> list[str]:
             devices.append(iface)
 
     return devices
+
+
+def is_bridge_alive(bridge_name: str) -> bool:
+    """Check if a network bridge still exists.
+
+    Args:
+        bridge_name: Name of the bridge interface
+
+    Returns:
+        True if bridge exists, False otherwise
+    """
+    try:
+        result = subprocess.run(
+            ["ip", "link", "show", bridge_name],
+            capture_output=True,
+            check=False,
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False

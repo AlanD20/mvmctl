@@ -179,7 +179,7 @@ def test_ssh_vm_id_matches_single_prefix(mocker):
     mock_vm = VMInstance(name="prefixed-vm", id="abc123def456abcd", status=VMStatus.RUNNING)
     mock_manager = mocker.MagicMock()
     mock_manager.find_by_id_prefix.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.ssh.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli._helpers.get_vm_manager", return_value=mock_manager)
     mock_ssh = mocker.patch("mvmctl.cli.ssh.ssh_vm", return_value=0)
 
     result = runner.invoke(app, ["abc123"])
@@ -195,7 +195,7 @@ def test_ssh_vm_id_ambiguous_prefix(mocker):
     vm2 = VMInstance(name="vm2", id="abc123ffff00ffff", status=VMStatus.RUNNING)
     mock_manager = mocker.MagicMock()
     mock_manager.find_by_id_prefix.return_value = [vm1, vm2]
-    mocker.patch("mvmctl.cli.ssh.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli._helpers.get_vm_manager", return_value=mock_manager)
 
     result = runner.invoke(app, ["abc123"])
     assert result.exit_code == 1
@@ -205,7 +205,7 @@ def test_ssh_vm_id_ambiguous_prefix(mocker):
 def test_ssh_vm_id_no_prefix_match_falls_back_to_name_validation(mocker):
     mock_manager = mocker.MagicMock()
     mock_manager.find_by_id_prefix.return_value = []
-    mocker.patch("mvmctl.cli.ssh.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli._helpers.get_vm_manager", return_value=mock_manager)
     mock_ssh = mocker.patch("mvmctl.cli.ssh.ssh_vm", return_value=0)
 
     result = runner.invoke(app, ["myvm"])

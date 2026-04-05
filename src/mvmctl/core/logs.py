@@ -9,8 +9,6 @@ from pathlib import Path
 from mvmctl.constants import (
     DEFAULT_FC_CONSOLE_LOG_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
-    DEFAULT_VM_LOG_LINES,
-    DEFAULT_VM_LOG_TYPE,
     LOG_FOLLOW_POLL_INTERVAL_S,
 )
 from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
@@ -26,7 +24,7 @@ _LOG_TYPE_FILES: dict[str, str] = {
 
 def get_log_path(
     vm_hash: str,
-    log_type: str = DEFAULT_VM_LOG_TYPE,
+    log_type: str,
 ) -> Path:
     """Get log file path for a VM by its hash.
 
@@ -60,7 +58,7 @@ def get_log_path(
 
 def read_log_lines(
     log_file: Path,
-    lines: int = DEFAULT_VM_LOG_LINES,
+    lines: int,
 ) -> list[str]:
     """Read last *lines* lines from a log file.
 
@@ -108,9 +106,9 @@ def follow_log(
 
 def show_logs(
     vm_hash: str,
-    log_type: str = DEFAULT_VM_LOG_TYPE,
-    lines: int = DEFAULT_VM_LOG_LINES,
-    follow: bool = False,
+    log_type: str,
+    lines: int,
+    follow: bool,
     output: Callable[[str], object] | None = None,
 ) -> list[str]:
     """Retrieve VM log lines.

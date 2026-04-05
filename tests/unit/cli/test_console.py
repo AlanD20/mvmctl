@@ -33,9 +33,8 @@ class TestAttachCommand:
     def test_attach_no_flags_calls_do_attach(self):
         """No flags should call _do_attach."""
         with patch("mvmctl.cli.console._do_attach") as mock_do_attach:
-            with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+            with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
-                mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
                 mock_mgr.get.return_value = mock_vm
                 mock_mgr.find_by_id_prefix.return_value = []
@@ -49,7 +48,7 @@ class TestAttachCommand:
     def test_attach_state_flag_calls_show_state(self):
         """--state flag should call _show_state."""
         with patch("mvmctl.cli.console._show_state") as mock_show_state:
-            with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+            with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
@@ -65,7 +64,7 @@ class TestAttachCommand:
     def test_attach_kill_flag_calls_do_kill(self):
         """--kill flag should call _do_kill."""
         with patch("mvmctl.cli.console._do_kill") as mock_do_kill:
-            with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+            with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
@@ -80,7 +79,7 @@ class TestAttachCommand:
 
     def test_attach_vm_not_found(self):
         """VM not found should exit with error."""
-        with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+        with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
             mock_mgr = MagicMock()
             mock_mgr.get.return_value = None
             mock_mgr.find_by_id_prefix.return_value = []
@@ -99,7 +98,7 @@ class TestAttachCommand:
     def test_attach_positional_short_id_resolves_vm(self):
         """Positional arg with short ID resolves to VM name."""
         with patch("mvmctl.cli.console._do_attach") as mock_do_attach:
-            with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+            with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
@@ -115,7 +114,7 @@ class TestAttachCommand:
     def test_attach_positional_name_fallback(self):
         """Positional arg falls back to name lookup if not short ID."""
         with patch("mvmctl.cli.console._do_attach") as mock_do_attach:
-            with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+            with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
                 mock_mgr = MagicMock()
                 mock_mgr.find_by_id_prefix.return_value = []
@@ -129,7 +128,7 @@ class TestAttachCommand:
 
     def test_attach_short_id_ambiguous(self):
         """Multiple short ID matches shows error."""
-        with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+        with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
             mock_vm1 = MagicMock()
             mock_vm1.name = "vm1"
             mock_vm2 = MagicMock()
@@ -616,7 +615,7 @@ class TestAttachCommandIntegration:
     def test_attach_state_flag_integration(self):
         """Test --state flag with full command flow."""
         with patch("mvmctl.cli.console._show_state") as mock_show:
-            with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+            with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
@@ -632,7 +631,7 @@ class TestAttachCommandIntegration:
     def test_attach_kill_flag_integration(self):
         """Test --kill flag with full command flow."""
         with patch("mvmctl.cli.console._do_kill") as mock_kill:
-            with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+            with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
@@ -648,7 +647,7 @@ class TestAttachCommandIntegration:
     def test_attach_default_attach_mode_integration(self):
         """Test default attach mode with full command flow."""
         with patch("mvmctl.cli.console._do_attach") as mock_attach:
-            with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+            with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                 mock_vm = MagicMock()
                 mock_vm.name = "testvm"
                 mock_mgr = MagicMock()
@@ -665,7 +664,7 @@ class TestAttachCommandIntegration:
         """--state and --kill can both be specified (first one wins)."""
         with patch("mvmctl.cli.console._show_state") as mock_show:
             with patch("mvmctl.cli.console._do_kill") as mock_kill:
-                with patch("mvmctl.cli.console.get_vm_manager") as mock_get_mgr:
+                with patch("mvmctl.cli._helpers.get_vm_manager") as mock_get_mgr:
                     mock_vm = MagicMock()
                     mock_vm.name = "testvm"
                     mock_mgr = MagicMock()

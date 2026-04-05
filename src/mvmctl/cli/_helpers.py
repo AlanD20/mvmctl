@@ -1,10 +1,13 @@
-"""Shared helpers for CLI command modules."""
+"""CLI-specific helpers."""
 
-import os
-import subprocess
-from pathlib import Path
+from typing import Optional
 
 import typer
+
+from mvmctl.api.vms import get_vm_manager
+from mvmctl.exceptions import MVMError
+from mvmctl.utils.console import print_error
+from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 
 def check_name_arg(ctx: typer.Context, name: str | None) -> str:
@@ -18,77 +21,79 @@ def check_name_arg(ctx: typer.Context, name: str | None) -> str:
     return name
 
 
-def is_file_missing(path: Path | None) -> bool:
-    """Check if a file is missing or None."""
-    if path is None:
-        return True
-    return not path.exists()
-
-
-def is_vm_process_running(pid: int | None) -> bool:
-    """Check if a VM process is still running by PID.
+def resolve_vm_by_id_or_name(vm_id: Optional[str], name: Optional[str]) -> str:
+    """Resolve a VM by ID prefix or name.
 
     Args:
-        pid: Process ID to check
+        vm_id: VM ID prefix or name (positional argument)
+        name: VM name (from --name option)
 
     Returns:
-        True if process is running, False if not running or PID is None
+        Resolved VM name
+
+    Raises:
+        typer.Exit: If no VM found or ambiguous match
     """
-    if pid is None:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except (ProcessLookupError, OSError):
-        return False
+    manager = get_vm_manager()
+
+    if name:
+        if manager.get(name) is None:
+            print_error(f"VM '{name}' not found")
+            raise typer.Exit(1)
+        return name
+
+    if vm_id:
+        matches = manager.find_by_id_prefix(vm_id)
+        if len(matches) == 1:
+            return matches[0].name
+        if len(matches) > 1:
+            print_error(f"Multiple VMs match ID prefix '{vm_id}' — use a longer prefix or --name")
+            raise typer.Exit(1)
+        if manager.get(vm_id) is not None:
+            return vm_id
+        print_error(f"No VM found with ID prefix or name '{vm_id}'")
+        raise typer.Exit(1)
+
+    print_error("Provide a VM ID prefix or --name")
+    raise typer.Exit(1)
 
 
-def is_bridge_alive(bridge_name: str) -> bool:
-    """Check if a network bridge still exists.
+def resolve_ssh_target(
+    vm_id: Optional[str],
+    name: Optional[str],
+    ip: Optional[str],
+) -> str:
+    """Resolve SSH target from vm_id, name, or IP.
 
     Args:
-        bridge_name: Name of the bridge interface
+        vm_id: VM identifier (name, ID prefix, or IP)
+        name: VM name from --name option
+        ip: IP address from --ip option
 
     Returns:
-        True if bridge exists, False otherwise
+        Resolved target (VM name or IP)
+
+    Raises:
+        MVMError: If no valid target provided or ambiguous match
     """
-    try:
-        result = subprocess.run(
-            ["ip", "link", "show", bridge_name],
-            capture_output=True,
-            check=False,
-        )
-        return result.returncode == 0
-    except FileNotFoundError:
-        return False
+    if ip is not None:
+        return ip
 
+    if name is not None:
+        validate_entity_name(name, "VM")
+        return name
 
-def get_state_marker(is_missing: bool) -> str:
-    """Get the state marker prefix.
+    if vm_id is not None:
+        if is_ip_address(vm_id):
+            return vm_id
+        manager = get_vm_manager()
+        matches = manager.find_by_id_prefix(vm_id)
+        if len(matches) == 1:
+            return matches[0].name
+        elif len(matches) > 1:
+            raise MVMError(f"Ambiguous ID prefix '{vm_id}' matches {len(matches)} VMs")
+        else:
+            validate_entity_name(vm_id, "VM")
+            return vm_id
 
-    Returns:
-        "X " if resource is missing, "  " (two spaces) if present
-    """
-    return "X " if is_missing else "  "
-
-
-def get_combined_marker(is_default: bool, is_missing: bool) -> str:
-    """Get combined default and existence marker.
-
-    Combines default marker (* ) with existence marker (X ) into a single
-    3-character prefix for display in listing tables.
-
-    Returns:
-        "*X " - File missing + default
-        "X "  - File missing + not default (with leading space for alignment)
-        "* "  - File exists + default (with trailing space for alignment)
-        "  "  - File exists + not default
-    """
-    if is_default and is_missing:
-        return "*X "
-    elif is_missing:
-        return " X "  # Leading space for alignment with "*X "
-    elif is_default:
-        return "*  "  # Trailing space for alignment
-    else:
-        return "   "  # Three spaces for alignment
+    raise MVMError("Provide either a VM identifier, --name, or --ip")

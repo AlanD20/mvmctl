@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
-from mvmctl.cli._helpers import get_combined_marker, is_bridge_alive, is_vm_process_running
+from mvmctl.utils.console import get_combined_marker
+from mvmctl.utils.network import is_bridge_alive
+from mvmctl.utils.process import is_process_running as is_vm_process_running
 
 
 def test_is_vm_process_running_none_pid():
@@ -8,7 +10,7 @@ def test_is_vm_process_running_none_pid():
 
 
 def test_is_bridge_alive_file_not_found():
-    with patch("mvmctl.cli._helpers.subprocess.run", side_effect=FileNotFoundError):
+    with patch("mvmctl.utils.network.subprocess.run", side_effect=FileNotFoundError):
         assert is_bridge_alive("mvm-nonexistent") is False
 
 

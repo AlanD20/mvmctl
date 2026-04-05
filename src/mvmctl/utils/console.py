@@ -113,3 +113,34 @@ def print_inspect_header(title: str, subtitle: str = "") -> None:
         header = title
     print(f"\n{header}")
     print("=" * len(header))
+
+
+def get_state_marker(is_missing: bool) -> str:
+    """Get the state marker prefix.
+
+    Returns:
+        "X " if resource is missing, "  " (two spaces) if present
+    """
+    return "X " if is_missing else "  "
+
+
+def get_combined_marker(is_default: bool, is_missing: bool) -> str:
+    """Get combined default and existence marker.
+
+    Combines default marker (* ) with existence marker (X ) into a single
+    3-character prefix for display in listing tables.
+
+    Returns:
+        "*X " - File missing + default
+        "X "  - File missing + not default (with leading space for alignment)
+        "* "  - File exists + default (with trailing space for alignment)
+        "  "  - File exists + not default
+    """
+    if is_default and is_missing:
+        return "*X "
+    elif is_missing:
+        return " X "  # Leading space for alignment with "*X "
+    elif is_default:
+        return "*  "  # Trailing space for alignment
+    else:
+        return "   "  # Three spaces for alignment

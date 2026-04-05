@@ -75,7 +75,7 @@ def test_ssh_vm(mock_connect):
 def test_get_logs(mock_show_logs):
     """get_logs forwards to show_logs."""
     mock_show_logs.return_value = ["log1"]
-    res = get_logs("vm1", log_type="console", lines=10)
+    res = get_logs("vm1", log_type="console", lines=10, follow=False)
     assert res == ["log1"]
     mock_show_logs.assert_called_with(vm_hash="vm1", log_type="console", lines=10, follow=False)
 

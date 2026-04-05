@@ -37,7 +37,6 @@ from mvmctl.api.metadata import (
     update_image_entry,
 )
 from mvmctl.api.vms import get_vm_manager
-from mvmctl.cli._helpers import get_combined_marker, is_file_missing
 from mvmctl.constants import (
     COMPRESSION_EXTENSION_MAP,
     DEFAULT_IMAGE_ARCH,
@@ -56,33 +55,24 @@ from mvmctl.exceptions import (
     TieDetectedError,
 )
 from mvmctl.utils.console import (
+    get_combined_marker,
     print_error,
     print_info,
     print_success,
     print_table,
     print_warning,
 )
-from mvmctl.utils.disk_size import format_bytes_human_readable
+from mvmctl.utils.disk_size import format_bytes_human_readable, format_sectors_human_readable
 from mvmctl.utils.fs import (
     get_assets_dir,
     get_cache_dir,
     get_images_dir,
     get_kernels_dir,
+    is_file_missing,
 )
 from mvmctl.utils.full_hash import generate_full_hash_image, shorten_hash
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 from mvmctl.utils.time import human_readable_time
-
-
-def _format_size_human_readable(size_sectors: int) -> str:
-    """Convert size in sectors to human-readable format."""
-    from mvmctl.constants import CONST_MEBIBYTE_BYTES, CONST_SECTOR_SIZE_BYTES
-
-    size_bytes = size_sectors * CONST_SECTOR_SIZE_BYTES
-    size_mib = size_bytes / CONST_MEBIBYTE_BYTES
-    if size_mib >= 1024:
-        return f"{size_mib / 1024:.1f} GiB"
-    return f"{size_mib:.1f} MiB"
 
 
 def _prompt_for_partition_selection(
@@ -117,7 +107,7 @@ def _prompt_for_partition_selection(
     for i, partition in enumerate(partitions, 1):
         size_sectors = partition.get("size", 0)
         size_str = (
-            _format_size_human_readable(int(size_sectors))
+            format_sectors_human_readable(int(size_sectors))
             if isinstance(size_sectors, (int, float))
             else "Unknown"
         )

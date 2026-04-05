@@ -174,7 +174,19 @@ def test_create_vm_core_success(
     # Mock NoCloudNetServerManager to return a URL and port
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    vm = create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
+    vm = create_vm(
+        name="myvm",
+        image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
+        cloud_init_mode=CloudInitMode.NET,
+    )
 
     assert isinstance(vm, VMInstance)
     assert vm.name == "myvm"
@@ -189,7 +201,7 @@ def test_create_vm_core_success(
     assert vm_config_arg.cloud_init_mode == CloudInitMode.NET
     assert vm_config_arg.extra_drives == []
     mock_manager.register.assert_called_once()
-    assert mock_popen.call_count == 2
+    assert mock_popen.call_count == 1
     mock_write_pid.assert_called_once()
 
 
@@ -288,7 +300,19 @@ def test_create_vm_inject_mode_is_default(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     # Create VM with explicit AUTO mode
-    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.INJECT)
+    create_vm(
+        name="myvm",
+        image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
+        cloud_init_mode=CloudInitMode.INJECT,
+    )
 
     # Verify NO_CLOUD_NET was used
     # With INJECT mode, nocloud-net server should NOT be started
@@ -310,7 +334,18 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
     mock_get_vm_mgr.return_value = mock_manager
 
     with pytest.raises(MVMError, match="VM limit reached"):
-        create_vm(name="myvm", image="img")
+        create_vm(
+            name="myvm",
+            image="img",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+        )
 
 
 @patch("mvmctl.core.vm_lifecycle.get_vm_manager")
@@ -987,7 +1022,18 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
         mock_mgr.return_value = mock_manager
 
         with pytest.raises(MVMError, match="symlink"):
-            create_vm(name="attackvm", image="ubuntu-24.04")
+            create_vm(
+                name="attackvm",
+                image="ubuntu-24.04",
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+            )
 
 
 @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
@@ -1086,7 +1132,19 @@ def test_create_vm_uses_cached_image_path_not_copy(
     # Mock NoCloudNetServerManager
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
+    create_vm(
+        name="myvm",
+        image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
+        cloud_init_mode=CloudInitMode.NET,
+    )
 
     # Rootfs MUST be copied to VM directory (VM-local copy)
     mock_copy2.assert_called_once()
@@ -1199,7 +1257,20 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     # Mock NoCloudNetServerManager
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04", disk_size="10G", cloud_init_mode=CloudInitMode.NET)
+    create_vm(
+        name="myvm",
+        image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
+        disk_size="10G",
+        cloud_init_mode=CloudInitMode.NET,
+    )
 
     # Verify copy happened first
     mock_copy2.assert_called_once()
@@ -1314,7 +1385,19 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
     mock_create_tap.side_effect = Exception("TAP creation failed")
 
     with pytest.raises(Exception, match="TAP creation failed"):
-        create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
+        create_vm(
+            name="myvm",
+            image="ubuntu-22.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            cloud_init_mode=CloudInitMode.NET,
+        )
 
     # Verify copy happened before the failure
     mock_copy2.assert_called_once()
@@ -1432,7 +1515,19 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
     # Mock NoCloudNetServerManager
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    vm = create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
+    vm = create_vm(
+        name="myvm",
+        image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
+        cloud_init_mode=CloudInitMode.NET,
+    )
 
     # Verify VMInstance has config field set
     assert vm.config is not None, "VMInstance.config should be set"
@@ -1546,6 +1641,14 @@ def test_create_vm_nocloud_net_starts_server(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -1661,6 +1764,14 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
         create_vm(
             name="myvm",
             image="ubuntu-22.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
             cloud_init_mode=CloudInitMode.NET,
         )
 
@@ -1764,6 +1875,14 @@ def test_create_vm_nocloud_net_success_sets_port(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -1874,6 +1993,14 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -1995,6 +2122,14 @@ def test_firewall_failure_stops_server_and_raises(
         create_vm(
             name="myvm",
             image="ubuntu-22.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
             cloud_init_mode=CloudInitMode.NET,
         )
 
@@ -2110,6 +2245,14 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -2215,6 +2358,14 @@ def test_create_vm_starts_nocloud_server(
     vm = create_vm(
         name="myvm",
         image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -2320,6 +2471,14 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
         create_vm(
             name=vm_name,
             image="ubuntu-22.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
             cloud_init_mode=CloudInitMode.INJECT,
         )
 
@@ -2436,6 +2595,14 @@ def test_direct_injection_cleanup_on_injection_failure(
         create_vm(
             name=vm_name,
             image="ubuntu-22.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
             cloud_init_mode=CloudInitMode.INJECT,
         )
 
@@ -2539,7 +2706,19 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     mock_popen.return_value.pid = 99999
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
+    create_vm(
+        name="myvm",
+        image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
+        cloud_init_mode=CloudInitMode.NET,
+    )
 
     mock_write_ci.assert_called_once()
     _, kwargs = mock_write_ci.call_args
@@ -2632,7 +2811,20 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     mock_popen.return_value.pid = 99999
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04", ssh_key="mykey", cloud_init_mode=CloudInitMode.NET)
+    create_vm(
+        name="myvm",
+        image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
+        ssh_key="mykey",
+        cloud_init_mode=CloudInitMode.NET,
+    )
 
     mock_resolve_ssh_key.assert_called_once_with("mykey")
     mock_write_ci.assert_called_once()
@@ -2726,7 +2918,19 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_popen.return_value.pid = 99999
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
-    create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
+    create_vm(
+        name="myvm",
+        image="ubuntu-22.04",
+        vcpus=2,
+        mem=256,
+        network_name="default",
+        user="root",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_console=False,
+        firecracker_bin="firecracker",
+        cloud_init_mode=CloudInitMode.NET,
+    )
 
     mock_resolve_ssh_key.assert_called_once_with(None)
 
@@ -2810,7 +3014,19 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_add_rules.side_effect = NetworkError("iptables failed")
 
     with pytest.raises(NetworkError, match="Network setup failed"):
-        create_vm(name="myvm", image="ubuntu-22.04", cloud_init_mode=CloudInitMode.NET)
+        create_vm(
+            name="myvm",
+            image="ubuntu-22.04",
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            cloud_init_mode=CloudInitMode.NET,
+        )
 
     # cleanup_tap must be called to remove TAP and iptables rules
     mock_cleanup_tap.assert_called_once()
