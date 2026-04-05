@@ -1553,6 +1553,8 @@ def test_resolve_source_template_success(
         format="squashfs",
         convert_to="ext4",
         minimum_rootfs_size=2048,
+        list_url_template="http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
+        source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
 
     result = _resolve_source_template(spec)
@@ -1567,11 +1569,10 @@ def test_resolve_source_template_success(
 def test_resolve_source_template_uses_default_version(
     mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
-    """Test _resolve_source_template uses default version when config fails."""
+    """Test _resolve_source_template raises ImageError when binary metadata lookup fails (no fallback version)."""
     mock_get_default_binary.side_effect = Exception("metadata error")
 
     mock_response = MagicMock()
-    # Use v1.15 which matches DEFAULT_FIRECRACKER_CI_VERSION
     mock_response.read.return_value = b"""<?xml version="1.0" encoding="UTF-8"?>
     <ListBucketResult>
         <Contents>
@@ -1591,11 +1592,12 @@ def test_resolve_source_template_uses_default_version(
         format="squashfs",
         convert_to="ext4",
         minimum_rootfs_size=2048,
+        list_url_template="http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
+        source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
 
-    result = _resolve_source_template(spec)
-
-    assert "ubuntu-22.04.squashfs" in result
+    with pytest.raises(ImageError):
+        _resolve_source_template(spec)
 
 
 @patch("urllib.request.urlopen")
@@ -1617,6 +1619,8 @@ def test_resolve_source_template_network_error(
         format="squashfs",
         convert_to="ext4",
         minimum_rootfs_size=2048,
+        list_url_template="http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
+        source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
 
     with pytest.raises(ImageError, match="Failed to list Firecracker CI ubuntu images") as exc_info:
@@ -1655,6 +1659,8 @@ def test_resolve_source_template_no_matching_keys(
         format="squashfs",
         convert_to="ext4",
         minimum_rootfs_size=2048,
+        list_url_template="http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
+        source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
 
     with pytest.raises(ImageError, match="No ubuntu squashfs found"):

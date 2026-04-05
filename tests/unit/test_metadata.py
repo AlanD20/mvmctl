@@ -274,7 +274,7 @@ class TestBinaryMetadata:
         )
         set_default_binary_entry(cache_dir, "1.15.0")
 
-        default = get_default_binary_entry(cache_dir)
+        default = get_default_binary_entry()
         assert default is not None
         assert default[0] == "1.15.0"
 

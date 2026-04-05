@@ -138,8 +138,8 @@ def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
     _set_default_image_by_os_slug(cache_dir, os_slug)
 
 
-def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    return _get_default_binary_entry(cache_dir)
+def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
+    return _get_default_binary_entry()
 
 
 def set_default_binary_entry(cache_dir: Path, version: str) -> None:

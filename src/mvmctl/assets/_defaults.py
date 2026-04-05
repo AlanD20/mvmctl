@@ -80,6 +80,7 @@ DEFAULTS: dict[str, object] = {
     },
     "image": {
         "defaults": {
+            "arch": "x86_64",
             "convert_to": "ext4",
             "import_format": "auto",
             "import_size_mib": 2048,
@@ -185,20 +186,6 @@ DEFAULTS: dict[str, object] = {
             "github_releases_api": "https://api.github.com/repos/firecracker-microvm/firecracker/releases",
             "github_download_base": "https://github.com/firecracker-microvm/firecracker/releases/download",
             "github_raw_base": "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main",
-        },
-        "firecracker_ci_kernel": {
-            "s3_base": "https://s3.amazonaws.com/spec.ccfc.min",
-            "list_url_template": "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-&list-type=2",
-        },
-        "firecracker_ci_image": {
-            "list_url_template": "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
-        },
-        "firecracker_kernel": {
-            "config_url_template": "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-x86_64-{major_minor}.config",
-        },
-        "kernel": {
-            "tarball_template": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz",
-            "sha256_template": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz.sha256",
         },
     },
     "detectors": {

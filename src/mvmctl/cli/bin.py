@@ -40,6 +40,7 @@ from mvmctl.api.vms import get_vm_manager
 from mvmctl.cli._helpers import get_combined_marker, is_file_missing
 from mvmctl.constants import (
     COMPRESSION_EXTENSION_MAP,
+    DEFAULT_IMAGE_ARCH,
     DEFAULT_IMAGE_IMPORT_FORMAT,
     IMAGE_IMPORT_FORMAT_MAP,
     KERNEL_TYPE_FIRECRACKER,
@@ -1036,6 +1037,11 @@ def image_fetch(
         "--version",
         help="Image spec version from images.yaml (required if multiple images share the same type)",
     ),
+    arch: Optional[str] = typer.Option(
+        None,
+        "--arch",
+        help="Image architecture (e.g. x86_64, arm64)",
+    ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output directory"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-download even if exists"),
     set_default: bool = typer.Option(
@@ -1064,6 +1070,8 @@ def image_fetch(
     effective_selector = image_type or image_selector
 
     spec = _resolve_image_spec(images, effective_selector, version)
+
+    spec.arch = arch if arch is not None else DEFAULT_IMAGE_ARCH
 
     effective_force = force
     if not effective_force:

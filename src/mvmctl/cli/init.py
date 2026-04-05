@@ -21,7 +21,6 @@ from mvmctl.api.host import check_kvm_access, get_host_state, init_host
 from mvmctl.api.keys import add_key, create_key, list_keys
 from mvmctl.constants import (
     DEFAULT_KERNEL_VERSION,
-    KERNEL_TARBALL_URL_TEMPLATE,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.exceptions import BinaryError, HostError, KernelError, MVMError, MVMKeyError
@@ -244,7 +243,11 @@ def _build_default_kernel() -> None:
     version = DEFAULT_KERNEL_VERSION
     out = get_kernels_dir() / "vmlinux"
     out.parent.mkdir(parents=True, exist_ok=True)
-    source_url = KERNEL_TARBALL_URL_TEMPLATE.format(version=version)
+    from mvmctl.api.assets import resolve_kernel_spec
+    from mvmctl.constants import KERNEL_TYPE_OFFICIAL
+
+    kernel_spec = resolve_kernel_spec(kernel_type=KERNEL_TYPE_OFFICIAL)
+    source_url = kernel_spec.source
     try:
         build_kernel_pipeline(
             version=version,

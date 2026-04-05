@@ -6,7 +6,6 @@ import pytest
 
 from mvmctl.core.kernel import (
     download_firecracker_kernel,
-    fetch_kernel_sha256,
     get_default_kernel_path,
     list_kernels,
     parse_kernel_filename,
@@ -312,24 +311,6 @@ def test_list_kernels_shows_default_marker():
 
     result = list_kernels(kernels_dir)
     assert result[0]["is_default"] == "true"
-
-
-@patch("mvmctl.core.kernel.urlopen")
-def test_fetch_kernel_sha256_success(mock_urlopen: MagicMock):
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = b"abcdef0123456789  linux-6.1.9.tar.xz\n"
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-    mock_urlopen.return_value = mock_resp
-
-    result = fetch_kernel_sha256("6.1.9")
-    assert result == "abcdef0123456789"
-
-
-@patch("mvmctl.core.kernel.urlopen", side_effect=URLError("no network"))
-def test_fetch_kernel_sha256_failure(mock_urlopen: MagicMock):
-    result = fetch_kernel_sha256("6.1.9")
-    assert result is None
 
 
 @patch("mvmctl.core.kernel.download_file")

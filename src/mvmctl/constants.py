@@ -100,7 +100,8 @@ _CONFIG_KEY_MAP: Final[dict[str, str]] = {
     "DEFAULT_REMOTE_VERSION_LIMIT": "default_remote_version_limit",
     "DEFAULT_FIRECRACKER_BINARY_PATH": "default_firecracker_binary_path",
     "DEFAULT_KERNEL_VERSION": "default_kernel_version",
-    "DEFAULT_KERNEL_ARCH": "default_fc_kernel_arch",
+    "DEFAULT_KERNEL_ARCH": "default_kernel_arch",
+    "DEFAULT_IMAGE_ARCH": "default_image_arch",
 }
 
 
@@ -237,30 +238,9 @@ DEFAULT_KERNEL_ARCH: Final[str] = _resolve_with_config_override(
     "DEFAULT_KERNEL_ARCH", _require_str(("kernel", "defaults", "arch"))
 )
 
-# Base URL for the Firecracker CI S3 kernel bucket.
-FIRECRACKER_CI_KERNEL_S3_BASE: Final[str] = _require_str(
-    ("urls", "firecracker_ci_kernel", "s3_base")
+DEFAULT_IMAGE_ARCH: Final[str] = _resolve_with_config_override(
+    "DEFAULT_IMAGE_ARCH", _require_str(("image", "defaults", "arch"))
 )
-
-# S3 listing URL template for kernels; fill in {ci_version} and {arch}.
-FIRECRACKER_CI_KERNEL_LIST_URL: Final[str] = _require_str(
-    ("urls", "firecracker_ci_kernel", "list_url_template")
-)
-
-# S3 listing URL template for Firecracker CI Ubuntu images; fill in {ci_version} and {arch}.
-FIRECRACKER_CI_IMAGE_LIST_URL: Final[str] = _require_str(
-    ("urls", "firecracker_ci_image", "list_url_template")
-)
-
-# Firecracker microvm kernel config URL template. The {major_minor} placeholder
-# is substituted at runtime (for example, "6.1").
-FIRECRACKER_KERNEL_CONFIG_URL: Final[str] = _require_str(
-    ("urls", "firecracker_kernel", "config_url_template")
-)
-
-# External kernel tarball/checksum URL templates.
-KERNEL_TARBALL_URL_TEMPLATE: Final[str] = _require_str(("urls", "kernel", "tarball_template"))
-KERNEL_SHA256_URL_TEMPLATE: Final[str] = _require_str(("urls", "kernel", "sha256_template"))
 
 PROJECT_NAME: Final[str] = _resolve_project_name()
 

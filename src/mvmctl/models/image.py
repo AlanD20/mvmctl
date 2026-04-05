@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -74,8 +75,11 @@ class ImageSpec:
     format: str  # noqa: N816
     convert_to: str
     minimum_rootfs_size: int
+    arch: str = field(default_factory=platform.machine)
     sha256: str | None = None
     sha256_url: str | None = None
+    list_url_template: str | None = None
+    source_base: str | None = None
 
 
 @dataclass

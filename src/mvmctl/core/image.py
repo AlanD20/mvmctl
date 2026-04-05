@@ -22,11 +22,7 @@ from mvmctl.constants import (
     CONST_ROOTFS_HEADROOM_FACTOR,
     CONST_SECTOR_SIZE_BYTES,
     CONST_SHRINK_SAFETY_MARGIN,
-    DEFAULT_FIRECRACKER_CI_VERSION,
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
-    DEFAULT_KERNEL_ARCH,
-    FIRECRACKER_CI_IMAGE_LIST_URL,
-    FIRECRACKER_CI_KERNEL_S3_BASE,
     HTTP_TIMEOUT_SHA256_FETCH_S,
     HTTP_USER_AGENT,
 )
@@ -893,13 +889,10 @@ def _handle_raw(
 
 
 def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
-    import platform
-
     try:
         from mvmctl.core.metadata import get_default_binary_entry
-        from mvmctl.utils.fs import get_cache_dir
 
-        default_binary = get_default_binary_entry(get_cache_dir())
+        default_binary = get_default_binary_entry()
         ci_version = ""
         if default_binary is not None:
             _version, binary_meta = default_binary
@@ -909,13 +902,9 @@ def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
     except Exception:
         ci_version = ""
 
-    if not ci_version:
-        ci_version = DEFAULT_FIRECRACKER_CI_VERSION
-
-    arch = platform.machine() or DEFAULT_KERNEL_ARCH
     variables = {
         "ci_version": ci_version,
-        "arch": arch,
+        "arch": spec.arch,
         "image_type": spec.image_type,
         "version": spec.version,
         "image_version": spec.version,
@@ -927,8 +916,13 @@ def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
 def _resolve_source_template(spec: ImageSpec) -> str:
     import re
 
+    if not spec.list_url_template:
+        raise ImageError(f"Missing 'list_url_template' in images.yaml for {spec.id}")
+    if not spec.source_base:
+        raise ImageError(f"Missing 'source_base' in images.yaml for {spec.id}")
+
     template_vars = _get_template_variables(spec)
-    list_url = render_template(FIRECRACKER_CI_IMAGE_LIST_URL, template_vars)
+    list_url = render_template(spec.list_url_template, template_vars)
 
     try:
         req = urllib.request.Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
@@ -950,7 +944,7 @@ def _resolve_source_template(spec: ImageSpec) -> str:
 
     keys.sort()
     chosen_key = keys[-1]
-    return f"{FIRECRACKER_CI_KERNEL_S3_BASE}/{chosen_key}"
+    return f"{spec.source_base}/{chosen_key}"
 
 
 def _fetch_sha256_from_url(sha256_url: str, source_filename: str | None = None) -> str | None:
@@ -1314,6 +1308,8 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
     Raises:
         ConfigError: If config file not found
     """
+    import platform
+
     import yaml
 
     if not config_path.exists():
@@ -1322,6 +1318,7 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
     with open(config_path) as f:
         data = yaml.safe_load(f)
 
+    arch = platform.machine()
     images = []
     for img in data.get("images", []):
         image_id = img["id"]
@@ -1330,6 +1327,7 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
                 id=image_id,
                 image_type=img.get("type", image_id),
                 version=str(img.get("version", image_id)),
+                arch=img.get("arch", arch),
                 name=img.get("name", image_id),
                 source=img["source"],
                 format=img["format"],
@@ -1337,6 +1335,8 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
                 minimum_rootfs_size=img.get("minimum_rootfs_size", DEFAULT_IMAGE_IMPORT_SIZE_MIB),
                 sha256=img.get("sha256"),
                 sha256_url=img.get("sha256_url"),
+                list_url_template=img.get("list_url_template"),
+                source_base=img.get("source_base"),
             )
         )
 

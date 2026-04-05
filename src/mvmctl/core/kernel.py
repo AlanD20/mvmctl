@@ -29,7 +29,6 @@ from mvmctl.constants import (
     HTTP_TIMEOUT_SHA256_FETCH_S,
     HTTP_TIMEOUT_SHA256_SIDECAR_S,
     HTTP_USER_AGENT,
-    KERNEL_SHA256_URL_TEMPLATE,
     KERNEL_TYPE_FIRECRACKER,
     KERNEL_TYPE_OFFICIAL,
     KERNEL_TYPE_UNKNOWN,
@@ -765,19 +764,6 @@ def build_kernel(
     )
 
 
-def fetch_kernel_sha256(version: str) -> str | None:
-    sha256_url = KERNEL_SHA256_URL_TEMPLATE.format(version=version)
-    try:
-        req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
-            content = resp.read().decode().strip()
-        parts = content.split()
-        return str(parts[0]).lower() if parts else None
-    except (URLError, OSError):
-        logger.debug("Could not fetch SHA-256 for kernel %s", version)
-        return None
-
-
 def fetch_kernel_sha256_from_url(sha256_url: str) -> str | None:
     try:
         req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
@@ -964,8 +950,6 @@ def build_kernel_pipeline(
         resolved_sha256_url = render_optional_template(kernel_spec.sha256_url, template_vars)
         if resolved_sha256_url is not None:
             sha256 = fetch_kernel_sha256_from_url(resolved_sha256_url)
-        if sha256 is None:
-            sha256 = fetch_kernel_sha256(version)
 
     if sha256 is None and not intentional_no_checksum:
         raise KernelError(f"Checksum required for kernel source download: {resolved_source_url}")

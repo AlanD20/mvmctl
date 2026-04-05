@@ -598,7 +598,9 @@ def test_build_kernel_pipeline_cached(
 @patch("mvmctl.core.kernel.download_with_progress")
 @patch("mvmctl.core.kernel.update_kernel_entry")
 @patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
+@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value="fakechecksum256fake")
 def test_build_kernel_pipeline_ignores_cache_when_disabled(
+    mock_fetch_sha256_url: MagicMock,
     mock_update_kernel_entry: MagicMock,
     mock_check_deps: MagicMock,
     mock_download: MagicMock,
@@ -668,13 +670,11 @@ def test_build_kernel_pipeline_download_fails(
 
 
 @patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value=None)
-@patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value=None)
 @patch("mvmctl.core.kernel.update_kernel_entry")
 @patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_requires_checksum(
     mock_update_kernel_entry: MagicMock,
     mock_check_deps: MagicMock,
-    mock_fetch_sha256: MagicMock,
     mock_fetch_sha256_url: MagicMock,
     tmp_path: Path,
 ):
@@ -706,8 +706,7 @@ def test_build_kernel_pipeline_requires_checksum(
 
 
 @patch("mvmctl.core.kernel.shutil.copy2")
-@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value=None)
-@patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
+@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value="fakechecksum256fake")
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
@@ -723,7 +722,6 @@ def test_build_kernel_pipeline_full_success(
     mock_extract: MagicMock,
     mock_configure: MagicMock,
     mock_build: MagicMock,
-    mock_fetch_sha256: MagicMock,
     mock_fetch_sha256_url: MagicMock,
     mock_copy2: MagicMock,
     tmp_path: Path,
@@ -753,7 +751,6 @@ def test_build_kernel_pipeline_full_success(
     mock_build.assert_called_once()
 
 
-@patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value=None)
 @patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value="b" * 64)
 @patch("mvmctl.core.kernel.shutil.copy2")
 @patch("mvmctl.core.kernel.build_kernel")
@@ -771,7 +768,6 @@ def test_build_kernel_pipeline_uses_templated_sha256_url(
     mock_build: MagicMock,
     mock_copy2: MagicMock,
     mock_fetch_sha256_url: MagicMock,
-    mock_fetch_sha256: MagicMock,
     tmp_path: Path,
 ):
     output_path = tmp_path / "vmlinux"
@@ -800,7 +796,6 @@ def test_build_kernel_pipeline_uses_templated_sha256_url(
     assert called_sha_url == "https://example.com/linux-6.1.102.sha256"
     assert mock_download.call_args.args[0] == "https://example.com/linux-6.1.102.tar.xz"
     assert mock_download.call_args.kwargs["expected_sha256"] == ("b" * 64)
-    mock_fetch_sha256.assert_not_called()
 
 
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
@@ -889,7 +884,7 @@ def test_build_kernel_pipeline_build_fails(
 
 
 @patch("mvmctl.core.kernel.shutil.copy2")
-@patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
+@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value="fakechecksum256fake")
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
@@ -903,7 +898,7 @@ def test_build_kernel_pipeline_cached_tarball(
     mock_extract: MagicMock,
     mock_configure: MagicMock,
     mock_build: MagicMock,
-    mock_fetch_sha256: MagicMock,
+    mock_fetch_sha256_url: MagicMock,
     mock_copy2: MagicMock,
     tmp_path: Path,
 ):
@@ -934,7 +929,7 @@ def test_build_kernel_pipeline_cached_tarball(
 
 
 @patch("mvmctl.core.kernel.shutil.copy2")
-@patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
+@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value="fakechecksum256fake")
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
@@ -948,7 +943,7 @@ def test_build_kernel_pipeline_cached_tarball_needs_extract(
     mock_extract: MagicMock,
     mock_configure: MagicMock,
     mock_build: MagicMock,
-    mock_fetch_sha256: MagicMock,
+    mock_fetch_sha256_url: MagicMock,
     mock_copy2: MagicMock,
     tmp_path: Path,
 ):
@@ -1116,7 +1111,7 @@ def test_compute_config_hash_with_user_config(tmp_path: Path):
     assert hash1 != hash2
 
 
-@patch("mvmctl.core.kernel.fetch_kernel_sha256", return_value="fakechecksum256fake")
+@patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value="fakechecksum256fake")
 @patch("mvmctl.core.kernel.build_kernel")
 @patch("mvmctl.core.kernel.configure_kernel")
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
@@ -1128,7 +1123,7 @@ def test_build_kernel_pipeline_uses_cache_marker(
     mock_extract: MagicMock,
     mock_configure: MagicMock,
     mock_build: MagicMock,
-    mock_fetch_sha256: MagicMock,
+    mock_fetch_sha256_url: MagicMock,
     tmp_path: Path,
 ):
     """Test that build_kernel_pipeline creates cache marker with config hash."""

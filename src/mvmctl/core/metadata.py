@@ -470,7 +470,7 @@ def set_default_binary_entry(cache_dir: Path, version: str) -> None:
                 break
 
 
-def get_default_binary_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
     """Return the default binary entry as (version, metadata) or None."""
     db = MVMDatabase()
     binary = _find_db_default_binary(db)

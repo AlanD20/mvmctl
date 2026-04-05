@@ -58,6 +58,8 @@ images:
     version: "24.04"
     name: "Ubuntu (Firecracker CI)"
     source: "https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-24.04.squashfs"
+    list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2"
+    source_base: "https://s3.amazonaws.com/spec.ccfc.min"
     format: squashfs
     convert_to: ext4
     minimum_rootfs_size: 640
