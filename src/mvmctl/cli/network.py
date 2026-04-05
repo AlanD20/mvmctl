@@ -7,7 +7,6 @@ from rich.prompt import Prompt
 
 from mvmctl.api.network import (
     create_network,
-    get_iptables_rules_for_bridge,
     get_network_leases,
     inspect_network,
     list_network_interfaces,
@@ -51,7 +50,7 @@ def help_cmd(ctx: typer.Context) -> None:
 
 
 @app.command(name="ls")
-def ls(
+def network_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List all networks."""
@@ -122,8 +121,60 @@ def set_default(
     print_success(f"Default network set to '{name}'")
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def create(
+def _resolve_nat_gateways() -> str:
+    interfaces = list_network_interfaces()
+    if not interfaces:
+        print_error("No network interfaces found")
+        raise typer.Exit(code=1)
+    if len(interfaces) == 1:
+        return interfaces[0]
+    print_info("Select interface(s) for NAT (internet access):")
+    for i, iface in enumerate(interfaces, 1):
+        print_info(f"  [{i}] {iface}")
+    selected = Prompt.ask("Select interface number(s) [comma-separated]", default="1")
+    try:
+        indices = [int(x.strip()) for x in selected.split(",") if x.strip()]
+        selected_interfaces = [
+            interfaces[idx - 1] for idx in indices if 1 <= idx <= len(interfaces)
+        ]
+    except ValueError:
+        print_error(f"Invalid interface selection: {selected}")
+        raise typer.Exit(code=1)
+    if not selected_interfaces:
+        print_error("No valid interface indices selected")
+        raise typer.Exit(code=1)
+    return ",".join(selected_interfaces)
+
+
+def _print_create_error(error_msg: str, name: str) -> None:
+    print_error(error_msg)
+    print_info("")
+    lowered = error_msg.lower()
+    if "already exists" in lowered:
+        print_info("To view existing networks:")
+        print_info("  mvm network ls")
+        print_info("")
+        print_info("To remove the existing network:")
+        print_info(f"  mvm network rm {name}")
+    elif "overlaps" in lowered:
+        print_info("Choose a different SUBNET that doesn't conflict with existing networks.")
+        print_info("Common private ranges:")
+        print_info("  10.0.0.0/8     (very large)")
+        print_info("  172.16.0.0/12  (large)")
+        print_info("  192.168.0.0/16 (medium)")
+        print_info("  192.168.100.0/24 (small, good for testing)")
+    elif "bridge" in lowered and "conflicts" in lowered:
+        print_info("Try using a different network name.")
+    elif "privilege" in lowered or "permission" in lowered:
+        print_info("Run with sudo or configure persistent access:")
+        print_info("  sudo mvm host init")
+        print_info("  (then log out and back in)")
+
+
+@app.command(
+    name="create", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def network_create(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
     subnet: str | None = typer.Option(
@@ -141,19 +192,18 @@ def create(
 ) -> None:
     """Create a named network."""
     name = check_name_arg(ctx, name)
+    validate_entity_name(name, "network")
+
     if subnet is None:
         print_error("Missing required option '--subnet'")
         raise typer.Exit(code=1)
-    validate_entity_name(name, "network")
 
-    # Validate SUBNET notation
     try:
         subnet = validate_subnet(subnet)
     except MVMError as e:
         print_error(f"Invalid SUBNET: {e}")
         raise typer.Exit(code=1)
 
-    # Validate gateway if provided
     if ipv4_gateway is not None:
         try:
             ipv4_gateway = validate_ipv4_address(ipv4_gateway)
@@ -162,36 +212,8 @@ def create(
             raise typer.Exit(code=1)
 
     if nat_gateways is None:
-        interfaces = list_network_interfaces()
-        if len(interfaces) == 0:
-            print_error("No network interfaces found")
-            raise typer.Exit(code=1)
-        elif len(interfaces) == 1:
-            nat_gateways = interfaces[0]
-        else:
-            print_info("Select interface(s) for NAT (internet access):")
-            for i, iface in enumerate(interfaces, 1):
-                print_info(f"  [{i}] {iface}")
-            selected = Prompt.ask(
-                "Select interface number(s) [comma-separated]",
-                default="1",
-            )
-            # Parse comma-separated indices
-            try:
-                indices = [int(x.strip()) for x in selected.split(",") if x.strip()]
-                selected_interfaces = []
-                for idx in indices:
-                    if 1 <= idx <= len(interfaces):
-                        selected_interfaces.append(interfaces[idx - 1])
-                if not selected_interfaces:
-                    print_error("No valid interface indices selected")
-                    raise typer.Exit(code=1)
-                nat_gateways = ",".join(selected_interfaces)
-            except ValueError:
-                print_error(f"Invalid interface selection: {selected}")
-                raise typer.Exit(code=1)
+        nat_gateways = _resolve_nat_gateways()
 
-    # Validate and parse NAT gateways
     try:
         nat_gateways_list = validate_nat_gateways(nat_gateways)
     except MVMError as e:
@@ -207,28 +229,7 @@ def create(
             nat_gateways=nat_gateways_list,
         )
     except NetworkError as e:
-        error_msg = str(e)
-        print_error(error_msg)
-        print_info("")
-        if "already exists" in error_msg.lower():
-            print_info("To view existing networks:")
-            print_info("  mvm network ls")
-            print_info("")
-            print_info("To remove the existing network:")
-            print_info(f"  mvm network rm {name}")
-        elif "overlaps" in error_msg.lower():
-            print_info("Choose a different SUBNET that doesn't conflict with existing networks.")
-            print_info("Common private ranges:")
-            print_info("  10.0.0.0/8     (very large)")
-            print_info("  172.16.0.0/12  (large)")
-            print_info("  192.168.0.0/16 (medium)")
-            print_info("  192.168.100.0/24 (small, good for testing)")
-        elif "bridge" in error_msg.lower() and "conflicts" in error_msg.lower():
-            print_info("Try using a different network name.")
-        elif "privilege" in error_msg.lower() or "permission" in error_msg.lower():
-            print_info("Run with sudo or configure persistent access:")
-            print_info("  sudo mvm host init")
-            print_info("  (then log out and back in)")
+        _print_create_error(str(e), name)
         raise typer.Exit(code=1)
 
     print_success(f"Network '{config.name}' created")
@@ -298,42 +299,26 @@ def inspect(
 
     print_section_header("BASIC INFO")
     print_key_value("Name", info["name"])
-    print_key_value("SUBNET", info.get("subnet", info.get("subnet", "-")))
+    print_key_value("Subnet", info.get("subnet", "-"))
     print_key_value("IPv4 Gateway", info.get("ipv4_gateway", "-"))
     print_key_value("Bridge", info["bridge"])
     print_key_value("NAT", "enabled" if info["nat_enabled"] else "disabled")
     print_key_value("Created", format_timestamp(info.get("created_at")))
 
     print_section_header("RESOURCES")
-    raw_vms = info.get("vms")
-    vms = [v for v in (raw_vms if isinstance(raw_vms, list) else []) if isinstance(v, dict)]
+    vms = [v for v in info.get("vms") or [] if isinstance(v, dict)]
     print_key_value("Bridge Active", "yes" if info.get("bridge_exists") else "no")
     print_key_value("Leases", f"{len(vms)} assigned")
 
-    print_section_header("INTERFACES")
-    print_key_value("Bridge", info["bridge"])
-
     # Show NAT config if enabled
     if info.get("nat_enabled"):
+        nat_gateways: list[str] = info.get("nat_gateways") or []
         print_section_header("NAT CONFIG")
-        # Get iptables rules to find interface
-        bridge = str(info["bridge"])
-        rules = get_iptables_rules_for_bridge(bridge)
-        iface = "-"
-        for rule in rules:
-            if "-o" in rule:
-                parts = rule.split()
-                for i, part in enumerate(parts):
-                    if part == "-o" and i + 1 < len(parts):
-                        iface = parts[i + 1]
-                        break
-            if iface != "-":
-                break
-        print_key_value("Interface", iface)
-        print_key_value("MASQUERADE", "enabled" if rules else "disabled")
+        print_key_value("NAT Gateways", ", ".join(nat_gateways) if nat_gateways else "-")
 
     # Show VMs if any
     if vms:
         print_section_header("VMS")
         for vm in vms:
-            print_key_value(vm["vm_id"], vm["ipv4"], indent=2, key_width=20)
+            label = f"{vm['vm_id']}  ({vm.get('status', '?')})"
+            print_key_value(label, vm["ipv4"], indent=2, key_width=28)

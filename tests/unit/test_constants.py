@@ -25,19 +25,27 @@ from mvmctl.constants import (
 
 
 def test_resolve_project_name_package_found():
-    with patch("mvmctl.constants.importlib.metadata.metadata") as mock_meta:
-        mock_meta.return_value = {"Name": "mvmctl"}
-        assert _resolve_project_name() == "mvmctl"
+    import importlib.metadata
+
+    _resolve_project_name.cache_clear()
+    with patch.object(importlib.metadata, "metadata", return_value={"Name": "mvmctl"}):
+        result = _resolve_project_name()
+    _resolve_project_name.cache_clear()
+    assert result == "mvmctl"
 
 
 def test_resolve_project_name_package_not_found():
     import importlib.metadata
 
-    with patch(
-        "mvmctl.constants.importlib.metadata.metadata",
+    _resolve_project_name.cache_clear()
+    with patch.object(
+        importlib.metadata,
+        "metadata",
         side_effect=importlib.metadata.PackageNotFoundError("not installed"),
     ):
-        assert _resolve_project_name() == "mvmctl"
+        result = _resolve_project_name()
+    _resolve_project_name.cache_clear()
+    assert result == "mvmctl"
 
 
 def test_project_name_is_string():

@@ -5,8 +5,8 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from mvmctl.cli.network import app
-from mvmctl.models.network import NetworkConfig
 from mvmctl.exceptions import MVMError, NetworkError
+from mvmctl.models.network import NetworkConfig
 
 runner = CliRunner()
 
@@ -136,6 +136,7 @@ _FAKE_INSPECT = {
     "ipv4_gateway": "192.168.100.1",
     "bridge": "mvm-testnet",
     "nat_enabled": True,
+    "nat_gateways": ["eth0"],
     "bridge_exists": False,
     "created_at": "2024-01-01T00:00:00+00:00",
     "vms": [],
@@ -143,24 +144,21 @@ _FAKE_INSPECT = {
 
 
 @patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT)
-@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
-def test_inspect_success(mock_rules, mock_inspect):
+def test_inspect_success(mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet"])
     assert result.exit_code == 0
     assert "testnet" in result.output
 
 
 @patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT)
-@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
-def test_inspect_json(mock_rules, mock_inspect):
+def test_inspect_json(mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet", "--json"])
     assert result.exit_code == 0
     assert '"testnet"' in result.output
 
 
 @patch("mvmctl.cli.network.inspect_network", side_effect=NetworkError("not found"))
-@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
-def test_inspect_error(mock_rules, mock_inspect):
+def test_inspect_error(mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet"])
     assert result.exit_code == 1
     assert "not found" in result.output.lower()
@@ -520,7 +518,7 @@ def test_create_success_prints_nat_gateways(mock_create, mock_ifaces):
 
 
 # ---------------------------------------------------------------------------
-# network inspect — NAT section with iptables rules (covers lines 317-333)
+# network inspect — NAT section showing nat_gateways (covers NAT CONFIG block)
 # ---------------------------------------------------------------------------
 
 _FAKE_INSPECT_NAT = {
@@ -529,6 +527,7 @@ _FAKE_INSPECT_NAT = {
     "ipv4_gateway": "192.168.100.1",
     "bridge": "mvm-testnet",
     "nat_enabled": True,
+    "nat_gateways": ["eth0"],
     "bridge_exists": True,
     "created_at": "2024-01-01T00:00:00+00:00",
     "vms": [],
@@ -536,22 +535,21 @@ _FAKE_INSPECT_NAT = {
 
 
 @patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_NAT)
-@patch(
-    "mvmctl.cli.network.get_iptables_rules_for_bridge",
-    return_value=["-A POSTROUTING -o eth0 -j MASQUERADE"],
-)
-def test_inspect_nat_section_with_iptables_rule(mock_rules, mock_inspect):
-    """NAT CONFIG section printed and interface extracted from iptables rule."""
+def test_inspect_nat_section_with_gateways(mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet"])
     assert result.exit_code == 0
     assert "NAT CONFIG" in result.output
     assert "eth0" in result.output
 
 
-@patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_NAT)
-@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
-def test_inspect_nat_section_no_iptables_rules(mock_rules, mock_inspect):
-    """NAT CONFIG section printed even when no iptables rules found."""
+_FAKE_INSPECT_NAT_EMPTY = {
+    **_FAKE_INSPECT_NAT,
+    "nat_gateways": [],
+}
+
+
+@patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_NAT_EMPTY)
+def test_inspect_nat_section_no_gateways(mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet"])
     assert result.exit_code == 0
     assert "NAT CONFIG" in result.output
@@ -567,16 +565,15 @@ _FAKE_INSPECT_WITH_VMS = {
     "ipv4_gateway": "192.168.100.1",
     "bridge": "mvm-testnet",
     "nat_enabled": False,
+    "nat_gateways": [],
     "bridge_exists": True,
     "created_at": "2024-01-01T00:00:00+00:00",
-    "vms": [{"vm_id": "abc123", "ipv4": "192.168.100.2"}],
+    "vms": [{"vm_id": "abc123", "ipv4": "192.168.100.2", "status": "running"}],
 }
 
 
 @patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_WITH_VMS)
-@patch("mvmctl.cli.network.get_iptables_rules_for_bridge", return_value=[])
-def test_inspect_shows_vms_section(mock_rules, mock_inspect):
-    """VMS section printed when vms list is non-empty."""
+def test_inspect_shows_vms_section(mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet"])
     assert result.exit_code == 0
     assert "VMS" in result.output

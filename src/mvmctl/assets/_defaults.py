@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+DEFAULTS: dict[str, object] = {
+    "firecracker": {
+        "binary": "/usr/local/bin/firecracker",
+        "socket_dir": "/tmp/mvm/sockets",
+        "run_dir": "/tmp/mvm/run",
+        "log_dir": "/tmp/mvm/logs",
+        "versions": {
+            "full": "v1.15.0",
+            "ci": "v1.15",
+        },
+    },
+    "vm_defaults": {
+        "vcpu_count": 2,
+        "mem_size_mib": 2048,
+        "ssh_user": "root",
+        "root_fs_type": "ext4",
+        "network_interface": "eth0",
+        "subnet_mask": "255.255.255.0",
+        "boot_args": "console=ttyS0 reboot=k panic=1 pci=off",
+        "disk_size": "2G",
+        "enable_api_socket": True,
+        "enable_pci": False,
+        "enable_logging": True,
+        "enable_metrics": False,
+        "enable_console": True,
+        "lsm_flags": "landlock,lockdown,yama,integrity,selinux,bpf",
+    },
+    "network": {
+        "defaults": {
+            "name": "default",
+            "subnet": "172.35.0.0/24",
+            "ipv4_gateway": "172.35.0.1",
+        },
+    },
+    "vm": {
+        "files": {
+            "kernel_filename": "vmlinux",
+            "rootfs_filename": "rootfs.ext4",
+            "rootfs_basename": "rootfs",
+        },
+        "cloud_init": {
+            "seed_path": "/var/lib/cloud/seed/nocloud",
+            "kernel_cmdline_ds": "ds=nocloud",
+            "final_message": "mvm cloud-init done",
+            "disable_snapd_cmd": "systemctl disable --now snapd.socket 2>/dev/null || true",
+            "dirname": "cloud-init",
+            "kernel_cmdline_nocloud": "ds=nocloud",
+            "iso_name": "cloud-init.iso",
+            "iso_volume_label": "cidata",
+            "drive_id": "cloud-init",
+            "required_iso_tool": "cloud-localds",
+            "default_dns_servers": ["1.1.1.1", "8.8.8.8"],
+        },
+        "boot": {
+            "console": "console=ttyS0",
+            "reboot": "reboot=k",
+            "panic": "panic=1",
+            "pci_off": "pci=off",
+        },
+        "network_guest": {
+            "mac_default": "02:FC:00:00:00:01",
+            "mac_prefix": "02:FC",
+            "iface": "eth0",
+            "boot_mode": "off",
+        },
+        "firecracker": {
+            "log_level": "Debug",
+            "drive_cache_type": "Unsafe",
+            "drive_io_engine": "Sync",
+        },
+        "firecracker_bin_name": "firecracker",
+        "logging": {
+            "type": "os",
+            "lines": 50,
+            "follow": False,
+        },
+        "snapshot": {
+            "resume": True,
+        },
+        "limits": {
+            "max_vms": 1000,
+        },
+    },
+    "image": {
+        "defaults": {
+            "convert_to": "ext4",
+            "import_format": "auto",
+            "import_size_mib": 2048,
+            "supported_extensions": [
+                ".ext4",
+                ".btrfs",
+                ".img",
+                ".raw",
+                ".ext4.zst",
+                ".btrfs.zst",
+            ],
+            "compression_extension_map": {
+                ".ext4": ".ext4.zst",
+                ".btrfs": ".btrfs.zst",
+                ".img": ".img.zst",
+                ".raw": ".raw.zst",
+            },
+            "import_format_map": {
+                ".qcow2": "qcow2",
+                ".raw": "raw",
+                ".img": "raw",
+                ".tar": "tar-rootfs",
+                ".tar.gz": "tar-rootfs",
+                ".tar.xz": "tar-rootfs",
+                ".tgz": "tar-rootfs",
+            },
+        },
+        "remote": {
+            "version_limit": 5,
+            "max_parallel_downloads": 4,
+        },
+        "shrink_safety_margin": 1.01,
+        "ratio_min": 1.0,
+    },
+    "host": {
+        "system_dirs": {
+            "sysctl_conf_dir": "/etc/sysctl.d",
+            "sudoers_dir": "/etc/sudoers",
+        },
+        "sbin_paths": {
+            "ip": "/usr/sbin/ip",
+            "iptables": "/usr/sbin/iptables",
+            "iptables_restore": "/usr/sbin/iptables-restore",
+            "iptables_save": "/usr/sbin/iptables-save",
+            "sysctl": "/usr/sbin/sysctl",
+        },
+        "privileged_binaries": [
+            "/usr/sbin/ip",
+            "/usr/sbin/iptables",
+            "/usr/sbin/iptables-restore",
+            "/usr/sbin/iptables-save",
+            "/usr/sbin/sysctl",
+            "/usr/bin/mount",
+            "/usr/bin/umount",
+        ],
+        "required_binaries": [
+            "ip",
+            "iptables",
+            "qemu-img",
+        ],
+        "iso_binaries": [
+            "mkisofs",
+            "genisoimage",
+        ],
+        "system_files": {
+            "sudoers_drop_in_template": "/etc/sudoers.d/{cli_name}",
+            "iptables_rules_v4": "/etc/iptables/rules.v4",
+            "iptables_chains": [
+                {"name": "MVM-FORWARD", "table": "filter", "built_in": "FORWARD"},
+                {"name": "MVM-POSTROUTING", "table": "nat", "built_in": "POSTROUTING"},
+                {"name": "MVM-NOCLOUD-INPUT", "table": "filter", "built_in": "INPUT"},
+            ],
+        },
+    },
+    "http": {
+        "download_chunk_size": 1048576,
+        "download_max_retries": 3,
+        "download_retry_delay": 1.0,
+        "download_retry_backoff": 2.0,
+    },
+    "kernel": {
+        "defaults": {
+            "version": "6.19.9",
+            "arch": "x86_64",
+            "build_jobs": 1,
+        },
+    },
+    "fallbacks": {
+        "fc_ci_version": "1.15",
+        "firecracker_bin": "firecracker",
+        "kernel_build_jobs": 1,
+        "max_parallel_downloads": 4,
+    },
+    "libguestfs": {
+        "launch_timeout": 4,
+        "fallback_root_device": "/dev/sda1",
+        "seed_dir": "/var/lib/cloud/seed/nocloud",
+        "root_indicators": [
+            "/etc/os-release",
+            "/etc/fstab",
+        ],
+    },
+    "urls": {
+        "firecracker": {
+            "github_releases_api": "https://api.github.com/repos/firecracker-microvm/firecracker/releases",
+            "github_download_base": "https://github.com/firecracker-microvm/firecracker/releases/download",
+            "github_raw_base": "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main",
+        },
+        "firecracker_ci_kernel": {
+            "s3_base": "https://s3.amazonaws.com/spec.ccfc.min",
+            "list_url_template": "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-&list-type=2",
+        },
+        "firecracker_ci_image": {
+            "list_url_template": "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
+        },
+        "firecracker_kernel": {
+            "config_url_template": "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-x86_64-{major_minor}.config",
+        },
+        "kernel": {
+            "tarball_template": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz",
+            "sha256_template": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz.sha256",
+        },
+    },
+    "detectors": {
+        "weights": {
+            "type_code": 1.0,
+            "label": 0.8,
+            "size": 0.5,
+            "filesystem": 0.7,
+        },
+        "scores": {
+            "ROOT_SCORE": 1.0,
+            "EXCLUDE_SCORE": -1.0,
+            "NEUTRAL_SCORE": 0.0,
+            "MBR_LINUX_SCORE": 0.5,
+            "LABEL_ROOT_SCORE": 1.0,
+            "LABEL_EXCLUDE_SCORE": -0.5,
+            "SIZE_LARGEST_SCORE": 0.5,
+            "SIZE_ROOT_SCORE": 0.3,
+            "SIZE_TOO_SMALL_SCORE": -0.5,
+        },
+        "thresholds": {
+            "MIN_ROOT_SIZE_MB": 500,
+            "SIZE_TOO_SMALL_MB": 100,
+        },
+    },
+    "debug": {
+        "enabled": False,
+        "verbose_errors": True,
+        "show_tracebacks": False,
+    },
+}

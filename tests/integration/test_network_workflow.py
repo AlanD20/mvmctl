@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from mvmctl.cli.network import app as network_app
-from mvmctl.models.network import NetworkConfig
 from mvmctl.exceptions import NetworkError
+from mvmctl.models.network import NetworkConfig
 
 runner = CliRunner()
 
@@ -59,7 +59,6 @@ class TestNetworkLifecycleWorkflow:
         assert len(data) == 1
         assert data[0]["name"] == "integration-net"
 
-    @patch("mvmctl.cli.network.get_iptables_rules_for_bridge")
     @patch("mvmctl.cli.network.inspect_network")
     @patch("mvmctl.cli.network.create_network")
     @patch("mvmctl.api.network.check_privileges_interactive")
@@ -70,7 +69,6 @@ class TestNetworkLifecycleWorkflow:
         mock_check_priv,
         mock_create,
         mock_inspect,
-        mock_rules,
     ):
         """Test creating a network and then inspecting it."""
         mock_check_priv.return_value = None
@@ -83,11 +81,11 @@ class TestNetworkLifecycleWorkflow:
             "ipv4_gateway": "172.16.0.1",
             "bridge": "mvm-inspect-net",
             "nat_enabled": True,
+            "nat_gateways": ["eth0"],
             "bridge_exists": True,
             "created_at": "2024-01-01T00:00:00+00:00",
             "vms": [],
         }
-        mock_rules.return_value = []
 
         result = runner.invoke(
             network_app,
@@ -219,12 +217,10 @@ class TestNetworkWorkflowEdgeCases:
 
     @patch("mvmctl.api.network.check_privileges_interactive")
     @patch("mvmctl.cli.network.inspect_network")
-    @patch("mvmctl.cli.network.get_iptables_rules_for_bridge")
-    def test_inspect_nonexistent_network(self, mock_rules, mock_inspect, mock_check_priv):
+    def test_inspect_nonexistent_network(self, mock_inspect, mock_check_priv):
         """Test attempting to inspect a network that doesn't exist."""
         mock_check_priv.return_value = None
         mock_inspect.side_effect = NetworkError("Network 'unknown-net' not found")
-        mock_rules.return_value = []
 
         result = runner.invoke(network_app, ["inspect", "unknown-net"])
         assert result.exit_code == 1

@@ -1,14 +1,10 @@
 """Project identity constants derived from pyproject.toml metadata."""
 
 import functools
-import importlib.metadata
-import importlib.resources
 import ipaddress
 import json
 from pathlib import Path
 from typing import Any, Final
-
-import yaml
 
 _BOOTSTRAP_NAME: Final[str] = "mvmctl"
 
@@ -16,17 +12,21 @@ _BOOTSTRAP_NAME: Final[str] = "mvmctl"
 @functools.lru_cache(maxsize=1)
 def _resolve_project_name() -> str:
     """Resolve the project name from package metadata, falling back to bootstrap name."""
+    import importlib.metadata as _meta
+
     try:
-        return importlib.metadata.metadata(_BOOTSTRAP_NAME)["Name"]
-    except importlib.metadata.PackageNotFoundError:
+        return _meta.metadata(_BOOTSTRAP_NAME)["Name"]
+    except _meta.PackageNotFoundError:
         return _BOOTSTRAP_NAME
 
 
 @functools.lru_cache(maxsize=1)
 def _resolve_cli_name() -> str:
     """Resolve CLI name from entry points, falling back to 'mvm'."""
+    import importlib.metadata as _meta
+
     try:
-        eps = importlib.metadata.entry_points(group="console_scripts")
+        eps = _meta.entry_points(group="console_scripts")
         for ep in eps:
             if ep.value == "mvmctl.main:app" or ep.value.endswith("main:app"):
                 return ep.name
@@ -114,24 +114,9 @@ def _resolve_with_config_override(constant_name: str, yaml_fallback: Any) -> Any
 
 @functools.lru_cache(maxsize=1)
 def _load_defaults_yaml() -> dict[str, Any]:
-    """Load packaged defaults.yaml once for constant bootstrapping."""
-    try:
-        # Using importlib.resources is more robust across different install/freeze scenarios
-        resource_path = importlib.resources.files("mvmctl") / "assets" / "defaults.yaml"
-        with resource_path.open("r", encoding="utf-8") as f:
-            loaded = yaml.safe_load(f) or {}
-    except (OSError, yaml.YAMLError) as exc:
-        # Fallback to Path(__file__) if importlib.resources fails (e.g., during development or very old Python)
-        try:
-            defaults_path = Path(__file__).parent / "assets" / "defaults.yaml"
-            with defaults_path.open("r", encoding="utf-8") as f:
-                loaded = yaml.safe_load(f) or {}
-        except Exception:
-            raise RuntimeError(f"Failed to load required defaults file: {exc}") from exc
+    from mvmctl.assets._defaults import DEFAULTS
 
-    if not isinstance(loaded, dict):
-        raise RuntimeError("defaults.yaml root must be a mapping")
-    return loaded
+    return DEFAULTS
 
 
 def _get_required(path: tuple[str, ...]) -> Any:
@@ -610,9 +595,11 @@ DEFAULT_FIRECRACKER_CI_VERSION: Final[str] = _require_str(("firecracker", "versi
 
 
 def _resolve_version() -> str:
+    import importlib.metadata as _meta
+
     try:
-        return importlib.metadata.version(_BOOTSTRAP_NAME)
-    except importlib.metadata.PackageNotFoundError:
+        return _meta.version(_BOOTSTRAP_NAME)
+    except _meta.PackageNotFoundError:
         return "0.0.0"
 
 
