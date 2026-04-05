@@ -736,40 +736,25 @@ def image_ls(
     rows_local: list[list[str]] = []
 
     for img in images:
-        found_path = next(
-            (
-                images_dir / f"{img.id}{ext}"
-                for ext in SUPPORTED_IMAGE_EXTENSIONS
-                if (images_dir / f"{img.id}{ext}").exists()
-            ),
-            None,
-        )
-        # Check metadata first - show metadata-only entries even if file missing
-        entry = _find_meta_for_os_slug(img.id) if found_path is None else None
-        if found_path is None and entry is None:
-            continue  # No file and no metadata - skip entirely
-        # If file missing but metadata exists, we will show it with X marker below
+        entry = _find_meta_for_os_slug(img.id)
         if entry is None:
-            entry = _find_meta_for_os_slug(img.id)
-        if entry:
-            meta_key, meta = entry
-            display_id_base = meta_key
-            added = (
-                human_readable_time(str(meta.get("pulled_at", "")))
-                if meta.get("pulled_at")
-                else "-"
-            )
-            fs_type = str(
-                meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
-            )
-        else:
-            display_id_base = "-"
-            added = "-"
-            fs_type = found_path.suffix.lstrip(".") if found_path else "unknown"
+            continue
+        meta_key, meta = entry
+        db_path = str(meta.get("path", ""))
+        candidate = images_dir / db_path if db_path else None
+        found_path = candidate if candidate and candidate.exists() else None
+        display_id_base = meta_key
+        added = (
+            human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+        )
+        fs_type = str(
+            meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
+        )
         is_default = img.id == default_img
         is_missing = is_file_missing(found_path)
         display_id = get_combined_marker(is_default, is_missing) + display_id_base
-        size = found_path.stat().st_size if found_path and found_path.exists() else 0
+        _db_size_1 = int(meta.get("compressed_size") or 0) if entry and meta else 0  # type: ignore[call-overload]
+        size = found_path.stat().st_size if found_path and found_path.exists() else _db_size_1
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
         rows_local.append([display_id, img.name, fs_type, size_str, added])
 
@@ -785,7 +770,7 @@ def image_ls(
             None,
         )
         if found_path is None:
-            filename = str(meta.get("filename", ""))
+            filename = str(meta.get("path", ""))
             if filename:
                 found_path = images_dir / filename
         # Include entries even if file is missing - show X mark
@@ -799,7 +784,8 @@ def image_ls(
         is_default = meta_id == default_img
         is_missing = is_file_missing(found_path)
         display_id = get_combined_marker(is_default, is_missing) + meta_id
-        size = found_path.stat().st_size if found_path and found_path.exists() else 0
+        _db_size_2 = int(meta.get("compressed_size") or 0)  # type: ignore[call-overload]
+        size = found_path.stat().st_size if found_path and found_path.exists() else _db_size_2
         size_str = _format_bytes_human_readable(size) if size > 0 else "-"
         rows_local.append([display_id, os_name, fs_type, size_str, added])
 
@@ -1001,7 +987,7 @@ def image_set_default(
         raise typer.Exit(code=1)
 
     full_key, meta = match
-    filename = str(meta.get("filename", ""))
+    filename = str(meta.get("path", ""))
 
     if filename and (images_dir / filename).exists():
         pass
@@ -1051,7 +1037,7 @@ def image_rm(
             continue
 
         full_key, meta = match
-        filename = str(meta.get("filename", ""))
+        filename = str(meta.get("path", ""))
         files_to_remove: list[Path] = []
 
         if filename:
@@ -1129,7 +1115,7 @@ def image_inspect(
 
     full_id, meta = match
 
-    filename = str(meta.get("filename", ""))
+    filename = str(meta.get("path", ""))
     found_path = None
     if filename:
         candidate = images_dir / filename

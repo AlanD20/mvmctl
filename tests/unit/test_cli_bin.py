@@ -593,17 +593,17 @@ def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, 
 # ---------------------------------------------------------------------------
 
 
-def _write_kernel_meta(cache_dir: Path, full_hash: str, filename: str, **extra: object) -> None:
+def _write_kernel_meta(cache_dir: Path, full_hash: str, path: str, **extra: object) -> None:
     """Seed a kernel entry in the SQLite database."""
     db = MVMDatabase()
     db.migrate()
     db.upsert_kernel(
         Kernel(
             id=full_hash,
-            name=filename,
+            name=path,
             version=str(extra.get("version", "6.1.9")),
             arch=str(extra.get("arch", "x86_64")),
-            path=filename,
+            path=path,
             base_name=extra.get("base_name"),
             type=extra.get("type", "firecracker"),
             is_default=bool(extra.get("is_default", False)),
@@ -644,6 +644,12 @@ def test_kernel_rm_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_image_ls_normal(tmp_path: Path):
     (tmp_path / "ubuntu-24.04.ext4").write_bytes(b"\x00" * 1024)
     (tmp_path / "debian-12.ext4").write_bytes(b"\x00" * 1024)
+    _write_image_meta(
+        tmp_path, "a" * 64, "ubuntu-24.04.ext4", os_slug="ubuntu-24.04", os_name="Ubuntu 24.04 LTS"
+    )
+    _write_image_meta(
+        tmp_path, "b" * 64, "debian-12.ext4", os_slug="debian-12", os_name="Debian 12"
+    )
     with (
         patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
         patch("mvmctl.cli.bin.get_images_dir", return_value=tmp_path),
@@ -952,7 +958,7 @@ def test_image_import_saves_fs_uuid_in_metadata(
 # ---------------------------------------------------------------------------
 
 
-def _write_image_meta(cache_dir: Path, full_hash: str, filename: str, **extra: object) -> None:
+def _write_image_meta(cache_dir: Path, full_hash: str, path: str, **extra: object) -> None:
     """Seed an image entry in the SQLite database."""
     db = MVMDatabase()
     db.migrate()
@@ -960,7 +966,7 @@ def _write_image_meta(cache_dir: Path, full_hash: str, filename: str, **extra: o
         Image(
             id=full_hash,
             os_slug=str(extra.get("os_slug")) if extra.get("os_slug") else full_hash,
-            path=filename,
+            path=path,
             os_name=extra.get("os_name"),
             fs_type=extra.get("fs_type", "ext4"),
             fs_uuid=extra.get("fs_uuid"),
@@ -1813,7 +1819,9 @@ def test_image_ls_shows_size_column(tmp_path: Path, mocker):
     img_file = images_dir / "ubuntu-24.04.ext4"
     img_file.write_bytes(b"\x00" * (2 * 1024 * 1024 * 1024))  # 2 GiB
 
-    _write_image_meta(cache_dir, "e" * 64, "ubuntu-24.04.ext4", os_name="Ubuntu 24.04")
+    _write_image_meta(
+        cache_dir, "e" * 64, "ubuntu-24.04.ext4", os_name="Ubuntu 24.04", os_slug="ubuntu-24.04"
+    )
 
     with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
@@ -1841,8 +1849,8 @@ def test_image_ls_size_various_units(tmp_path: Path, mocker):
     medium_img = images_dir / "medium.ext4"
     medium_img.write_bytes(b"\x00" * (100 * 1024 * 1024))
 
-    _write_image_meta(cache_dir, "f" * 64, "small.ext4", os_name="Small Image")
-    _write_image_meta(cache_dir, "g" * 64, "medium.ext4", os_name="Medium Image")
+    _write_image_meta(cache_dir, "f" * 64, "small.ext4", os_name="Small Image", os_slug="small")
+    _write_image_meta(cache_dir, "g" * 64, "medium.ext4", os_name="Medium Image", os_slug="medium")
 
     fake_images = [
         ImageSpec(
@@ -1964,6 +1972,7 @@ def test_image_ls_shows_default_prefix(tmp_path: Path, mocker):
         "j" * 64,
         "ubuntu-24.04.ext4",
         os_name="Ubuntu 24.04",
+        os_slug="ubuntu-24.04",
         is_default=True,
     )
 
@@ -2497,8 +2506,8 @@ def test_image_ls_remote_with_compression_in_metadata(
     assert "zst" in result.output
 
 
-def test_image_inspect_with_filename_lookup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Test image inspect finds image by filename."""
+def test_image_inspect_with_path_lookup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test image inspect finds image by path."""
     full_hash = "k" * 64
     images_dir = tmp_path / "images"
     images_dir.mkdir()
