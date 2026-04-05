@@ -446,7 +446,7 @@ def _format_violations(violations: list[dict], violation_type: str) -> str:
     if len(violations) > 10:
         lines.append(f"  ... and {len(violations) - 10} more")
     lines.append("")
-    lines.append("Fix: Move hardcoded values to defaults.yaml and use _require_* functions.")
+    lines.append("Fix: Move hardcoded values to _defaults.py and use _require_* functions.")
     return "\n".join(lines)
 
 

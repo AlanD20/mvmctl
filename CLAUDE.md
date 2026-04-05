@@ -52,7 +52,7 @@ src/mvmctl/
 ├── core/            # All business logic, subprocess, Firecracker interaction
 ├── models/          # Pure dataclasses (VMInstance, VMConfig, ImageSpec, etc.)
 ├── utils/           # Shared helpers: console, process, fs, http, audit, validation
-├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
+├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml) + _defaults.py
 └── services/        # Runtime subprocess services (console_relay, nocloud_server)
 tests/               # Unit + integration test files (64 total)
 docs/                # API and release docs

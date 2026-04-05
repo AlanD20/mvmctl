@@ -3,9 +3,6 @@ from __future__ import annotations
 DEFAULTS: dict[str, object] = {
     "firecracker": {
         "binary": "/usr/local/bin/firecracker",
-        "socket_dir": "/tmp/mvm/sockets",
-        "run_dir": "/tmp/mvm/run",
-        "log_dir": "/tmp/mvm/logs",
         "versions": {
             "full": "v1.15.0",
             "ci": "v1.15",
@@ -17,7 +14,6 @@ DEFAULTS: dict[str, object] = {
         "ssh_user": "root",
         "root_fs_type": "ext4",
         "network_interface": "eth0",
-        "subnet_mask": "255.255.255.0",
         "boot_args": "console=ttyS0 reboot=k panic=1 pci=off",
         "disk_size": "2G",
         "enable_api_socket": True,
@@ -51,7 +47,6 @@ DEFAULTS: dict[str, object] = {
             "iso_volume_label": "cidata",
             "drive_id": "cloud-init",
             "required_iso_tool": "cloud-localds",
-            "default_dns_servers": ["1.1.1.1", "8.8.8.8"],
         },
         "boot": {
             "console": "console=ttyS0",
@@ -114,7 +109,6 @@ DEFAULTS: dict[str, object] = {
         },
         "remote": {
             "version_limit": 5,
-            "max_parallel_downloads": 4,
         },
         "shrink_safety_margin": 1.01,
         "ratio_min": 1.0,
@@ -169,7 +163,6 @@ DEFAULTS: dict[str, object] = {
         "defaults": {
             "version": "6.19.9",
             "arch": "x86_64",
-            "build_jobs": 1,
         },
     },
     "fallbacks": {

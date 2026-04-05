@@ -8,18 +8,18 @@ from mvmctl.main import app
 
 
 class TestDebugConstants:
-    """Test debug mode constants load correctly from defaults.yaml."""
+    """Test debug mode constants load correctly from _defaults.py."""
 
     def test_debug_mode_constant(self) -> None:
-        """DEBUG_MODE should be False by default (from defaults.yaml)."""
+        """DEBUG_MODE should be False by default (from _defaults.py)."""
         assert DEBUG_MODE is False
 
     def test_debug_verbose_errors_constant(self) -> None:
-        """DEBUG_VERBOSE_ERRORS should be True by default (from defaults.yaml)."""
+        """DEBUG_VERBOSE_ERRORS should be True by default (from _defaults.py)."""
         assert DEBUG_VERBOSE_ERRORS is True
 
     def test_debug_show_tracebacks_constant(self) -> None:
-        """DEBUG_SHOW_TRACEBACKS should be False by default (from defaults.yaml)."""
+        """DEBUG_SHOW_TRACEBACKS should be False by default (from _defaults.py)."""
         assert DEBUG_SHOW_TRACEBACKS is False
 
 

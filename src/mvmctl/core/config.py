@@ -32,9 +32,6 @@ def _default_assets_dir() -> str:
 @dataclass
 class FirecrackerConfig:
     binary: str = DEFAULT_FIRECRACKER_BINARY_PATH
-    socket_dir: str = ""
-    run_dir: str = ""
-    log_dir: str = ""
 
 
 @dataclass
@@ -94,12 +91,10 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_config(config_dir: Path) -> MVMConfig:
-    """Load configuration from YAML files.
-
-    Loads defaults.yaml from config_dir.
+    """Load configuration from a YAML override file in config_dir.
 
     Args:
-        config_dir: Directory containing config files
+        config_dir: Directory optionally containing a config.yaml override file
 
     Returns:
         Parsed configuration
@@ -108,7 +103,7 @@ def load_config(config_dir: Path) -> MVMConfig:
     if config_key in _config_cache:
         return _config_cache[config_key]
 
-    defaults_path = config_key / "defaults.yaml"
+    defaults_path = config_key / "config.yaml"
     data = load_yaml(defaults_path)
 
     firecracker_data = data.get("firecracker", {})

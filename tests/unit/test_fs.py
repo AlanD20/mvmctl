@@ -61,7 +61,6 @@ def test_get_logs_dir_is_under_cache(tmp_path: Path):
 def test_get_assets_dir_points_to_package():
     result = get_assets_dir()
     assert result.is_dir()
-    assert (result / "defaults.yaml").exists()
     assert (result / "images.yaml").exists()
 
 

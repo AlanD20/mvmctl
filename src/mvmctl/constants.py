@@ -105,7 +105,7 @@ _CONFIG_KEY_MAP: Final[dict[str, str]] = {
 
 
 def _resolve_with_config_override(constant_name: str, yaml_fallback: Any) -> Any:
-    """Resolve constant value, preferring config.json over defaults.yaml."""
+    """Resolve constant value, preferring config.json over _defaults.py."""
     config_key = _CONFIG_KEY_MAP.get(constant_name)
     if config_key is None:
         return yaml_fallback
@@ -113,14 +113,14 @@ def _resolve_with_config_override(constant_name: str, yaml_fallback: Any) -> Any
 
 
 @functools.lru_cache(maxsize=1)
-def _load_defaults_yaml() -> dict[str, Any]:
+def _load_defaults() -> dict[str, Any]:
     from mvmctl.assets._defaults import DEFAULTS
 
     return DEFAULTS
 
 
 def _get_required(path: tuple[str, ...]) -> Any:
-    current: Any = _load_defaults_yaml()
+    current: Any = _load_defaults()
     for key in path:
         if not isinstance(current, dict) or key not in current:
             raise RuntimeError(f"Missing required defaults key: {_format_path(path)}")
@@ -481,7 +481,7 @@ KERNEL_TYPE_OFFICIAL: Final[str] = "official"
 KERNEL_TYPE_UNKNOWN: Final[str] = "unknown"
 
 # ---------------------------------------------------------------------------
-# VM cloud-init defaults (loaded from assets/defaults.yaml)
+# VM cloud-init defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 DEFAULT_CLOUD_INIT_SEED_PATH: Final[str] = _require_str(("vm", "cloud_init", "seed_path"))
 DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS: Final[str] = _require_str(
@@ -505,7 +505,7 @@ REQUIRED_ISO_TOOL: Final[str] = _require_str(("vm", "cloud_init", "required_iso_
 # Cloud-init detection timeouts
 
 # ---------------------------------------------------------------------------
-# VM boot arg defaults (loaded from assets/defaults.yaml)
+# VM boot arg defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 DEFAULT_BOOT_CONSOLE: Final[str] = _require_str(("vm", "boot", "console"))
 DEFAULT_BOOT_REBOOT: Final[str] = _require_str(("vm", "boot", "reboot"))
@@ -513,7 +513,7 @@ DEFAULT_BOOT_PANIC: Final[str] = _require_str(("vm", "boot", "panic"))
 DEFAULT_BOOT_PCI_OFF: Final[str] = _require_str(("vm", "boot", "pci_off"))
 
 # ---------------------------------------------------------------------------
-# VM guest network defaults (loaded from assets/defaults.yaml)
+# VM guest network defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 DEFAULT_GUEST_MAC_DEFAULT: Final[str] = _require_str(("vm", "network_guest", "mac_default"))
 DEFAULT_GUEST_MAC_PREFIX: Final[str] = _require_str(("vm", "network_guest", "mac_prefix"))
@@ -521,7 +521,7 @@ DEFAULT_GUEST_NETWORK_IFACE: Final[str] = _require_str(("vm", "network_guest", "
 DEFAULT_GUEST_NETWORK_BOOT_MODE: Final[str] = _require_str(("vm", "network_guest", "boot_mode"))
 
 # ---------------------------------------------------------------------------
-# Firecracker driver defaults (loaded from assets/defaults.yaml)
+# Firecracker driver defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 DEFAULT_FC_LOG_LEVEL: Final[str] = _require_str(("vm", "firecracker", "log_level"))
 DEFAULT_FC_DRIVE_CACHE_TYPE: Final[str] = _require_str(("vm", "firecracker", "drive_cache_type"))
@@ -531,7 +531,7 @@ DEFAULT_FC_DRIVE_IO_ENGINE: Final[str] = _require_str(("vm", "firecracker", "dri
 DEFAULT_VM_ROOTFS_BASENAME: Final[str] = _require_str(("vm", "files", "rootfs_basename"))
 
 # ---------------------------------------------------------------------------
-# Rootfs detector constants (loaded from assets/defaults.yaml)
+# Rootfs detector constants (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 
 DETECTOR_WEIGHTS: Final[dict[str, float]] = _require_str_float_dict(("detectors", "weights"))
@@ -540,7 +540,7 @@ MIN_ROOT_SIZE_MB: Final[int] = _require_int(("detectors", "thresholds", "MIN_ROO
 SIZE_TOO_SMALL_MB: Final[int] = _require_int(("detectors", "thresholds", "SIZE_TOO_SMALL_MB"))
 
 # ---------------------------------------------------------------------------
-# Host system paths (loaded from assets/defaults.yaml)
+# Host system paths (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 DEFAULT_SYSCTL_CONF_DIR: Final[str] = _require_str(("host", "system_dirs", "sysctl_conf_dir"))
 DEFAULT_SUDOERS_DIR: Final[str] = _require_str(("host", "system_dirs", "sudoers_dir"))
@@ -553,7 +553,7 @@ DEFAULT_USR_SBIN_IPTABLES_SAVE: Final[str] = _require_str(("host", "sbin_paths",
 DEFAULT_USR_SBIN_SYSCTL: Final[str] = _require_str(("host", "sbin_paths", "sysctl"))
 
 # ---------------------------------------------------------------------------
-# Libguestfs defaults (loaded from assets/defaults.yaml)
+# Libguestfs defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT: Final[int] = _require_int(("libguestfs", "launch_timeout"))
 DEFAULT_LIBGUESTFS_ROOT_DEVICE: Final[str] = _require_str(("libguestfs", "fallback_root_device"))
@@ -661,7 +661,7 @@ CONST_SECONDS_PER_MONTH: Final[int] = 2592000
 CONST_SECONDS_PER_YEAR: Final[int] = 31536000
 CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
 
-# Retry and timeout constants (loaded from assets/defaults.yaml)
+# Retry and timeout constants (loaded from assets/_defaults.py)
 CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = _require_int(("http", "download_chunk_size"))
 CONST_DOWNLOAD_MAX_RETRIES: Final[int] = _require_int(("http", "download_max_retries"))
 CONST_DOWNLOAD_RETRY_DELAY: Final[float] = _require_float(("http", "download_retry_delay"))
@@ -695,18 +695,14 @@ FIRECRACKER_GITHUB_DOWNLOAD_URL: Final[str] = _require_str(
 FIRECRACKER_GITHUB_RAW_URL: Final[str] = _require_str(("urls", "firecracker", "github_raw_base"))
 
 # ---------------------------------------------------------------------------
-# Debug mode constants (loaded from assets/defaults.yaml)
+# Debug mode constants (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 
 # Debug mode master switch - enables verbose logging and detailed error output
-DEBUG_MODE: Final[bool] = _load_defaults_yaml().get("debug", {}).get("enabled", False)
+DEBUG_MODE: Final[bool] = _load_defaults().get("debug", {}).get("enabled", False)
 
 # When True, show detailed error messages with context
-DEBUG_VERBOSE_ERRORS: Final[bool] = (
-    _load_defaults_yaml().get("debug", {}).get("verbose_errors", True)
-)
+DEBUG_VERBOSE_ERRORS: Final[bool] = _load_defaults().get("debug", {}).get("verbose_errors", True)
 
 # When True, include full Python tracebacks in error output
-DEBUG_SHOW_TRACEBACKS: Final[bool] = (
-    _load_defaults_yaml().get("debug", {}).get("show_tracebacks", False)
-)
+DEBUG_SHOW_TRACEBACKS: Final[bool] = _load_defaults().get("debug", {}).get("show_tracebacks", False)

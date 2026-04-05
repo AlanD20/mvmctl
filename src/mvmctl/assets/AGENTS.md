@@ -8,7 +8,7 @@
 
 ```
 src/mvmctl/assets/
-├── defaults.yaml             # Master config: all runtime defaults (199 lines)
+├── _defaults.py              # Master config: all runtime defaults (Python dict)
 ├── images.yaml               # Image catalog: 7 entries with URLs + convert specs
 ├── kernels.yaml              # Kernel catalog: build-from-source + prebuilt entries
 ├── cloud-init.template.yaml  # Jinja2 cloud-init user-data template (98 lines)
@@ -35,22 +35,25 @@ assets = get_assets_dir()  # Path(__file__).parent.parent / "assets"
 
 ## FILE SCHEMAS
 
-### `defaults.yaml` — Master Runtime Defaults
+### `_defaults.py` — Master Runtime Defaults
+
+Pure Python dict (`DEFAULTS`) imported directly by `constants.py:_load_defaults()`.
+Zero parse overhead at startup — no YAML/JSON loading required.
 
 Top-level sections map to `MVMConfig` dataclass fields:
 
 | Section | Key fields |
 |---------|-----------|
-| `firecracker` | `binary`, `socket_dir`, `run_dir`, `log_dir`, `versions.full/ci` |
+| `firecracker` | `binary`, `versions.full/ci` |
 | `vm_defaults` | `vcpu_count` (2), `mem_size_mib` (2048), `ssh_user` (root), `boot_args`, `lsm_flags` |
 | `network.defaults` | `name` (default), `cidr` (172.35.0.0/24), `gateway` (172.35.0.1) |
 | `vm.cloud_init` | `seed_path`, `kernel_cmdline_ds`, `final_message` — injected into cloud-init ISO |
 | `vm.network_guest` | `mac_prefix` (02:FC), `iface` (eth0) |
-| `vm.limits` | `max_vms` (50) — hard cap on simultaneous VMs |
+| `vm.limits` | `max_vms` (1000) — hard cap on simultaneous VMs |
 | `image` | `convert_to` (ext4), `supported_extensions`, `import_format_map` |
 | `host.sbin_paths` | `ip`, `iptables`, `iptables_restore`, `iptables_save`, `sysctl` — used in privilege checks |
 | `host.required_binaries` | `["ip", "iptables", "qemu-img"]` — checked at host init |
-| `kernel.defaults` | `version` (6.19.9), `arch` (x86_64), `build_jobs` (1) |
+| `kernel.defaults` | `version` (6.19.9), `arch` (x86_64) |
 | `fallbacks` | Last-resort values loaded by `constants.py` via `FALLBACK_*` |
 | `urls` | All download URL templates for Firecracker releases, CI kernels, kernel.org |
 
@@ -107,8 +110,8 @@ Jinja2 template rendered by `core/cloud_init.py:write_cloud_init()`. Variables i
 |----------|--------|
 | `{{ hostname }}` | VM name |
 | `{{ ssh_authorized_keys }}` | Key list from key manager |
-| `{{ ssh_user }}` | defaults.yaml `vm_defaults.ssh_user` |
-| `{{ final_message }}` | defaults.yaml `vm.cloud_init.final_message` |
+| `{{ ssh_user }}` | `_defaults.py` `vm_defaults.ssh_user` |
+| `{{ final_message }}` | `_defaults.py` `vm.cloud_init.final_message` |
 
 **Do not edit directly** — changes affect all newly created VMs. Use `--cloud-init` CLI flag to inject custom user-data per VM.
 
@@ -117,6 +120,6 @@ Jinja2 template rendered by `core/cloud_init.py:write_cloud_init()`. Variables i
 | Forbidden | Correct |
 |-----------|---------|
 | Parse `assets/*.yaml` directly with `yaml.safe_load` | Use `load_config()` or `load_images_from_yaml()` |
-| Hardcode URLs from `defaults.yaml` in Python | Read via `MVMConfig.urls.*` |
+| Hardcode URLs from `_defaults.py` in Python | Read via `MVMConfig.urls.*` |
 | Edit defaults to change per-VM behavior | CLI flags or `mvm config set` |
 | Add secrets or tokens to any YAML file | Environment variables only |

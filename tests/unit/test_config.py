@@ -47,9 +47,6 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     config = load_config(tmp_path)
 
     assert config.firecracker.binary == "/usr/local/bin/firecracker"
-    assert config.firecracker.socket_dir == ""
-    assert config.firecracker.run_dir == ""
-    assert config.firecracker.log_dir == ""
 
     assert config.vm_defaults.vcpu_count == DEFAULT_VM_VCPU_COUNT
     assert config.vm_defaults.mem_size_mib == DEFAULT_VM_MEM_MIB
@@ -78,7 +75,7 @@ def test_load_config_from_yaml(tmp_path: Path) -> None:
         },
         "paths": {"assets_dir": "/tmp/assets"},
     }
-    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.yaml").write_text(yaml.dump(data))
 
     config = load_config(tmp_path)
 
@@ -188,7 +185,7 @@ def test_load_config_missing_fields_uses_defaults(tmp_path: Path) -> None:
     """YAML with missing fields should use defaults."""
     # Only provide a subset of fields
     data = {"vm_defaults": {"vcpu_count": 8}}
-    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.yaml").write_text(yaml.dump(data))
 
     config = load_config(tmp_path)
 
@@ -202,7 +199,7 @@ def test_load_config_missing_fields_uses_defaults(tmp_path: Path) -> None:
 def test_load_config_type_mismatch_string_for_int(tmp_path: Path) -> None:
     """Type mismatch (string instead of int) should use default or raise."""
     data = {"vm_defaults": {"vcpu_count": "not-a-number"}}
-    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.yaml").write_text(yaml.dump(data))
 
     # Should not crash - either uses default or handles gracefully
     config = load_config(tmp_path)
@@ -215,7 +212,7 @@ def test_load_config_type_mismatch_int_for_string(tmp_path: Path) -> None:
     data = {
         "firecracker": {"binary": 12345}  # Should be string
     }
-    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.yaml").write_text(yaml.dump(data))
 
     config = load_config(tmp_path)
     # Should not crash
@@ -228,7 +225,7 @@ def test_load_config_extra_unknown_fields_filtered(tmp_path: Path) -> None:
         "unknown_section": {"foo": "bar"},
         "vm_defaults": {"vcpu_count": 4, "unknown_field": "should be ignored"},
     }
-    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.yaml").write_text(yaml.dump(data))
 
     config = load_config(tmp_path)
     assert config.vm_defaults.vcpu_count == 4
@@ -241,7 +238,7 @@ def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
             "defaults": {"subnet": 99999}  # Should be string
         }
     }
-    (tmp_path / "defaults.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.yaml").write_text(yaml.dump(data))
 
     # Should not crash
     config = load_config(tmp_path)

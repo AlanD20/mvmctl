@@ -173,7 +173,7 @@ mvmctl/
 │   ├── core/            # All business logic, subprocesses, and Firecracker interactions
 │   ├── models/          # Pure @dataclass objects containing domain data (VMInstance, VMConfig, etc.)
 │   ├── utils/           # Shared helpers (console, process, fs, http, audit, validation, guestfs, template, time)
-│   ├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml, defaults.yaml)
+│   ├── assets/          # Bundled YAML configs (images.yaml, kernels.yaml) + _defaults.py
 │   ├── services/        # Runtime subprocess services (console_relay, nocloud_server)
 │   └── db/              # SQLite schema, migrations, and ORM models (mvmdb.db)
 ├── docs/                # Project documentation
@@ -202,10 +202,10 @@ mvmctl/
 |--------|------|---------|
 | `PROJECT_NAME` | Final[str] | Resolved from package metadata |
 | `CLI_NAME` | Final[str] | Resolved from entry points, defaults to "mvm" |
-| `_load_defaults_yaml()`| function | Loads `defaults.yaml` via `importlib.resources` |
+| `_load_defaults()`| function | Loads `_defaults.py` Python dict |
 | `_BOOTSTRAP_NAME` | Final[str] | Internal package name "mvmctl" |
 | `env_var(suffix)` | function | Returns `MVM_*` env var name |
-| `DEFAULT_*` | Final[*] | User-facing defaults from `defaults.yaml` |
+| `DEFAULT_*` | Final[*] | User-facing defaults from `_defaults.py` |
 | `FALLBACK_*` | Final[*] | Last-resort runtime values |
 | `CONST_*` | Final[*] | Hardcoded numeric constants (buffer sizes, timeouts, permissions) |
 
@@ -346,7 +346,7 @@ def _extract_partition_with_guestfs(...):  # DON'T DO THIS
 | `typer.Option(get_assets_dir(), ...)` | Function evaluated at **import time**, not runtime | Breaks when `MVM_CONFIG_DIR` env var is set after import |
 | `typer.Option([], ...)` for lists | Breaks Typer internals; mutable default | Use `None` with `list(values) if values else []` |
 | `typer.Option(True/False, ...)` for config-backed booleans | Must support tri-state (CLI/config/default) | Use `None` and resolve at runtime |
-| Any non-None default for config-backed values | Bypasses SQLite/defaults.yaml configuration | User settings are silently ignored |
+| Any non-None default for config-backed values | Bypasses SQLite/_defaults.py configuration | User settings are silently ignored |
 
 **MANDATORY CORRECT PATTERN:**
 ```python

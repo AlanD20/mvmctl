@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     import typer.models
 
 # Lazy imports from constants to avoid heavy import-time work
-# (parsing defaults.yaml, package metadata resolution)
+# (package metadata resolution)
 
 
 def _get_bootstrap_name() -> str:
