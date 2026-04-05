@@ -63,6 +63,7 @@ from mvmctl.utils.console import (
     print_table,
     print_warning,
 )
+from mvmctl.utils.disk_size import format_bytes_human_readable
 from mvmctl.utils.fs import (
     get_assets_dir,
     get_cache_dir,
@@ -82,25 +83,6 @@ def _format_size_human_readable(size_sectors: int) -> str:
     if size_mib >= 1024:
         return f"{size_mib / 1024:.1f} GiB"
     return f"{size_mib:.1f} MiB"
-
-
-def _format_bytes_human_readable(size_bytes: int) -> str:
-    """Format bytes to human readable string using binary units.
-
-    Args:
-        size_bytes: Size in bytes
-
-    Returns:
-        Formatted string like "4.2 MiB", "1.5 GiB", "512 KiB"
-    """
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    size_float = float(size_bytes)
-    for unit in ["KiB", "MiB", "GiB"]:
-        size_float /= 1024
-        if size_float < 1024:
-            return f"{size_float:.1f} {unit}"
-    return f"{size_float:.1f} TiB"
 
 
 def _prompt_for_partition_selection(
@@ -202,6 +184,36 @@ def _get_vms_using_image(image_path: Path) -> list[str]:
     return result
 
 
+def _get_file_size(path: Path | None, fallback: int = 0) -> int:
+    if path and path.exists():
+        return path.stat().st_size
+    return fallback
+
+
+def _find_image_by_os_slug(
+    all_meta: dict[str, dict[str, object]], os_slug: str
+) -> tuple[str, dict[str, object]] | None:
+    for key, meta in all_meta.items():
+        if str(meta.get("os_slug", "")) == os_slug:
+            return key, meta
+    return None
+
+
+def _find_local_image_path(images_dir: Path, image_id: str) -> Path | None:
+    for ext in SUPPORTED_IMAGE_EXTENSIONS:
+        candidate = images_dir / f"{image_id}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _resolve_image_file(images_dir: Path, image_id: str, meta: dict[str, object]) -> Path | None:
+    filename = str(meta.get("path", ""))
+    if filename:
+        return images_dir / filename
+    return _find_local_image_path(images_dir, image_id)
+
+
 kernel_app = typer.Typer(
     help="Kernel management",
     no_args_is_help=False,
@@ -282,7 +294,7 @@ def kernel_ls(
         is_missing = is_file_missing(path)
         display_id = get_combined_marker(is_default, is_missing) + k.get("id", "")
         size = path.stat().st_size if path and path.exists() else 0
-        size_str = _format_bytes_human_readable(size) if size > 0 else "-"
+        size_str = format_bytes_human_readable(size) if size > 0 else "-"
         rows.append(
             [
                 display_id,
@@ -607,195 +619,6 @@ def _save_image_meta(
     update_image_entry(cache_dir, image_id, **fields)
 
 
-@image_app.command(name="ls")
-def image_ls(
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
-    remote: bool = typer.Option(False, "--remote", "-r", help="Show available remote images"),
-    name_filter: Optional[str] = typer.Option(None, "--name", help="Filter by image name"),
-) -> None:
-    """List cached images (or available remote images with --remote)."""
-    images_dir = images_dir if images_dir is not None else get_images_dir()
-    images_dir.mkdir(parents=True, exist_ok=True)
-    config_path = get_assets_dir() / "images.yaml"
-    images = load_images_config(config_path)
-
-    if name_filter:
-        images = [
-            img
-            for img in images
-            if name_filter.lower() in img.name.lower() or name_filter.lower() in img.id.lower()
-        ]
-
-    if remote:
-        # Pre-load all metadata for lookup
-        _all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
-
-        def _find_meta_for_os_slug_remote(
-            os_slug: str,
-        ) -> tuple[str, dict[str, object]] | None:
-            for _k, _v in _all_meta.items():
-                if str(_v.get("os_slug", "")) == os_slug:
-                    return _k, _v
-            return None
-
-        rows: list[list[str]] = []
-        for img in images:
-            found_path = next(
-                (
-                    images_dir / f"{img.id}{ext}"
-                    for ext in SUPPORTED_IMAGE_EXTENSIONS
-                    if (images_dir / f"{img.id}{ext}").exists()
-                ),
-                None,
-            )
-            is_missing = is_file_missing(found_path)
-            display_id = get_combined_marker(False, is_missing) + img.id
-
-            # Get compression format from metadata if downloaded
-            compression = "-"
-            if found_path and not is_missing:
-                entry = _find_meta_for_os_slug_remote(img.id)
-                if entry:
-                    _, meta = entry
-                    compression = str(meta.get("compressed_format", "-"))
-
-            size = found_path.stat().st_size if found_path else 0
-            size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-            rows.append([display_id, img.name, compression, img.convert_to, size_str])
-        if json_output:
-            typer.echo(
-                json.dumps(
-                    [
-                        {
-                            "id": img.id,
-                            "name": img.name,
-                            "format": img.format,
-                            "convert_to": img.convert_to,
-                        }
-                        for img in images
-                    ],
-                    indent=2,
-                )
-            )
-        else:
-            print_table(
-                title="Available Images (Remote)",
-                columns=["Image ID", "Name", "Compression", "FS Type", "Size"],
-                rows=rows,
-            )
-        return
-
-    default_img = _get_default_image()
-    os_slugs = {img.id for img in images}
-
-    _all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
-
-    def _find_meta_for_os_slug(os_slug: str) -> tuple[str, dict[str, object]] | None:
-        for _k, _v in _all_meta.items():
-            if str(_v.get("os_slug", "")) == os_slug:
-                return _k, _v
-        return None
-
-    if json_output:
-        result = []
-        for img in images:
-            entry = _find_meta_for_os_slug(img.id)
-            if entry:
-                meta_key, meta = entry
-                display_id = meta_key
-                result.append(
-                    {
-                        "id": display_id,
-                        "name": img.name,
-                        "format": img.format,
-                        "fs_type": str(meta.get("fs_type", img.convert_to)),
-                        "added": human_readable_time(str(meta.get("pulled_at", "")))
-                        if meta.get("pulled_at")
-                        else "-",
-                    }
-                )
-        for meta_id, meta in _all_meta.items():
-            if str(meta.get("os_slug", meta_id)) in os_slugs:
-                continue
-            display_id = meta_id
-            result.append(
-                {
-                    "id": display_id,
-                    "name": str(meta.get("os_name", meta_id)),
-                    "format": str(meta.get("fs_type", "unknown")),
-                    "fs_type": str(meta.get("fs_type", "unknown")),
-                    "added": human_readable_time(str(meta.get("pulled_at", "")))
-                    if meta.get("pulled_at")
-                    else "-",
-                }
-            )
-        typer.echo(json.dumps(result, indent=2))
-        return
-
-    rows_local: list[list[str]] = []
-
-    for img in images:
-        entry = _find_meta_for_os_slug(img.id)
-        if entry is None:
-            continue
-        meta_key, meta = entry
-        db_path = str(meta.get("path", ""))
-        candidate = images_dir / db_path if db_path else None
-        found_path = candidate if candidate and candidate.exists() else None
-        display_id_base = meta_key
-        added = (
-            human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
-        )
-        fs_type = str(
-            meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
-        )
-        is_default = img.id == default_img
-        is_missing = is_file_missing(found_path)
-        display_id = get_combined_marker(is_default, is_missing) + display_id_base
-        _db_size_1 = int(meta.get("compressed_size") or 0) if entry and meta else 0  # type: ignore[call-overload]
-        size = found_path.stat().st_size if found_path and found_path.exists() else _db_size_1
-        size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-        rows_local.append([display_id, img.name, fs_type, size_str, added])
-
-    for meta_id, meta in _all_meta.items():
-        if str(meta.get("os_slug", meta_id)) in os_slugs:
-            continue
-        found_path = next(
-            (
-                images_dir / f"{meta_id}{ext}"
-                for ext in SUPPORTED_IMAGE_EXTENSIONS
-                if (images_dir / f"{meta_id}{ext}").exists()
-            ),
-            None,
-        )
-        if found_path is None:
-            filename = str(meta.get("path", ""))
-            if filename:
-                found_path = images_dir / filename
-        # Include entries even if file is missing - show X mark
-        added = (
-            human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
-        )
-        fs_type = str(
-            meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
-        )
-        os_name = str(meta.get("os_name", meta_id))
-        is_default = meta_id == default_img
-        is_missing = is_file_missing(found_path)
-        display_id = get_combined_marker(is_default, is_missing) + meta_id
-        _db_size_2 = int(meta.get("compressed_size") or 0)  # type: ignore[call-overload]
-        size = found_path.stat().st_size if found_path and found_path.exists() else _db_size_2
-        size_str = _format_bytes_human_readable(size) if size > 0 else "-"
-        rows_local.append([display_id, os_name, fs_type, size_str, added])
-
-    print_table(
-        title="Downloaded Images",
-        columns=["ID", "OS Name", "FS Type", "Size", "Added"],
-        rows=rows_local,
-    )
-
-
 def _get_default_image() -> str | None:
     try:
         default_entry = get_default_image_entry(get_cache_dir())
@@ -808,6 +631,191 @@ def _get_default_image() -> str | None:
         return image_id
     except Exception:
         return None
+
+
+def _output_remote_images(images: list[Any], images_dir: Path, json_output: bool) -> None:
+    if json_output:
+        typer.echo(
+            json.dumps(
+                [
+                    {
+                        "id": img.id,
+                        "name": img.name,
+                        "format": img.format,
+                        "convert_to": img.convert_to,
+                    }
+                    for img in images
+                ],
+                indent=2,
+            )
+        )
+        return
+
+    all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
+    rows: list[list[str]] = []
+    for img in images:
+        entry = _find_image_by_os_slug(all_meta, img.id)
+        if entry:
+            meta_key, meta = entry
+            found_path = _resolve_image_file(images_dir, meta_key, meta)
+            compression = (
+                str(meta.get("compressed_format", "-"))
+                if found_path and found_path.exists()
+                else "-"
+            )
+        else:
+            found_path = None
+            compression = "-"
+        is_missing = is_file_missing(found_path)
+        display_id = get_combined_marker(False, is_missing) + img.id
+        size = _get_file_size(found_path)
+        rows.append(
+            [
+                display_id,
+                img.name,
+                compression,
+                img.convert_to,
+                format_bytes_human_readable(size) if size > 0 else "-",
+            ]
+        )
+
+    print_table(
+        title="Available Images (Remote)",
+        columns=["Image ID", "Name", "Compression", "FS Type", "Size"],
+        rows=rows,
+    )
+
+
+def _output_local_images(images: list[Any], images_dir: Path, json_output: bool) -> None:
+    cache_dir = get_cache_dir()
+    all_meta = list_image_entries(cache_dir, images_dir, include_missing=True)
+    os_slugs = {img.id for img in images}
+
+    if json_output:
+        result: list[dict[str, str]] = []
+        for img in images:
+            entry = _find_image_by_os_slug(all_meta, img.id)
+            if entry is None:
+                continue
+            meta_key, meta = entry
+            result.append(
+                {
+                    "id": meta_key,
+                    "name": img.name,
+                    "format": img.format,
+                    "fs_type": str(meta.get("fs_type", img.convert_to)),
+                    "added": human_readable_time(str(meta.get("pulled_at", "")))
+                    if meta.get("pulled_at")
+                    else "-",
+                }
+            )
+        for meta_id, meta in all_meta.items():
+            if str(meta.get("os_slug", meta_id)) in os_slugs:
+                continue
+            result.append(
+                {
+                    "id": meta_id,
+                    "name": str(meta.get("os_name", meta_id)),
+                    "format": str(meta.get("fs_type", "unknown")),
+                    "fs_type": str(meta.get("fs_type", "unknown")),
+                    "added": human_readable_time(str(meta.get("pulled_at", "")))
+                    if meta.get("pulled_at")
+                    else "-",
+                }
+            )
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    default_img = _get_default_image()
+    rows: list[list[str]] = []
+
+    for img in images:
+        entry = _find_image_by_os_slug(all_meta, img.id)
+        if entry is None:
+            continue
+        meta_key, meta = entry
+        found_path = _resolve_image_file(images_dir, meta_key, meta)
+        is_default = img.id == default_img
+        is_missing = is_file_missing(found_path)
+        added = (
+            human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+        )
+        fs_type = str(
+            meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
+        )
+        display_id = get_combined_marker(is_default, is_missing) + meta_key
+        _raw_size = meta.get("compressed_size")
+        size = _get_file_size(
+            found_path, int(_raw_size) if isinstance(_raw_size, (int, float)) else 0
+        )
+        rows.append(
+            [
+                display_id,
+                img.name,
+                fs_type,
+                format_bytes_human_readable(size) if size > 0 else "-",
+                added,
+            ]
+        )
+
+    for meta_id, meta in all_meta.items():
+        if str(meta.get("os_slug", meta_id)) in os_slugs:
+            continue
+        found_path = _resolve_image_file(images_dir, meta_id, meta)
+        is_default = meta_id == default_img
+        is_missing = is_file_missing(found_path)
+        os_name = str(meta.get("os_name", meta_id))
+        added = (
+            human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
+        )
+        fs_type = str(
+            meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
+        )
+        display_id = get_combined_marker(is_default, is_missing) + meta_id
+        _raw_size = meta.get("compressed_size")
+        size = _get_file_size(
+            found_path, int(_raw_size) if isinstance(_raw_size, (int, float)) else 0
+        )
+        rows.append(
+            [
+                display_id,
+                os_name,
+                fs_type,
+                format_bytes_human_readable(size) if size > 0 else "-",
+                added,
+            ]
+        )
+
+    print_table(
+        title="Downloaded Images",
+        columns=["ID", "OS Name", "FS Type", "Size", "Added"],
+        rows=rows,
+    )
+
+
+@image_app.command(name="ls")
+def image_ls(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Images directory"),
+    remote: bool = typer.Option(False, "--remote", "-r", help="Show available remote images"),
+    name_filter: Optional[str] = typer.Option(None, "--name", help="Filter by image name"),
+) -> None:
+    """List cached images (or available remote images with --remote)."""
+    images_dir = images_dir if images_dir is not None else get_images_dir()
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    images = load_images_config(get_assets_dir() / "images.yaml")
+    if name_filter:
+        images = [
+            img
+            for img in images
+            if name_filter.lower() in img.name.lower() or name_filter.lower() in img.id.lower()
+        ]
+
+    if remote:
+        _output_remote_images(images, images_dir, json_output)
+    else:
+        _output_local_images(images, images_dir, json_output)
 
 
 @image_app.command(name="fetch")
@@ -1145,9 +1153,9 @@ def image_inspect(
     compression_ratio = meta.get("compression_ratio")
     compressed_format = meta.get("compressed_format", "-")
 
-    original_size_str = _format_bytes_human_readable(int(original_size)) if original_size else "-"
+    original_size_str = format_bytes_human_readable(int(original_size)) if original_size else "-"
     compressed_size_str = (
-        _format_bytes_human_readable(int(compressed_size)) if compressed_size else "-"
+        format_bytes_human_readable(int(compressed_size)) if compressed_size else "-"
     )
     ratio_str = f"{float(compression_ratio):.2f}x" if compression_ratio else "-"
 
@@ -1155,7 +1163,7 @@ def image_inspect(
     if found_path and found_path.exists():
         try:
             file_size = found_path.stat().st_size
-            file_size_str = _format_bytes_human_readable(file_size)
+            file_size_str = format_bytes_human_readable(file_size)
         except OSError:
             pass
 

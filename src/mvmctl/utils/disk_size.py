@@ -65,6 +65,18 @@ def parse_disk_size(size_str: str) -> int:
     return bytes_count
 
 
+def format_bytes_human_readable(size_bytes: int) -> str:
+    """Format bytes using binary (IEC) units — e.g. "512 B", "4.2 MiB", "1.5 GiB"."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    size_float = float(size_bytes)
+    for unit in ["KiB", "MiB", "GiB"]:
+        size_float /= 1024
+        if size_float < 1024:
+            return f"{size_float:.1f} {unit}"
+    return f"{size_float:.1f} TiB"
+
+
 def format_disk_size(bytes_count: int) -> str:
     """Format bytes to human-readable string.
 
