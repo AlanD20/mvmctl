@@ -14,7 +14,6 @@ from mvmctl.api.assets import (
     download_firecracker_kernel,
     fetch_binary,
     fetch_image,
-    human_readable_time,
     import_image,
     list_kernels,
     list_local_versions,
@@ -71,6 +70,7 @@ from mvmctl.utils.fs import (
     get_kernels_dir,
 )
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
+from mvmctl.utils.time import human_readable_time
 
 
 def _format_size_human_readable(size_sectors: int) -> str:
