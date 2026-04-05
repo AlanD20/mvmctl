@@ -954,6 +954,211 @@ def test_image_import_saves_fs_uuid_in_metadata(
 
 
 # ---------------------------------------------------------------------------
+# _resolve_image_spec helper
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_image_spec_exact_id_match():
+    from mvmctl.cli.bin import _resolve_image_spec
+
+    images = [
+        ImageSpec(
+            id="ubuntu-24.04",
+            image_type="ubuntu",
+            version="24.04",
+            name="Ubuntu 24.04",
+            source="",
+            format="qcow2",
+            convert_to="ext4",
+            minimum_rootfs_size=2048,
+        ),
+        ImageSpec(
+            id="ubuntu-22.04",
+            image_type="ubuntu",
+            version="22.04",
+            name="Ubuntu 22.04",
+            source="",
+            format="qcow2",
+            convert_to="ext4",
+            minimum_rootfs_size=2048,
+        ),
+    ]
+    result = _resolve_image_spec(images, "ubuntu-24.04", None)
+    assert result.id == "ubuntu-24.04"
+
+
+def test_resolve_image_spec_type_single_match():
+    from mvmctl.cli.bin import _resolve_image_spec
+
+    images = [
+        ImageSpec(
+            id="debian-12",
+            image_type="debian",
+            version="12",
+            name="Debian 12",
+            source="",
+            format="qcow2",
+            convert_to="ext4",
+            minimum_rootfs_size=2048,
+        ),
+    ]
+    result = _resolve_image_spec(images, "debian", None)
+    assert result.id == "debian-12"
+
+
+def test_resolve_image_spec_type_with_version():
+    from mvmctl.cli.bin import _resolve_image_spec
+
+    images = [
+        ImageSpec(
+            id="ubuntu-22.04",
+            image_type="ubuntu",
+            version="22.04",
+            name="Ubuntu 22.04",
+            source="",
+            format="qcow2",
+            convert_to="ext4",
+            minimum_rootfs_size=2048,
+        ),
+        ImageSpec(
+            id="ubuntu-24.04",
+            image_type="ubuntu",
+            version="24.04",
+            name="Ubuntu 24.04",
+            source="",
+            format="qcow2",
+            convert_to="ext4",
+            minimum_rootfs_size=2048,
+        ),
+    ]
+    result = _resolve_image_spec(images, "ubuntu", "22.04")
+    assert result.id == "ubuntu-22.04"
+
+
+def test_resolve_image_spec_not_found_exits():
+    import click
+
+    from mvmctl.cli.bin import _resolve_image_spec
+
+    with pytest.raises(click.exceptions.Exit):
+        _resolve_image_spec([], "nonexistent", None)
+
+
+def test_resolve_image_spec_type_ambiguous_no_version_exits():
+    import click
+
+    from mvmctl.cli.bin import _resolve_image_spec
+
+    images = [
+        ImageSpec(
+            id="ubuntu-22.04",
+            image_type="ubuntu",
+            version="22.04",
+            name="Ubuntu 22.04",
+            source="",
+            format="qcow2",
+            convert_to="ext4",
+            minimum_rootfs_size=2048,
+        ),
+        ImageSpec(
+            id="ubuntu-24.04",
+            image_type="ubuntu",
+            version="24.04",
+            name="Ubuntu 24.04",
+            source="",
+            format="qcow2",
+            convert_to="ext4",
+            minimum_rootfs_size=2048,
+        ),
+    ]
+    with pytest.raises(click.exceptions.Exit):
+        _resolve_image_spec(images, "ubuntu", None)
+
+
+# ---------------------------------------------------------------------------
+# _handle_partition_detection_retry helper
+# ---------------------------------------------------------------------------
+
+
+def test_handle_partition_retry_success_no_error():
+    from mvmctl.cli.bin import _handle_partition_detection_retry
+    from mvmctl.core.image import ImageImportResult
+
+    mock_func = MagicMock(
+        return_value=ImageImportResult(path=Path("/x"), fs_type="ext4", fs_uuid=None)
+    )
+    result = _handle_partition_detection_retry(mock_func, "arg1", no_prompt=False)
+    assert result.fs_type == "ext4"
+    mock_func.assert_called_once_with("arg1")
+
+
+def test_handle_partition_retry_no_prompt_exits_on_detection_error():
+    import click
+
+    from mvmctl.cli.bin import _handle_partition_detection_retry
+    from mvmctl.exceptions import RootPartitionDetectionError
+
+    exc = RootPartitionDetectionError(partitions=[{"size": 1024, "type": "83"}])
+    mock_func = MagicMock(side_effect=exc)
+    with pytest.raises(click.exceptions.Exit):
+        _handle_partition_detection_retry(mock_func, no_prompt=True)
+
+
+@patch("mvmctl.cli.bin._prompt_for_partition_selection", return_value=1)
+def test_handle_partition_retry_prompts_and_retries_on_tie(mock_prompt: MagicMock):
+    from mvmctl.cli.bin import _handle_partition_detection_retry
+    from mvmctl.core.image import ImageImportResult
+    from mvmctl.exceptions import TieDetectedError
+
+    tie_exc = TieDetectedError(
+        tied_partitions=["1", "2"],
+        partitions=[{"size": 1024, "type": "83"}, {"size": 2048, "type": "83"}],
+    )
+    success_result = ImageImportResult(path=Path("/y"), fs_type="ext4", fs_uuid=None)
+    mock_func = MagicMock(side_effect=[tie_exc, success_result])
+    result = _handle_partition_detection_retry(mock_func, "spec", no_prompt=False)
+    assert result.fs_type == "ext4"
+    mock_prompt.assert_called_once()
+    assert mock_func.call_count == 2
+    second_call_kwargs = mock_func.call_args_list[1].kwargs
+    assert second_call_kwargs.get("partition") == 1
+
+
+# ---------------------------------------------------------------------------
+# image fetch — existing image DB fallback check
+# ---------------------------------------------------------------------------
+
+
+@patch("mvmctl.cli.bin.list_image_entries")
+@patch("mvmctl.cli.bin.fetch_image")
+@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
+def test_image_fetch_detects_existing_via_db(
+    mock_config: MagicMock,
+    mock_fetch: MagicMock,
+    mock_list_entries: MagicMock,
+    tmp_path: Path,
+):
+    db_image_id = "a" * 64
+    db_image_path = tmp_path / "ubuntu-24.04-special.ext4.zst"
+    db_image_path.touch()
+
+    mock_list_entries.return_value = {
+        db_image_id: {
+            "os_slug": "ubuntu-24.04",
+            "path": db_image_path.name,
+        }
+    }
+
+    result = click_runner.invoke(
+        main_app,
+        ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path)],
+        input="n\n",
+    )
+    assert result.exit_code == 0
+    mock_fetch.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # image rm
 # ---------------------------------------------------------------------------
 

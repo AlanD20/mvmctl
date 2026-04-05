@@ -879,7 +879,7 @@ def test_resolve_image_id_path_unique(tmp_path):
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    full_hash = "b" * 16
+    full_hash = "b" * 64
     img = images_dir / "ubuntu.ext4"
     img.write_bytes(b"img")
 

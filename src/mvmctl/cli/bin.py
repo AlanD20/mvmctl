@@ -70,6 +70,7 @@ from mvmctl.utils.fs import (
     get_images_dir,
     get_kernels_dir,
 )
+from mvmctl.utils.full_hash import generate_full_hash_image, shorten_hash
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 from mvmctl.utils.time import human_readable_time
 
@@ -212,6 +213,104 @@ def _resolve_image_file(images_dir: Path, image_id: str, meta: dict[str, object]
     if filename:
         return images_dir / filename
     return _find_local_image_path(images_dir, image_id)
+
+
+def _resolve_image_spec(
+    images: list[Any],
+    effective_selector: str,
+    version: str | None,
+) -> Any:
+    """Resolve an ImageSpec from the images list using selector and optional version.
+
+    Tries exact ID match first, then falls back to image_type matching with optional
+    version disambiguation.
+
+    Args:
+        images: List of ImageSpec objects loaded from images.yaml.
+        effective_selector: The image ID or image_type to resolve.
+        version: Optional version string to disambiguate multiple type matches.
+
+    Returns:
+        The matching ImageSpec.
+
+    Raises:
+        typer.Exit: With code 1 if no match or ambiguous match is found.
+    """
+    spec = next((img for img in images if img.id == effective_selector), None)
+    if spec is not None:
+        return spec
+
+    type_matches = [img for img in images if img.image_type == effective_selector]
+    if not type_matches:
+        available = ", ".join(img.id for img in images)
+        print_error(f"Image '{effective_selector}' not found. Available: {available}")
+        raise typer.Exit(code=1)
+
+    if version is not None:
+        version_matches = [img for img in type_matches if img.version == version]
+        if len(version_matches) == 1:
+            return version_matches[0]
+        if len(version_matches) > 1:
+            ids = ", ".join(img.id for img in version_matches)
+            print_error(
+                f"Multiple '{effective_selector}' images with version '{version}' found: {ids}"
+            )
+            raise typer.Exit(code=1)
+        versions = ", ".join(sorted({img.version for img in type_matches}))
+        print_error(
+            f"No '{effective_selector}' image with version '{version}'. Available: {versions}"
+        )
+        raise typer.Exit(code=1)
+
+    if len(type_matches) == 1:
+        return type_matches[0]
+
+    versions = ", ".join(sorted({img.version for img in type_matches}))
+    print_error(
+        f"Multiple '{effective_selector}' images found. Provide --version. Available: {versions}"
+    )
+    raise typer.Exit(code=1)
+
+
+def _handle_partition_detection_retry(
+    func: Any,
+    *args: Any,
+    no_prompt: bool,
+    disabled_detectors: list[str] | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Run an image fetch/import function and handle partition detection errors.
+
+    If the function raises RootPartitionDetectionError or TieDetectedError, prompts the user
+    to select a partition (unless no_prompt is True) then retries with partition= set.
+
+    Args:
+        func: Callable — fetch_image or import_image.
+        *args: Positional arguments forwarded to func.
+        no_prompt: If True, exit with error instead of prompting.
+        disabled_detectors: Detector names to display in the partition prompt.
+        **kwargs: Keyword arguments forwarded to func.
+
+    Returns:
+        The result returned by func.
+
+    Raises:
+        typer.Exit: With code 1 if no_prompt and a detection error occurs.
+    """
+    try:
+        return func(*args, **kwargs)
+    except (RootPartitionDetectionError, TieDetectedError) as exc:
+        if no_prompt:
+            print_error(str(exc))
+            raise typer.Exit(code=1)
+        tied = exc.tied_partitions if isinstance(exc, TieDetectedError) else None
+        selected = _prompt_for_partition_selection(
+            exc.partitions,
+            tied_partitions=tied,
+            disabled_detectors=disabled_detectors,
+        )
+        print_info(f"Using user-selected partition: {selected}")
+        return func(*args, partition=selected, **kwargs)
 
 
 kernel_app = typer.Typer(
@@ -861,48 +960,24 @@ def image_fetch(
 
     effective_selector = image_type or image_selector
 
-    spec = next((img for img in images if img.id == effective_selector), None)
-    if spec is None:
-        type_matches = [img for img in images if img.image_type == effective_selector]
-        if not type_matches:
-            available = ", ".join(img.id for img in images)
-            print_error(f"Image '{effective_selector}' not found. Available: {available}")
-            raise typer.Exit(code=1)
+    spec = _resolve_image_spec(images, effective_selector, version)
 
-        if version is not None:
-            version_matches = [img for img in type_matches if img.version == version]
-            if len(version_matches) == 1:
-                spec = version_matches[0]
-            elif len(version_matches) > 1:
-                ids = ", ".join(img.id for img in version_matches)
-                print_error(
-                    f"Multiple '{effective_selector}' images with version '{version}' found: {ids}"
-                )
-                raise typer.Exit(code=1)
-            else:
-                versions = ", ".join(sorted({img.version for img in type_matches}))
-                print_error(
-                    f"No '{effective_selector}' image with version '{version}'. Available: {versions}"
-                )
-                raise typer.Exit(code=1)
-        else:
-            if len(type_matches) == 1:
-                spec = type_matches[0]
-            else:
-                versions = ", ".join(sorted({img.version for img in type_matches}))
-                print_error(
-                    f"Multiple '{effective_selector}' images found. Provide --version. Available: {versions}"
-                )
-                raise typer.Exit(code=1)
-
-    # Check if image already exists locally (final compressed version)
-    if not force:
+    effective_force = force
+    if not effective_force:
         compressed_extensions = list(COMPRESSION_EXTENSION_MAP.values())
         existing_compressed = [
             out / f"{spec.id}{ext}"
             for ext in compressed_extensions
             if (out / f"{spec.id}{ext}").exists()
         ]
+        if not existing_compressed:
+            all_meta = list_image_entries(get_cache_dir(), out, include_missing=False)
+            db_entry = _find_image_by_os_slug(all_meta, spec.id)
+            if db_entry:
+                db_key, db_meta = db_entry
+                db_path = _resolve_image_file(out, db_key, db_meta)
+                if db_path and db_path.exists():
+                    existing_compressed = [db_path]
         if existing_compressed:
             print_warning(f"Image '{spec.id}' already exists locally:")
             for path in existing_compressed:
@@ -919,39 +994,27 @@ def image_fetch(
                         pass
                     print_success(f"Default image set to: {spec.id}")
                 raise typer.Exit(code=0)
-            force = True
+            effective_force = True
 
-    try:
-        result = fetch_image(spec, out, force, skip_optimization=skip_optimization)
-    except (RootPartitionDetectionError, TieDetectedError) as exc:
-        if no_prompt:
-            print_error(str(exc))
-            raise typer.Exit(code=1)
-        tied = exc.tied_partitions if isinstance(exc, TieDetectedError) else None
-        selected = _prompt_for_partition_selection(
-            exc.partitions,
-            tied_partitions=tied,
-        )
-        print_info(f"Using user-selected partition: {selected}")
-        result = fetch_image(
-            spec, out, force, partition=selected, skip_optimization=skip_optimization
-        )
+    result = _handle_partition_detection_retry(
+        fetch_image,
+        spec,
+        out,
+        effective_force,
+        no_prompt=no_prompt,
+        skip_optimization=skip_optimization,
+    )
 
     if result:
-        import hashlib
-        import time
+        from datetime import datetime, timezone
 
         result_path = result.path
         result_fs_type = result.fs_type
         result_fs_uuid = result.fs_uuid
 
-        try:
-            file_bytes = result_path.read_bytes()
-            file_hash = hashlib.sha256(file_bytes).hexdigest()
-        except OSError:
-            file_hash = hashlib.sha256(str(result_path).encode()).hexdigest()
-        timestamp = str(time.time())
-        full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()[:16]
+        timestamp = datetime.now(tz=timezone.utc).isoformat()
+        full_id = generate_full_hash_image(result_path, spec.id, timestamp)
+        short_id = shorten_hash(full_id, 12)
 
         _save_image_meta(
             out,
@@ -970,7 +1033,7 @@ def image_fetch(
             compression_ratio=result.compression_ratio,
         )
         print_success(f"Image ready: {result_path}")
-        print_info(f"  ID: {full_id}")
+        print_info(f"  ID: {short_id}")
         if set_default:
             set_default_image_by_os_slug(get_cache_dir(), spec.id)
             print_success(f"Default image set to: {spec.id}")
@@ -1289,8 +1352,7 @@ def image_import(
     ),
 ) -> None:
     """Import a local image file (qcow2, raw, tar-rootfs). The first argument is a display name."""
-    import hashlib
-    import time
+    from datetime import datetime, timezone
 
     images_dir = images_dir if images_dir is not None else get_images_dir()
 
@@ -1314,10 +1376,9 @@ def image_import(
                 )
                 raise typer.Exit(code=1)
 
-    file_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    timestamp = str(time.time())
-    full_id_hash = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()[:16]
-    image_id = full_id_hash
+    timestamp = datetime.now(tz=timezone.utc).isoformat()
+    full_id = generate_full_hash_image(source_path, name, timestamp)
+    image_id = full_id
 
     resolved_format: str | None = format
     # Runtime resolution: if no format specified, use default and auto-detect from filename
@@ -1347,19 +1408,14 @@ def image_import(
     )
 
     try:
-        result = import_image(spec, images_dir, force=force)
-    except (RootPartitionDetectionError, TieDetectedError) as exc:
-        if no_prompt:
-            print_error(str(exc))
-            raise typer.Exit(code=1)
-        tied = exc.tied_partitions if isinstance(exc, TieDetectedError) else None
-        selected = _prompt_for_partition_selection(
-            exc.partitions,
-            tied_partitions=tied,
+        result = _handle_partition_detection_retry(
+            import_image,
+            spec,
+            images_dir,
+            no_prompt=no_prompt,
             disabled_detectors=disabled_detectors,
+            force=force,
         )
-        print_info(f"Using user-selected partition: {selected}")
-        result = import_image(spec, images_dir, force=force, partition=selected)
     except ImageError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)
@@ -1374,7 +1430,7 @@ def image_import(
         result_path,
         {
             "os_name": name,
-            "full_hash": full_id_hash,
+            "full_hash": full_id,
             "filename": result_path.name,
         },
         fs_type=result_fs_type,
@@ -1383,9 +1439,10 @@ def image_import(
         original_size=result.original_size,
         compression_ratio=result.compression_ratio,
     )
+    short_id = shorten_hash(full_id, 12)
     print_success(f"Image imported: {result_path}")
     print_info(f"  Name: {name}")
-    print_info(f"  ID:   {full_id_hash}")
+    print_info(f"  ID:   {short_id}")
 
     if set_default:
         set_default_image_entry(get_cache_dir(), image_id)

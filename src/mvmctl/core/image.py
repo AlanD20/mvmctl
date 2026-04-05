@@ -1720,7 +1720,7 @@ def resolve_image_id_path(image: str) -> Path:
         raise MVMError(f"Image ID not found or ambiguous: {image!r}")
 
     full_key, meta = match
-    filename = str(meta.get("filename", ""))
+    filename = str(meta.get("path", ""))
     if filename:
         compressed = images_dir / f"{filename}.zst"
         if compressed.exists():
