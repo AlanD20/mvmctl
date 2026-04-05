@@ -227,114 +227,22 @@ def test_kernel_fetch_official_success(
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
     result = click_runner.invoke(
-        main_app, ["kernel", "fetch", "--type", "official", "--version", "6.1.9", "--out", str(out)]
-    )
-    assert result.exit_code == 0
-    assert "Kernel" in result.output
-    mock_build.assert_called_once()
-
-
-@patch("mvmctl.cli.bin.build_kernel_pipeline", side_effect=KernelError("build failed"))
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
-def test_kernel_fetch_official_failure(
-    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
-):
-    mock_resolve.return_value = KernelSpec(
-        name="kernel-official",
-        kernel_type="official",
-        version="6.1.9",
-        source="https://example.com/linux-6.1.9.tar.xz",
-        output_name="vmlinux-official",
-        build_dir="/tmp/build",
-    )
-    out = tmp_path / "vmlinux-6.1.9"
-    result = click_runner.invoke(
-        main_app, ["kernel", "fetch", "--type", "official", "--version", "6.1.9", "--out", str(out)]
-    )
-    assert result.exit_code == 1
-
-
-@patch("mvmctl.cli.bin.download_firecracker_kernel")
-@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
-def test_kernel_fetch_firecracker_success(
-    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
-):
-    mock_resolve.return_value = KernelSpec(
-        name="kernel-firecracker",
-        kernel_type="firecracker",
-        version="6.1",
-        source="https://example.com/fc/{ci_version}/{arch}/vmlinux-{version}",
-        output_name="vmlinux-fc",
-        build_dir="/tmp/build",
-        list_url_template="https://example.com/list?ci={ci_version}&arch={arch}",
-    )
-    fc_kernel = tmp_path / "vmlinux-fc-1.12-amd64"
-    fc_kernel.write_bytes(b"\x7fELF")
-    mock_dl.return_value = fc_kernel
-    result = click_runner.invoke(
         main_app,
-        ["kernel", "fetch", "--type", "firecracker", "--version", "1.12"],
+        [
+            "kernel",
+            "fetch",
+            "--official",
+            "--version",
+            "6.1.9",
+            "--arch",
+            "amd64",
+            "--out",
+            str(out),
+        ],
     )
-    assert result.exit_code == 0
-    assert "ready" in result.output.lower() or "kernel" in result.output.lower()
-    call_kwargs = mock_dl.call_args.kwargs
-    assert call_kwargs["output_name"] is None
-    assert call_kwargs["output_path"] is None
-
-
-@patch("mvmctl.cli.bin.download_firecracker_kernel")
-@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
-def test_kernel_fetch_firecracker_flag_shortcut(
-    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
-):
-    mock_resolve.return_value = KernelSpec(
-        name="kernel-firecracker",
-        kernel_type="firecracker",
-        version="6.1",
-        source="https://example.com/fc/{ci_version}/{arch}/vmlinux-{version}",
-        output_name="vmlinux-fc",
-        build_dir="/tmp/build",
-        list_url_template="https://example.com/list?ci={ci_version}&arch={arch}",
-    )
-    fc_kernel = tmp_path / "vmlinux-fc"
-    fc_kernel.write_bytes(b"\x7fELF")
-    mock_dl.return_value = fc_kernel
-
-    result = click_runner.invoke(main_app, ["kernel", "fetch", "--firecracker"])
 
     assert result.exit_code == 0
-    mock_resolve.assert_called_once_with(kernel_type="firecracker", version=None)
-
-
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
-def test_kernel_fetch_official_flag_shortcut(
-    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
-):
-    from mvmctl.core.kernel import KernelPipelineResult
-
-    mock_resolve.return_value = KernelSpec(
-        name="kernel-official",
-        kernel_type="official",
-        version="6.1.9",
-        source="https://example.com/linux-6.1.9.tar.xz",
-        output_name="vmlinux-official",
-        build_dir="/tmp/build",
-    )
-    mock_result = MagicMock(spec=KernelPipelineResult)
-    mock_result.build_dir = tmp_path / "build"
-    mock_result.config_result = None
-    mock_result.build_result = None
-    mock_build.return_value = mock_result
-
-    out = tmp_path / "vmlinux-6.1.9"
-    out.write_bytes(b"\x7fELF")
-    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official", "--out", str(out)])
-
-    assert result.exit_code == 0
-    mock_resolve.assert_called_once_with(kernel_type="official", version=None)
+    mock_resolve.assert_called_once_with(kernel_type="official", version="6.1.9")
 
 
 def test_kernel_fetch_official_conflicts_with_firecracker():
@@ -373,7 +281,7 @@ def test_kernel_fetch_firecracker_uses_name_override(
     mock_dl.return_value = result_path
 
     result = click_runner.invoke(
-        main_app, ["kernel", "fetch", "--firecracker", "--name", "my-fc-kernel"]
+        main_app, ["kernel", "fetch", "--firecracker", "--name", "my-fc-kernel", "--arch", "amd64"]
     )
 
     assert result.exit_code == 0
@@ -402,7 +310,7 @@ def test_kernel_fetch_firecracker_out_is_explicit_path(
 
     result = click_runner.invoke(
         main_app,
-        ["kernel", "fetch", "--firecracker", "--out", str(explicit_out)],
+        ["kernel", "fetch", "--firecracker", "--arch", "amd64", "--out", str(explicit_out)],
     )
 
     assert result.exit_code == 0
@@ -432,7 +340,8 @@ def test_kernel_fetch_official_uses_name_override(
     mock_build.return_value = mock_result
 
     result = click_runner.invoke(
-        main_app, ["kernel", "fetch", "--official", "--name", "my-official-kernel"]
+        main_app,
+        ["kernel", "fetch", "--official", "--name", "my-official-kernel", "--arch", "amd64"],
     )
 
     assert result.exit_code == 0
@@ -462,7 +371,7 @@ def test_kernel_fetch_official_without_name_uses_cache(
     mock_result.build_result = None
     mock_build.return_value = mock_result
 
-    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official"])
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official", "--arch", "amd64"])
 
     assert result.exit_code == 0
     assert mock_build.call_args.kwargs["use_cache"] is True
@@ -489,7 +398,9 @@ def test_kernel_fetch_official_clean_build_disables_cache(
     mock_result.build_result = None
     mock_build.return_value = mock_result
 
-    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official", "--clean-build"])
+    result = click_runner.invoke(
+        main_app, ["kernel", "fetch", "--official", "--arch", "amd64", "--clean-build"]
+    )
 
     assert result.exit_code == 0
     assert mock_build.call_args.kwargs["use_cache"] is False
@@ -518,7 +429,16 @@ def test_kernel_fetch_official_name_with_clean_build_disables_cache(
 
     result = click_runner.invoke(
         main_app,
-        ["kernel", "fetch", "--official", "--name", "custom-base", "--clean-build"],
+        [
+            "kernel",
+            "fetch",
+            "--official",
+            "--name",
+            "custom-base",
+            "--arch",
+            "amd64",
+            "--clean-build",
+        ],
     )
 
     assert result.exit_code == 0
@@ -540,11 +460,72 @@ def test_kernel_fetch_firecracker_conflicting_type():
     assert "cannot be combined" in result.output
 
 
+@patch("mvmctl.cli.bin.download_firecracker_kernel")
+@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
+def test_kernel_fetch_firecracker_missing_arch_error(
+    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock
+):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-firecracker",
+        kernel_type="firecracker",
+        version="6.1",
+        source="https://example.com/fc/{ci_version}/{arch}/vmlinux-{version}",
+        output_name="vmlinux-fc",
+        build_dir="/tmp/build",
+        list_url_template="https://example.com/list?ci={ci_version}&arch={arch}",
+    )
+
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--firecracker"])
+
+    assert result.exit_code == 1
+    assert "No architecture specified" in result.output
+    mock_dl.assert_not_called()
+
+
 @patch("mvmctl.cli.bin.resolve_kernel_spec", side_effect=KernelError("ambiguous type"))
 def test_kernel_fetch_type_ambiguity_error(mock_resolve: MagicMock):
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--type", "firecracker"])
     assert result.exit_code == 1
     assert "ambiguous type" in result.output
+
+
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
+def test_kernel_fetch_official_missing_version_error(
+    mock_resolve: MagicMock, mock_build: MagicMock
+):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="",
+        source="https://example.com/linux.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
+
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official", "--arch", "amd64"])
+
+    assert result.exit_code == 1
+    assert "No version available" in result.output
+
+
+@patch("mvmctl.cli.bin.build_kernel_pipeline")
+@patch("mvmctl.cli.bin.resolve_kernel_spec")
+def test_kernel_fetch_official_missing_arch_error(mock_resolve: MagicMock, mock_build: MagicMock):
+    mock_resolve.return_value = KernelSpec(
+        name="kernel-official",
+        kernel_type="official",
+        version="6.1.9",
+        source="https://example.com/linux-6.1.9.tar.xz",
+        output_name="vmlinux-official",
+        build_dir="/tmp/build",
+    )
+
+    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official"])
+
+    assert result.exit_code == 1
+    assert "No architecture specified" in result.output
 
 
 @patch("mvmctl.cli.bin.build_kernel_pipeline")
@@ -578,6 +559,8 @@ def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, 
             "official",
             "--version",
             "6.1.9",
+            "--arch",
+            "amd64",
             "-j",
             "4",
             "--out",
@@ -1818,6 +1801,75 @@ def test_kernel_ls_no_x_mark_for_existing_file(tmp_path: Path, mocker):
         if "vmlinux-fc" in line:
             # Should not have X prefix for existing file
             assert not line.startswith("X ")
+
+
+def test_kernel_ls_shows_12char_id(tmp_path: Path):
+    """Verify kernel ls displays 12-character short ID, not the full 64-char hash."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kernels_dir = tmp_path / "kernels"
+    kernels_dir.mkdir()
+
+    full_hash = "a" * 64
+    kernel_file = kernels_dir / "vmlinux-fc-6.1.9-x86_64"
+    kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 1024)
+
+    _write_kernel_meta(
+        cache_dir, full_hash, "vmlinux-fc-6.1.9-x86_64", version="6.1.9", arch="x86_64"
+    )
+
+    result = click_runner.invoke(main_app, ["kernel", "ls", "--kernels-dir", str(kernels_dir)])
+
+    assert result.exit_code == 0
+    short_id = full_hash[:12]
+    assert short_id in result.output
+    assert full_hash not in result.output
+
+
+def test_image_ls_local_shows_12char_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify image ls (local) displays 12-character short ID for YAML-matched rows."""
+    full_hash = "a" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / "ubuntu-24.04.ext4"
+    img_file.write_bytes(b"\x00" * 64)
+    _write_image_meta(
+        tmp_path,
+        full_hash,
+        "ubuntu-24.04.ext4",
+        os_name="Ubuntu 24.04 LTS",
+        os_slug="ubuntu-24.04",
+    )
+    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+        result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
+    assert result.exit_code == 0
+    short_id = full_hash[:12]
+    assert short_id in result.output
+    assert full_hash not in result.output
+
+
+def test_image_ls_local_shows_12char_id_for_non_yaml_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Verify image ls (local) displays 12-character short ID for imported (non-YAML) rows."""
+    full_hash = "b" * 64
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    img_file = images_dir / f"{full_hash}.ext4"
+    img_file.write_bytes(b"\x00" * 64)
+    _write_image_meta(
+        tmp_path,
+        full_hash,
+        img_file.name,
+        os_name="My Custom Import",
+        os_slug="custom-import",
+    )
+    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+        result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
+    assert result.exit_code == 0
+    short_id = full_hash[:12]
+    assert short_id in result.output
+    assert full_hash not in result.output
 
 
 def test_image_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):

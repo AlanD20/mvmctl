@@ -40,9 +40,7 @@ from mvmctl.api.vms import get_vm_manager
 from mvmctl.cli._helpers import get_combined_marker, is_file_missing
 from mvmctl.constants import (
     COMPRESSION_EXTENSION_MAP,
-    DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_IMAGE_IMPORT_FORMAT,
-    DEFAULT_KERNEL_VERSION,
     IMAGE_IMPORT_FORMAT_MAP,
     KERNEL_TYPE_FIRECRACKER,
     KERNEL_TYPE_OFFICIAL,
@@ -388,10 +386,10 @@ def kernel_ls(
     for k in kernels:
         is_default = k.get("is_default") == "true"
         last_modified_display = human_readable_time(k.get("last_modified", "-"))
-        filename = k.get("filename", "")
-        path = kernels_dir / filename if filename else None
+        path_str = k.get("path", "")
+        path = kernels_dir / path_str if path_str else None
         is_missing = is_file_missing(path)
-        display_id = get_combined_marker(is_default, is_missing) + k.get("id", "")
+        display_id = get_combined_marker(is_default, is_missing) + shorten_hash(k.get("id", ""), 12)
         size = path.stat().st_size if path and path.exists() else 0
         size_str = format_bytes_human_readable(size) if size > 0 else "-"
         rows.append(
@@ -427,6 +425,162 @@ def _get_ci_version() -> str:
     return ci_version
 
 
+def _compute_official_output_path(
+    kernels_dir: Path,
+    out: Path | None,
+    name: str | None,
+    spec_version: str,
+    spec_output_name: str,
+    arch: str,
+) -> Path:
+    """Compute the output path for an official kernel build.
+
+    Args:
+        kernels_dir: The kernels cache directory.
+        out: Explicit --out path (takes priority).
+        name: --name override for the filename base.
+        spec_version: Version string from the resolved KernelSpec (must be non-empty).
+        spec_output_name: output_name from the resolved KernelSpec.
+        arch: Architecture string (must be non-empty).
+
+    Returns:
+        The computed output Path.
+    """
+    if out is not None:
+        return out
+
+    base_name = name if name is not None else spec_output_name
+    return kernels_dir / f"{base_name}-{spec_version}-{arch}"
+
+
+def _print_pipeline_results(pipeline_result: Any) -> None:
+    """Print warnings and info messages from a kernel build pipeline result.
+
+    Args:
+        pipeline_result: A KernelPipelineResult instance.
+    """
+    if pipeline_result.config_result:
+        for warning in pipeline_result.config_result.warnings:
+            print_warning(warning)
+        for info in pipeline_result.config_result.info_messages:
+            print_info(info)
+
+    if pipeline_result.build_result:
+        for warning in pipeline_result.build_result.warnings:
+            print_warning(warning)
+        for info in pipeline_result.build_result.info_messages:
+            print_info(info)
+
+
+def _fetch_firecracker_kernel(
+    spec: Any,
+    kernels_dir: Path,
+    arch: str | None,
+    name: str | None,
+    out: Path | None,
+) -> Path:
+    if arch is None:
+        print_error(
+            f"No architecture specified for kernel spec '{spec.name}'. Provide --arch explicitly."
+        )
+        raise typer.Exit(code=1)
+
+    ci_version = _get_ci_version()
+    try:
+        return download_firecracker_kernel(
+            ci_version=ci_version,
+            arch=arch,
+            kernels_dir=kernels_dir,
+            output_name=name,
+            output_path=out,
+            kernel_spec=spec,
+        )
+    except KernelError as exc:
+        print_error(f"Kernel fetch failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+def _build_official_kernel(
+    spec: Any,
+    kernels_dir: Path,
+    out: Path | None,
+    name: str | None,
+    arch: str | None,
+    jobs: int | None,
+    keep_build_dir: bool,
+    clean_build: bool,
+    kernel_config: Path | None,
+) -> Path:
+    """Build an official upstream kernel.
+
+    Args:
+        spec: The resolved KernelSpec for the official kernel.
+        kernels_dir: The kernels cache directory.
+        out: Explicit --out path.
+        name: --name override for the filename base.
+        arch: Architecture string (required for official kernels).
+        jobs: Parallel build jobs.
+        keep_build_dir: Whether to retain the build directory.
+        clean_build: Whether to skip the build cache.
+        kernel_config: Optional path to a custom .config file.
+
+    Returns:
+        Path to the built kernel file.
+
+    Raises:
+        typer.Exit: With code 1 on build failure or missing required inputs.
+    """
+    # Validate required inputs — no silent fallbacks
+    if not spec.version:
+        print_error(
+            f"No version available for kernel spec '{spec.name}'. Provide --version explicitly."
+        )
+        raise typer.Exit(code=1)
+
+    if arch is None:
+        print_error(
+            f"No architecture specified for kernel spec '{spec.name}'. Provide --arch explicitly."
+        )
+        raise typer.Exit(code=1)
+
+    if kernel_config and not kernel_config.exists():
+        print_error(f"Kernel config file not found: {kernel_config}")
+        raise typer.Exit(code=1)
+
+    output_path = _compute_official_output_path(
+        kernels_dir=kernels_dir,
+        out=out,
+        name=name,
+        spec_version=spec.version,
+        spec_output_name=spec.output_name,
+        arch=arch,
+    )
+
+    try:
+        pipeline_result = build_kernel_pipeline(
+            version=spec.version,
+            source_url=spec.source,
+            output_path=output_path,
+            build_dir=None,
+            jobs=jobs,
+            keep_build_dir=keep_build_dir,
+            user_config_path=kernel_config,
+            arch=arch,
+            kernel_spec=spec,
+            use_cache=not clean_build,
+        )
+    except KernelError as exc:
+        print_error(f"Kernel build failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    _print_pipeline_results(pipeline_result)
+
+    if keep_build_dir:
+        print_info(f"Build directory kept at: {pipeline_result.build_dir}")
+
+    return output_path
+
+
 @kernel_app.command(name="fetch")
 def kernel_fetch(
     kernel_type: Optional[str] = typer.Option(
@@ -441,7 +595,9 @@ def kernel_fetch(
         "--version",
         help="Kernel spec version from kernels.yaml (required if multiple specs share the same type)",
     ),
-    arch: str = typer.Option(None, "--arch", help="Architecture (for firecracker type)"),
+    arch: Optional[str] = typer.Option(
+        None, "--arch", help="Architecture (required for official kernels)"
+    ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output path/name"),
     name: Optional[str] = typer.Option(
         None,
@@ -464,9 +620,11 @@ def kernel_fetch(
     ),
     set_default: bool = typer.Option(False, "--set-default", help="Set this kernel as default"),
 ) -> None:
+    # ── SETUP ──────────────────────────────────────────────────────────
     kernels_dir = get_kernels_dir()
     kernels_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── VALIDATE ───────────────────────────────────────────────────────
     if name is not None and out is not None:
         print_error("--name cannot be combined with --out")
         raise typer.Exit(code=1)
@@ -479,99 +637,48 @@ def kernel_fetch(
         if kernel_type is not None and kernel_type != KERNEL_TYPE_FIRECRACKER:
             print_error("--firecracker cannot be combined with a different --type value")
             raise typer.Exit(code=1)
-        kernel_type = KERNEL_TYPE_FIRECRACKER
-
-    if official:
+        resolved_type = KERNEL_TYPE_FIRECRACKER
+    elif official:
         if kernel_type is not None and kernel_type != KERNEL_TYPE_OFFICIAL:
             print_error("--official cannot be combined with a different --type value")
             raise typer.Exit(code=1)
-        kernel_type = KERNEL_TYPE_OFFICIAL
-
-    if kernel_type is None:
+        resolved_type = KERNEL_TYPE_OFFICIAL
+    elif kernel_type is None:
         print_error("Provide --type <kernel-type> or use --firecracker/--official")
         raise typer.Exit(code=1)
+    else:
+        resolved_type = kernel_type
 
     try:
-        spec = resolve_kernel_spec(kernel_type=kernel_type, version=version)
+        spec = resolve_kernel_spec(kernel_type=resolved_type, version=version)
     except KernelError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1) from exc
 
+    # ── EXECUTE ────────────────────────────────────────────────────────
     if spec.kernel_type == KERNEL_TYPE_FIRECRACKER:
-        ci_version = _get_ci_version()
-        output_name = name
-        try:
-            result = download_firecracker_kernel(
-                ci_version=ci_version,
-                arch=arch,
-                kernels_dir=kernels_dir,
-                output_name=output_name,
-                output_path=out,
-                kernel_spec=spec,
-            )
-        except KernelError as exc:
-            print_error(f"Kernel fetch failed: {exc}")
-            raise typer.Exit(code=1) from exc
+        result = _fetch_firecracker_kernel(spec, kernels_dir, arch, name, out)
         print_success(f"Firecracker kernel ready: {result}")
 
     elif spec.kernel_type == KERNEL_TYPE_OFFICIAL:
-        effective_version = spec.version or DEFAULT_KERNEL_VERSION
-        # Runtime resolution: use provided arch or fall back to default
-        effective_arch = arch if arch is not None else DEFAULT_FC_KERNEL_ARCH
-        output_path = (
-            out
-            if out is not None
-            else (
-                kernels_dir / f"{name}-{effective_version}-{effective_arch}"
-                if name is not None
-                else kernels_dir / f"{spec.output_name}-{effective_version}-{effective_arch}"
-            )
+        result = _build_official_kernel(
+            spec=spec,
+            kernels_dir=kernels_dir,
+            out=out,
+            name=name,
+            arch=arch,
+            jobs=jobs,
+            keep_build_dir=keep_build_dir,
+            clean_build=clean_build,
+            kernel_config=kernel_config,
         )
-
-        if kernel_config and not kernel_config.exists():
-            print_error(f"Kernel config file not found: {kernel_config}")
-            raise typer.Exit(code=1)
-
-        source_url = spec.source
-        try:
-            pipeline_result = build_kernel_pipeline(
-                version=effective_version,
-                source_url=source_url,
-                output_path=output_path,
-                build_dir=None,
-                jobs=jobs,
-                keep_build_dir=keep_build_dir,
-                user_config_path=kernel_config,
-                arch=effective_arch,
-                kernel_spec=spec,
-                use_cache=not clean_build,
-            )
-        except KernelError as exc:
-            print_error(f"Kernel build failed: {exc}")
-            raise typer.Exit(code=1) from exc
-
-        if pipeline_result.config_result:
-            for warning in pipeline_result.config_result.warnings:
-                print_warning(warning)
-            for info in pipeline_result.config_result.info_messages:
-                print_info(info)
-
-        if pipeline_result.build_result:
-            for warning in pipeline_result.build_result.warnings:
-                print_warning(warning)
-            for info in pipeline_result.build_result.info_messages:
-                print_info(info)
-
-        if keep_build_dir:
-            print_info(f"Build directory kept at: {pipeline_result.build_dir}")
-
-        result = output_path
         print_success(f"Kernel built: {result}")
 
     else:
         print_error(f"Unsupported kernel type in spec '{spec.name}': {spec.kernel_type!r}")
         raise typer.Exit(code=1)
 
+    # ── FINALIZE ───────────────────────────────────────────────────────
     if set_default:
         set_default_kernel(kernels_dir, result.name)
         print_success(f"Default kernel set to: {result.name}")
@@ -593,17 +700,17 @@ def kernel_set_default(
         raise typer.Exit(code=1)
 
     _, meta = match
-    filename = str(meta.get("filename", ""))
-    if not filename or not (kernels_dir / filename).exists():
+    path_str = str(meta.get("path", ""))
+    if not path_str or not (kernels_dir / path_str).exists():
         print_error(f"Kernel file not found for ID '{prefix}'")
         raise typer.Exit(code=1)
 
     try:
-        set_default_kernel(kernels_dir, filename)
+        set_default_kernel(kernels_dir, path_str)
     except KernelError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1) from exc
-    print_success(f"Default kernel set to: {filename}")
+    print_success(f"Default kernel set to: {path_str}")
 
 
 @kernel_app.command(name="rm")
@@ -640,9 +747,9 @@ def kernel_rm(
             continue
 
         full_id, meta = match
-        filename = str(meta.get("filename", ""))
+        path_str = str(meta.get("path", ""))
 
-        path: Path | None = kernels_dir / filename if filename else None
+        path: Path | None = kernels_dir / path_str if path_str else None
         if path is None or not path.exists():
             print_error(
                 f"Kernel file not found for ID '{prefix}' (metadata exists but file missing)"
@@ -671,7 +778,7 @@ def kernel_rm(
                 stale.unlink(missing_ok=True)
 
         remove_kernel_entry(cache_dir, full_id)
-        print_success(f"Removed: {filename}")
+        print_success(f"Removed: {path_str}")
 
     raise typer.Exit(code=exit_code)
 
@@ -842,7 +949,7 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
         fs_type = str(
             meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
         )
-        display_id = get_combined_marker(is_default, is_missing) + meta_key
+        display_id = get_combined_marker(is_default, is_missing) + shorten_hash(meta_key, 12)
         _raw_size = meta.get("compressed_size")
         size = _get_file_size(
             found_path, int(_raw_size) if isinstance(_raw_size, (int, float)) else 0
@@ -870,7 +977,7 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
         fs_type = str(
             meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
         )
-        display_id = get_combined_marker(is_default, is_missing) + meta_id
+        display_id = get_combined_marker(is_default, is_missing) + shorten_hash(meta_id, 12)
         _raw_size = meta.get("compressed_size")
         size = _get_file_size(
             found_path, int(_raw_size) if isinstance(_raw_size, (int, float)) else 0
@@ -1024,7 +1131,7 @@ def image_fetch(
                 "os_name": spec.name,
                 "os_slug": spec.id,
                 "full_hash": full_id,
-                "filename": result_path.name,
+                "path": result_path.name,
             },
             fs_type=result_fs_type,
             fs_uuid=result_fs_uuid,
@@ -1431,7 +1538,7 @@ def image_import(
         {
             "os_name": name,
             "full_hash": full_id,
-            "filename": result_path.name,
+            "path": result_path.name,
         },
         fs_type=result_fs_type,
         fs_uuid=result_fs_uuid,

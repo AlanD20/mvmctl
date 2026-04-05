@@ -45,7 +45,7 @@ class TestKernelMetadata:
             name="vmlinux-test",
             version="6.1.0",
             arch="x86_64",
-            filename="vmlinux-test",
+            path="vmlinux-test",
             type="official",
         )
 
@@ -81,7 +81,7 @@ class TestKernelMetadata:
         cache_dir = make_test_paths(tmp_path).cache
 
         update_kernel_entry(
-            cache_dir, "kernel1", name="vmlinux-1", version="6.1.0", filename="vmlinux-1"
+            cache_dir, "kernel1", name="vmlinux-1", version="6.1.0", path="vmlinux-1"
         )
         set_default_kernel_by_filename(cache_dir, "vmlinux-1")
 
@@ -108,7 +108,7 @@ class TestImageMetadata:
             cache_dir,
             "img123",
             os_slug="ubuntu-24.04",
-            filename="ubuntu-24.04.ext4",
+            path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
             fs_type="ext4",
         )
@@ -125,9 +125,7 @@ class TestImageMetadata:
         update_image_entry(
             cache_dir, "img1", os_slug="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
         )
-        update_image_entry(
-            cache_dir, "img2", os_slug="debian-12", os_name="Debian", fs_type="ext4"
-        )
+        update_image_entry(cache_dir, "img2", os_slug="debian-12", os_name="Debian", fs_type="ext4")
 
         entries = list_image_entries(cache_dir)
         assert len(entries) == 2
@@ -152,7 +150,7 @@ class TestImageMetadata:
             cache_dir,
             "img1",
             os_slug="ubuntu-24.04",
-            filename="ubuntu-24.04.ext4",
+            path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
         )
         set_default_image_entry(cache_dir, "img1")
@@ -169,7 +167,7 @@ class TestImageMetadata:
             cache_dir,
             "img1",
             os_slug="ubuntu-24.04",
-            filename="ubuntu-24.04.ext4",
+            path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
         )
         set_default_image_by_os_slug(cache_dir, "ubuntu-24.04")
@@ -339,8 +337,8 @@ class TestOrphanedEntryCleanup:
         valid_kernel.write_bytes(b"\x7fELF")
 
         # Add entries - one with matching file, one orphaned
-        update_kernel_entry(cache_dir, "valid123", name="vmlinux", filename="vmlinux")
-        update_kernel_entry(cache_dir, "orphan456", name="missing", filename="missing")
+        update_kernel_entry(cache_dir, "valid123", name="vmlinux", path="vmlinux")
+        update_kernel_entry(cache_dir, "orphan456", name="missing", path="missing")
 
         # List with validation
         entries = list_kernel_entries(cache_dir, kernels_dir)
@@ -364,10 +362,8 @@ class TestOrphanedEntryCleanup:
         valid_image.write_bytes(b"ext4 data")
 
         # Add entries - one with matching file, one orphaned
-        update_image_entry(
-            cache_dir, "valid123", os_slug="ubuntu-24.04", filename="ubuntu.ext4"
-        )
-        update_image_entry(cache_dir, "orphan456", os_slug="debian-12", filename="missing.ext4")
+        update_image_entry(cache_dir, "valid123", os_slug="ubuntu-24.04", path="ubuntu.ext4")
+        update_image_entry(cache_dir, "orphan456", os_slug="debian-12", path="missing.ext4")
 
         # List with validation
         entries = list_image_entries(cache_dir, images_dir)
@@ -390,7 +386,7 @@ class TestDualWriteCompatibility:
             cache_dir,
             image_id,
             internal_id="alpine-3.21",
-            filename="alpine-3.21.ext4",
+            path="alpine-3.21.ext4",
             os_name="Alpine Linux",
             is_default=0,
         )
@@ -413,7 +409,7 @@ class TestDualWriteCompatibility:
             name="vmlinux-6.1",
             version="6.1.102",
             arch="x86_64",
-            filename="vmlinux-6.1",
+            path="vmlinux-6.1",
             type="official",
             is_default=0,
         )

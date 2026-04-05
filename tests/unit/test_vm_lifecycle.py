@@ -817,18 +817,18 @@ def test_resolve_image_path_not_found(tmp_path):
 def test_resolve_single_by_id_prefix_unique(tmp_path):
     def _find(_: Path, prefix: str) -> list[tuple[str, dict[str, str]]]:
         if prefix == "abc123":
-            return [("abc123deadbeef", {"filename": "asset"})]
+            return [("abc123deadbeef", {"path": "asset"})]
         return []
 
     result = resolve_single_by_id_prefix("abc123", _find, tmp_path)
-    assert result == ("abc123deadbeef", {"filename": "asset"})
+    assert result == ("abc123deadbeef", {"path": "asset"})
 
 
 def test_resolve_single_by_id_prefix_none_for_ambiguous(tmp_path):
     def _find(_: Path, __: str) -> list[tuple[str, dict[str, str]]]:
         return [
-            ("abc123deadbeef", {"filename": "a"}),
-            ("abc123feedface", {"filename": "b"}),
+            ("abc123deadbeef", {"path": "a"}),
+            ("abc123feedface", {"path": "b"}),
         ]
 
     assert resolve_single_by_id_prefix("abc123", _find, tmp_path) is None

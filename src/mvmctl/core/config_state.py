@@ -185,7 +185,7 @@ def get_defaults_config() -> dict[str, Any]:
         default_kernel = get_default_kernel_entry(cache_dir)
         if default_kernel is not None:
             _kernel_id, kernel_meta = default_kernel
-            defaults["kernel"] = kernel_meta.get("filename")
+            defaults["kernel"] = kernel_meta.get("path")
 
     return defaults
 

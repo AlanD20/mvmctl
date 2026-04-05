@@ -146,9 +146,9 @@ def resolve_image_multi_strategy(value: str) -> Path:
     for full_key, meta in all_entries.items():
         os_slug = str(meta.get("os_slug", ""))
         if os_slug == value:
-            filename = str(meta.get("filename", ""))
-            if filename:
-                candidate = images_dir / filename
+            path_str = str(meta.get("path", ""))
+            if path_str:
+                candidate = images_dir / path_str
                 if candidate.exists():
                     return candidate
             # Try full_key with extensions

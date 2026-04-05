@@ -72,7 +72,7 @@ def test_save_kernel_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     full_id = save_kernel_metadata(kernels_dir, "vmlinux", version="6.1.9", kernel_type="official")
 
-    assert len(full_id) == 16
+    assert len(full_id) == 64
 
     # Verify in SQLite database
     db = MVMDatabase()
@@ -98,7 +98,7 @@ def test_save_kernel_metadata_parses_filename(tmp_path: Path, monkeypatch: pytes
         kernels_dir, "vmlinux-fc-v1.15-x86_64", kernel_type="firecracker"
     )
 
-    assert len(full_id) == 16
+    assert len(full_id) == 64
 
     # Verify in SQLite database
     db = MVMDatabase()

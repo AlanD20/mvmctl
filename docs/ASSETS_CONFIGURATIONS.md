@@ -343,7 +343,7 @@ uv run mvm image fetch <your-new-id>
 | `DEFAULT_REMOTE_VERSION_LIMIT` | `image.remote.version_limit` | Max remote versions shown by `mvm bin ls --remote` |
 | `FALLBACK_MAX_PARALLEL_DOWNLOADS` | `fallbacks.max_parallel_downloads` | Default worker count for parallel image fetches |
 | `DEFAULT_KERNEL_VERSION` | `kernel.defaults.version` | Default version for `mvm kernel fetch --type official` |
-| `DEFAULT_FC_KERNEL_ARCH` | `kernel.defaults.arch` | Default architecture for kernel operations |
+| `DEFAULT_KERNEL_ARCH` | `kernel.defaults.arch` | Default architecture for kernel operations |
 | `FALLBACK_KERNEL_BUILD_JOBS` | `fallbacks.kernel_build_jobs` | Default `make -j` value when not specified |
 | `KERNEL_TARBALL_URL_TEMPLATE` | `urls.kernel.tarball_template` | kernel.org tarball URL; fill `{version}` |
 | `KERNEL_SHA256_URL_TEMPLATE` | `urls.kernel.sha256_template` | kernel.org SHA-256 URL; fill `{version}` |

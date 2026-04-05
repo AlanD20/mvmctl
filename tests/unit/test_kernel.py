@@ -713,10 +713,12 @@ def test_build_kernel_pipeline_requires_checksum(
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
 @patch("mvmctl.core.kernel.download_with_progress")
 @patch("mvmctl.core.kernel.update_kernel_entry")
+@patch("mvmctl.core.kernel.generate_full_hash_kernel", return_value="a" * 64)
 @patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_full_success(
-    mock_update_kernel_entry: MagicMock,
     mock_check_deps: MagicMock,
+    mock_full_hash: MagicMock,
+    mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
     mock_configure: MagicMock,
@@ -737,6 +739,7 @@ def test_build_kernel_pipeline_full_success(
     mock_configure.return_value = True
     mock_build.return_value = True
 
+    output_path.write_bytes(b"")
     build_kernel_pipeline(
         version="6.1.102",
         source_url="https://example.com/linux.tar.xz",
@@ -758,7 +761,9 @@ def test_build_kernel_pipeline_full_success(
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
 @patch("mvmctl.core.kernel.download_file")
 @patch("mvmctl.core.kernel.update_kernel_entry")
+@patch("mvmctl.core.kernel.generate_full_hash_kernel", return_value="a" * 64)
 def test_build_kernel_pipeline_uses_templated_sha256_url(
+    mock_full_hash: MagicMock,
     mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -782,6 +787,7 @@ def test_build_kernel_pipeline_uses_templated_sha256_url(
     spec.sha256_url = "https://example.com/linux-{version}.sha256"
     spec.source = "https://example.com/linux-{version}.tar.xz"
 
+    output_path.write_bytes(b"")
     build_kernel_pipeline(
         version="6.1.102",
         source_url=spec.source,
@@ -889,7 +895,9 @@ def test_build_kernel_pipeline_build_fails(
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
 @patch("mvmctl.core.kernel.download_with_progress")
 @patch("mvmctl.core.kernel.update_kernel_entry")
+@patch("mvmctl.core.kernel.generate_full_hash_kernel", return_value="a" * 64)
 def test_build_kernel_pipeline_cached_tarball(
+    mock_full_hash: MagicMock,
     mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -913,6 +921,7 @@ def test_build_kernel_pipeline_cached_tarball(
     mock_configure.return_value = True
     mock_build.return_value = True
 
+    output_path.write_bytes(b"")
     build_kernel_pipeline(
         version="6.1.102",
         source_url="https://example.com/linux.tar.xz",
@@ -931,7 +940,9 @@ def test_build_kernel_pipeline_cached_tarball(
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
 @patch("mvmctl.core.kernel.download_with_progress")
 @patch("mvmctl.core.kernel.update_kernel_entry")
+@patch("mvmctl.core.kernel.generate_full_hash_kernel", return_value="a" * 64)
 def test_build_kernel_pipeline_cached_tarball_needs_extract(
+    mock_full_hash: MagicMock,
     mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
@@ -954,6 +965,7 @@ def test_build_kernel_pipeline_cached_tarball_needs_extract(
     mock_configure.return_value = True
     mock_build.return_value = True
 
+    output_path.write_bytes(b"")
     build_kernel_pipeline(
         version="6.1.102",
         source_url="https://example.com/linux.tar.xz",

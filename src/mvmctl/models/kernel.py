@@ -40,7 +40,7 @@ class KernelRecord:
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "filename": self.path,
+            "path": self.path,
             "version": self.version,
             "arch": self.arch,
             "base_name": self.base_name,

@@ -832,7 +832,7 @@ def test_resolve_image_yaml_name(mocker: MockerFixture, tmp_path: Path, monkeypa
     mock_entries = {
         "abc123fullhash": {
             "os_slug": "ubuntu-24.04",
-            "filename": "ubuntu-24.04.ext4",
+            "path": "ubuntu-24.04.ext4",
         }
     }
     mocker.patch("mvmctl.core.metadata.list_image_entries", return_value=mock_entries)

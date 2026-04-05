@@ -251,9 +251,9 @@ def cache_prune_images(dry_run: bool = False, include_all: bool = False) -> list
             if image_id == default_id:
                 continue
 
-            filename = str(meta.get("filename", ""))
-            if filename:
-                image_path = str(images_dir / filename)
+            path = str(meta.get("path", ""))
+            if path:
+                image_path = str(images_dir / path)
                 if image_path in referenced_paths:
                     continue
 
@@ -267,11 +267,11 @@ def cache_prune_images(dry_run: bool = False, include_all: bool = False) -> list
                 if is_referenced:
                     continue
 
-        filename = str(meta.get("filename", ""))
+        path = str(meta.get("path", ""))
         if not dry_run:
             try:
-                if filename:
-                    (images_dir / filename).unlink(missing_ok=True)
+                if path:
+                    (images_dir / path).unlink(missing_ok=True)
                 else:
                     for ext in SUPPORTED_IMAGE_EXTENSIONS:
                         (images_dir / f"{image_id}{ext}").unlink(missing_ok=True)
@@ -297,19 +297,19 @@ def cache_prune_kernels(dry_run: bool = False, include_all: bool = False) -> lis
 
     removed: list[str] = []
     for kernel_id, meta in all_kernels.items():
-        filename = str(meta.get("filename", ""))
+        path = str(meta.get("path", ""))
         if not include_all:
             if kernel_id == default_id:
                 continue
-            if filename:
-                kernel_path = str(kernels_dir / filename)
+            if path:
+                kernel_path = str(kernels_dir / path)
                 if kernel_path in referenced_paths:
                     continue
 
         if not dry_run:
             try:
-                if filename:
-                    (kernels_dir / filename).unlink(missing_ok=True)
+                if path:
+                    (kernels_dir / path).unlink(missing_ok=True)
                 else:
                     (kernels_dir / kernel_id).unlink(missing_ok=True)
                 remove_kernel_entry(cache_dir, kernel_id)

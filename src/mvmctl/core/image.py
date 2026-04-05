@@ -22,9 +22,9 @@ from mvmctl.constants import (
     CONST_ROOTFS_HEADROOM_FACTOR,
     CONST_SECTOR_SIZE_BYTES,
     CONST_SHRINK_SAFETY_MARGIN,
-    DEFAULT_FC_KERNEL_ARCH,
     DEFAULT_FIRECRACKER_CI_VERSION,
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
+    DEFAULT_KERNEL_ARCH,
     FIRECRACKER_CI_IMAGE_LIST_URL,
     FIRECRACKER_CI_KERNEL_S3_BASE,
     HTTP_TIMEOUT_SHA256_FETCH_S,
@@ -912,7 +912,7 @@ def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
     if not ci_version:
         ci_version = DEFAULT_FIRECRACKER_CI_VERSION
 
-    arch = platform.machine() or DEFAULT_FC_KERNEL_ARCH
+    arch = platform.machine() or DEFAULT_KERNEL_ARCH
     variables = {
         "ci_version": ci_version,
         "arch": arch,
@@ -1644,12 +1644,12 @@ def resolve_image_path(image: str) -> Path:
     matches = find_images_by_id_prefix(get_cache_dir(), image)
     if len(matches) == 1:
         full_key, meta = matches[0]
-        filename = str(meta.get("filename", ""))
-        if filename:
-            compressed = images_dir / f"{filename}.zst"
+        path = str(meta.get("path", ""))
+        if path:
+            compressed = images_dir / f"{path}.zst"
             if compressed.exists():
                 return compressed
-            candidate = images_dir / filename
+            candidate = images_dir / path
             if candidate.exists():
                 return candidate
         for ext in SUPPORTED_IMAGE_EXTENSIONS:
@@ -1672,7 +1672,7 @@ def resolve_image_fs_uuid(image: str) -> str | None:
 
     cache_dir = get_cache_dir()
     for _full_key, meta in list_image_entries(cache_dir).items():
-        if image not in {str(meta.get("os_slug", "")), str(meta.get("filename", ""))}:
+        if image not in {str(meta.get("os_slug", "")), str(meta.get("path", ""))}:
             continue
         fs_uuid = meta.get("fs_uuid")
         if isinstance(fs_uuid, str) and fs_uuid.strip():
@@ -1693,7 +1693,7 @@ def resolve_image_fs_type(image: str) -> str | None:
 
     cache_dir = get_cache_dir()
     for _full_key, meta in list_image_entries(cache_dir).items():
-        if image not in {str(meta.get("os_slug", "")), str(meta.get("filename", ""))}:
+        if image not in {str(meta.get("os_slug", "")), str(meta.get("path", ""))}:
             continue
         fs_type = meta.get("fs_type")
         if isinstance(fs_type, str) and fs_type.strip():

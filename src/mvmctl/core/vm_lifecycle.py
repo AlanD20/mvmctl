@@ -1105,7 +1105,7 @@ def create_vm(
             all_entries = list_image_entries(cache_dir)
             image_hash = resolved_image_path.stem  # fallback
             for img_id, meta in all_entries.items():
-                if meta.get("filename") == resolved_image_path.name:
+                if meta.get("path") == resolved_image_path.name:
                     image_hash = img_id
                     break
 

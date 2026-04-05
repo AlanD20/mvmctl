@@ -38,16 +38,16 @@ def update_kernel_entry(cache_dir: Path, kernel_name: str, **fields: Any) -> Non
 
     # Build Kernel model from fields
     kernel_id = fields.get("full_hash", kernel_name)
-    filename = fields.get("filename", "")
+    path = fields.get("path", "")
     created_at = fields.get("created_at") or _now_utc()
     updated_at = fields.get("last_modified") or created_at
 
     kernel = Kernel(
         id=kernel_id,
-        name=fields.get("name", filename),
+        name=fields.get("name", path),
         version=fields.get("version", ""),
         arch=fields.get("arch", "x86_64"),
-        path=filename,
+        path=path,
         base_name=fields.get("base_name"),
         type=fields.get("type"),
         is_default=fields.get("is_default", 0) == 1,
@@ -167,7 +167,7 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
     image = Image(
         id=image_id,
         os_slug=fields.get("os_slug") or fields.get("internal_id", ""),
-        path=fields.get("filename", ""),
+        path=fields.get("path", ""),
         os_name=fields.get("os_name"),
         fs_type=fields.get("fs_type"),
         fs_uuid=fields.get("fs_uuid"),

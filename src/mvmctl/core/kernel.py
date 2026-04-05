@@ -22,7 +22,7 @@ from mvmctl.constants import (
     CONST_FILE_PERMS_EXECUTABLE,
     CONST_HTTP_TIMEOUT_SECONDS,
     CONST_MEBIBYTE_BYTES,
-    DEFAULT_FC_KERNEL_ARCH,
+    DEFAULT_KERNEL_ARCH,
     DEFAULT_KERNEL_BUILD_JOBS,
     HTTP_TIMEOUT_KERNEL_CONFIG_S,
     HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
@@ -43,6 +43,7 @@ from mvmctl.core.metadata import (
 from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
 from mvmctl.models.kernel import KernelSpec
 from mvmctl.utils.fs import get_cache_dir
+from mvmctl.utils.full_hash import generate_full_hash_kernel
 from mvmctl.utils.progress import download_with_progress
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
@@ -364,7 +365,7 @@ def extract_kernel_tarball(
 def download_firecracker_config(
     kernel_dir: Path,
     version: str,
-    arch: str = DEFAULT_FC_KERNEL_ARCH,
+    arch: str = DEFAULT_KERNEL_ARCH,
     kernel_spec: KernelSpec | None = None,
 ) -> None:
     """Download Firecracker microvm kernel config.
@@ -576,7 +577,7 @@ def configure_kernel(
     warnings: list[str] = []
     info_messages: list[str] = []
 
-    effective_arch = arch or DEFAULT_FC_KERNEL_ARCH
+    effective_arch = arch or DEFAULT_KERNEL_ARCH
     major_minor = ".".join(version.split(".")[:2])
     template_vars = {
         "major_minor": major_minor,
@@ -951,7 +952,7 @@ def build_kernel_pipeline(
         "version": version,
         "kernel_version": version,
         "ci_version": version,
-        "arch": str(arch or DEFAULT_FC_KERNEL_ARCH),
+        "arch": str(arch or DEFAULT_KERNEL_ARCH),
     }
     resolved_source_url = (
         render_template(source_url, template_vars) if "{" in source_url else source_url
@@ -1052,19 +1053,17 @@ def save_kernel_metadata(
         mtime = kernel_path.stat().st_mtime
         last_modified = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
 
-    try:
-        file_bytes = kernel_path.read_bytes()
-        file_hash = hashlib.sha256(file_bytes).hexdigest()
-    except OSError:
-        file_hash = hashlib.sha256(kernel_name.encode()).hexdigest()
-    timestamp = str(datetime.now(tz=timezone.utc).timestamp())
-    full_id = hashlib.sha256(f"{file_hash}:{timestamp}".encode()).hexdigest()[:16]
+    full_id = generate_full_hash_kernel(
+        kernel_path,
+        version,
+        arch,
+    )
 
     cache_dir = get_cache_dir()
     update_kernel_entry(
         cache_dir,
         full_id,
-        filename=kernel_name,
+        path=kernel_name,
         full_hash=full_id,
         name=kernel_name,
         base_name=parsed.base_name,
@@ -1086,12 +1085,12 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
 
     for entry_id, meta in sorted(entries.items()):
-        filename = str(meta.get("filename", entry_id))
-        path = kernels_dir / filename
+        path = str(meta.get("path", entry_id))
+        kernel_file_path = kernels_dir / path
         # Include entries even if file is missing - CLI will show X mark
-        file_exists = path.is_file()
+        file_exists = kernel_file_path.is_file()
 
-        size_mb = path.stat().st_size / CONST_MEBIBYTE_BYTES if file_exists else 0
+        size_mb = kernel_file_path.stat().st_size / CONST_MEBIBYTE_BYTES if file_exists else 0
 
         last_modified = meta.get("last_modified")
         if not last_modified:
@@ -1103,7 +1102,7 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
             arch = str(meta.get("arch", "-"))
             kernel_type = str(meta.get("type", KERNEL_TYPE_UNKNOWN))
         else:
-            parsed = parse_kernel_filename(filename)
+            parsed = parse_kernel_filename(path)
             base_name = parsed.base_name
             version = parsed.version
             arch = parsed.arch
@@ -1116,8 +1115,8 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
             {
                 "id": entry_id,
                 "name": base_name,
-                "filename": filename,
-                "full_name": filename,
+                "path": path,
+                "full_name": path,
                 "version": version,
                 "type": kernel_type,
                 "arch": arch,
@@ -1135,9 +1134,9 @@ def _load_default_kernel(kernels_dir: Path) -> str | None:
     if default_entry is None:
         return None
     _kernel_id, entry = default_entry
-    filename = entry.get("filename")
-    if isinstance(filename, str) and filename:
-        return filename
+    path = entry.get("path")
+    if isinstance(path, str) and path:
+        return path
     return None
 
 
@@ -1159,7 +1158,7 @@ def get_default_kernel_path(kernels_dir: Path) -> Path | None:
 
 def download_firecracker_kernel(
     ci_version: str,
-    arch: str = DEFAULT_FC_KERNEL_ARCH,
+    arch: str = DEFAULT_KERNEL_ARCH,
     kernels_dir: Path | None = None,
     output_name: str | None = None,
     output_path: Path | None = None,
@@ -1292,9 +1291,9 @@ def resolve_kernel_path(kernel: str) -> Path:
     ]
     if len(matches) == 1:
         full_key, meta = matches[0]
-        filename = str(meta.get("filename", ""))
-        if filename:
-            candidate = kernels_dir / filename
+        path = str(meta.get("path", ""))
+        if path:
+            candidate = kernels_dir / path
             if candidate.exists():
                 return candidate
         candidate = kernels_dir / full_key
@@ -1326,9 +1325,9 @@ def resolve_kernel_id_path(kernel: str) -> Path:
         raise MVMError(f"Kernel ID not found or ambiguous: {kernel!r}")
 
     full_key, meta = match
-    filename = str(meta.get("filename", ""))
-    if filename:
-        candidate = kernels_dir / filename
+    path = str(meta.get("path", ""))
+    if path:
+        candidate = kernels_dir / path
         if candidate.exists():
             return candidate
     candidate = kernels_dir / full_key

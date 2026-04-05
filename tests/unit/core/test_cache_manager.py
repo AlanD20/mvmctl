@@ -283,7 +283,7 @@ class TestCachePruneImages:
 
         # Mock metadata
         full_hash = "a" * 16
-        mock_entries = {full_hash: {"filename": "unused.ext4", "is_default": 0}}
+        mock_entries = {full_hash: {"path": "unused.ext4", "is_default": 0}}
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []  # No VMs using this image
@@ -322,7 +322,7 @@ class TestCachePruneImages:
         )
 
         full_hash = "b" * 64
-        mock_entries = {full_hash: {"filename": "used.ext4", "is_default": 0}}
+        mock_entries = {full_hash: {"path": "used.ext4", "is_default": 0}}
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [sample_vm]
@@ -353,7 +353,7 @@ class TestCachePruneImages:
         default_image.write_text("fake image")
 
         default_hash = "c" * 64
-        mock_entries = {default_hash: {"filename": "default.ext4", "is_default": 1}}
+        mock_entries = {default_hash: {"path": "default.ext4", "is_default": 1}}
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []
@@ -397,7 +397,7 @@ class TestCachePruneKernels:
         unused_kernel.write_text("fake kernel")
 
         full_hash = "d" * 16
-        mock_entries = {full_hash: {"filename": "unused-vmlinux", "is_default": 0}}
+        mock_entries = {full_hash: {"path": "unused-vmlinux", "is_default": 0}}
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []
@@ -435,7 +435,7 @@ class TestCachePruneKernels:
         )
 
         full_hash = "e" * 64
-        mock_entries = {full_hash: {"filename": "used-vmlinux", "is_default": 0}}
+        mock_entries = {full_hash: {"path": "used-vmlinux", "is_default": 0}}
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [sample_vm]
@@ -465,7 +465,7 @@ class TestCachePruneKernels:
         default_kernel.write_text("fake kernel")
 
         default_hash = "f" * 64
-        mock_entries = {default_hash: {"filename": "default-vmlinux", "is_default": 1}}
+        mock_entries = {default_hash: {"path": "default-vmlinux", "is_default": 1}}
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []

@@ -100,7 +100,7 @@ _CONFIG_KEY_MAP: Final[dict[str, str]] = {
     "DEFAULT_REMOTE_VERSION_LIMIT": "default_remote_version_limit",
     "DEFAULT_FIRECRACKER_BINARY_PATH": "default_firecracker_binary_path",
     "DEFAULT_KERNEL_VERSION": "default_kernel_version",
-    "DEFAULT_FC_KERNEL_ARCH": "default_fc_kernel_arch",
+    "DEFAULT_KERNEL_ARCH": "default_fc_kernel_arch",
 }
 
 
@@ -248,8 +248,8 @@ DEFAULT_KERNEL_VERSION: Final[str] = _resolve_with_config_override(
 )
 
 # Default architecture for Firecracker CI kernel downloads.
-DEFAULT_FC_KERNEL_ARCH: Final[str] = _resolve_with_config_override(
-    "DEFAULT_FC_KERNEL_ARCH", _require_str(("kernel", "defaults", "arch"))
+DEFAULT_KERNEL_ARCH: Final[str] = _resolve_with_config_override(
+    "DEFAULT_KERNEL_ARCH", _require_str(("kernel", "defaults", "arch"))
 )
 
 # Base URL for the Firecracker CI S3 kernel bucket.
