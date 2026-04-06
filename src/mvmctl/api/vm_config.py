@@ -13,7 +13,7 @@ from mvmctl.constants import (
     DEFAULT_VM_VCPU_COUNT,
 )
 from mvmctl.core.config_gen import ConfigGenerator
-from mvmctl.models.vm_config_file import VMCreateConfigFile
+from mvmctl.models.vm_config_file import VMExportConfig
 
 __all__ = [
     "load_vm_config_file",
@@ -23,11 +23,11 @@ __all__ = [
 ]
 
 
-def load_vm_config_file(path: Path) -> VMCreateConfigFile:
-    return VMCreateConfigFile.from_json_file(path)
+def load_vm_config_file(path: Path) -> VMExportConfig:
+    return VMExportConfig.from_json_file(path)
 
 
-def save_vm_config_file(config: VMCreateConfigFile, path: Path) -> None:
+def save_vm_config_file(config: VMExportConfig, path: Path) -> None:
     config.to_json_file(path)
 
 
@@ -50,8 +50,18 @@ def build_vm_config_file(
     subnet_mask: str | None = None,
     tap_device: str | None = None,
     cloud_init: dict[str, Any] | None = None,
-) -> VMCreateConfigFile:
+) -> VMExportConfig:
     from mvmctl.models.vm import VMConfig
+    from mvmctl.models.vm_config_file import (
+        VMExportBinaryConfig,
+        VMExportCloudInitConfig,
+        VMExportComputeConfig,
+        VMExportFirecrackerConfig,
+        VMExportImageConfig,
+        VMExportKernelConfig,
+        VMExportNetworkConfig,
+        VMExportBootConfig,
+    )
 
     effective_vcpus = vcpus if vcpus is not None else DEFAULT_VM_VCPU_COUNT
     effective_mem = mem if mem is not None else DEFAULT_VM_MEM_MIB
@@ -86,63 +96,96 @@ def build_vm_config_file(
         subnet_mask=subnet_mask,
     )
 
+    # Build Firecracker boot config (stored as dict for now, to be refactored in Phase 10)
     try:
         generator = ConfigGenerator(VMConfig(**vm_config_kwargs), vm_instance)
-        firecracker_config: dict[str, Any] = dict(generator.generate())
+        firecracker_boot_config: dict[str, Any] = dict(generator.generate())
     except Exception:
-        firecracker_config = {}
+        firecracker_boot_config = {}
 
-    return VMCreateConfigFile(
+    # Parse kernel version if provided (for portable export)
+    kernel_version = None
+    if kernel:
+        # Extract version from path like /path/to/vmlinux-6.1.0
+        kernel_path = Path(kernel)
+        kernel_version = kernel_path.name  # Default to full filename
+        if "-" in kernel_path.name:
+            kernel_version = kernel_path.name.split("-")[-1]  # Extract version suffix
+
+    return VMExportConfig(
         name=name,
-        image=image,
-        kernel=kernel,
-        vcpus=effective_vcpus,
-        mem=effective_mem,
-        ip=ip,
-        network=effective_network,
-        mac=mac,
-        ssh_key=ssh_key,
-        user=effective_user,
-        enable_api_socket=effective_api_socket,
-        enable_pci=effective_pci,
-        firecracker_bin=effective_bin,
-        firecracker_config=firecracker_config,
-        cloud_init=cloud_init,
+        compute=VMExportComputeConfig(vcpus=effective_vcpus, mem=effective_mem),
+        image=VMExportImageConfig(os_slug=image, arch="x86_64"),  # arch default for now
+        kernel=VMExportKernelConfig(version=kernel_version),
+        binary=VMExportBinaryConfig(name=effective_bin),
+        network=VMExportNetworkConfig(name=effective_network),
+        boot=VMExportBootConfig(enable_console=True),  # default for now
+        firecracker=VMExportFirecrackerConfig(
+            enable_api_socket=effective_api_socket,
+            enable_pci=effective_pci,
+        ),
+        cloud_init=VMExportCloudInitConfig(
+            mode="inject" if cloud_init else None,
+            user=effective_user,
+            ssh_key=ssh_key,
+        ),
     )
 
 
 def merge_cli_overrides(
-    base: VMCreateConfigFile,
+    base: VMExportConfig,
     *,
     name: str | None = None,
-    image: str | None = None,
-    kernel: str | None = None,
     vcpus: int | None = None,
     mem: int | None = None,
     ip: str | None = None,
-    network: str | None = None,
     mac: str | None = None,
     ssh_key: str | None = None,
     user: str | None = None,
     enable_api_socket: bool | None = None,
     enable_pci: bool | None = None,
-    firecracker_bin: str | None = None,
-) -> VMCreateConfigFile:
-    return VMCreateConfigFile(
+) -> VMExportConfig:
+    """Merge CLI overrides into base config, returning new VMExportConfig."""
+    from dataclasses import replace
+    from mvmctl.models.vm_config_file import (
+        VMExportCloudInitConfig,
+        VMExportComputeConfig,
+        VMExportFirecrackerConfig,
+        VMExportNetworkConfig,
+    )
+
+    # Build new sub-configs with overrides applied
+    new_compute = replace(
+        base.compute,
+        vcpus=vcpus if vcpus is not None else base.compute.vcpus,
+        mem=mem if mem is not None else base.compute.mem,
+    )
+
+    new_network = replace(
+        base.network,
+        ip=ip if ip is not None else base.network.ip,
+        mac=mac if mac is not None else base.network.mac,
+    )
+
+    new_firecracker = replace(
+        base.firecracker,
+        enable_api_socket=enable_api_socket
+        if enable_api_socket is not None
+        else base.firecracker.enable_api_socket,
+        enable_pci=enable_pci if enable_pci is not None else base.firecracker.enable_pci,
+    )
+
+    new_cloud_init = replace(
+        base.cloud_init,
+        user=user if user is not None else base.cloud_init.user,
+        ssh_key=ssh_key if ssh_key is not None else base.cloud_init.ssh_key,
+    )
+
+    return replace(
+        base,
         name=name if name is not None else base.name,
-        image=image if image is not None else base.image,
-        kernel=kernel if kernel is not None else base.kernel,
-        vcpus=vcpus if vcpus is not None else base.vcpus,
-        mem=mem if mem is not None else base.mem,
-        ip=ip if ip is not None else base.ip,
-        network=network if network is not None else base.network,
-        mac=mac if mac is not None else base.mac,
-        ssh_key=ssh_key if ssh_key is not None else base.ssh_key,
-        user=user if user is not None else base.user,
-        enable_api_socket=(
-            enable_api_socket if enable_api_socket is not None else base.enable_api_socket
-        ),
-        enable_pci=enable_pci if enable_pci is not None else base.enable_pci,
-        firecracker_bin=(firecracker_bin if firecracker_bin is not None else base.firecracker_bin),
-        firecracker_config=base.firecracker_config,
+        compute=new_compute,
+        network=new_network,
+        firecracker=new_firecracker,
+        cloud_init=new_cloud_init,
     )
