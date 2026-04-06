@@ -13,9 +13,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.metadata import find_images_by_id_prefix as _find_images_by_id_prefix
 from mvmctl.core.metadata import get_default_binary_entry as _get_default_binary_entry
-from mvmctl.core.metadata import get_default_image_entry as _get_default_image_entry
 from mvmctl.core.metadata import get_default_network_entry as _get_default_network_entry
 from mvmctl.core.metadata import get_image_entry as _get_image_entry
 from mvmctl.core.metadata import list_binary_entries as _list_binary_entries
@@ -27,6 +27,7 @@ from mvmctl.core.metadata import set_default_binary_entry as _set_default_binary
 from mvmctl.core.metadata import set_default_image_by_os_slug as _set_default_image_by_os_slug
 from mvmctl.core.metadata import set_default_image_entry as _set_default_image_entry
 from mvmctl.core.metadata import update_image_entry as _update_image_entry
+from mvmctl.models.image import ImageRecord
 
 __all__ = [
     "list_image_entries",
@@ -101,7 +102,16 @@ def find_kernels_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, d
 
 
 def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
-    return _get_default_image_entry()
+    """Get the default image entry from the database.
+
+    Returns:
+        Tuple of (image_id, metadata_dict) or None if no default is set.
+    """
+    db = MVMDatabase()
+    image = db.get_default_image()
+    if image is None:
+        return None
+    return image.id, ImageRecord.from_db(image).to_dict()
 
 
 def remove_kernel_entry(cache_dir: Path, kernel_id: str) -> None:

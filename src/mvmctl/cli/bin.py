@@ -618,7 +618,7 @@ def kernel_fetch(
         help="Kernel spec version from kernels.yaml (required if multiple specs share the same type)",
     ),
     arch: Optional[str] = typer.Option(
-        None, "--arch", help="Architecture (required for official kernels)"
+        None, "--arch", help="Architecture"
     ),
     out: Optional[Path] = typer.Option(None, "--out", help="Output path/name"),
     name: Optional[str] = typer.Option(
@@ -676,6 +676,9 @@ def kernel_fetch(
     except KernelError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1) from exc
+
+    if arch is None:
+        arch = DEFAULT_IMAGE_ARCH
 
     # ── EXECUTE ────────────────────────────────────────────────────────
     if spec.kernel_type == KERNEL_TYPE_FIRECRACKER:

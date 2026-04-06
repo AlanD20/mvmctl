@@ -943,9 +943,14 @@ def build_kernel_pipeline(
     resolved_source_url = (
         render_template(source_url, template_vars) if "{" in source_url else source_url
     )
+    # this needs to be also rendered then used
+    resolved_sha256_url = (
+        render_template(source_url, template_vars) if "{" in source_url else source_url
+    )
 
     intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None
 
+    # needs to properly check if sha256 url exist and use it
     if sha256 is None and not intentional_no_checksum:
         resolved_sha256_url = render_optional_template(kernel_spec.sha256_url, template_vars)
         if resolved_sha256_url is not None:
