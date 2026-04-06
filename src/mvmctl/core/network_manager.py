@@ -6,15 +6,14 @@ import ipaddress
 import logging
 import os
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from typing import Any, TypedDict
 
+from mvmctl.api.metadata import get_default_network_entry
 from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
     DEFAULT_NETWORK_SUBNET,
 )
 from mvmctl.core.metadata import (
-    get_default_network_entry,
     get_network_entry,
     list_network_entries,
     remove_network_entry,
@@ -26,7 +25,6 @@ from mvmctl.exceptions import MVMError, NetworkError
 from mvmctl.models.network import NetworkConfig as NetworkConfig
 from mvmctl.models.network import NetworkLease as NetworkLease
 from mvmctl.utils.fs import get_cache_dir
-from mvmctl.utils.full_hash import generate_full_hash_network
 from mvmctl.utils.network import allocate_ip, bridge_exists
 from mvmctl.utils.network import (
     bridge_name_for as _bridge_name_for_util,

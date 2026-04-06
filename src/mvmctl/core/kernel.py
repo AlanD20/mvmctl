@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 
 import yaml
 
+from mvmctl.api.metadata import get_default_kernel_entry
 from mvmctl.constants import (
     CONST_FILE_PERMS_EXECUTABLE,
     CONST_HTTP_TIMEOUT_SECONDS,
@@ -34,7 +35,6 @@ from mvmctl.constants import (
     KERNEL_TYPE_UNKNOWN,
 )
 from mvmctl.core.metadata import (
-    get_default_kernel_entry,
     list_kernel_entries,
     set_default_kernel_by_filename,
     update_kernel_entry,

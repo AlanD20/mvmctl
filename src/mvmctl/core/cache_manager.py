@@ -7,10 +7,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from mvmctl.api.metadata import get_default_image_entry, get_default_kernel_entry
 from mvmctl.constants import DEFAULT_NETWORK_NAME, SUPPORTED_IMAGE_EXTENSIONS
 from mvmctl.core.metadata import (
-    get_default_image_entry,
-    get_default_kernel_entry,
     list_image_entries,
     list_kernel_entries,
     remove_image_entry,

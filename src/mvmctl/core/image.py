@@ -890,7 +890,7 @@ def _handle_raw(
 
 def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
     try:
-        from mvmctl.core.metadata import get_default_binary_entry
+        from mvmctl.api.metadata import get_default_binary_entry
 
         default_binary = get_default_binary_entry()
         ci_version = ""

@@ -7,17 +7,15 @@ functions to read and write metadata through the database layer.
 from __future__ import annotations
 
 import logging
-import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.db.models import Binary, Image, Kernel, Network
+from mvmctl.db.models import Binary, Image, Kernel
 from mvmctl.models.binary import BinaryRecord
 from mvmctl.models.image import ImageRecord
 from mvmctl.models.kernel import KernelRecord
-from mvmctl.models.network import NetworkRecord
 from mvmctl.utils.full_hash import generate_full_hash_binary
 
 logger = logging.getLogger(__name__)
@@ -84,22 +82,6 @@ def set_default_kernel_by_filename(cache_dir: Path, filename: str) -> None:
             db.set_default_kernel(kernel.id)
             return
     raise KeyError(f"Kernel filename '{filename}' not found in metadata")
-
-
-def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Return the default kernel entry as (id, metadata) or None.
-
-    .. deprecated::
-        Use :func:`mvmctl.api.metadata.get_default_kernel_entry` instead.
-    """
-    warnings.warn(
-        "get_default_kernel_entry() is deprecated. Use mvmctl.api.metadata.get_default_kernel_entry() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from mvmctl.api.metadata import get_default_kernel_entry as _api_get_default_kernel_entry
-
-    return _api_get_default_kernel_entry(cache_dir)
 
 
 def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
@@ -260,22 +242,6 @@ def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
             return
 
     raise KeyError(f"Image os_slug '{os_slug}' not found in metadata")
-
-
-def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
-    """Return the default image entry as (id, metadata) or None.
-
-    .. deprecated::
-        Use :func:`mvmctl.api.metadata.get_default_image_entry` instead.
-    """
-    warnings.warn(
-        "get_default_image_entry() is deprecated. Use mvmctl.api.metadata.get_default_image_entry() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from mvmctl.api.metadata import get_default_image_entry as _api_get_default_image_entry
-
-    return _api_get_default_image_entry()
 
 
 def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str, Any]] | None:
@@ -486,22 +452,6 @@ def set_default_binary_entry(cache_dir: Path, version: str) -> None:
                 break
 
 
-def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
-    """Return the default binary entry as (version, metadata) or None.
-
-    .. deprecated::
-        Use :func:`mvmctl.api.metadata.get_default_binary_entry` instead.
-    """
-    warnings.warn(
-        "get_default_binary_entry() is deprecated. Use mvmctl.api.metadata.get_default_binary_entry() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from mvmctl.api.metadata import get_default_binary_entry as _api_get_default_binary_entry
-
-    return _api_get_default_binary_entry()
-
-
 # =============================================================================
 # Network metadata
 # =============================================================================
@@ -606,21 +556,3 @@ def set_default_network_entry(cache_dir: Path, network_name: str) -> None:
     # Store default network name in a marker file
     default_path = cache_dir / "networks" / "default_network.json"
     default_path.write_text(json.dumps({"name": network_name}))
-
-
-def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Return the default network entry as (name, metadata) or None.
-
-    Reads from JSON marker file since core layer should not access DB.
-    """
-    import json
-
-    default_path = cache_dir / "networks" / "default_network.json"
-    if default_path.exists():
-        data = json.loads(default_path.read_text())
-        name = data.get("name")
-        if name:
-            entry = get_network_entry(cache_dir, name)
-            if entry:
-                return (name, entry)
-    return None

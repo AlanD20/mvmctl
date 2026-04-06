@@ -1523,7 +1523,7 @@ def test_handle_squashfs_mkfs_failure(mock_which: MagicMock, mock_run: MagicMock
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("mvmctl.core.metadata.get_default_binary_entry")
+@patch("mvmctl.api.metadata.get_default_binary_entry")
 def test_resolve_source_template_success(
     mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
@@ -1565,7 +1565,7 @@ def test_resolve_source_template_success(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("mvmctl.core.metadata.get_default_binary_entry")
+@patch("mvmctl.api.metadata.get_default_binary_entry")
 def test_resolve_source_template_uses_default_version(
     mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
@@ -1602,7 +1602,7 @@ def test_resolve_source_template_uses_default_version(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("mvmctl.core.metadata.get_default_binary_entry")
+@patch("mvmctl.api.metadata.get_default_binary_entry")
 def test_resolve_source_template_network_error(
     mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):
@@ -1632,7 +1632,7 @@ def test_resolve_source_template_network_error(
 
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
-@patch("mvmctl.core.metadata.get_default_binary_entry")
+@patch("mvmctl.api.metadata.get_default_binary_entry")
 def test_resolve_source_template_no_matching_keys(
     mock_get_default_binary: MagicMock, mock_request: MagicMock, mock_urlopen: MagicMock
 ):

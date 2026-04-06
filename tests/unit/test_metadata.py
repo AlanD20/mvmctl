@@ -2,13 +2,15 @@
 
 from pathlib import Path
 
-from mvmctl.core.metadata import (
-    find_images_by_id_prefix,
-    get_binary_entry,
+from mvmctl.api.metadata import (
     get_default_binary_entry,
     get_default_image_entry,
     get_default_kernel_entry,
     get_default_network_entry,
+)
+from mvmctl.core.metadata import (
+    find_images_by_id_prefix,
+    get_binary_entry,
     get_image_entry,
     get_kernel_entry,
     get_network_entry,
@@ -314,8 +316,19 @@ class TestNetworkMetadata:
         """Test setting and retrieving default network."""
         cache_dir = make_test_paths(tmp_path).cache
 
-        update_network_entry(cache_dir, "default", cidr="172.35.0.0/24", gateway="172.35.0.1")
-        set_default_network_entry(cache_dir, "default")
+        db = MVMDatabase()
+        from mvmctl.db.models import Network
+
+        network = Network(
+            id="net-default-123",
+            name="default",
+            subnet="172.35.0.0/24",
+            ipv4_gateway="172.35.0.1",
+            bridge="mvm-default",
+            nat_enabled=True,
+        )
+        db.upsert_network(network)
+        db.set_default_network("net-default-123")
 
         default = get_default_network_entry(cache_dir)
         assert default is not None

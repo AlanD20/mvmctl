@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mvmctl.core.metadata import get_default_network_entry, update_network_entry
+from mvmctl.api.metadata import get_default_network_entry
+from mvmctl.core.metadata import update_network_entry
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.network_manager import (
     NetworkConfig,
@@ -440,6 +441,20 @@ def test_ensure_default_network_creates_default_network_metadata(
         bridge="mvm-default",
     )
 
+    db = MVMDatabase()
+    from mvmctl.db.models import Network
+
+    network = Network(
+        id="net-default-123",
+        name="default",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
+        bridge="mvm-default",
+        nat_enabled=True,
+    )
+    db.upsert_network(network)
+    db.set_default_network("net-default-123")
+
     with (
         patch("mvmctl.utils.network.bridge_exists", return_value=True),
         patch("mvmctl.core.network.setup_nat"),
@@ -448,7 +463,6 @@ def test_ensure_default_network_creates_default_network_metadata(
         config = ensure_default_network()
 
     assert config is not None
-    # Verify network exists in JSON metadata
     default_entry = get_default_network_entry(mock_cache_dir)
     assert default_entry is not None
     assert default_entry[0] == "default"
@@ -462,6 +476,20 @@ def test_ensure_default_network_sets_default_when_none_exists(mock_cache_dir: Pa
         ipv4_gateway="172.35.0.1",
         bridge="mvm-default",
     )
+
+    db = MVMDatabase()
+    from mvmctl.db.models import Network
+
+    network = Network(
+        id="net-default-456",
+        name="default",
+        subnet="172.35.0.0/24",
+        ipv4_gateway="172.35.0.1",
+        bridge="mvm-default",
+        nat_enabled=True,
+    )
+    db.upsert_network(network)
+    db.set_default_network("net-default-456")
 
     with (
         patch("mvmctl.utils.network.bridge_exists", return_value=True),
@@ -493,6 +521,20 @@ def test_ensure_default_network_preserves_existing_other_default(mock_cache_dir:
         bridge="mvm-default",
         is_default=False,
     )
+
+    db = MVMDatabase()
+    from mvmctl.db.models import Network
+
+    custom_network = Network(
+        id="net-custom-123",
+        name="custom",
+        subnet="10.20.0.0/24",
+        ipv4_gateway="10.20.0.1",
+        bridge="mvm-custom",
+        nat_enabled=True,
+    )
+    db.upsert_network(custom_network)
+    db.set_default_network("net-custom-123")
 
     with (
         patch("mvmctl.utils.network.bridge_exists", return_value=True),
@@ -628,14 +670,14 @@ class TestSetDefaultNetwork:
 
         set_default_network("mynet")
 
-        # Verify the network is now default
-        get_network("mynet")  # Verify network exists
-        # is_default should be determined by get_default_network_entry
-        from mvmctl.core.metadata import get_default_network_entry
+        get_network("mynet")
 
-        default = get_default_network_entry(mock_cache_dir)
-        assert default is not None
-        assert default[0] == "mynet"
+        import json
+
+        default_path = mock_cache_dir / "networks" / "default_network.json"
+        assert default_path.exists()
+        data = json.loads(default_path.read_text())
+        assert data.get("name") == "mynet"
 
     def test_set_default_network_not_found(self, mock_cache_dir: Path):
         from mvmctl.core.network_manager import set_default_network

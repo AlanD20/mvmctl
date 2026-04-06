@@ -5,13 +5,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from mvmctl.api.metadata import get_default_image_entry, get_default_kernel_entry
 from mvmctl.constants import (
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_CONFIG,
 )
 from mvmctl.core.metadata import (
-    get_default_image_entry,
-    get_default_kernel_entry,
     set_default_image_by_os_slug,
     set_default_image_entry,
     set_default_kernel_by_filename,

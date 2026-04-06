@@ -2,18 +2,23 @@
 
 from typing import Any
 
-from mvmctl.core.config import dump_config, load_config, validate_config
-from mvmctl.core.config_state import (
-    get_assets_config,
-    get_defaults_config as _core_get_defaults_config,
-    get_firecracker_config as _core_get_firecracker_config,
-    initialize_default_config,
-    set_defaults_value as _core_set_defaults_value,
-)
-from mvmctl.core.metadata import (
+from mvmctl.api.metadata import (
     get_default_binary_entry,
     get_default_image_entry,
     get_default_kernel_entry,
+)
+from mvmctl.core.config import dump_config, load_config, validate_config
+from mvmctl.core.config_state import (
+    get_defaults_config as _core_get_defaults_config,
+)
+from mvmctl.core.config_state import (
+    get_firecracker_config as _core_get_firecracker_config,
+)
+from mvmctl.core.config_state import (
+    initialize_default_config,
+)
+from mvmctl.core.config_state import (
+    set_defaults_value as _core_set_defaults_value,
 )
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.user_config import get_config_value, get_full_user_config, set_config_value
