@@ -652,3 +652,23 @@ def test_config_gen_validates_fs_type_in_boot_args_generation():
 
     with pytest.raises(MVMError, match="Invalid.*fs_type"):
         ConfigGenerator(vm_config, instance).generate()
+
+
+def test_firecracker_boot_config_typeddict_exists():
+    """FirecrackerBootConfig TypedDict must exist (renamed from FirecrackerConfig)."""
+    from mvmctl.core.config_gen import FirecrackerBootConfig
+
+    assert FirecrackerBootConfig is not None
+    assert FirecrackerBootConfig.__name__ == "FirecrackerBootConfig"
+
+
+def test_firecracker_config_dataclass_collision_resolved():
+    """FirecrackerConfig (the old dataclass name collision) must not exist in config_gen."""
+    import mvmctl.core.config_gen as cg
+
+    # The TypedDict was renamed to FirecrackerBootConfig to avoid collision
+    # with FirecrackerConfig dataclass (if any still exists elsewhere)
+    assert not hasattr(cg, "FirecrackerConfig"), (
+        "FirecrackerConfig must be renamed to FirecrackerBootConfig in config_gen "
+        "to eliminate name collision with dataclass"
+    )

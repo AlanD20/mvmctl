@@ -71,8 +71,8 @@ class MetricsConfig(TypedDict):
     metrics_path: str
 
 
-FirecrackerConfig = TypedDict(
-    "FirecrackerConfig",
+FirecrackerBootConfig = TypedDict(
+    "FirecrackerBootConfig",
     {
         "boot-source": BootSourceConfig,
         "drives": list[DriveConfig],
@@ -121,7 +121,7 @@ class ConfigGenerator:
         if lsm_flags:
             validate_boot_arg_component(lsm_flags, "lsm_flags")
 
-    def generate(self) -> FirecrackerConfig:
+    def generate(self) -> FirecrackerBootConfig:
         boot_args = self.vm_config.boot_args or self._build_default_boot_args()
         boot_args = self._ensure_root_uuid_in_boot_args(boot_args)
 
@@ -152,7 +152,7 @@ class ConfigGenerator:
             filled = filled.replace(placeholder, value)
 
         try:
-            config: FirecrackerConfig = json.loads(filled)
+            config: FirecrackerBootConfig = json.loads(filled)
         except json.JSONDecodeError as exc:
             raise MVMError(f"Generated Firecracker config is not valid JSON: {exc}") from exc
 
