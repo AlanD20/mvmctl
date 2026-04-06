@@ -289,10 +289,239 @@ class TestDBImportCompliance:
             for v in violations:
                 violation_msgs.append(f"  {v['file']}:{v['line']} - {v['import']}")
 
+
+class TestCoreLayerDBCompliance:
+    """Tests for Resolution Layer Mandate — Core layer must not use MVMDatabase directly.
+
+    Resolution Layer Mandate:
+    - CLI: Resolves user input + constants-backed defaults
+    - API: Resolves DB-backed defaults (queries MVMDatabase)
+    - Core: Receives explicit values — NEVER queries database
+
+    This test class enforces that Core layer does not:
+    1. Import MVMDatabase from mvmctl.core.mvm_db
+    2. Instantiate MVMDatabase()
+    3. Call db.get_default_*() methods
+    """
+
+    def _parse_ast(self, file_path: Path) -> ast.AST | None:
+        """Parse a Python file and return the AST."""
+        content = file_path.read_text()
+        try:
+            return ast.parse(content)
+        except SyntaxError:
+            return None
+
+    def _find_mvm_db_imports(self, tree: ast.AST) -> list[tuple[int, str]]:
+        """Find imports of MVMDatabase from mvmctl.core.mvm_db.
+
+        Returns list of (line_number, import_detail) tuples.
+        """
+        violations = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                # Check for: from mvmctl.core.mvm_db import MVMDatabase
+                if module == "mvmctl.core.mvm_db":
+                    for alias in node.names:
+                        if alias.name == "MVMDatabase":
+                            violations.append((node.lineno, f"from {module} import MVMDatabase"))
+                # Check for: from mvmctl.core import mvm_db (then mvm_db.MVMDatabase)
+                elif module == "mvmctl.core":
+                    for alias in node.names:
+                        if alias.name == "mvm_db":
+                            violations.append((node.lineno, f"from {module} import mvm_db"))
+
+        return violations
+
+    def _find_mvm_db_instantiations(self, tree: ast.AST) -> list[tuple[int, str]]:
+        """Find MVMDatabase() instantiations.
+
+        Returns list of (line_number, code_snippet) tuples.
+        """
+        violations = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                # Check for: MVMDatabase()
+                if isinstance(node.func, ast.Name) and node.func.id == "MVMDatabase":
+                    violations.append((node.lineno, "MVMDatabase()"))
+                # Check for: mvm_db.MVMDatabase()
+                elif isinstance(node.func, ast.Attribute):
+                    if (
+                        isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "mvm_db"
+                        and node.func.attr == "MVMDatabase"
+                    ):
+                        violations.append((node.lineno, "mvm_db.MVMDatabase()"))
+
+        return violations
+
+    def _find_db_default_queries(self, tree: ast.AST) -> list[tuple[int, str]]:
+        """Find db.get_default_*() method calls.
+
+        Returns list of (line_number, method_name) tuples.
+        """
+        violations = []
+        default_methods = {
+            "get_default_image",
+            "get_default_kernel",
+            "get_default_binary",
+            "get_default_network",
+            "get_default_firecracker_path",
+            "get_default_jailer_path",
+            "get_default_kernel_path",
+        }
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                # Check for: db.get_default_*() or any_var.get_default_*()
+                if isinstance(node.func, ast.Attribute):
+                    if node.func.attr in default_methods:
+                        # Get the object name (e.g., 'db' in db.get_default_image())
+                        if isinstance(node.func.value, ast.Name):
+                            obj_name = node.func.value.id
+                            violations.append((node.lineno, f"{obj_name}.{node.func.attr}()"))
+
+        return violations
+
+    def test_core_no_mvm_db_imports(self):
+        """Core files must not import MVMDatabase from mvmctl.core.mvm_db.
+
+        Resolution Layer Mandate: Core receives explicit values from API.
+        Core must NOT import the database interface.
+
+        Known violations (to be fixed in Phase 4.2-4.4):
+        - core/metadata.py imports MVMDatabase
+        - core/host_state.py imports MVMDatabase
+        - core/host_setup.py imports MVMDatabase
+        - core/host.py imports MVMDatabase
+        - core/vm_manager.py imports MVMDatabase
+        """
+        core_files = _get_python_files(CORE_DIR)
+        violations = []
+
+        for file_path in core_files:
+            if file_path.name == "__init__.py":
+                continue
+            if file_path.name == "mvm_db.py":
+                continue  # The ORM module itself is allowed to import it
+
+            tree = self._parse_ast(file_path)
+            if tree is None:
+                continue
+
+            found = self._find_mvm_db_imports(tree)
+            for line_no, detail in found:
+                violations.append(
+                    {
+                        "file": _get_relative_path(file_path),
+                        "line": line_no,
+                        "detail": detail,
+                    }
+                )
+
+        if violations:
+            violation_msgs = []
+            for v in violations:
+                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['detail']}")
+
             msg = (
-                f"Found {len(violations)} Core→DB import violation(s):\n"
+                f"Found {len(violations)} Core→mvm_db import violation(s):\n"
                 + "\n".join(violation_msgs)
-                + "\n\nResolution Layer Mandate: Core must NOT query the database."
+                + "\n\nResolution Layer Mandate: Core must NOT import MVMDatabase."
                 + "\nCore receives explicit values from API layer."
+            )
+            pytest.fail(msg)
+
+    def test_core_no_mvm_db_instantiation(self):
+        """Core files must not instantiate MVMDatabase().
+
+        Resolution Layer Mandate: Core receives explicit values from API.
+        Core must NOT create database connections.
+
+        Known violations (to be fixed in Phase 4.2-4.4):
+        - Multiple core files instantiate MVMDatabase() directly
+        """
+        core_files = _get_python_files(CORE_DIR)
+        violations = []
+
+        for file_path in core_files:
+            if file_path.name == "__init__.py":
+                continue
+            if file_path.name == "mvm_db.py":
+                continue  # The ORM module itself is allowed
+
+            tree = self._parse_ast(file_path)
+            if tree is None:
+                continue
+
+            found = self._find_mvm_db_instantiations(tree)
+            for line_no, detail in found:
+                violations.append(
+                    {
+                        "file": _get_relative_path(file_path),
+                        "line": line_no,
+                        "detail": detail,
+                    }
+                )
+
+        if violations:
+            violation_msgs = []
+            for v in violations:
+                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['detail']}")
+
+            msg = (
+                f"Found {len(violations)} MVMDatabase() instantiation violation(s):\n"
+                + "\n".join(violation_msgs)
+                + "\n\nResolution Layer Mandate: Core must NOT instantiate MVMDatabase."
+                + "\nCore receives explicit values from API layer."
+            )
+            pytest.fail(msg)
+
+    def test_core_no_db_default_queries(self):
+        """Core files must not call db.get_default_*() methods.
+
+        Resolution Layer Mandate: Core receives explicit values from API.
+        Core must NOT query the database for defaults.
+
+        Known violations (to be fixed in Phase 4.2-4.4):
+        - Multiple core files call db.get_default_image(), db.get_default_kernel(), etc.
+        """
+        core_files = _get_python_files(CORE_DIR)
+        violations = []
+
+        for file_path in core_files:
+            if file_path.name == "__init__.py":
+                continue
+            if file_path.name == "mvm_db.py":
+                continue  # The ORM module itself is allowed
+
+            tree = self._parse_ast(file_path)
+            if tree is None:
+                continue
+
+            found = self._find_db_default_queries(tree)
+            for line_no, detail in found:
+                violations.append(
+                    {
+                        "file": _get_relative_path(file_path),
+                        "line": line_no,
+                        "detail": detail,
+                    }
+                )
+
+        if violations:
+            violation_msgs = []
+            for v in violations:
+                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['detail']}")
+
+            msg = (
+                f"Found {len(violations)} db.get_default_*() query violation(s):\n"
+                + "\n".join(violation_msgs)
+                + "\n\nResolution Layer Mandate: Core must NOT query database defaults."
+                + "\nCore receives explicit values from API layer."
+                + "\nAPI layer queries MVMDatabase and passes resolved values to Core."
             )
             pytest.fail(msg)
