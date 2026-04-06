@@ -4,6 +4,33 @@
 **Status:** Canonical source of truth for all binary/kernel/image defaults and state
 **Rule:** Schema lives in SQL files; runner applies migrations; models define row dataclasses
 
+## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
+
+**The DB layer is only accessed by the API layer. No exceptions.**
+
+| Layer | DB Access |
+|-------|-----------|
+| **CLI** | **FORBIDDEN** — never queries SQLite |
+| **API** | **REQUIRED** — only layer that instantiates `MVMDatabase` |
+| **Core** | **FORBIDDEN** — receives resolved values from API |
+| **Models** | **FORBIDDEN** — pure data containers |
+
+**SQLite (`mvmdb.db`) is the canonical source of truth for:**
+- Default image (`is_default=1` in `images` table)
+- Default kernel (`is_default=1` in `kernels` table)
+- Default binary per name (`is_default=1` in `binaries` table)
+- Default network (`is_default=1` in `networks` table)
+
+**`metadata.json` is a legacy compatibility shim. Never canonical. Never query it for defaults.**
+
+**Portable reference fields** (used in `VMExportConfig` for export/import — never internal SHA256 IDs):
+- Images: `(os_slug, arch)` — unique identifier across environments
+- Kernels: `(version, arch, type)` — unique identifier across environments
+- Binaries: `(name, version)` — unique identifier across environments
+- Networks: `name` — unique identifier (subnet/gateway are hints for auto-recreation)
+
+**Violation = CI failure.** Enforced by `tests/layer_compliance/test_imports.py`.
+
 ## STRUCTURE
 
 ```

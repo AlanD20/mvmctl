@@ -4,6 +4,31 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Return data or raise typed exceptions — NEVER format output here
 
+## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
+
+| Layer | Resolves | How |
+|-------|----------|-----|
+| **CLI** | User input + constants-backed defaults | `DEFAULT_*` from `constants.py`. |
+| **API** | DB-backed defaults | SQLite queries. `is_default=1` is canonical. |
+| **Core** | **NOTHING** | Receives ALL explicit, pre-resolved values. |
+
+**Core MUST:**
+- Receive `image_path: Path` (not `image: str`) — path resolved by API before calling core
+- Receive `kernel_path: Path | None` (not `kernel: str`) — resolved by API
+- Receive `firecracker_binary_path: str` — resolved by API
+- Have NO default values for operationally significant parameters
+- Have NO `Optional[T]` for required params — API guarantees they are always set
+
+**Core MUST NOT:**
+- Import or use `MVMDatabase`
+- Call `db.get_default_*()` or any SQLite method
+- Use `DEFAULT_*` constants as parameter defaults
+- Resolve image/kernel/network names to paths — that is the API layer's job
+
+**The `_resolve_image_path()` function does NOT exist in core.** It was moved to `api/vms.py`.
+
+**Violation = CI failure.** Enforced by `tests/layer_compliance/test_imports.py:test_core_does_not_import_from_db()`.
+
 ## STRUCTURE
 
 ```

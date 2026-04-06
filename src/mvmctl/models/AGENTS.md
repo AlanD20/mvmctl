@@ -4,6 +4,30 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** `@dataclass` only; no methods with business logic; **NO default values for config-backed fields**
 
+## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
+
+**Models are pure data containers. They resolve nothing.**
+
+| Layer | Resolves | How |
+|-------|----------|-----|
+| **CLI** | Constants-backed defaults | `DEFAULT_*` from `constants.py`. |
+| **API** | DB-backed defaults | `MVMDatabase` queries. |
+| **Core** | Nothing | Receives ALL explicit values. |
+| **Models** | **Nothing** | Store exactly what they're given. |
+
+**Models MUST NOT:**
+- Have default values for config-backed fields (`vcpu_count`, `mem_size_mib`, `enable_pci`, `cloud_init_mode`, etc.)
+- Import `DEFAULT_*` constants from `constants.py` as field defaults
+- Import `MVMDatabase` or perform any DB operations
+- Use `default_factory` for config-backed fields
+
+**Field defaults policy:**
+- Technical/structural fields with non-config defaults (`vm_id=""`, `extra_drives=field(default_factory=list)`, `schema_version="1.0"`) → **allowed**
+- Config-backed fields (`vcpu_count`, `mem_size_mib`, `cloud_init_mode`, etc.) → **NO DEFAULTS**
+- Truly optional nullable fields (`ip`, `mac`, `ssh_key`) → `= None` **allowed** (semantically optional, not a fallback)
+
+**Violation = CI failure.** Enforced by `tests/layer_compliance/test_constants.py` and `tests/unit/test_vm_models.py`.
+
 ## STRUCTURE
 
 ```

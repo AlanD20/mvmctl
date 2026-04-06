@@ -4,6 +4,31 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Role:** Add privilege checks; delegate to `core/`; export with `__all__`
 
+## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
+
+| Layer | Resolves | How |
+|-------|----------|-----|
+| **CLI** | User input + constants-backed defaults | `DEFAULT_*` from `constants.py`. No DB queries. |
+| **API** | DB-backed defaults | Query SQLite (`MVMDatabase`) when CLI passes `None`. `is_default=1` is canonical. |
+| **Core** | Nothing | Receives ALL explicit values from API. No DB. No defaults. |
+
+**API MUST:**
+- Query `MVMDatabase` to resolve `None` for DB-backed params before calling core
+- Call `check_privileges()` before any privileged operation
+- Call `_prompt_missing_assets()` when DB-backed assets are not found
+- Pass ALL params explicitly to core — no `None` for required core params
+- NOT use `DEFAULT_*` constants for DB-backed defaults — CLI sends pre-resolved values for those
+
+**DB-backed params API resolves** (when CLI passes `None`):
+- `image` → `db.get_default_image()` or `db.get_image_by_os_slug(slug)` → `Path`
+- `kernel` → `db.get_default_kernel()` or lookup by version/arch/type → `Path | None`
+- `binary` → `db.get_default_binary("firecracker")` → `Path`
+- `network` → `db.get_default_network()` or `db.get_network_by_name(name)` → `NetworkConfig`
+
+**Network special case**: If network not found by name but subnet hint available → auto-create (no prompt needed).
+
+**Violation = CI failure.** Enforced by `tests/layer_compliance/test_imports.py` and `tests/layer_compliance/test_privilege.py`.
+
 ## STRUCTURE
 
 ```

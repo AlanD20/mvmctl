@@ -4,6 +4,28 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Call `api/` for everything; never import from `core/` directly
 
+## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
+
+| Layer | Resolves | How |
+|-------|----------|-----|
+| **CLI** | User input + constants-backed defaults | `DEFAULT_*` from `constants.py` if flag not provided. **No DB queries ever.** |
+| **API** | DB-backed defaults | Query SQLite (`MVMDatabase`) when CLI passes `None`. `is_default=1` rows are canonical. |
+| **Core** | Nothing — executes only | Receives ALL explicit, resolved values. No `None` for required params. No DB. |
+| **Models** | Nothing | Pure `@dataclass` containers. No defaults for config-backed fields. |
+
+**Constants-backed** (CLI resolves via `DEFAULT_*` from `constants.py`):
+`vcpu_count`, `mem`, `ssh_user`, `boot_args`, `lsm_flags`, `disk_size`, `enable_api_socket`, `enable_pci`, `enable_console`, `cloud_init_mode`
+
+**DB-backed** (pass `None` to API — API resolves via `MVMDatabase`):
+image path, kernel path, firecracker binary path, network config
+
+**CLI MUST:**
+- Resolve constants-backed defaults in the command function body: `effective_x = x if x is not None else DEFAULT_X`
+- Pass `None` for DB-backed params: image, kernel, binary, network — API resolves these
+- NEVER import `MVMDatabase`, `get_default_image()`, `get_default_kernel()`, `get_default_network()`, or any DB-querying symbol
+
+**Violation = CI failure.** Enforced by `tests/layer_compliance/test_imports.py`.
+
 ## STRUCTURE
 
 ```
