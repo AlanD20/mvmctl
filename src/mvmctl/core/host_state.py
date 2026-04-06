@@ -88,7 +88,6 @@ def _save_state(db: MVMDatabase, changes: list[HostStateChange]) -> None:
         db: MVMDatabase instance for persisting host state.
         changes: List of host changes to record.
     """
-    from mvmctl.utils.fs import chown_to_real_user
 
     db.initialize_host_state()
 

@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import Any
 
 from mvmctl.api.host import check_privileges_interactive
 from mvmctl.api.metadata import get_default_network_entry
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET, MVM_POSTROUTING_CHAIN
-from mvmctl.core import host_setup, metadata, network as network_core
+from mvmctl.core import host_setup, metadata
+from mvmctl.core import network as network_core
 from mvmctl.core.network_manager import (
     NetworkConfig,
     NetworkLease,

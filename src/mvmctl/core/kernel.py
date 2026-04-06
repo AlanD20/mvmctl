@@ -10,7 +10,6 @@ import subprocess
 import tarfile
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -31,12 +30,9 @@ from mvmctl.constants import (
     HTTP_USER_AGENT,
     KERNEL_TYPE_FIRECRACKER,
     KERNEL_TYPE_OFFICIAL,
-    KERNEL_TYPE_UNKNOWN,
 )
 from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
 from mvmctl.models.kernel import KernelSpec
-from mvmctl.utils.fs import get_cache_dir
-from mvmctl.utils.full_hash import generate_full_hash_kernel
 from mvmctl.utils.progress import download_with_progress
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (

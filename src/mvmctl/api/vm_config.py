@@ -119,9 +119,9 @@ def build_vm_config_file(
     # Build Firecracker boot config (stored as dict for now, to be refactored in Phase 10)
     try:
         generator = ConfigGenerator(VMConfig(**vm_config_kwargs), vm_instance)
-        firecracker_boot_config: dict[str, Any] = dict(generator.generate())
+        dict(generator.generate())  # Validate config generation works
     except Exception:
-        firecracker_boot_config = {}
+        pass  # Config generation failed, but we can still export without it
 
     # Parse kernel version if provided (for portable export)
     kernel_version = None

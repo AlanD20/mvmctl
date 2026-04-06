@@ -40,7 +40,6 @@ from mvmctl.constants import (
     CONST_FILE_PERMS_PUBLIC_KEY,
     CONST_FILE_PERMS_SHADOW,
     CONST_FILE_PERMS_SUDOERS,
-    CONST_FILE_PERMS_STATE_FILE,
     CONST_ROOT_GID,
     CONST_ROOT_UID,
     CONST_SHADOW_DAYS_SINCE_EPOCH,
@@ -474,7 +473,9 @@ def _generate_ssh_host_keys(guestfs_handle: Any, rootfs_path: Path) -> None:
             "[Service]\nType=oneshot\nExecStart=/bin/bash /etc/local.d/ssh-keygen.start\nRemainAfterExit=yes\n\n"
             "[Install]\nWantedBy=multi-user.target\n",
         )
-        guestfs_handle.chmod(0o644, "/etc/systemd/system/ssh-hostkeygen.service")
+        guestfs_handle.chmod(
+            CONST_FILE_PERMS_PUBLIC_KEY, "/etc/systemd/system/ssh-hostkeygen.service"
+        )
         guestfs_handle.mkdir_p("/etc/systemd/system/multi-user.target.wants")
         guestfs_handle.ln_s(
             "/etc/systemd/system/ssh-hostkeygen.service",
@@ -524,12 +525,12 @@ def _inject_ssh_keys_for_disabled_mode(
 
                 if not guestfs_handle.exists("/root"):
                     guestfs_handle.mkdir_p("/root")
-                    guestfs_handle.chmod(0o700, "/root")
-                    guestfs_handle.chown(0, 0, "/root")
+                    guestfs_handle.chmod(CONST_DIR_PERMS_CACHE, "/root")
+                    guestfs_handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, "/root")
 
                 guestfs_handle.mkdir_p(f"{ssh_home_dir}/.ssh")
-                guestfs_handle.chmod(0o700, f"{ssh_home_dir}/.ssh")
-                guestfs_handle.chown(0, 0, f"{ssh_home_dir}/.ssh")
+                guestfs_handle.chmod(CONST_DIR_PERMS_CACHE, f"{ssh_home_dir}/.ssh")
+                guestfs_handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, f"{ssh_home_dir}/.ssh")
                 guestfs_handle.sync()
 
                 existing_keys = ""
@@ -549,7 +550,7 @@ def _inject_ssh_keys_for_disabled_mode(
                         combined += "\n"
                     combined += "\n".join(new_keys) + "\n"
                     guestfs_handle.write(auth_keys_path, combined)
-                    guestfs_handle.chmod(0o600, auth_keys_path)
+                    guestfs_handle.chmod(CONST_FILE_PERMS_PRIVATE_KEY, auth_keys_path)
                     guestfs_handle.sync()
 
                 guestfs_handle.mkdir_p("/etc/cloud/cloud.cfg.d")
@@ -600,7 +601,10 @@ def _inject_ssh_keys_for_disabled_mode(
                     "systemctl disable first-boot-ssh-installer.service 2>/dev/null || true\n'\n"
                     "RemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n",
                 )
-                guestfs_handle.chmod(0o644, "/etc/systemd/system/first-boot-ssh-installer.service")
+                guestfs_handle.chmod(
+                    CONST_FILE_PERMS_PUBLIC_KEY,
+                    "/etc/systemd/system/first-boot-ssh-installer.service",
+                )
                 guestfs_handle.mkdir_p("/etc/systemd/system/multi-user.target.wants")
                 guestfs_handle.ln_s(
                     "/etc/systemd/system/first-boot-ssh-installer.service",

@@ -6,10 +6,7 @@ import typer
 
 from mvmctl.api.vms import get_vm_manager
 from mvmctl.constants import (
-    DEFAULT_FIRECRACKER_BINARY_PATH,
-    DEFAULT_NETWORK_IPV4_GATEWAY,
     DEFAULT_NETWORK_NAME,
-    DEFAULT_NETWORK_SUBNET,
     DEFAULT_VM_BOOT_ARGS,
     DEFAULT_VM_DISK_SIZE,
     DEFAULT_VM_ENABLE_API_SOCKET,
@@ -26,7 +23,6 @@ from mvmctl.constants import (
 from mvmctl.exceptions import MVMError
 from mvmctl.models.config import SystemDefaultsConfig
 from mvmctl.utils.console import print_error
-from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 

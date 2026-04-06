@@ -23,7 +23,7 @@ from mvmctl.constants import (
     HTTP_USER_AGENT,
 )
 from mvmctl.exceptions import AssetNotFoundError, BinaryError, MVMError
-from mvmctl.utils.fs import get_bin_dir, get_cache_dir
+from mvmctl.utils.fs import get_bin_dir
 from mvmctl.utils.progress import download_with_progress
 
 logger = logging.getLogger(__name__)
@@ -236,7 +236,6 @@ def fetch_binary(
     finally:
         tgz_path.unlink(missing_ok=True)
 
-
     if set_as_default:
         set_active_version(version, d)
 
@@ -284,10 +283,6 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
 
     fc_link.symlink_to(fc_src.name)
     jl_link.symlink_to(jl_src.name)
-
-    parts = version.split(".")
-    ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{version}"
-    full_version = f"v{version}"
 
 
 def get_binary_path(name: str, version: str) -> str:

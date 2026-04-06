@@ -531,6 +531,7 @@ DEFAULT_USR_SBIN_IPTABLES_RESTORE: Final[str] = _require_str(
 )
 DEFAULT_USR_SBIN_IPTABLES_SAVE: Final[str] = _require_str(("host", "sbin_paths", "iptables_save"))
 DEFAULT_USR_SBIN_SYSCTL: Final[str] = _require_str(("host", "sbin_paths", "sysctl"))
+DEFAULT_SYSCTL_CONF_PATH: Final[str] = "/etc/sysctl.d/mvmctl.conf"
 
 # ---------------------------------------------------------------------------
 # Libguestfs defaults (loaded from assets/_defaults.py)

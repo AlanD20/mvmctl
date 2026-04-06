@@ -140,7 +140,7 @@ class TestHostWithSubprocessMocking:
         mock_run,
     ):
         """Test host init with all system calls mocked."""
-        from mvmctl.core.host_setup import init_host
+        from mvmctl.api.host import init_host
 
         mock_check_priv.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -174,22 +174,24 @@ class TestHostWithSubprocessMocking:
                                     with patch(
                                         "mvmctl.core.host_setup._persist_sysctl", return_value=None
                                     ):
-                                        with patch("mvmctl.core.host_setup.setup_mvm_chains"):
-                                            with patch("mvmctl.core.host_setup._save_state"):
-                                                with patch("mvmctl.core.host_setup._write_sudoers"):
+                                        with patch("mvmctl.core.network.setup_mvm_chains"):
+                                            with patch("mvmctl.core.host_state._save_state"):
+                                                with patch(
+                                                    "mvmctl.core.host_privilege._write_sudoers"
+                                                ):
                                                     result = init_host(Path("/tmp/cache"))
 
                             assert len(result) > 0
 
-    @patch("mvmctl.core.host.restore_host")
+    @patch("mvmctl.api.host._restore_host")
     def test_reset_with_subprocess_mocking(self, mock_restore):
-        from mvmctl.core.host import reset_host
+        from mvmctl.api.host import reset_host
 
         mock_restore.return_value = []
 
-        with patch("mvmctl.core.host.clean_host", return_value=[]):
-            with patch("mvmctl.core.host._remove_sudoers", return_value=False):
-                with patch("mvmctl.core.host._remove_group", return_value=False):
+        with patch("mvmctl.api.host.clean_host", return_value=[]):
+            with patch("mvmctl.api.host._remove_sudoers", return_value=False):
+                with patch("mvmctl.api.host._remove_group", return_value=False):
                     reset_host(Path("/tmp/cache"))
 
         mock_restore.assert_called_once()

@@ -26,7 +26,7 @@ from mvmctl.constants import (
     HTTP_TIMEOUT_SHA256_FETCH_S,
     HTTP_USER_AGENT,
 )
-from mvmctl.exceptions import ConfigError, ImageError, MVMError
+from mvmctl.exceptions import ConfigError, ImageError
 from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.guestfs import extract_partition_with_guestfs
 from mvmctl.utils.http import download_file as _download_file

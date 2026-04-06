@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 from mvmctl.constants import (
+    DEFAULT_SYSCTL_CONF_PATH,
     IPTABLES_RULES_V4,
     ISO_BINARIES,
     REQUIRED_BINARIES,
@@ -21,7 +22,7 @@ from mvmctl.exceptions import HostError
 from mvmctl.models.host import HostStateChange
 
 SYSCTL_KEY = "net.ipv4.ip_forward"
-SYSCTL_CONF = Path("/etc/sysctl.d/mvmctl.conf")
+SYSCTL_CONF = Path(DEFAULT_SYSCTL_CONF_PATH)
 
 logger = logging.getLogger(__name__)
 
