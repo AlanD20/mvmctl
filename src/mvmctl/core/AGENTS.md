@@ -1,8 +1,10 @@
-# mvmctl/core/ — Business Logic Layer
+# mvmctl/core/ — Business Logic Layer (Isolated Ingredients)
 
-**Scope:** All subprocess calls, privilege checks, VM lifecycle, network, image, kernel
+**Scope:** All subprocess calls, VM lifecycle, network, image, kernel — each module is ISOLATED
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
-**Rule:** Return data or raise typed exceptions — NEVER format output here
+**Rule:** Return data or raise typed exceptions — NEVER format output here; NEVER import from other core/ modules
+
+**CRITICAL PRINCIPLE:** Core modules are **ISOLATED COMPONENTS**. They do NOT call each other. The **API layer is the ONLY entity** that calls multiple core modules and sequences them together. This prevents circular dependencies and keeps each core module testable in isolation.
 
 ## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
 
@@ -74,6 +76,59 @@ All other core modules MUST NOT import, instantiate, or use `MVMDatabase`. They 
 **The `_resolve_image_path()` function does NOT exist in core.** It was moved to `api/vms.py`.
 
 **Violation = CI failure.** Enforced by `tests/layer_compliance/test_imports.py:test_core_does_not_import_from_db()`.
+
+## CORE MODULE ISOLATION (MANDATORY)
+
+Core modules are **ISOLATED COMPONENTS**. Each module does ONE thing and receives ALL needed data as explicit parameters. **Core modules MUST NOT import from other core/ modules.**
+
+### Why Isolation Matters
+
+1. **No circular dependencies** — each module is independently testable
+2. **Clear data flow** — API layer orchestrates, core modules execute
+3. **Easier testing** — mock API layer, not other core modules
+4. **Maintainability** — changes to one core module don't cascade
+
+### Correct Pattern (Core Module Isolation)
+
+```python
+# core/network_manager.py — ISOLATED
+def create_network(name: str, subnet: str) -> NetworkConfig:
+    # Receives explicit parameters
+    # Does ONE thing: create network
+    # Does NOT import from core/vm_lifecycle, core/metadata, etc.
+    ...
+
+# core/vm_lifecycle.py — ISOLATED
+def create_vm(name: str, image: Path, network: NetworkConfig) -> VMInstance:
+    # Receives explicit parameters (including pre-created network)
+    # Does ONE thing: create VM
+    # Does NOT import from core/network_manager, core/metadata, etc.
+    ...
+
+# api/vms.py — ORCHESTRATOR (the "bun")
+def create_vm(name: str, image: str, ...) -> VMInstance:
+    # API sequences isolated core modules
+    network = _core_create_network(...)        # ← core/network_manager
+    vm = _core_create_vm(..., network=network) # ← core/vm_lifecycle (receives network)
+    register_vm_metadata(vm)                   # ← core/metadata (API's job)
+    return vm
+```
+
+### Forbidden Pattern (Cross-Core Imports)
+
+```python
+# core/vm_lifecycle.py — WRONG
+from mvmctl.core.network_manager import create_network  # ❌ FORBIDDEN
+from mvmctl.core.metadata import register_vm_metadata   # ❌ FORBIDDEN
+
+def create_vm(name: str, image: Path) -> VMInstance:
+    network = create_network(...)  # ❌ Core calling core
+    vm = _do_create_vm(...)
+    register_vm_metadata(vm)       # ❌ Core calling core
+    return vm
+```
+
+**Violation = CI failure.** Enforced by `tests/layer_compliance/test_imports.py:test_core_modules_isolated()`.
 
 ## STRUCTURE
 

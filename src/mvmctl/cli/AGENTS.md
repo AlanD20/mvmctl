@@ -1,8 +1,21 @@
-# mvmctl/cli/ — CLI Layer
+# mvmctl/cli/ — CLI Layer (The Chef)
 
 **Scope:** Typer command definitions only — arg parsing, output formatting, NO business logic
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Call `api/` for everything; never import from `core/` directly
+
+**CLI's Role (The Chef):**
+1. Parse user input from command-line flags and arguments
+2. Apply `DEFAULT_*` constants for constants-backed defaults (vcpus, mem, etc.)
+3. Pass `None` for DB-backed defaults (image, kernel, binary, network) — let API resolve
+4. Delegate entirely to the API layer
+5. Format API responses for display to the user
+
+**CLI MUST NOT:**
+- Query the database (even via API wrappers)
+- Contain business logic
+- Import from `core/` directly
+- Format output in complex ways (keep it simple)
 
 ## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
 

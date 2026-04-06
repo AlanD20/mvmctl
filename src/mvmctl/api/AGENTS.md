@@ -55,6 +55,41 @@ src/mvmctl/api/
 └── metadata.py  # Metadata query API
 ```
 
+## ORCHESTRATION PATTERN (API is the Bun)
+
+The API layer is the **SOLE orchestrator** of core modules. It sequences multiple core function calls together to implement complete workflows:
+
+```python
+# api/vms.py — orchestration example
+from mvmctl.core.network_manager import ensure_default_network
+from mvmctl.core.vm_lifecycle import create_vm as _core_create_vm
+from mvmctl.core.metadata import register_vm_metadata
+from mvmctl.core.cloud_init import write_cloud_init
+from mvmctl.core.host_privilege import check_privileges
+
+def create_vm(name: str, image: str, ...) -> VMInstance:
+    check_privileges("/usr/sbin/ip")           # ← privilege check HERE
+    
+    # Sequence core modules (isolated ingredients)
+    ensure_default_network()                   # ← core/network_manager
+    vm = _core_create_vm(name, image, ...)     # ← core/vm_lifecycle
+    register_vm_metadata(vm)                   # ← core/metadata (API's job to persist)
+    write_cloud_init(vm)                       # ← core/cloud_init
+    
+    return vm  # ← return to CLI for formatting
+
+__all__ = ["create_vm", "remove_vm", ...]
+```
+
+**Key behaviors:**
+- API calls multiple core modules in sequence — this is the **ONLY place** where cross-core orchestration happens
+- Core modules are **ISOLATED** — they do NOT import from each other
+- API handles metadata persistence (calling `core/metadata.py`) — this is API's responsibility, not Core's
+- Only ops that touch network/host call `check_privileges()` — not all API functions do
+- Return core's return value directly; never reformat output
+- `api/vms.py`: only `cleanup_vms` calls `check_privileges`; `create_vm`, `remove_vm` do NOT
+- `api/vm_config.py` has no `__all__` and is not re-exported from `api/__init__.py`
+
 ## DELEGATION PATTERN
 
 ```python
@@ -68,13 +103,6 @@ def create_network(name: str, ...) -> NetworkConfig:
 
 __all__ = ["create_network", "remove_network", ...]
 ```
-
-Key behaviors:
-- Only ops that touch network/host call `check_privileges()` — not all API functions do
-- They re-export core functions that need no privilege wrapper unchanged
-- Return core's return value directly; never reformat output
-- `api/vms.py`: only `cleanup_vms` calls `check_privileges`; `create_vm`, `remove_vm` do NOT
-- `api/vm_config.py` has no `__all__` and is not re-exported from `api/__init__.py`
 
 ## API → CORE MAPPING
 

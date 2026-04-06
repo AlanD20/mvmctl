@@ -308,12 +308,38 @@ Every downloaded/imported asset (image, kernel, VM) gets a **full 64-char SHA256
 - Removal and lookup accept the 6-char prefix; `find_images_by_short_id()` / `find_kernels_by_short_id()` do the prefix search
 - YAML images (e.g. `ubuntu-24.04`) keep their YAML filename on disk; their hash is only in SQLite
 
+## ORCHESTRATION ARCHITECTURE (The Burger Analogy)
+
+Think of the system as a burger:
+
+```
+user input → CLI (validate, apply constants defaults)
+               ↓
+           API Layer (the "bun" — orchestrates everything)
+           ├── calls core/network.py (setup network)
+           ├── calls core/vm_lifecycle.py (start VM)
+           ├── calls core/metadata.py (store metadata)
+           ├── calls core/cloud_init.py (write cloud-init)
+           └── returns result to CLI
+               ↑
+           Core Modules (isolated "ingredients")
+           Each module does ONE thing, receives explicit inputs,
+           does NOT import from other core/ modules.
+```
+
+**Key principle**: Core modules are **ISOLATED**. They do not call each other. The **API layer is the ONLY entity** that calls multiple core modules and sequences them together. This prevents circular dependencies and keeps each core module testable in isolation.
+
+**Analogy**:
+- **Chef** = CLI (takes the order, validates it)
+- **Tomato, Burger, Onion** = core modules (each does its job independently)
+- **The Bun** = API layer (holds all ingredients together, defines the complete product)
+
 ## CONVENTIONS
 
 ### Architecture (Strict Layers)
 - **cli/** — arg parsing + output formatting ONLY; runtime default resolution; call `api/`
-- **api/** — privilege checks + delegation to `core/`; **NO default values in params**; stable public API with `__all__`
-- **core/** — subprocess, filesystem, business logic; **NO default values in params**; returns data or raises typed exceptions
+- **api/** — privilege checks + delegation to `core/`; **NO default values in params**; stable public API with `__all__`; **SOLE orchestrator** of core modules
+- **core/** — subprocess, filesystem, business logic; **NO default values in params**; returns data or raises typed exceptions; **ISOLATED** — no cross-core imports
 - **models/** — `@dataclass` only; **NO default values for config-backed fields**; no methods with side effects
 - **utils/** — pure helpers with no domain knowledge
 
