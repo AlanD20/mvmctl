@@ -12,6 +12,52 @@
 | **API** | DB-backed defaults | SQLite queries. `is_default=1` is canonical. |
 | **Core** | **NOTHING** | Receives ALL explicit, pre-resolved values. |
 
+### Core Layer Database Enforcement (CRITICAL)
+
+**ONLY `mvm_db.py` is allowed to use `MVMDatabase` in the core layer.**
+
+All other core modules MUST NOT import, instantiate, or use `MVMDatabase`. They must receive explicit values from the API layer.
+
+**Core files that MUST NOT use MVMDatabase:**
+
+| File | Status | Notes |
+|------|--------|-------|
+| `core/vm_manager.py` | MUST NOT use DB | Receives VM state from API |
+| `core/vm_lifecycle.py` | MUST NOT use DB | Receives image/kernel paths from API |
+| `core/vm_monitor.py` | MUST NOT use DB | Receives VM data from API |
+| `core/network.py` | MUST NOT use DB | Receives network config from API |
+| `core/network_manager.py` | MUST NOT use DB | Receives network defaults from API |
+| `core/host.py` | MUST NOT use DB | Receives host state from API |
+| `core/host_setup.py` | MUST NOT use DB | Receives setup config from API |
+| `core/host_privilege.py` | MUST NOT use DB | Receives privilege config from API |
+| `core/host_state.py` | MUST NOT use DB | Receives state data from API |
+| `core/image.py` | MUST NOT use DB | Receives image paths from API |
+| `core/kernel.py` | MUST NOT use DB | Receives kernel paths from API |
+| `core/binary_manager.py` | MUST NOT use DB | Receives binary paths from API |
+| `core/metadata.py` | MUST NOT use DB | Receives metadata from API |
+| `core/config_state.py` | MUST NOT use DB | Receives config from API |
+| `core/cache_manager.py` | MUST NOT use DB | Receives cache config from API |
+| `core/config_gen.py` | MUST NOT use DB | Receives config values from API |
+| `core/firecracker.py` | MUST NOT use DB | Receives socket paths from API |
+| `core/firewall.py` | MUST NOT use DB | Receives firewall rules from API |
+| `core/ssh.py` | MUST NOT use DB | Receives SSH config from API |
+| `core/key_manager.py` | MUST NOT use DB | Receives key paths from API |
+| `core/cloud_init.py` | MUST NOT use DB | Receives cloud-init config from API |
+| `core/cloud_init_status.py` | MUST NOT use DB | Receives status config from API |
+| `core/console.py` | MUST NOT use DB | Receives console config from API |
+| `core/download_engine.py` | MUST NOT use DB | Receives download config from API |
+| `core/partition_detection.py` | MUST NOT use DB | Receives detection params from API |
+| `core/rootfs_injector.py` | MUST NOT use DB | Receives injection config from API |
+| `core/logs.py` | MUST NOT use DB | Receives log paths from API |
+| `core/config.py` | MUST NOT use DB | Receives config data from API |
+| `core/user_config.py` | MUST NOT use DB | Receives user config from API |
+
+**The ONLY exempt file:**
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `core/mvm_db.py` | **ALLOWED** | Defines `MVMDatabase` class and all DB operations. This is the sole database interface for the entire codebase. |
+
 **Core MUST:**
 - Receive `image_path: Path` (not `image: str`) — path resolved by API before calling core
 - Receive `kernel_path: Path | None` (not `kernel: str`) — resolved by API
@@ -20,7 +66,7 @@
 - Have NO `Optional[T]` for required params — API guarantees they are always set
 
 **Core MUST NOT:**
-- Import or use `MVMDatabase`
+- Import or use `MVMDatabase` (except in `mvm_db.py`)
 - Call `db.get_default_*()` or any SQLite method
 - Use `DEFAULT_*` constants as parameter defaults
 - Resolve image/kernel/network names to paths — that is the API layer's job
@@ -95,29 +141,6 @@ src/mvmctl/core/
 | Cloud-init inject | `rootfs_injector.py` | inject via libguestfs |
 | Config dataclass | `config.py` | `MVMConfig`, `load_config()` |
 
-## STATE QUERY PREFERENCE
-
-**SQLite is the canonical source of truth for all binary/kernel/image defaults and state.**
-
-When determining which binary/kernel/image is "active" or "default":
-1. Query `MVMDatabase` first (e.g. `db.get_default_binary("firecracker")`)
-2. Verify the returned path still exists on disk (stale-entry guard)
-3. Do NOT read filesystem symlinks (`firecracker` → `firecracker-v1.15.0`) to derive state
-
-The `firecracker` symlink in `bin/` is a **side-effect** of `set_active_version()` for shell/script compatibility — it is NOT the source of truth. The symlink may be absent or stale; SQLite `is_default=1` is always authoritative.
-
-Pattern for active binary lookup:
-```python
-db = MVMDatabase()
-default = db.get_default_binary("firecracker")
-if default and Path(default.path).exists():
-    return default.path
-```
-
-When to use filesystem scanning (`list_local_versions`):
-- Only when discovering binaries not yet registered in SQLite (e.g. manual drops into `bin/`)
-- Always pass results back through `update_binary_entry()` + `set_default_binary_entry()` to register them
-
 ## STATE SCHEMAS
 
 **VM state** (`$MVM_CACHE_DIR/vms/state.json`):
@@ -171,7 +194,7 @@ Called in `api/` layer before entering core, or explicitly in core for ops needi
 | `except Exception: pass` | Catch specific type, re-raise as MVMError subclass |
 | Large functions (>100 lines) | Extract helpers; early returns to reduce nesting |
 | `subprocess.run(..., shell=True)` | Always use list form |
-| Read `bin/firecracker` symlink for state | Query `db.get_default_binary("firecracker")` — symlink is a side-effect |
+| **Core using `MVMDatabase` or `db.get_default_*()`** | API queries DB, passes explicit values to Core |
 | **Default values in function parameters** | Core receives explicit values from API; never use `def func(arg=DEFAULT_VALUE)` |
 
 ## DEFAULT VALUE POLICY
@@ -251,8 +274,9 @@ Core layer violations create:
 ### Verification Checklist
 
 Before submitting Core changes:
-- [ ] **NO imports from `mvmctl.core.mvm_db`** (except for asset registration in specific modules)
-- [ ] **NO `MVMDatabase()` instantiation** in Core functions
+- [ ] **NO imports from `mvmctl.core.mvm_db`** in any core file except `mvm_db.py` itself
+- [ ] **NO `MVMDatabase()` instantiation** in any core file except `mvm_db.py`
+- [ ] **NO `db.get_default_*()` calls** in any core file except `mvm_db.py`
 - [ ] Function parameters receive explicit values, not `Optional[T]` for required params
 - [ ] API layer guarantees required values are set before calling Core
 - [ ] Core raises typed exceptions, never returns None for required data
@@ -260,8 +284,10 @@ Before submitting Core changes:
 ### Enforcement
 
 CI checks will reject PRs containing:
-- Core code that imports from `mvmctl.core.mvm_db` (except metadata.py for asset registration)
-- Core functions with default parameter values
+- Core code (except `mvm_db.py`) that imports from `mvmctl.core.mvm_db`
+- Core code (except `mvm_db.py`) that instantiates `MVMDatabase()`
+- Core code (except `mvm_db.py`) that calls `db.get_default_*()` methods
+- Core functions with default parameter values for DB-backed params
 - Core functions that handle `None` for required DB-backed parameters
 
 **NO EXCEPTIONS. NO WORKAROUNDS. NO DISCUSSION.**
@@ -284,12 +310,18 @@ The core layer **must not** produce console output. All output formatting belong
 - `create_vm()` — full orchestration: image→rootfs copy, cloud-init, config, network, process, register
 - TAP naming: `mvm-{net[:3]}-{vm[:3]}-{rand3}` (15-char Linux IFNAMSIZ limit)
 
-### mvm_db.py (868 lines) — CANONICAL DB INTERFACE
+### mvm_db.py (868 lines) — SOLE DB INTERFACE FOR ENTIRE CODEBASE
+
+**This is the ONLY file in the core layer allowed to use `MVMDatabase`.**
+
+All other core modules must receive database-resolved values from the API layer.
+
 - `MVMDatabase` class — single entry point for all SQLite operations
 - `get_default_binary(name)` → `BinaryRecord | None`
 - `get_default_image()`, `get_default_kernel()`
 - `list_binaries()`, `list_images()`, `list_kernels()`
 - Do NOT bypass this with raw sqlite3 calls from `core/` or above
+- API layer imports from here: `from mvmctl.core.mvm_db import MVMDatabase`
 
 ### network_manager.py (890 lines)
 - `NetworkConfig` + `NetworkLease` dataclasses; persisted as JSON under `$MVM_CACHE_DIR/networks/`
