@@ -848,7 +848,7 @@ def test_resolve_image_id_prefix(mocker: MockerFixture, tmp_path: Path, monkeypa
     # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "images" / "abc123.ext4"
     mocker.patch(
-        "mvmctl.api.vms._core_resolve_image_id_path",
+        "mvmctl.api.vms._api_resolve_image_id_path",
         return_value=mock_path,
     )
 
@@ -872,9 +872,9 @@ def test_resolve_kernel_id_prefix(mocker: MockerFixture, tmp_path: Path):
     from mvmctl.api.vms import resolve_kernel_multi_strategy
 
     # Mock ID prefix resolution to return a path
-    mock_path = tmp_path / "cache" / "kernels" / "abc123"
+    mock_path = tmp_path / "kernels" / "abc123"
     mocker.patch(
-        "mvmctl.api.vms._core_resolve_kernel_id_path",
+        "mvmctl.api.vms._api_resolve_kernel_id_path",
         return_value=mock_path,
     )
 
