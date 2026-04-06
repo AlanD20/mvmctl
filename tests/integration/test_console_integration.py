@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mvmctl.constants import env_var
+from mvmctl.core import vm_lifecycle  # noqa: F401 - imported for patch resolution
 from mvmctl.models import VMInstance
 from mvmctl.models.network import NetworkConfig
 
@@ -13,9 +14,9 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_manager.VMManager.register")
     @patch("mvmctl.core.vm_lifecycle.ensure_default_network")
     @patch("mvmctl.core.kernel.resolve_kernel_path")
-    @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
-    @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-    @patch("mvmctl.core.vm_lifecycle.os.openpty")
+    @patch("shutil.copy2")
+    @patch("subprocess.Popen")
+    @patch("os.openpty")
     @patch("mvmctl.utils.fs.secure_mkdir")
     @patch("mvmctl.core.vm_manager.get_vm_manager")
     @patch("mvmctl.utils.fs.get_vm_dir")
@@ -38,7 +39,7 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.ConsoleRelayManager")
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
-    @patch("mvmctl.core.vm_lifecycle.shutil.which")
+    @patch("shutil.which")
     def test_create_vm_with_console_starts_relay(
         self,
         mock_which,
@@ -182,7 +183,7 @@ class TestConsoleWorkflow:
 
         vm = create_vm(
             name="testvm",
-            image="ubuntu-22.04",
+            image_path=Path("/tmp/test-image.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -210,8 +211,8 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_manager.VMManager.register")
     @patch("mvmctl.core.vm_lifecycle.ensure_default_network")
     @patch("mvmctl.core.kernel.resolve_kernel_path")
-    @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
-    @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
+    @patch("shutil.copy2")
+    @patch("subprocess.Popen")
     @patch("mvmctl.utils.fs.secure_mkdir")
     @patch("mvmctl.core.vm_manager.get_vm_manager")
     @patch("mvmctl.utils.fs.get_vm_dir")
@@ -231,7 +232,7 @@ class TestConsoleWorkflow:
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
-    @patch("mvmctl.core.vm_lifecycle.shutil.which")
+    @patch("shutil.which")
     def test_create_vm_without_console_skips_relay(
         self,
         mock_which,
@@ -333,7 +334,7 @@ class TestConsoleWorkflow:
 
         vm = create_vm(
             name="testvm",
-            image="ubuntu-22.04",
+            image_path=Path("/tmp/test-image.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
