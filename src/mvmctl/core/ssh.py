@@ -7,8 +7,7 @@ import subprocess
 from pathlib import Path
 
 from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY
-from mvmctl.core.vm_manager import VMManager
-from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
+from mvmctl.exceptions import MVMError, MVMKeyError
 from mvmctl.utils.validation import is_ip_address
 
 logger = logging.getLogger(__name__)
@@ -96,17 +95,16 @@ def run_ssh(
 
 
 def connect_to_vm(
-    vm_name_or_ip: str,
+    ip: str,
     user: str,
     key_path: Path | None = None,
     command: str | None = None,
     exec_mode: bool = True,
-    vm_manager: VMManager | None = None,
 ) -> int:
     """Connect to VM via SSH.
 
     Args:
-        vm_name_or_ip: VM name or IP address
+        ip: IP address of the VM
         user: SSH user
         key_path: Specific SSH key to use
         command: Command to execute (optional)
@@ -116,23 +114,11 @@ def connect_to_vm(
         Exit code (0 for success, or subprocess exit code)
 
     Raises:
-        VMNotFoundError: If VM name not found in state
         MVMKeyError: If no SSH keys found or specified key not found
-        MVMError: If VM has no IP address
+        MVMError: If IP is not a valid IP address
     """
-    is_ip = is_ip_address(vm_name_or_ip)
-
-    if is_ip:
-        ip = vm_name_or_ip
-    else:
-        # Look up VM in state via VMManager
-        manager = vm_manager if vm_manager is not None else VMManager()
-        vm = manager.get(vm_name_or_ip)
-        if not vm:
-            raise VMNotFoundError(f"VM '{vm_name_or_ip}' not found")
-        if not vm.ipv4:
-            raise MVMError(f"VM '{vm_name_or_ip}' has no IP address")
-        ip = vm.ipv4
+    if not is_ip_address(ip):
+        raise MVMError(f"Invalid IP address: {ip}")
 
     if not key_path:
         keys = find_ssh_keys()
@@ -153,11 +139,15 @@ def connect_to_vm(
         return run_ssh(ip, user, key_path, command)
 
 
-def resolve_ssh_key(ssh_key: str | None) -> str | None:
+def resolve_ssh_key(ssh_key: str | None, available_keys: list[str] | None = None) -> str | None:
     """Resolve an SSH key from name (key store) or file path.
 
     Returns the public key content string, or None.
     When ssh_key is explicitly named but not found, raises MVMKeyError.
+
+    Args:
+        ssh_key: Name of the key in the store, or path to key file, or None
+        available_keys: List of available key names for error messaging (optional)
     """
     from mvmctl.utils.fs import get_keys_dir
 
@@ -177,11 +167,8 @@ def resolve_ssh_key(ssh_key: str | None) -> str | None:
     if key_path.exists():
         return key_path.read_text().strip()
 
-    from mvmctl.core.key_manager import list_keys
-
-    available = list_keys()
-    if available:
-        names = ", ".join(k.name for k in available)
+    if available_keys:
+        names = ", ".join(available_keys)
         raise MVMKeyError(f"SSH key '{ssh_key}' not found.\nAvailable keys: {names}")
     else:
         raise MVMKeyError(

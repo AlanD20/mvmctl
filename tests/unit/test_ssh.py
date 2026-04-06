@@ -10,8 +10,7 @@ from mvmctl.core.ssh import (
     find_ssh_keys,
     resolve_ssh_key,
 )
-from mvmctl.exceptions import MVMError, MVMKeyError, VMNotFoundError
-from mvmctl.models.vm import VMInstance, VMStatus
+from mvmctl.exceptions import MVMError, MVMKeyError
 
 
 def test_find_ssh_keys_empty_dir(tmp_path: Path):
@@ -96,56 +95,18 @@ def test_connect_to_vm_by_ip(mock_find_keys: MagicMock, mock_run_ssh: MagicMock,
     key.chmod(0o600)
     mock_find_keys.return_value = [key]
 
-    result = connect_to_vm("10.20.0.5", user="root", exec_mode=False, command="echo hi")
+    result = connect_to_vm(ip="10.20.0.5", user="root", exec_mode=False, command="echo hi")
 
     assert result == 0
     mock_find_keys.assert_called_once()
     mock_run_ssh.assert_called_once_with("10.20.0.5", "root", key, "echo hi")
 
 
-@patch("mvmctl.core.ssh.run_ssh", return_value=0)
-@patch("mvmctl.core.ssh.find_ssh_keys")
-@patch("mvmctl.core.ssh.VMManager")
-def test_connect_to_vm_by_name(
-    mock_vm_manager_cls: MagicMock,
-    mock_find_keys: MagicMock,
-    mock_run_ssh: MagicMock,
-    tmp_path: Path,
-):
-    """Connect by name: looks up VM, uses its IP."""
-    vm = VMInstance(name="myvm", ipv4="10.20.0.3", status=VMStatus.RUNNING)
-    mock_manager = MagicMock()
-    mock_manager.get.return_value = vm
-    mock_vm_manager_cls.return_value = mock_manager
-
-    key = tmp_path / "id_rsa"
-    key.write_text("private")
-    key.chmod(0o600)
-    mock_find_keys.return_value = [key]
-
-    result = connect_to_vm("myvm", user="root", exec_mode=False, command="echo hi")
-
-    assert result == 0
-    mock_manager.get.assert_called_once_with("myvm")
-    mock_run_ssh.assert_called_once_with("10.20.0.3", "root", key, "echo hi")
-
-
-@patch("mvmctl.core.ssh.VMManager")
-def test_connect_to_vm_name_not_found(mock_vm_manager_cls: MagicMock):
-    """Raises VMNotFoundError when VM name not found."""
-    mock_manager = MagicMock()
-    mock_manager.get.return_value = None
-    mock_vm_manager_cls.return_value = mock_manager
-
-    with pytest.raises(VMNotFoundError, match="not found"):
-        connect_to_vm("nonexistent", user="root", exec_mode=False)
-
-
 @patch("mvmctl.core.ssh.find_ssh_keys", return_value=[])
 def test_connect_to_vm_no_keys(mock_find_keys: MagicMock):
     """Raises MVMKeyError when no SSH keys found."""
     with pytest.raises(MVMKeyError, match="No SSH keys found"):
-        connect_to_vm("10.20.0.5", user="root", exec_mode=False)
+        connect_to_vm(ip="10.20.0.5", user="root", exec_mode=False)
 
     mock_find_keys.assert_called_once()
 
@@ -224,54 +185,36 @@ class TestConnectToVm:
         key.write_text("fake key")
         with patch("mvmctl.core.ssh.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            result = connect_to_vm("10.0.0.1", user="root", key_path=key, exec_mode=False)
+            result = connect_to_vm(ip="10.0.0.1", user="root", key_path=key, exec_mode=False)
             assert result == 0
 
-    def test_connect_vm_no_ip(self, tmp_path):
-        """connect_to_vm should raise MVMError when VM has no IP."""
-        mock_mgr = MagicMock()
-        vm = VMInstance(name="noip", status=VMStatus.STOPPED)
-        mock_mgr.get.return_value = vm
-
-        with pytest.raises(MVMError, match="has no IP address"):
-            connect_to_vm("noip", user="root", vm_manager=mock_mgr)
+    def test_connect_invalid_ip(self, tmp_path):
+        """connect_to_vm should raise MVMError for invalid IP."""
+        with pytest.raises(MVMError, match="Invalid IP address"):
+            connect_to_vm(ip="not-an-ip", user="root", exec_mode=False)
 
     def test_connect_no_keys_found(self, tmp_path):
         """connect_to_vm should raise MVMKeyError when no keys found."""
-        mock_mgr = MagicMock()
-        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMStatus.RUNNING)
-        mock_mgr.get.return_value = vm
-
         keys_dir = tmp_path / "empty_keys"
         keys_dir.mkdir()
 
         with patch("mvmctl.core.ssh.find_ssh_keys", return_value=[]):
             with pytest.raises(MVMKeyError, match="No SSH keys found"):
-                connect_to_vm("testvm", user="root", vm_manager=mock_mgr)
+                connect_to_vm(ip="10.0.0.2", user="root", exec_mode=False)
 
     def test_connect_key_path_not_exists(self, tmp_path):
         """connect_to_vm should raise MVMKeyError when key file doesn't exist."""
-        mock_mgr = MagicMock()
-        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMStatus.RUNNING)
-        mock_mgr.get.return_value = vm
-
         missing_key = tmp_path / "missing_key"
         with pytest.raises(MVMKeyError, match="SSH key not found"):
-            connect_to_vm("testvm", user="root", key_path=missing_key, vm_manager=mock_mgr)
+            connect_to_vm(ip="10.0.0.2", user="root", key_path=missing_key, exec_mode=False)
 
     def test_connect_exec_mode(self, tmp_path):
         """connect_to_vm should call exec_ssh in exec mode."""
-        mock_mgr = MagicMock()
-        vm = VMInstance(name="testvm", ipv4="10.0.0.2", status=VMStatus.RUNNING)
-        mock_mgr.get.return_value = vm
-
         key = tmp_path / "id_rsa"
         key.write_text("fake key")
 
         with patch("mvmctl.core.ssh.exec_ssh") as mock_exec:
-            result = connect_to_vm(
-                "testvm", user="root", key_path=key, exec_mode=True, vm_manager=mock_mgr
-            )
+            result = connect_to_vm(ip="10.0.0.2", user="root", key_path=key, exec_mode=True)
             assert result == 0
             mock_exec.assert_called_once()
 
@@ -317,25 +260,13 @@ class TestResolveSshKey:
         assert result == "ssh-rsa BBBB fake"
 
     def test_resolve_not_found_with_available_keys(self, tmp_path):
-        """resolve_ssh_key should list available keys in error message."""
+        """resolve_ssh_key should list available keys in error message when provided."""
         keys_dir = tmp_path / "keys"
         keys_dir.mkdir()
 
         with patch("mvmctl.utils.fs.get_keys_dir", return_value=keys_dir):
-            with patch("mvmctl.core.key_manager.list_keys") as mock_list:
-                from mvmctl.core.key_manager import KeyInfo
-
-                mock_list.return_value = [
-                    KeyInfo(
-                        name="existing",
-                        fingerprint="SHA256:abc",
-                        algorithm="ssh-ed25519",
-                        comment="test",
-                        added_at="2026-01-01",
-                    )
-                ]
-                with pytest.raises(MVMKeyError, match="Available keys: existing"):
-                    resolve_ssh_key("nonexistent")
+            with pytest.raises(MVMKeyError, match="Available keys: existing"):
+                resolve_ssh_key("nonexistent", available_keys=["existing"])
 
     def test_resolve_not_found_no_keys(self, tmp_path):
         """resolve_ssh_key should suggest adding keys when none exist."""

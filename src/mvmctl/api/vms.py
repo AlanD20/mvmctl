@@ -415,8 +415,18 @@ def ssh_vm(
     cmd: str | None = None,
 ) -> int:
     """Open SSH session or execute command on a VM."""
+    from mvmctl.exceptions import MVMError, VMNotFoundError
+
+    # Resolve VM name to IP address
+    manager = get_vm_manager()
+    vm = manager.get(name)
+    if vm is None:
+        raise VMNotFoundError(f"VM '{name}' not found")
+    if not vm.ipv4:
+        raise MVMError(f"VM '{name}' has no IP address")
+
     return connect_to_vm(
-        vm_name_or_ip=name,
+        ip=vm.ipv4,
         user=user,
         key_path=key,
         command=cmd,

@@ -57,13 +57,19 @@ def test_vm_cache_dir(mock_get_vm_dir_by_hash):
 
 
 @patch("mvmctl.api.vms.connect_to_vm")
-def test_ssh_vm(mock_connect):
-    """ssh_vm forwards to connect_to_vm."""
+@patch("mvmctl.api.vms.get_vm_manager")
+def test_ssh_vm(mock_get_manager, mock_connect):
+    """ssh_vm looks up VM and forwards to connect_to_vm with IP."""
     mock_connect.return_value = 0
+    mock_manager = MagicMock()
+    mock_vm = VMInstance(name="vm1", ipv4="10.0.0.5", status=VMStatus.RUNNING)
+    mock_manager.get.return_value = mock_vm
+    mock_get_manager.return_value = mock_manager
+
     res = ssh_vm("vm1", user="ubuntu", key=Path("mykey"), cmd="uptime")
     assert res == 0
     mock_connect.assert_called_with(
-        vm_name_or_ip="vm1",
+        ip="10.0.0.5",
         user="ubuntu",
         key_path=Path("mykey"),
         command="uptime",
