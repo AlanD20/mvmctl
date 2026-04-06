@@ -20,15 +20,13 @@ class TestReconcileVM:
         mock_manager = mocker.MagicMock()
         sample_vm.pid = 1234
         sample_vm.api_socket_path = Path("/tmp/test.sock")
-        sample_vm.status = VMStatus.RUNNING
+        sample_vm.status = VMStatus.STARTING
+
+        mock_client = MagicMock()
+        mock_client.describe_instance.return_value = {"state": "Running"}
 
         with patch("os.kill", return_value=None):
-            mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
-            mock_client = MagicMock()
-            mock_client.describe_instance.return_value = {"state": "Running"}
-            mock_client_class.return_value.__enter__.return_value = mock_client
-
-            result = reconcile_vm(sample_vm, mock_manager)
+            result = reconcile_vm(sample_vm, mock_manager, mock_client)
 
         assert result == VMStatus.RUNNING
         assert sample_vm.status == VMStatus.RUNNING
