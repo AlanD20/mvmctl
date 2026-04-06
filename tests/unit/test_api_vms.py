@@ -440,18 +440,38 @@ def test_inspect_vm_rootfs_source_field(mocker: MockerFixture, tmp_path: Path):
 # -----------------------------------------------------------------------------
 
 
-@patch("mvmctl.api.vms._pause_vm")
+@patch("mvmctl.api.vms._pause_process")
 def test_pause_vm_api(mock_pause):
-    """pause_vm API delegates directly to core function (no privilege check)."""
-    pause_vm("myvm")
-    mock_pause.assert_called_once_with(name="myvm")
+    """pause_vm calls the process helper with a Firecracker client."""
+    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+        mock_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status = VMStatus.RUNNING
+        mock_vm.api_socket_path = Path("/tmp/fc.sock")
+        mock_manager.get.return_value = mock_vm
+        mock_get_manager.return_value = mock_manager
+
+        with patch("mvmctl.api.vms.FirecrackerClient"):
+            pause_vm("myvm")
+
+    mock_pause.assert_called_once()
 
 
-@patch("mvmctl.api.vms._resume_vm")
+@patch("mvmctl.api.vms._resume_process")
 def test_resume_vm_api(mock_resume):
-    """resume_vm API delegates directly to core function (no privilege check)."""
-    resume_vm("myvm")
-    mock_resume.assert_called_once_with(name="myvm")
+    """resume_vm calls the process helper with a Firecracker client."""
+    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+        mock_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status = VMStatus.PAUSED
+        mock_vm.api_socket_path = Path("/tmp/fc.sock")
+        mock_manager.get.return_value = mock_vm
+        mock_get_manager.return_value = mock_manager
+
+        with patch("mvmctl.api.vms.FirecrackerClient"):
+            resume_vm("myvm")
+
+    mock_resume.assert_called_once()
 
 
 # -----------------------------------------------------------------------------
@@ -459,29 +479,66 @@ def test_resume_vm_api(mock_resume):
 # -----------------------------------------------------------------------------
 
 
-@patch("mvmctl.core.vm_lifecycle.stop_vm")
+@patch("mvmctl.api.vms.graceful_shutdown")
 def test_stop_vm_api(mock_stop):
-    """stop_vm API delegates directly to core function."""
-    stop_vm("myvm")
-    mock_stop.assert_called_once_with(name="myvm", force=False)
+    """stop_vm updates state and delegates shutdown."""
+    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+        mock_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status = VMStatus.RUNNING
+        mock_vm.pid = 123
+        mock_vm.api_socket_path = Path("/tmp/fc.sock")
+        mock_manager.get.return_value = mock_vm
+        mock_get_manager.return_value = mock_manager
+
+        stop_vm("myvm")
+
+    mock_stop.assert_called_once_with(123, Path("/tmp/fc.sock"), force=False)
 
 
-@patch("mvmctl.core.vm_lifecycle.stop_vm")
+@patch("mvmctl.api.vms.graceful_shutdown")
 def test_stop_vm_api_force(mock_stop):
-    """stop_vm API passes force=True to core function."""
-    stop_vm("myvm", force=True)
-    mock_stop.assert_called_once_with(name="myvm", force=True)
+    """stop_vm passes force=True to shutdown."""
+    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+        mock_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status = VMStatus.RUNNING
+        mock_vm.pid = 123
+        mock_vm.api_socket_path = Path("/tmp/fc.sock")
+        mock_manager.get.return_value = mock_vm
+        mock_get_manager.return_value = mock_manager
+
+        stop_vm("myvm", force=True)
+
+    mock_stop.assert_called_once_with(123, Path("/tmp/fc.sock"), force=True)
 
 
-@patch("mvmctl.core.vm_lifecycle.start_vm")
-def test_start_vm_api(mock_start):
-    """start_vm API queries default binary and passes binary_id to core function."""
-    start_vm("myvm")
-    mock_start.assert_called_once_with(name="myvm", binary_id=None)
+@patch("mvmctl.api.vms.time.sleep")
+@patch("mvmctl.api.vms._write_pid_file")
+@patch("mvmctl.api.vms.subprocess.Popen")
+def test_start_vm_api(mock_popen, mock_write_pid, mock_sleep):
+    """start_vm queries the default binary and registers the VM."""
+    mock_popen.return_value.pid = 456
+    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+        mock_manager = MagicMock()
+        mock_vm = MagicMock()
+        mock_vm.status = VMStatus.STOPPED
+        mock_vm.id = "abc"
+        mock_vm.config = MagicMock(enable_api_socket=False, enable_console=False, kernel_path=None)
+        mock_manager.get.return_value = mock_vm
+        mock_get_manager.return_value = mock_manager
+        with patch("mvmctl.api.vms.get_vm_dir_by_hash", return_value=Path("/tmp/vm")):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("builtins.open", MagicMock()):
+                    start_vm("myvm")
+
+    mock_write_pid.assert_called_once()
 
 
-@patch("mvmctl.core.vm_lifecycle.reboot_vm")
-def test_reboot_vm_api(mock_reboot):
-    """reboot_vm API delegates directly to core function."""
+@patch("mvmctl.api.vms.start_vm")
+@patch("mvmctl.api.vms.stop_vm")
+def test_reboot_vm_api(mock_stop, mock_start):
+    """reboot_vm stops then starts the VM."""
     reboot_vm("myvm")
-    mock_reboot.assert_called_once_with(name="myvm", force=False)
+    mock_stop.assert_called_once_with("myvm", force=False)
+    mock_start.assert_called_once_with("myvm")

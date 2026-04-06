@@ -12,7 +12,7 @@ from mvmctl.models.network import NetworkConfig
 
 class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_manager.VMManager.register")
-    @patch("mvmctl.core.vm_lifecycle.ensure_default_network")
+    @patch("mvmctl.api.vms.ensure_default_network")
     @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("shutil.copy2")
     @patch("subprocess.Popen")
@@ -26,18 +26,18 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.network_manager.allocate_network_ip")
     @patch("mvmctl.utils.network.generate_mac")
     @patch("mvmctl.utils.network.bridge_exists")
-    @patch("mvmctl.core.vm_lifecycle.create_tap")
-    @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
-    @patch("mvmctl.core.vm_lifecycle.setup_nat")
+    @patch("mvmctl.api.vms.create_tap")
+    @patch("mvmctl.api.vms.add_iptables_forward_rules")
+    @patch("mvmctl.api.vms.setup_nat")
     @patch("mvmctl.utils.fs.write_pid_file")
-    @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+    @patch("mvmctl.api.vms.ConfigGenerator")
     @patch("mvmctl.core.cloud_init.write_cloud_init")
-    @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
+    @patch("mvmctl.api.vms.write_cloud_init")
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
-    @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
-    @patch("mvmctl.core.vm_lifecycle.ConsoleRelayManager")
+    @patch("mvmctl.api.vms.add_nocloud_input_rule")
+    @patch("mvmctl.api.vms.NoCloudNetServerManager")
+    @patch("mvmctl.api.vms.ConsoleRelayManager")
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
     @patch("shutil.which")
     def test_create_vm_with_console_starts_relay(
@@ -73,7 +73,7 @@ class TestConsoleWorkflow:
         mock_vm_register,
         tmp_path: Path,
     ):
-        from mvmctl.core.vm_lifecycle import create_vm
+        from mvmctl.api.vms import create_vm
 
         # Setup mock for subprocess.run to return success
         mock_run_result = MagicMock()
@@ -209,7 +209,7 @@ class TestConsoleWorkflow:
         assert mock_console_instance.start_relay.call_count == 1
 
     @patch("mvmctl.core.vm_manager.VMManager.register")
-    @patch("mvmctl.core.vm_lifecycle.ensure_default_network")
+    @patch("mvmctl.api.vms.ensure_default_network")
     @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("shutil.copy2")
     @patch("subprocess.Popen")
@@ -222,16 +222,16 @@ class TestConsoleWorkflow:
     @patch("mvmctl.core.network_manager.allocate_network_ip")
     @patch("mvmctl.utils.network.generate_mac")
     @patch("mvmctl.utils.network.bridge_exists")
-    @patch("mvmctl.core.vm_lifecycle.create_tap")
-    @patch("mvmctl.core.vm_lifecycle.add_iptables_forward_rules")
-    @patch("mvmctl.core.vm_lifecycle.setup_nat")
+    @patch("mvmctl.api.vms.create_tap")
+    @patch("mvmctl.api.vms.add_iptables_forward_rules")
+    @patch("mvmctl.api.vms.setup_nat")
     @patch("mvmctl.utils.fs.write_pid_file")
-    @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
+    @patch("mvmctl.api.vms.ConfigGenerator")
     @patch("mvmctl.core.cloud_init.write_cloud_init")
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
-    @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
+    @patch("mvmctl.api.vms.add_nocloud_input_rule")
+    @patch("mvmctl.api.vms.NoCloudNetServerManager")
     @patch("shutil.which")
     def test_create_vm_without_console_skips_relay(
         self,
@@ -262,7 +262,7 @@ class TestConsoleWorkflow:
         mock_vm_register,
         tmp_path: Path,
     ):
-        from mvmctl.core.vm_lifecycle import create_vm
+        from mvmctl.api.vms import create_vm
 
         # Setup mock for subprocess.run to return success
         mock_run_result = MagicMock()

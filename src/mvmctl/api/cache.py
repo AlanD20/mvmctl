@@ -7,11 +7,11 @@ prune operations across VMs, networks, images, and kernels.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from mvmctl.api.host import check_privileges_interactive
 from mvmctl.api.metadata import get_default_image_entry, get_default_kernel_entry
 from mvmctl.api.network import get_network_leases, list_networks, remove_network
+from mvmctl.api.vms import remove_vm
 from mvmctl.constants import DEFAULT_NETWORK_NAME, SUPPORTED_IMAGE_EXTENSIONS
 from mvmctl.core import cache_manager as core_cache_manager
 from mvmctl.core.metadata import (
@@ -20,7 +20,6 @@ from mvmctl.core.metadata import (
     remove_image_entry,
     remove_kernel_entry,
 )
-from mvmctl.core.vm_lifecycle import remove_vm
 from mvmctl.core.vm_manager import get_vm_manager
 from mvmctl.models.vm import VMStatus
 from mvmctl.utils.fs import (
