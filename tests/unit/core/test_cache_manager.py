@@ -9,16 +9,18 @@ from unittest.mock import MagicMock
 import pytest
 from pytest_mock import MockerFixture
 
+from mvmctl.api.cache import (
+    prune_all,
+    prune_images,
+    prune_kernels,
+    prune_networks,
+    prune_vms,
+)
 from mvmctl.core.cache_manager import (
     cache_init_all,
     cache_init_images,
     cache_init_kernels,
     cache_init_vms,
-    cache_prune_all,
-    cache_prune_images,
-    cache_prune_kernels,
-    cache_prune_networks,
-    cache_prune_vms,
 )
 from mvmctl.models.vm import VMInstance
 
@@ -94,7 +96,7 @@ class TestCacheInitAll:
 
 
 class TestCachePruneVms:
-    """Tests for cache_prune_vms function."""
+    """Tests for prune_vms function."""
 
     def test_cache_prune_vms_default_only_error(
         self,
@@ -106,10 +108,10 @@ class TestCachePruneVms:
         """By default, only ERROR state VMs are pruned."""
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [error_vm, stopped_vm, running_vm]
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.remove_vm")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.remove_vm")
 
-        removed = cache_prune_vms(include_stopped=False, include_running=False)
+        removed = prune_vms(include_stopped=False, include_running=False)
 
         assert len(removed) == 1
         assert error_vm.name in removed
@@ -126,10 +128,10 @@ class TestCachePruneVms:
         """Test --include-stopped flag."""
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [error_vm, stopped_vm, running_vm]
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.remove_vm")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.remove_vm")
 
-        removed = cache_prune_vms(include_stopped=True, include_running=False)
+        removed = prune_vms(include_stopped=True, include_running=False)
 
         assert len(removed) == 2
         assert error_vm.name in removed
@@ -146,10 +148,10 @@ class TestCachePruneVms:
         """Test --include-running flag (dangerous operation)."""
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [error_vm, stopped_vm, running_vm]
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.remove_vm")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.remove_vm")
 
-        removed = cache_prune_vms(include_stopped=False, include_running=True)
+        removed = prune_vms(include_stopped=False, include_running=True)
 
         assert len(removed) == 2
         assert error_vm.name in removed
@@ -164,10 +166,10 @@ class TestCachePruneVms:
         """Safety: don't prune running VMs by default."""
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [running_vm]
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mock_remove = mocker.patch("mvmctl.core.cache_manager.remove_vm")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mock_remove = mocker.patch("mvmctl.api.cache.remove_vm")
 
-        removed = cache_prune_vms(include_stopped=False, include_running=False)
+        removed = prune_vms(include_stopped=False, include_running=False)
 
         assert len(removed) == 0
         mock_remove.assert_not_called()
@@ -181,10 +183,10 @@ class TestCachePruneVms:
         """Test dry-run mode."""
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [error_vm, stopped_vm]
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mock_remove = mocker.patch("mvmctl.core.cache_manager.remove_vm")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mock_remove = mocker.patch("mvmctl.api.cache.remove_vm")
 
-        removed = cache_prune_vms(include_stopped=True, include_running=False, dry_run=True)
+        removed = prune_vms(include_stopped=True, include_running=False, dry_run=True)
 
         # Should report what would be removed
         assert len(removed) == 2
@@ -200,7 +202,7 @@ class TestCachePruneVms:
 
 
 class TestCachePruneNetworks:
-    """Tests for cache_prune_networks function."""
+    """Tests for prune_networks function."""
 
     def test_cache_prune_networks_not_in_use(self, mocker: MockerFixture):
         """Prune unused networks."""
@@ -210,12 +212,12 @@ class TestCachePruneNetworks:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []  # No VMs referencing any network
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_networks", return_value=[mock_network])
-        mocker.patch("mvmctl.core.cache_manager.get_network_leases", return_value=[])
-        mock_remove = mocker.patch("mvmctl.core.cache_manager.remove_network")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_networks", return_value=[mock_network])
+        mocker.patch("mvmctl.api.cache.get_network_leases", return_value=[])
+        mock_remove = mocker.patch("mvmctl.api.cache.remove_network")
 
-        removed = cache_prune_networks()
+        removed = prune_networks()
 
         assert len(removed) == 1
         assert "unused-network" in removed
@@ -232,11 +234,11 @@ class TestCachePruneNetworks:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [sample_vm]
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_networks", return_value=[mock_network])
-        mock_remove = mocker.patch("mvmctl.core.cache_manager.remove_network")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_networks", return_value=[mock_network])
+        mock_remove = mocker.patch("mvmctl.api.cache.remove_network")
 
-        removed = cache_prune_networks()
+        removed = prune_networks()
 
         assert len(removed) == 0
         mock_remove.assert_not_called()
@@ -248,11 +250,11 @@ class TestCachePruneNetworks:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_networks", return_value=[mock_network])
-        mock_remove = mocker.patch("mvmctl.core.cache_manager.remove_network")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_networks", return_value=[mock_network])
+        mock_remove = mocker.patch("mvmctl.api.cache.remove_network")
 
-        removed = cache_prune_networks()
+        removed = prune_networks()
 
         assert len(removed) == 0
         mock_remove.assert_not_called()
@@ -264,7 +266,7 @@ class TestCachePruneNetworks:
 
 
 class TestCachePruneImages:
-    """Tests for cache_prune_images function."""
+    """Tests for prune_images function."""
 
     def test_cache_prune_images_not_in_use(
         self,
@@ -287,12 +289,12 @@ class TestCachePruneImages:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []  # No VMs using this image
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_image_entries", return_value=mock_entries)
-        mocker.patch("mvmctl.core.cache_manager.get_default_image_entry", return_value=None)
-        mocker.patch("mvmctl.core.cache_manager.remove_image_entry")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_image_entries", return_value=mock_entries)
+        mocker.patch("mvmctl.api.cache.get_default_image_entry", return_value=None)
+        mocker.patch("mvmctl.api.cache.remove_image_entry")
 
-        removed = cache_prune_images()
+        removed = prune_images()
 
         assert len(removed) == 1
         assert full_hash in removed
@@ -325,12 +327,12 @@ class TestCachePruneImages:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [sample_vm]
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_image_entries", return_value=mock_entries)
-        mocker.patch("mvmctl.core.cache_manager.get_default_image_entry", return_value=None)
-        mock_remove_entry = mocker.patch("mvmctl.core.cache_manager.remove_image_entry")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_image_entries", return_value=mock_entries)
+        mocker.patch("mvmctl.api.cache.get_default_image_entry", return_value=None)
+        mock_remove_entry = mocker.patch("mvmctl.api.cache.remove_image_entry")
 
-        removed = cache_prune_images()
+        removed = prune_images()
 
         assert len(removed) == 0
         # Image file should still exist
@@ -356,16 +358,16 @@ class TestCachePruneImages:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_image_entries", return_value=mock_entries)
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_image_entries", return_value=mock_entries)
         # Return the default entry
         mocker.patch(
-            "mvmctl.core.cache_manager.get_default_image_entry",
+            "mvmctl.api.cache.get_default_image_entry",
             return_value=(default_hash, mock_entries[default_hash]),
         )
-        mock_remove_entry = mocker.patch("mvmctl.core.cache_manager.remove_image_entry")
+        mock_remove_entry = mocker.patch("mvmctl.api.cache.remove_image_entry")
 
-        removed = cache_prune_images()
+        removed = prune_images()
 
         assert len(removed) == 0
         # Default image should still exist
@@ -379,7 +381,7 @@ class TestCachePruneImages:
 
 
 class TestCachePruneKernels:
-    """Tests for cache_prune_kernels function."""
+    """Tests for prune_kernels function."""
 
     def test_cache_prune_kernels_not_in_use(
         self,
@@ -400,12 +402,12 @@ class TestCachePruneKernels:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_kernel_entries", return_value=mock_entries)
-        mocker.patch("mvmctl.core.cache_manager.get_default_kernel_entry", return_value=None)
-        mocker.patch("mvmctl.core.cache_manager.remove_kernel_entry")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_kernel_entries", return_value=mock_entries)
+        mocker.patch("mvmctl.api.cache.get_default_kernel_entry", return_value=None)
+        mocker.patch("mvmctl.api.cache.remove_kernel_entry")
 
-        removed = cache_prune_kernels()
+        removed = prune_kernels()
 
         assert len(removed) == 1
         assert full_hash in removed
@@ -437,12 +439,12 @@ class TestCachePruneKernels:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = [sample_vm]
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_kernel_entries", return_value=mock_entries)
-        mocker.patch("mvmctl.core.cache_manager.get_default_kernel_entry", return_value=None)
-        mock_remove_entry = mocker.patch("mvmctl.core.cache_manager.remove_kernel_entry")
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_kernel_entries", return_value=mock_entries)
+        mocker.patch("mvmctl.api.cache.get_default_kernel_entry", return_value=None)
+        mock_remove_entry = mocker.patch("mvmctl.api.cache.remove_kernel_entry")
 
-        removed = cache_prune_kernels()
+        removed = prune_kernels()
 
         assert len(removed) == 0
         assert kernel_path.exists()
@@ -467,15 +469,15 @@ class TestCachePruneKernels:
 
         mock_manager = mocker.MagicMock()
         mock_manager.list_all.return_value = []
-        mocker.patch("mvmctl.core.cache_manager.get_vm_manager", return_value=mock_manager)
-        mocker.patch("mvmctl.core.cache_manager.list_kernel_entries", return_value=mock_entries)
+        mocker.patch("mvmctl.api.cache.get_vm_manager", return_value=mock_manager)
+        mocker.patch("mvmctl.api.cache.list_kernel_entries", return_value=mock_entries)
         mocker.patch(
-            "mvmctl.core.cache_manager.get_default_kernel_entry",
+            "mvmctl.api.cache.get_default_kernel_entry",
             return_value=(default_hash, mock_entries[default_hash]),
         )
-        mock_remove_entry = mocker.patch("mvmctl.core.cache_manager.remove_kernel_entry")
+        mock_remove_entry = mocker.patch("mvmctl.api.cache.remove_kernel_entry")
 
-        removed = cache_prune_kernels()
+        removed = prune_kernels()
 
         assert len(removed) == 0
         assert default_kernel.exists()
@@ -488,24 +490,16 @@ class TestCachePruneKernels:
 
 
 class TestCachePruneAll:
-    """Tests for cache_prune_all function."""
+    """Tests for prune_all function."""
 
     def test_cache_prune_all_orchestration(self, mocker: MockerFixture):
         """Prune all resources."""
-        mock_prune_vms = mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_vms", return_value=["vm1"]
-        )
-        mock_prune_networks = mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_networks", return_value=["net1"]
-        )
-        mock_prune_images = mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_images", return_value=["img1"]
-        )
-        mock_prune_kernels = mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_kernels", return_value=["kern1"]
-        )
+        mock_prune_vms = mocker.patch("mvmctl.api.cache.prune_vms", return_value=["vm1"])
+        mock_prune_networks = mocker.patch("mvmctl.api.cache.prune_networks", return_value=["net1"])
+        mock_prune_images = mocker.patch("mvmctl.api.cache.prune_images", return_value=["img1"])
+        mock_prune_kernels = mocker.patch("mvmctl.api.cache.prune_kernels", return_value=["kern1"])
 
-        result = cache_prune_all()
+        result = prune_all()
 
         assert "vms" in result
         assert "networks" in result
@@ -526,18 +520,12 @@ class TestCachePruneAll:
 
     def test_cache_prune_all_respects_flags(self, mocker: MockerFixture):
         """Pass flags to sub-prunes."""
-        mock_prune_vms = mocker.patch("mvmctl.core.cache_manager.cache_prune_vms", return_value=[])
-        mock_prune_networks = mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_networks", return_value=[]
-        )
-        mock_prune_images = mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_images", return_value=[]
-        )
-        mock_prune_kernels = mocker.patch(
-            "mvmctl.core.cache_manager.cache_prune_kernels", return_value=[]
-        )
+        mock_prune_vms = mocker.patch("mvmctl.api.cache.prune_vms", return_value=[])
+        mock_prune_networks = mocker.patch("mvmctl.api.cache.prune_networks", return_value=[])
+        mock_prune_images = mocker.patch("mvmctl.api.cache.prune_images", return_value=[])
+        mock_prune_kernels = mocker.patch("mvmctl.api.cache.prune_kernels", return_value=[])
 
-        cache_prune_all(include_stopped=True, include_running=True, dry_run=True)
+        prune_all(include_stopped=True, include_running=True, dry_run=True)
 
         # Verify flags passed to VM prune (positional args)
         mock_prune_vms.assert_called_once_with(True, True, True)
