@@ -18,7 +18,6 @@ from urllib.request import Request, urlopen
 
 import yaml
 
-from mvmctl.api.metadata import get_default_kernel_entry
 from mvmctl.constants import (
     CONST_FILE_PERMS_EXECUTABLE,
     CONST_HTTP_TIMEOUT_SECONDS,
@@ -943,10 +942,6 @@ def build_kernel_pipeline(
     resolved_source_url = (
         render_template(source_url, template_vars) if "{" in source_url else source_url
     )
-    # this needs to be also rendered then used
-    resolved_sha256_url = (
-        render_template(source_url, template_vars) if "{" in source_url else source_url
-    )
 
     intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None
 
@@ -1119,6 +1114,8 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
 
 def _load_default_kernel(kernels_dir: Path) -> str | None:
+    from mvmctl.api.metadata import get_default_kernel_entry
+
     default_entry = get_default_kernel_entry(get_cache_dir())
     if default_entry is None:
         return None

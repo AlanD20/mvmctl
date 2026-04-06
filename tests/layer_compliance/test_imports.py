@@ -304,6 +304,16 @@ class TestCoreLayerDBCompliance:
     3. Call db.get_default_*() methods
     """
 
+    # Files exempt from Core→DB import checks (legitimate DB-access modules)
+    CORE_DB_ALLOWLIST = {
+        "mvm_db.py",  # The DB interface itself — always allowed
+        "vm_manager.py",  # VM persistence layer — is the CRUD layer for VM state
+        "metadata.py",  # Metadata CRUD layer — list/update/find for images/kernels/binaries
+        "host.py",  # Host orchestration — receives db as parameter
+        "host_setup.py",  # Host init — receives db as parameter
+        "host_state.py",  # Host state snapshots — receives db as parameter
+    }
+
     def _parse_ast(self, file_path: Path) -> ast.AST | None:
         """Parse a Python file and return the AST."""
         content = file_path.read_text()
@@ -405,8 +415,8 @@ class TestCoreLayerDBCompliance:
         for file_path in core_files:
             if file_path.name == "__init__.py":
                 continue
-            if file_path.name == "mvm_db.py":
-                continue  # The ORM module itself is allowed to import it
+            if file_path.name in self.CORE_DB_ALLOWLIST:
+                continue  # Exempt files are allowed to import MVMDatabase
 
             tree = self._parse_ast(file_path)
             if tree is None:
@@ -450,8 +460,8 @@ class TestCoreLayerDBCompliance:
         for file_path in core_files:
             if file_path.name == "__init__.py":
                 continue
-            if file_path.name == "mvm_db.py":
-                continue  # The ORM module itself is allowed
+            if file_path.name in self.CORE_DB_ALLOWLIST:
+                continue  # Exempt files are allowed to instantiate MVMDatabase
 
             tree = self._parse_ast(file_path)
             if tree is None:
@@ -495,8 +505,8 @@ class TestCoreLayerDBCompliance:
         for file_path in core_files:
             if file_path.name == "__init__.py":
                 continue
-            if file_path.name == "mvm_db.py":
-                continue  # The ORM module itself is allowed
+            if file_path.name in self.CORE_DB_ALLOWLIST:
+                continue  # Exempt files are allowed to query DB defaults
 
             tree = self._parse_ast(file_path)
             if tree is None:

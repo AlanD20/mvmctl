@@ -8,7 +8,6 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Any, TypedDict
 
-from mvmctl.api.metadata import get_default_network_entry
 from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
     DEFAULT_NETWORK_SUBNET,
@@ -170,6 +169,8 @@ def list_networks() -> list[NetworkConfig]:
     Returns:
         List of NetworkConfig objects with is_default populated from metadata
     """
+    from mvmctl.api.metadata import get_default_network_entry
+
     cache_dir = get_cache_dir()
     entries = list_network_entries(cache_dir)
     if not entries:
@@ -254,6 +255,8 @@ def set_default_network(name: str) -> None:
 
 def _should_preserve_current_default(name: str) -> bool:
     """Check if current default should be preserved (not the same as new default)."""
+    from mvmctl.api.metadata import get_default_network_entry
+
     cache_dir = get_cache_dir()
     default_entry = get_default_network_entry(cache_dir)
     if default_entry is None:
@@ -497,10 +500,8 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
 def release_network_ip(network_name: str, vm_name: str) -> None:
     """Release a VM's IP lease from a network."""
     leases = get_network_leases(network_name)
-    released_ip = None
     for lease in leases:
         if lease.vm_id == vm_name:
-            released_ip = lease.ipv4
             break
 
     leases = [lease for lease in leases if lease.vm_id != vm_name]
