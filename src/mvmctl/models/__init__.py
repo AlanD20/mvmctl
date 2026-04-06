@@ -6,6 +6,7 @@ from mvmctl.models.kernel import KernelSpec
 from mvmctl.models.vm import VMConfig, VMInstance, VMStatus
 from mvmctl.models.vm_config_file import (
     VMExportBinaryConfig,
+    VMExportBootConfig,
     VMExportCloudInitConfig,
     VMExportComputeConfig,
     VMExportConfig,
@@ -13,7 +14,6 @@ from mvmctl.models.vm_config_file import (
     VMExportImageConfig,
     VMExportKernelConfig,
     VMExportNetworkConfig,
-    VMExportBootConfig,
 )
 
 __all__ = [

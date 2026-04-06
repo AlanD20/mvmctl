@@ -13,19 +13,6 @@ from mvmctl.models.cloud_init import CloudInitMode
 if TYPE_CHECKING:
     from mvmctl.core.config_gen import DriveConfig
 
-from mvmctl.constants import (
-    DEFAULT_VM_ENABLE_API_SOCKET,
-    DEFAULT_VM_ENABLE_CONSOLE,
-    DEFAULT_VM_ENABLE_LOGGING,
-    DEFAULT_VM_ENABLE_METRICS,
-    DEFAULT_VM_ENABLE_PCI,
-    DEFAULT_VM_KERNEL_FILENAME,
-    DEFAULT_VM_LSM_FLAGS,
-    DEFAULT_VM_MEM_MIB,
-    DEFAULT_VM_ROOTFS_FILENAME,
-    DEFAULT_VM_VCPU_COUNT,
-)
-
 
 class VMStatus(StrEnum):
     """VM lifecycle states."""
@@ -60,25 +47,28 @@ class VMConfig:
         root_fs_type: Filesystem type of the root image (e.g. ext4, btrfs, xfs).
     """
 
+    # Required fields (CLI/API layer resolves these)
     name: str
-    vm_id: str = ""
-    vcpu_count: int = DEFAULT_VM_VCPU_COUNT
-    mem_size_mib: int = DEFAULT_VM_MEM_MIB
-    kernel_path: Path = field(default_factory=lambda: Path(DEFAULT_VM_KERNEL_FILENAME))
-    rootfs_path: Path = field(default_factory=lambda: Path(DEFAULT_VM_ROOTFS_FILENAME))
+    vcpu_count: int
+    mem_size_mib: int
+    enable_api_socket: bool
+    enable_pci: bool
+    lsm_flags: str
+    enable_logging: bool
+    enable_metrics: bool
+    enable_console: bool
+    cloud_init_mode: CloudInitMode
+
+    # Optional fields with defaults
+    vm_id: str = ""  # Empty string is valid sentinel for "not set"
+    kernel_path: Path | None = None
+    rootfs_path: Path | None = None
     boot_args: str | None = None
     root_uuid: str | None = None
     root_fs_type: str | None = None
-    enable_api_socket: bool = DEFAULT_VM_ENABLE_API_SOCKET
-    enable_pci: bool = DEFAULT_VM_ENABLE_PCI
-    lsm_flags: str = DEFAULT_VM_LSM_FLAGS
-    extra_drives: list[DriveConfig] = field(default_factory=list)
-    enable_logging: bool = DEFAULT_VM_ENABLE_LOGGING
-    enable_metrics: bool = DEFAULT_VM_ENABLE_METRICS
-    enable_console: bool = DEFAULT_VM_ENABLE_CONSOLE
-    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT
+    extra_drives: list[DriveConfig] = field(default_factory=list)  # Technical default OK
     cloud_init_iso_path: Path | None = None
-    keep_cloud_init_iso: bool = False
+    keep_cloud_init_iso: bool = False  # Operational flag, not config-backed
     nocloud_net_url: str | None = None
 
     def __post_init__(self) -> None:
@@ -155,20 +145,20 @@ class VMConfig:
         return cls(
             name=data.get("name", ""),
             vm_id=data.get("vm_id", ""),
-            vcpu_count=data.get("vcpu_count", DEFAULT_VM_VCPU_COUNT),
-            mem_size_mib=data.get("mem_size_mib", DEFAULT_VM_MEM_MIB),
-            kernel_path=Path(data.get("kernel_path", DEFAULT_VM_KERNEL_FILENAME)),
-            rootfs_path=Path(data.get("rootfs_path", DEFAULT_VM_ROOTFS_FILENAME)),
+            vcpu_count=data["vcpu_count"],  # Required - no default
+            mem_size_mib=data["mem_size_mib"],  # Required - no default
+            kernel_path=Path(data["kernel_path"]) if data.get("kernel_path") else None,
+            rootfs_path=Path(data["rootfs_path"]) if data.get("rootfs_path") else None,
             boot_args=data.get("boot_args"),
             root_uuid=data.get("root_uuid"),
             root_fs_type=data.get("root_fs_type"),
-            enable_api_socket=data.get("enable_api_socket", DEFAULT_VM_ENABLE_API_SOCKET),
-            enable_pci=data.get("enable_pci", DEFAULT_VM_ENABLE_PCI),
-            lsm_flags=data.get("lsm_flags", DEFAULT_VM_LSM_FLAGS),
+            enable_api_socket=data["enable_api_socket"],  # Required - no default
+            enable_pci=data["enable_pci"],  # Required - no default
+            lsm_flags=data["lsm_flags"],  # Required - no default
             extra_drives=extra_drives,
-            enable_logging=data.get("enable_logging", DEFAULT_VM_ENABLE_LOGGING),
-            enable_metrics=data.get("enable_metrics", DEFAULT_VM_ENABLE_METRICS),
-            enable_console=data.get("enable_console", DEFAULT_VM_ENABLE_CONSOLE),
+            enable_logging=data["enable_logging"],  # Required - no default
+            enable_metrics=data["enable_metrics"],  # Required - no default
+            enable_console=data["enable_console"],  # Required - no default
             cloud_init_mode=(
                 CloudInitMode(data["cloud_init_mode"])
                 if data.get("cloud_init_mode")

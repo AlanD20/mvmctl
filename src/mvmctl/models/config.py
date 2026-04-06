@@ -47,9 +47,12 @@ class SystemDefaultsConfig:
     enable_api_socket: bool
     enable_pci: bool
     lsm_flags: str
+    enable_logging: bool
+    enable_metrics: bool
 
     # Cloud-init
     cloud_init_mode: str  # "inject", "iso", "net", "off"
 
-    # Network (name hint only — canonical default is SQLite is_default=1)
+    # Network interface and name
+    network_interface: str
     default_network_name: str
