@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING, Any, List, Optional, Union
 import typer
 
 if TYPE_CHECKING:
-    from mvmctl.core.config import VMDefaultsConfig
+    from mvmctl.models.config import SystemDefaultsConfig
 
 from mvmctl.api.network import check_ip_available
 from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from mvmctl.api.vms import (
     create_vm,
+    export_vm_config,
     get_vm_status_with_exit_code,
     list_vms,
     load_snapshot,
@@ -30,7 +31,6 @@ from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
     DEFAULT_CLOUD_INIT_SEED_PATH,
-    DEFAULT_NETWORK_NAME,
 )
 from mvmctl.exceptions import MVMError
 from mvmctl.models import CloudInitMode, VMInstance
@@ -81,38 +81,11 @@ def help_cmd(ctx: typer.Context) -> None:
     raise typer.Exit()
 
 
-def _resolve_default_image() -> str | None:
-    try:
-        from mvmctl.api.metadata import get_default_image_entry
-
-        default_entry = get_default_image_entry()
-        if default_entry is None:
-            return None
-        image_id, meta = default_entry
-        os_slug = meta.get("os_slug")
-        if isinstance(os_slug, str) and os_slug:
-            return os_slug
-        return image_id
-    except Exception:
-        return None
-
-
-def _resolve_default_kernel() -> str | None:
-    try:
-        from mvmctl.api.assets import get_default_kernel_path
-        from mvmctl.utils.fs import get_kernels_dir
-
-        path = get_default_kernel_path(get_kernels_dir())
-        return str(path) if path else None
-    except Exception:
-        return None
-
-
-def _get_vm_defaults() -> "VMDefaultsConfig":
+def _get_vm_defaults() -> "SystemDefaultsConfig":
     from mvmctl.api.config import load_config
     from mvmctl.utils.fs import get_assets_dir
 
-    return load_config(get_assets_dir(), build_mvm_defaults()).vm_defaults
+    return load_config(get_assets_dir(), build_mvm_defaults())
 
 
 def _resolve_active_firecracker_bin() -> str:
@@ -124,16 +97,6 @@ def _resolve_active_firecracker_bin() -> str:
     except AssetNotFoundError as e:
         print_error(str(e))
         raise typer.Exit(1) from e
-
-
-def _resolve_default_network() -> str:
-    """Resolve the default network from metadata, falling back to 'default'."""
-    from mvmctl.api.metadata import get_default_network_entry
-
-    entry = get_default_network_entry()
-    if entry is not None:
-        return entry[0]  # network name
-    return DEFAULT_NETWORK_NAME
 
 
 @app.command()
@@ -219,6 +182,21 @@ def create(
         "--no-console",
         help="Disable serial console",
     ),
+    lsm_flags: Optional[str] = typer.Option(
+        None,
+        "--lsm-flags",
+        help="Linux Security Module flags for kernel cmdline (default: from user config)",
+    ),
+    enable_logging: Optional[bool] = typer.Option(
+        None,
+        "--enable-logging/--no-enable-logging",
+        help="Enable Firecracker logging (default: from user config)",
+    ),
+    enable_metrics: Optional[bool] = typer.Option(
+        None,
+        "--enable-metrics/--no-enable-metrics",
+        help="Enable Firecracker metrics (default: from user config)",
+    ),
     firecracker_bin: Optional[str] = typer.Option(
         None,
         "--firecracker-bin",
@@ -297,6 +275,13 @@ def create(
     effective_vcpus: int = vcpus if vcpus is not None else _defaults.vcpu_count
     effective_mem: int = mem if mem is not None else _defaults.mem_size_mib
     effective_user: str = user if user is not None else _defaults.ssh_user
+    effective_lsm_flags: str = lsm_flags if lsm_flags is not None else _defaults.lsm_flags
+    effective_enable_logging: bool = (
+        enable_logging if enable_logging is not None else _defaults.enable_logging
+    )
+    effective_enable_metrics: bool = (
+        enable_metrics if enable_metrics is not None else _defaults.enable_metrics
+    )
 
     # Variables for path resolution
     resolved_image_path: Path | None = None
@@ -305,11 +290,9 @@ def create(
     kernel_id_for_lookup: str | None = None
     effective_api_socket: bool = True
     effective_pci: bool = enable_pci if enable_pci is not None else _defaults.enable_pci
-    effective_network: str = (
-        network_name if network_name is not None else _resolve_default_network()
-    )
+    effective_network: str | None = network_name
     # Check IP availability before VM creation
-    if ip is not None:
+    if ip is not None and effective_network is not None:
         check_ip_available(effective_network, ip)
 
     # Check mutual exclusivity of --no-cloud-init and --cloud-init-iso
@@ -337,22 +320,13 @@ def create(
             raise typer.Exit(code=1)
         resolved_image_path = image_path
         image_id_for_lookup = image if image else str(image_path)
-    elif image is None:
-        image = _resolve_default_image()
-        if image is None:
-            print_error(
-                "No --image specified and no default image set. "
-                "Use 'mvm image fetch <name>' then 'mvm image set-default <name>', or pass --image."
-            )
-            raise typer.Exit(code=1)
-        resolved_image_path = resolve_image_multi_strategy(image)
-        image_id_for_lookup = image if image else str(resolved_image_path)
-    else:
+    elif image is not None:
         try:
             resolved_image_path = resolve_image_multi_strategy(image)
             image_id_for_lookup = image if image else str(resolved_image_path)
         except MVMError as e:
             handle_mvm_error(e)
+    # else: image is None — API will resolve default from DB
 
     # Kernel path validation and resolution
     if kernel_path is not None:
@@ -364,16 +338,13 @@ def create(
             raise typer.Exit(code=1)
         resolved_kernel_path = kernel_path
         kernel_id_for_lookup = kernel if kernel else str(kernel_path)
-    elif kernel is None:
-        kernel = _resolve_default_kernel()
-        resolved_kernel_path = Path(kernel) if kernel is not None else None
-        kernel_id_for_lookup = kernel
-    else:
+    elif kernel is not None:
         try:
             resolved_kernel_path = resolve_kernel_multi_strategy(kernel)
             kernel_id_for_lookup = kernel if kernel else str(resolved_kernel_path)
         except MVMError as e:
             handle_mvm_error(e)
+    # else: kernel is None — API will resolve default from DB
 
     effective_bin = firecracker_bin or _resolve_active_firecracker_bin()
 
@@ -502,6 +473,9 @@ def create(
             enable_pci=effective_pci,
             enable_console=not no_console,
             firecracker_bin=effective_bin,
+            lsm_flags=effective_lsm_flags,
+            enable_logging=effective_enable_logging,
+            enable_metrics=effective_enable_metrics,
             cloud_init_mode=effective_cloud_init_mode,
             cloud_init_iso_path=effective_cloud_init_iso_path,
             keep_cloud_init_iso=keep_cloud_init_iso,
@@ -1023,3 +997,28 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
 
     for line in tree_lines:
         print(line)
+
+
+@app.command(name="export")
+def export_vm(
+    name: str = typer.Option(..., "--name", "-n", help="VM name to export"),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Output file path (default: <vm_name>.json)"
+    ),
+) -> None:
+    """Export VM configuration as portable JSON.
+
+    Examples:
+        mvm vm export --name myvm
+        mvm vm export --name myvm --output /path/to/config.json
+    """
+    from mvmctl.exceptions import MVMError
+
+    effective_output = output or Path(f"{name}.json")
+
+    try:
+        config = export_vm_config(name)
+        config.to_json_file(effective_output)
+        print_success(f"VM '{name}' exported to {effective_output}")
+    except MVMError as e:
+        handle_mvm_error(e)

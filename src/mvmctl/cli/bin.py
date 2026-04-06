@@ -27,7 +27,6 @@ from mvmctl.api.assets import (
 from mvmctl.api.metadata import (
     find_images_by_id_prefix,
     find_kernels_by_id_prefix,
-    get_default_image_entry,
     get_image_entry,
     list_image_entries,
     remove_image_entry,
@@ -847,20 +846,6 @@ def _save_image_meta(
     update_image_entry(cache_dir, image_id, **fields)
 
 
-def _get_default_image() -> str | None:
-    try:
-        default_entry = get_default_image_entry()
-        if default_entry is None:
-            return None
-        image_id, meta = default_entry
-        os_slug = meta.get("os_slug")
-        if isinstance(os_slug, str) and os_slug:
-            return os_slug
-        return image_id
-    except Exception:
-        return None
-
-
 def _output_remote_images(images: list[Any], images_dir: Path, json_output: bool) -> None:
     if json_output:
         typer.echo(
@@ -953,7 +938,6 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
         typer.echo(json.dumps(result, indent=2))
         return
 
-    default_img = _get_default_image()
     rows: list[list[str]] = []
 
     for img in images:
@@ -962,7 +946,7 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
             continue
         meta_key, meta = entry
         found_path = _resolve_image_file(images_dir, meta_key, meta)
-        is_default = img.id == default_img
+        is_default = bool(meta.get("is_default", 0))
         is_missing = is_file_missing(found_path)
         added = (
             human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
@@ -989,7 +973,7 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
         if str(meta.get("os_slug", meta_id)) in os_slugs:
             continue
         found_path = _resolve_image_file(images_dir, meta_id, meta)
-        is_default = meta_id == default_img
+        is_default = bool(meta.get("is_default", 0))
         is_missing = is_file_missing(found_path)
         os_name = str(meta.get("os_name", meta_id))
         added = (

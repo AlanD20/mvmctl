@@ -13,7 +13,7 @@ from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error
 
 if TYPE_CHECKING:
-    from mvmctl.core.config import VMDefaultsConfig
+    from mvmctl.models.config import SystemDefaultsConfig
 
 app = typer.Typer(
     help="VM SSH access",
@@ -63,11 +63,11 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
     return None
 
 
-def _get_vm_defaults() -> "VMDefaultsConfig":
+def _get_vm_defaults() -> "SystemDefaultsConfig":
     from mvmctl.api.config import load_config
     from mvmctl.utils.fs import get_assets_dir
 
-    return load_config(get_assets_dir(), build_mvm_defaults()).vm_defaults
+    return load_config(get_assets_dir(), build_mvm_defaults())
 
 
 @app.command()
