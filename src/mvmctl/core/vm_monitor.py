@@ -10,18 +10,15 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from mvmctl.exceptions import FirecrackerError, SocketNotFoundError
 from mvmctl.models.vm import VMInstance, VMStatus
 
-if TYPE_CHECKING:
-    from mvmctl.core.vm_manager import VMManager
-
 logger = logging.getLogger(__name__)
 
 
-def reconcile_vm(vm: VMInstance, manager: "VMManager") -> VMStatus:
+def reconcile_vm(vm: VMInstance, manager: Any, client: Any | None = None) -> VMStatus:
     """Determine actual VM state from live signals and persist it.
 
     Detection priority:
@@ -41,6 +38,7 @@ def reconcile_vm(vm: VMInstance, manager: "VMManager") -> VMStatus:
     Args:
         vm: The VM instance to reconcile
         manager: The VM manager for persisting state changes
+        client: Optional FirecrackerClient for API queries (required if process alive)
 
     Returns:
         The reconciled VM state
@@ -68,7 +66,11 @@ def reconcile_vm(vm: VMInstance, manager: "VMManager") -> VMStatus:
 
     if process_alive:
         # Process is alive - query Firecracker API
-        new_state = _check_firecracker_state(vm)
+        if client is None:
+            # Cannot query without client - assume running
+            new_state = VMStatus.RUNNING
+        else:
+            new_state = _check_firecracker_state(vm, client)
     else:
         # Process is dead - determine state from exit code
         new_state = _determine_state_from_exit_code(vm)
@@ -87,26 +89,18 @@ def reconcile_vm(vm: VMInstance, manager: "VMManager") -> VMStatus:
     return new_state
 
 
-def _check_firecracker_state(vm: VMInstance) -> VMStatus:
+def _check_firecracker_state(vm: VMInstance, client: Any) -> VMStatus:
     """Query Firecracker API to determine VM state.
 
     Args:
         vm: The VM instance with socket_path
+        client: FirecrackerClient instance for API communication
 
     Returns:
         VMState based on Firecracker response
     """
-    socket_path = vm.api_socket_path
-
-    # If no socket path, we can't query FC, but process is alive
-    if socket_path is None:
-        return VMStatus.RUNNING
-
     try:
-        from mvmctl.core.firecracker import FirecrackerClient
-
-        with FirecrackerClient(Path(socket_path)) as client:
-            instance_info = client.describe_instance()
+        instance_info = client.describe_instance()
 
         if instance_info is None:
             # Socket reachable but no response - assume running
