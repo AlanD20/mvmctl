@@ -51,7 +51,7 @@ from mvmctl.core.vm_lifecycle import (
     snapshot_vm as _snapshot_vm,
 )
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
-from mvmctl.models import CloudInitMode, VMInstance, VMStatus
+from mvmctl.models import CloudInitMode, VMExportConfig, VMInstance, VMStatus
 from mvmctl.services.console_relay import ConsoleRelayManager
 
 __all__ = [
@@ -87,8 +87,7 @@ __all__ = [
     "disconnect_from_relay",
     "read_console_output",
     "send_console_input",
-    "inspect_vm",
-    "resolve_vm_selector",
+    "export_vm_config",
 ]
 
 
@@ -209,20 +208,23 @@ def resolve_vm_selector(selector: str) -> str:
 
 def create_vm(
     name: str,
-    image: str,
     vcpus: int,
     mem: int,
-    network_name: str,
     user: str,
     enable_api_socket: bool,
     enable_pci: bool,
     enable_console: bool,
     firecracker_bin: str,
+    lsm_flags: str,
+    enable_logging: bool,
+    enable_metrics: bool,
+    image: str | None = None,
     kernel: str | None = None,
     image_path: Path | None = None,
     kernel_path: Path | None = None,
     disk_size: str | None = None,
     ip: str | None = None,
+    network_name: str | None = None,
     mac: str | None = None,
     ssh_key: str | None = None,
     user_data: Path | None = None,
@@ -232,12 +234,65 @@ def create_vm(
     vm_manager: VMManager | None = None,
     nocloud_net_port: int = 0,
 ) -> VMInstance:
+    from mvmctl.core.image import (
+        resolve_image_fs_type as _resolve_image_fs_type,
+    )
+    from mvmctl.core.image import (
+        resolve_image_fs_uuid as _resolve_image_fs_uuid,
+    )
+    from mvmctl.core.metadata import list_image_entries
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.exceptions import AssetNotFoundError
+    from mvmctl.utils.fs import get_cache_dir
+
+    # Resolve DB-backed defaults when CLI passes None
+    if image is None:
+        db = MVMDatabase()
+        default_image = db.get_default_image()
+        if default_image is None:
+            raise AssetNotFoundError(
+                "No image specified and no default image set. "
+                "Use 'mvm image fetch <name>' then 'mvm image set-default <name>', or pass --image."
+            )
+        image = default_image
+
+    if network_name is None:
+        db = MVMDatabase()
+        default_network = db.get_default_network()
+        if default_network is None:
+            from mvmctl.constants import DEFAULT_NETWORK_NAME
+
+            network_name = DEFAULT_NETWORK_NAME
+        else:
+            network_name = default_network.name
+
     check_privileges_interactive("/usr/sbin/ip", f"create VM '{name}'")
+
+    # Resolve image path and metadata in API layer
+    if image_path is not None:
+        resolved_image_path = image_path
+        resolved_image_fs_uuid = _resolve_image_fs_uuid(image) if image else None
+        resolved_image_fs_type = _resolve_image_fs_type(image) if image else None
+        resolved_image_hash: str | None = None
+        if resolved_image_path.suffix == ".zst":
+            cache_dir = get_cache_dir()
+            all_entries = list_image_entries(cache_dir)
+            for img_id, meta in all_entries.items():
+                if meta.get("path") == resolved_image_path.name:
+                    resolved_image_hash = img_id
+                    break
+            if resolved_image_hash is None:
+                resolved_image_hash = resolved_image_path.stem
+    else:
+        resolved_image_path = resolve_image_multi_strategy(image)
+        resolved_image_fs_uuid = _resolve_image_fs_uuid(image)
+        resolved_image_fs_type = _resolve_image_fs_type(image)
+        resolved_image_hash = None
+
     return _create_vm(
         name=name,
-        image=image,
+        image_path=resolved_image_path,
         kernel=kernel,
-        image_path=image_path,
         kernel_path=kernel_path,
         vcpus=vcpus,
         mem=mem,
@@ -252,11 +307,17 @@ def create_vm(
         enable_pci=enable_pci,
         enable_console=enable_console,
         firecracker_bin=firecracker_bin,
+        lsm_flags=lsm_flags,
+        enable_logging=enable_logging,
+        enable_metrics=enable_metrics,
         cloud_init_mode=cloud_init_mode,
         cloud_init_iso_path=cloud_init_iso_path,
         keep_cloud_init_iso=keep_cloud_init_iso,
         vm_manager=vm_manager,
         nocloud_net_port=nocloud_net_port,
+        image_fs_uuid=resolved_image_fs_uuid,
+        image_fs_type=resolved_image_fs_type,
+        image_hash=resolved_image_hash,
     )
 
 
@@ -688,3 +749,167 @@ def _get_exit_code_from_sources(vm: VMInstance) -> int | None:
             pass
 
     return None
+
+
+def export_vm_config(name: str) -> "VMExportConfig":
+    """Export a VM's configuration as a portable VMExportConfig.
+
+    Uses semantic references (os_slug, version, name) — NEVER internal SHA256 IDs.
+
+    Args:
+        name: VM name or ID prefix
+
+    Returns:
+        VMExportConfig with semantic references
+
+    Raises:
+        VMNotFoundError: If VM not found
+    """
+    from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
+    from mvmctl.core.metadata import list_image_entries, list_kernel_entries
+    from mvmctl.exceptions import VMNotFoundError
+    from mvmctl.models.vm_config_file import (
+        VMExportBinaryConfig,
+        VMExportBootConfig,
+        VMExportCloudInitConfig,
+        VMExportComputeConfig,
+        VMExportFirecrackerConfig,
+        VMExportImageConfig,
+        VMExportKernelConfig,
+        VMExportNetworkConfig,
+    )
+    from mvmctl.utils.fs import get_cache_dir
+
+    manager = get_vm_manager()
+
+    # Try ID prefix first
+    vm = manager.get_by_id_prefix(name)
+    if not vm:
+        # Fall back to name lookup
+        matches = manager.get_by_name(name)
+        if len(matches) == 1:
+            vm = matches[0]
+        elif len(matches) > 1:
+            from mvmctl.exceptions import MVMError
+
+            raise MVMError(f"Multiple VMs match name '{name}' — use ID prefix")
+        else:
+            raise VMNotFoundError(f"VM '{name}' not found")
+
+    if vm.config is None:
+        raise VMNotFoundError(f"VM '{name}' has no configuration")
+
+    config = vm.config
+
+    # Resolve image os_slug from metadata
+    image_os_slug = ""
+    image_arch = ""
+    if vm.image_id:
+        cache_dir = get_cache_dir()
+        try:
+            matches = find_images_by_id_prefix(cache_dir, vm.image_id)
+            if matches:
+                _, meta = matches[0]
+                image_os_slug = meta.get("os_slug", "")
+                image_arch = meta.get("arch", "")
+        except Exception:
+            pass
+
+        # Fallback: search all entries by matching the image_id
+        if not image_os_slug:
+            try:
+                all_entries = list_image_entries(cache_dir)
+                for img_id, meta in all_entries.items():
+                    if img_id == vm.image_id or img_id.startswith(vm.image_id):
+                        image_os_slug = meta.get("os_slug", "")
+                        image_arch = meta.get("arch", "")
+                        break
+            except Exception:
+                pass
+
+    # Resolve kernel version from metadata
+    kernel_version: str | None = None
+    kernel_arch: str | None = None
+    kernel_type: str | None = None
+    if vm.kernel_id:
+        cache_dir = get_cache_dir()
+        try:
+            matches = find_kernels_by_id_prefix(cache_dir, vm.kernel_id)
+            if matches:
+                _, meta = matches[0]
+                kernel_version = meta.get("version")
+                kernel_arch = meta.get("arch")
+                kernel_type = meta.get("type")
+        except Exception:
+            pass
+
+        # Fallback: search all entries
+        if not kernel_version:
+            try:
+                all_entries = list_kernel_entries(cache_dir)
+                for kern_id, meta in all_entries.items():
+                    if kern_id == vm.kernel_id or kern_id.startswith(vm.kernel_id):
+                        kernel_version = meta.get("version")
+                        kernel_arch = meta.get("arch")
+                        kernel_type = meta.get("type")
+                        break
+            except Exception:
+                pass
+
+    # Resolve binary version from metadata
+    binary_version: str | None = None
+    try:
+        from mvmctl.core.metadata import list_binary_entries
+
+        cache_dir = get_cache_dir()
+        all_binaries = list_binary_entries(cache_dir)
+        for bin_name, meta in all_binaries.items():
+            if meta.get("is_default"):
+                binary_version = meta.get("version")
+                break
+    except Exception:
+        pass
+
+    # Build network config
+    network_name = vm.network_name
+    network_ip = vm.ipv4
+    network_mac = vm.mac
+
+    return VMExportConfig(
+        name=vm.name,
+        compute=VMExportComputeConfig(
+            vcpus=config.vcpu_count,
+            mem=config.mem_size_mib,
+        ),
+        image=VMExportImageConfig(
+            os_slug=image_os_slug,
+            arch=image_arch,
+        ),
+        kernel=VMExportKernelConfig(
+            version=kernel_version,
+            arch=kernel_arch,
+            type=kernel_type,
+        ),
+        binary=VMExportBinaryConfig(
+            version=binary_version,
+        ),
+        network=VMExportNetworkConfig(
+            name=network_name,
+            ip=network_ip,
+            mac=network_mac,
+        ),
+        boot=VMExportBootConfig(
+            args=config.boot_args,
+            enable_console=config.enable_console,
+        ),
+        firecracker=VMExportFirecrackerConfig(
+            enable_api_socket=config.enable_api_socket,
+            enable_pci=config.enable_pci,
+            lsm_flags=config.lsm_flags,
+        ),
+        cloud_init=VMExportCloudInitConfig(
+            mode=config.cloud_init_mode.value,
+            user=config.name,  # VM name doubles as default user
+            keep_iso=config.keep_cloud_init_iso,
+        ),
+    )

@@ -1,13 +1,4 @@
-from mvmctl.core.config import (
-    FirecrackerConfig,
-    MVMConfig,
-    NetworkDefaultsConfig,
-    PathsConfig,
-    VMDefaultsConfig,
-    dump_config,
-    load_config,
-    validate_config,
-)
+from mvmctl.core.config import dump_config, load_config, validate_config
 from mvmctl.core.config_state import (
     get_defaults_config,
     get_firecracker_config,
@@ -20,6 +11,7 @@ from mvmctl.core.metadata import (
     get_default_kernel_entry,
 )
 from mvmctl.core.user_config import get_config_value, get_full_user_config, set_config_value
+from mvmctl.models.config import SystemDefaultsConfig
 
 __all__ = [
     "dump_config",
@@ -35,9 +27,5 @@ __all__ = [
     "get_default_image_entry",
     "get_default_kernel_entry",
     "get_default_binary_entry",
-    "FirecrackerConfig",
-    "MVMConfig",
-    "NetworkDefaultsConfig",
-    "PathsConfig",
-    "VMDefaultsConfig",
+    "SystemDefaultsConfig",
 ]
