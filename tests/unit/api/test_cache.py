@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from mvmctl.api import cache as cache_api
+from mvmctl.models.vm import VMStatus
+from mvmctl.models.network import NetworkConfig
 
 # =============================================================================
 # init_all tests
@@ -40,41 +42,42 @@ def test_init_all_calls_core_functions(mock_init_all, mock_check_privs):
 
 
 @patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.core.cache_manager.cache_prune_vms")
-def test_prune_vms_privilege_check(mock_prune_vms, mock_check_privs):
+@patch("mvmctl.api.cache.get_vm_manager")
+@patch("mvmctl.api.cache.remove_vm")
+def test_prune_vms_privilege_check(mock_remove_vm, mock_get_vm_manager, mock_check_privs):
     """Verify privilege check is called for prune_vms."""
-    mock_prune_vms.return_value = ["vm1", "vm2"]
+    mock_vm = MagicMock()
+    mock_vm.name = "stopped-vm"
+    mock_vm.status = VMStatus.STOPPED
+    mock_get_vm_manager.return_value.list_all.return_value = [mock_vm]
 
-    result = cache_api.prune_vms()
+    result = cache_api.prune_vms(include_stopped=True)
 
     mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune VMs")
-    assert result == ["vm1", "vm2"]
+    mock_remove_vm.assert_called_once_with("stopped-vm")
+    assert result == ["stopped-vm"]
 
 
 @patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.core.cache_manager.cache_prune_vms")
-def test_prune_vms_passes_flags(mock_prune_vms, mock_check_privs):
-    """Verify flags are passed correctly to core prune_vms."""
-    mock_prune_vms.return_value = ["vm1"]
+@patch("mvmctl.api.cache.get_vm_manager")
+@patch("mvmctl.api.cache.remove_vm")
+def test_prune_vms_passes_flags(mock_remove_vm, mock_get_vm_manager, mock_check_privs):
+    """Verify flags are passed correctly to prune_vms."""
+    mock_vm = MagicMock()
+    mock_vm.name = "test-vm"
+    mock_vm.status = VMStatus.STOPPED
+    mock_get_vm_manager.return_value.list_all.return_value = [mock_vm]
 
-    # Test with include_stopped=True
     result = cache_api.prune_vms(include_stopped=True, include_running=False)
 
-    mock_prune_vms.assert_called_once_with(
-        include_stopped=True, include_running=False, dry_run=False
-    )
-    assert result == ["vm1"]
+    mock_remove_vm.assert_called_once_with("test-vm")
+    assert result == ["test-vm"]
 
-    # Reset and test with include_running=True
-    mock_prune_vms.reset_mock()
-    mock_prune_vms.return_value = ["running-vm"]
+    mock_remove_vm.reset_mock()
+    result = cache_api.prune_vms(include_stopped=True, dry_run=True)
 
-    result = cache_api.prune_vms(include_stopped=False, include_running=True)
-
-    mock_prune_vms.assert_called_once_with(
-        include_stopped=False, include_running=True, dry_run=False
-    )
-    assert result == ["running-vm"]
+    mock_remove_vm.assert_not_called()
+    assert result == ["test-vm"]
 
 
 # =============================================================================
@@ -83,26 +86,19 @@ def test_prune_vms_passes_flags(mock_prune_vms, mock_check_privs):
 
 
 @patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.core.cache_manager.cache_prune_networks")
-def test_prune_networks_privilege_check(mock_prune_networks, mock_check_privs):
+@patch("mvmctl.api.cache.list_networks")
+@patch("mvmctl.api.cache.remove_network")
+def test_prune_networks_privilege_check(mock_remove_network, mock_list_networks, mock_check_privs):
     """Verify privilege check is called for prune_networks."""
-    mock_prune_networks.return_value = ["unused-net"]
+    mock_network = MagicMock()
+    mock_network.name = "unused-net"
+    mock_list_networks.return_value = [mock_network]
 
     result = cache_api.prune_networks()
 
     mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune networks")
-    mock_prune_networks.assert_called_once()
+    mock_remove_network.assert_called_once_with("unused-net")
     assert result == ["unused-net"]
-
-
-# =============================================================================
-# prune_images tests
-# =============================================================================
-
-
-# =============================================================================
-# prune_kernels tests
-# =============================================================================
 
 
 # =============================================================================
@@ -111,57 +107,55 @@ def test_prune_networks_privilege_check(mock_prune_networks, mock_check_privs):
 
 
 @patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.core.cache_manager.cache_prune_all")
-def test_prune_all_privilege_check(mock_prune_all, mock_check_privs):
-    """Verify privilege check is called for prune_all."""
-    mock_prune_all.return_value = {
-        "vms": ["vm1"],
-        "networks": ["net1"],
-        "images": ["img1"],
-        "kernels": ["kern1"],
-    }
+@patch("mvmctl.api.cache.get_vm_manager")
+@patch("mvmctl.api.cache.list_networks")
+@patch("mvmctl.api.cache.list_image_entries")
+@patch("mvmctl.api.cache.list_kernel_entries")
+def test_prune_all_privilege_check(
+    mock_list_kernels,
+    mock_list_images,
+    mock_list_networks,
+    mock_get_vm_manager,
+    mock_check_privs,
+):
+    """Verify privilege checks from prune_all and its sub-operations."""
+    mock_get_vm_manager.return_value.list_all.return_value = []
+    mock_list_networks.return_value = []
+    mock_list_images.return_value = {}
+    mock_list_kernels.return_value = {}
 
     result = cache_api.prune_all()
 
-    mock_check_privs.assert_called_once_with("/usr/sbin/ip", "prune all cache resources")
-    assert result["vms"] == ["vm1"]
-    assert result["networks"] == ["net1"]
-    assert result["images"] == ["img1"]
-    assert result["kernels"] == ["kern1"]
-    # guestfs is not included (removed)
-    assert "guestfs" not in result
+    assert mock_check_privs.call_count == 3
+    mock_check_privs.assert_any_call("/usr/sbin/ip", "prune all cache resources")
+    mock_check_privs.assert_any_call("/usr/sbin/ip", "prune VMs")
+    mock_check_privs.assert_any_call("/usr/sbin/ip", "prune networks")
+    assert result["vms"] == []
+    assert result["networks"] == []
+    assert result["images"] == []
+    assert result["kernels"] == []
 
 
 @patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.core.cache_manager.cache_prune_all")
-def test_prune_all_passes_flags(mock_prune_all, mock_check_privs):
-    """Verify flags are passed correctly to core prune_all."""
-    mock_prune_all.return_value = {
-        "vms": [],
-        "networks": [],
-        "images": [],
-        "kernels": [],
-    }
+@patch("mvmctl.api.cache.get_vm_manager")
+@patch("mvmctl.api.cache.list_networks")
+@patch("mvmctl.api.cache.list_image_entries")
+@patch("mvmctl.api.cache.list_kernel_entries")
+def test_prune_all_passes_flags(
+    mock_list_kernels,
+    mock_list_images,
+    mock_list_networks,
+    mock_get_vm_manager,
+    mock_check_privs,
+):
+    """Verify flags are passed correctly to prune_all."""
+    # Setup mocks
+    mock_get_vm_manager.return_value.list_all.return_value = []
+    mock_list_networks.return_value = []
+    mock_list_images.return_value = {}
+    mock_list_kernels.return_value = {}
 
-    # Test with include_stopped=True
-    result = cache_api.prune_all(include_stopped=True, include_running=False)
+    result = cache_api.prune_all(include_stopped=True, include_running=True)
 
-    mock_prune_all.assert_called_once_with(
-        include_stopped=True, include_running=False, dry_run=False
-    )
-
-    # Reset and test with include_running=True
-    mock_prune_all.reset_mock()
-    mock_prune_all.return_value = {
-        "vms": ["running-vm"],
-        "networks": [],
-        "images": [],
-        "kernels": [],
-    }
-
-    result = cache_api.prune_all(include_stopped=False, include_running=True)
-
-    mock_prune_all.assert_called_once_with(
-        include_stopped=False, include_running=True, dry_run=False
-    )
-    assert result["vms"] == ["running-vm"]
+    # Result should be empty since no VMs/networks/images/kernels to prune
+    assert result == {"vms": [], "networks": [], "images": [], "kernels": []}

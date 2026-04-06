@@ -27,7 +27,7 @@ class TestCleanHost:
     def test_default_cache_dir(self):
         """Should use get_cache_dir() when cache_dir is None."""
         with patch("mvmctl.api.host.get_cache_dir") as mock_get:
-            with patch("mvmctl.api.host._clean_host") as mock_clean:
+            with patch("mvmctl.api.host.clean_host") as mock_clean:
                 mock_get.return_value = Path("/tmp/cache")
                 mock_clean.return_value = ["removed bridge"]
                 result = clean_host()
@@ -43,7 +43,7 @@ class TestCleanHost:
 
     def test_explicit_cache_dir(self):
         """Should use provided cache_dir."""
-        with patch("mvmctl.api.host._clean_host") as mock_clean:
+        with patch("mvmctl.api.host.clean_host") as mock_clean:
             mock_clean.return_value = []
             result = clean_host(Path("/custom/cache"))
             assert result == []
@@ -63,7 +63,7 @@ class TestResetHost:
     def test_default_cache_dir(self):
         """Should use get_cache_dir() when cache_dir is None."""
         with patch("mvmctl.api.host.get_cache_dir") as mock_get:
-            with patch("mvmctl.api.host._reset_host") as mock_reset:
+            with patch("mvmctl.api.host.reset_host") as mock_reset:
                 mock_get.return_value = Path("/tmp/cache")
                 mock_reset.return_value = ["reverted sysctl"]
                 result = reset_host()
@@ -79,7 +79,7 @@ class TestResetHost:
 
     def test_explicit_cache_dir(self):
         """Should use provided cache_dir."""
-        with patch("mvmctl.api.host._reset_host") as mock_reset:
+        with patch("mvmctl.api.host.reset_host") as mock_reset:
             mock_reset.return_value = []
             reset_host(Path("/custom/cache"))
             # Verify _reset_host was called with cache_dir and db
@@ -98,7 +98,7 @@ class TestPruneHost:
     def test_default_cache_dir(self):
         """Should use get_cache_dir() when cache_dir is None."""
         with patch("mvmctl.api.host.get_cache_dir") as mock_get:
-            with patch("mvmctl.api.host._prune_host") as mock_prune:
+            with patch("mvmctl.api.host.prune_host") as mock_prune:
                 mock_get.return_value = Path("/tmp/cache")
                 mock_prune.return_value = ["torn down bridge"]
                 result = prune_host()
@@ -114,7 +114,7 @@ class TestPruneHost:
 
     def test_explicit_cache_dir(self):
         """Should use provided cache_dir."""
-        with patch("mvmctl.api.host._prune_host") as mock_prune:
+        with patch("mvmctl.api.host.prune_host") as mock_prune:
             mock_prune.return_value = []
             prune_host(Path("/custom/cache"))
             # Verify _prune_host was called with cache_dir and db

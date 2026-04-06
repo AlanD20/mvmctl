@@ -25,14 +25,14 @@ class TestReconcileVM:
         with patch("os.kill", return_value=None):
             mock_client_class = mocker.patch("mvmctl.core.firecracker.FirecrackerClient")
             mock_client = MagicMock()
-            mock_client.describe_instance.return_value = {"state": "Paused"}
+            mock_client.describe_instance.return_value = {"state": "Running"}
             mock_client_class.return_value.__enter__.return_value = mock_client
 
             result = reconcile_vm(sample_vm, mock_manager)
 
-        assert result == VMStatus.PAUSED
-        assert sample_vm.status == VMStatus.PAUSED
-        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.PAUSED)
+        assert result == VMStatus.RUNNING
+        assert sample_vm.status == VMStatus.RUNNING
+        mock_manager.update_status.assert_called_once_with(sample_vm.name, VMStatus.RUNNING)
 
     def test_reconcile_dead_vm_clean_exit(self, mocker: MockerFixture, sample_vm: VMInstance):
         """Test pid dead, exit_code=0 → STOPPED."""

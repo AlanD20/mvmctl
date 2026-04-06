@@ -1,13 +1,14 @@
-"""Unit tests for IP lease checking functions in network_manager module."""
+"""Unit tests for IP lease checking functions in network module."""
 
 import pytest
 from pytest_mock import MockerFixture
 
-from mvmctl.core.network_manager import (
-    NetworkLease,
+from mvmctl.api.network import (
     check_ip_available,
     is_ip_available,
 )
+from mvmctl.core.network_manager import NetworkLease
+from mvmctl.models.network import NetworkConfig
 from mvmctl.exceptions import NetworkError
 
 
@@ -16,9 +17,17 @@ class TestIsIpAvailable:
 
     def test_is_ip_available_true(self, mocker: MockerFixture):
         """IP not in leases returns True."""
-        # Mock get_network_leases to return some leases, but not the IP we're checking
         mocker.patch(
-            "mvmctl.core.network_manager.get_network_leases",
+            "mvmctl.api.network.get_network",
+            return_value=NetworkConfig(
+                name="default",
+                subnet="10.0.0.0/24",
+                ipv4_gateway="10.0.0.1",
+                bridge="mvm-default",
+            ),
+        )
+        mocker.patch(
+            "mvmctl.api.network.get_network_leases",
             return_value=[
                 NetworkLease(vm_id="vm1", ipv4="10.0.0.2"),
                 NetworkLease(vm_id="vm2", ipv4="10.0.0.3"),
@@ -31,12 +40,20 @@ class TestIsIpAvailable:
 
     def test_is_ip_available_false(self, mocker: MockerFixture):
         """IP in leases returns False."""
-        # Mock get_network_leases to return leases that include the IP we're checking
         mocker.patch(
-            "mvmctl.core.network_manager.get_network_leases",
+            "mvmctl.api.network.get_network",
+            return_value=NetworkConfig(
+                name="default",
+                subnet="10.0.0.0/24",
+                ipv4_gateway="10.0.0.1",
+                bridge="mvm-default",
+            ),
+        )
+        mocker.patch(
+            "mvmctl.api.network.get_network_leases",
             return_value=[
                 NetworkLease(vm_id="vm1", ipv4="10.0.0.2"),
-                NetworkLease(vm_id="vm2", ipv4="10.0.0.5"),  # This is the IP we're checking
+                NetworkLease(vm_id="vm2", ipv4="10.0.0.5"),
             ],
         )
 
@@ -50,9 +67,17 @@ class TestCheckIpAvailable:
 
     def test_check_ip_available_raises(self, mocker: MockerFixture):
         """Raises NetworkError when IP is taken."""
-        # Mock get_network_leases to return leases that include the IP
         mocker.patch(
-            "mvmctl.core.network_manager.get_network_leases",
+            "mvmctl.api.network.get_network",
+            return_value=NetworkConfig(
+                name="default",
+                subnet="10.0.0.0/24",
+                ipv4_gateway="10.0.0.1",
+                bridge="mvm-default",
+            ),
+        )
+        mocker.patch(
+            "mvmctl.api.network.get_network_leases",
             return_value=[
                 NetworkLease(vm_id="vm1", ipv4="10.0.0.5"),
             ],
@@ -63,11 +88,18 @@ class TestCheckIpAvailable:
 
     def test_check_ip_available_passes(self, mocker: MockerFixture):
         """No error when IP is available."""
-        # Mock get_network_leases to return empty leases
         mocker.patch(
-            "mvmctl.core.network_manager.get_network_leases",
+            "mvmctl.api.network.get_network",
+            return_value=NetworkConfig(
+                name="default",
+                subnet="10.0.0.0/24",
+                ipv4_gateway="10.0.0.1",
+                bridge="mvm-default",
+            ),
+        )
+        mocker.patch(
+            "mvmctl.api.network.get_network_leases",
             return_value=[],
         )
 
-        # Should not raise any exception
         check_ip_available("default", "10.0.0.5")
