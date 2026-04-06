@@ -396,6 +396,267 @@ class TestCoreLayerDBCompliance:
 
         return violations
 
+    def _find_cross_core_imports(self, tree: ast.AST, source_file: Path) -> list[tuple[int, str]]:
+        """Find cross-core imports and reverse-layer API imports.
+
+        Checks for:
+        - Top-level from mvmctl.core.X import Y where X is NOT mvm_db (cross-core)
+        - Top-level from mvmctl.api.X import Y in a core file (reverse-layer)
+        - Lazy imports inside function bodies
+
+        Returns list of (line_number, import_detail) tuples.
+        """
+        violations = []
+        source_name = source_file.name
+
+        # Permitted exceptions: these files are allowed to import mvm_db
+        permitted_mvm_db_files = {"vm_manager.py", "metadata.py", "host_state.py"}
+        is_core_file = "core" in str(source_file)
+
+        def _check_import_node(node: ast.ImportFrom, in_function: bool = False) -> None:
+            """Check a single import node for violations."""
+            module = node.module or ""
+            line_no = node.lineno
+
+            # Check for: from mvmctl.core.X import Y (cross-core, X != mvm_db)
+            if module.startswith("mvmctl.core."):
+                submodule = module.split(".")[2] if len(module.split(".")) >= 3 else ""
+                # mvm_db is allowed only in permitted files
+                if submodule == "mvm_db":
+                    if source_name not in permitted_mvm_db_files:
+                        for alias in node.names:
+                            violations.append((line_no, f"from {module} import {alias.name}"))
+                else:
+                    # Any other core submodule is a cross-core violation
+                    for alias in node.names:
+                        violations.append((line_no, f"from {module} import {alias.name}"))
+
+            # Check for: from mvmctl.core import X (where X is not mvm_db)
+            elif module == "mvmctl.core":
+                for alias in node.names:
+                    if alias.name != "mvm_db":
+                        violations.append((line_no, f"from {module} import {alias.name}"))
+                    elif source_name not in permitted_mvm_db_files:
+                        violations.append((line_no, f"from {module} import {alias.name}"))
+
+            # Check for: from mvmctl.api.X import Y in core files (reverse-layer)
+            elif is_core_file and module.startswith("mvmctl.api"):
+                for alias in node.names:
+                    violations.append(
+                        (line_no, f"from {module} import {alias.name} (reverse-layer)")
+                    )
+
+        # Check top-level imports
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                _check_import_node(node, in_function=False)
+
+        # Check lazy imports inside function bodies
+        def _walk_functions(node: ast.AST) -> None:
+            """Recursively walk function definitions and check their bodies."""
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for stmt in node.body:
+                    if isinstance(stmt, ast.ImportFrom):
+                        _check_import_node(stmt, in_function=True)
+                    # Recursively check nested function definitions
+                    _walk_functions(stmt)
+            elif isinstance(node, ast.If):
+                # Handle if statements (including TYPE_CHECKING blocks, but we check all)
+                for stmt in node.body + getattr(node, "orelse", []):
+                    if isinstance(stmt, ast.ImportFrom):
+                        _check_import_node(stmt, in_function=True)
+                    _walk_functions(stmt)
+            elif isinstance(node, ast.Try):
+                # Handle try blocks
+                for stmt in (
+                    node.body + getattr(node, "orelse", []) + getattr(node, "finalbody", [])
+                ):
+                    if isinstance(stmt, ast.ImportFrom):
+                        _check_import_node(stmt, in_function=True)
+                    _walk_functions(stmt)
+            elif isinstance(node, (ast.With, ast.For, ast.While)):
+                # Handle context managers and loops
+                for stmt in node.body + getattr(node, "orelse", []):
+                    if isinstance(stmt, ast.ImportFrom):
+                        _check_import_node(stmt, in_function=True)
+                    _walk_functions(stmt)
+
+        # Walk all top-level statements for function definitions
+        if isinstance(tree, ast.Module):
+            for node in tree.body:
+                _walk_functions(node)
+
+        return violations
+
+    def _check_file_cross_core_violations(self, file_name: str) -> None:
+        """Check a specific core file for cross-core import violations."""
+        file_path = CORE_DIR / file_name
+        if not file_path.exists():
+            pytest.fail(f"Target file not found: {file_path}")
+
+        tree = self._parse_ast(file_path)
+        if tree is None:
+            pytest.fail(f"Could not parse AST for {file_path}")
+
+        violations = self._find_cross_core_imports(tree, file_path)
+
+        if violations:
+            violation_msgs = []
+            for line_no, detail in violations:
+                violation_msgs.append(f"  {_get_relative_path(file_path)}:{line_no} - {detail}")
+
+            msg = (
+                f"Found {len(violations)} cross-core import violation(s) in {file_name}:\n"
+                + "\n".join(violation_msgs)
+                + "\n\nCore modules must NOT import from other core modules (except mvm_db in permitted files)."
+                + "\nCore modules must NOT import from api/ layer (reverse-layer violation)."
+            )
+            pytest.fail(msg)
+
+
+class TestCoreLayerIsolation(TestCoreLayerDBCompliance):
+    """Tests for Core layer isolation — no cross-core imports.
+
+    These tests verify that core modules do not import from other core modules
+    (except mvm_db in permitted files) and do not import from the api/ layer.
+
+    Known violations (to be fixed in refactoring phases):
+    - vm_lifecycle.py: cloud_init, config_gen, firecracker, firewall, image, kernel,
+                       network, network_manager, rootfs_injector, ssh, vm_manager + lazy key_manager
+    - network_manager.py: metadata, network + lazy host_setup, vm_manager
+    - cache_manager.py: core.metadata, network_manager, vm_lifecycle, vm_manager + api.metadata
+    - kernel.py: core.metadata + api.metadata (lazy at line ~1117)
+    - image.py: partition_detection (lazy), core.metadata (lazy)
+    - config_state.py: core.metadata + api.metadata
+    - binary_manager.py: core.metadata
+    - ssh.py: vm_manager
+    - vm_monitor.py: firecracker (lazy inside function body)
+    - host.py: host_privilege, host_setup, host_state, mvm_db (violation since host not in permitted list)
+    - host_setup.py: host_privilege, host_state, mvm_db (violation), network
+    """
+
+    def test_vm_lifecycle_no_cross_core_imports(self):
+        """vm_lifecycle.py must not import from other core modules.
+
+        Known violations:
+        - cloud_init, config_gen, firecracker, firewall, image, kernel
+        - network, network_manager, rootfs_injector, ssh, vm_manager
+        - lazy key_manager import inside function body
+        """
+        self._check_file_cross_core_violations("vm_lifecycle.py")
+
+    def test_network_manager_no_cross_core_imports(self):
+        """network_manager.py must not import from other core modules.
+
+        Known violations:
+        - metadata, network
+        - lazy host_setup, vm_manager inside function bodies
+        """
+        self._check_file_cross_core_violations("network_manager.py")
+
+    def test_cache_manager_no_cross_core_imports(self):
+        """cache_manager.py must not import from other core modules.
+
+        Known violations:
+        - core.metadata, network_manager, vm_lifecycle, vm_manager
+        """
+        self._check_file_cross_core_violations("cache_manager.py")
+
+    def test_cache_manager_no_api_imports(self):
+        """cache_manager.py must not import from api/ layer (reverse-layer).
+
+        Known violations:
+        - api.metadata (reverse-layer violation)
+        """
+        # This is tested by the parent method, but we document it separately
+        self._check_file_cross_core_violations("cache_manager.py")
+
+    def test_kernel_no_cross_core_imports(self):
+        """kernel.py must not import from other core modules.
+
+        Known violations:
+        - core.metadata
+        """
+        self._check_file_cross_core_violations("kernel.py")
+
+    def test_kernel_no_api_imports(self):
+        """kernel.py must not import from api/ layer (reverse-layer).
+
+        Known violations:
+        - api.metadata (reverse-layer, lazy at line ~1117)
+        """
+        # This is tested by the parent method, but we document it separately
+        self._check_file_cross_core_violations("kernel.py")
+
+    def test_image_no_cross_core_imports(self):
+        """image.py must not import from other core modules.
+
+        Known violations:
+        - partition_detection (lazy import)
+        - core.metadata (lazy import)
+        """
+        self._check_file_cross_core_violations("image.py")
+
+    def test_config_state_no_cross_core_imports(self):
+        """config_state.py must not import from other core modules.
+
+        Known violations:
+        - core.metadata
+        """
+        self._check_file_cross_core_violations("config_state.py")
+
+    def test_config_state_no_api_imports(self):
+        """config_state.py must not import from api/ layer (reverse-layer).
+
+        Known violations:
+        - api.metadata (reverse-layer violation)
+        """
+        # This is tested by the parent method, but we document it separately
+        self._check_file_cross_core_violations("config_state.py")
+
+    def test_binary_manager_no_cross_core_imports(self):
+        """binary_manager.py must not import from other core modules.
+
+        Known violations:
+        - core.metadata
+        """
+        self._check_file_cross_core_violations("binary_manager.py")
+
+    def test_ssh_no_cross_core_imports(self):
+        """ssh.py must not import from other core modules.
+
+        Known violations:
+        - vm_manager
+        """
+        self._check_file_cross_core_violations("ssh.py")
+
+    def test_vm_monitor_no_cross_core_lazy_imports(self):
+        """vm_monitor.py must not have lazy cross-core imports.
+
+        Known violations:
+        - firecracker (lazy inside function body)
+        """
+        self._check_file_cross_core_violations("vm_monitor.py")
+
+    def test_host_no_cross_core_imports(self):
+        """host.py must not import from other core modules.
+
+        Known violations:
+        - host_privilege, host_setup, host_state
+        - mvm_db (violation since host.py is NOT in permitted list)
+        """
+        self._check_file_cross_core_violations("host.py")
+
+    def test_host_setup_no_cross_core_imports(self):
+        """host_setup.py must not import from other core modules.
+
+        Known violations:
+        - host_privilege, host_state
+        - mvm_db (violation since host_setup.py is NOT in permitted list)
+        - network
+        """
+        self._check_file_cross_core_violations("host_setup.py")
+
     def test_core_no_mvm_db_imports(self):
         """Core files must not import MVMDatabase from mvmctl.core.mvm_db.
 
