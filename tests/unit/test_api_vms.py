@@ -469,9 +469,9 @@ def test_stop_vm_api_force(mock_stop):
 
 @patch("mvmctl.core.vm_lifecycle.start_vm")
 def test_start_vm_api(mock_start):
-    """start_vm API delegates directly to core function (no privilege check)."""
+    """start_vm API queries default binary and passes binary_id to core function."""
     start_vm("myvm")
-    mock_start.assert_called_once_with(name="myvm")
+    mock_start.assert_called_once_with(name="myvm", binary_id=None)
 
 
 @patch("mvmctl.core.vm_lifecycle.reboot_vm")

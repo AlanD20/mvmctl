@@ -458,27 +458,24 @@ def test_vm_instance_to_db_state_kernel_id_prefix_match(vm_manager: VMManager):
     assert result.kernel_id == "ker-full-id"
 
 
-def test_vm_instance_to_db_state_binary_id_resolved(vm_manager: VMManager):
-    """binary_id resolved from get_default_binary."""
+def test_vm_instance_to_db_state_binary_id_passed_explicitly(vm_manager: VMManager):
+    """binary_id is passed explicitly from API layer (Resolution Layer Mandate)."""
     from unittest.mock import MagicMock, patch
 
     from mvmctl.core.vm_manager import _vm_instance_to_db_state
-
-    mock_binary = MagicMock()
-    mock_binary.id = "bin-full-id"
 
     mock_db = MagicMock()
     mock_db.get_network_by_name.return_value = None
     mock_db.find_images_by_prefix.return_value = []
     mock_db.get_image_by_os_slug.return_value = None
     mock_db.find_kernels_by_prefix.return_value = []
-    mock_db.get_default_binary.return_value = mock_binary
 
     vm = VMInstance(name="binvm", pid=1, status=VMStatus.RUNNING)
     with patch("mvmctl.core.vm_manager.MVMDatabase", return_value=mock_db):
-        result = _vm_instance_to_db_state(vm)
+        result = _vm_instance_to_db_state(vm, binary_id="bin-full-id")
 
     assert result.binary_id == "bin-full-id"
+    mock_db.get_default_binary.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

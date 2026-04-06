@@ -941,6 +941,7 @@ def create_vm(
     image_fs_uuid: str | None = None,
     image_fs_type: str | None = None,
     image_hash: str | None = None,
+    binary_id: str | None = None,
 ) -> VMInstance:
     import ipaddress as _ipaddress
     import re
@@ -1358,7 +1359,7 @@ def create_vm(
         vm_instance.nocloud_server_pid = nocloud_server_pid
         vm_instance.console_relay_pid = console_relay_pid
         vm_instance.console_socket_path = console_socket_path
-        manager.register(vm_instance)
+        manager.register(vm_instance, binary_id)
 
         return vm_instance
 
@@ -1642,12 +1643,13 @@ def stop_vm(name: str, vm_manager: VMManager | None = None, force: bool = False)
         raise MVMError(f"Failed to stop VM '{name}': {e}") from e
 
 
-def start_vm(name: str, vm_manager: VMManager | None = None) -> None:
+def start_vm(name: str, vm_manager: VMManager | None = None, binary_id: str | None = None) -> None:
     """Re-launch a stopped VM using its stored firecracker.json config.
 
     Args:
         name: VM name to start.
         vm_manager: Optional VMManager instance.
+        binary_id: Optional binary ID from API layer (Resolution Layer Mandate).
 
     Raises:
         VMNotFoundError: If VM not found.
@@ -1727,7 +1729,7 @@ def start_vm(name: str, vm_manager: VMManager | None = None) -> None:
         vm.pid = proc.pid
         vm.api_socket_path = socket_path
         vm.status = VMStatus.RUNNING
-        manager.register(vm)
+        manager.register(vm, binary_id)
 
         time.sleep(CONST_VM_START_WAIT_S)
 

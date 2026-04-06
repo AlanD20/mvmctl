@@ -30,7 +30,7 @@ def _generate_vm_id(name: str, created_at: datetime) -> str:
     return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 
-def _vm_instance_to_db_state(vm: VMInstance) -> DBVMInstance:
+def _vm_instance_to_db_state(vm: VMInstance, binary_id: str | None = None) -> DBVMInstance:
     """Convert VMInstance to DB VMState for SQLite storage."""
     network_id = None
     if vm.network_name:
@@ -69,15 +69,8 @@ def _vm_instance_to_db_state(vm: VMInstance) -> DBVMInstance:
         except (sqlite3.OperationalError, Exception):
             kernel_id = None
 
-    # Resolve binary_id: look up default firecracker binary
-    binary_id = None
-    try:
-        db = MVMDatabase()
-        binary = db.get_default_binary("firecracker")
-        if binary:
-            binary_id = binary.id
-    except (sqlite3.OperationalError, Exception):
-        binary_id = None
+    # binary_id is passed explicitly from API layer (Resolution Layer Mandate)
+    # No database query here - core receives explicit values only
 
     updated_at = datetime.now().isoformat()
     created_at = vm.created_at.isoformat() if vm.created_at else datetime.now().isoformat()
@@ -186,12 +179,17 @@ class VMManager:
     def __init__(self, run_dir: Path | None = None) -> None:
         pass
 
-    def register(self, vm: VMInstance) -> None:
-        """Register a new VM in the database."""
+    def register(self, vm: VMInstance, binary_id: str | None = None) -> None:
+        """Register a new VM in the database.
+
+        Args:
+            vm: VM instance to register
+            binary_id: Optional binary ID from API layer (Resolution Layer Mandate)
+        """
         if not vm.id:
             vm.id = _generate_vm_id(vm.name, vm.created_at)
         db = MVMDatabase()
-        db.upsert_vm(_vm_instance_to_db_state(vm))
+        db.upsert_vm(_vm_instance_to_db_state(vm, binary_id))
 
     def update_status(self, name: str, status: VMStatus) -> None:
         """Update the status of a registered VM."""

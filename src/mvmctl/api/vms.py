@@ -266,6 +266,11 @@ def create_vm(
         else:
             network_name = default_network.name
 
+    # Resolve default binary ID for VM registration (Resolution Layer Mandate)
+    db = MVMDatabase()
+    default_binary = db.get_default_binary("firecracker")
+    binary_id = default_binary.id if default_binary else None
+
     check_privileges_interactive("/usr/sbin/ip", f"create VM '{name}'")
 
     # Resolve image path and metadata in API layer
@@ -318,6 +323,7 @@ def create_vm(
         image_fs_uuid=resolved_image_fs_uuid,
         image_fs_type=resolved_image_fs_type,
         image_hash=resolved_image_hash,
+        binary_id=binary_id,
     )
 
 
@@ -355,9 +361,15 @@ def stop_vm(name: str, force: bool = False) -> None:
 
 def start_vm(name: str) -> None:
     """Start a stopped VM."""
+    from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.core.vm_lifecycle import start_vm as _start_vm
 
-    return _start_vm(name=name)
+    # Resolve default binary ID for VM registration (Resolution Layer Mandate)
+    db = MVMDatabase()
+    default_binary = db.get_default_binary("firecracker")
+    binary_id = default_binary.id if default_binary else None
+
+    return _start_vm(name=name, binary_id=binary_id)
 
 
 def reboot_vm(name: str, force: bool = False) -> None:
