@@ -12,7 +12,7 @@ from mvmctl.models.network import NetworkConfig
 class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_manager.VMManager.register")
     @patch("mvmctl.core.vm_lifecycle.ensure_default_network")
-    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
+    @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
     @patch("mvmctl.core.vm_lifecycle.os.openpty")
@@ -191,6 +191,9 @@ class TestConsoleWorkflow:
             enable_pci=False,
             enable_console=True,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
             cloud_init_mode=CloudInitMode.NET,
         )
 
@@ -206,7 +209,7 @@ class TestConsoleWorkflow:
 
     @patch("mvmctl.core.vm_manager.VMManager.register")
     @patch("mvmctl.core.vm_lifecycle.ensure_default_network")
-    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
+    @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle.shutil.copy2")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
     @patch("mvmctl.utils.fs.secure_mkdir")
@@ -339,6 +342,9 @@ class TestConsoleWorkflow:
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
             cloud_init_mode=CloudInitMode.NET,
         )
 

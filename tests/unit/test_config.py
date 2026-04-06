@@ -3,24 +3,27 @@ from pathlib import Path
 
 import pytest
 
-from mvmctl.core.config import (
-    FirecrackerConfig,
-    MVMConfig,
-    NetworkDefaultsConfig,
-    PathsConfig,
-    VMDefaultsConfig,
-    dump_config,
-    load_config,
-    load_json,
-    validate_config,
-)
+from mvmctl.core import config as config_module
+from mvmctl.core.config import dump_config, load_config, load_json, validate_config
+from mvmctl.models.config import SystemDefaultsConfig
 
 
-def _make_vm_defaults(**overrides: object) -> VMDefaultsConfig:
+@pytest.fixture(autouse=True)
+def _clear_config_cache() -> None:
+    """Clear the config cache before each test to ensure isolation."""
+    config_module._config_cache.clear()
+
+
+def _make_system_defaults(**overrides: object) -> SystemDefaultsConfig:
+    """Create a SystemDefaultsConfig with default values for testing."""
     from mvmctl.constants import (
+        DEFAULT_NETWORK_NAME,
         DEFAULT_VM_BOOT_ARGS,
         DEFAULT_VM_DISK_SIZE,
         DEFAULT_VM_ENABLE_API_SOCKET,
+        DEFAULT_VM_ENABLE_CONSOLE,
+        DEFAULT_VM_ENABLE_LOGGING,
+        DEFAULT_VM_ENABLE_METRICS,
         DEFAULT_VM_ENABLE_PCI,
         DEFAULT_VM_LSM_FLAGS,
         DEFAULT_VM_MEM_MIB,
@@ -33,45 +36,20 @@ def _make_vm_defaults(**overrides: object) -> VMDefaultsConfig:
         "vcpu_count": DEFAULT_VM_VCPU_COUNT,
         "mem_size_mib": DEFAULT_VM_MEM_MIB,
         "ssh_user": DEFAULT_VM_SSH_USER,
-        "network_interface": DEFAULT_VM_NETWORK_INTERFACE,
-        "boot_args": DEFAULT_VM_BOOT_ARGS,
         "disk_size": DEFAULT_VM_DISK_SIZE,
+        "boot_args": DEFAULT_VM_BOOT_ARGS,
         "enable_api_socket": DEFAULT_VM_ENABLE_API_SOCKET,
         "enable_pci": DEFAULT_VM_ENABLE_PCI,
+        "enable_logging": DEFAULT_VM_ENABLE_LOGGING,
+        "enable_metrics": DEFAULT_VM_ENABLE_METRICS,
+        "enable_console": DEFAULT_VM_ENABLE_CONSOLE,
         "lsm_flags": DEFAULT_VM_LSM_FLAGS,
+        "cloud_init_mode": "inject",
+        "network_interface": DEFAULT_VM_NETWORK_INTERFACE,
+        "default_network_name": DEFAULT_NETWORK_NAME,
     }
     base.update(overrides)
-    return VMDefaultsConfig(**base)  # type: ignore[arg-type]
-
-
-def _make_network_defaults(**overrides: object) -> NetworkDefaultsConfig:
-    from mvmctl.constants import (
-        DEFAULT_NETWORK_IPV4_GATEWAY,
-        DEFAULT_NETWORK_NAME,
-        DEFAULT_NETWORK_SUBNET,
-    )
-
-    base: dict[str, object] = {
-        "name": DEFAULT_NETWORK_NAME,
-        "subnet": DEFAULT_NETWORK_SUBNET,
-        "ipv4_gateway": DEFAULT_NETWORK_IPV4_GATEWAY,
-    }
-    base.update(overrides)
-    return NetworkDefaultsConfig(**base)  # type: ignore[arg-type]
-
-
-def _make_mvm_config(**overrides: object) -> MVMConfig:
-    from mvmctl.constants import DEFAULT_FIRECRACKER_BINARY_PATH
-    from mvmctl.utils.fs import get_cache_dir
-
-    base: dict[str, object] = {
-        "firecracker": FirecrackerConfig(binary=DEFAULT_FIRECRACKER_BINARY_PATH),
-        "vm_defaults": _make_vm_defaults(),
-        "network": _make_network_defaults(),
-        "paths": PathsConfig(assets_dir=str(get_cache_dir())),
-    }
-    base.update(overrides)
-    return MVMConfig(**base)  # type: ignore[arg-type]
+    return SystemDefaultsConfig(**base)
 
 
 def test_load_json_missing_file(tmp_path: Path) -> None:
@@ -80,7 +58,7 @@ def test_load_json_missing_file(tmp_path: Path) -> None:
 
 
 def test_load_json_valid_file(tmp_path: Path) -> None:
-    data = {"firecracker": {"binary": "/usr/bin/fc"}, "vm_defaults": {"vcpu_count": 4}}
+    data = {"vcpu_count": 4, "mem_size_mib": 2048}
     json_path = tmp_path / "config.json"
     json_path.write_text(json.dumps(data))
 
@@ -90,69 +68,53 @@ def test_load_json_valid_file(tmp_path: Path) -> None:
 
 def test_load_config_defaults(tmp_path: Path) -> None:
     from mvmctl.constants import (
-        DEFAULT_NETWORK_IPV4_GATEWAY,
         DEFAULT_NETWORK_NAME,
-        DEFAULT_NETWORK_SUBNET,
         DEFAULT_VM_DISK_SIZE,
         DEFAULT_VM_MEM_MIB,
         DEFAULT_VM_NETWORK_INTERFACE,
         DEFAULT_VM_VCPU_COUNT,
     )
 
-    config = load_config(tmp_path, _make_mvm_config())
+    defaults = _make_system_defaults()
+    config = load_config(tmp_path, defaults)
 
-    assert config.vm_defaults.vcpu_count == DEFAULT_VM_VCPU_COUNT
-    assert config.vm_defaults.mem_size_mib == DEFAULT_VM_MEM_MIB
-    assert config.vm_defaults.network_interface == DEFAULT_VM_NETWORK_INTERFACE
-    assert config.vm_defaults.disk_size == DEFAULT_VM_DISK_SIZE
-    assert config.vm_defaults.enable_api_socket is True
-    assert config.vm_defaults.enable_pci is False
-
-    assert config.network.name == DEFAULT_NETWORK_NAME
-    assert config.network.subnet == DEFAULT_NETWORK_SUBNET
-    assert config.network.ipv4_gateway == DEFAULT_NETWORK_IPV4_GATEWAY
-
-    assert config.paths.assets_dir != ""
+    assert config.vcpu_count == DEFAULT_VM_VCPU_COUNT
+    assert config.mem_size_mib == DEFAULT_VM_MEM_MIB
+    assert config.network_interface == DEFAULT_VM_NETWORK_INTERFACE
+    assert config.disk_size == DEFAULT_VM_DISK_SIZE
+    assert config.enable_api_socket is True
+    assert config.enable_pci is False
+    assert config.default_network_name == DEFAULT_NETWORK_NAME
 
 
 def test_load_config_from_json(tmp_path: Path) -> None:
     data = {
-        "firecracker": {"binary": "/opt/firecracker"},
-        "vm_defaults": {"vcpu_count": 8, "mem_size_mib": 4096},
-        "network": {
-            "name": "custom",
-            "subnet": "172.16.0.0/16",
-            "ipv4_gateway": "172.16.0.1",
-        },
-        "paths": {"assets_dir": "/tmp/assets"},
+        "vcpu_count": 8,
+        "mem_size_mib": 4096,
+        "ssh_user": "customuser",
+        "cloud_init_mode": "iso",
     }
     (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path, _make_mvm_config())
+    defaults = _make_system_defaults()
+    config = load_config(tmp_path, defaults)
 
-    assert config.firecracker.binary == "/opt/firecracker"
-    assert config.vm_defaults.vcpu_count == 8
-    assert config.vm_defaults.mem_size_mib == 4096
-    assert config.network.name == "custom"
-    assert config.network.subnet == "172.16.0.0/16"
-    assert config.network.ipv4_gateway == "172.16.0.1"
-    assert config.paths.assets_dir == "/tmp/assets"
+    assert config.vcpu_count == 8
+    assert config.mem_size_mib == 4096
+    assert config.ssh_user == "customuser"
+    assert config.cloud_init_mode == "iso"
 
 
 def test_validate_config_valid() -> None:
-    config = _make_mvm_config()
+    config = _make_system_defaults()
     errors = validate_config(config)
 
-    binary_errors = [e for e in errors if "firecracker.binary" in e]
-    assert len(binary_errors) == 1
-
-    other_errors = [e for e in errors if "firecracker.binary" not in e]
-    assert other_errors == []
+    assert errors == []
 
 
 @pytest.mark.parametrize("vcpu_count", [0, -1, -100])
 def test_validate_config_invalid_vcpu(vcpu_count: int) -> None:
-    config = _make_mvm_config(vm_defaults=_make_vm_defaults(vcpu_count=vcpu_count))
+    config = _make_system_defaults(vcpu_count=vcpu_count)
     errors = validate_config(config)
 
     vcpu_errors = [e for e in errors if "vcpu_count" in e]
@@ -162,7 +124,7 @@ def test_validate_config_invalid_vcpu(vcpu_count: int) -> None:
 
 @pytest.mark.parametrize("mem_size_mib", [32, 63, 0])
 def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
-    config = _make_mvm_config(vm_defaults=_make_vm_defaults(mem_size_mib=mem_size_mib))
+    config = _make_system_defaults(mem_size_mib=mem_size_mib)
     errors = validate_config(config)
 
     mem_errors = [e for e in errors if "mem_size_mib" in e]
@@ -170,42 +132,27 @@ def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
     assert "Must be at least 64" in mem_errors[0]
 
 
-def test_validate_config_invalid_cidr() -> None:
-    config = _make_mvm_config(
-        network=_make_network_defaults(subnet="not-a-cidr"),
-    )
-    errors = validate_config(config)
-
-    cidr_errors = [e for e in errors if "network.defaults.cidr" in e]
-    assert len(cidr_errors) == 1
-    assert "Invalid CIDR" in cidr_errors[0]
-
-
 def test_dump_config_all_sections() -> None:
-    config = _make_mvm_config()
+    config = _make_system_defaults()
     result = dump_config(config)
 
-    assert "firecracker" in result
     assert "vm_defaults" in result
-    assert "network" in result
-    assert "paths" in result
-
-    network = result["network"]
-    assert isinstance(network, dict)
-    assert "name" in network
-    assert "subnet" in network
+    vm_defaults = result["vm_defaults"]
+    assert isinstance(vm_defaults, dict)
+    assert "vcpu_count" in vm_defaults
+    assert "mem_size_mib" in vm_defaults
+    assert "ssh_user" in vm_defaults
+    assert "cloud_init_mode" in vm_defaults
 
 
 def test_dump_config_specific_section() -> None:
-    config = _make_mvm_config(
-        firecracker=FirecrackerConfig(binary="/custom/bin"),
-    )
-    result = dump_config(config, section="firecracker")
+    config = _make_system_defaults(vcpu_count=8)
+    result = dump_config(config, section="vm_defaults")
 
-    assert list(result.keys()) == ["firecracker"]
-    fc = result["firecracker"]
-    assert isinstance(fc, dict)
-    assert fc["binary"] == "/custom/bin"
+    assert list(result.keys()) == ["vm_defaults"]
+    vm_defaults = result["vm_defaults"]
+    assert isinstance(vm_defaults, dict)
+    assert vm_defaults["vcpu_count"] == 8
 
 
 def test_load_json_invalid_syntax(tmp_path: Path) -> None:
@@ -225,62 +172,144 @@ def test_load_json_corrupt_file(tmp_path: Path) -> None:
 
 
 def test_load_config_missing_fields_uses_defaults(tmp_path: Path) -> None:
-    data = {"vm_defaults": {"vcpu_count": 8}}
+    data = {"vcpu_count": 8}
     (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path, _make_mvm_config())
+    defaults = _make_system_defaults(mem_size_mib=2048)
+    config = load_config(tmp_path, defaults)
 
-    assert config.vm_defaults.vcpu_count == 8
-    assert config.vm_defaults.mem_size_mib == 2048
-    assert config.firecracker.binary == "/usr/local/bin/firecracker"
+    assert config.vcpu_count == 8
+    assert config.mem_size_mib == 2048
 
 
 def test_load_config_type_mismatch_string_for_int(tmp_path: Path) -> None:
-    data = {"vm_defaults": {"vcpu_count": "not-a-number"}}
+    data = {"vcpu_count": "not-a-number"}
     (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path, _make_mvm_config())
-    assert config.vm_defaults.vcpu_count is not None
+    defaults = _make_system_defaults()
+    config = load_config(tmp_path, defaults)
+    # Type mismatches are passed through (validation is separate)
+    assert config.vcpu_count == "not-a-number"  # type: ignore[comparison-overlap]
 
 
 def test_load_config_type_mismatch_int_for_string(tmp_path: Path) -> None:
-    data = {"firecracker": {"binary": 12345}}
+    data = {"ssh_user": 12345}
     (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path, _make_mvm_config())
-    assert config.firecracker.binary is not None
+    defaults = _make_system_defaults()
+    config = load_config(tmp_path, defaults)
+    # Type mismatches are passed through (validation is separate)
+    assert config.ssh_user == 12345  # type: ignore[comparison-overlap]
 
 
 def test_load_config_extra_unknown_fields_filtered(tmp_path: Path) -> None:
     data = {
-        "unknown_section": {"foo": "bar"},
-        "vm_defaults": {"vcpu_count": 4, "unknown_field": "should be ignored"},
+        "unknown_field": "should be ignored",
+        "vcpu_count": 4,
     }
     (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path, _make_mvm_config())
-    assert config.vm_defaults.vcpu_count == 4
+    defaults = _make_system_defaults()
+    config = load_config(tmp_path, defaults)
+    assert config.vcpu_count == 4
 
 
 def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
-    data = {"network": {"subnet": 99999}}
+    data = {"cloud_init_mode": 99999}
     (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path, _make_mvm_config())
-    assert config.network.subnet is not None
-
-
-def test_validate_config_empty_binary_path() -> None:
-    config = _make_mvm_config(firecracker=FirecrackerConfig(binary=""))
-    errors = validate_config(config)
-
-    binary_errors = [e for e in errors if "firecracker.binary" in e and "empty" in e.lower()]
-    assert len(binary_errors) == 1
+    defaults = _make_system_defaults()
+    config = load_config(tmp_path, defaults)
+    # Type mismatches are passed through (validation is separate)
+    assert config.cloud_init_mode == 99999  # type: ignore[comparison-overlap]
 
 
 def test_validate_config_negative_memory() -> None:
-    config = _make_mvm_config(vm_defaults=_make_vm_defaults(mem_size_mib=-100))
+    config = _make_system_defaults(mem_size_mib=-100)
     errors = validate_config(config)
 
     mem_errors = [e for e in errors if "mem_size_mib" in e]
     assert len(mem_errors) == 1
+
+
+def test_load_config_legacy_nested_format(tmp_path: Path) -> None:
+    """Test that legacy nested config format is properly flattened."""
+    data = {
+        "vm_defaults": {
+            "vcpu_count": 16,
+            "mem_size_mib": 8192,
+        },
+        "network": {
+            "name": "legacy-net",
+        },
+    }
+    (tmp_path / "config.json").write_text(json.dumps(data))
+
+    defaults = _make_system_defaults()
+    config = load_config(tmp_path, defaults)
+
+    # Values from nested vm_defaults should be extracted
+    assert config.vcpu_count == 16
+    assert config.mem_size_mib == 8192
+    # Network name should be extracted to default_network_name
+    assert config.default_network_name == "legacy-net"
+
+
+def test_load_config_caching(tmp_path: Path) -> None:
+    """Test that config is cached and subsequent loads return cached value."""
+    data = {"vcpu_count": 4}
+    (tmp_path / "config.json").write_text(json.dumps(data))
+
+    defaults = _make_system_defaults()
+
+    # First load should read from file
+    config1 = load_config(tmp_path, defaults)
+    assert config1.vcpu_count == 4
+
+    # Modify the file
+    data["vcpu_count"] = 8
+    (tmp_path / "config.json").write_text(json.dumps(data))
+
+    # Second load should return cached value (4, not 8)
+    config2 = load_config(tmp_path, defaults)
+    assert config2.vcpu_count == 4  # Cached value
+
+
+def test_load_config_all_fields_preserved(tmp_path: Path) -> None:
+    """Test that all SystemDefaultsConfig fields are properly loaded and preserved."""
+
+    data = {
+        "vcpu_count": 2,
+        "mem_size_mib": 1024,
+        "ssh_user": "testuser",
+        "disk_size": "20G",
+        "boot_args": "console=ttyS0 reboot=k panic=1 pci=off",
+        "enable_api_socket": False,
+        "enable_pci": True,
+        "enable_logging": False,
+        "enable_metrics": True,
+        "enable_console": False,
+        "lsm_flags": "apparmor",
+        "cloud_init_mode": "net",
+        "network_interface": "eth1",
+        "default_network_name": "custom-net",
+    }
+    (tmp_path / "config.json").write_text(json.dumps(data))
+
+    defaults = _make_system_defaults()
+    config = load_config(tmp_path, defaults)
+
+    assert config.vcpu_count == 2
+    assert config.mem_size_mib == 1024
+    assert config.ssh_user == "testuser"
+    assert config.disk_size == "20G"
+    assert config.boot_args == "console=ttyS0 reboot=k panic=1 pci=off"
+    assert config.enable_api_socket is False
+    assert config.enable_pci is True
+    assert config.enable_logging is False
+    assert config.enable_metrics is True
+    assert config.enable_console is False
+    assert config.lsm_flags == "apparmor"
+    assert config.cloud_init_mode == "net"
+    assert config.network_interface == "eth1"
+    assert config.default_network_name == "custom-net"

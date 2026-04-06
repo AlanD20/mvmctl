@@ -104,15 +104,11 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 def test_create_vm_core_success(
     mock_setup_nat,
     mock_open,
-    mock_resolve_fs_type,
-    mock_resolve_fs_uuid,
     mock_bridge_exists,
     mock_write_pid,
     mock_popen,
@@ -165,8 +161,6 @@ def test_create_vm_core_success(
 
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
-    mock_resolve_fs_uuid.return_value = "11111111-2222-3333-4444-555555555555"
-    mock_resolve_fs_type.return_value = "ext4"
 
     mock_bridge_exists.return_value = True
     mock_popen.return_value.pid = 99999
@@ -176,7 +170,7 @@ def test_create_vm_core_success(
 
     vm = create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/image.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -185,7 +179,12 @@ def test_create_vm_core_success(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
+        image_fs_uuid="11111111-2222-3333-4444-555555555555",
+        image_fs_type="ext4",
     )
 
     assert isinstance(vm, VMInstance)
@@ -230,8 +229,8 @@ def test_create_vm_core_success(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 def test_create_vm_inject_mode_is_default(
@@ -290,8 +289,6 @@ def test_create_vm_inject_mode_is_default(
 
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
-    mock_resolve_fs_uuid.return_value = "22222222-3333-4444-5555-666666666666"
-    mock_resolve_fs_type.return_value = "ext4"
 
     mock_bridge_exists.return_value = True
     mock_popen.return_value.pid = 99999
@@ -302,7 +299,7 @@ def test_create_vm_inject_mode_is_default(
     # Create VM with explicit AUTO mode
     create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -311,6 +308,9 @@ def test_create_vm_inject_mode_is_default(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.INJECT,
     )
 
@@ -336,7 +336,7 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
     with pytest.raises(MVMError, match="VM limit reached"):
         create_vm(
             name="myvm",
-            image="img",
+            image_path=Path("/path/to/img.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -345,6 +345,9 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
         )
 
 
@@ -1025,7 +1028,7 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
         with pytest.raises(MVMError, match="symlink"):
             create_vm(
                 name="attackvm",
-                image="ubuntu-24.04",
+                image_path=Path("/path/to/ubuntu-24.04.ext4"),
                 vcpus=2,
                 mem=256,
                 network_name="default",
@@ -1034,6 +1037,9 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
                 enable_pci=False,
                 enable_console=False,
                 firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
             )
 
 
@@ -1048,8 +1054,8 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
 @patch("mvmctl.core.vm_lifecycle.generate_mac")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
 @patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
 @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
@@ -1135,7 +1141,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
 
     create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -1144,6 +1150,9 @@ def test_create_vm_uses_cached_image_path_not_copy(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -1171,8 +1180,8 @@ def test_create_vm_uses_cached_image_path_not_copy(
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
 @patch("mvmctl.core.vm_lifecycle.generate_mac")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
 @patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
 @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
@@ -1260,7 +1269,7 @@ def test_create_vm_disk_size_resizes_local_copy_only(
 
     create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -1269,6 +1278,9 @@ def test_create_vm_disk_size_resizes_local_copy_only(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         disk_size="10G",
         cloud_init_mode=CloudInitMode.NET,
     )
@@ -1296,8 +1308,8 @@ def test_create_vm_disk_size_resizes_local_copy_only(
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
 @patch("mvmctl.core.vm_lifecycle.generate_mac")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
 @patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
 @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
@@ -1388,7 +1400,7 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
     with pytest.raises(Exception, match="TAP creation failed"):
         create_vm(
             name="myvm",
-            image="ubuntu-22.04",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -1397,6 +1409,9 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
             cloud_init_mode=CloudInitMode.NET,
         )
 
@@ -1426,8 +1441,8 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
 @patch("mvmctl.core.vm_lifecycle.get_network")
 @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
 @patch("mvmctl.core.vm_lifecycle.generate_mac")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("mvmctl.core.vm_lifecycle.write_cloud_init")
 @patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
 @patch("mvmctl.core.vm_lifecycle.ConfigGenerator")
@@ -1518,7 +1533,7 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
 
     vm = create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -1527,6 +1542,9 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -1569,8 +1587,8 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 def test_create_vm_nocloud_net_starts_server(
@@ -1641,7 +1659,7 @@ def test_create_vm_nocloud_net_starts_server(
 
     vm = create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -1650,6 +1668,9 @@ def test_create_vm_nocloud_net_starts_server(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -1680,8 +1701,8 @@ def test_create_vm_nocloud_net_starts_server(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("mvmctl.core.vm_lifecycle.cleanup_tap")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
 @patch("builtins.open", new_callable=MagicMock)
@@ -1764,7 +1785,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     with pytest.raises(MVMError, match="Firecracker binary not found"):
         create_vm(
             name="myvm",
-            image="ubuntu-22.04",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -1773,6 +1794,9 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
             cloud_init_mode=CloudInitMode.NET,
         )
 
@@ -1799,8 +1823,8 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 def test_create_vm_nocloud_net_success_sets_port(
@@ -1875,7 +1899,7 @@ def test_create_vm_nocloud_net_success_sets_port(
 
     vm = create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -1884,6 +1908,9 @@ def test_create_vm_nocloud_net_success_sets_port(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -1916,8 +1943,8 @@ def test_create_vm_nocloud_net_success_sets_port(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 def test_create_vm_nocloud_net_adds_firewall_rule(
@@ -1993,7 +2020,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
 
     vm = create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -2002,6 +2029,9 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -2035,8 +2065,8 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("mvmctl.core.vm_lifecycle.cleanup_tap")
 @patch("mvmctl.core.vm_lifecycle.release_network_ip")
 @patch("mvmctl.core.vm_lifecycle.shutil.rmtree")
@@ -2122,7 +2152,7 @@ def test_firewall_failure_stops_server_and_raises(
     with pytest.raises(NetworkError, match="Failed to add firewall rule"):
         create_vm(
             name="myvm",
-            image="ubuntu-22.04",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -2131,6 +2161,9 @@ def test_firewall_failure_stops_server_and_raises(
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
             cloud_init_mode=CloudInitMode.NET,
         )
 
@@ -2168,8 +2201,8 @@ def test_firewall_failure_stops_server_and_raises(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 def test_create_vm_returns_immediately_with_nocloud_net(
@@ -2245,7 +2278,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
 
     vm = create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -2254,6 +2287,9 @@ def test_create_vm_returns_immediately_with_nocloud_net(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -2281,8 +2317,8 @@ def test_create_vm_returns_immediately_with_nocloud_net(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 def test_create_vm_starts_nocloud_server(
@@ -2358,7 +2394,7 @@ def test_create_vm_starts_nocloud_server(
 
     vm = create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -2367,6 +2403,9 @@ def test_create_vm_starts_nocloud_server(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -2394,8 +2433,8 @@ def test_create_vm_starts_nocloud_server(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 @patch("mvmctl.core.vm_lifecycle.inject_cloud_init")
@@ -2471,7 +2510,7 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
         mock_inject.side_effect = spy_inject
         create_vm(
             name=vm_name,
-            image="ubuntu-22.04",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -2480,6 +2519,9 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
             cloud_init_mode=CloudInitMode.INJECT,
         )
 
@@ -2517,8 +2559,8 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 @patch("mvmctl.core.vm_lifecycle.inject_cloud_init")
@@ -2595,7 +2637,7 @@ def test_direct_injection_cleanup_on_injection_failure(
     ):
         create_vm(
             name=vm_name,
-            image="ubuntu-22.04",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -2604,6 +2646,9 @@ def test_direct_injection_cleanup_on_injection_failure(
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
             cloud_init_mode=CloudInitMode.INJECT,
         )
 
@@ -2635,8 +2680,8 @@ def test_direct_injection_cleanup_on_injection_failure(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 @patch("mvmctl.core.key_manager.get_default_keys")
@@ -2709,7 +2754,7 @@ def test_create_vm_without_ssh_key_injects_default_keys(
 
     create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -2718,6 +2763,9 @@ def test_create_vm_without_ssh_key_injects_default_keys(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -2748,8 +2796,8 @@ def test_create_vm_without_ssh_key_injects_default_keys(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 @patch("mvmctl.core.vm_lifecycle.resolve_ssh_key")
@@ -2814,7 +2862,7 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
 
     create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -2823,6 +2871,9 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         ssh_key="mykey",
         cloud_init_mode=CloudInitMode.NET,
     )
@@ -2852,8 +2903,8 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
 @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
 @patch("mvmctl.core.vm_lifecycle.write_pid_file")
 @patch("mvmctl.core.vm_lifecycle.bridge_exists")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_uuid")
-@patch("mvmctl.core.vm_lifecycle._resolve_image_fs_type")
+@patch("mvmctl.core.image.resolve_image_fs_uuid")
+@patch("mvmctl.core.image.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.core.vm_lifecycle.setup_nat")
 @patch("mvmctl.core.key_manager.get_default_keys")
@@ -2921,7 +2972,7 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
 
     create_vm(
         name="myvm",
-        image="ubuntu-22.04",
+        image_path=Path("/path/to/ubuntu-22.04.ext4"),
         vcpus=2,
         mem=256,
         network_name="default",
@@ -2930,6 +2981,9 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
         enable_pci=False,
         enable_console=False,
         firecracker_bin="firecracker",
+        lsm_flags="",
+        enable_logging=False,
+        enable_metrics=False,
         cloud_init_mode=CloudInitMode.NET,
     )
 
@@ -3017,7 +3071,7 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     with pytest.raises(NetworkError, match="Network setup failed"):
         create_vm(
             name="myvm",
-            image="ubuntu-22.04",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -3026,6 +3080,9 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
             cloud_init_mode=CloudInitMode.NET,
         )
 

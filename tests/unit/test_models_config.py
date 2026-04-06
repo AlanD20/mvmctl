@@ -18,8 +18,11 @@ def test_system_defaults_config_all_fields_required():
         enable_console=True,
         enable_api_socket=True,
         enable_pci=False,
+        enable_logging=True,
+        enable_metrics=False,
         lsm_flags="landlock,lockdown",
         cloud_init_mode="inject",
+        network_interface="eth0",
         default_network_name="default",
     )
     assert config.vcpu_count == 1
@@ -58,8 +61,11 @@ def test_system_defaults_config_has_all_required_fields():
         "enable_console",
         "enable_api_socket",
         "enable_pci",
+        "enable_logging",
+        "enable_metrics",
         "lsm_flags",
         "cloud_init_mode",
+        "network_interface",
         "default_network_name",
     }
     actual_fields = {f.name for f in dataclasses.fields(SystemDefaultsConfig)}
@@ -80,8 +86,11 @@ def test_system_defaults_config_cloud_init_mode_values():
             enable_console=True,
             enable_api_socket=True,
             enable_pci=False,
+            enable_logging=True,
+            enable_metrics=False,
             lsm_flags="",
             cloud_init_mode=mode,
+            network_interface="eth0",
             default_network_name="default",
         )
         assert config.cloud_init_mode == mode

@@ -1325,3 +1325,108 @@ def test_reboot_vm_api_error(mocker: MockerFixture):
     mocker.patch("mvmctl.cli.vm.reboot_vm", side_effect=MVMError("Stop failed"))
     result = runner.invoke(app, ["reboot", "myvm"])
     assert result.exit_code != 0
+
+
+# -----------------------------------------------------------------------------
+# Export CLI tests
+# -----------------------------------------------------------------------------
+
+
+def test_export_vm_success(mocker: MockerFixture, tmp_path: Path):
+    """export command creates JSON file with semantic refs."""
+    from mvmctl.models import VMExportConfig, VMExportComputeConfig, VMExportImageConfig
+
+    mock_config = VMExportConfig(
+        name="myvm",
+        compute=VMExportComputeConfig(vcpus=2, mem=1024),
+        image=VMExportImageConfig(os_slug="ubuntu-24.04", arch="x86_64"),
+    )
+    mocker.patch("mvmctl.cli.vm.export_vm_config", return_value=mock_config)
+
+    output_path = tmp_path / "myvm.json"
+    result = runner.invoke(app, ["export", "--name", "myvm", "--output", str(output_path)])
+
+    assert result.exit_code == 0
+    assert "exported" in result.output.lower()
+    assert output_path.exists()
+
+    data = json.loads(output_path.read_text())
+    assert data["schema_version"] == "1.0"
+    assert data["name"] == "myvm"
+    assert data["image"]["os_slug"] == "ubuntu-24.04"
+    assert "image_id" not in data
+
+
+def test_export_vm_default_output(mocker: MockerFixture, tmp_path: Path):
+    """export command uses <vm_name>.json as default output."""
+    from mvmctl.models import VMExportConfig
+
+    mock_config = VMExportConfig(name="testvm")
+    mocker.patch("mvmctl.cli.vm.export_vm_config", return_value=mock_config)
+
+    import os
+
+    original_cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        result = runner.invoke(app, ["export", "--name", "testvm"])
+        assert result.exit_code == 0
+        assert (tmp_path / "testvm.json").exists()
+    finally:
+        os.chdir(original_cwd)
+
+
+def test_export_vm_not_found(mocker: MockerFixture):
+    """export command handles missing VM gracefully."""
+    mocker.patch(
+        "mvmctl.cli.vm.export_vm_config",
+        side_effect=MVMError("VM 'ghost' not found"),
+    )
+    result = runner.invoke(app, ["export", "--name", "ghost"])
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower()
+
+
+def test_export_vm_no_internal_ids(mocker: MockerFixture, tmp_path: Path):
+    """export command output does NOT contain internal SHA256 IDs."""
+    from mvmctl.models import (
+        VMExportBinaryConfig,
+        VMExportBootConfig,
+        VMExportCloudInitConfig,
+        VMExportComputeConfig,
+        VMExportConfig,
+        VMExportFirecrackerConfig,
+        VMExportImageConfig,
+        VMExportKernelConfig,
+        VMExportNetworkConfig,
+    )
+
+    mock_config = VMExportConfig(
+        name="myvm",
+        compute=VMExportComputeConfig(vcpus=4, mem=2048),
+        image=VMExportImageConfig(os_slug="ubuntu-24.04", arch="x86_64"),
+        kernel=VMExportKernelConfig(version="6.1.0", arch="x86_64"),
+        binary=VMExportBinaryConfig(version="1.15.0"),
+        network=VMExportNetworkConfig(name="default", ip="10.20.0.2"),
+        boot=VMExportBootConfig(enable_console=True),
+        firecracker=VMExportFirecrackerConfig(enable_api_socket=True, enable_pci=False),
+        cloud_init=VMExportCloudInitConfig(mode="inject", user="ubuntu"),
+    )
+    mocker.patch("mvmctl.cli.vm.export_vm_config", return_value=mock_config)
+
+    output_path = tmp_path / "myvm.json"
+    result = runner.invoke(app, ["export", "--name", "myvm", "--output", str(output_path)])
+
+    assert result.exit_code == 0
+    data = json.loads(output_path.read_text())
+
+    # Verify semantic refs exist
+    assert data["image"]["os_slug"] == "ubuntu-24.04"
+    assert data["kernel"]["version"] == "6.1.0"
+    assert data["network"]["name"] == "default"
+
+    # Verify NO internal IDs
+    assert "image_id" not in data
+    assert "kernel_id" not in data
+    assert "binary_id" not in data
+    assert "network_id" not in data

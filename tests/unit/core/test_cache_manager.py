@@ -304,6 +304,7 @@ class TestCachePruneImages:
         mocker: MockerFixture,
         tmp_path: Path,
         sample_vm: VMInstance,
+        make_test_vmconfig,
     ):
         """Keep images referenced by VMs."""
         cache_dir = tmp_path / "cache"
@@ -315,10 +316,8 @@ class TestCachePruneImages:
         image_path.write_text("fake image")
 
         # VM using this image
-        from mvmctl.models.vm import VMConfig
-
-        sample_vm.config = VMConfig(
-            name=sample_vm.name, rootfs_path=str(image_path), kernel_path="/fake/kernel"
+        sample_vm.config = make_test_vmconfig(
+            name=sample_vm.name, rootfs_path=image_path, kernel_path=Path("/fake/kernel")
         )
 
         full_hash = "b" * 64
@@ -417,6 +416,7 @@ class TestCachePruneKernels:
         mocker: MockerFixture,
         tmp_path: Path,
         sample_vm: VMInstance,
+        make_test_vmconfig,
     ):
         """Keep kernels referenced by VMs."""
         cache_dir = tmp_path / "cache"
@@ -428,10 +428,8 @@ class TestCachePruneKernels:
         kernel_path.write_text("fake kernel")
 
         # VM using this kernel
-        from mvmctl.models.vm import VMConfig
-
-        sample_vm.config = VMConfig(
-            name=sample_vm.name, rootfs_path="/fake/image", kernel_path=str(kernel_path)
+        sample_vm.config = make_test_vmconfig(
+            name=sample_vm.name, rootfs_path=Path("/fake/image"), kernel_path=kernel_path
         )
 
         full_hash = "e" * 64

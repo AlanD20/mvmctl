@@ -197,3 +197,102 @@ class TestImportWhitelist:
             f"Import '{import_path}' violation detection failed: "
             f"expected {should_be_violation}, got {result}"
         )
+
+
+class TestDBImportCompliance:
+    """Tests for Resolution Layer Mandate — DB imports only in API layer."""
+
+    DB_MODULES = {
+        "mvmctl.core.mvm_db",
+        "mvmctl.db",
+        "mvmctl.db.models",
+        "mvmctl.db.migrations",
+    }
+
+    def _is_db_violation(self, import_path: str) -> bool:
+        """Check if import path is a DB module."""
+        return any(import_path.startswith(mod) for mod in self.DB_MODULES)
+
+    def test_cli_no_db_imports(self):
+        """CLI layer must NEVER import from DB modules.
+
+        Resolution Layer Mandate: Only API layer queries the database.
+        CLI must pass None to API for DB-backed defaults.
+        """
+        cli_files = _get_python_files(CLI_DIR)
+        violations = []
+
+        for file_path in cli_files:
+            if file_path.name == "__init__.py":
+                continue
+
+            imports = _parse_imports(file_path)
+            for import_type, import_path, line_no in imports:
+                if self._is_db_violation(import_path):
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                        }
+                    )
+
+        if violations:
+            violation_msgs = []
+            for v in violations:
+                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['import']}")
+
+            msg = (
+                f"Found {len(violations)} CLI→DB import violation(s):\n"
+                + "\n".join(violation_msgs)
+                + "\n\nResolution Layer Mandate: CLI must NOT query the database."
+                + "\nPass None to API for DB-backed defaults (image, kernel, binary, network)."
+            )
+            pytest.fail(msg)
+
+    def test_core_no_db_imports_except_mvm_db(self):
+        """Core layer must not import from DB except mvm_db (ORM interface).
+
+        Resolution Layer Mandate: Core receives explicit values from API.
+        Core must NOT query the database directly.
+
+        Note: Importing ORM dataclasses from db.models is allowed —
+        they are pure data containers, not queries.
+        Only MVMDatabase and query functions are prohibited in Core.
+        """
+        core_files = _get_python_files(CORE_DIR)
+        violations = []
+
+        for file_path in core_files:
+            if file_path.name == "__init__.py":
+                continue
+            if file_path.name == "mvm_db.py":
+                continue  # The ORM module itself is allowed
+
+            imports = _parse_imports(file_path)
+            for import_type, import_path, line_no in imports:
+                # Allow importing ORM models (dataclasses) - they're not queries
+                if import_path.startswith("mvmctl.db.models"):
+                    continue
+                # Prohibit importing MVMDatabase and migrations
+                if import_path.startswith("mvmctl.db"):
+                    violations.append(
+                        {
+                            "file": _get_relative_path(file_path),
+                            "line": line_no,
+                            "import": import_path,
+                        }
+                    )
+
+        if violations:
+            violation_msgs = []
+            for v in violations:
+                violation_msgs.append(f"  {v['file']}:{v['line']} - {v['import']}")
+
+            msg = (
+                f"Found {len(violations)} Core→DB import violation(s):\n"
+                + "\n".join(violation_msgs)
+                + "\n\nResolution Layer Mandate: Core must NOT query the database."
+                + "\nCore receives explicit values from API layer."
+            )
+            pytest.fail(msg)

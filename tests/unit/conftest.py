@@ -83,6 +83,57 @@ def stopped_vm() -> VMInstance:
 
 
 @pytest.fixture
+def make_test_vmconfig():
+    """Factory fixture for creating VMConfig instances with sensible test defaults.
+
+    Usage:
+        def test_something(make_test_vmconfig):
+            config = make_test_vmconfig(name="my-vm", vcpus=4)
+            # config has all required fields populated with test-safe defaults
+    """
+    from mvmctl.models.cloud_init import CloudInitMode
+
+    def _make(
+        name: str = "test-vm",
+        vcpu_count: int = 2,
+        mem_size_mib: int = 512,
+        kernel_path: Path | None = None,
+        rootfs_path: Path | None = None,
+        enable_api_socket: bool = True,
+        enable_pci: bool = False,
+        lsm_flags: str = "landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging: bool = True,
+        enable_metrics: bool = False,
+        enable_console: bool = True,
+        cloud_init_mode=CloudInitMode.INJECT,
+        **kwargs,
+    ) -> VMConfig:
+        # Default paths if not provided
+        if kernel_path is None:
+            kernel_path = Path("/tmp/vmlinux")
+        if rootfs_path is None:
+            rootfs_path = Path("/tmp/rootfs.ext4")
+
+        return VMConfig(
+            name=name,
+            vcpu_count=vcpu_count,
+            mem_size_mib=mem_size_mib,
+            kernel_path=kernel_path,
+            rootfs_path=rootfs_path,
+            enable_api_socket=enable_api_socket,
+            enable_pci=enable_pci,
+            lsm_flags=lsm_flags,
+            enable_logging=enable_logging,
+            enable_metrics=enable_metrics,
+            enable_console=enable_console,
+            cloud_init_mode=cloud_init_mode,
+            **kwargs,
+        )
+
+    return _make
+
+
+@pytest.fixture
 def vm_manager(tmp_path: Path) -> VMManager:
     return VMManager(tmp_path)
 
@@ -104,8 +155,8 @@ def mock_subprocess_run_failure(monkeypatch):
 
 
 @pytest.fixture
-def running_vm() -> VMInstance:
-    """Running VM with all fields set."""
+def running_vm(make_test_vmconfig) -> VMInstance:
+    """VM in running state with all required config fields."""
     return VMInstance(
         name="running-vm",
         ipv4="10.20.0.5",
@@ -115,7 +166,7 @@ def running_vm() -> VMInstance:
         created_at=datetime(2026, 1, 15, 8, 30, 0),
         api_socket_path=Path("/tmp/running-vm.sock"),
         network_name="default",
-        config=VMConfig(name="running-vm", vcpu_count=4, mem_size_mib=4096),
+        config=make_test_vmconfig(name="running-vm", vcpu_count=4, mem_size_mib=4096),
     )
 
 

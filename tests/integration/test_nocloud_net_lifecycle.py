@@ -40,7 +40,18 @@ def _make_vm(
         created_at=datetime(2026, 1, 1, 12, 0, 0),
         network_name=network,
         api_socket_path=Path(f"/tmp/mvm/{name}.sock"),
-        config=VMConfig(name=name, cloud_init_mode=mode),
+        config=VMConfig(
+            name=name,
+            vcpu_count=2,
+            mem_size_mib=512,
+            enable_api_socket=True,
+            enable_pci=False,
+            lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+            enable_logging=True,
+            enable_metrics=False,
+            enable_console=True,
+            cloud_init_mode=mode,
+        ),
         nocloud_net_port=nocloud_net_port,
     )
 
@@ -64,8 +75,7 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
     @patch("mvmctl.core.vm_lifecycle.release_network_ip")
     @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
-    @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
-    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
+    @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_full_nocloud_net_lifecycle(
@@ -73,7 +83,6 @@ class TestFullNocloudNetLifecycle:
         mock_get_vm_dir,
         mock_write_pid,
         mock_resolve_kernel,
-        mock_resolve_image,
         mock_setup_chain,
         mock_release_ip,
         mock_alloc_ip,
@@ -104,7 +113,6 @@ class TestFullNocloudNetLifecycle:
         kernel_path = tmp_path / "vmlinux"
         kernel_path.write_text("fake kernel")
 
-        mock_resolve_image.return_value = image_path
         mock_resolve_kernel.return_value = kernel_path
 
         # Mock network
@@ -146,7 +154,7 @@ class TestFullNocloudNetLifecycle:
             with patch("mvmctl.core.vm_lifecycle.setup_nat"):
                 vm = create_vm(
                     name="nocloud-test-vm",
-                    image="ubuntu-24.04",
+                    image_path=image_path,
                     kernel="vmlinux",
                     vcpus=2,
                     mem=2048,
@@ -156,6 +164,9 @@ class TestFullNocloudNetLifecycle:
                     enable_pci=False,
                     enable_console=False,
                     firecracker_bin="firecracker",
+                    lsm_flags="",
+                    enable_logging=False,
+                    enable_metrics=False,
                     cloud_init_mode=CloudInitMode.NET,
                     vm_manager=vm_mgr,
                 )
@@ -186,8 +197,7 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
     @patch("mvmctl.core.vm_lifecycle.release_network_ip")
     @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
-    @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
-    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
+    @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_nocloud_net_remove_cleanup(
@@ -195,7 +205,6 @@ class TestFullNocloudNetLifecycle:
         mock_get_vm_dir,
         mock_write_pid,
         mock_resolve_kernel,
-        mock_resolve_image,
         mock_setup_chain,
         mock_release_ip,
         mock_alloc_ip,
@@ -226,7 +235,6 @@ class TestFullNocloudNetLifecycle:
         kernel_path = tmp_path / "vmlinux"
         kernel_path.write_text("fake kernel")
 
-        mock_resolve_image.return_value = image_path
         mock_resolve_kernel.return_value = kernel_path
 
         # Mock network
@@ -279,6 +287,9 @@ class TestFullNocloudNetLifecycle:
                     enable_pci=False,
                     enable_console=False,
                     firecracker_bin="firecracker",
+                    lsm_flags="",
+                    enable_logging=False,
+                    enable_metrics=False,
                     cloud_init_mode=CloudInitMode.NET,
                     vm_manager=vm_mgr,
                 )
@@ -310,8 +321,8 @@ class TestMultipleVMsDifferentPorts:
     @patch("mvmctl.core.vm_lifecycle.NoCloudNetServerManager")
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
-    @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
-    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
+    @patch("mvmctl.core.image.resolve_image_path")
+    @patch("mvmctl.core.kernel.resolve_kernel_path")
     def test_multiple_vms_different_ports(
         self,
         mock_resolve_kernel,
@@ -400,6 +411,9 @@ class TestMultipleVMsDifferentPorts:
                                                     enable_pci=False,
                                                     enable_console=False,
                                                     firecracker_bin="firecracker",
+                                                    lsm_flags="",
+                                                    enable_logging=False,
+                                                    enable_metrics=False,
                                                     cloud_init_mode=CloudInitMode.NET,
                                                     vm_manager=vm_mgr,
                                                 )
@@ -416,6 +430,9 @@ class TestMultipleVMsDifferentPorts:
                                                     enable_pci=False,
                                                     enable_console=False,
                                                     firecracker_bin="firecracker",
+                                                    lsm_flags="",
+                                                    enable_logging=False,
+                                                    enable_metrics=False,
                                                     cloud_init_mode=CloudInitMode.NET,
                                                     vm_manager=vm_mgr,
                                                 )
@@ -483,8 +500,8 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
     @patch("mvmctl.core.vm_lifecycle.release_network_ip")
     @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
-    @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
-    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
+    @patch("mvmctl.core.image.resolve_image_path")
+    @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_failure_cleanup_on_firewall_error(
         self,
@@ -563,6 +580,9 @@ class TestNocloudNetFailureCleanup:
                     enable_pci=False,
                     enable_console=False,
                     firecracker_bin="firecracker",
+                    lsm_flags="",
+                    enable_logging=False,
+                    enable_metrics=False,
                     cloud_init_mode=CloudInitMode.NET,
                     vm_manager=vm_mgr,
                 )
@@ -587,8 +607,8 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.core.vm_lifecycle.allocate_network_ip")
     @patch("mvmctl.core.vm_lifecycle.release_network_ip")
     @patch("mvmctl.core.vm_lifecycle.setup_nocloud_input_chain")
-    @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
-    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
+    @patch("mvmctl.core.image.resolve_image_path")
+    @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("mvmctl.core.vm_lifecycle._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_failure_cleanup_on_firecracker_error(
@@ -676,6 +696,9 @@ class TestNocloudNetFailureCleanup:
                         enable_pci=False,
                         enable_console=False,
                         firecracker_bin="firecracker",
+                        lsm_flags="",
+                        enable_logging=False,
+                        enable_metrics=False,
                         cloud_init_mode=CloudInitMode.NET,
                         vm_manager=vm_mgr,
                     )
@@ -693,8 +716,8 @@ class TestVMWithoutNocloudNet:
     @patch("mvmctl.core.vm_lifecycle.add_nocloud_input_rule")
     @patch("mvmctl.core.vm_lifecycle.subprocess.Popen")
     @patch("mvmctl.core.vm_lifecycle.create_cloud_init_iso")
-    @patch("mvmctl.core.vm_lifecycle._resolve_image_path")
-    @patch("mvmctl.core.vm_lifecycle._resolve_kernel_path")
+    @patch("mvmctl.core.image.resolve_image_path")
+    @patch("mvmctl.core.kernel.resolve_kernel_path")
     def test_vm_with_disabled_mode_no_nocloud(
         self,
         mock_resolve_kernel,
@@ -771,6 +794,9 @@ class TestVMWithoutNocloudNet:
                                                     enable_pci=False,
                                                     enable_console=False,
                                                     firecracker_bin="firecracker",
+                                                    lsm_flags="",
+                                                    enable_logging=False,
+                                                    enable_metrics=False,
                                                     cloud_init_mode=CloudInitMode.OFF,
                                                     vm_manager=vm_mgr,
                                                 )

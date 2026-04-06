@@ -12,7 +12,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from mvmctl.core.host_privilege import _generate_sudoers_content
-from mvmctl.core.vm_lifecycle import _resolve_image_path, create_vm
+from mvmctl.core.image import resolve_image_path as _resolve_image_path
+from mvmctl.core.vm_lifecycle import create_vm
 from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.http import download_file
 from mvmctl.utils.validation import validate_boot_arg_component, validate_entity_name
@@ -250,7 +251,8 @@ def test_create_vm_rejects_malicious_names(
     with pytest.raises(MVMError, match="Invalid VM name"):
         create_vm(
             name=malicious_name,
-            image="ubuntu-24.04",
+            image_path=Path("/tmp/ubuntu-24.04.ext4"),
+            kernel_path=Path("/tmp/vmlinux"),
             vcpus=2,
             mem=256,
             network_name="default",
@@ -259,6 +261,9 @@ def test_create_vm_rejects_malicious_names(
             enable_pci=False,
             enable_console=False,
             firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
         )
 
 

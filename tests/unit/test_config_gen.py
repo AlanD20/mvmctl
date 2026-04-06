@@ -18,6 +18,13 @@ def test_config_generator_basic():
         mem_size_mib=512,
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(
         name="test-vm", ipv4="10.0.0.2", mac="02:FC:00:00:00:01", tap_device="fc-tap0"
@@ -39,6 +46,15 @@ def test_config_generator_sets_root_uuid_in_boot_args():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
 
     config = ConfigGenerator(vm_config, VMInstance(name="test-vm")).generate()
@@ -54,6 +70,15 @@ def test_config_generator_overrides_existing_root_arg_with_uuid():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="123e4567-e89b-12d3-a456-426614174001",
         boot_args="console=ttyS0 root=/dev/vda rw",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
 
     config = ConfigGenerator(vm_config, VMInstance(name="test-vm")).generate()
@@ -69,6 +94,15 @@ def test_config_generator_network():
         name="test-vm",
         kernel_path=Path("vmlinux"),
         rootfs_path=Path("rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="test-vm", tap_device="fc-tap0", mac="02:FC:00:00:00:01")
 
@@ -88,6 +122,15 @@ def test_config_generator_no_network():
         name="test-vm",
         kernel_path=Path("vmlinux"),
         rootfs_path=Path("rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
 
     generator = ConfigGenerator(vm_config, VMInstance(name="test-vm"))
@@ -106,7 +149,18 @@ def test_boot_args_rejects_shell_injection_in_guest_ip():
     from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
-        name="test-vm", kernel_path=Path("vmlinux"), rootfs_path=Path("rootfs.ext4")
+        name="test-vm",
+        kernel_path=Path("vmlinux"),
+        rootfs_path=Path("rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(
         name="test-vm",
@@ -126,7 +180,18 @@ def test_boot_args_rejects_shell_injection_in_gateway():
     from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
-        name="test-vm", kernel_path=Path("vmlinux"), rootfs_path=Path("rootfs.ext4")
+        name="test-vm",
+        kernel_path=Path("vmlinux"),
+        rootfs_path=Path("rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(
         name="test-vm",
@@ -144,7 +209,18 @@ def test_boot_args_rejects_shell_injection_in_gateway():
 def test_boot_args_accepts_normal_ip():
     """Normal IP addresses should pass validation without error."""
     vm_config = VMConfig(
-        name="test-vm", kernel_path=Path("vmlinux"), rootfs_path=Path("rootfs.ext4")
+        name="test-vm",
+        kernel_path=Path("vmlinux"),
+        rootfs_path=Path("rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(
         name="test-vm",
@@ -169,6 +245,15 @@ def test_config_gen_empty_vm_name():
         name="",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name=""))
     config = generator.generate()
@@ -184,6 +269,14 @@ def test_config_gen_zero_vcpus():
             vcpu_count=0,
             kernel_path=Path("/tmp/vmlinux"),
             rootfs_path=Path("/tmp/rootfs.ext4"),
+            mem_size_mib=512,
+            enable_api_socket=True,
+            enable_pci=False,
+            lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+            enable_logging=True,
+            enable_metrics=False,
+            enable_console=True,
+            cloud_init_mode=CloudInitMode.INJECT,
         )
 
 
@@ -195,18 +288,60 @@ def test_config_gen_zero_memory():
             mem_size_mib=0,
             kernel_path=Path("/tmp/vmlinux"),
             rootfs_path=Path("/tmp/rootfs.ext4"),
+            vcpu_count=2,
+            enable_api_socket=True,
+            enable_pci=False,
+            lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+            enable_logging=True,
+            enable_metrics=False,
+            enable_console=True,
+            cloud_init_mode=CloudInitMode.INJECT,
         )
 
 
 def test_config_gen_missing_kernel_path_default():
-    vm_config = VMConfig(name="no-kernel")
+    """Test that ConfigGenerator uses default kernel path when kernel_path is not provided.
+
+    Note: VMConfig now requires explicit kernel_path, so we test with explicit Path("vmlinux").
+    """
+    vm_config = VMConfig(
+        name="no-kernel",
+        vcpu_count=2,
+        mem_size_mib=512,
+        kernel_path=Path("vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
+    )
     generator = ConfigGenerator(vm_config, VMInstance(name="no-kernel"))
     config = generator.generate()
     assert config["boot-source"]["kernel_image_path"] == "vmlinux"
 
 
 def test_config_gen_missing_rootfs_path_default():
-    vm_config = VMConfig(name="no-rootfs")
+    """Test that ConfigGenerator uses default rootfs path when rootfs_path is not provided.
+
+    Note: VMConfig now requires explicit rootfs_path, so we test with explicit Path("rootfs.ext4").
+    """
+    vm_config = VMConfig(
+        name="no-rootfs",
+        vcpu_count=2,
+        mem_size_mib=512,
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("rootfs.ext4"),
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
+    )
     generator = ConfigGenerator(vm_config, VMInstance(name="no-rootfs"))
     config = generator.generate()
     assert config["drives"][0]["path_on_host"] == "rootfs.ext4"
@@ -216,7 +351,18 @@ def test_config_gen_invalid_ip_with_shell_chars():
     from mvmctl.exceptions import MVMError
 
     vm_config = VMConfig(
-        name="bad-ip", kernel_path=Path("/tmp/vmlinux"), rootfs_path=Path("/tmp/rootfs.ext4")
+        name="bad-ip",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(
         name="bad-ip",
@@ -240,6 +386,13 @@ def test_config_gen_write_to_file(tmp_path):
         mem_size_mib=256,
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="file-test", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
     generator = ConfigGenerator(vm_config, instance)
@@ -258,6 +411,14 @@ def test_config_gen_pci_enabled():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         enable_pci=True,
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="pci-vm", tap_device="fc-tap0", mac="02:FC:00:00:00:01")
     generator = ConfigGenerator(vm_config, instance)
@@ -271,6 +432,15 @@ def test_config_gen_custom_boot_args():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         boot_args="console=ttyS0 custom=yes",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="custom-boot"))
     config = generator.generate()
@@ -282,6 +452,15 @@ def test_config_gen_no_guest_ip_omits_ip_arg():
         name="no-ip",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="no-ip", tap_device="fc-tap0", mac="02:FC:00:00:00:01")
     generator = ConfigGenerator(vm_config, instance)
@@ -308,6 +487,15 @@ def test_config_gen_extra_drives():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         extra_drives=[extra],
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="multi-drive"))
     config = generator.generate()
@@ -326,6 +514,14 @@ def test_config_gen_cloud_init_drive_added_once():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         cloud_init_mode=CloudInitMode.INJECT,
         cloud_init_iso_path=Path("/tmp/cloud-init.iso"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
     )
 
     config = ConfigGenerator(vm_config, VMInstance(name="ci-vm")).generate()
@@ -341,6 +537,14 @@ def test_config_gen_logging_disabled():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         enable_logging=False,
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="no-log"))
     config = generator.generate()
@@ -352,6 +556,15 @@ def test_config_gen_logging_enabled_by_default():
         name="with-log",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="with-log"))
     config = generator.generate()
@@ -364,6 +577,15 @@ def test_config_gen_metrics_disabled_by_default():
         name="no-metrics",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="no-metrics"))
     config = generator.generate()
@@ -376,6 +598,14 @@ def test_config_gen_metrics_enabled():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         enable_metrics=True,
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="with-metrics"))
     config = generator.generate()
@@ -389,6 +619,15 @@ def test_boot_args_nocloud_ds_default():
         name="nocloud-vm",
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="nocloud-vm"))
     config = generator.generate()
@@ -403,6 +642,14 @@ def test_boot_args_nocloud_net_ds():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         cloud_init_mode=CloudInitMode.NET,
         nocloud_net_url="http://192.168.1.1:8123/",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="nocloud-net-vm"))
     config = generator.generate()
@@ -416,6 +663,14 @@ def test_boot_args_direct_injection_seed_dir_uses_constant():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         cloud_init_mode=CloudInitMode.INJECT,
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
     )
 
     config = ConfigGenerator(vm_config, VMInstance(name="direct-injection-vm")).generate()
@@ -434,6 +689,14 @@ def test_boot_args_nocloud_net_requires_url():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         cloud_init_mode=CloudInitMode.NET,
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="nocloud-net-vm"))
     with pytest.raises(ConfigError, match="nocloud_net_url must be set"):
@@ -447,6 +710,14 @@ def test_boot_args_cloud_init_disabled():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         cloud_init_mode=CloudInitMode.OFF,
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
     )
     generator = ConfigGenerator(vm_config, VMInstance(name="no-ci-vm"))
     config = generator.generate()
@@ -461,6 +732,15 @@ def test_boot_args_uses_root_fs_type_from_config():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.btrfs"),
         root_fs_type="btrfs",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="btrfs-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
     generator = ConfigGenerator(vm_config, instance)
@@ -476,6 +756,15 @@ def test_boot_args_falls_back_to_ext4_when_root_fs_type_none():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_fs_type=None,
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="ext4-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
     generator = ConfigGenerator(vm_config, instance)
@@ -491,6 +780,15 @@ def test_boot_args_rootfstype_from_metadata():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.xfs"),
         root_fs_type="xfs",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="xfs-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
     generator = ConfigGenerator(vm_config, instance)
@@ -502,7 +800,18 @@ def test_boot_args_rootfstype_from_metadata():
 def test_boot_args_includes_net_ifnames_zero():
     """Boot args should include net.ifnames=0 to prevent interface renaming."""
     vm_config = VMConfig(
-        name="test-vm", kernel_path=Path("/tmp/vmlinux"), rootfs_path=Path("/tmp/rootfs.ext4")
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(
         name="test-vm",
@@ -521,7 +830,18 @@ def test_boot_args_includes_net_ifnames_zero():
 def test_boot_args_includes_eth0_none_when_guest_ip_set():
     """Boot args should include ::eth0:none when guest_ip is set."""
     vm_config = VMConfig(
-        name="test-vm", kernel_path=Path("/tmp/vmlinux"), rootfs_path=Path("/tmp/rootfs.ext4")
+        name="test-vm",
+        kernel_path=Path("/tmp/vmlinux"),
+        rootfs_path=Path("/tmp/rootfs.ext4"),
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(
         name="test-vm",
@@ -552,6 +872,15 @@ def test_config_gen_validates_root_uuid_format():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="invalid-uuid",
         root_fs_type="ext4",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
@@ -569,6 +898,15 @@ def test_config_gen_validates_root_fs_type():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="ntfs",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
@@ -584,6 +922,15 @@ def test_config_gen_accepts_valid_uuid_and_fs_type():
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="ext4",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
@@ -598,6 +945,15 @@ def test_config_gen_accepts_btrfs_fs_type():
         rootfs_path=Path("/tmp/rootfs.btrfs"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="btrfs",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="btrfs-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
@@ -614,6 +970,15 @@ def test_config_gen_accepts_xfs_fs_type():
         rootfs_path=Path("/tmp/rootfs.xfs"),
         root_uuid="123e4567-e89b-12d3-a456-426614174000",
         root_fs_type="xfs",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="xfs-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
@@ -631,6 +996,15 @@ def test_config_gen_validates_uuid_in_boot_args_generation():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_uuid="not-a-valid-uuid",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 
@@ -647,6 +1021,15 @@ def test_config_gen_validates_fs_type_in_boot_args_generation():
         kernel_path=Path("/tmp/vmlinux"),
         rootfs_path=Path("/tmp/rootfs.ext4"),
         root_fs_type="invalidfs",
+        vcpu_count=2,
+        mem_size_mib=512,
+        enable_api_socket=True,
+        enable_pci=False,
+        lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        cloud_init_mode=CloudInitMode.INJECT,
     )
     instance = VMInstance(name="test-vm", ipv4_gateway="10.0.0.1", subnet_mask="255.255.255.0")
 

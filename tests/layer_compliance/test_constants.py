@@ -285,11 +285,13 @@ class TestNoHardcodedValues:
                 # Allow values that come from libguestfs call sites to remain
                 # inline (eg. g.set_memsize(256)). These are implementation
                 # details that tests should not force into constants.py.
+                # Also allow ImageSpec construction with default sizes.
                 if (
                     "constants." in line
                     or "FALLBACK_" in line
                     or "DEFAULT_" in line
                     or (file_path.name == "rootfs_injector.py" and "set_memsize" in line)
+                    or (file_path.name == "vm_config.py" and "minimum_rootfs_size" in line)
                 ):
                     continue
 
