@@ -82,15 +82,15 @@ def _seed_binary(
 
 def test_get_firecracker_config_empty_raises_asset_not_found(config_dir: Path) -> None:
     with pytest.raises(AssetNotFoundError, match="No active binary for 'firecracker'"):
-        get_firecracker_config()
+        get_firecracker_config(binary_record=None)
 
 
 def test_get_firecracker_config_no_default_error_mentions_fetch(config_dir: Path) -> None:
     with pytest.raises(AssetNotFoundError, match="mvm bin fetch"):
-        get_firecracker_config()
+        get_firecracker_config(binary_record=None)
 
 
-def test_get_firecracker_config_reads_from_db(config_dir: Path, cache_dir: Path) -> None:
+def test_get_firecracker_config_with_binary_record(config_dir: Path, cache_dir: Path) -> None:
     bin_dir = cache_dir / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     fc_path = str(bin_dir / "firecracker-v1.12.0")
@@ -99,7 +99,11 @@ def test_get_firecracker_config_reads_from_db(config_dir: Path, cache_dir: Path)
 
     _seed_binary(cache_dir, "v1.12.0", fc_path, ci_version="v1.12")
 
-    fc = get_firecracker_config()
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    binary_record = db.get_default_binary("firecracker")
+    fc = get_firecracker_config(binary_record=binary_record)
     assert fc["full_version"] == "v1.12.0"
     assert fc["ci_version"] == "v1.12"
     assert fc["active_version"] == "v1.12.0"
@@ -114,13 +118,17 @@ def test_get_firecracker_config_does_not_own_config_json(config_dir: Path, cache
 
     _seed_binary(cache_dir, "v1.12.0", fc_path)
 
-    get_firecracker_config()
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    binary_record = db.get_default_binary("firecracker")
+    get_firecracker_config(binary_record=binary_record)
     if (config_dir / "config.json").exists():
         raw = json.loads((config_dir / "config.json").read_text())
         assert "firecracker" not in raw
 
 
-def test_get_firecracker_config_latest_seeded_version(config_dir: Path, cache_dir: Path) -> None:
+def test_get_firecracker_config_with_explicit_record(config_dir: Path, cache_dir: Path) -> None:
     bin_dir = cache_dir / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     (bin_dir / "firecracker-v1.10.0").write_bytes(b"\x7fELF")
@@ -129,15 +137,19 @@ def test_get_firecracker_config_latest_seeded_version(config_dir: Path, cache_di
     _seed_binary(cache_dir, "v1.10.0", str(bin_dir / "firecracker-v1.10.0"))
     _seed_binary(cache_dir, "v1.12.0", str(bin_dir / "firecracker-v1.12.0"))
 
-    fc = get_firecracker_config()
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    binary_record = db.get_default_binary("firecracker")
+    fc = get_firecracker_config(binary_record=binary_record)
     assert fc["full_version"] == "v1.12.0"
 
 
-def test_firecracker_config_raises_when_no_default_in_db(config_dir: Path) -> None:
+def test_firecracker_config_raises_when_no_binary_record(config_dir: Path) -> None:
     raw: dict = {"firecracker": "not-a-dict"}
     (config_dir / "config.json").write_text(json.dumps(raw))
     with pytest.raises(AssetNotFoundError, match="No active binary for 'firecracker'"):
-        get_firecracker_config()
+        get_firecracker_config(binary_record=None)
 
 
 def test_get_assets_config_has_all_expected_keys(cache_dir: Path) -> None:
@@ -232,10 +244,11 @@ def test_initialize_default_config_preserves_binary_state_in_db(
     _seed_binary(cache_dir, "v1.10.0", fc_path)
 
     initialize_default_config()
-    db_entry = MVMDatabase().get_default_binary("firecracker")
+    db = MVMDatabase()
+    db_entry = db.get_default_binary("firecracker")
     assert db_entry is not None
     assert db_entry.full_version == "v1.10.0"
-    fc = get_firecracker_config()
+    fc = get_firecracker_config(binary_record=db_entry)
     assert fc["full_version"] == "v1.10.0"
     raw = json.loads((config_dir / "config.json").read_text())
     assert "firecracker" not in raw
@@ -281,6 +294,15 @@ def test_get_defaults_config_returns_none_when_no_defaults(cache_dir: Path) -> N
     assert defaults["kernel"] is None
 
 
+def test_get_defaults_config_with_explicit_values(cache_dir: Path) -> None:
+    defaults = get_defaults_config(
+        default_image_slug="ubuntu-24.04",
+        default_kernel_path="/path/to/vmlinux",
+    )
+    assert defaults["image"] == "ubuntu-24.04"
+    assert defaults["kernel"] == "/path/to/vmlinux"
+
+
 def test_set_defaults_value_image_non_string_raises(cache_dir: Path) -> None:
     with pytest.raises(ValueError, match="Default image must be a string"):
         set_defaults_value("image", 123)
@@ -297,80 +319,33 @@ def test_set_defaults_value_generic_key(config_dir: Path) -> None:
     assert raw["custom_key"] == "custom_value"
 
 
-def test_get_defaults_config_image_from_sqlite(cache_dir: Path) -> None:
-    import hashlib
-
-    from mvmctl.core.mvm_db import MVMDatabase
-    from mvmctl.db.models import Image
-
-    db = MVMDatabase()
-    db.migrate()
-    img_id = hashlib.sha256(b"test-image-default").hexdigest()
-    img = Image(
-        id=img_id,
-        os_slug="ubuntu-24.04",
-        path=str(cache_dir / "images" / "ubuntu-24.04.ext4"),
-        arch="x86_64",
-        is_default=True,
-    )
-    db.upsert_image(img)
-    db.set_default_image(img_id)
-
-    defaults = get_defaults_config()
+def test_get_defaults_config_image_from_explicit_value(cache_dir: Path) -> None:
+    defaults = get_defaults_config(default_image_slug="ubuntu-24.04")
     assert defaults["image"] == "ubuntu-24.04"
 
 
-def test_get_defaults_config_kernel_from_sqlite(cache_dir: Path) -> None:
-    import hashlib
-
-    from mvmctl.core.mvm_db import MVMDatabase
-    from mvmctl.db.models import Kernel
-
-    db = MVMDatabase()
-    db.migrate()
+def test_get_defaults_config_kernel_from_explicit_value(cache_dir: Path) -> None:
     kernel_path = str(cache_dir / "kernels" / "vmlinux-5.10")
-    k_id = hashlib.sha256(b"test-kernel-default").hexdigest()
-    k = Kernel(
-        id=k_id,
-        name="vmlinux",
-        arch="x86_64",
-        version="5.10",
-        path=kernel_path,
-        is_default=True,
-    )
-    db.upsert_kernel(k)
-    db.set_default_kernel(k_id)
-
-    defaults = get_defaults_config()
+    defaults = get_defaults_config(default_kernel_path=kernel_path)
     assert defaults["kernel"] == kernel_path
 
 
-def test_get_defaults_config_image_sqlite_operational_error(
-    mocker: "MockerFixture", cache_dir: Path
-) -> None:
-    import sqlite3
-
-    mocker.patch(
-        "mvmctl.core.config_state.MVMDatabase",
-        side_effect=sqlite3.OperationalError("db gone"),
-    )
-
-    defaults = get_defaults_config()
-    assert defaults["image"] is None
+def test_set_defaults_value_image_with_db(mocker: "MockerFixture", cache_dir: Path) -> None:
+    mock_db = mocker.MagicMock()
+    mocker.patch("mvmctl.core.config_state.set_default_image_entry")
+    set_defaults_value("image", "ubuntu-24.04", db=mock_db)
+    mock_db.set_default_image.assert_called_once_with("ubuntu-24.04")
 
 
-def test_get_defaults_config_kernel_sqlite_operational_error(
-    mocker: "MockerFixture", cache_dir: Path
-) -> None:
-    import sqlite3
-
-    mocker.patch(
-        "mvmctl.core.config_state.MVMDatabase",
-        side_effect=sqlite3.OperationalError("db gone"),
-    )
-
-    defaults = get_defaults_config()
-    assert defaults["kernel"] is None
+def test_set_defaults_value_kernel_with_db(mocker: "MockerFixture", cache_dir: Path) -> None:
+    mock_db = mocker.MagicMock()
+    mock_kernel = mocker.MagicMock()
+    mock_kernel.path = "vmlinux-5.10"
+    mock_kernel.id = "kernel-id-123"
+    mock_db.list_kernels.return_value = [mock_kernel]
+    mocker.patch("mvmctl.core.config_state.set_default_kernel_by_filename")
+    set_defaults_value("kernel", "vmlinux-5.10", db=mock_db)
+    mock_db.set_default_kernel.assert_called_once_with("kernel-id-123")
 
 
 def test_set_defaults_value_image_key_error_falls_back_to_os_slug(
@@ -381,61 +356,35 @@ def test_set_defaults_value_image_key_error_falls_back_to_os_slug(
         side_effect=KeyError("not found"),
     )
     mock_slug = mocker.patch("mvmctl.core.config_state.set_default_image_by_os_slug")
-    mocker.patch("mvmctl.core.config_state.MVMDatabase")
 
     set_defaults_value("image", "ubuntu-24.04")
     mock_slug.assert_called_once_with(cache_dir, "ubuntu-24.04")
 
 
-def test_set_defaults_value_image_sqlite_operational_error(
+def test_set_defaults_value_image_db_exception_swallowed(
     mocker: "MockerFixture", cache_dir: Path
 ) -> None:
-    import sqlite3
-
     mocker.patch("mvmctl.core.config_state.set_default_image_entry")
-    mocker.patch(
-        "mvmctl.core.config_state.MVMDatabase",
-        side_effect=sqlite3.OperationalError("db gone"),
-    )
-    set_defaults_value("image", "ubuntu-24.04")
+    mock_db = mocker.MagicMock()
+    mock_db.set_default_image.side_effect = Exception("db error")
+    set_defaults_value("image", "ubuntu-24.04", db=mock_db)
 
 
-def test_set_defaults_value_kernel_sqlite_operational_error(
+def test_set_defaults_value_kernel_db_exception_swallowed(
     mocker: "MockerFixture", cache_dir: Path
 ) -> None:
-    import sqlite3
-
     mocker.patch("mvmctl.core.config_state.set_default_kernel_by_filename")
-    mocker.patch(
-        "mvmctl.core.config_state.MVMDatabase",
-        side_effect=sqlite3.OperationalError("db gone"),
-    )
-    set_defaults_value("kernel", "vmlinux-5.10")
+    mock_db = mocker.MagicMock()
+    mock_db.list_kernels.side_effect = Exception("db error")
+    set_defaults_value("kernel", "vmlinux-5.10", db=mock_db)
 
 
-def test_set_defaults_value_kernel_found_in_sqlite(cache_dir: Path) -> None:
-    import hashlib
-    from unittest.mock import patch
-
-    from mvmctl.core.mvm_db import MVMDatabase
-    from mvmctl.db.models import Kernel
-
-    db = MVMDatabase()
-    db.migrate()
-    kernel_path = "vmlinux-5.10"
-    k_id = hashlib.sha256(b"kernel-for-set-default").hexdigest()
-    k = Kernel(
-        id=k_id,
-        name="vmlinux",
-        arch="x86_64",
-        version="5.10",
-        path=kernel_path,
-        is_default=False,
-    )
-    db.upsert_kernel(k)
-
-    with patch("mvmctl.core.config_state.set_default_kernel_by_filename"):
-        set_defaults_value("kernel", kernel_path)
-
-    updated = db.list_kernels()
-    assert any(kern.is_default and kern.path == kernel_path for kern in updated)
+def test_set_defaults_value_kernel_found_in_db(mocker: "MockerFixture", cache_dir: Path) -> None:
+    mock_db = mocker.MagicMock()
+    mock_kernel = mocker.MagicMock()
+    mock_kernel.path = "vmlinux-5.10"
+    mock_kernel.id = "kernel-id-abc"
+    mock_db.list_kernels.return_value = [mock_kernel]
+    mocker.patch("mvmctl.core.config_state.set_default_kernel_by_filename")
+    set_defaults_value("kernel", "vmlinux-5.10", db=mock_db)
+    mock_db.set_default_kernel.assert_called_once_with("kernel-id-abc")

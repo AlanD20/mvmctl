@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -12,11 +11,11 @@ from mvmctl.constants import (
 )
 from mvmctl.core.metadata import (
     get_default_image_entry,
+    get_default_kernel_entry,
     set_default_image_by_os_slug,
     set_default_image_entry,
     set_default_kernel_by_filename,
 )
-from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import AssetNotFoundError
 from mvmctl.utils.fs import get_cache_dir
 
@@ -53,21 +52,32 @@ def _write_raw(state: dict[str, Any]) -> None:
     path.chmod(CONST_FILE_PERMS_CONFIG)
 
 
-def get_firecracker_config() -> dict[str, str]:
-    db = MVMDatabase()
-    binary_default = db.get_default_binary("firecracker")
-    if binary_default is None:
+def get_firecracker_config(binary_record: Any | None = None) -> dict[str, str]:
+    """Get Firecracker binary configuration.
+
+    Args:
+        binary_record: Optional binary record from MVMDatabase.get_default_binary().
+                      If not provided, the caller (API layer) must query the database.
+
+    Returns:
+        Dictionary with Firecracker version and path information.
+
+    Raises:
+        AssetNotFoundError: If no binary_record is provided and no default is found.
+    """
+    if binary_record is None:
         raise AssetNotFoundError(
             "No active binary for 'firecracker' found — "
             "run 'mvm bin fetch <version>' to download one."
         )
-    full_version = binary_default.full_version or f"v{binary_default.version}"
+
+    full_version = binary_record.full_version or f"v{binary_record.version}"
     return {
         "full_version": full_version,
-        "ci_version": binary_default.ci_version or f"v{binary_default.version}",
+        "ci_version": binary_record.ci_version or f"v{binary_record.version}",
         "default_version": full_version,
         "active_version": full_version,
-        "binary_path": binary_default.path or "",
+        "binary_path": binary_record.path or "",
     }
 
 
@@ -145,43 +155,37 @@ def get_assets_config() -> dict[str, str]:
     return dict(section)
 
 
-def get_defaults_config() -> dict[str, Any]:
+def get_defaults_config(
+    default_image_slug: str | None = None,
+    default_kernel_path: str | None = None,
+) -> dict[str, Any]:
+    """Get default image and kernel configuration.
+
+    Args:
+        default_image_slug: Optional default image OS slug from database.
+                           If not provided, falls back to JSON metadata.
+        default_kernel_path: Optional default kernel path from database.
+                            If not provided, falls back to JSON metadata.
+
+    Returns:
+        Dictionary with 'image' and 'kernel' keys containing default values.
+    """
     cache_dir = get_cache_dir()
     defaults: dict[str, Any] = {"image": None, "kernel": None}
 
-    # Try SQLite first for image default
-    try:
-        db = MVMDatabase()
-        images = db.list_images()
-        for image in images:
-            if image.is_default:
-                defaults["image"] = image.os_slug or image.id
-                break
-    except sqlite3.OperationalError:
-        pass
-
-    # Fall back to JSON for image
-    if defaults["image"] is None:
+    # Use provided image default or fall back to JSON
+    if default_image_slug is not None:
+        defaults["image"] = default_image_slug
+    else:
         default_image = get_default_image_entry()
         if default_image is not None:
             image_id, image_meta = default_image
             defaults["image"] = image_meta.get("os_slug") or image_id
 
-    # Try SQLite first for kernel default
-    try:
-        db = MVMDatabase()
-        kernels = db.list_kernels()
-        for kernel in kernels:
-            if kernel.is_default:
-                defaults["kernel"] = kernel.path
-                break
-    except sqlite3.OperationalError:
-        pass
-
-    # Fall back to JSON for kernel
-    if defaults["kernel"] is None:
-        from mvmctl.core.metadata import get_default_kernel_entry
-
+    # Use provided kernel default or fall back to JSON
+    if default_kernel_path is not None:
+        defaults["kernel"] = default_kernel_path
+    else:
         default_kernel = get_default_kernel_entry(cache_dir)
         if default_kernel is not None:
             _kernel_id, kernel_meta = default_kernel
@@ -190,7 +194,19 @@ def get_defaults_config() -> dict[str, Any]:
     return defaults
 
 
-def set_defaults_value(key: str, value: Any) -> None:
+def set_defaults_value(key: str, value: Any, db: Any | None = None) -> None:
+    """Set a default value in the configuration.
+
+    Args:
+        key: The configuration key to set ("image", "kernel", or custom key).
+        value: The value to set.
+        db: Optional MVMDatabase instance for updating SQLite defaults.
+            If provided, image and kernel defaults will also be updated in DB.
+            The caller (API layer) is responsible for providing this.
+
+    Raises:
+        ValueError: If image/kernel value is not a string.
+    """
     cache_dir = get_cache_dir()
     if key == "image":
         if not isinstance(value, str):
@@ -200,11 +216,11 @@ def set_defaults_value(key: str, value: Any) -> None:
         except KeyError:
             set_default_image_by_os_slug(cache_dir, value)
 
-        try:
-            db = MVMDatabase()
-            db.set_default_image(value)
-        except sqlite3.OperationalError:
-            pass
+        if db is not None:
+            try:
+                db.set_default_image(value)
+            except Exception:
+                pass
         return
 
     if key == "kernel":
@@ -212,15 +228,15 @@ def set_defaults_value(key: str, value: Any) -> None:
             raise ValueError("Default kernel must be a string kernel filename")
         set_default_kernel_by_filename(cache_dir, value)
 
-        try:
-            db = MVMDatabase()
-            kernels = db.list_kernels()
-            for kernel in kernels:
-                if kernel.path == value:
-                    db.set_default_kernel(kernel.id)
-                    break
-        except sqlite3.OperationalError:
-            pass
+        if db is not None:
+            try:
+                kernels = db.list_kernels()
+                for kernel in kernels:
+                    if kernel.path == value:
+                        db.set_default_kernel(kernel.id)
+                        break
+            except Exception:
+                pass
         return
 
     state = _read_raw()

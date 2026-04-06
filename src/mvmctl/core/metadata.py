@@ -508,82 +508,119 @@ def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
 
 
 def update_network_entry(cache_dir: Path, network_name: str, **fields: Any) -> None:
-    """Upsert network entry in database."""
-    from mvmctl.utils.full_hash import generate_full_hash_network
+    """Upsert network entry in JSON metadata.
 
-    db = MVMDatabase()
+    Writes to JSON file directly since core layer should not access DB.
+    """
+    import json
 
-    subnet = fields.get("subnet", "")
-    created_at = fields.get("created_at") or _now_utc()
-    updated_at = fields.get("updated_at") or created_at
+    networks_dir = cache_dir / "networks"
+    networks_dir.mkdir(parents=True, exist_ok=True)
+    network_dir = networks_dir / network_name
+    network_dir.mkdir(parents=True, exist_ok=True)
 
-    existing = db.get_network_by_name(network_name)
-    network_id = fields.get("network_id") or (
-        existing.id if existing else generate_full_hash_network(network_name, subnet, created_at)
-    )
+    config_path = network_dir / "config.json"
 
-    nat_gateways = fields.get("nat_gateways", [])
-    nat_gateways_str = ",".join(nat_gateways) if nat_gateways else None
+    # Read existing config if present
+    config = {}
+    if config_path.exists():
+        config = json.loads(config_path.read_text())
 
-    network = Network(
-        id=network_id,
-        name=network_name,
-        subnet=subnet,
-        bridge=fields.get("bridge", ""),
-        ipv4_gateway=fields.get("ipv4_gateway", ""),
-        bridge_active=fields.get("bridge_active", False),
-        nat_gateways=nat_gateways_str,
-        nat_enabled=fields.get("nat_enabled", True),
-        is_default=fields.get("is_default", 0) == 1,
-        created_at=created_at,
-        updated_at=updated_at,
-    )
-    db.upsert_network(network)
+    # Update with new fields
+    for key, value in fields.items():
+        if key == "gateway":
+            config["ipv4_gateway"] = value
+        elif key == "leases":
+            # Store leases separately
+            leases_path = network_dir / "leases.json"
+            leases_path.write_text(json.dumps(value))
+        elif key not in ("network_id", "updated_at"):
+            config[key] = value
+
+    # Write updated config
+    config_path.write_text(json.dumps(config))
 
 
 def get_network_entry(cache_dir: Path, network_name: str) -> dict[str, Any]:
-    """Return network metadata entry or {} if not found."""
-    db = MVMDatabase()
-    network = db.get_network_by_name(network_name)
-    if network:
-        return NetworkRecord.from_db(network).to_dict()
-    return {}
+    """Return network metadata entry or {} if not found.
+
+    Reads from JSON files directly since core layer should not access DB.
+    """
+    import json
+
+    network_dir = cache_dir / "networks" / network_name
+    config_path = network_dir / "config.json"
+
+    entry = {}
+    if config_path.exists():
+        entry = json.loads(config_path.read_text())
+
+    # Also read leases from separate file
+    leases_path = network_dir / "leases.json"
+    if leases_path.exists():
+        entry["leases"] = json.loads(leases_path.read_text())
+
+    return entry
 
 
 def list_network_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
-    """Return all network entries dict keyed by network name."""
-    db = MVMDatabase()
-    networks = db.list_networks()
-    return {network.name: NetworkRecord.from_db(network).to_dict() for network in networks}
+    """Return all network entries dict keyed by network name.
+
+    Reads from JSON files directly since core layer should not access DB.
+    """
+    import json
+
+    networks_dir = cache_dir / "networks"
+    if not networks_dir.exists():
+        return {}
+
+    entries = {}
+    for network_dir in networks_dir.iterdir():
+        if network_dir.is_dir():
+            config_path = network_dir / "config.json"
+            if config_path.exists():
+                entries[network_dir.name] = json.loads(config_path.read_text())
+
+    return entries
 
 
 def remove_network_entry(cache_dir: Path, network_name: str) -> None:
-    """Remove a network entry from database."""
-    db = MVMDatabase()
-    network = db.get_network_by_name(network_name)
-    if network:
-        db.delete_network(network.id)
+    """Remove a network entry from JSON metadata.
+
+    Removes JSON files directly since core layer should not access DB.
+    """
+    import shutil
+
+    network_dir = cache_dir / "networks" / network_name
+    if network_dir.exists():
+        shutil.rmtree(network_dir)
 
 
 def set_default_network_entry(cache_dir: Path, network_name: str) -> None:
-    """Set a network as the default."""
-    db = MVMDatabase()
-    network = db.get_network_by_name(network_name)
-    if network:
-        db.set_default_network(network.id)
+    """Set a network as the default in JSON metadata.
+
+    Writes to a marker file since core layer should not access DB.
+    """
+    import json
+
+    # Store default network name in a marker file
+    default_path = cache_dir / "networks" / "default_network.json"
+    default_path.write_text(json.dumps({"name": network_name}))
 
 
 def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
     """Return the default network entry as (name, metadata) or None.
 
-    .. deprecated::
-        Use :func:`mvmctl.api.metadata.get_default_network_entry` instead.
+    Reads from JSON marker file since core layer should not access DB.
     """
-    warnings.warn(
-        "get_default_network_entry() is deprecated. Use mvmctl.api.metadata.get_default_network_entry() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    from mvmctl.api.metadata import get_default_network_entry as _api_get_default_network_entry
+    import json
 
-    return _api_get_default_network_entry(cache_dir)
+    default_path = cache_dir / "networks" / "default_network.json"
+    if default_path.exists():
+        data = json.loads(default_path.read_text())
+        name = data.get("name")
+        if name:
+            entry = get_network_entry(cache_dir, name)
+            if entry:
+                return (name, entry)
+    return None

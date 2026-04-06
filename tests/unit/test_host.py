@@ -38,7 +38,15 @@ from mvmctl.core.host_state import (
     get_host_state,
     restore_host,
 )
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import HostError, NetworkError, PrivilegeError
+
+
+@pytest.fixture
+def db() -> MVMDatabase:
+    """Provide an MVMDatabase instance for tests."""
+    return MVMDatabase()
+
 
 # ---------------------------------------------------------------------------
 # _state_dir / _state_file helpers
@@ -496,7 +504,7 @@ def test_ensure_kvm_modules_kvm_already_loaded_vendor_not(mock_loaded, mock_load
 # ---------------------------------------------------------------------------
 
 
-def test_save_state_writes_to_sqlite(tmp_path):
+def test_save_state_writes_to_sqlite(tmp_path, db):
     """_save_state should persist changes to SQLite database."""
     from mvmctl.core.mvm_db import MVMDatabase
 
@@ -508,11 +516,11 @@ def test_save_state_writes_to_sqlite(tmp_path):
             mechanism="sysctl",
         ),
     ]
-    _save_state(tmp_path, changes)
+    _save_state(db, changes)
 
     # Verify in SQLite database
-    db = MVMDatabase()
-    db_changes = db.list_host_changes()
+    db_verify = MVMDatabase()
+    db_changes = db_verify.list_host_changes()
     assert len(db_changes) == 1
     assert db_changes[0].setting == "net.ipv4.ip_forward"
     assert db_changes[0].mechanism == "sysctl"
@@ -520,30 +528,30 @@ def test_save_state_writes_to_sqlite(tmp_path):
     assert db_changes[0].applied_value == "1"
 
 
-def test_save_state_empty_changes_sqlite(tmp_path):
+def test_save_state_empty_changes_sqlite(tmp_path, db):
     """_save_state should create valid state entry with empty changes list."""
     from mvmctl.core.mvm_db import MVMDatabase
 
-    _save_state(tmp_path, [])
+    _save_state(db, [])
 
     # Verify in SQLite database
-    db = MVMDatabase()
-    db_changes = db.list_host_changes()
+    db_verify = MVMDatabase()
+    db_changes = db_verify.list_host_changes()
     assert db_changes == []
 
 
-def test_save_state_initializes_sqlite(tmp_path):
+def test_save_state_initializes_sqlite(tmp_path, db):
     """_save_state should initialize host state tables in SQLite."""
     from mvmctl.core.mvm_db import MVMDatabase
 
-    _save_state(tmp_path, [])
+    _save_state(db, [])
 
-    db = MVMDatabase()
-    state = db.get_host_state()
+    db_verify = MVMDatabase()
+    state = db_verify.get_host_state()
     assert state is not None
 
 
-def test_save_state_multiple_changes_sqlite(tmp_path):
+def test_save_state_multiple_changes_sqlite(tmp_path, db):
     """_save_state should persist all provided HostChange entries to SQLite."""
     from mvmctl.core.mvm_db import MVMDatabase
 
@@ -551,11 +559,11 @@ def test_save_state_multiple_changes_sqlite(tmp_path):
         HostStateChange("a", "0", "1", "sysctl"),
         HostStateChange("b", None, "v", "modprobe"),
     ]
-    _save_state(tmp_path, changes)
+    _save_state(db, changes)
 
     # Verify in SQLite database
-    db = MVMDatabase()
-    db_changes = db.list_host_changes()
+    db_verify = MVMDatabase()
+    db_changes = db_verify.list_host_changes()
     assert len(db_changes) == 2
     assert db_changes[0].setting == "a"
     assert db_changes[1].setting == "b"
@@ -584,11 +592,11 @@ def _mock_lsmod_with_kvm():
 @patch("mvmctl.core.host_setup.os.access", return_value=False)
 @patch("mvmctl.core.host_setup.Path.exists", return_value=False)
 def test_init_host_kvm_not_accessible(
-    mock_exists, mock_access, mock_which, mock_run, mock_getuid, mock_write_sudoers, tmp_path
+    mock_exists, mock_access, mock_which, mock_run, mock_getuid, mock_write_sudoers, tmp_path, db
 ):
     """init_host should raise HostError when /dev/kvm is not accessible."""
     with pytest.raises(HostError, match="/dev/kvm is not accessible"):
-        init_host(tmp_path)
+        init_host(tmp_path, db)
 
 
 @patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
@@ -598,12 +606,12 @@ def test_init_host_kvm_not_accessible(
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
 @patch("mvmctl.core.host_setup.Path.exists", return_value=True)
 def test_init_host_missing_binaries(
-    mock_exists, mock_access, mock_which, mock_run, mock_getuid, mock_write_sudoers, tmp_path
+    mock_exists, mock_access, mock_which, mock_run, mock_getuid, mock_write_sudoers, tmp_path, db
 ):
     """init_host should raise HostError listing missing binaries when required tools are absent."""
     mock_which.return_value = None
     with pytest.raises(HostError, match="Missing required binaries"):
-        init_host(tmp_path)
+        init_host(tmp_path, db)
 
 
 @patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
@@ -632,6 +640,7 @@ def test_init_host_ip_forward_already_enabled(
     mock_getuid,
     mock_write_sudoers,
     tmp_path,
+    db,
 ):
     """init_host should return no changes when IP forwarding and KVM modules are already configured."""
     # Path.exists for /dev/kvm returns True
@@ -653,7 +662,7 @@ def test_init_host_ip_forward_already_enabled(
             sudoers_file = tmp_path / "sudoers"
             sudoers_file.write_text("valid sudoers content")
             mock_gen_sudoers.return_value = "valid sudoers content"
-            changes = init_host(tmp_path)
+            changes = init_host(tmp_path, db)
 
     # ip_forward already "1" and sysctl conf already correct and modules loaded
     assert len(changes) == 1
@@ -694,6 +703,7 @@ def test_init_host_enables_ip_forward(
     mock_getuid,
     mock_write_sudoers,
     tmp_path,
+    db,
 ):
     """init_host should record ip_forward and sysctl_persist_file changes when forwarding was off."""
     with patch("mvmctl.core.host_setup.Path.exists", return_value=True):
@@ -718,7 +728,7 @@ def test_init_host_enables_ip_forward(
         # so sudoers_stale evaluates to False and no sudoers change is recorded
         mock_gen_sudoers.return_value = mock_sysctl_conf.read_text.return_value
 
-        changes = init_host(tmp_path)
+        changes = init_host(tmp_path, db)
 
     setting_names = [c.setting for c in changes]
     assert "net.ipv4.ip_forward" in setting_names
@@ -755,6 +765,7 @@ def test_init_host_writes_state_to_sqlite(
     mock_getuid,
     mock_write_sudoers,
     tmp_path,
+    db,
 ):
     """init_host should persist state to SQLite database."""
     from mvmctl.core.mvm_db import MVMDatabase
@@ -773,7 +784,7 @@ def test_init_host_writes_state_to_sqlite(
         mock_sysctl_conf.exists.return_value = True
         mock_sysctl_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
 
-        init_host(tmp_path)
+        init_host(tmp_path, db)
 
     db = MVMDatabase()
     state = db.get_host_state()
@@ -805,6 +816,7 @@ def test_init_host_idempotent(
     mock_getuid,
     mock_write_sudoers,
     tmp_path,
+    db,
 ):
     """init_host should produce fewer changes on the second call when the host is already configured."""
     with patch("mvmctl.core.host_setup.Path.exists", return_value=True):
@@ -829,13 +841,13 @@ def test_init_host_idempotent(
         mock_sysctl_conf.parent = MagicMock()
         mock_sysctl_conf.__str__ = lambda self: "/etc/sysctl.d/mvmctl.conf"
 
-        changes_first = init_host(tmp_path)
+        changes_first = init_host(tmp_path, db)
 
         # Second run: ip_forward already "1", sysctl conf now "exists"
         mock_sysctl_conf.exists.return_value = True
         mock_sysctl_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
 
-        changes_second = init_host(tmp_path)
+        changes_second = init_host(tmp_path, db)
 
     assert len(changes_second) <= len(changes_first)
     assert any(c.mechanism == "noop" and c.setting == "iptables_chains" for c in changes_second)
@@ -865,6 +877,7 @@ def test_init_host_with_module_loading(
     mock_getuid,
     mock_write_sudoers,
     tmp_path,
+    db,
 ):
     """init_host loads kvm modules when they're not loaded."""
     with patch("mvmctl.core.host_setup.Path.exists", return_value=True):
@@ -884,7 +897,7 @@ def test_init_host_with_module_loading(
         mock_sysctl_conf.exists.return_value = True
         mock_sysctl_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
 
-        changes = init_host(tmp_path)
+        changes = init_host(tmp_path, db)
 
     module_changes = [c for c in changes if c.mechanism == "modprobe"]
     assert len(module_changes) >= 1
@@ -895,18 +908,18 @@ def test_init_host_with_module_loading(
 # ---------------------------------------------------------------------------
 
 
-def test_get_host_state_no_state(tmp_path):
+def test_get_host_state_no_state(tmp_path, db):
     """get_host_state should return None when no state exists in SQLite."""
     from mvmctl.core.mvm_db import MVMDatabase
 
     db = MVMDatabase()
     db.initialize_host_state()
 
-    result = get_host_state(tmp_path)
+    result = get_host_state(db)
     assert result is None
 
 
-def test_get_host_state_valid(tmp_path):
+def test_get_host_state_valid(tmp_path, db):
     """get_host_state should return a HostState object when valid state exists in SQLite."""
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.db.models import HostStateChange
@@ -931,7 +944,7 @@ def test_get_host_state_valid(tmp_path):
     )
     db.add_host_change(change)
 
-    result = get_host_state(tmp_path)
+    result = get_host_state(db)
     assert isinstance(result, HostState)
     assert len(result.changes) == 1
     assert result.changes[0].setting == "net.ipv4.ip_forward"
@@ -940,18 +953,18 @@ def test_get_host_state_valid(tmp_path):
     assert result.changes[0].mechanism == "sysctl"
 
 
-def test_get_host_state_empty_changes(tmp_path):
+def test_get_host_state_empty_changes(tmp_path, db):
     """get_host_state should return None when state exists but has no unreverted changes."""
     from mvmctl.core.mvm_db import MVMDatabase
 
     db = MVMDatabase()
     db.initialize_host_state()
 
-    result = get_host_state(tmp_path)
+    result = get_host_state(db)
     assert result is None
 
 
-def test_get_host_state_multiple_changes(tmp_path):
+def test_get_host_state_multiple_changes(tmp_path, db):
     """get_host_state should return all HostChange entries when multiple changes exist in SQLite."""
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.db.models import HostStateChange
@@ -993,7 +1006,7 @@ def test_get_host_state_multiple_changes(tmp_path):
     for change in changes:
         db.add_host_change(change)
 
-    result = get_host_state(tmp_path)
+    result = get_host_state(db)
     assert isinstance(result, HostState)
     assert len(result.changes) == 2
     assert result.changes[0].setting == "net.ipv4.ip_forward"
@@ -1031,14 +1044,14 @@ def _seed_host_changes(cache_dir: Path, changes: list[dict]) -> None:
         )
 
 
-def test_restore_host_no_state(tmp_path):
+def test_restore_host_no_state(tmp_path, db):
     """restore_host should raise HostError when no state file exists to restore from."""
     with pytest.raises(HostError, match="No saved host state to restore"):
-        restore_host(tmp_path)
+        restore_host(db)
 
 
 @patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_reverts_sysctl(mock_run, tmp_path):
+def test_restore_host_reverts_sysctl(mock_run, tmp_path, db):
     """restore_host should revert a sysctl change to its original value and mark change reverted in SQLite."""
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.db.models import HostStateChange
@@ -1065,7 +1078,7 @@ def test_restore_host_reverts_sysctl(mock_run, tmp_path):
 
     mock_run.return_value = MagicMock(returncode=0)
 
-    reverted = restore_host(tmp_path)
+    reverted = restore_host(db)
     assert len(reverted) == 1
     assert reverted[0].setting == "net.ipv4.ip_forward"
     assert reverted[0].original_value == "1"
@@ -1084,7 +1097,7 @@ def test_restore_host_reverts_sysctl(mock_run, tmp_path):
     assert changes[0].reverted
 
 
-def test_restore_host_reverts_file_create(tmp_path):
+def test_restore_host_reverts_file_create(tmp_path, db):
     """restore_host should delete a file that was created during init when original_value is None."""
     target_file = tmp_path / "test-sysctl.conf"
     target_file.write_text("net.ipv4.ip_forward = 1\n")
@@ -1105,7 +1118,7 @@ def test_restore_host_reverts_file_create(tmp_path):
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
-        reverted = restore_host(tmp_path)
+        reverted = restore_host(db)
     assert len(reverted) == 1
     assert reverted[0].setting == "sysctl_persist_file"
     assert reverted[0].applied_value == "(removed)"
@@ -1114,7 +1127,7 @@ def test_restore_host_reverts_file_create(tmp_path):
     assert not target_file.exists()
 
 
-def test_restore_host_reverts_file_create_with_original(tmp_path):
+def test_restore_host_reverts_file_create_with_original(tmp_path, db):
     """restore_host should restore a file to its original content when original_value is set."""
     target_file = tmp_path / "test-sysctl.conf"
     target_file.write_text("net.ipv4.ip_forward = 1\n")
@@ -1135,13 +1148,13 @@ def test_restore_host_reverts_file_create_with_original(tmp_path):
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
-        reverted = restore_host(tmp_path)
+        reverted = restore_host(db)
     assert len(reverted) == 1
     assert target_file.read_text() == "old content\n"
 
 
 @patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_marks_changes_reverted(mock_run, tmp_path):
+def test_restore_host_marks_changes_reverted(mock_run, tmp_path, db):
     """restore_host should mark changes as reverted in the database."""
     from mvmctl.core.mvm_db import MVMDatabase
 
@@ -1158,7 +1171,7 @@ def test_restore_host_marks_changes_reverted(mock_run, tmp_path):
     )
 
     mock_run.return_value = MagicMock(returncode=0)
-    restore_host(tmp_path)
+    restore_host(db)
 
     db = MVMDatabase()
     changes = db.list_host_changes(include_reverted=True)
@@ -1167,7 +1180,7 @@ def test_restore_host_marks_changes_reverted(mock_run, tmp_path):
 
 
 @patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path):
+def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path, db):
     """restore_host should skip reverting a sysctl change when original_value is None."""
     _seed_host_changes(
         tmp_path,
@@ -1181,13 +1194,13 @@ def test_restore_host_sysctl_null_original_skipped(mock_run, tmp_path):
         ],
     )
 
-    reverted = restore_host(tmp_path)
+    reverted = restore_host(db)
     assert reverted == []
     mock_run.assert_not_called()
 
 
 @patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_sysctl_failure(mock_run, tmp_path):
+def test_restore_host_sysctl_failure(mock_run, tmp_path, db):
     """restore_host should raise HostError when the sysctl revert command fails."""
     _seed_host_changes(
         tmp_path,
@@ -1204,11 +1217,11 @@ def test_restore_host_sysctl_failure(mock_run, tmp_path):
     mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl")
 
     with pytest.raises(HostError, match="Failed to revert"):
-        restore_host(tmp_path)
+        restore_host(db)
 
 
 @patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_sysctl_file_not_found(mock_run, tmp_path):
+def test_restore_host_sysctl_file_not_found(mock_run, tmp_path, db):
     """sysctl command not found during restore."""
     _seed_host_changes(
         tmp_path,
@@ -1225,11 +1238,11 @@ def test_restore_host_sysctl_file_not_found(mock_run, tmp_path):
     mock_run.side_effect = FileNotFoundError("sysctl")
 
     with pytest.raises(HostError, match="sysctl command not found"):
-        restore_host(tmp_path)
+        restore_host(db)
 
 
 @patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path):
+def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path, db):
     """restore_host should revert changes in reverse order so later changes are undone first."""
     target_file = tmp_path / "test-sysctl.conf"
     target_file.write_text("content")
@@ -1258,13 +1271,13 @@ def test_restore_host_multiple_changes_reversed_order(mock_run, tmp_path):
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
-        reverted = restore_host(tmp_path)
+        reverted = restore_host(db)
     assert len(reverted) == 2
     assert reverted[0].setting == "sysctl_persist_file"
     assert reverted[1].setting == "net.ipv4.ip_forward"
 
 
-def test_restore_host_file_create_target_missing(tmp_path):
+def test_restore_host_file_create_target_missing(tmp_path, db):
     """file_create target doesn't exist anymore — skip silently."""
     target_file = tmp_path / "nonexistent.conf"
 
@@ -1284,11 +1297,11 @@ def test_restore_host_file_create_target_missing(tmp_path):
         "mvmctl.core.host_state.RESTORABLE_FILE_PATHS",
         frozenset({target_file}),
     ):
-        reverted = restore_host(tmp_path)
+        reverted = restore_host(db)
     assert reverted == []
 
 
-def test_restore_host_file_create_os_error(tmp_path):
+def test_restore_host_file_create_os_error(tmp_path, db):
     """OS error during file revert raises HostError."""
     target_file = tmp_path / "test.conf"
     target_file.write_text("content")
@@ -1311,10 +1324,10 @@ def test_restore_host_file_create_os_error(tmp_path):
     ):
         with patch("pathlib.Path.unlink", side_effect=OSError("permission denied")):
             with pytest.raises(HostError, match="Failed to revert file"):
-                restore_host(tmp_path)
+                restore_host(db)
 
 
-def test_restore_host_modprobe_mechanism_ignored(tmp_path):
+def test_restore_host_modprobe_mechanism_ignored(tmp_path, db):
     """modprobe mechanism changes are not reverted."""
     _seed_host_changes(
         tmp_path,
@@ -1328,7 +1341,7 @@ def test_restore_host_modprobe_mechanism_ignored(tmp_path):
         ],
     )
 
-    reverted = restore_host(tmp_path)
+    reverted = restore_host(db)
     assert reverted == []
 
 
@@ -1351,7 +1364,7 @@ def test_host_change_dataclass():
     assert change.mechanism == "sysctl"
 
 
-def test_host_state_dataclass():
+def test_host_state_dataclass(db):
     """HostState should store init_timestamp and changes fields correctly."""
     state = HostState(
         init_timestamp="2025-01-01T00:00:00+00:00",
@@ -1369,13 +1382,13 @@ def test_host_state_dataclass():
 class TestCheckPrivileges:
     @patch("mvmctl.core.host_privilege.shutil.which", return_value=None)
     @patch("mvmctl.core.host_privilege.Path.exists", return_value=False)
-    def test_binary_not_found(self, mock_exists, mock_which):
+    def test_binary_not_found(self, mock_exists, mock_which, db):
         with pytest.raises(PrivilegeError, match="Binary not found"):
             check_privileges("/usr/sbin/nonexistent")
 
     @patch("mvmctl.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
     @patch("mvmctl.core.host_privilege.os.getuid", return_value=0)
-    def test_root_user_passes(self, mock_uid, mock_which):
+    def test_root_user_passes(self, mock_uid, mock_which, db):
         check_privileges("/usr/sbin/ip")
 
     @patch("mvmctl.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
@@ -1383,7 +1396,7 @@ class TestCheckPrivileges:
     @patch("mvmctl.core.host_privilege.os.getgroups", return_value=[1000, 957])
     @patch("mvmctl.core.host_privilege.os.getgid", return_value=1000)
     @patch("mvmctl.core.host_privilege.os.getegid", return_value=1000)
-    def test_user_in_group_passes(self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which):
+    def test_user_in_group_passes(self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which, db):
         import grp
         import pwd
 
@@ -1406,7 +1419,9 @@ class TestCheckPrivileges:
     @patch("mvmctl.core.host_privilege.os.getgroups", return_value=[1000])
     @patch("mvmctl.core.host_privilege.os.getgid", return_value=1000)
     @patch("mvmctl.core.host_privilege.os.getegid", return_value=1000)
-    def test_user_not_in_group_fails(self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which):
+    def test_user_not_in_group_fails(
+        self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which, db
+    ):
         import grp
         import pwd
 
@@ -1427,7 +1442,7 @@ class TestCheckPrivileges:
 
     @patch("mvmctl.core.host_privilege.shutil.which", return_value="/usr/sbin/ip")
     @patch("mvmctl.core.host_privilege.os.getuid", return_value=1000)
-    def test_group_not_exists(self, mock_uid, mock_which):
+    def test_group_not_exists(self, mock_uid, mock_which, db):
         import grp
 
         with patch.object(grp, "getgrnam", side_effect=KeyError("mvm")):
@@ -1440,7 +1455,7 @@ class TestCheckPrivileges:
     @patch("mvmctl.core.host_privilege.os.getgid", return_value=957)
     @patch("mvmctl.core.host_privilege.os.getegid", return_value=957)
     def test_user_with_primary_group_passes(
-        self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which
+        self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which, db
     ):
         """Test that user whose primary gid is mvm group passes privilege check."""
         import grp
@@ -1466,7 +1481,7 @@ class TestCheckPrivileges:
     @patch("mvmctl.core.host_privilege.os.getgid", return_value=1000)
     @patch("mvmctl.core.host_privilege.os.getegid", return_value=1000)
     def test_user_in_group_but_session_not_restarted(
-        self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which
+        self, mock_egid, mock_gid, mock_groups, mock_uid, mock_which, db
     ):
         """Test session-not-restarted error when group not in process credentials."""
         import grp
@@ -1494,7 +1509,7 @@ class TestCheckPrivileges:
 
 
 class TestHostHelpers:
-    def test_get_current_user_no_sudo(self, monkeypatch):
+    def test_get_current_user_no_sudo(self, monkeypatch, db):
         import os
         import pwd
 
@@ -1507,23 +1522,23 @@ class TestHostHelpers:
         ):
             assert _get_current_user() == "testuser"
 
-    def test_get_current_user_with_sudo(self, monkeypatch):
+    def test_get_current_user_with_sudo(self, monkeypatch, db):
         monkeypatch.setenv("SUDO_USER", "realuser")
         assert _get_current_user() == "realuser"
 
-    def test_group_exists_true(self):
+    def test_group_exists_true(selfdb):
         import grp
 
         with patch.object(grp, "getgrnam", return_value=MagicMock()):
             assert _group_exists("mvm") is True
 
-    def test_group_exists_false(self):
+    def test_group_exists_false(selfdb):
         import grp
 
         with patch.object(grp, "getgrnam", side_effect=KeyError("mvm")):
             assert _group_exists("mvm") is False
 
-    def test_user_in_group_true(self):
+    def test_user_in_group_true(selfdb):
         import grp
 
         mock_grp = MagicMock()
@@ -1531,7 +1546,7 @@ class TestHostHelpers:
         with patch.object(grp, "getgrnam", return_value=mock_grp):
             assert _user_in_group("alice", "mvm") is True
 
-    def test_user_in_group_false(self):
+    def test_user_in_group_false(selfdb):
         import grp
 
         mock_grp = MagicMock()
@@ -1539,19 +1554,19 @@ class TestHostHelpers:
         with patch.object(grp, "getgrnam", return_value=mock_grp):
             assert _user_in_group("alice", "mvm") is False
 
-    def test_user_in_group_no_group(self):
+    def test_user_in_group_no_group(selfdb):
         import grp
 
         with patch.object(grp, "getgrnam", side_effect=KeyError("mvm")):
             assert _user_in_group("alice", "mvm") is False
 
     @patch("mvmctl.core.host_privilege._group_exists", return_value=True)
-    def test_create_group_already_exists(self, mock_exists):
+    def test_create_group_already_exists(self, mock_exists, db):
         assert _create_group("mvm") is False
 
     @patch("mvmctl.core.host_privilege._group_exists", return_value=False)
     @patch("mvmctl.core.host_privilege.subprocess.run")
-    def test_create_group_success(self, mock_run, mock_exists):
+    def test_create_group_success(self, mock_run, mock_exists, db):
         assert _create_group("mvm") is True
         mock_run.assert_called_once()
 
@@ -1560,41 +1575,41 @@ class TestHostHelpers:
         "mvmctl.core.host_privilege.subprocess.run",
         side_effect=FileNotFoundError("groupadd"),
     )
-    def test_create_group_command_not_found(self, mock_run, mock_exists):
+    def test_create_group_command_not_found(self, mock_run, mock_exists, db):
         with pytest.raises(HostError, match="groupadd command not found"):
             _create_group("mvm")
 
     @patch("mvmctl.core.host_privilege._user_in_group", return_value=True)
-    def test_add_user_to_group_already_member(self, mock_in_group):
+    def test_add_user_to_group_already_member(self, mock_in_group, db):
         assert _add_user_to_group("alice", "mvm") is False
 
     @patch("mvmctl.core.host_privilege._user_in_group", return_value=False)
     @patch("mvmctl.core.host_privilege.subprocess.run")
-    def test_add_user_to_group_success(self, mock_run, mock_in_group):
+    def test_add_user_to_group_success(self, mock_run, mock_in_group, db):
         assert _add_user_to_group("alice", "mvm") is True
 
-    def test_generate_sudoers_content(self):
+    def test_generate_sudoers_content(selfdb):
         content = _generate_sudoers_content("mvm")
         assert "%mvm ALL=(root) NOPASSWD:" in content
         assert "/usr/sbin/ip" in content
         assert "do not edit manually" in content
 
     @patch("mvmctl.core.host_privilege.Path.exists", return_value=True)
-    def test_validate_sudoers_binaries_all_present(self, mock_exists):
+    def test_validate_sudoers_binaries_all_present(self, mock_exists, db):
         _validate_sudoers_binaries()  # Should not raise
 
     @patch("mvmctl.core.host_privilege.Path.exists", return_value=False)
-    def test_validate_sudoers_binaries_missing(self, mock_exists):
+    def test_validate_sudoers_binaries_missing(self, mock_exists, db):
         with pytest.raises(HostError, match="Required binary not found"):
             _validate_sudoers_binaries()
 
     @patch("mvmctl.core.host_privilege._group_exists", return_value=False)
-    def test_remove_group_not_exists(self, mock_exists):
+    def test_remove_group_not_exists(self, mock_exists, db):
         assert _remove_group("mvm") is False
 
     @patch("mvmctl.core.host_privilege._group_exists", return_value=True)
     @patch("mvmctl.core.host_privilege.subprocess.run")
-    def test_remove_group_success(self, mock_run, mock_exists):
+    def test_remove_group_success(self, mock_run, mock_exists, db):
         assert _remove_group("mvm") is True
 
 
@@ -1625,8 +1640,9 @@ class TestCleanHost:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert any("Removed TAP device 'mvm-def-vm0-aaa'" in s for s in summary)
         assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
 
@@ -1655,13 +1671,14 @@ class TestCleanHost:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
         net = MagicMock()
         net.name = "default"
         net.bridge = "mvm-br0"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert len(summary) == 4
         assert any("Removed network 'default'" in s for s in summary)
         assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
@@ -1694,13 +1711,14 @@ class TestCleanHost:
         mock_teardown_chains,
         mock_teardown_nat,
         mock_teardown_bridge,
+        db,
     ):
         net = MagicMock()
         net.name = "default"
         net.bridge = "mvm-br0"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert any("Warning" in s for s in summary)
         assert any("already deleted, skipping" in s for s in summary)
 
@@ -1728,8 +1746,9 @@ class TestCleanHost:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert any("skipped network inventory cleanup" in s for s in summary)
         assert any("MVM Networking: deleted chain" in s for s in summary)
 
@@ -1758,13 +1777,14 @@ class TestCleanHost:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
         net = MagicMock()
         net.name = "default"
         net.bridge = "mvm-br0"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert any("Warning: failed to remove TAP" in s for s in summary)
         assert any("failed to remove network 'default'" in s for s in summary)
         assert any("failed to delete chain MVM-FORWARD" in s for s in summary)
@@ -1792,8 +1812,9 @@ class TestCleanHost:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert any("Removed TAP device 'mvm-abc-vm1-xyz'" in s for s in summary)
         assert any("Removed TAP device 'mvm-stale'" in s for s in summary)
         assert any("MVM Networking: deleted chain" in s for s in summary)
@@ -1824,8 +1845,9 @@ class TestCleanHost:
         mock_teardown_nat,
         mock_teardown_bridge,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
 
         mock_teardown_nat.assert_called_once_with(bridge="mvm-orphan", force=True)
         mock_teardown_bridge.assert_called_once_with("mvm-orphan")
@@ -1855,13 +1877,14 @@ class TestCleanHost:
         mock_teardown_nat,
         mock_teardown_bridge,
         mock_teardown_chains,
+        db,
     ):
         net = MagicMock()
         net.name = "custom"
         net.bridge = "mvm-custom"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
 
         mock_teardown_bridge.assert_called_once_with("mvm-custom")
         assert any("Removed network 'custom'" in s for s in summary)
@@ -1876,18 +1899,18 @@ class TestResetHost:
     @patch("mvmctl.core.host._state_file")
     @patch("mvmctl.core.host._remove_group", return_value=True)
     @patch("mvmctl.core.host._remove_sudoers", return_value=True)
-    @patch("mvmctl.core.host.restore_host", return_value=[])
+    @patch("mvmctl.core.host_state.restore_host", return_value=[])
     @patch(
         "mvmctl.core.host.clean_host", return_value=["Removed network 'default' (bridge: mvm-br0)"]
     )
     def test_reset_host_full(
-        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file
+        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
         mock_state_file.return_value = mock_sf
 
-        summary = reset_host(MagicMock())
+        summary = reset_host(MagicMock(), db)
         assert any("Removed network" in s for s in summary)
         assert any("sudoers" in s for s in summary)
         assert any("group" in s for s in summary)
@@ -1895,16 +1918,16 @@ class TestResetHost:
     @patch("mvmctl.core.host._state_file")
     @patch("mvmctl.core.host._remove_group", return_value=False)
     @patch("mvmctl.core.host._remove_sudoers", return_value=False)
-    @patch("mvmctl.core.host.restore_host", side_effect=HostError("no state"))
+    @patch("mvmctl.core.host_state.restore_host", side_effect=HostError("no state"))
     @patch("mvmctl.core.host.clean_host", return_value=[])
     def test_reset_host_nothing_to_do(
-        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file
+        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = False
         mock_state_file.return_value = mock_sf
 
-        summary = reset_host(MagicMock())
+        summary = reset_host(MagicMock(), db)
         assert summary == []
 
 
@@ -1921,11 +1944,11 @@ class TestInitHostErrorPaths:
     @patch("mvmctl.core.host_setup.os.access", return_value=False)
     @patch("mvmctl.core.host_setup.Path.exists", return_value=False)
     def test_configure_host_kvm_not_available(
-        self, mock_exists, mock_access, mock_getuid, mock_write_sudoers, tmp_path
+        self, mock_exists, mock_access, mock_getuid, mock_write_sudoers, tmp_path, db
     ):
         """init_host raises HostError when /dev/kvm is not available."""
         with pytest.raises(HostError, match="/dev/kvm is not accessible"):
-            init_host(tmp_path)
+            init_host(tmp_path, db)
 
     @patch("mvmctl.core.host_setup._write_sudoers")
     @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
@@ -1950,6 +1973,7 @@ class TestInitHostErrorPaths:
         mock_getuid,
         mock_write_sudoers,
         tmp_path,
+        db,
     ):
         """init_host raises HostError when sysctl -w ip_forward=1 fails."""
         with patch("mvmctl.core.host_setup.Path.exists", return_value=True):
@@ -1968,7 +1992,7 @@ class TestInitHostErrorPaths:
             mock_sysctl_conf.parent = MagicMock()
 
             with pytest.raises(HostError, match="Failed to enable IP forwarding"):
-                init_host(tmp_path)
+                init_host(tmp_path, db)
 
 
 class TestCleanHostErrorPaths:
@@ -1995,9 +2019,10 @@ class TestCleanHostErrorPaths:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
         """clean_host removes MVM chains even when no bridges/networks exist."""
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert len(summary) == 3
         assert any("already deleted, skipping" in s for s in summary)
         mock_list.assert_called_once()
@@ -2030,13 +2055,14 @@ class TestCleanHostErrorPaths:
         mock_teardown_chains,
         mock_teardown_nat,
         mock_teardown_bridge,
+        db,
     ):
         net = MagicMock()
         net.name = "stale-net"
         net.bridge = "mvm-br99"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert len(summary) == 4
         assert any("Warning" in s for s in summary)
         assert any("stale-net" in s for s in summary)
@@ -2046,12 +2072,12 @@ class TestCleanHostErrorPaths:
 class TestRestoreHostErrorPaths:
     """Error-path tests for restore_host."""
 
-    def test_restore_host_no_state_in_db(self, tmp_path):
+    def test_restore_host_no_state_in_db(self, tmp_path, db):
         """restore_host raises HostError when no state exists in database."""
         with pytest.raises(HostError, match="No saved host state to restore"):
-            restore_host(tmp_path)
+            restore_host(db)
 
-    def test_restore_host_no_unreverted_changes(self, tmp_path):
+    def test_restore_host_no_unreverted_changes(self, tmp_path, db):
         """restore_host raises HostError when all changes are already reverted."""
         from mvmctl.core.mvm_db import MVMDatabase
         from mvmctl.db.models import HostStateChange
@@ -2078,14 +2104,14 @@ class TestRestoreHostErrorPaths:
         )
 
         with pytest.raises(HostError, match="No saved host state to restore"):
-            restore_host(tmp_path)
+            restore_host(db)
 
 
 class TestCheckRequiredBinariesErrorPaths:
     """Error-path tests for check_required_binaries."""
 
     @patch("mvmctl.core.host_setup.shutil.which")
-    def test_single_required_binary_missing(self, mock_which):
+    def test_single_required_binary_missing(self, mock_which, db):
         """check_required_binaries detects when only 'iptables' is missing."""
 
         def side_effect(name):
@@ -2100,7 +2126,7 @@ class TestCheckRequiredBinariesErrorPaths:
         assert "qemu-img" not in result
 
     @patch("mvmctl.core.host_setup.shutil.which")
-    def test_qemu_img_missing(self, mock_which):
+    def test_qemu_img_missing(self, mock_which, db):
         """check_required_binaries detects when only 'qemu-img' is missing."""
 
         def side_effect(name):
@@ -2114,7 +2140,7 @@ class TestCheckRequiredBinariesErrorPaths:
         assert "ip" not in result
 
     @patch("mvmctl.core.host_setup.shutil.which", return_value=None)
-    def test_all_binaries_missing(self, mock_which):
+    def test_all_binaries_missing(self, mock_which, db):
         """check_required_binaries reports all binaries when none are found."""
         result = check_required_binaries()
         assert "ip" in result
@@ -2124,7 +2150,7 @@ class TestCheckRequiredBinariesErrorPaths:
         assert len(result) == 4
 
     @patch("mvmctl.core.host_setup.shutil.which")
-    def test_only_iso_binaries_missing(self, mock_which):
+    def test_only_iso_binaries_missing(self, mock_which, db):
         """check_required_binaries detects when both ISO tools are missing."""
 
         def side_effect(name):
@@ -2141,13 +2167,13 @@ class TestGetIpForwardErrorPaths:
     """Error-path tests for get_ip_forward_status."""
 
     @patch("mvmctl.core.host_setup.subprocess.run")
-    def test_sysctl_command_not_found(self, mock_run):
+    def test_sysctl_command_not_found(self, mock_run, db):
         mock_run.side_effect = FileNotFoundError("sysctl")
         with pytest.raises(HostError, match="sysctl command not found"):
             get_ip_forward_status()
 
     @patch("mvmctl.core.host_setup.subprocess.run")
-    def test_sysctl_returns_error(self, mock_run):
+    def test_sysctl_returns_error(self, mock_run, db):
         mock_run.side_effect = subprocess.CalledProcessError(1, "sysctl", stderr="unknown key")
         with pytest.raises(HostError, match="Failed to read"):
             get_ip_forward_status()
@@ -2155,7 +2181,7 @@ class TestGetIpForwardErrorPaths:
 
 class TestWriteSudoersErrorPaths:
     @patch("mvmctl.core.host_privilege.subprocess.run")
-    def test_visudo_failure(self, mock_run, tmp_path):
+    def test_visudo_failure(self, mock_run, tmp_path, db):
         """_write_sudoers raises HostError if visudo validation fails."""
         mock_run.return_value = MagicMock(returncode=1, stderr="syntax error")
         from mvmctl.core.host_privilege import _write_sudoers
@@ -2167,7 +2193,7 @@ class TestWriteSudoersErrorPaths:
 class TestAddUserToGroupErrorPaths:
     @patch("mvmctl.core.host_privilege._user_in_group", return_value=False)
     @patch("mvmctl.core.host_privilege.subprocess.run")
-    def test_usermod_failure(self, mock_run, mock_in_group):
+    def test_usermod_failure(self, mock_run, mock_in_group, db):
         """_add_user_to_group raises HostError if usermod fails."""
         mock_run.side_effect = subprocess.CalledProcessError(1, "usermod", stderr="user not found")
         with pytest.raises(HostError, match="Failed to add usr to group grp"):
@@ -2175,7 +2201,7 @@ class TestAddUserToGroupErrorPaths:
 
     @patch("mvmctl.core.host_privilege._user_in_group", return_value=False)
     @patch("mvmctl.core.host_privilege.subprocess.run", side_effect=FileNotFoundError("usermod"))
-    def test_usermod_not_found(self, mock_run, mock_in_group):
+    def test_usermod_not_found(self, mock_run, mock_in_group, db):
         """_add_user_to_group raises HostError if usermod is missing."""
         with pytest.raises(HostError, match="usermod command not found"):
             _add_user_to_group("usr", "grp")
@@ -2183,9 +2209,11 @@ class TestAddUserToGroupErrorPaths:
 
 class TestPruneHostErrorPaths:
     @patch("mvmctl.core.host.clean_host", return_value=["cleaned"])
-    @patch("mvmctl.core.host.restore_host")
+    @patch("mvmctl.core.host_state.restore_host")
     @patch("mvmctl.core.host._state_file")
-    def test_prune_host_restore_fails(self, mock_state_file, mock_restore, mock_clean, tmp_path):
+    def test_prune_host_restore_fails(
+        self, mock_state_file, mock_restore, mock_clean, tmp_path, db
+    ):
         """prune_host catches HostError from restore_host but still returns clean summary and removes state."""
         mock_restore.side_effect = HostError("fake restore error")
         mock_sf = MagicMock()
@@ -2194,7 +2222,7 @@ class TestPruneHostErrorPaths:
 
         from mvmctl.core.host import prune_host
 
-        summary = prune_host(tmp_path)
+        summary = prune_host(tmp_path, db)
 
         assert "cleaned" in summary
         assert "Removed host state snapshot" in summary
@@ -2203,12 +2231,12 @@ class TestPruneHostErrorPaths:
 
 class TestResetHostErrorPaths:
     @patch("mvmctl.core.host.clean_host", return_value=["cleaned"])
-    @patch("mvmctl.core.host.restore_host", side_effect=HostError("fake restore error"))
+    @patch("mvmctl.core.host_state.restore_host", side_effect=HostError("fake restore error"))
     @patch("mvmctl.core.host._remove_sudoers", side_effect=HostError("fake sudoers error"))
     @patch("mvmctl.core.host._remove_group", side_effect=HostError("fake group error"))
     @patch("mvmctl.core.host._state_file")
     def test_reset_host_all_errors(
-        self, mock_state_file, mock_rg, mock_rs, mock_rh, mock_ch, tmp_path
+        self, mock_state_file, mock_rg, mock_rs, mock_rh, mock_ch, tmp_path, db
     ):
         """reset_host catches all intermediary HostErrors and still returns a summary."""
         mock_sf = MagicMock()
@@ -2217,7 +2245,7 @@ class TestResetHostErrorPaths:
 
         from mvmctl.core.host import reset_host
 
-        summary = reset_host(tmp_path)
+        summary = reset_host(tmp_path, db)
 
         assert "cleaned" in summary
         assert "Warning: fake sudoers error" in summary
@@ -2256,7 +2284,7 @@ class TestPersistHostStateToDb:
             ),
         ]
 
-        _persist_host_state_to_db(changes)
+        _persist_host_state_to_db(db, changes)
 
         state = db.get_host_state()
         assert state is not None
@@ -2273,6 +2301,8 @@ class TestPersistHostStateToDb:
     def test_sqlite_failure_is_silent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from mvmctl.core.mvm_db import MVMDatabase
+
         unmigrated_db = tmp_path / "empty.db"
         unmigrated_db.touch()
         monkeypatch.setattr("mvmctl.core.mvm_db.get_mvm_db_path", lambda: unmigrated_db)
@@ -2280,7 +2310,10 @@ class TestPersistHostStateToDb:
         from mvmctl.core.host_setup import _persist_host_state_to_db
         from mvmctl.models.host import HostStateChange
 
+        db = MVMDatabase(db_path=unmigrated_db)
+
         _persist_host_state_to_db(
+            db,
             [
                 HostStateChange(
                     setting="ip_forward",
@@ -2288,7 +2321,7 @@ class TestPersistHostStateToDb:
                     original_value="0",
                     applied_value="1",
                 )
-            ]
+            ],
         )
 
 
@@ -2300,7 +2333,7 @@ class TestPersistHostStateToDb:
 class TestPruneHostAdditional:
     @patch("mvmctl.core.host.clean_host", return_value=["cleaned"])
     @patch(
-        "mvmctl.core.host.restore_host",
+        "mvmctl.core.host_state.restore_host",
         return_value=[
             HostStateChange(
                 setting="net.ipv4.ip_forward",
@@ -2312,7 +2345,7 @@ class TestPruneHostAdditional:
     )
     @patch("mvmctl.core.host._state_file")
     def test_prune_host_with_restore_changes(
-        self, mock_state_file, mock_restore, mock_clean, tmp_path
+        self, mock_state_file, mock_restore, mock_clean, tmp_path, db
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
@@ -2320,15 +2353,17 @@ class TestPruneHostAdditional:
 
         from mvmctl.core.host import prune_host
 
-        summary = prune_host(tmp_path)
+        summary = prune_host(tmp_path, db)
         assert "cleaned" in summary
         assert any("net.ipv4.ip_forward" in s for s in summary)
         assert "Removed host state snapshot" in summary
 
     @patch("mvmctl.core.host.clean_host", return_value=["cleaned"])
-    @patch("mvmctl.core.host.restore_host", side_effect=HostError("no state"))
+    @patch("mvmctl.core.host_state.restore_host", side_effect=HostError("no state"))
     @patch("mvmctl.core.host._state_file")
-    def test_prune_host_unlink_oserror(self, mock_state_file, mock_restore, mock_clean, tmp_path):
+    def test_prune_host_unlink_oserror(
+        self, mock_state_file, mock_restore, mock_clean, tmp_path, db
+    ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
         mock_sf.unlink.side_effect = OSError("permission denied")
@@ -2336,7 +2371,7 @@ class TestPruneHostAdditional:
 
         from mvmctl.core.host import prune_host
 
-        summary = prune_host(tmp_path)
+        summary = prune_host(tmp_path, db)
         assert "cleaned" in summary
         assert "Removed host state snapshot" not in summary
 
@@ -2361,8 +2396,9 @@ class TestCleanHostAdditional:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         mock_teardown_bridge.assert_called()
         assert any("orphan bridge" in s or "MVM Networking" in s for s in summary)
 
@@ -2385,8 +2421,9 @@ class TestCleanHostAdditional:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert any("Warning" in s for s in summary)
 
     @patch(
@@ -2408,8 +2445,9 @@ class TestCleanHostAdditional:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         mock_teardown_bridge.assert_called()
         assert any("orphan bridge" in s or "MVM Networking" in s for s in summary)
 
@@ -2432,8 +2470,9 @@ class TestCleanHostAdditional:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert any("Warning" in s for s in summary)
 
     @patch(
@@ -2453,8 +2492,9 @@ class TestCleanHostAdditional:
         mock_bridge_exists,
         mock_list_bridges,
         mock_teardown_chains,
+        db,
     ):
-        summary = clean_host(MagicMock())
+        summary = clean_host(MagicMock(), db)
         assert any("already clean" in s for s in summary)
 
 
@@ -2463,7 +2503,7 @@ class TestResetHostAdditional:
     @patch("mvmctl.core.host._remove_group", return_value=True)
     @patch("mvmctl.core.host._remove_sudoers", return_value=True)
     @patch(
-        "mvmctl.core.host.restore_host",
+        "mvmctl.core.host_state.restore_host",
         return_value=[
             HostStateChange(
                 setting="net.ipv4.ip_forward",
@@ -2475,7 +2515,7 @@ class TestResetHostAdditional:
     )
     @patch("mvmctl.core.host.clean_host", return_value=[])
     def test_reset_host_with_restore_changes(
-        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file
+        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
@@ -2483,7 +2523,7 @@ class TestResetHostAdditional:
 
         from mvmctl.core.host import reset_host
 
-        summary = reset_host(MagicMock())
+        summary = reset_host(MagicMock(), db)
         assert any("net.ipv4.ip_forward" in s for s in summary)
         assert any("sudoers" in s for s in summary)
         assert any("group" in s for s in summary)
@@ -2491,10 +2531,10 @@ class TestResetHostAdditional:
     @patch("mvmctl.core.host._state_file")
     @patch("mvmctl.core.host._remove_group", return_value=False)
     @patch("mvmctl.core.host._remove_sudoers", return_value=False)
-    @patch("mvmctl.core.host.restore_host", return_value=[])
+    @patch("mvmctl.core.host_state.restore_host", return_value=[])
     @patch("mvmctl.core.host.clean_host", return_value=[])
     def test_reset_host_state_file_unlink_oserror(
-        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file
+        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
@@ -2503,7 +2543,7 @@ class TestResetHostAdditional:
 
         from mvmctl.core.host import reset_host
 
-        summary = reset_host(MagicMock())
+        summary = reset_host(MagicMock(), db)
         assert "Removed host state snapshot" not in summary
 
 
@@ -2515,7 +2555,7 @@ class TestResetHostAdditional:
 class TestRestoreHostStateBranches:
     """Cover remaining branches in core/host_state.py restore_host()."""
 
-    def test_restore_host_disallowed_sysctl_key_skipped(self, tmp_path):
+    def test_restore_host_disallowed_sysctl_key_skipped(self, tmp_path, db):
         """restore_host skips sysctl keys not in RESTORABLE_SYSCTL_KEYS (lines 150-151)."""
         _seed_host_changes(
             tmp_path,
@@ -2530,12 +2570,12 @@ class TestRestoreHostStateBranches:
         )
 
         with patch("mvmctl.core.host_state.RESTORABLE_SYSCTL_KEYS", frozenset()):
-            reverted = restore_host(tmp_path)
+            reverted = restore_host(db)
 
         assert reverted == []
 
     @patch("mvmctl.core.host_state.subprocess.run")
-    def test_restore_host_iptables_save_writes_original(self, mock_run, tmp_path):
+    def test_restore_host_iptables_save_writes_original(self, mock_run, tmp_path, db):
         """restore_host rewrites iptables rules file when original_value is set (lines 175-178)."""
         rules_path = tmp_path / "iptables.rules"
         rules_path.write_text("# new rules\n")
@@ -2553,7 +2593,7 @@ class TestRestoreHostStateBranches:
         )
 
         with patch("mvmctl.core.host_state.IPTABLES_RULES_V4", str(rules_path)):
-            reverted = restore_host(tmp_path)
+            reverted = restore_host(db)
 
         assert len(reverted) == 1
         assert reverted[0].mechanism == "iptables_restore"
@@ -2561,7 +2601,7 @@ class TestRestoreHostStateBranches:
         mock_run.assert_not_called()
 
     @patch("mvmctl.core.host_state.subprocess.run")
-    def test_restore_host_iptables_save_removes_file_when_no_original(self, mock_run, tmp_path):
+    def test_restore_host_iptables_save_removes_file_when_no_original(self, mock_run, tmp_path, db):
         """restore_host deletes iptables rules file when original_value is None (lines 179-181)."""
         rules_path = tmp_path / "iptables.rules"
         rules_path.write_text("# rules created by mvm\n")
@@ -2579,7 +2619,7 @@ class TestRestoreHostStateBranches:
         )
 
         with patch("mvmctl.core.host_state.IPTABLES_RULES_V4", str(rules_path)):
-            reverted = restore_host(tmp_path)
+            reverted = restore_host(db)
 
         assert len(reverted) == 1
         assert reverted[0].applied_value == "(removed)"
@@ -2587,7 +2627,7 @@ class TestRestoreHostStateBranches:
         mock_run.assert_not_called()
 
     @patch("mvmctl.core.host_state.subprocess.run")
-    def test_restore_host_iptables_save_oserror(self, mock_run, tmp_path):
+    def test_restore_host_iptables_save_oserror(self, mock_run, tmp_path, db):
         """restore_host raises HostError when iptables rules file write fails (lines 190-191)."""
         rules_path = tmp_path / "iptables.rules"
 
@@ -2606,11 +2646,11 @@ class TestRestoreHostStateBranches:
         with patch("mvmctl.core.host_state.IPTABLES_RULES_V4", str(rules_path)):
             with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
                 with pytest.raises(HostError, match="Failed to restore iptables rules"):
-                    restore_host(tmp_path)
+                    restore_host(db)
 
         mock_run.assert_not_called()
 
-    def test_restore_host_disallowed_file_path_skipped(self, tmp_path):
+    def test_restore_host_disallowed_file_path_skipped(self, tmp_path, db):
         """restore_host skips file_create entries with disallowed paths (lines 196-197)."""
         bad_file = tmp_path / "evil.conf"
         bad_file.write_text("bad content\n")
@@ -2628,13 +2668,13 @@ class TestRestoreHostStateBranches:
         )
 
         with patch("mvmctl.core.host_state.RESTORABLE_FILE_PATHS", frozenset()):
-            reverted = restore_host(tmp_path)
+            reverted = restore_host(db)
 
         assert reverted == []
         assert bad_file.exists()
 
     @patch("mvmctl.core.host_state.subprocess.run")
-    def test_restore_host_sudoers_visudo_validation_passes(self, mock_run, tmp_path):
+    def test_restore_host_sudoers_visudo_validation_passes(self, mock_run, tmp_path, db):
         """restore_host restores sudoers file after visudo validation succeeds (lines 203-210)."""
         sudoers_dir = tmp_path / "sudoers.d"
         sudoers_dir.mkdir()
@@ -2659,7 +2699,7 @@ class TestRestoreHostStateBranches:
 
         with patch("mvmctl.core.host_state.RESTORABLE_FILE_PATHS", frozenset({sudoers_file})):
             with patch("mvmctl.core.host_state.DEFAULT_SUDOERS_DIR", str(sudoers_dir)):
-                reverted = restore_host(tmp_path)
+                reverted = restore_host(db)
 
         assert len(reverted) == 1
         assert sudoers_file.read_text() == original_content
@@ -2671,7 +2711,7 @@ class TestRestoreHostStateBranches:
         )
 
     @patch("mvmctl.core.host_state.subprocess.run")
-    def test_restore_host_sudoers_visudo_validation_fails(self, mock_run, tmp_path):
+    def test_restore_host_sudoers_visudo_validation_fails(self, mock_run, tmp_path, db):
         """restore_host raises HostError when visudo validation fails (lines 209-213)."""
         sudoers_dir = tmp_path / "sudoers.d"
         sudoers_dir.mkdir()
@@ -2697,7 +2737,7 @@ class TestRestoreHostStateBranches:
         with patch("mvmctl.core.host_state.RESTORABLE_FILE_PATHS", frozenset({sudoers_file})):
             with patch("mvmctl.core.host_state.DEFAULT_SUDOERS_DIR", str(sudoers_dir)):
                 with pytest.raises(HostError, match="Sudoers content from state failed visudo"):
-                    restore_host(tmp_path)
+                    restore_host(db)
 
     def test_get_host_state_returns_none_when_db_row_missing(self, tmp_path):
         """get_host_state returns None when db.get_host_state() returns None after init (line 57)."""
@@ -2709,13 +2749,13 @@ class TestRestoreHostStateBranches:
         mock_db.get_host_state.return_value = None
 
         with patch("mvmctl.core.host_state.MVMDatabase", return_value=mock_db):
-            result = get_host_state(tmp_path)
+            result = get_host_state(mock_db)
 
         assert result is None
 
 
 @patch("mvmctl.core.host_state.subprocess.run")
-def test_restore_host_iptables_save_no_original_no_existing_file(mock_run, tmp_path):
+def test_restore_host_iptables_save_no_original_no_existing_file(mock_run, tmp_path, db):
     rules_path = tmp_path / "iptables.rules"
 
     _seed_host_changes(
@@ -2731,7 +2771,7 @@ def test_restore_host_iptables_save_no_original_no_existing_file(mock_run, tmp_p
     )
 
     with patch("mvmctl.core.host_state.IPTABLES_RULES_V4", str(rules_path)):
-        reverted = restore_host(tmp_path)
+        reverted = restore_host(db)
 
     assert len(reverted) == 1
     assert reverted[0].applied_value == "(removed)"

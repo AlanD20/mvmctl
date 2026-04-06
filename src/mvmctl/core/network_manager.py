@@ -5,7 +5,6 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
-import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, TypedDict
@@ -22,7 +21,6 @@ from mvmctl.core.metadata import (
     set_default_network_entry,
     update_network_entry,
 )
-from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.network import setup_bridge, setup_nat, teardown_bridge, teardown_nat
 from mvmctl.exceptions import MVMError, NetworkError
 from mvmctl.models.network import NetworkConfig as NetworkConfig
@@ -48,42 +46,6 @@ from mvmctl.utils.validation import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _mark_default_network_created_in_db() -> None:
-    try:
-        db = MVMDatabase()
-        db.initialize_host_state()
-        db.update_host_component("default_network_created", True)
-    except (MVMError, sqlite3.OperationalError):
-        pass
-
-
-def _upsert_network_to_sqlite(config: NetworkConfig, bridge_active: bool | None = None) -> None:
-    """Write a NetworkConfig to SQLite (creates or updates the row)."""
-    from mvmctl.db.models import Network as DBNetwork
-
-    now = datetime.now(timezone.utc).isoformat()
-    network_id = generate_full_hash_network(config.name, config.subnet, config.created_at or now)
-    db = MVMDatabase()
-    try:
-        db.upsert_network(
-            DBNetwork(
-                id=network_id,
-                name=config.name,
-                subnet=config.subnet,
-                bridge=config.bridge,
-                ipv4_gateway=config.ipv4_gateway,
-                bridge_active=bridge_active if bridge_active is not None else False,
-                nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
-                nat_enabled=config.nat_enabled,
-                is_default=config.is_default,
-                created_at=config.created_at or now,
-                updated_at=now,
-            )
-        )
-    except sqlite3.OperationalError:
-        pass
 
 
 def _bridge_name_for(network_name: str) -> str:
@@ -210,29 +172,6 @@ def list_networks() -> list[NetworkConfig]:
     Returns:
         List of NetworkConfig objects with is_default populated from metadata
     """
-    # Try SQLite first
-    try:
-        db = MVMDatabase()
-        db_networks = db.list_networks()
-        if db_networks:
-            configs: list[NetworkConfig] = []
-            for network in db_networks:
-                config = NetworkConfig(
-                    name=network.name,
-                    subnet=network.subnet,
-                    ipv4_gateway=network.ipv4_gateway,
-                    bridge=network.bridge,
-                    nat_enabled=network.nat_enabled,
-                    nat_gateways=network.nat_gateways.split(",") if network.nat_gateways else [],
-                    created_at=network.created_at or "",
-                    is_default=network.is_default,
-                )
-                configs.append(config)
-            return sorted(configs, key=lambda c: c.name)
-    except Exception:
-        pass
-
-    # Fall back to JSON
     cache_dir = get_cache_dir()
     entries = list_network_entries(cache_dir)
     if not entries:
@@ -241,37 +180,18 @@ def list_networks() -> list[NetworkConfig]:
     default_entry = get_default_network_entry(cache_dir)
     default_name = default_entry[0] if default_entry else None
 
-    json_configs: list[NetworkConfig] = []
+    configs: list[NetworkConfig] = []
     for name, entry in entries.items():
-        json_config = _network_entry_to_config(name, entry)
-        if json_config is not None:
-            json_config.is_default = name == default_name
-            json_configs.append(json_config)
+        config = _network_entry_to_config(name, entry)
+        if config is not None:
+            config.is_default = name == default_name
+            configs.append(config)
 
-    return sorted(json_configs, key=lambda c: c.name)
+    return sorted(configs, key=lambda c: c.name)
 
 
 def get_network(name: str) -> NetworkConfig | None:
     """Get a named network by name."""
-    # Try SQLite first
-    try:
-        db = MVMDatabase()
-        network = db.get_network_by_name(name)
-        if network:
-            return NetworkConfig(
-                name=network.name,
-                subnet=network.subnet,
-                ipv4_gateway=network.ipv4_gateway,
-                bridge=network.bridge,
-                nat_enabled=network.nat_enabled,
-                nat_gateways=network.nat_gateways.split(",") if network.nat_gateways else [],
-                created_at=network.created_at or "",
-                is_default=network.is_default,
-            )
-    except Exception:
-        pass
-
-    # Fall back to JSON
     cache_dir = get_cache_dir()
     entry = get_network_entry(cache_dir, name)
     return _network_entry_to_config(name, entry)
@@ -279,15 +199,6 @@ def get_network(name: str) -> NetworkConfig | None:
 
 def get_network_leases(name: str) -> list[NetworkLease]:
     """Get all IP leases for a network."""
-    try:
-        db = MVMDatabase()
-        network = db.get_network_by_name(name)
-        if network:
-            db_leases = db.list_leases(network.id)
-            return [NetworkLease(vm_id=lease.vm_id or "", ipv4=lease.ipv4) for lease in db_leases]
-    except Exception:
-        pass
-
     cache_dir = get_cache_dir()
     entry = get_network_entry(cache_dir, name)
     return _leases_from_entry(entry)
@@ -342,23 +253,15 @@ def set_default_network(name: str) -> None:
     cache_dir = get_cache_dir()
     set_default_network_entry(cache_dir, name)
 
-    try:
-        db = MVMDatabase()
-        network = db.get_network_by_name(name)
-        if network:
-            db.set_default_network(network.id)
-    except sqlite3.OperationalError:
-        pass
-
 
 def _should_preserve_current_default(name: str) -> bool:
-    try:
-        db = MVMDatabase()
-        current_default = db.get_default_network()
-    except sqlite3.OperationalError:
+    """Check if current default should be preserved (not the same as new default)."""
+    cache_dir = get_cache_dir()
+    default_entry = get_default_network_entry(cache_dir)
+    if default_entry is None:
         return False
-
-    return current_default is not None and current_default.name != name
+    current_default_name = default_entry[0]
+    return current_default_name is not None and current_default_name != name
 
 
 def _persist_iptables_if_root() -> None:
@@ -446,7 +349,6 @@ def create_network(
         bridge_active=True,
     )
 
-    _upsert_network_to_sqlite(config, bridge_active=True)
     _persist_iptables_if_root()
 
     return config
@@ -492,14 +394,6 @@ def remove_network(name: str) -> None:
     cache_dir = get_cache_dir()
     remove_network_entry(cache_dir, name)
 
-    try:
-        db = MVMDatabase()
-        network = db.get_network_by_name(name)
-        if network:
-            db.delete_network(network.id)
-    except sqlite3.OperationalError:
-        pass
-
     _persist_iptables_if_root()
 
 
@@ -536,7 +430,6 @@ def inspect_network(name: str) -> NetworkInspect:
 
     cache_dir = get_cache_dir()
     update_network_entry(cache_dir, name, bridge_active=active)
-    _upsert_network_to_sqlite(config, bridge_active=active)
 
     vm_manager = VMManager()
     enriched_vms: list[_VMLease] = []
@@ -600,16 +493,6 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
     cache_dir = get_cache_dir()
     update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
 
-    _upsert_network_to_sqlite(config)
-    try:
-        db = MVMDatabase()
-        network = db.get_network_by_name(network_name)
-        if network:
-            vm = db.get_vm_by_name(vm_name)
-            db.acquire_lease(network.id, ip, vm.id if vm else None)
-    except sqlite3.OperationalError:
-        pass
-
     return ip
 
 
@@ -627,15 +510,6 @@ def release_network_ip(network_name: str, vm_name: str) -> None:
     # Persist updated leases to metadata
     cache_dir = get_cache_dir()
     update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
-
-    if released_ip:
-        try:
-            db = MVMDatabase()
-            network = db.get_network_by_name(network_name)
-            if network:
-                db.release_lease(network.id, released_ip)
-        except sqlite3.OperationalError:
-            pass
 
 
 def ensure_default_network() -> NetworkConfig:
@@ -701,8 +575,6 @@ def ensure_default_network() -> NetworkConfig:
                         save_iptables_rules()
                 cache_dir = get_cache_dir()
                 update_network_entry(cache_dir, DEFAULT_NETWORK_NAME, bridge_active=True)
-                _upsert_network_to_sqlite(config, bridge_active=True)
-                _mark_default_network_created_in_db()
                 if not _should_preserve_current_default(DEFAULT_NETWORK_NAME):
                     set_default_network(DEFAULT_NETWORK_NAME)
             except NetworkError:
@@ -713,7 +585,6 @@ def ensure_default_network() -> NetworkConfig:
                         pass
                 raise
         else:
-            _mark_default_network_created_in_db()
             if not _should_preserve_current_default(DEFAULT_NETWORK_NAME):
                 set_default_network(DEFAULT_NETWORK_NAME)
         return config
@@ -765,7 +636,6 @@ def reconcile_networks() -> list[ReconcileResult]:
         stale = (stored_active is True) and (not actual_active)
 
         update_network_entry(cache_dir, config.name, bridge_active=actual_active)
-        _upsert_network_to_sqlite(config, bridge_active=actual_active)
 
         results.append(
             ReconcileResult(
@@ -863,7 +733,6 @@ def restore_networks() -> list[str]:
                 status.append(f"Network '{config.name}': failed to configure NAT: {e}")
 
         update_network_entry(cache_dir, config.name, bridge_active=True)
-        _upsert_network_to_sqlite(config, bridge_active=True)
 
     return status
 

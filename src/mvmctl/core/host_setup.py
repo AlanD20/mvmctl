@@ -28,6 +28,7 @@ from mvmctl.core.host_privilege import (
     _write_sudoers,
 )
 from mvmctl.core.host_state import SYSCTL_CONF, SYSCTL_KEY, HostStateChange, _save_state
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.network import setup_mvm_chains
 from mvmctl.exceptions import HostError, MVMError
 
@@ -269,7 +270,7 @@ def save_iptables_rules() -> HostStateChange | None:
     )
 
 
-def init_host(cache_dir: Path) -> list[HostStateChange]:
+def init_host(cache_dir: Path, db: MVMDatabase) -> list[HostStateChange]:
     changes: list[HostStateChange] = []
 
     if os.getuid() != 0:
@@ -359,17 +360,15 @@ def init_host(cache_dir: Path) -> list[HostStateChange]:
     if iptables_change:
         changes.append(iptables_change)
 
-    _save_state(cache_dir, changes)
-    _persist_host_state_to_db(changes)
+    _save_state(db, changes)
+    _persist_host_state_to_db(db, changes)
     return changes
 
 
-def _persist_host_state_to_db(changes: list[HostStateChange]) -> None:
-    from mvmctl.core.mvm_db import MVMDatabase
+def _persist_host_state_to_db(db: MVMDatabase, changes: list[HostStateChange]) -> None:
     from mvmctl.db.models import HostStateChange
 
     try:
-        db = MVMDatabase()
         now = datetime.now(timezone.utc).isoformat()
         db.initialize_host_state()
 

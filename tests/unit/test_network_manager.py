@@ -116,6 +116,13 @@ class TestLeasesFromEntry:
 
 
 def _add_network_to_metadata(cache_dir: Path, name: str, **fields) -> None:
+    """Add a network to metadata with optional leases.
+
+    Note: This helper writes to JSON files directly since core layer
+    no longer queries the database.
+    """
+    import json
+
     defaults = {
         "subnet": "10.20.1.0/24",
         "ipv4_gateway": "10.20.1.1",
@@ -126,31 +133,32 @@ def _add_network_to_metadata(cache_dir: Path, name: str, **fields) -> None:
         "bridge_active": True,
     }
     defaults.update(fields)
-    update_network_entry(cache_dir, name, **defaults)
 
-    leases = defaults.get("leases", [])
-    if leases:
-        db = MVMDatabase()
-        network = db.get_network_by_name(name)
-        if network:
-            for lease in leases:
-                if isinstance(lease, dict) and "vm_id" in lease and "ipv4" in lease:
-                    vm_id = lease["vm_id"]
-                    try:
-                        from mvmctl.db.models import VMInstance as DBVMInstance
+    # Write network config to JSON file directly
+    networks_dir = cache_dir / "networks"
+    networks_dir.mkdir(parents=True, exist_ok=True)
+    network_dir = networks_dir / name
+    network_dir.mkdir(parents=True, exist_ok=True)
 
-                        db.upsert_vm(
-                            DBVMInstance(
-                                id=vm_id,
-                                name=vm_id,
-                                status="stopped",
-                                created_at="2026-01-01T00:00:00Z",
-                                updated_at="2026-01-01T00:00:00Z",
-                            )
-                        )
-                        db.acquire_lease(network.id, lease["ipv4"], vm_id)
-                    except Exception:
-                        pass
+    config_path = network_dir / "config.json"
+    config_data = {
+        "subnet": defaults["subnet"],
+        "ipv4_gateway": defaults["ipv4_gateway"],
+        "bridge": defaults["bridge"],
+        "nat_enabled": defaults["nat_enabled"],
+        "created_at": defaults["created_at"],
+        "bridge_active": defaults["bridge_active"],
+    }
+    config_path.write_text(json.dumps(config_data))
+
+    # Write leases to separate JSON file
+    leases_path = network_dir / "leases.json"
+    leases_path.write_text(json.dumps(defaults["leases"]))
+
+    # Set as default if requested
+    if defaults.get("is_default"):
+        default_path = networks_dir / "default_network.json"
+        default_path.write_text(json.dumps({"name": name}))
 
 
 def test_list_networks(mock_cache_dir: Path):
@@ -420,15 +428,10 @@ def test_ensure_default_network_returns_existing(
     assert config.name == "default"
 
 
-def test_ensure_default_network_marks_default_network_created_in_sqlite(
+def test_ensure_default_network_creates_default_network_metadata(
     mock_cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    db_path = mock_cache_dir / "mvmdb.db"
-    monkeypatch.setattr("mvmctl.core.mvm_db.get_mvm_db_path", lambda: db_path)
-
-    db = MVMDatabase(db_path=db_path)
-    db.migrate()
-
+    """Test that ensure_default_network creates default network in JSON metadata."""
     _add_network_to_metadata(
         mock_cache_dir,
         "default",
@@ -445,9 +448,10 @@ def test_ensure_default_network_marks_default_network_created_in_sqlite(
         config = ensure_default_network()
 
     assert config is not None
-    state = db.get_host_state()
-    assert state is not None
-    assert bool(state.default_network_created) is True
+    # Verify network exists in JSON metadata
+    default_entry = get_default_network_entry(mock_cache_dir)
+    assert default_entry is not None
+    assert default_entry[0] == "default"
 
 
 def test_ensure_default_network_sets_default_when_none_exists(mock_cache_dir: Path):

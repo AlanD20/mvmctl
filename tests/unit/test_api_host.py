@@ -32,7 +32,14 @@ class TestCleanHost:
                 mock_clean.return_value = ["removed bridge"]
                 result = clean_host()
                 assert result == ["removed bridge"]
-                mock_clean.assert_called_once_with(Path("/tmp/cache"))
+                # Verify _clean_host was called with cache_dir and db
+                assert mock_clean.call_count == 1
+                call_args = mock_clean.call_args[0]
+                assert call_args[0] == Path("/tmp/cache")
+                # Second argument should be an MVMDatabase instance
+                from mvmctl.core.mvm_db import MVMDatabase
+
+                assert isinstance(call_args[1], MVMDatabase)
 
     def test_explicit_cache_dir(self):
         """Should use provided cache_dir."""
@@ -40,7 +47,14 @@ class TestCleanHost:
             mock_clean.return_value = []
             result = clean_host(Path("/custom/cache"))
             assert result == []
-            mock_clean.assert_called_once_with(Path("/custom/cache"))
+            # Verify _clean_host was called with cache_dir and db
+            assert mock_clean.call_count == 1
+            call_args = mock_clean.call_args[0]
+            assert call_args[0] == Path("/custom/cache")
+            # Second argument should be an MVMDatabase instance
+            from mvmctl.core.mvm_db import MVMDatabase
+
+            assert isinstance(call_args[1], MVMDatabase)
 
 
 class TestResetHost:
@@ -54,13 +68,28 @@ class TestResetHost:
                 mock_reset.return_value = ["reverted sysctl"]
                 result = reset_host()
                 assert result == ["reverted sysctl"]
+                # Verify _reset_host was called with cache_dir and db
+                assert mock_reset.call_count == 1
+                call_args = mock_reset.call_args[0]
+                assert call_args[0] == Path("/tmp/cache")
+                # Second argument should be an MVMDatabase instance
+                from mvmctl.core.mvm_db import MVMDatabase
+
+                assert isinstance(call_args[1], MVMDatabase)
 
     def test_explicit_cache_dir(self):
         """Should use provided cache_dir."""
         with patch("mvmctl.api.host._reset_host") as mock_reset:
             mock_reset.return_value = []
             reset_host(Path("/custom/cache"))
-            mock_reset.assert_called_once_with(Path("/custom/cache"))
+            # Verify _reset_host was called with cache_dir and db
+            assert mock_reset.call_count == 1
+            call_args = mock_reset.call_args[0]
+            assert call_args[0] == Path("/custom/cache")
+            # Second argument should be an MVMDatabase instance
+            from mvmctl.core.mvm_db import MVMDatabase
+
+            assert isinstance(call_args[1], MVMDatabase)
 
 
 class TestPruneHost:
@@ -74,13 +103,28 @@ class TestPruneHost:
                 mock_prune.return_value = ["torn down bridge"]
                 result = prune_host()
                 assert result == ["torn down bridge"]
+                # Verify _prune_host was called with cache_dir and db
+                assert mock_prune.call_count == 1
+                call_args = mock_prune.call_args[0]
+                assert call_args[0] == Path("/tmp/cache")
+                # Second argument should be an MVMDatabase instance
+                from mvmctl.core.mvm_db import MVMDatabase
+
+                assert isinstance(call_args[1], MVMDatabase)
 
     def test_explicit_cache_dir(self):
         """Should use provided cache_dir."""
         with patch("mvmctl.api.host._prune_host") as mock_prune:
             mock_prune.return_value = []
             prune_host(Path("/custom/cache"))
-            mock_prune.assert_called_once_with(Path("/custom/cache"))
+            # Verify _prune_host was called with cache_dir and db
+            assert mock_prune.call_count == 1
+            call_args = mock_prune.call_args[0]
+            assert call_args[0] == Path("/custom/cache")
+            # Second argument should be an MVMDatabase instance
+            from mvmctl.core.mvm_db import MVMDatabase
+
+            assert isinstance(call_args[1], MVMDatabase)
 
 
 class TestCleanReadyPool:

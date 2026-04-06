@@ -16,15 +16,13 @@ from mvmctl.core.host_setup import (
     check_kvm_access,
     check_required_binaries,
     get_ip_forward_status,
-    init_host,
 )
 from mvmctl.core.host_state import (
     HostState,
     HostStateChange,
     _state_file,
-    get_host_state,
-    restore_host,
 )
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import HostError
 
 __all__ = [
@@ -33,8 +31,6 @@ __all__ = [
     "reset_host",
     "HostState",
     "HostStateChange",
-    "get_host_state",
-    "restore_host",
     "_state_file",
     "check_privileges",
     "check_privileges_interactive",
@@ -43,27 +39,29 @@ __all__ = [
     "check_kvm_access",
     "check_required_binaries",
     "get_ip_forward_status",
-    "init_host",
 ]
 
 logger = logging.getLogger(__name__)
 
 
-def prune_host(cache_dir: Path) -> list[str]:
+def prune_host(cache_dir: Path, db: MVMDatabase) -> list[str]:
     """Tear down all bridges, TAPs, iptables rules and revert host sysctl changes.
 
     Does NOT remove VM cache files, images, kernels, or binaries.
 
     Args:
         cache_dir: Root cache directory containing the host state snapshot.
+        db: MVMDatabase instance for querying and updating host state.
 
     Returns:
         A list of summary strings describing what was torn down.
     """
-    summary = clean_host(cache_dir)
+    from mvmctl.core.host_state import restore_host as _restore_host
+
+    summary = clean_host(cache_dir, db)
 
     try:
-        reverted = restore_host(cache_dir)
+        reverted = _restore_host(db)
         for change in reverted:
             summary.append(f"Reverted {change.setting}")
     except HostError as e:
@@ -80,12 +78,16 @@ def prune_host(cache_dir: Path) -> list[str]:
     return summary
 
 
-def clean_host(cache_dir: Path) -> list[str]:
+def clean_host(cache_dir: Path, db: MVMDatabase) -> list[str]:
     """Remove all networking config (bridges, TAP devices, iptables rules, MVM chains).
 
     Does NOT revert sysctl, remove sudoers, or remove project group.
     Preserves network metadata to allow restoration during host init.
     Returns list of summary strings.
+
+    Args:
+        cache_dir: Root cache directory.
+        db: MVMDatabase instance (unused, kept for API compatibility).
     """
     from mvmctl.constants import DEFAULT_NETWORK_NAME, TAP_PREFIX, device_prefix
     from mvmctl.core.network import (
@@ -180,16 +182,22 @@ def clean_host(cache_dir: Path) -> list[str]:
     return summary
 
 
-def reset_host(cache_dir: Path) -> list[str]:
+def reset_host(cache_dir: Path, db: MVMDatabase) -> list[str]:
     """Full rollback to pre-init state.
 
     Removes networking config, reverts sysctl, removes sudoers drop-in, and removes project group.
     Returns list of summary strings.
+
+    Args:
+        cache_dir: Root cache directory.
+        db: MVMDatabase instance for querying and updating host state.
     """
-    summary = clean_host(cache_dir)
+    from mvmctl.core.host_state import restore_host as _restore_host
+
+    summary = clean_host(cache_dir, db)
 
     try:
-        reverted = restore_host(cache_dir)
+        reverted = _restore_host(db)
         for change in reverted:
             summary.append(f"Reverted {change.setting}")
     except HostError as e:

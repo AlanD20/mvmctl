@@ -40,16 +40,15 @@ def _state_file(cache_dir: Path) -> Path:
     return _state_dir(cache_dir) / "state.json"
 
 
-def get_host_state(cache_dir: Path) -> HostState | None:
+def get_host_state(db: MVMDatabase) -> HostState | None:
     """Load the saved host state changes, or return None if none exist.
 
     Args:
-        cache_dir: Root cache directory (unused, kept for API compatibility).
+        db: MVMDatabase instance for querying host state.
 
     Returns:
         HostState object with init_timestamp and changes, or None if no state is saved.
     """
-    db = MVMDatabase()
     db.initialize_host_state()
 
     host_state_row = db.get_host_state()
@@ -82,16 +81,15 @@ def _generate_session_id() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _save_state(cache_dir: Path, changes: list[HostStateChange]) -> None:
+def _save_state(db: MVMDatabase, changes: list[HostStateChange]) -> None:
     """Persist host changes to the SQLite database.
 
     Args:
-        cache_dir: Root cache directory (unused, kept for API compatibility).
+        db: MVMDatabase instance for persisting host state.
         changes: List of host changes to record.
     """
     from mvmctl.utils.fs import chown_to_real_user
 
-    db = MVMDatabase()
     db.initialize_host_state()
 
     session_id = _generate_session_id()
@@ -114,26 +112,22 @@ def _save_state(cache_dir: Path, changes: list[HostStateChange]) -> None:
         )
         db.add_host_change(db_change)
 
-    # Chown the entire cache root so the real user can write to all subdirs
-    chown_to_real_user(cache_dir)
 
-
-def restore_host(cache_dir: Path) -> list[HostStateChange]:
+def restore_host(db: MVMDatabase) -> list[HostStateChange]:
     """Revert host changes recorded in the database.
 
     Processes changes in reverse order, restoring sysctl values and removing
     files that were created during host init.
 
     Args:
-        cache_dir: Root cache directory (unused, kept for API compatibility).
+        db: MVMDatabase instance for querying and updating host state.
 
     Returns:
         List of HostChange records describing each reverted change.
 
     Raises:
-        HostError: If no saved state exists, or if a revert operation fails.
+        HostError: If no saved host state exists, or if a revert operation fails.
     """
-    db = MVMDatabase()
     db.initialize_host_state()
 
     # Get unreverted changes
