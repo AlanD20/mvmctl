@@ -77,16 +77,23 @@ def get_defaults_config() -> dict[str, Any]:
 
 
 def set_defaults_value(key: str, value: Any) -> None:
-    """Set a default value with DB update.
-
-    Updates both JSON metadata and SQLite database.
-
-    Args:
-        key: The configuration key to set.
-        value: The value to set.
-    """
+    _core_set_defaults_value(key, value)
     db = MVMDatabase()
-    _core_set_defaults_value(key, value, db)
+    try:
+        if key == "image" and isinstance(value, str):
+            images = db.list_images()
+            for img in images:
+                if (img.os_slug or img.id) == value:
+                    db.set_default_image(img.id)
+                    break
+        elif key == "kernel" and isinstance(value, str):
+            kernels = db.list_kernels()
+            for kernel in kernels:
+                if kernel.path == value:
+                    db.set_default_kernel(kernel.id)
+                    break
+    except Exception:
+        pass
 
 
 __all__ = [

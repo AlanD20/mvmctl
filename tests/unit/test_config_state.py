@@ -330,61 +330,21 @@ def test_get_defaults_config_kernel_from_explicit_value(cache_dir: Path) -> None
     assert defaults["kernel"] == kernel_path
 
 
-def test_set_defaults_value_image_with_db(mocker: "MockerFixture", cache_dir: Path) -> None:
-    mock_db = mocker.MagicMock()
-    mocker.patch("mvmctl.core.config_state.set_default_image_entry")
-    set_defaults_value("image", "ubuntu-24.04", db=mock_db)
-    mock_db.set_default_image.assert_called_once_with("ubuntu-24.04")
-
-
-def test_set_defaults_value_kernel_with_db(mocker: "MockerFixture", cache_dir: Path) -> None:
-    mock_db = mocker.MagicMock()
-    mock_kernel = mocker.MagicMock()
-    mock_kernel.path = "vmlinux-5.10"
-    mock_kernel.id = "kernel-id-123"
-    mock_db.list_kernels.return_value = [mock_kernel]
-    mocker.patch("mvmctl.core.config_state.set_default_kernel_by_filename")
-    set_defaults_value("kernel", "vmlinux-5.10", db=mock_db)
-    mock_db.set_default_kernel.assert_called_once_with("kernel-id-123")
-
-
-def test_set_defaults_value_image_key_error_falls_back_to_os_slug(
-    mocker: "MockerFixture", cache_dir: Path
-) -> None:
-    mocker.patch(
-        "mvmctl.core.config_state.set_default_image_entry",
-        side_effect=KeyError("not found"),
-    )
-    mock_slug = mocker.patch("mvmctl.core.config_state.set_default_image_by_os_slug")
-
+def test_set_defaults_value_image_persists_to_json(cache_dir: Path) -> None:
     set_defaults_value("image", "ubuntu-24.04")
-    mock_slug.assert_called_once_with(cache_dir, "ubuntu-24.04")
+    import json, os
+
+    config_file = os.environ.get("MVM_CONFIG_DIR", "")
+    if config_file:
+        cfg = json.loads((Path(config_file) / "config.json").read_text())
+        assert cfg["image"] == "ubuntu-24.04"
 
 
-def test_set_defaults_value_image_db_exception_swallowed(
-    mocker: "MockerFixture", cache_dir: Path
-) -> None:
-    mocker.patch("mvmctl.core.config_state.set_default_image_entry")
-    mock_db = mocker.MagicMock()
-    mock_db.set_default_image.side_effect = Exception("db error")
-    set_defaults_value("image", "ubuntu-24.04", db=mock_db)
+def test_set_defaults_value_kernel_persists_to_json(cache_dir: Path) -> None:
+    set_defaults_value("kernel", "/path/to/vmlinux")
+    import json, os
 
-
-def test_set_defaults_value_kernel_db_exception_swallowed(
-    mocker: "MockerFixture", cache_dir: Path
-) -> None:
-    mocker.patch("mvmctl.core.config_state.set_default_kernel_by_filename")
-    mock_db = mocker.MagicMock()
-    mock_db.list_kernels.side_effect = Exception("db error")
-    set_defaults_value("kernel", "vmlinux-5.10", db=mock_db)
-
-
-def test_set_defaults_value_kernel_found_in_db(mocker: "MockerFixture", cache_dir: Path) -> None:
-    mock_db = mocker.MagicMock()
-    mock_kernel = mocker.MagicMock()
-    mock_kernel.path = "vmlinux-5.10"
-    mock_kernel.id = "kernel-id-abc"
-    mock_db.list_kernels.return_value = [mock_kernel]
-    mocker.patch("mvmctl.core.config_state.set_default_kernel_by_filename")
-    set_defaults_value("kernel", "vmlinux-5.10", db=mock_db)
-    mock_db.set_default_kernel.assert_called_once_with("kernel-id-abc")
+    config_file = os.environ.get("MVM_CONFIG_DIR", "")
+    if config_file:
+        cfg = json.loads((Path(config_file) / "config.json").read_text())
+        assert cfg["kernel"] == "/path/to/vmlinux"

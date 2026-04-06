@@ -5,18 +5,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from mvmctl.api.metadata import get_default_image_entry, get_default_kernel_entry
 from mvmctl.constants import (
     CONST_DIR_PERMS_CACHE,
     CONST_FILE_PERMS_CONFIG,
 )
-from mvmctl.core.metadata import (
-    set_default_image_by_os_slug,
-    set_default_image_entry,
-    set_default_kernel_by_filename,
-)
 from mvmctl.exceptions import AssetNotFoundError
-from mvmctl.utils.fs import get_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -169,31 +162,15 @@ def get_defaults_config(
     Returns:
         Dictionary with 'image' and 'kernel' keys containing default values.
     """
-    cache_dir = get_cache_dir()
     defaults: dict[str, Any] = {"image": None, "kernel": None}
-
-    # Use provided image default or fall back to JSON
     if default_image_slug is not None:
         defaults["image"] = default_image_slug
-    else:
-        default_image = get_default_image_entry()
-        if default_image is not None:
-            image_id, image_meta = default_image
-            defaults["image"] = image_meta.get("os_slug") or image_id
-
-    # Use provided kernel default or fall back to JSON
     if default_kernel_path is not None:
         defaults["kernel"] = default_kernel_path
-    else:
-        default_kernel = get_default_kernel_entry(cache_dir)
-        if default_kernel is not None:
-            _kernel_id, kernel_meta = default_kernel
-            defaults["kernel"] = kernel_meta.get("path")
-
     return defaults
 
 
-def set_defaults_value(key: str, value: Any, db: Any | None = None) -> None:
+def set_defaults_value(key: str, value: Any) -> None:
     """Set a default value in the configuration.
 
     Args:
@@ -206,38 +183,10 @@ def set_defaults_value(key: str, value: Any, db: Any | None = None) -> None:
     Raises:
         ValueError: If image/kernel value is not a string.
     """
-    cache_dir = get_cache_dir()
-    if key == "image":
-        if not isinstance(value, str):
-            raise ValueError("Default image must be a string image identifier")
-        try:
-            set_default_image_entry(cache_dir, value)
-        except KeyError:
-            set_default_image_by_os_slug(cache_dir, value)
-
-        if db is not None:
-            try:
-                db.set_default_image(value)
-            except Exception:
-                pass
-        return
-
-    if key == "kernel":
-        if not isinstance(value, str):
-            raise ValueError("Default kernel must be a string kernel filename")
-        set_default_kernel_by_filename(cache_dir, value)
-
-        if db is not None:
-            try:
-                kernels = db.list_kernels()
-                for kernel in kernels:
-                    if kernel.path == value:
-                        db.set_default_kernel(kernel.id)
-                        break
-            except Exception:
-                pass
-        return
-
+    if key == "image" and not isinstance(value, str):
+        raise ValueError("Default image must be a string image identifier")
+    if key == "kernel" and not isinstance(value, str):
+        raise ValueError("Default kernel must be a string kernel filename")
     state = _read_raw()
     state[key] = value
     _write_raw(state)
