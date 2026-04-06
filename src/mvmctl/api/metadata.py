@@ -14,8 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from mvmctl.core.metadata import find_images_by_id_prefix as _find_images_by_id_prefix
-from mvmctl.core.metadata import get_default_binary_entry as _get_default_binary_entry
-from mvmctl.core.metadata import get_default_network_entry as _get_default_network_entry
 from mvmctl.core.metadata import get_image_entry as _get_image_entry
 from mvmctl.core.metadata import list_binary_entries as _list_binary_entries
 from mvmctl.core.metadata import list_image_entries as _list_image_entries
@@ -27,8 +25,10 @@ from mvmctl.core.metadata import set_default_image_by_os_slug as _set_default_im
 from mvmctl.core.metadata import set_default_image_entry as _set_default_image_entry
 from mvmctl.core.metadata import update_image_entry as _update_image_entry
 from mvmctl.core.mvm_db import MVMDatabase
+from mvmctl.models.binary import BinaryRecord
 from mvmctl.models.image import ImageRecord
 from mvmctl.models.kernel import KernelRecord
+from mvmctl.models.network import NetworkRecord
 
 __all__ = [
     "list_image_entries",
@@ -167,15 +167,33 @@ def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
 
 
 def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
-    return _get_default_binary_entry()
+    """Get the default binary entry from the database.
+
+    Returns:
+        Tuple of (version, metadata_dict) or None if no default is set.
+    """
+    db = MVMDatabase()
+    binary = db.get_default_binary("firecracker")
+    if binary is None:
+        return None
+    return binary.version, BinaryRecord.from_db(binary).to_dict()
 
 
 def set_default_binary_entry(cache_dir: Path, version: str) -> None:
     _set_default_binary_entry(cache_dir, version)
 
 
-def get_default_network_entry() -> tuple[str, dict[str, Any]] | None:
-    """Return the default network entry as (name, metadata) or None if not set."""
-    from mvmctl.utils.fs import get_cache_dir
+def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    """Get the default network entry from the database.
 
-    return _get_default_network_entry(get_cache_dir())
+    Args:
+        cache_dir: Directory containing network configs
+
+    Returns:
+        Tuple of (name, metadata_dict) or None if no default is set.
+    """
+    db = MVMDatabase()
+    network = db.get_default_network()
+    if network is None:
+        return None
+    return network.name, NetworkRecord.from_db(network).to_dict()
