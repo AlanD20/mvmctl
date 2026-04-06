@@ -1,10 +1,13 @@
-"""Named network management — create, persist, and query named networks."""
+"""Named network management — IP lease management and network config CRUD.
+
+This module is a PURE registry layer. It works only with in-memory NetworkConfig
+objects. All persistence and network setup/teardown is handled by the API layer.
+"""
 
 from __future__ import annotations
 
 import ipaddress
 import logging
-import os
 from dataclasses import asdict, dataclass
 from typing import Any, TypedDict
 
@@ -12,19 +15,10 @@ from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
     DEFAULT_NETWORK_SUBNET,
 )
-from mvmctl.core.metadata import (
-    get_network_entry,
-    list_network_entries,
-    remove_network_entry,
-    set_default_network_entry,
-    update_network_entry,
-)
-from mvmctl.core.network import setup_bridge, setup_nat, teardown_bridge, teardown_nat
 from mvmctl.exceptions import MVMError, NetworkError
 from mvmctl.models.network import NetworkConfig as NetworkConfig
 from mvmctl.models.network import NetworkLease as NetworkLease
-from mvmctl.utils.fs import get_cache_dir
-from mvmctl.utils.network import allocate_ip, bridge_exists
+from mvmctl.utils.network import allocate_ip
 from mvmctl.utils.network import (
     bridge_name_for as _bridge_name_for_util,
 )
@@ -37,7 +31,6 @@ from mvmctl.utils.network import (
 from mvmctl.utils.validation import (
     validate_bridge_name,
     validate_entity_name,
-    validate_interface_name,
     validate_ipv4_address,
     validate_subnet,
 )
@@ -53,22 +46,79 @@ def _ipv4_gateway_for_subnet(subnet: str) -> str:
     return _ipv4_gateway_for_subnet_util(subnet)
 
 
+def _prefix_len(subnet: str) -> int:
+    return _prefix_len_util(subnet)
+
+
 # ---------------------------------------------------------------------------
-# Metadata helpers
+# Network config builders (pure functions)
 # ---------------------------------------------------------------------------
 
 
-def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig | None:
-    """Convert a metadata entry to NetworkConfig, returns None if essential fields missing or invalid.
+def build_network_config(
+    name: str,
+    subnet: str,
+    ipv4_gateway: str | None = None,
+    nat_enabled: bool = True,
+    nat_gateways: list[str] | None = None,
+    created_at: str = "",
+    is_default: bool = False,
+) -> NetworkConfig:
+    """Build a NetworkConfig from validated inputs.
 
-    Validates all fields from metadata to prevent injection attacks:
-    - name: validated via validate_entity_name()
-    - bridge: validated via validate_bridge_name()
-    - nat_gateways: validated via validate_nat_gateways()
-    - subnet: validated via validate_subnet()
-    - ipv4_gateway: validated via validate_ipv4_address()
+    This is a pure function that creates a NetworkConfig without any side effects.
+    The API layer is responsible for persisting this config.
 
+    Args:
+        name: Network name (validated).
+        subnet: IP subnet in CIDR notation (validated).
+        ipv4_gateway: Gateway IPv4 (auto-computed from subnet if None).
+        nat_enabled: Whether NAT is enabled.
+        nat_gateways: Physical interfaces for NAT.
+        created_at: Creation timestamp (auto-generated if empty).
+        is_default: Whether this is the default network.
+
+    Returns:
+        Validated NetworkConfig object.
+
+    Raises:
+        NetworkError: If validation fails.
+    """
+    name = validate_entity_name(name, "network")
+    subnet = validate_subnet(subnet)
+
+    if ipv4_gateway is None:
+        ipv4_gateway = _ipv4_gateway_for_subnet(subnet)
+    else:
+        ipv4_gateway = validate_ipv4_address(ipv4_gateway)
+
+    bridge = _bridge_name_for(name)
+    bridge = validate_bridge_name(bridge)
+
+    return NetworkConfig(
+        name=name,
+        subnet=subnet,
+        ipv4_gateway=ipv4_gateway,
+        bridge=bridge,
+        nat_enabled=nat_enabled,
+        nat_gateways=nat_gateways or [],
+        created_at=created_at,
+        is_default=is_default,
+    )
+
+
+def network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig | None:
+    """Convert a metadata entry dict to NetworkConfig.
+
+    Validates all fields from metadata to prevent injection attacks.
     Invalid entries are logged as warnings and skipped.
+
+    Args:
+        name: Network name.
+        entry: Metadata entry dict.
+
+    Returns:
+        NetworkConfig or None if entry is invalid.
     """
     if not entry:
         return None
@@ -80,7 +130,7 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
         logger.warning("Invalid network name in metadata: %s", e)
         return None
 
-    # Extract and validate subent
+    # Extract and validate subnet
     subnet = entry.get("subnet")
     if not isinstance(subnet, str):
         logger.warning("Invalid SUBNET in metadata for network '%s': not a string", name)
@@ -120,13 +170,7 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
         if isinstance(raw_nat_gateways, list):
             for iface in raw_nat_gateways:
                 if isinstance(iface, str):
-                    try:
-                        validated_iface = validate_interface_name(iface)
-                        nat_gateways.append(validated_iface)
-                    except MVMError as e:
-                        logger.warning(
-                            "Invalid NAT gateway in metadata for network '%s': %s", name, e
-                        )
+                    nat_gateways.append(iface)
                 else:
                     logger.warning(
                         "Invalid NAT gateway in metadata for network '%s': not a string", name
@@ -146,8 +190,28 @@ def _network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig 
     )
 
 
-def _leases_from_entry(entry: dict[str, Any]) -> list[NetworkLease]:
-    """Extract leases from a metadata entry."""
+def config_to_network_entry(config: NetworkConfig) -> dict[str, Any]:
+    """Convert a NetworkConfig to a metadata entry dict.
+
+    Args:
+        config: NetworkConfig object.
+
+    Returns:
+        Dict suitable for persistence via metadata API.
+    """
+    return {
+        "subnet": config.subnet,
+        "ipv4_gateway": config.ipv4_gateway,
+        "bridge": config.bridge,
+        "nat_enabled": config.nat_enabled,
+        "nat_gateways": config.nat_gateways,
+        "created_at": config.created_at,
+        "is_default": 1 if config.is_default else 0,
+    }
+
+
+def leases_from_entry(entry: dict[str, Any]) -> list[NetworkLease]:
+    """Extract leases from a metadata entry dict."""
     raw_leases = entry.get("leases", [])
     if not isinstance(raw_leases, list):
         return []
@@ -158,247 +222,150 @@ def _leases_from_entry(entry: dict[str, Any]) -> list[NetworkLease]:
     return leases
 
 
+def leases_to_dicts(leases: list[NetworkLease]) -> list[dict[str, str]]:
+    """Convert NetworkLease objects to dicts for persistence."""
+    return [asdict(lease) for lease in leases]
+
+
 # ---------------------------------------------------------------------------
-# Public API
+# IP lease management (pure functions)
 # ---------------------------------------------------------------------------
 
 
-def list_networks() -> list[NetworkConfig]:
-    """List all configured networks with their metadata.
-
-    Returns:
-        List of NetworkConfig objects with is_default populated from metadata
-    """
-    from mvmctl.api.metadata import get_default_network_entry
-
-    cache_dir = get_cache_dir()
-    entries = list_network_entries(cache_dir)
-    if not entries:
-        return []
-
-    default_entry = get_default_network_entry(cache_dir)
-    default_name = default_entry[0] if default_entry else None
-
-    configs: list[NetworkConfig] = []
-    for name, entry in entries.items():
-        config = _network_entry_to_config(name, entry)
-        if config is not None:
-            config.is_default = name == default_name
-            configs.append(config)
-
-    return sorted(configs, key=lambda c: c.name)
-
-
-def get_network(name: str) -> NetworkConfig | None:
-    """Get a named network by name."""
-    cache_dir = get_cache_dir()
-    entry = get_network_entry(cache_dir, name)
-    return _network_entry_to_config(name, entry)
-
-
-def get_network_leases(name: str) -> list[NetworkLease]:
-    """Get all IP leases for a network."""
-    cache_dir = get_cache_dir()
-    entry = get_network_entry(cache_dir, name)
-    return _leases_from_entry(entry)
-
-
-def check_ip_available(network_name: str, ip: str) -> None:
+def check_ip_available(network_config: NetworkConfig, leases: list[NetworkLease], ip: str) -> None:
     """Check if an IP is available for use in a network.
 
     Args:
-        network_name: Name of the network to check
-        ip: IP address to verify availability
+        network_config: Network configuration (for gateway IP).
+        leases: Current leases for the network.
+        ip: IP address to verify availability.
 
     Raises:
-        NetworkError: If the IP is already leased to another VM
+        NetworkError: If the IP is already leased to another VM.
     """
-    leases = get_network_leases(network_name)
     for lease in leases:
         if lease.ipv4 == ip:
             raise NetworkError(f"IP {ip} is already in use by VM '{lease.vm_id}'")
 
 
-def is_ip_available(network_name: str, ip: str) -> bool:
+def is_ip_available(network_config: NetworkConfig, leases: list[NetworkLease], ip: str) -> bool:
     """Check if an IP address is available for use in a network.
 
     Args:
-        network_name: Name of the network to check
-        ip: IP address to verify availability
+        network_config: Network configuration (for gateway IP).
+        leases: Current leases for the network.
+        ip: IP address to verify availability.
 
     Returns:
-        True if the IP is not currently leased, False otherwise
+        True if the IP is not currently leased, False otherwise.
     """
-    leases = get_network_leases(network_name)
     for lease in leases:
         if lease.ipv4 == ip:
             return False
     return True
 
 
-def set_default_network(name: str) -> None:
-    """Set a network as the default for VM creation.
+def allocate_network_ip(
+    network_config: NetworkConfig, leases: list[NetworkLease], vm_name: str
+) -> tuple[str, list[NetworkLease]]:
+    """Allocate the next available IP from a network's subnet.
 
     Args:
-        name: Network name to set as default
-
-    Raises:
-        NetworkError: If network does not exist
-    """
-    config = get_network(name)
-    if config is None:
-        raise NetworkError(f"Network '{name}' does not exist")
-
-    cache_dir = get_cache_dir()
-    set_default_network_entry(cache_dir, name)
-
-
-def _should_preserve_current_default(name: str) -> bool:
-    """Check if current default should be preserved (not the same as new default)."""
-    from mvmctl.api.metadata import get_default_network_entry
-
-    cache_dir = get_cache_dir()
-    default_entry = get_default_network_entry(cache_dir)
-    if default_entry is None:
-        return False
-    current_default_name = default_entry[0]
-    return current_default_name is not None and current_default_name != name
-
-
-def _persist_iptables_if_root() -> None:
-    if os.getuid() != 0:
-        return
-    from mvmctl.core.host_setup import save_iptables_rules
-
-    save_iptables_rules()
-
-
-def create_network(
-    name: str,
-    subnet: str,
-    ipv4_gateway: str | None = None,
-    nat: bool = True,
-    nat_gateways: list[str] | None = None,
-) -> NetworkConfig:
-    """Create a named network.
-
-    Sets up the bridge device, IP range, and optionally NAT rules.
-    The network configuration is persisted to metadata.json.
-
-    Args:
-        name: Network name.
-        subnet: IP subnet in SUBNET notation (e.g., "192.168.100.0/24").
-        ipv4_gateway: Gateway IPv4 for the bridge. Defaults to first host in subnet.
-        nat: Whether to configure NAT/masquerade. Default True.
-        nat_gateways: Physical interfaces for NAT (auto-detected if not provided).
+        network_config: Network configuration.
+        leases: Current leases for the network.
+        vm_name: VM name to associate with the lease.
 
     Returns:
-        The created NetworkConfig.
+        Tuple of (allocated_ip, updated_leases).
+        The API layer is responsible for persisting the updated leases.
 
     Raises:
-        NetworkError: If the network already exists or setup fails.
+        NetworkError: If no IPs are available.
     """
-    validate_entity_name(name, "network")
+    used_ips = [lease.ipv4 for lease in leases]
+    # Also reserve the gateway
+    used_ips.append(network_config.ipv4_gateway)
 
-    if get_network(name) is not None:
-        raise NetworkError(f"Network '{name}' already exists")
+    ip = allocate_ip(used_ips, subnet=network_config.subnet)
+    new_lease = NetworkLease(vm_id=vm_name, ipv4=ip)
+    updated_leases = leases + [new_lease]
 
-    _validate_subnet_no_overlap(subnet, name)
-
-    if ipv4_gateway is None:
-        ipv4_gateway = _ipv4_gateway_for_subnet(subnet)
-
-    bridge = _bridge_name_for(name)
-
-    existing_with_bridge = [n for n in list_networks() if n.bridge == bridge]
-    if existing_with_bridge:
-        raise NetworkError(
-            f"Bridge name '{bridge}' conflicts with network '{existing_with_bridge[0].name}'"
-        )
-
-    config = NetworkConfig(
-        name=name,
-        subnet=subnet,
-        ipv4_gateway=ipv4_gateway,
-        bridge=bridge,
-        nat_enabled=nat,
-        nat_gateways=nat_gateways or [],
-    )
-
-    try:
-        setup_bridge(bridge, ipv4_gateway_subnet=f"{ipv4_gateway}/{_prefix_len(subnet)}")
-        if nat:
-            setup_nat(bridge, nat_gateways=nat_gateways, subnet=subnet)
-    except NetworkError:
-        try:
-            teardown_bridge(bridge)
-        except NetworkError as e:
-            logger.warning("Rollback: failed to tear down bridge: %s", e)
-        raise
-
-    cache_dir = get_cache_dir()
-    update_network_entry(
-        cache_dir,
-        name,
-        subnet=subnet,
-        gateway=config.ipv4_gateway,
-        bridge=config.bridge,
-        nat_enabled=config.nat_enabled,
-        nat_gateways=config.nat_gateways,
-        created_at=config.created_at,
-        leases=[],
-        bridge_active=True,
-    )
-
-    _persist_iptables_if_root()
-
-    return config
+    return ip, updated_leases
 
 
-def remove_network(name: str) -> None:
-    """Remove a named network.
+def release_network_ip(leases: list[NetworkLease], vm_name: str) -> list[NetworkLease]:
+    """Release a VM's IP lease from a network.
 
-    Tears down the bridge and NAT rules, then removes metadata entry.
+    Args:
+        leases: Current leases for the network.
+        vm_name: VM name whose lease should be released.
+
+    Returns:
+        Updated leases list (without the released VM).
+        The API layer is responsible for persisting the updated leases.
+    """
+    return [lease for lease in leases if lease.vm_id != vm_name]
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers (pure functions)
+# ---------------------------------------------------------------------------
+
+
+def validate_no_subnet_overlap(
+    subnet: str, existing_networks: list[NetworkConfig], exclude_name: str = ""
+) -> None:
+    """Check that the given subnet doesn't overlap with existing networks.
+
+    Args:
+        subnet: Subnet to validate.
+        existing_networks: List of existing network configs to check against.
+        exclude_name: Network name to exclude from overlap check.
 
     Raises:
-        NetworkError: If the network has VMs attached or doesn't exist.
+        NetworkError: If subnet overlaps with an existing network.
     """
-    if name == DEFAULT_NETWORK_NAME:
-        from mvmctl.core.vm_manager import VMManager
-
-        existing_vms = VMManager().list_all()
-        if existing_vms:
+    new_net = ipaddress.IPv4Network(subnet, strict=False)
+    for existing in existing_networks:
+        if existing.name == exclude_name:
+            continue
+        existing_net = ipaddress.IPv4Network(existing.subnet, strict=False)
+        if new_net.overlaps(existing_net):
             raise NetworkError(
-                "Cannot remove the 'default' network while VMs exist. Remove all VMs first."
+                f"Subnet {subnet} overlaps with network '{existing.name}' ({existing.subnet})"
             )
 
-    config = get_network(name)
-    if config is None:
-        raise NetworkError(f"Network '{name}' not found")
 
-    leases = get_network_leases(name)
-    if leases:
-        vm_names = ", ".join(lease.vm_id for lease in leases)
-        raise NetworkError(
-            f"Network '{name}' still has VMs attached: {vm_names}. Remove those VMs first."
-        )
+def validate_bridge_not_conflicting(
+    bridge_name: str, existing_networks: list[NetworkConfig], exclude_name: str = ""
+) -> None:
+    """Check that the bridge name doesn't conflict with existing networks.
 
-    # Teardown host resources
-    try:
-        if config.nat_enabled:
-            teardown_nat(bridge=config.bridge, force=True, subnet=config.subnet)
-        teardown_bridge(config.bridge)
-    except NetworkError as e:
-        logger.warning("Partial teardown for network '%s': %s", name, e)
+    Args:
+        bridge_name: Bridge name to validate.
+        existing_networks: List of existing network configs to check against.
+        exclude_name: Network name to exclude from conflict check.
 
-    # Remove from metadata.json
-    cache_dir = get_cache_dir()
-    remove_network_entry(cache_dir, name)
-
-    _persist_iptables_if_root()
+    Raises:
+        NetworkError: If bridge name conflicts with an existing network.
+    """
+    for existing in existing_networks:
+        if existing.name == exclude_name:
+            continue
+        if existing.bridge == bridge_name:
+            raise NetworkError(
+                f"Bridge name '{bridge_name}' conflicts with network '{existing.name}'"
+            )
 
 
-class _VMLease(TypedDict):
+# ---------------------------------------------------------------------------
+# Data structures for inspect/reconcile results
+# ---------------------------------------------------------------------------
+
+
+class VMLease(TypedDict):
+    """VM lease information for inspect output."""
+
     vm_id: str
     ipv4: str
     status: str
@@ -407,6 +374,8 @@ class _VMLease(TypedDict):
 
 
 class NetworkInspect(TypedDict):
+    """Full network details for inspect output."""
+
     name: str
     subnet: str
     ipv4_gateway: str
@@ -415,193 +384,7 @@ class NetworkInspect(TypedDict):
     nat_gateways: list[str]
     created_at: str
     bridge_exists: bool
-    vms: list[_VMLease]
-
-
-def inspect_network(name: str) -> NetworkInspect:
-    """Return full details for a named network."""
-    from mvmctl.core.vm_manager import VMManager
-
-    config = get_network(name)
-    if config is None:
-        raise NetworkError(f"Network '{name}' not found")
-
-    leases = get_network_leases(name)
-    active = bridge_exists(config.bridge)
-
-    cache_dir = get_cache_dir()
-    update_network_entry(cache_dir, name, bridge_active=active)
-
-    vm_manager = VMManager()
-    enriched_vms: list[_VMLease] = []
-    for lease in leases:
-        vm = vm_manager.get(lease.vm_id)
-        if vm is not None:
-            enriched_vms.append(
-                {
-                    "vm_id": lease.vm_id,
-                    "ipv4": lease.ipv4,
-                    "status": vm.status.value,
-                    "pid": vm.pid,
-                    "api_socket_path": str(vm.api_socket_path) if vm.api_socket_path else None,
-                }
-            )
-        else:
-            enriched_vms.append(
-                {
-                    "vm_id": lease.vm_id,
-                    "ipv4": lease.ipv4,
-                    "status": "unknown",
-                    "pid": None,
-                    "api_socket_path": None,
-                }
-            )
-
-    return {
-        "name": config.name,
-        "subnet": config.subnet,
-        "ipv4_gateway": config.ipv4_gateway,
-        "bridge": config.bridge,
-        "nat_enabled": config.nat_enabled,
-        "nat_gateways": config.nat_gateways,
-        "created_at": config.created_at,
-        "bridge_exists": active,
-        "vms": enriched_vms,
-    }
-
-
-def allocate_network_ip(network_name: str, vm_name: str) -> str:
-    """Allocate the next available IP from a network's subnet.
-
-    Registers the lease in metadata.json.
-
-    Returns:
-        The allocated IP address string.
-    """
-    config = get_network(network_name)
-    if config is None:
-        raise NetworkError(f"Network '{network_name}' not found")
-
-    leases = get_network_leases(network_name)
-    used_ips = [lease.ipv4 for lease in leases]
-    # Also reserve the gateway
-    used_ips.append(config.ipv4_gateway)
-
-    ip = allocate_ip(used_ips, subnet=config.subnet)
-    leases.append(NetworkLease(vm_id=vm_name, ipv4=ip))
-
-    # Persist updated leases to metadata
-    cache_dir = get_cache_dir()
-    update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
-
-    return ip
-
-
-def release_network_ip(network_name: str, vm_name: str) -> None:
-    """Release a VM's IP lease from a network."""
-    leases = get_network_leases(network_name)
-    for lease in leases:
-        if lease.vm_id == vm_name:
-            break
-
-    leases = [lease for lease in leases if lease.vm_id != vm_name]
-
-    # Persist updated leases to metadata
-    cache_dir = get_cache_dir()
-    update_network_entry(cache_dir, network_name, leases=[asdict(lease) for lease in leases])
-
-
-def ensure_default_network() -> NetworkConfig:
-    """Ensure the default network exists with all host resources materialized.
-
-    If the network exists in metadata but the actual bridge, iptables chains,
-    or NAT rules are missing (e.g., after a reboot), this function recreates
-    them from the stored configuration.
-    """
-    from mvmctl.constants import MVM_POSTROUTING_CHAIN
-    from mvmctl.core.host_setup import save_iptables_rules
-    from mvmctl.core.network import (
-        setup_bridge,
-        setup_mvm_chains,
-        setup_nat,
-    )
-    from mvmctl.utils.network import (
-        _iptables_rule_exists,
-        bridge_exists,
-        get_default_interface,
-    )
-
-    config = get_network(DEFAULT_NETWORK_NAME)
-
-    if config is not None:
-        bridge_missing = not bridge_exists(config.bridge)
-        chains_missing = not setup_mvm_chains()
-
-        nat_missing = False
-        if config.nat_enabled:
-            try:
-                nat_gateways = config.nat_gateways or [get_default_interface()]
-                # Check if at least one gateway has a MASQUERADE rule
-                for gateway_iface in nat_gateways:
-                    masquerade_check = [
-                        "iptables",
-                        "-t",
-                        "nat",
-                        "-C",
-                        MVM_POSTROUTING_CHAIN,
-                        "-s",
-                        config.subnet,
-                        "-o",
-                        gateway_iface,
-                        "-j",
-                        "MASQUERADE",
-                    ]
-                    if not _iptables_rule_exists(masquerade_check):
-                        nat_missing = True
-                        break
-            except Exception:
-                nat_missing = True
-
-        if bridge_missing or chains_missing or nat_missing:
-            ipv4_gateway_subnet = f"{config.ipv4_gateway}/{_prefix_len(config.subnet)}"
-            try:
-                if bridge_missing:
-                    setup_bridge(config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet)
-                if config.nat_enabled:
-                    nat_gateways = config.nat_gateways or [get_default_interface()]
-                    setup_nat(config.bridge, nat_gateways=nat_gateways, subnet=config.subnet)
-                    if os.getuid() == 0:
-                        save_iptables_rules()
-                cache_dir = get_cache_dir()
-                update_network_entry(cache_dir, DEFAULT_NETWORK_NAME, bridge_active=True)
-                if not _should_preserve_current_default(DEFAULT_NETWORK_NAME):
-                    set_default_network(DEFAULT_NETWORK_NAME)
-            except NetworkError:
-                if bridge_missing:
-                    try:
-                        teardown_bridge(config.bridge)
-                    except NetworkError:
-                        pass
-                raise
-        else:
-            if not _should_preserve_current_default(DEFAULT_NETWORK_NAME):
-                set_default_network(DEFAULT_NETWORK_NAME)
-        return config
-
-    # Auto-detect internet-facing interface for NAT gateway
-    default_iface = get_default_interface()
-    if not default_iface:
-        raise NetworkError(
-            "Could not auto-detect internet-facing interface. "
-            "Please create the default network manually with: "
-            "mvm network create default --nat-gateways <interface>"
-        )
-    config = create_network(
-        DEFAULT_NETWORK_NAME, subnet=DEFAULT_NETWORK_SUBNET, nat=True, nat_gateways=[default_iface]
-    )
-    if not _should_preserve_current_default(DEFAULT_NETWORK_NAME):
-        set_default_network(DEFAULT_NETWORK_NAME)
-    return config
+    vms: list[VMLease]
 
 
 @dataclass
@@ -615,144 +398,33 @@ class ReconcileResult:
     stale: bool
 
 
-def reconcile_networks() -> list[ReconcileResult]:
-    """Compare stored network state with actual kernel bridge state.
-
-    For each network in metadata, checks whether its bridge device still
-    exists on the host. Updates bridge_active in metadata.json and
-    returns a list of reconciliation results. Entries where
-    ``stale is True`` indicate that the bridge was expected to be up
-    but is no longer present in the kernel.
-    """
-    cache_dir = get_cache_dir()
-    results: list[ReconcileResult] = []
-
-    for config in list_networks():
-        entry = get_network_entry(cache_dir, config.name)
-        stored_active = entry.get("bridge_active")
-        actual_active = bridge_exists(config.bridge)
-
-        stale = (stored_active is True) and (not actual_active)
-
-        update_network_entry(cache_dir, config.name, bridge_active=actual_active)
-
-        results.append(
-            ReconcileResult(
-                name=config.name,
-                bridge=config.bridge,
-                stored_active=stored_active,
-                actual_active=actual_active,
-                stale=stale,
-            )
-        )
-
-    if any(r.stale for r in results):
-        stale_names = [r.name for r in results if r.stale]
-        logger.warning("Stale networks detected (bridge missing): %s", ", ".join(stale_names))
-
-    return results
+# ---------------------------------------------------------------------------
+# Default network helpers
+# ---------------------------------------------------------------------------
 
 
-def restore_networks() -> list[str]:
-    """Restore all networks from metadata, recreating bridges and NAT rules.
+def should_preserve_current_default(
+    current_default_name: str | None, new_default_name: str
+) -> bool:
+    """Check if current default should be preserved (not the same as new default).
 
-    This function is called during host init to restore networks after a clean
-    or reboot. It validates stored interfaces and recreates network resources.
+    Args:
+        current_default_name: Current default network name (None if no default).
+        new_default_name: New default network name being set.
 
     Returns:
-        List of status messages describing what was restored.
+        True if current default should be preserved, False otherwise.
     """
-    from mvmctl.core.network import (
-        setup_bridge,
-        setup_nat,
-    )
-    from mvmctl.utils.network import (
-        bridge_exists,
-        get_default_interface,
-        validate_network_interface,
-    )
-
-    networks = list_networks()
-    if not networks:
-        return []
-
-    status: list[str] = []
-    cache_dir = get_cache_dir()
-
-    for config in networks:
-        if bridge_exists(config.bridge):
-            status.append(f"Network '{config.name}': bridge already exists, skipping")
-            continue
-
-        ipv4_gateway_subnet = f"{config.ipv4_gateway}/{_prefix_len(config.subnet)}"
-
-        try:
-            setup_bridge(config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet)
-            status.append(f"Network '{config.name}': created bridge {config.bridge}")
-        except NetworkError as e:
-            status.append(f"Network '{config.name}': failed to create bridge: {e}")
-            continue
-
-        if config.nat_enabled:
-            nat_gateways = config.nat_gateways or []
-
-            # Validate stored gateways
-            validated_gateways: list[str] = []
-            for gateway_iface in nat_gateways:
-                try:
-                    validate_network_interface(gateway_iface)
-                    validated_gateways.append(gateway_iface)
-                except NetworkError:
-                    logger.warning(
-                        "Network '%s': stored gateway '%s' is invalid, skipping",
-                        config.name,
-                        gateway_iface,
-                    )
-
-            # If no valid gateways, auto-detect
-            if not validated_gateways:
-                try:
-                    default_iface = get_default_interface()
-                    validate_network_interface(default_iface)
-                    validated_gateways = [default_iface]
-                except NetworkError as e:
-                    status.append(f"Network '{config.name}': no valid interface for NAT: {e}")
-                    continue
-
-            try:
-                setup_nat(config.bridge, nat_gateways=validated_gateways, subnet=config.subnet)
-                status.append(
-                    f"Network '{config.name}': NAT configured via {', '.join(validated_gateways)}"
-                )
-
-                if config.nat_gateways != validated_gateways:
-                    update_network_entry(cache_dir, config.name, nat_gateways=validated_gateways)
-                    config.nat_gateways = validated_gateways
-            except NetworkError as e:
-                status.append(f"Network '{config.name}': failed to configure NAT: {e}")
-
-        update_network_entry(cache_dir, config.name, bridge_active=True)
-
-    return status
+    if current_default_name is None:
+        return False
+    return current_default_name != new_default_name
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def get_default_network_gateway() -> str:
+    """Get the default gateway for the default network subnet."""
+    return _ipv4_gateway_for_subnet(DEFAULT_NETWORK_SUBNET)
 
 
-def _prefix_len(subnet: str) -> int:
-    return _prefix_len_util(subnet)
-
-
-def _validate_subnet_no_overlap(subnet: str, exclude_name: str = "") -> None:
-    """Check that the given subnet doesn't overlap with existing networks."""
-    new_net = ipaddress.IPv4Network(subnet, strict=False)
-    for existing in list_networks():
-        if existing.name == exclude_name:
-            continue
-        existing_net = ipaddress.IPv4Network(existing.subnet, strict=False)
-        if new_net.overlaps(existing_net):
-            raise NetworkError(
-                f"Subnet {subnet} overlaps with network '{existing.name}' ({existing.subnet})"
-            )
+def get_default_network_bridge() -> str:
+    """Get the bridge name for the default network."""
+    return _bridge_name_for(DEFAULT_NETWORK_NAME)

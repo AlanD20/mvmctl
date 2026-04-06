@@ -200,7 +200,7 @@ def _reconcile_networks() -> None:
     - `mvm host init` (full host setup)
     """
     try:
-        from mvmctl.core.network_manager import reconcile_networks
+        from mvmctl.api.network import reconcile_networks
 
         reconcile_networks()
     except Exception:

@@ -96,7 +96,7 @@ def clean_host(cache_dir: Path, db: MVMDatabase) -> list[str]:
         teardown_bridge,
         teardown_nat,
     )
-    from mvmctl.core.network_manager import list_networks
+    from mvmctl.api.network import list_networks
     from mvmctl.exceptions import NetworkError
     from mvmctl.utils.network import bridge_exists, list_bridges, list_tuntap_devices
 

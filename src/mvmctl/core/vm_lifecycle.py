@@ -60,7 +60,7 @@ from mvmctl.core.network import (
     setup_nat,
     teardown_nat,
 )
-from mvmctl.core.network_manager import (
+from mvmctl.api.network import (
     allocate_network_ip,
     ensure_default_network,
     get_network,

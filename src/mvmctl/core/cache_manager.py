@@ -15,7 +15,7 @@ from mvmctl.core.metadata import (
     remove_image_entry,
     remove_kernel_entry,
 )
-from mvmctl.core.network_manager import (
+from mvmctl.api.network import (
     get_network_leases,
     list_networks,
     remove_network,

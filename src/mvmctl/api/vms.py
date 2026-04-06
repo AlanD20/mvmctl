@@ -24,7 +24,7 @@ from mvmctl.core.console import (
 )
 from mvmctl.core.logs import show_logs
 from mvmctl.core.network import teardown_nat
-from mvmctl.core.network_manager import get_network
+from mvmctl.api.network import get_network
 from mvmctl.core.ssh import connect_to_vm
 from mvmctl.core.vm_lifecycle import (
     create_vm as _create_vm,
