@@ -261,7 +261,7 @@ class TestNetworkWithSubprocessMocking:
         mock_require_group.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("mvmctl.core.network_manager._validate_subnet_no_overlap"):
+        with patch("mvmctl.core.network_manager.validate_no_subnet_overlap"):
             with patch("mvmctl.core.network_manager.setup_nat"):
                 result = create_network("subprocess-net", subnet="10.77.0.0/24")
 

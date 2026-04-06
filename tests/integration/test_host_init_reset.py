@@ -288,11 +288,14 @@ class TestHostStateManagement:
 
     def test_save_and_load_state(self, tmp_path):
         """Test saving and loading host state via SQLite."""
-        from mvmctl.core.host_state import _save_state, get_host_state
+        from mvmctl.api.host import get_host_state
+        from mvmctl.core.host_state import _save_state
+        from mvmctl.core.mvm_db import MVMDatabase
 
         changes = [_host_change("test", "a", "b", "manual")]
 
-        _save_state(tmp_path, changes)
+        db = MVMDatabase()
+        _save_state(db, changes)
 
         loaded = get_host_state(tmp_path)
         assert loaded is not None
