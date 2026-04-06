@@ -1,4 +1,4 @@
-"""Tests for core/host.py."""
+"""Tests for core/host.py and api/host.py."""
 
 import subprocess
 from pathlib import Path
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.core.host import clean_host, reset_host
+from mvmctl.api.host import clean_host, prune_host, reset_host
 from mvmctl.core.host_privilege import (
     _add_user_to_group,
     _create_group,
@@ -18,6 +18,7 @@ from mvmctl.core.host_privilege import (
     _validate_sudoers_binaries,
     check_privileges,
 )
+from mvmctl.api.host import init_host
 from mvmctl.core.host_setup import (
     _enable_ip_forward,
     _ensure_kvm_modules,
@@ -27,7 +28,6 @@ from mvmctl.core.host_setup import (
     check_kvm_access,
     check_required_binaries,
     get_ip_forward_status,
-    init_host,
 )
 from mvmctl.core.host_state import (
     HostStateChange,
@@ -585,7 +585,7 @@ def _mock_lsmod_with_kvm():
     return result
 
 
-@patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
+@patch("mvmctl.core.host_privilege._write_sudoers", return_value=None)
 @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
@@ -596,10 +596,10 @@ def test_init_host_kvm_not_accessible(
 ):
     """init_host should raise HostError when /dev/kvm is not accessible."""
     with pytest.raises(HostError, match="/dev/kvm is not accessible"):
-        init_host(tmp_path, db)
+        init_host(tmp_path)
 
 
-@patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
+@patch("mvmctl.core.host_privilege._write_sudoers", return_value=None)
 @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which")
@@ -611,18 +611,18 @@ def test_init_host_missing_binaries(
     """init_host should raise HostError listing missing binaries when required tools are absent."""
     mock_which.return_value = None
     with pytest.raises(HostError, match="Missing required binaries"):
-        init_host(tmp_path, db)
+        init_host(tmp_path)
 
 
-@patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
+@patch("mvmctl.core.host_privilege._write_sudoers", return_value=None)
 @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
-@patch("mvmctl.core.host_setup._get_current_user", return_value="testuser")
-@patch("mvmctl.core.host_setup._add_user_to_group", return_value=False)
-@patch("mvmctl.core.host_setup._create_group", return_value=False)
-@patch("mvmctl.core.host_setup._validate_sudoers_binaries")
-@patch("mvmctl.core.host_setup._generate_sudoers_content")
+@patch("mvmctl.core.host_privilege._get_current_user", return_value="testuser")
+@patch("mvmctl.core.host_privilege._add_user_to_group", return_value=False)
+@patch("mvmctl.core.host_privilege._create_group", return_value=False)
+@patch("mvmctl.core.host_privilege._validate_sudoers_binaries")
+@patch("mvmctl.core.host_privilege._generate_sudoers_content")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
-@patch("mvmctl.core.host_setup.setup_mvm_chains", return_value=True)
+@patch("mvmctl.core.network.setup_mvm_chains", return_value=True)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -658,11 +658,11 @@ def test_init_host_ip_forward_already_enabled(
         mock_sysctl_conf.exists.return_value = True
         mock_sysctl_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
 
-        with patch("mvmctl.core.host_setup.SUDOERS_DROP_IN_PATH", str(tmp_path / "sudoers")):
+        with patch("mvmctl.constants.SUDOERS_DROP_IN_PATH", str(tmp_path / "sudoers")):
             sudoers_file = tmp_path / "sudoers"
             sudoers_file.write_text("valid sudoers content")
             mock_gen_sudoers.return_value = "valid sudoers content"
-            changes = init_host(tmp_path, db)
+            changes = init_host(tmp_path)
 
     # ip_forward already "1" and sysctl conf already correct and modules loaded
     assert len(changes) == 1
@@ -677,15 +677,15 @@ def test_init_host_ip_forward_already_enabled(
     assert len(db_changes) >= 1
 
 
-@patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
+@patch("mvmctl.core.host_privilege._write_sudoers", return_value=None)
 @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
-@patch("mvmctl.core.host_setup._get_current_user", return_value="testuser")
-@patch("mvmctl.core.host_setup._add_user_to_group", return_value=False)
-@patch("mvmctl.core.host_setup._create_group", return_value=False)
-@patch("mvmctl.core.host_setup._validate_sudoers_binaries")
-@patch("mvmctl.core.host_setup._generate_sudoers_content")
+@patch("mvmctl.core.host_privilege._get_current_user", return_value="testuser")
+@patch("mvmctl.core.host_privilege._add_user_to_group", return_value=False)
+@patch("mvmctl.core.host_privilege._create_group", return_value=False)
+@patch("mvmctl.core.host_privilege._validate_sudoers_binaries")
+@patch("mvmctl.core.host_privilege._generate_sudoers_content")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
-@patch("mvmctl.core.host_setup.setup_mvm_chains", return_value=False)
+@patch("mvmctl.core.network.setup_mvm_chains", return_value=False)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -728,7 +728,7 @@ def test_init_host_enables_ip_forward(
         # so sudoers_stale evaluates to False and no sudoers change is recorded
         mock_gen_sudoers.return_value = mock_sysctl_conf.read_text.return_value
 
-        changes = init_host(tmp_path, db)
+        changes = init_host(tmp_path)
 
     setting_names = [c.setting for c in changes]
     assert "net.ipv4.ip_forward" in setting_names
@@ -741,14 +741,14 @@ def test_init_host_enables_ip_forward(
     assert ip_fwd_change.mechanism == "sysctl"
 
 
-@patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
+@patch("mvmctl.core.host_privilege._write_sudoers", return_value=None)
 @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
-@patch("mvmctl.core.host_setup._get_current_user", return_value="testuser")
-@patch("mvmctl.core.host_setup._add_user_to_group", return_value=False)
-@patch("mvmctl.core.host_setup._create_group", return_value=False)
-@patch("mvmctl.core.host_setup._validate_sudoers_binaries")
+@patch("mvmctl.core.host_privilege._get_current_user", return_value="testuser")
+@patch("mvmctl.core.host_privilege._add_user_to_group", return_value=False)
+@patch("mvmctl.core.host_privilege._create_group", return_value=False)
+@patch("mvmctl.core.host_privilege._validate_sudoers_binaries")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
-@patch("mvmctl.core.host_setup.setup_mvm_chains", return_value=False)
+@patch("mvmctl.core.network.setup_mvm_chains", return_value=False)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -784,7 +784,7 @@ def test_init_host_writes_state_to_sqlite(
         mock_sysctl_conf.exists.return_value = True
         mock_sysctl_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
 
-        init_host(tmp_path, db)
+        init_host(tmp_path)
 
     db = MVMDatabase()
     state = db.get_host_state()
@@ -792,14 +792,14 @@ def test_init_host_writes_state_to_sqlite(
     assert state.initialized
 
 
-@patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
+@patch("mvmctl.core.host_privilege._write_sudoers", return_value=None)
 @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
-@patch("mvmctl.core.host_setup._get_current_user", return_value="testuser")
-@patch("mvmctl.core.host_setup._add_user_to_group", return_value=False)
-@patch("mvmctl.core.host_setup._create_group", return_value=False)
-@patch("mvmctl.core.host_setup._validate_sudoers_binaries")
+@patch("mvmctl.core.host_privilege._get_current_user", return_value="testuser")
+@patch("mvmctl.core.host_privilege._add_user_to_group", return_value=False)
+@patch("mvmctl.core.host_privilege._create_group", return_value=False)
+@patch("mvmctl.core.host_privilege._validate_sudoers_binaries")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
-@patch("mvmctl.core.host_setup.setup_mvm_chains", side_effect=[False, True])
+@patch("mvmctl.core.network.setup_mvm_chains", side_effect=[False, True])
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -841,26 +841,26 @@ def test_init_host_idempotent(
         mock_sysctl_conf.parent = MagicMock()
         mock_sysctl_conf.__str__ = lambda self: "/etc/sysctl.d/mvmctl.conf"
 
-        changes_first = init_host(tmp_path, db)
+        changes_first = init_host(tmp_path)
 
         # Second run: ip_forward already "1", sysctl conf now "exists"
         mock_sysctl_conf.exists.return_value = True
         mock_sysctl_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
 
-        changes_second = init_host(tmp_path, db)
+        changes_second = init_host(tmp_path)
 
     assert len(changes_second) <= len(changes_first)
     assert any(c.mechanism == "noop" and c.setting == "iptables_chains" for c in changes_second)
 
 
-@patch("mvmctl.core.host_setup._write_sudoers", return_value=None)
+@patch("mvmctl.core.host_privilege._write_sudoers", return_value=None)
 @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
-@patch("mvmctl.core.host_setup._get_current_user", return_value="testuser")
-@patch("mvmctl.core.host_setup._add_user_to_group", return_value=False)
-@patch("mvmctl.core.host_setup._create_group", return_value=False)
-@patch("mvmctl.core.host_setup._validate_sudoers_binaries")
+@patch("mvmctl.core.host_privilege._get_current_user", return_value="testuser")
+@patch("mvmctl.core.host_privilege._add_user_to_group", return_value=False)
+@patch("mvmctl.core.host_privilege._create_group", return_value=False)
+@patch("mvmctl.core.host_privilege._validate_sudoers_binaries")
 @patch("mvmctl.core.host_setup.SYSCTL_CONF")
-@patch("mvmctl.core.host_setup.setup_mvm_chains", return_value=False)
+@patch("mvmctl.core.network.setup_mvm_chains", return_value=False)
 @patch("mvmctl.core.host_setup.subprocess.run")
 @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
 @patch("mvmctl.core.host_setup.os.access", return_value=True)
@@ -897,7 +897,7 @@ def test_init_host_with_module_loading(
         mock_sysctl_conf.exists.return_value = True
         mock_sysctl_conf.read_text.return_value = "net.ipv4.ip_forward = 1\n"
 
-        changes = init_host(tmp_path, db)
+        changes = init_host(tmp_path)
 
     module_changes = [c for c in changes if c.mechanism == "modprobe"]
     assert len(module_changes) >= 1
@@ -1620,18 +1620,18 @@ class TestHostHelpers:
 
 class TestCleanHost:
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=["mvm-def-vm0-aaa", "eth0"])
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=["mvm-def-vm0-aaa", "eth0"])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_no_networks(
         self,
         mock_list,
@@ -1642,25 +1642,25 @@ class TestCleanHost:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert any("Removed TAP device 'mvm-def-vm0-aaa'" in s for s in summary)
         assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.core.network.teardown_bridge")
-    @patch("mvmctl.core.network_manager.list_networks")
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.host.teardown_nat")
+    @patch("mvmctl.api.host.teardown_bridge")
+    @patch("mvmctl.api.network.list_networks")
     def test_clean_host_removes_networks(
         self,
         mock_list,
@@ -1678,29 +1678,29 @@ class TestCleanHost:
         net.bridge = "mvm-br0"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert len(summary) == 4
         assert any("Removed network 'default'" in s for s in summary)
         assert any("MVM Networking: deleted chain MVM-FORWARD" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_bridge",
+        "mvmctl.api.host.teardown_bridge",
         side_effect=NetworkError("bridge teardown failed"),
     )
-    @patch("mvmctl.core.network.teardown_nat")
+    @patch("mvmctl.api.host.teardown_nat")
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: chain MVM-FORWARD already deleted, skipping",
             "MVM Networking: chain MVM-POSTROUTING already deleted, skipping",
             "MVM Networking: chain MVM-NOCLOUD-INPUT already deleted, skipping",
         ],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks")
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks")
     def test_clean_host_handles_network_failure(
         self,
         mock_list,
@@ -1718,24 +1718,24 @@ class TestCleanHost:
         net.bridge = "mvm-br0"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert any("Warning" in s for s in summary)
         assert any("already deleted, skipping" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
     @patch(
-        "mvmctl.core.network_manager.list_networks",
+        "mvmctl.api.network.list_networks",
         side_effect=NetworkError("list failed"),
     )
     def test_clean_host_handles_list_failure(
@@ -1748,25 +1748,25 @@ class TestCleanHost:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert any("skipped network inventory cleanup" in s for s in summary)
         assert any("MVM Networking: deleted chain" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "Warning: MVM Networking: failed to delete chain MVM-FORWARD",
             "Warning: MVM Networking: failed to delete chain MVM-POSTROUTING",
             "Warning: MVM Networking: failed to delete chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap", side_effect=NetworkError("permission denied"))
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=["mvm-denied-tap"])
-    @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.core.network.teardown_bridge", side_effect=NetworkError("permission denied"))
-    @patch("mvmctl.core.network_manager.list_networks")
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap", side_effect=NetworkError("permission denied"))
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=["mvm-denied-tap"])
+    @patch("mvmctl.api.host.teardown_nat")
+    @patch("mvmctl.api.host.teardown_bridge", side_effect=NetworkError("permission denied"))
+    @patch("mvmctl.api.network.list_networks")
     def test_clean_host_permission_denied_becomes_warnings(
         self,
         mock_list,
@@ -1784,26 +1784,24 @@ class TestCleanHost:
         net.bridge = "mvm-br0"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert any("Warning: failed to remove TAP" in s for s in summary)
         assert any("failed to remove network 'default'" in s for s in summary)
         assert any("failed to delete chain MVM-FORWARD" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch(
-        "mvmctl.utils.network.list_tuntap_devices", return_value=["mvm-abc-vm1-xyz", "mvm-stale"]
-    )
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=["mvm-abc-vm1-xyz", "mvm-stale"])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_removes_stale_taps_without_metadata(
         self,
         mock_list,
@@ -1814,27 +1812,25 @@ class TestCleanHost:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert any("Removed TAP device 'mvm-abc-vm1-xyz'" in s for s in summary)
         assert any("Removed TAP device 'mvm-stale'" in s for s in summary)
         assert any("MVM Networking: deleted chain" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
         ],
     )
-    @patch("mvmctl.core.network.teardown_bridge")
-    @patch("mvmctl.core.network.teardown_nat")
-    @patch(
-        "mvmctl.utils.network.list_bridges", return_value=["mvm-orphan", "virbr0", "mvm-default"]
-    )
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.teardown_bridge")
+    @patch("mvmctl.api.host.teardown_nat")
+    @patch("mvmctl.api.host.list_bridges", return_value=["mvm-orphan", "virbr0", "mvm-default"])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_removes_orphan_mvm_bridges_only(
         self,
         mock_list,
@@ -1847,26 +1843,26 @@ class TestCleanHost:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
 
         mock_teardown_nat.assert_called_once_with(bridge="mvm-orphan", force=True)
         mock_teardown_bridge.assert_called_once_with("mvm-orphan")
         assert any("Removed orphan bridge 'mvm-orphan'" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
         ],
     )
-    @patch("mvmctl.core.network.teardown_bridge")
-    @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.utils.network.list_bridges", return_value=["mvm-custom"])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks")
+    @patch("mvmctl.api.host.teardown_bridge")
+    @patch("mvmctl.api.host.teardown_nat")
+    @patch("mvmctl.api.host.list_bridges", return_value=["mvm-custom"])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks")
     def test_clean_host_skips_metadata_tracked_bridge_in_orphan_scan(
         self,
         mock_list,
@@ -1884,7 +1880,7 @@ class TestCleanHost:
         net.bridge = "mvm-custom"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
 
         mock_teardown_bridge.assert_called_once_with("mvm-custom")
         assert any("Removed network 'custom'" in s for s in summary)
@@ -1896,12 +1892,12 @@ class TestCleanHost:
 
 
 class TestResetHost:
-    @patch("mvmctl.core.host._state_file")
-    @patch("mvmctl.core.host._remove_group", return_value=True)
-    @patch("mvmctl.core.host._remove_sudoers", return_value=True)
-    @patch("mvmctl.core.host_state.restore_host", return_value=[])
+    @patch("mvmctl.api.host._state_file")
+    @patch("mvmctl.api.host._remove_group", return_value=True)
+    @patch("mvmctl.api.host._remove_sudoers", return_value=True)
+    @patch("mvmctl.api.host._restore_host", return_value=[])
     @patch(
-        "mvmctl.core.host.clean_host", return_value=["Removed network 'default' (bridge: mvm-br0)"]
+        "mvmctl.api.host.clean_host", return_value=["Removed network 'default' (bridge: mvm-br0)"]
     )
     def test_reset_host_full(
         self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
@@ -1910,16 +1906,16 @@ class TestResetHost:
         mock_sf.exists.return_value = True
         mock_state_file.return_value = mock_sf
 
-        summary = reset_host(MagicMock(), db)
+        summary = reset_host()
         assert any("Removed network" in s for s in summary)
         assert any("sudoers" in s for s in summary)
         assert any("group" in s for s in summary)
 
-    @patch("mvmctl.core.host._state_file")
-    @patch("mvmctl.core.host._remove_group", return_value=False)
-    @patch("mvmctl.core.host._remove_sudoers", return_value=False)
-    @patch("mvmctl.core.host_state.restore_host", side_effect=HostError("no state"))
-    @patch("mvmctl.core.host.clean_host", return_value=[])
+    @patch("mvmctl.api.host._state_file")
+    @patch("mvmctl.api.host._remove_group", return_value=False)
+    @patch("mvmctl.api.host._remove_sudoers", return_value=False)
+    @patch("mvmctl.api.host._restore_host", side_effect=HostError("no state"))
+    @patch("mvmctl.api.host.clean_host", return_value=[])
     def test_reset_host_nothing_to_do(
         self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
     ):
@@ -1927,7 +1923,7 @@ class TestResetHost:
         mock_sf.exists.return_value = False
         mock_state_file.return_value = mock_sf
 
-        summary = reset_host(MagicMock(), db)
+        summary = reset_host()
         assert summary == []
 
 
@@ -1939,23 +1935,31 @@ class TestResetHost:
 class TestInitHostErrorPaths:
     """Error-path tests for init_host / configure_host."""
 
-    @patch("mvmctl.core.host_setup._write_sudoers")
+    @patch("mvmctl.api.host.check_privileges")
+    @patch("mvmctl.core.host_privilege._write_sudoers")
     @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
     @patch("mvmctl.core.host_setup.os.access", return_value=False)
     @patch("mvmctl.core.host_setup.Path.exists", return_value=False)
     def test_configure_host_kvm_not_available(
-        self, mock_exists, mock_access, mock_getuid, mock_write_sudoers, tmp_path, db
+        self,
+        mock_check_priv,
+        mock_exists,
+        mock_access,
+        mock_getuid,
+        mock_write_sudoers,
+        tmp_path,
+        db,
     ):
         """init_host raises HostError when /dev/kvm is not available."""
         with pytest.raises(HostError, match="/dev/kvm is not accessible"):
-            init_host(tmp_path, db)
+            init_host(tmp_path)
 
-    @patch("mvmctl.core.host_setup._write_sudoers")
+    @patch("mvmctl.core.host_privilege._write_sudoers")
     @patch("mvmctl.core.host_setup.os.getuid", return_value=0)
-    @patch("mvmctl.core.host_setup._get_current_user", return_value="testuser")
-    @patch("mvmctl.core.host_setup._add_user_to_group", return_value=False)
-    @patch("mvmctl.core.host_setup._create_group", return_value=False)
-    @patch("mvmctl.core.host_setup._validate_sudoers_binaries")
+    @patch("mvmctl.core.host_privilege._get_current_user", return_value="testuser")
+    @patch("mvmctl.core.host_privilege._add_user_to_group", return_value=False)
+    @patch("mvmctl.core.host_privilege._create_group", return_value=False)
+    @patch("mvmctl.core.host_privilege._validate_sudoers_binaries")
     @patch("mvmctl.core.host_setup.SYSCTL_CONF")
     @patch("mvmctl.core.host_setup.subprocess.run")
     @patch("mvmctl.core.host_setup.shutil.which", side_effect=_mock_which_all_found)
@@ -1992,25 +1996,25 @@ class TestInitHostErrorPaths:
             mock_sysctl_conf.parent = MagicMock()
 
             with pytest.raises(HostError, match="Failed to enable IP forwarding"):
-                init_host(tmp_path, db)
+                init_host(tmp_path)
 
 
 class TestCleanHostErrorPaths:
     """Error-path tests for clean_host."""
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: chain MVM-FORWARD already deleted, skipping",
             "MVM Networking: chain MVM-POSTROUTING already deleted, skipping",
             "MVM Networking: chain MVM-NOCLOUD-INPUT already deleted, skipping",
         ],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_bridge_doesnt_exist(
         self,
         mock_list,
@@ -2022,29 +2026,29 @@ class TestCleanHostErrorPaths:
         db,
     ):
         """clean_host removes MVM chains even when no bridges/networks exist."""
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert len(summary) == 3
         assert any("already deleted, skipping" in s for s in summary)
         mock_list.assert_called_once()
 
     @patch(
-        "mvmctl.core.network.teardown_bridge",
+        "mvmctl.api.host.teardown_bridge",
         side_effect=NetworkError("ip link delete failed"),
     )
-    @patch("mvmctl.core.network.teardown_nat")
+    @patch("mvmctl.api.host.teardown_nat")
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[
             "MVM Networking: deleted chain MVM-FORWARD",
             "MVM Networking: deleted chain MVM-POSTROUTING",
             "MVM Networking: deleted chain MVM-NOCLOUD-INPUT",
         ],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks")
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks")
     def test_clean_host_remove_network_subprocess_error(
         self,
         mock_list,
@@ -2062,7 +2066,7 @@ class TestCleanHostErrorPaths:
         net.bridge = "mvm-br99"
         mock_list.return_value = [net]
 
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert len(summary) == 4
         assert any("Warning" in s for s in summary)
         assert any("stale-net" in s for s in summary)
@@ -2208,9 +2212,9 @@ class TestAddUserToGroupErrorPaths:
 
 
 class TestPruneHostErrorPaths:
-    @patch("mvmctl.core.host.clean_host", return_value=["cleaned"])
-    @patch("mvmctl.core.host_state.restore_host")
-    @patch("mvmctl.core.host._state_file")
+    @patch("mvmctl.api.host.clean_host", return_value=["cleaned"])
+    @patch("mvmctl.api.host._restore_host")
+    @patch("mvmctl.api.host._state_file")
     def test_prune_host_restore_fails(
         self, mock_state_file, mock_restore, mock_clean, tmp_path, db
     ):
@@ -2220,9 +2224,9 @@ class TestPruneHostErrorPaths:
         mock_sf.exists.return_value = True
         mock_state_file.return_value = mock_sf
 
-        from mvmctl.core.host import prune_host
+        from mvmctl.api.host import prune_host
 
-        summary = prune_host(tmp_path, db)
+        summary = prune_host(tmp_path)
 
         assert "cleaned" in summary
         assert "Removed host state snapshot" in summary
@@ -2230,11 +2234,11 @@ class TestPruneHostErrorPaths:
 
 
 class TestResetHostErrorPaths:
-    @patch("mvmctl.core.host.clean_host", return_value=["cleaned"])
-    @patch("mvmctl.core.host_state.restore_host", side_effect=HostError("fake restore error"))
-    @patch("mvmctl.core.host._remove_sudoers", side_effect=HostError("fake sudoers error"))
-    @patch("mvmctl.core.host._remove_group", side_effect=HostError("fake group error"))
-    @patch("mvmctl.core.host._state_file")
+    @patch("mvmctl.api.host.clean_host", return_value=["cleaned"])
+    @patch("mvmctl.api.host._restore_host", side_effect=HostError("fake restore error"))
+    @patch("mvmctl.api.host._remove_sudoers", side_effect=HostError("fake sudoers error"))
+    @patch("mvmctl.api.host._remove_group", side_effect=HostError("fake group error"))
+    @patch("mvmctl.api.host._state_file")
     def test_reset_host_all_errors(
         self, mock_state_file, mock_rg, mock_rs, mock_rh, mock_ch, tmp_path, db
     ):
@@ -2243,9 +2247,9 @@ class TestResetHostErrorPaths:
         mock_sf.exists.return_value = True
         mock_state_file.return_value = mock_sf
 
-        from mvmctl.core.host import reset_host
+        from mvmctl.api.host import reset_host
 
-        summary = reset_host(tmp_path, db)
+        summary = reset_host(tmp_path)
 
         assert "cleaned" in summary
         assert "Warning: fake sudoers error" in summary
@@ -2266,7 +2270,7 @@ class TestPersistHostStateToDb:
         db = MVMDatabase(db_path=db_path)
         db.migrate()
 
-        from mvmctl.core.host_setup import _persist_host_state_to_db
+        from mvmctl.api.host import _persist_host_state_to_db
         from mvmctl.models.host import HostStateChange
 
         changes = [
@@ -2307,7 +2311,7 @@ class TestPersistHostStateToDb:
         unmigrated_db.touch()
         monkeypatch.setattr("mvmctl.core.mvm_db.get_mvm_db_path", lambda: unmigrated_db)
 
-        from mvmctl.core.host_setup import _persist_host_state_to_db
+        from mvmctl.api.host import _persist_host_state_to_db
         from mvmctl.models.host import HostStateChange
 
         db = MVMDatabase(db_path=unmigrated_db)
@@ -2331,9 +2335,9 @@ class TestPersistHostStateToDb:
 
 
 class TestPruneHostAdditional:
-    @patch("mvmctl.core.host.clean_host", return_value=["cleaned"])
+    @patch("mvmctl.api.host.clean_host", return_value=["cleaned"])
     @patch(
-        "mvmctl.core.host_state.restore_host",
+        "mvmctl.api.host._restore_host",
         return_value=[
             HostStateChange(
                 setting="net.ipv4.ip_forward",
@@ -2343,7 +2347,7 @@ class TestPruneHostAdditional:
             )
         ],
     )
-    @patch("mvmctl.core.host._state_file")
+    @patch("mvmctl.api.host._state_file")
     def test_prune_host_with_restore_changes(
         self, mock_state_file, mock_restore, mock_clean, tmp_path, db
     ):
@@ -2351,16 +2355,16 @@ class TestPruneHostAdditional:
         mock_sf.exists.return_value = True
         mock_state_file.return_value = mock_sf
 
-        from mvmctl.core.host import prune_host
+        from mvmctl.api.host import prune_host
 
-        summary = prune_host(tmp_path, db)
+        summary = prune_host(tmp_path)
         assert "cleaned" in summary
         assert any("net.ipv4.ip_forward" in s for s in summary)
         assert "Removed host state snapshot" in summary
 
-    @patch("mvmctl.core.host.clean_host", return_value=["cleaned"])
-    @patch("mvmctl.core.host_state.restore_host", side_effect=HostError("no state"))
-    @patch("mvmctl.core.host._state_file")
+    @patch("mvmctl.api.host.clean_host", return_value=["cleaned"])
+    @patch("mvmctl.api.host._restore_host", side_effect=HostError("no state"))
+    @patch("mvmctl.api.host._state_file")
     def test_prune_host_unlink_oserror(
         self, mock_state_file, mock_restore, mock_clean, tmp_path, db
     ):
@@ -2369,24 +2373,24 @@ class TestPruneHostAdditional:
         mock_sf.unlink.side_effect = OSError("permission denied")
         mock_state_file.return_value = mock_sf
 
-        from mvmctl.core.host import prune_host
+        from mvmctl.api.host import prune_host
 
-        summary = prune_host(tmp_path, db)
+        summary = prune_host(tmp_path)
         assert "cleaned" in summary
         assert "Removed host state snapshot" not in summary
 
 
 class TestCleanHostAdditional:
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=["MVM Networking: deleted chain MVM-FORWARD"],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=["mvm-default"])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=True)
-    @patch("mvmctl.core.network.teardown_bridge")
-    @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=["mvm-default"])
+    @patch("mvmctl.api.host.bridge_exists", return_value=True)
+    @patch("mvmctl.api.host.teardown_bridge")
+    @patch("mvmctl.api.host.teardown_nat")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_removes_default_bridge(
         self,
         mock_list_networks,
@@ -2398,20 +2402,20 @@ class TestCleanHostAdditional:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         mock_teardown_bridge.assert_called()
         assert any("orphan bridge" in s or "MVM Networking" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=["MVM Networking: deleted chain MVM-FORWARD"],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=["mvm-default"])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=True)
-    @patch("mvmctl.core.network.teardown_bridge", side_effect=NetworkError("bridge busy"))
-    @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=["mvm-default"])
+    @patch("mvmctl.api.host.bridge_exists", return_value=True)
+    @patch("mvmctl.api.host.teardown_bridge", side_effect=NetworkError("bridge busy"))
+    @patch("mvmctl.api.host.teardown_nat")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_default_bridge_teardown_fails(
         self,
         mock_list_networks,
@@ -2423,19 +2427,19 @@ class TestCleanHostAdditional:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert any("Warning" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=["MVM Networking: deleted chain MVM-FORWARD"],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=["mvm-extranet"])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.teardown_bridge")
-    @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=["mvm-extranet"])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.teardown_bridge")
+    @patch("mvmctl.api.host.teardown_nat")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_removes_orphan_bridge_from_list(
         self,
         mock_list_networks,
@@ -2447,20 +2451,20 @@ class TestCleanHostAdditional:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         mock_teardown_bridge.assert_called()
         assert any("orphan bridge" in s or "MVM Networking" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=["MVM Networking: deleted chain MVM-FORWARD"],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=["mvm-extranet"])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.teardown_bridge", side_effect=NetworkError("busy"))
-    @patch("mvmctl.core.network.teardown_nat")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=["mvm-extranet"])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.teardown_bridge", side_effect=NetworkError("busy"))
+    @patch("mvmctl.api.host.teardown_nat")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_orphan_bridge_teardown_fails(
         self,
         mock_list_networks,
@@ -2472,18 +2476,18 @@ class TestCleanHostAdditional:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert any("Warning" in s for s in summary)
 
     @patch(
-        "mvmctl.core.network.teardown_all_mvm_chains_with_status",
+        "mvmctl.api.host.teardown_all_mvm_chains_with_status",
         return_value=[],
     )
-    @patch("mvmctl.utils.network.list_bridges", return_value=[])
-    @patch("mvmctl.utils.network.bridge_exists", return_value=False)
-    @patch("mvmctl.core.network.delete_tap")
-    @patch("mvmctl.utils.network.list_tuntap_devices", return_value=[])
-    @patch("mvmctl.core.network_manager.list_networks", return_value=[])
+    @patch("mvmctl.api.host.list_bridges", return_value=[])
+    @patch("mvmctl.api.host.bridge_exists", return_value=False)
+    @patch("mvmctl.api.host.delete_tap")
+    @patch("mvmctl.api.host.list_tuntap_devices", return_value=[])
+    @patch("mvmctl.api.network.list_networks", return_value=[])
     def test_clean_host_empty_summary_warning(
         self,
         mock_list_networks,
@@ -2494,16 +2498,16 @@ class TestCleanHostAdditional:
         mock_teardown_chains,
         db,
     ):
-        summary = clean_host(MagicMock(), db)
+        summary = clean_host()
         assert any("already clean" in s for s in summary)
 
 
 class TestResetHostAdditional:
-    @patch("mvmctl.core.host._state_file")
-    @patch("mvmctl.core.host._remove_group", return_value=True)
-    @patch("mvmctl.core.host._remove_sudoers", return_value=True)
+    @patch("mvmctl.api.host._state_file")
+    @patch("mvmctl.api.host._remove_group", return_value=True)
+    @patch("mvmctl.api.host._remove_sudoers", return_value=True)
     @patch(
-        "mvmctl.core.host_state.restore_host",
+        "mvmctl.api.host._restore_host",
         return_value=[
             HostStateChange(
                 setting="net.ipv4.ip_forward",
@@ -2513,7 +2517,7 @@ class TestResetHostAdditional:
             )
         ],
     )
-    @patch("mvmctl.core.host.clean_host", return_value=[])
+    @patch("mvmctl.api.host.clean_host", return_value=[])
     def test_reset_host_with_restore_changes(
         self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
     ):
@@ -2521,18 +2525,18 @@ class TestResetHostAdditional:
         mock_sf.exists.return_value = True
         mock_state_file.return_value = mock_sf
 
-        from mvmctl.core.host import reset_host
+        from mvmctl.api.host import reset_host
 
-        summary = reset_host(MagicMock(), db)
+        summary = reset_host()
         assert any("net.ipv4.ip_forward" in s for s in summary)
         assert any("sudoers" in s for s in summary)
         assert any("group" in s for s in summary)
 
-    @patch("mvmctl.core.host._state_file")
-    @patch("mvmctl.core.host._remove_group", return_value=False)
-    @patch("mvmctl.core.host._remove_sudoers", return_value=False)
-    @patch("mvmctl.core.host_state.restore_host", return_value=[])
-    @patch("mvmctl.core.host.clean_host", return_value=[])
+    @patch("mvmctl.api.host._state_file")
+    @patch("mvmctl.api.host._remove_group", return_value=False)
+    @patch("mvmctl.api.host._remove_sudoers", return_value=False)
+    @patch("mvmctl.api.host._restore_host", return_value=[])
+    @patch("mvmctl.api.host.clean_host", return_value=[])
     def test_reset_host_state_file_unlink_oserror(
         self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
     ):
@@ -2541,9 +2545,9 @@ class TestResetHostAdditional:
         mock_sf.unlink.side_effect = OSError("permission denied")
         mock_state_file.return_value = mock_sf
 
-        from mvmctl.core.host import reset_host
+        from mvmctl.api.host import reset_host
 
-        summary = reset_host(MagicMock(), db)
+        summary = reset_host()
         assert "Removed host state snapshot" not in summary
 
 

@@ -1,51 +1,42 @@
-"""Host initialization routines."""
+"""Host initialization routines.
+
+This module contains pure setup operations. The orchestration function init_host()
+has been moved to api/host.py.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
 import shutil
-import sqlite3
 import subprocess
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from mvmctl.constants import (
-    CONST_FILE_PERMS_STATE_FILE,
     IPTABLES_RULES_V4,
     ISO_BINARIES,
-    PROJECT_GROUP,
     REQUIRED_BINARIES,
-    SUDOERS_DROP_IN_PATH,
 )
-from mvmctl.core.host_privilege import (
-    _add_user_to_group,
-    _create_group,
-    _generate_sudoers_content,
-    _get_current_user,
-    _validate_sudoers_binaries,
-    _write_sudoers,
-)
-from mvmctl.core.host_state import SYSCTL_CONF, SYSCTL_KEY, HostStateChange, _save_state
-from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.core.network import setup_mvm_chains
-from mvmctl.exceptions import HostError, MVMError
+from mvmctl.exceptions import HostError
+from mvmctl.models.host import HostStateChange
+
+SYSCTL_KEY = "net.ipv4.ip_forward"
+SYSCTL_CONF = Path("/etc/sysctl.d/mvmctl.conf")
 
 logger = logging.getLogger(__name__)
-
-_CHAIN_EXISTS_MARKER = "MVM chains already exist"
 
 KVM_MODULES = ["kvm"]
 KVM_VENDOR_MODULES = ["kvm_intel", "kvm_amd"]
 
 
 def check_kvm_access() -> bool:
+    """Check if /dev/kvm is accessible."""
     kvm = Path("/dev/kvm")
     return kvm.exists() and os.access(kvm, os.R_OK | os.W_OK)
 
 
 def check_required_binaries() -> list[str]:
+    """Check for required binaries and return list of missing ones."""
     missing: list[str] = []
     for name in REQUIRED_BINARIES:
         if not shutil.which(name):
@@ -57,10 +48,12 @@ def check_required_binaries() -> list[str]:
 
 
 def check_cloud_localds() -> bool:
+    """Check if cloud-localds is available."""
     return shutil.which("cloud-localds") is not None
 
 
 def get_ip_forward_status() -> str:
+    """Get the current IP forwarding status."""
     try:
         result = subprocess.run(
             ["sysctl", "-n", SYSCTL_KEY],
@@ -76,6 +69,7 @@ def get_ip_forward_status() -> str:
 
 
 def _is_module_loaded(module: str) -> bool:
+    """Check if a kernel module is loaded."""
     try:
         result = subprocess.run(
             ["lsmod"],
@@ -91,6 +85,7 @@ def _is_module_loaded(module: str) -> bool:
 
 
 def _load_module(module: str) -> None:
+    """Load a kernel module."""
     try:
         subprocess.run(
             ["modprobe", module],
@@ -104,7 +99,57 @@ def _load_module(module: str) -> None:
         raise HostError("modprobe command not found") from e
 
 
+def _unload_module(module: str) -> None:
+    """Unload a kernel module."""
+    try:
+        subprocess.run(
+            ["modprobe", "-r", module],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise HostError(f"Failed to unload kernel module {module}: {e}") from e
+    except FileNotFoundError as e:
+        raise HostError("modprobe command not found") from e
+
+
+def _detect_kvm_modules() -> list[str]:
+    """Detect which KVM modules are available on the system."""
+    available_modules: list[str] = []
+    for module in KVM_MODULES + KVM_VENDOR_MODULES:
+        try:
+            result = subprocess.run(
+                ["modprobe", "--dry-run", module],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            if result.returncode == 0:
+                available_modules.append(module)
+        except (OSError, subprocess.CalledProcessError):
+            continue
+    return available_modules
+
+
+def _ensure_kvm() -> None:
+    """Ensure KVM modules are loaded."""
+    for module in KVM_MODULES:
+        if not _is_module_loaded(module):
+            _load_module(module)
+
+    vendor_loaded = any(_is_module_loaded(m) for m in KVM_VENDOR_MODULES)
+    if not vendor_loaded:
+        for module in KVM_VENDOR_MODULES:
+            try:
+                _load_module(module)
+                break
+            except HostError:
+                continue
+
+
 def _enable_ip_forward() -> HostStateChange | None:
+    """Enable IP forwarding if not already enabled."""
     current = get_ip_forward_status()
     if current == "1":
         logger.debug("IP forwarding already enabled")
@@ -130,31 +175,8 @@ def _enable_ip_forward() -> HostStateChange | None:
     )
 
 
-def _persist_sysctl() -> HostStateChange | None:
-    content = f"{SYSCTL_KEY} = 1\n"
-    if SYSCTL_CONF.exists() and SYSCTL_CONF.read_text() == content:
-        logger.debug("sysctl persist file already exists with correct content")
-        return None
-
-    original: str | None = None
-    if SYSCTL_CONF.exists():
-        original = SYSCTL_CONF.read_text()
-
-    try:
-        SYSCTL_CONF.parent.mkdir(parents=True, exist_ok=True)
-        SYSCTL_CONF.write_text(content)
-    except OSError as e:
-        raise HostError(f"Failed to write {SYSCTL_CONF}: {e}") from e
-
-    return HostStateChange(
-        setting="sysctl_persist_file",
-        original_value=original,
-        applied_value=str(SYSCTL_CONF),
-        mechanism="file_create",
-    )
-
-
 def _ensure_kvm_modules() -> list[HostStateChange]:
+    """Ensure KVM modules are loaded and return list of changes."""
     changes: list[HostStateChange] = []
     for module in KVM_MODULES:
         if _is_module_loaded(module):
@@ -190,7 +212,37 @@ def _ensure_kvm_modules() -> list[HostStateChange]:
     return changes
 
 
+def _persist_sysctl() -> HostStateChange | None:
+    """Persist sysctl configuration to file.
+
+    Returns:
+        HostStateChange if file was created/modified, None if already correct.
+    """
+    content = f"{SYSCTL_KEY} = 1\n"
+    if SYSCTL_CONF.exists() and SYSCTL_CONF.read_text() == content:
+        logger.debug("sysctl persist file already exists with correct content")
+        return None
+
+    original: str | None = None
+    if SYSCTL_CONF.exists():
+        original = SYSCTL_CONF.read_text()
+
+    try:
+        SYSCTL_CONF.parent.mkdir(parents=True, exist_ok=True)
+        SYSCTL_CONF.write_text(content)
+    except OSError as e:
+        raise HostError(f"Failed to write {SYSCTL_CONF}: {e}") from e
+
+    return HostStateChange(
+        setting="sysctl_persist_file",
+        original_value=original,
+        applied_value=str(SYSCTL_CONF),
+        mechanism="file_create",
+    )
+
+
 def _get_active_tap_names() -> set[str]:
+    """Get set of active TAP device names."""
     try:
         result = subprocess.run(
             ["ip", "-o", "link", "show", "type", "tuntap"],
@@ -209,6 +261,7 @@ def _get_active_tap_names() -> set[str]:
 
 
 def _strip_tap_rules(rules_text: str) -> str:
+    """Strip TAP-related rules from iptables rules text."""
     tap_names = _get_active_tap_names()
     if not tap_names:
         return rules_text
@@ -222,6 +275,11 @@ def _strip_tap_rules(rules_text: str) -> str:
 
 
 def save_iptables_rules() -> HostStateChange | None:
+    """Save iptables rules to file.
+
+    Returns:
+        HostStateChange if rules were saved, None if already up-to-date.
+    """
     rules_path = Path(IPTABLES_RULES_V4)
 
     try:
@@ -257,7 +315,6 @@ def save_iptables_rules() -> HostStateChange | None:
     try:
         rules_path.parent.mkdir(parents=True, exist_ok=True)
         rules_path.write_text(filtered)
-        rules_path.chmod(CONST_FILE_PERMS_STATE_FILE)
     except OSError as e:
         raise HostError(f"Failed to write {rules_path}: {e}") from e
 
@@ -268,135 +325,3 @@ def save_iptables_rules() -> HostStateChange | None:
         applied_value=str(rules_path),
         mechanism="iptables_save",
     )
-
-
-def init_host(cache_dir: Path, db: MVMDatabase) -> list[HostStateChange]:
-    changes: list[HostStateChange] = []
-
-    if os.getuid() != 0:
-        raise HostError("Root privileges required")
-
-    if not check_kvm_access():
-        raise HostError("/dev/kvm is not accessible — check permissions or load KVM modules")
-
-    missing = check_required_binaries()
-    if missing:
-        raise HostError(f"Missing required binaries: {', '.join(missing)}")
-
-    _validate_sudoers_binaries()
-
-    if not check_cloud_localds():
-        logger.warning(
-            "cloud-localds not found. Install cloud-image-utils (Debian/Ubuntu) or cloud-utils (Arch) package"
-        )
-
-    group_created = _create_group(PROJECT_GROUP)
-    if group_created:
-        changes.append(
-            HostStateChange(
-                setting=f"group:{PROJECT_GROUP}",
-                original_value=None,
-                applied_value=PROJECT_GROUP,
-                mechanism="groupadd",
-            )
-        )
-
-    username = _get_current_user()
-    user_added = _add_user_to_group(username, PROJECT_GROUP)
-    if user_added:
-        changes.append(
-            HostStateChange(
-                setting=f"group_member:{username}",
-                original_value=None,
-                applied_value=f"{username}:{PROJECT_GROUP}",
-                mechanism="usermod",
-            )
-        )
-
-    sudoers_path = Path(SUDOERS_DROP_IN_PATH)
-    sudoers_stale = True
-    try:
-        if sudoers_path.exists():
-            existing = sudoers_path.read_text()
-            expected = _generate_sudoers_content(PROJECT_GROUP)
-            sudoers_stale = existing != expected
-    except (PermissionError, OSError):
-        pass
-    if sudoers_stale:
-        _write_sudoers(sudoers_path, PROJECT_GROUP)
-        changes.append(
-            HostStateChange(
-                setting="sudoers_dropin",
-                original_value=None,
-                applied_value=str(sudoers_path),
-                mechanism="file_create",
-            )
-        )
-
-    change = _enable_ip_forward()
-    if change:
-        changes.append(change)
-
-    change = _persist_sysctl()
-    if change:
-        changes.append(change)
-
-    module_changes = _ensure_kvm_modules()
-    changes.extend(module_changes)
-
-    chains_already_exist = setup_mvm_chains()
-    if chains_already_exist:
-        logger.warning("MVM iptables chains already exist; keeping existing chain state")
-        changes.append(
-            HostStateChange(
-                setting="iptables_chains",
-                original_value=None,
-                applied_value=_CHAIN_EXISTS_MARKER,
-                mechanism="noop",
-            )
-        )
-
-    iptables_change = save_iptables_rules()
-    if iptables_change:
-        changes.append(iptables_change)
-
-    _save_state(db, changes)
-    _persist_host_state_to_db(db, changes)
-    return changes
-
-
-def _persist_host_state_to_db(db: MVMDatabase, changes: list[HostStateChange]) -> None:
-    from mvmctl.db.models import HostStateChange
-
-    try:
-        now = datetime.now(timezone.utc).isoformat()
-        db.initialize_host_state()
-
-        group_created = any(
-            c.setting.startswith("group:") and c.mechanism == "groupadd" for c in changes
-        )
-        sudoers_written = any(
-            c.setting == "sudoers_dropin" and c.mechanism == "file_create" for c in changes
-        )
-        if group_created:
-            db.update_host_component("mvm_group_created", True)
-        if sudoers_written:
-            db.update_host_component("sudoers_configured", True)
-
-        session_id = str(uuid.uuid4())
-        for order, change in enumerate(changes):
-            db.add_host_change(
-                HostStateChange(
-                    session_id=session_id,
-                    init_timestamp=now,
-                    setting=change.setting,
-                    mechanism=change.mechanism,
-                    original_value=change.original_value,
-                    applied_value=change.applied_value,
-                    change_order=order,
-                )
-            )
-
-        db.set_host_initialized(now)
-    except (MVMError, sqlite3.OperationalError):
-        return
