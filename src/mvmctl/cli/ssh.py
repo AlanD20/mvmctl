@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Optional
 import typer
 
 from mvmctl.api.vms import ssh_vm
-from mvmctl.cli._helpers import resolve_ssh_target
+from mvmctl.cli._helpers import build_mvm_defaults, resolve_ssh_target
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error
 
 if TYPE_CHECKING:
-    from mvmctl.api.config import VMDefaultsConfig
+    from mvmctl.core.config import VMDefaultsConfig
 
 app = typer.Typer(
     help="VM SSH access",
@@ -67,7 +67,7 @@ def _get_vm_defaults() -> "VMDefaultsConfig":
     from mvmctl.api.config import load_config
     from mvmctl.utils.fs import get_assets_dir
 
-    return load_config(get_assets_dir()).vm_defaults
+    return load_config(get_assets_dir(), build_mvm_defaults()).vm_defaults
 
 
 @app.command()

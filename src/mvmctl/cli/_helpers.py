@@ -4,9 +4,32 @@ from typing import Optional
 
 import typer
 
+from mvmctl.api.config import (
+    FirecrackerConfig,
+    MVMConfig,
+    NetworkDefaultsConfig,
+    PathsConfig,
+    VMDefaultsConfig,
+)
 from mvmctl.api.vms import get_vm_manager
+from mvmctl.constants import (
+    DEFAULT_FIRECRACKER_BINARY_PATH,
+    DEFAULT_NETWORK_IPV4_GATEWAY,
+    DEFAULT_NETWORK_NAME,
+    DEFAULT_NETWORK_SUBNET,
+    DEFAULT_VM_BOOT_ARGS,
+    DEFAULT_VM_DISK_SIZE,
+    DEFAULT_VM_ENABLE_API_SOCKET,
+    DEFAULT_VM_ENABLE_PCI,
+    DEFAULT_VM_LSM_FLAGS,
+    DEFAULT_VM_MEM_MIB,
+    DEFAULT_VM_NETWORK_INTERFACE,
+    DEFAULT_VM_SSH_USER,
+    DEFAULT_VM_VCPU_COUNT,
+)
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error
+from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 
@@ -97,3 +120,27 @@ def resolve_ssh_target(
             return vm_id
 
     raise MVMError("Provide either a VM identifier, --name, or --ip")
+
+
+def build_mvm_defaults() -> MVMConfig:
+    """Build the default MVMConfig for CLI-layer config loading."""
+    return MVMConfig(
+        firecracker=FirecrackerConfig(binary=DEFAULT_FIRECRACKER_BINARY_PATH),
+        vm_defaults=VMDefaultsConfig(
+            vcpu_count=DEFAULT_VM_VCPU_COUNT,
+            mem_size_mib=DEFAULT_VM_MEM_MIB,
+            ssh_user=DEFAULT_VM_SSH_USER,
+            network_interface=DEFAULT_VM_NETWORK_INTERFACE,
+            boot_args=DEFAULT_VM_BOOT_ARGS,
+            disk_size=DEFAULT_VM_DISK_SIZE,
+            enable_api_socket=DEFAULT_VM_ENABLE_API_SOCKET,
+            enable_pci=DEFAULT_VM_ENABLE_PCI,
+            lsm_flags=DEFAULT_VM_LSM_FLAGS,
+        ),
+        network=NetworkDefaultsConfig(
+            name=DEFAULT_NETWORK_NAME,
+            subnet=DEFAULT_NETWORK_SUBNET,
+            ipv4_gateway=DEFAULT_NETWORK_IPV4_GATEWAY,
+        ),
+        paths=PathsConfig(assets_dir=str(get_cache_dir())),
+    )

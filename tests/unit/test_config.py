@@ -1,35 +1,90 @@
+import json
 from pathlib import Path
 
 import pytest
-import yaml
 
 from mvmctl.core.config import (
     FirecrackerConfig,
     MVMConfig,
     NetworkDefaultsConfig,
-    NetworkTopologyConfig,
+    PathsConfig,
     VMDefaultsConfig,
     dump_config,
     load_config,
-    load_yaml,
+    load_json,
     validate_config,
 )
 
-# Note: SingleVMNetworkConfig was removed — networks are now managed via
-# the named network system (core/network_manager.py).
+
+def _make_vm_defaults(**overrides: object) -> VMDefaultsConfig:
+    from mvmctl.constants import (
+        DEFAULT_VM_BOOT_ARGS,
+        DEFAULT_VM_DISK_SIZE,
+        DEFAULT_VM_ENABLE_API_SOCKET,
+        DEFAULT_VM_ENABLE_PCI,
+        DEFAULT_VM_LSM_FLAGS,
+        DEFAULT_VM_MEM_MIB,
+        DEFAULT_VM_NETWORK_INTERFACE,
+        DEFAULT_VM_SSH_USER,
+        DEFAULT_VM_VCPU_COUNT,
+    )
+
+    base: dict[str, object] = {
+        "vcpu_count": DEFAULT_VM_VCPU_COUNT,
+        "mem_size_mib": DEFAULT_VM_MEM_MIB,
+        "ssh_user": DEFAULT_VM_SSH_USER,
+        "network_interface": DEFAULT_VM_NETWORK_INTERFACE,
+        "boot_args": DEFAULT_VM_BOOT_ARGS,
+        "disk_size": DEFAULT_VM_DISK_SIZE,
+        "enable_api_socket": DEFAULT_VM_ENABLE_API_SOCKET,
+        "enable_pci": DEFAULT_VM_ENABLE_PCI,
+        "lsm_flags": DEFAULT_VM_LSM_FLAGS,
+    }
+    base.update(overrides)
+    return VMDefaultsConfig(**base)  # type: ignore[arg-type]
 
 
-def test_load_yaml_missing_file(tmp_path: Path) -> None:
-    result = load_yaml(tmp_path / "nonexistent.yaml")
+def _make_network_defaults(**overrides: object) -> NetworkDefaultsConfig:
+    from mvmctl.constants import (
+        DEFAULT_NETWORK_IPV4_GATEWAY,
+        DEFAULT_NETWORK_NAME,
+        DEFAULT_NETWORK_SUBNET,
+    )
+
+    base: dict[str, object] = {
+        "name": DEFAULT_NETWORK_NAME,
+        "subnet": DEFAULT_NETWORK_SUBNET,
+        "ipv4_gateway": DEFAULT_NETWORK_IPV4_GATEWAY,
+    }
+    base.update(overrides)
+    return NetworkDefaultsConfig(**base)  # type: ignore[arg-type]
+
+
+def _make_mvm_config(**overrides: object) -> MVMConfig:
+    from mvmctl.constants import DEFAULT_FIRECRACKER_BINARY_PATH
+    from mvmctl.utils.fs import get_cache_dir
+
+    base: dict[str, object] = {
+        "firecracker": FirecrackerConfig(binary=DEFAULT_FIRECRACKER_BINARY_PATH),
+        "vm_defaults": _make_vm_defaults(),
+        "network": _make_network_defaults(),
+        "paths": PathsConfig(assets_dir=str(get_cache_dir())),
+    }
+    base.update(overrides)
+    return MVMConfig(**base)  # type: ignore[arg-type]
+
+
+def test_load_json_missing_file(tmp_path: Path) -> None:
+    result = load_json(tmp_path / "nonexistent.json")
     assert result == {}
 
 
-def test_load_yaml_valid_file(tmp_path: Path) -> None:
+def test_load_json_valid_file(tmp_path: Path) -> None:
     data = {"firecracker": {"binary": "/usr/bin/fc"}, "vm_defaults": {"vcpu_count": 4}}
-    yaml_path = tmp_path / "config.yaml"
-    yaml_path.write_text(yaml.dump(data))
+    json_path = tmp_path / "config.json"
+    json_path.write_text(json.dumps(data))
 
-    result = load_yaml(yaml_path)
+    result = load_json(json_path)
     assert result == data
 
 
@@ -44,9 +99,7 @@ def test_load_config_defaults(tmp_path: Path) -> None:
         DEFAULT_VM_VCPU_COUNT,
     )
 
-    config = load_config(tmp_path)
-
-    assert config.firecracker.binary == "/usr/local/bin/firecracker"
+    config = load_config(tmp_path, _make_mvm_config())
 
     assert config.vm_defaults.vcpu_count == DEFAULT_VM_VCPU_COUNT
     assert config.vm_defaults.mem_size_mib == DEFAULT_VM_MEM_MIB
@@ -55,41 +108,39 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert config.vm_defaults.enable_api_socket is True
     assert config.vm_defaults.enable_pci is False
 
-    assert config.network.defaults.name == DEFAULT_NETWORK_NAME
-    assert config.network.defaults.subnet == DEFAULT_NETWORK_SUBNET
-    assert config.network.defaults.ipv4_gateway == DEFAULT_NETWORK_IPV4_GATEWAY
+    assert config.network.name == DEFAULT_NETWORK_NAME
+    assert config.network.subnet == DEFAULT_NETWORK_SUBNET
+    assert config.network.ipv4_gateway == DEFAULT_NETWORK_IPV4_GATEWAY
 
     assert config.paths.assets_dir != ""
 
 
-def test_load_config_from_yaml(tmp_path: Path) -> None:
+def test_load_config_from_json(tmp_path: Path) -> None:
     data = {
         "firecracker": {"binary": "/opt/firecracker"},
         "vm_defaults": {"vcpu_count": 8, "mem_size_mib": 4096},
         "network": {
-            "defaults": {
-                "name": "custom",
-                "subnet": "172.16.0.0/16",
-                "ipv4_gateway": "172.16.0.1",
-            },
+            "name": "custom",
+            "subnet": "172.16.0.0/16",
+            "ipv4_gateway": "172.16.0.1",
         },
         "paths": {"assets_dir": "/tmp/assets"},
     }
-    (tmp_path / "config.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path)
+    config = load_config(tmp_path, _make_mvm_config())
 
     assert config.firecracker.binary == "/opt/firecracker"
     assert config.vm_defaults.vcpu_count == 8
     assert config.vm_defaults.mem_size_mib == 4096
-    assert config.network.defaults.name == "custom"
-    assert config.network.defaults.subnet == "172.16.0.0/16"
-    assert config.network.defaults.ipv4_gateway == "172.16.0.1"
+    assert config.network.name == "custom"
+    assert config.network.subnet == "172.16.0.0/16"
+    assert config.network.ipv4_gateway == "172.16.0.1"
     assert config.paths.assets_dir == "/tmp/assets"
 
 
 def test_validate_config_valid() -> None:
-    config = MVMConfig()
+    config = _make_mvm_config()
     errors = validate_config(config)
 
     binary_errors = [e for e in errors if "firecracker.binary" in e]
@@ -101,7 +152,7 @@ def test_validate_config_valid() -> None:
 
 @pytest.mark.parametrize("vcpu_count", [0, -1, -100])
 def test_validate_config_invalid_vcpu(vcpu_count: int) -> None:
-    config = MVMConfig(vm_defaults=VMDefaultsConfig(vcpu_count=vcpu_count))
+    config = _make_mvm_config(vm_defaults=_make_vm_defaults(vcpu_count=vcpu_count))
     errors = validate_config(config)
 
     vcpu_errors = [e for e in errors if "vcpu_count" in e]
@@ -111,7 +162,7 @@ def test_validate_config_invalid_vcpu(vcpu_count: int) -> None:
 
 @pytest.mark.parametrize("mem_size_mib", [32, 63, 0])
 def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
-    config = MVMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=mem_size_mib))
+    config = _make_mvm_config(vm_defaults=_make_vm_defaults(mem_size_mib=mem_size_mib))
     errors = validate_config(config)
 
     mem_errors = [e for e in errors if "mem_size_mib" in e]
@@ -120,10 +171,8 @@ def test_validate_config_invalid_mem(mem_size_mib: int) -> None:
 
 
 def test_validate_config_invalid_cidr() -> None:
-    config = MVMConfig(
-        network=NetworkTopologyConfig(
-            defaults=NetworkDefaultsConfig(subnet="not-a-cidr"),
-        ),
+    config = _make_mvm_config(
+        network=_make_network_defaults(subnet="not-a-cidr"),
     )
     errors = validate_config(config)
 
@@ -133,7 +182,7 @@ def test_validate_config_invalid_cidr() -> None:
 
 
 def test_dump_config_all_sections() -> None:
-    config = MVMConfig()
+    config = _make_mvm_config()
     result = dump_config(config)
 
     assert "firecracker" in result
@@ -143,11 +192,12 @@ def test_dump_config_all_sections() -> None:
 
     network = result["network"]
     assert isinstance(network, dict)
-    assert "defaults" in network
+    assert "name" in network
+    assert "subnet" in network
 
 
 def test_dump_config_specific_section() -> None:
-    config = MVMConfig(
+    config = _make_mvm_config(
         firecracker=FirecrackerConfig(binary="/custom/bin"),
     )
     result = dump_config(config, section="firecracker")
@@ -158,97 +208,70 @@ def test_dump_config_specific_section() -> None:
     assert fc["binary"] == "/custom/bin"
 
 
-# ---------------------------------------------------------------------------
-# T-M2: Negative test cases for config validation
-# ---------------------------------------------------------------------------
+def test_load_json_invalid_syntax(tmp_path: Path) -> None:
+    json_path = tmp_path / "bad.json"
+    json_path.write_text("{ not valid json [[[")
 
-
-def test_load_yaml_invalid_syntax(tmp_path: Path) -> None:
-    """YAML with invalid syntax should return empty dict (graceful degradation)."""
-    yaml_path = tmp_path / "bad.yaml"
-    yaml_path.write_text("invalid: yaml: syntax: [[[")
-
-    result = load_yaml(yaml_path)
+    result = load_json(json_path)
     assert result == {}
 
 
-def test_load_yaml_corrupt_file(tmp_path: Path) -> None:
-    """Corrupt YAML file should return empty dict."""
-    yaml_path = tmp_path / "corrupt.yaml"
-    yaml_path.write_text("{ not valid yaml at all")
+def test_load_json_corrupt_file(tmp_path: Path) -> None:
+    json_path = tmp_path / "corrupt.json"
+    json_path.write_text("{ not valid json at all")
 
-    result = load_yaml(yaml_path)
+    result = load_json(json_path)
     assert result == {}
 
 
 def test_load_config_missing_fields_uses_defaults(tmp_path: Path) -> None:
-    """YAML with missing fields should use defaults."""
-    # Only provide a subset of fields
     data = {"vm_defaults": {"vcpu_count": 8}}
-    (tmp_path / "config.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path)
+    config = load_config(tmp_path, _make_mvm_config())
 
-    # Provided value should be used
     assert config.vm_defaults.vcpu_count == 8
-    # Missing fields should use defaults
-    assert config.vm_defaults.mem_size_mib == 2048  # default
-    assert config.firecracker.binary == "/usr/local/bin/firecracker"  # default
+    assert config.vm_defaults.mem_size_mib == 2048
+    assert config.firecracker.binary == "/usr/local/bin/firecracker"
 
 
 def test_load_config_type_mismatch_string_for_int(tmp_path: Path) -> None:
-    """Type mismatch (string instead of int) should use default or raise."""
     data = {"vm_defaults": {"vcpu_count": "not-a-number"}}
-    (tmp_path / "config.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.json").write_text(json.dumps(data))
 
-    # Should not crash - either uses default or handles gracefully
-    config = load_config(tmp_path)
-    # The dataclass will use the default value when type coercion fails
+    config = load_config(tmp_path, _make_mvm_config())
     assert config.vm_defaults.vcpu_count is not None
 
 
 def test_load_config_type_mismatch_int_for_string(tmp_path: Path) -> None:
-    """Type mismatch (int instead of string) should use default or handle gracefully."""
-    data = {
-        "firecracker": {"binary": 12345}  # Should be string
-    }
-    (tmp_path / "config.yaml").write_text(yaml.dump(data))
+    data = {"firecracker": {"binary": 12345}}
+    (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path)
-    # Should not crash
+    config = load_config(tmp_path, _make_mvm_config())
     assert config.firecracker.binary is not None
 
 
 def test_load_config_extra_unknown_fields_filtered(tmp_path: Path) -> None:
-    """Unknown fields in YAML should be silently ignored."""
     data = {
         "unknown_section": {"foo": "bar"},
         "vm_defaults": {"vcpu_count": 4, "unknown_field": "should be ignored"},
     }
-    (tmp_path / "config.yaml").write_text(yaml.dump(data))
+    (tmp_path / "config.json").write_text(json.dumps(data))
 
-    config = load_config(tmp_path)
+    config = load_config(tmp_path, _make_mvm_config())
     assert config.vm_defaults.vcpu_count == 4
 
 
 def test_load_config_nested_type_mismatch(tmp_path: Path) -> None:
-    """Nested type mismatches should be handled gracefully."""
-    data = {
-        "network": {
-            "defaults": {"subnet": 99999}  # Should be string
-        }
-    }
-    (tmp_path / "config.yaml").write_text(yaml.dump(data))
+    data = {"network": {"subnet": 99999}}
+    (tmp_path / "config.json").write_text(json.dumps(data))
 
-    # Should not crash
-    config = load_config(tmp_path)
-    # The invalid value may remain or use default
-    assert config.network.defaults.subnet is not None
+    config = load_config(tmp_path, _make_mvm_config())
+    assert config.network.subnet is not None
 
 
 def test_validate_config_empty_binary_path() -> None:
-    """Empty binary path should be caught by validation."""
-    config = MVMConfig(firecracker=FirecrackerConfig(binary=""))
+    config = _make_mvm_config(firecracker=FirecrackerConfig(binary=""))
     errors = validate_config(config)
 
     binary_errors = [e for e in errors if "firecracker.binary" in e and "empty" in e.lower()]
@@ -256,8 +279,7 @@ def test_validate_config_empty_binary_path() -> None:
 
 
 def test_validate_config_negative_memory() -> None:
-    """Negative memory should be caught by validation."""
-    config = MVMConfig(vm_defaults=VMDefaultsConfig(mem_size_mib=-100))
+    config = _make_mvm_config(vm_defaults=_make_vm_defaults(mem_size_mib=-100))
     errors = validate_config(config)
 
     mem_errors = [e for e in errors if "mem_size_mib" in e]

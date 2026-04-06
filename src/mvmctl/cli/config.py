@@ -10,6 +10,7 @@ from mvmctl.api.config import (
     set_config_value,
     validate_config,
 )
+from mvmctl.cli._helpers import build_mvm_defaults
 from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error, print_info, print_success
@@ -42,7 +43,7 @@ def show(
     """Print resolved configuration."""
     effective_config_dir = config_dir if config_dir is not None else get_assets_dir()
     try:
-        config = load_config(effective_config_dir)
+        config = load_config(effective_config_dir, build_mvm_defaults())
         data = dump_config(config, section)
         typer.echo(json.dumps(data, indent=2))
     except MVMError as e:
@@ -60,7 +61,7 @@ def validate(
     """Validate all YAML config files."""
     effective_config_dir = config_dir if config_dir is not None else get_assets_dir()
     try:
-        config = load_config(effective_config_dir)
+        config = load_config(effective_config_dir, build_mvm_defaults())
         errors = validate_config(config)
 
         if errors:

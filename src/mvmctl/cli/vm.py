@@ -25,6 +25,7 @@ from mvmctl.api.vms import (
     start_vm,
     stop_vm,
 )
+from mvmctl.cli._helpers import build_mvm_defaults
 from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
@@ -111,7 +112,7 @@ def _get_vm_defaults() -> "VMDefaultsConfig":
     from mvmctl.api.config import load_config
     from mvmctl.utils.fs import get_assets_dir
 
-    return load_config(get_assets_dir()).vm_defaults
+    return load_config(get_assets_dir(), build_mvm_defaults()).vm_defaults
 
 
 def _resolve_active_firecracker_bin() -> str:
