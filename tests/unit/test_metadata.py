@@ -155,7 +155,7 @@ class TestImageMetadata:
         )
         set_default_image_entry(cache_dir, "img1")
 
-        default = get_default_image_entry(cache_dir)
+        default = get_default_image_entry()
         assert default is not None
         assert default[0] == "img1"
 
@@ -172,7 +172,7 @@ class TestImageMetadata:
         )
         set_default_image_by_os_slug(cache_dir, "ubuntu-24.04")
 
-        default = get_default_image_entry(cache_dir)
+        default = get_default_image_entry()
         assert default is not None
 
     def test_find_images_by_prefix(self, tmp_path: Path):

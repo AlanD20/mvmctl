@@ -253,3 +253,9 @@ def is_file_missing(path: Path | None) -> bool:
     if path is None:
         return True
     return not path.exists()
+
+
+def get_file_size(path: Path | None, fallback: int = 0) -> int:
+    if path and path.exists():
+        return path.stat().st_size
+    return fallback

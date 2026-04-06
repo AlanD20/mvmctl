@@ -42,6 +42,7 @@ class TestImageOperations:
             id="a" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
             os_name="Ubuntu",
             fs_type="ext4",
         )
@@ -64,6 +65,7 @@ class TestImageOperations:
             id="b" * 64,
             os_slug="alpine-3.21",
             path="/cache/images/alpine-3.21.ext4",
+            arch="x86_64",
         )
         db.upsert_image(image)
 
@@ -77,6 +79,7 @@ class TestImageOperations:
             id="c" * 64,
             os_slug="debian-12",
             path="/cache/images/debian-12.ext4",
+            arch="x86_64",
             os_name="Debian",
         )
         db.upsert_image(image1)
@@ -85,6 +88,7 @@ class TestImageOperations:
             id="c" * 64,
             os_slug="debian-12",
             path="/cache/images/debian-12.ext4",
+            arch="x86_64",
             os_name="Debian 12",  # Updated
             fs_type="ext4",  # New field
         )
@@ -101,6 +105,7 @@ class TestImageOperations:
             id="d" * 64,
             os_slug="fedora-40",
             path="/cache/images/fedora-40.ext4",
+            arch="x86_64",
         )
         db.upsert_image(image)
         assert db.get_image("d" * 64) is not None
@@ -125,12 +130,14 @@ class TestImageOperations:
             id="e" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
             created_at="2026-04-01T10:00:00Z",
         )
         image2 = Image(
             id="f" * 64,
             os_slug="alpine-3.21",
             path="/cache/images/alpine-3.21.ext4",
+            arch="x86_64",
             created_at="2026-04-02T10:00:00Z",
         )
         db.upsert_image(image1)
@@ -147,6 +154,7 @@ class TestImageOperations:
             id="abc123" + "d" * 58,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         db.upsert_image(image)
 
@@ -160,11 +168,13 @@ class TestImageOperations:
             id="abc000" + "d" * 58,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         image2 = Image(
             id="abc111" + "d" * 58,
             os_slug="alpine-3.21",
             path="/cache/images/alpine-3.21.ext4",
+            arch="x86_64",
         )
         db.upsert_image(image1)
         db.upsert_image(image2)
@@ -178,6 +188,7 @@ class TestImageOperations:
             id="xyz" + "a" * 61,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         db.upsert_image(image)
 
@@ -190,6 +201,7 @@ class TestImageOperations:
             id="g" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
             is_default=False,
         )
         db.upsert_image(image)
@@ -207,12 +219,14 @@ class TestImageOperations:
             id="h" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
             is_default=True,
         )
         image2 = Image(
             id="i" * 64,
             os_slug="alpine-3.21",
             path="/cache/images/alpine-3.21.ext4",
+            arch="x86_64",
             is_default=False,
         )
         db.upsert_image(image1)
@@ -233,6 +247,7 @@ class TestImageOperations:
             id="j" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         db.upsert_image(image)
 
@@ -810,6 +825,7 @@ class TestEdgeCases:
             id="1" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
             os_name="Ubuntu",
             fs_type="ext4",
             fs_uuid="12345678-1234-1234-1234-123456789012",
@@ -899,18 +915,21 @@ class TestEdgeCases:
             id="4" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
             is_default=True,
         )
         image2 = Image(
             id="5" * 64,
             os_slug="alpine-3.21",
             path="/cache/images/alpine-3.21.ext4",
+            arch="x86_64",
             is_default=False,
         )
         image3 = Image(
             id="6" * 64,
             os_slug="debian-12",
             path="/cache/images/debian-12.ext4",
+            arch="x86_64",
             is_default=False,
         )
         db.upsert_image(image1)
@@ -965,6 +984,7 @@ class TestEdgeCases:
             id="ABC123" + "d" * 58,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         db.upsert_image(image)
 

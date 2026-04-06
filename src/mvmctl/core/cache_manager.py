@@ -242,7 +242,7 @@ def cache_prune_images(dry_run: bool = False, include_all: bool = False) -> list
     referenced_paths = _get_image_references()
     all_images = list_image_entries(cache_dir, images_dir)
 
-    default_entry = get_default_image_entry(cache_dir)
+    default_entry = get_default_image_entry()
     default_id = default_entry[0] if default_entry else None
 
     removed: list[str] = []

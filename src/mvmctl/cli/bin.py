@@ -55,9 +55,13 @@ from mvmctl.exceptions import (
     TieDetectedError,
 )
 from mvmctl.utils.console import (
+    format_timestamp,
     get_combined_marker,
     print_error,
     print_info,
+    print_inspect_header,
+    print_key_value,
+    print_section_header,
     print_success,
     print_table,
     print_warning,
@@ -66,6 +70,7 @@ from mvmctl.utils.disk_size import format_bytes_human_readable, format_sectors_h
 from mvmctl.utils.fs import (
     get_assets_dir,
     get_cache_dir,
+    get_file_size,
     get_images_dir,
     get_kernels_dir,
     is_file_missing,
@@ -73,6 +78,112 @@ from mvmctl.utils.fs import (
 from mvmctl.utils.full_hash import generate_full_hash_image, shorten_hash
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 from mvmctl.utils.time import human_readable_time
+
+
+def _find_image_by_os_slug(
+    all_meta: dict[str, dict[str, object]], os_slug: str
+) -> tuple[str, dict[str, object]] | None:
+    for key, meta in all_meta.items():
+        if str(meta.get("os_slug", "")) == os_slug:
+            return key, meta
+    return None
+
+
+def _find_local_image_path(images_dir: Path, image_id: str) -> Path | None:
+    for ext in SUPPORTED_IMAGE_EXTENSIONS:
+        candidate = images_dir / f"{image_id}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _resolve_image_file(images_dir: Path, image_id: str, meta: dict[str, object]) -> Path | None:
+    filename = str(meta.get("path", ""))
+    if filename:
+        return images_dir / filename
+    return _find_local_image_path(images_dir, image_id)
+
+
+def _compute_official_output_path(
+    kernels_dir: Path,
+    out: Path | None,
+    name: str | None,
+    spec_version: str,
+    spec_output_name: str,
+    arch: str,
+) -> Path:
+    if out is not None:
+        return out
+    base_name = name if name is not None else spec_output_name
+    return kernels_dir / f"{base_name}-{spec_version}-{arch}"
+
+
+def _print_image_details(info: dict[str, Any], found_path: Path | None) -> None:
+    os_slug = info.get("os_slug", "-")
+    missing_marker = " (missing)" if info.get("missing") else ""
+
+    print_inspect_header(f"Image: {os_slug}{missing_marker}")
+
+    print_section_header("BASIC INFO")
+    print_key_value("ID", info.get("id", "-"))
+    print_key_value("Name", info.get("name", "-"))
+    print_key_value("OS Slug", os_slug)
+    print_key_value("Pulled", format_timestamp(info.get("pulled_at")))
+
+    print_section_header("STORAGE")
+    print_key_value("Filename", info.get("filename", "-"))
+    print_key_value("FS Type", info.get("fs_type", "-"))
+    print_key_value("FS UUID", info.get("fs_uuid", "-"))
+    print_key_value("File Size", info.get("file_size", "-"))
+
+    print_section_header("COMPRESSION")
+    print_key_value("Format", info.get("compressed_format", "-"))
+    print_key_value("Original", info.get("original_size", "-"))
+    print_key_value("Compressed", info.get("compressed_size", "-"))
+    print_key_value("Ratio", info.get("compression_ratio", "-"))
+
+
+def _print_image_details_tree(info: dict[str, Any], found_path: Path | None) -> None:
+    os_slug = info.get("os_slug", "-")
+    missing_marker = " (missing)" if info.get("missing") else ""
+
+    print(f"{os_slug}{missing_marker}")
+
+    tree_lines = [
+        f"├── ID:          {info.get('id', '-')}",
+        f"├── Name:        {info.get('name', '-')}",
+        f"├── OS Slug: {os_slug}",
+        f"├── Pulled:      {info.get('pulled_at', '-')}",
+    ]
+
+    tree_lines.append("├── Storage")
+    tree_lines.append(f"│   ├── Filename:  {info.get('filename', '-')}")
+    tree_lines.append(f"│   ├── FS Type:   {info.get('fs_type', '-')}")
+    tree_lines.append(f"│   ├── FS UUID:   {info.get('fs_uuid', '-')}")
+    tree_lines.append(f"│   └── File Size: {info.get('file_size', '-')}")
+
+    tree_lines.append("└── Compression")
+    tree_lines.append(f"    ├── Format:    {info.get('compressed_format', '-')}")
+    tree_lines.append(f"    ├── Original:  {info.get('original_size', '-')}")
+    tree_lines.append(f"    ├── Compressed: {info.get('compressed_size', '-')}")
+    tree_lines.append(f"    └── Ratio:     {info.get('compression_ratio', '-')}")
+
+    for line in tree_lines:
+        print(line)
+
+
+def _print_pipeline_results(pipeline_result: Any) -> None:
+    if pipeline_result.config_result:
+        for warning in pipeline_result.config_result.warnings:
+            print_warning(warning)
+        for info in pipeline_result.config_result.info_messages:
+            print_info(info)
+
+    if pipeline_result.build_result:
+        for warning in pipeline_result.build_result.warnings:
+            print_warning(warning)
+        for info in pipeline_result.build_result.info_messages:
+            print_info(info)
 
 
 def _prompt_for_partition_selection(
@@ -171,36 +282,6 @@ def _get_vms_using_image(image_path: Path) -> list[str]:
         elif vm.image_id and vm.image_id == image_path_str:
             result.append(vm.name)
     return result
-
-
-def _get_file_size(path: Path | None, fallback: int = 0) -> int:
-    if path and path.exists():
-        return path.stat().st_size
-    return fallback
-
-
-def _find_image_by_os_slug(
-    all_meta: dict[str, dict[str, object]], os_slug: str
-) -> tuple[str, dict[str, object]] | None:
-    for key, meta in all_meta.items():
-        if str(meta.get("os_slug", "")) == os_slug:
-            return key, meta
-    return None
-
-
-def _find_local_image_path(images_dir: Path, image_id: str) -> Path | None:
-    for ext in SUPPORTED_IMAGE_EXTENSIONS:
-        candidate = images_dir / f"{image_id}{ext}"
-        if candidate.exists():
-            return candidate
-    return None
-
-
-def _resolve_image_file(images_dir: Path, image_id: str, meta: dict[str, object]) -> Path | None:
-    filename = str(meta.get("path", ""))
-    if filename:
-        return images_dir / filename
-    return _find_local_image_path(images_dir, image_id)
 
 
 def _resolve_image_spec(
@@ -412,53 +493,6 @@ def _get_ci_version() -> str:
             "Fetch a binary first with: mvm bin fetch <version>"
         )
     return ci_version
-
-
-def _compute_official_output_path(
-    kernels_dir: Path,
-    out: Path | None,
-    name: str | None,
-    spec_version: str,
-    spec_output_name: str,
-    arch: str,
-) -> Path:
-    """Compute the output path for an official kernel build.
-
-    Args:
-        kernels_dir: The kernels cache directory.
-        out: Explicit --out path (takes priority).
-        name: --name override for the filename base.
-        spec_version: Version string from the resolved KernelSpec (must be non-empty).
-        spec_output_name: output_name from the resolved KernelSpec.
-        arch: Architecture string (must be non-empty).
-
-    Returns:
-        The computed output Path.
-    """
-    if out is not None:
-        return out
-
-    base_name = name if name is not None else spec_output_name
-    return kernels_dir / f"{base_name}-{spec_version}-{arch}"
-
-
-def _print_pipeline_results(pipeline_result: Any) -> None:
-    """Print warnings and info messages from a kernel build pipeline result.
-
-    Args:
-        pipeline_result: A KernelPipelineResult instance.
-    """
-    if pipeline_result.config_result:
-        for warning in pipeline_result.config_result.warnings:
-            print_warning(warning)
-        for info in pipeline_result.config_result.info_messages:
-            print_info(info)
-
-    if pipeline_result.build_result:
-        for warning in pipeline_result.build_result.warnings:
-            print_warning(warning)
-        for info in pipeline_result.build_result.info_messages:
-            print_info(info)
 
 
 def _fetch_firecracker_kernel(
@@ -772,14 +806,13 @@ def kernel_rm(
     raise typer.Exit(code=exit_code)
 
 
-def _load_image_meta(images_dir: Path, image_id: str) -> dict[str, str]:
+def _load_image_meta(image_id: str) -> dict[str, str]:
     cache_dir = get_cache_dir()
     meta = get_image_entry(cache_dir, image_id)
     return {str(k): str(v) for k, v in meta.items()}
 
 
 def _save_image_meta(
-    images_dir: Path,
     image_id: str,
     image_path: Path,
     meta: dict[str, str],
@@ -788,35 +821,35 @@ def _save_image_meta(
     compressed_size: int | None = None,
     original_size: int | None = None,
     compression_ratio: float | None = None,
+    arch: str | None = None,
 ) -> None:
     from datetime import datetime, timezone
 
     cache_dir = get_cache_dir()
-    fields: dict[str, object] = dict(meta)
-    fields.setdefault("pulled_at", datetime.now(tz=timezone.utc).isoformat())
-    # Use detected fs_type if provided, otherwise fall back to extension
-    if fs_type:
-        fields.setdefault("fs_type", fs_type)
-    else:
-        fields.setdefault(
-            "fs_type", image_path.suffix.lstrip(".") if image_path.suffix else "unknown"
-        )
+    fields: dict[str, object] = {
+        "pulled_at": datetime.now(tz=timezone.utc).isoformat(),
+        "fs_type": fs_type
+        if fs_type
+        else (image_path.suffix.lstrip(".") if image_path.suffix else "unknown"),
+        "compressed_format": "zst",
+        **meta,
+    }
     if fs_uuid:
         fields.setdefault("fs_uuid", fs_uuid)
-    # Store compression metadata
     if compressed_size is not None:
         fields.setdefault("compressed_size", compressed_size)
     if original_size is not None:
         fields.setdefault("original_size", original_size)
     if compression_ratio is not None:
         fields.setdefault("compression_ratio", compression_ratio)
-    fields.setdefault("compressed_format", "zst")
+    if arch is not None:
+        fields["arch"] = arch
     update_image_entry(cache_dir, image_id, **fields)
 
 
 def _get_default_image() -> str | None:
     try:
-        default_entry = get_default_image_entry(get_cache_dir())
+        default_entry = get_default_image_entry()
         if default_entry is None:
             return None
         image_id, meta = default_entry
@@ -863,7 +896,7 @@ def _output_remote_images(images: list[Any], images_dir: Path, json_output: bool
             compression = "-"
         is_missing = is_file_missing(found_path)
         display_id = get_combined_marker(False, is_missing) + img.id
-        size = _get_file_size(found_path)
+        size = get_file_size(found_path)
         rows.append(
             [
                 display_id,
@@ -939,7 +972,7 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
         )
         display_id = get_combined_marker(is_default, is_missing) + shorten_hash(meta_key, 12)
         _raw_size = meta.get("compressed_size")
-        size = _get_file_size(
+        size = get_file_size(
             found_path, int(_raw_size) if isinstance(_raw_size, (int, float)) else 0
         )
         rows.append(
@@ -967,7 +1000,7 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
         )
         display_id = get_combined_marker(is_default, is_missing) + shorten_hash(meta_id, 12)
         _raw_size = meta.get("compressed_size")
-        size = _get_file_size(
+        size = get_file_size(
             found_path, int(_raw_size) if isinstance(_raw_size, (int, float)) else 0
         )
         rows.append(
@@ -1083,7 +1116,7 @@ def image_fetch(
             print_warning(f"Image '{spec.id}' already exists locally:")
             for path in existing_compressed:
                 print_info(f"  {path}")
-            meta = _load_image_meta(out, spec.id)
+            meta = _load_image_meta(spec.id)
             if meta.get("pulled_at"):
                 print_info(f"    Pulled: {meta['pulled_at'][:19]}")
             if not typer.confirm("Re-download anyway?", default=False):
@@ -1118,7 +1151,6 @@ def image_fetch(
         short_id = shorten_hash(full_id, 12)
 
         _save_image_meta(
-            out,
             full_id,
             result_path,
             {
@@ -1357,69 +1389,6 @@ def image_inspect(
         _print_image_details(info, found_path)
 
 
-def _print_image_details(info: dict[str, Any], found_path: Path | None) -> None:
-    from mvmctl.utils.console import (
-        format_timestamp,
-        print_inspect_header,
-        print_key_value,
-        print_section_header,
-    )
-
-    name = info.get("name", "-")
-    os_slug = info.get("os_slug", "-")
-    missing_marker = " (missing)" if info.get("missing") else ""
-
-    print_inspect_header(f"Image: {os_slug}{missing_marker}")
-
-    print_section_header("BASIC INFO")
-    print_key_value("ID", info.get("id", "-"))
-    print_key_value("Name", name)
-    print_key_value("OS Slug", os_slug)
-    print_key_value("Pulled", format_timestamp(info.get("pulled_at")))
-
-    print_section_header("STORAGE")
-    print_key_value("Filename", info.get("filename", "-"))
-    print_key_value("FS Type", info.get("fs_type", "-"))
-    print_key_value("FS UUID", info.get("fs_uuid", "-"))
-    print_key_value("File Size", info.get("file_size", "-"))
-
-    print_section_header("COMPRESSION")
-    print_key_value("Format", info.get("compressed_format", "-"))
-    print_key_value("Original", info.get("original_size", "-"))
-    print_key_value("Compressed", info.get("compressed_size", "-"))
-    print_key_value("Ratio", info.get("compression_ratio", "-"))
-
-
-def _print_image_details_tree(info: dict[str, Any], found_path: Path | None) -> None:
-    name = info.get("name", "-")
-    os_slug = info.get("os_slug", "-")
-    missing_marker = " (missing)" if info.get("missing") else ""
-
-    print(f"{os_slug}{missing_marker}")
-
-    tree_lines = [
-        f"├── ID:          {info.get('id', '-')}",
-        f"├── Name:        {name}",
-        f"├── OS Slug: {os_slug}",
-        f"├── Pulled:      {info.get('pulled_at', '-')}",
-    ]
-
-    tree_lines.append("├── Storage")
-    tree_lines.append(f"│   ├── Filename:  {info.get('filename', '-')}")
-    tree_lines.append(f"│   ├── FS Type:   {info.get('fs_type', '-')}")
-    tree_lines.append(f"│   ├── FS UUID:   {info.get('fs_uuid', '-')}")
-    tree_lines.append(f"│   └── File Size: {info.get('file_size', '-')}")
-
-    tree_lines.append("└── Compression")
-    tree_lines.append(f"    ├── Format:    {info.get('compressed_format', '-')}")
-    tree_lines.append(f"    ├── Original:  {info.get('original_size', '-')}")
-    tree_lines.append(f"    ├── Compressed: {info.get('compressed_size', '-')}")
-    tree_lines.append(f"    └── Ratio:     {info.get('compression_ratio', '-')}")
-
-    for line in tree_lines:
-        print(line)
-
-
 # Mapping from CLI detector names to internal detector names
 CLI_TO_INTERNAL_DETECTOR = {
     "type": "type_code",
@@ -1526,7 +1495,6 @@ def image_import(
     result_fs_uuid = result.fs_uuid
 
     _save_image_meta(
-        images_dir,
         image_id,
         result_path,
         {

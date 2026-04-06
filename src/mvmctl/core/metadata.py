@@ -169,6 +169,7 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
         os_slug=fields.get("os_slug") or fields.get("internal_id", ""),
         path=fields.get("path", ""),
         os_name=fields.get("os_name"),
+        arch=str(fields.get("arch") or ""),
         fs_type=fields.get("fs_type"),
         fs_uuid=fields.get("fs_uuid"),
         compressed_size=fields.get("compressed_size"),
@@ -253,7 +254,7 @@ def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
     raise KeyError(f"Image os_slug '{os_slug}' not found in metadata")
 
 
-def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
     """Return the default image entry as (id, metadata) or None."""
     db = MVMDatabase()
     image = db.get_default_image()

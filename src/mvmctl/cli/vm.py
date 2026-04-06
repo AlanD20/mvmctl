@@ -32,20 +32,18 @@ from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
 )
 from mvmctl.exceptions import MVMError
+from mvmctl.models import CloudInitMode, VMInstance
 from mvmctl.utils.console import (
     get_state_marker,
     print_error,
     print_info,
+    print_success,
     print_table,
-    print_warning,
 )
-from mvmctl.utils.fs import get_vms_dir, is_file_missing
-from mvmctl.utils.process import is_process_running as is_vm_process_running
-from mvmctl.models import CloudInitMode, VMInstance
-from mvmctl.utils.console import print_error, print_info, print_success, print_table
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import get_vm_dir_by_hash as get_vm_dir  # noqa: F401
-from mvmctl.utils.fs import get_vms_dir  # noqa: F401
+from mvmctl.utils.fs import get_vms_dir, is_file_missing  # noqa: F401
+from mvmctl.utils.process import is_process_running as is_vm_process_running
 from mvmctl.utils.time import human_readable_time
 
 # Sentinel for auto-generation mode
@@ -85,9 +83,8 @@ def help_cmd(ctx: typer.Context) -> None:
 def _resolve_default_image() -> str | None:
     try:
         from mvmctl.api.metadata import get_default_image_entry
-        from mvmctl.utils.fs import get_cache_dir
 
-        default_entry = get_default_image_entry(get_cache_dir())
+        default_entry = get_default_image_entry()
         if default_entry is None:
             return None
         image_id, meta = default_entry

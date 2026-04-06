@@ -100,8 +100,8 @@ def find_kernels_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, d
     return [(full_id, data) for full_id, data in all_kernels.items() if full_id.startswith(prefix)]
 
 
-def get_default_image_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    return _get_default_image_entry(cache_dir)
+def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
+    return _get_default_image_entry()
 
 
 def remove_kernel_entry(cache_dir: Path, kernel_id: str) -> None:

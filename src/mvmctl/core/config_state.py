@@ -162,7 +162,7 @@ def get_defaults_config() -> dict[str, Any]:
 
     # Fall back to JSON for image
     if defaults["image"] is None:
-        default_image = get_default_image_entry(cache_dir)
+        default_image = get_default_image_entry()
         if default_image is not None:
             image_id, image_meta = default_image
             defaults["image"] = image_meta.get("os_slug") or image_id

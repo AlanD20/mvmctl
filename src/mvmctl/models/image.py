@@ -24,6 +24,7 @@ class ImageRecord:
     compression_ratio: float | None
     compressed_format: str | None
     pulled_at: str | None
+    arch: str | None = None
     is_default: bool = False
     created_at: str | None = None
     updated_at: str | None = None
@@ -42,6 +43,7 @@ class ImageRecord:
             compression_ratio=record.compression_ratio,
             compressed_format=record.compressed_format,
             pulled_at=record.pulled_at,
+            arch=record.arch,
             is_default=record.is_default,
             created_at=record.created_at,
             updated_at=record.updated_at,
@@ -52,6 +54,7 @@ class ImageRecord:
             "os_slug": self.os_slug,
             "path": self.path,
             "os_name": self.os_name,
+            "arch": self.arch,
             "fs_type": self.fs_type,
             "fs_uuid": self.fs_uuid,
             "compressed_size": self.compressed_size,

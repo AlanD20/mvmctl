@@ -45,6 +45,7 @@ def make_image(image_id: str = IMAGE_ID) -> Image:
         id=image_id,
         os_slug="test-image",
         path="/cache/images/test.img",
+        arch="x86_64",
     )
 
 

@@ -310,6 +310,7 @@ def test_get_defaults_config_image_from_sqlite(cache_dir: Path) -> None:
         id=img_id,
         os_slug="ubuntu-24.04",
         path=str(cache_dir / "images" / "ubuntu-24.04.ext4"),
+        arch="x86_64",
         is_default=True,
     )
     db.upsert_image(img)

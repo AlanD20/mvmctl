@@ -25,6 +25,7 @@ class Image:
     id: str  # 64-char SHA256 hash (primary key)
     os_slug: str  # e.g., "alpine-3.21" (from JSON internal_id)
     path: str  # Full filesystem path (from JSON filename)
+    arch: str
     os_name: Optional[str] = None
     fs_type: Optional[str] = None
     fs_uuid: Optional[str] = None

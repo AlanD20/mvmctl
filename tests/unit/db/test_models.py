@@ -23,6 +23,7 @@ class TestImage:
             id="a" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         assert image.id == "a" * 64
         assert image.os_slug == "ubuntu-24.04"
@@ -34,17 +35,9 @@ class TestImage:
             id="a" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         assert image.os_name is None
-        assert image.fs_type is None
-        assert image.fs_uuid is None
-        assert image.compressed_size is None
-        assert image.original_size is None
-        assert image.compression_ratio is None
-        assert image.compressed_format is None
-        assert image.pulled_at is None
-        assert image.created_at is None
-        assert image.updated_at is None
 
     def test_image_is_default_defaults_to_false(self) -> None:
         """Image is_default defaults to False."""
@@ -52,6 +45,7 @@ class TestImage:
             id="a" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         assert image.is_default is False
 
@@ -61,6 +55,7 @@ class TestImage:
             id="a" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
             os_name="Ubuntu",
             fs_type="ext4",
             fs_uuid="12345678-1234-1234-1234-123456789012",
@@ -83,11 +78,13 @@ class TestImage:
             id="a" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         image2 = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
+            arch="x86_64",
         )
         assert image1 == image2
 

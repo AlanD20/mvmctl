@@ -134,13 +134,14 @@ class MVMDatabase:
             conn.execute(
                 """
                 INSERT INTO images (
-                    id, os_slug, os_name, path, fs_type, fs_uuid,
+                    id, os_slug, os_name, arch, path, fs_type, fs_uuid,
                     compressed_size, original_size, compression_ratio,
                     compressed_format, pulled_at, is_default, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     os_slug = excluded.os_slug,
                     os_name = excluded.os_name,
+                    arch = excluded.arch,
                     path = excluded.path,
                     fs_type = excluded.fs_type,
                     fs_uuid = excluded.fs_uuid,
@@ -156,6 +157,7 @@ class MVMDatabase:
                     image.id,
                     image.os_slug,
                     image.os_name,
+                    image.arch,
                     image.path,
                     image.fs_type,
                     image.fs_uuid,

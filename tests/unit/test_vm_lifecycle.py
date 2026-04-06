@@ -760,6 +760,7 @@ def _seed_image(full_hash: str, filename: str, **extra) -> None:
             os_slug=extra.get("os_slug", ""),
             os_name=extra.get("os_name"),
             path=filename,
+            arch=str(extra.get("arch", "x86_64")),
             fs_type=extra.get("fs_type"),
             fs_uuid=extra.get("fs_uuid"),
             pulled_at=extra.get("pulled_at"),

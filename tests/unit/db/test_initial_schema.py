@@ -100,6 +100,7 @@ class TestTableCreation:
             "id": "TEXT",
             "os_slug": "TEXT",
             "os_name": "TEXT",
+            "arch": "TEXT",
             "path": "TEXT",
             "fs_type": "TEXT",
             "fs_uuid": "TEXT",
@@ -409,14 +410,14 @@ class TestUniqueConstraints:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert first image
                 conn.execute(
-                    "INSERT INTO images (id, os_slug, path) VALUES (?, ?, ?)",
-                    ("id1", "ubuntu-24.04", "/path/to/image1"),
+                    "INSERT INTO images (id, os_slug, path, arch) VALUES (?, ?, ?, ?)",
+                    ("id1", "ubuntu-24.04", "/path/to/image1", "x86_64"),
                 )
                 # Try to insert duplicate os_slug
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO images (id, os_slug, path) VALUES (?, ?, ?)",
-                        ("id2", "ubuntu-24.04", "/path/to/image2"),
+                        "INSERT INTO images (id, os_slug, path, arch) VALUES (?, ?, ?, ?)",
+                        ("id2", "ubuntu-24.04", "/path/to/image2", "x86_64"),
                     )
 
     def test_networks_name_unique(self, runner: MigrationRunner, db_path: Path) -> None:
@@ -800,8 +801,8 @@ class TestDataIntegrity:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert image
                 conn.execute(
-                    "INSERT INTO images (id, os_slug, path) VALUES (?, ?, ?)",
-                    ("img1", "ubuntu-24.04", "/path/to/image"),
+                    "INSERT INTO images (id, os_slug, path, arch) VALUES (?, ?, ?, ?)",
+                    ("img1", "ubuntu-24.04", "/path/to/image", "x86_64"),
                 )
                 # Retrieve image
                 cursor = conn.execute("SELECT os_slug, path FROM images WHERE id = ?", ("img1",))
