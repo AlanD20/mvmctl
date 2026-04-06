@@ -131,6 +131,12 @@ class VMInstance:
     disk_size_mib: Optional[int] = None
     rootfs_path: Optional[str] = None
     rootfs_suffix: Optional[str] = None
+    enable_api_socket: Optional[bool] = None
+    enable_pci: Optional[bool] = None
+    lsm_flags: Optional[str] = None
+    enable_logging: Optional[bool] = None
+    enable_metrics: Optional[bool] = None
+    enable_console: Optional[bool] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

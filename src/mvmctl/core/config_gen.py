@@ -126,7 +126,9 @@ class ConfigGenerator:
         boot_args = self._ensure_root_uuid_in_boot_args(boot_args)
 
         context = {
-            "kernel_image_path": str(self.vm_config.kernel_path),
+            "kernel_image_path": str(self.vm_config.kernel_path)
+            if self.vm_config.kernel_path
+            else "vmlinux",
             "boot_args": boot_args,
             "drives": json.dumps(self._build_drives_config()),
             "network_interfaces": json.dumps(self._build_network_config()),
@@ -164,7 +166,9 @@ class ConfigGenerator:
         # Rootfs drive
         rootfs: DriveConfig = {
             "drive_id": "rootfs",
-            "path_on_host": str(self.vm_config.rootfs_path),
+            "path_on_host": str(self.vm_config.rootfs_path)
+            if self.vm_config.rootfs_path
+            else "rootfs.ext4",
             "is_root_device": True,
             "is_read_only": False,
             "partuuid": None,

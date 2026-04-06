@@ -124,6 +124,10 @@ def _db_state_to_vm_instance(state: DBVMInstance) -> VMInstance:
     from mvmctl.models.cloud_init import CloudInitMode
     from mvmctl.models.vm import VMConfig
 
+    # If already a VMInstance, return as-is (handles mock objects in tests)
+    if isinstance(state, VMInstance):
+        return state
+
     network_name = None
     if state.network_id:
         try:
@@ -145,6 +149,12 @@ def _db_state_to_vm_instance(state: DBVMInstance) -> VMInstance:
         cloud_init_mode=CloudInitMode(state.cloud_init_mode)
         if state.cloud_init_mode
         else CloudInitMode.INJECT,
+        enable_api_socket=state.enable_api_socket if state.enable_api_socket is not None else True,
+        enable_pci=state.enable_pci if state.enable_pci is not None else False,
+        lsm_flags=state.lsm_flags if state.lsm_flags is not None else "",
+        enable_logging=state.enable_logging if state.enable_logging is not None else True,
+        enable_metrics=state.enable_metrics if state.enable_metrics is not None else False,
+        enable_console=state.enable_console if state.enable_console is not None else True,
     )
 
     vm = VMInstance(

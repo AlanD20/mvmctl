@@ -48,19 +48,9 @@ from mvmctl.core.image import (
     copy_from_ready_pool,
     ensure_image_in_ready_pool,
 )
-from mvmctl.core.image import (
-    resolve_image_fs_type as _resolve_image_fs_type,
-)
-from mvmctl.core.image import (
-    resolve_image_fs_uuid as _resolve_image_fs_uuid,
-)
-from mvmctl.core.image import (
-    resolve_image_path as _resolve_image_path,
-)
 from mvmctl.core.kernel import (
     resolve_kernel_path as _resolve_kernel_path,
 )
-from mvmctl.core.metadata import list_image_entries
 from mvmctl.core.network import (
     add_iptables_forward_rules,
     create_tap,
@@ -90,7 +80,6 @@ from mvmctl.models import CloudInitMode, VMConfig, VMInstance, VMStatus
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.services.nocloud_server import NoCloudNetServerManager
 from mvmctl.utils.fs import (
-    get_cache_dir,
     get_kernels_dir,
     get_vm_dir_by_hash,
     read_pid_file,
@@ -925,7 +914,7 @@ def cleanup_tap(tap_name: str, bridge: str | None = None) -> None:
 
 def create_vm(
     name: str,
-    image: str,
+    image_path: Path,
     vcpus: int,
     mem: int,
     network_name: str,
@@ -934,8 +923,10 @@ def create_vm(
     enable_pci: bool,
     enable_console: bool,
     firecracker_bin: str,
+    lsm_flags: str,
+    enable_logging: bool,
+    enable_metrics: bool,
     kernel: str | None = None,
-    image_path: Path | None = None,
     kernel_path: Path | None = None,
     disk_size: str | None = None,
     ip: str | None = None,
@@ -947,6 +938,9 @@ def create_vm(
     keep_cloud_init_iso: bool = False,
     vm_manager: VMManager | None = None,
     nocloud_net_port: int = 0,
+    image_fs_uuid: str | None = None,
+    image_fs_type: str | None = None,
+    image_hash: str | None = None,
 ) -> VMInstance:
     import ipaddress as _ipaddress
     import re
@@ -1039,16 +1033,8 @@ def create_vm(
             if not os.access(fc_bin_path, os.X_OK):
                 raise MVMError(f"Firecracker binary is not executable: {firecracker_bin}")
 
-        # Image resolution with path override
-        if image_path is not None:
-            resolved_image_path = image_path
-            # Still resolve metadata by image identifier for fs_uuid/fs_type
-            image_fs_uuid = _resolve_image_fs_uuid(image) if image else None
-            image_fs_type = _resolve_image_fs_type(image) if image else None
-        else:
-            resolved_image_path = _resolve_image_path(image)
-            image_fs_uuid = _resolve_image_fs_uuid(image)
-            image_fs_type = _resolve_image_fs_type(image)
+        # Image resolution — path and metadata already resolved by API layer
+        resolved_image_path = image_path
 
         # Validate resolved filesystem metadata
         if image_fs_uuid:
@@ -1091,20 +1077,14 @@ def create_vm(
         # Copy image to VM directory (VM-local rootfs)
         # Handle compressed images (.zst suffix)
         if resolved_image_path.suffix == ".zst":
-            rootfs_ext = resolved_image_path.suffixes[-2]  # Get .ext4 from .ext4.zst
+            rootfs_ext = resolved_image_path.suffixes[-2]
             vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
             fs_type = rootfs_ext.lstrip(".")
 
-            # Look up image hash from metadata by filename
-            cache_dir = get_cache_dir()
-            all_entries = list_image_entries(cache_dir)
-            image_hash = resolved_image_path.stem  # fallback
-            for img_id, meta in all_entries.items():
-                if meta.get("path") == resolved_image_path.name:
-                    image_hash = img_id
-                    break
+            # image_hash resolved by API layer
+            if image_hash is None:
+                raise MVMError(f"image_hash required for compressed images: {resolved_image_path}")
 
-            # Ensure image is in ready pool (tmpfs), then fast-copy
             ensure_image_in_ready_pool(resolved_image_path, image_hash, fs_type)
             copy_from_ready_pool(image_hash, fs_type, vm_rootfs_path)
         else:
@@ -1248,6 +1228,9 @@ def create_vm(
             root_fs_type=image_fs_type,
             enable_api_socket=enable_api_socket,
             enable_pci=enable_pci,
+            lsm_flags=lsm_flags,
+            enable_logging=enable_logging,
+            enable_metrics=enable_metrics,
             enable_console=enable_console,
             cloud_init_mode=effective_mode,
             cloud_init_iso_path=cloud_init_iso,
