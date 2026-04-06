@@ -896,13 +896,6 @@ def build_kernel_pipeline(
         shutil.copy2(cached_kernel_path, output_path)
         output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
         logger.info("Using cached kernel build (config hash match): %s", output_path)
-        save_kernel_metadata(
-            output_path.parent,
-            output_path.name,
-            version=version,
-            kernel_type=KERNEL_TYPE_OFFICIAL,
-            arch=arch,
-        )
         return KernelPipelineResult(
             build_dir=build_dir,
             config_result=None,
@@ -911,13 +904,6 @@ def build_kernel_pipeline(
 
     if use_cache and output_path.exists() and cache_marker.exists():
         logger.info("Using cached kernel (config hash match): %s", output_path)
-        save_kernel_metadata(
-            output_path.parent,
-            output_path.name,
-            version=version,
-            kernel_type=KERNEL_TYPE_OFFICIAL,
-            arch=arch,
-        )
         return KernelPipelineResult(
             build_dir=build_dir,
             config_result=None,
@@ -983,13 +969,6 @@ def build_kernel_pipeline(
             shutil.copy2(output_path, cached_kernel_path)
             cache_marker.write_text(cache_key)
 
-        save_kernel_metadata(
-            output_path.parent,
-            output_path.name,
-            version=version,
-            kernel_type=KERNEL_TYPE_OFFICIAL,
-            arch=arch,
-        )
     except Exception:
         raise
     else:
@@ -1007,134 +986,6 @@ def build_kernel_pipeline(
         config_result=config_result,
         build_result=build_result,
     )
-
-
-def save_kernel_metadata(
-    kernels_dir: Path,
-    kernel_name: str,
-    version: str | None = None,
-    kernel_type: str | None = None,
-    arch: str | None = None,
-) -> str:
-    kernel_path = kernels_dir / kernel_name
-
-    parsed = parse_kernel_filename(kernel_name)
-
-    if version is None:
-        version = parsed.version
-    if arch is None:
-        arch = parsed.arch
-    if kernel_type is None:
-        kernel_type = KERNEL_TYPE_UNKNOWN
-
-    last_modified = "-"
-    if kernel_path.exists():
-        mtime = kernel_path.stat().st_mtime
-        last_modified = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
-
-    full_id = generate_full_hash_kernel(
-        kernel_path,
-        version,
-        arch,
-    )
-
-    cache_dir = get_cache_dir()
-    update_kernel_entry(
-        cache_dir,
-        full_id,
-        path=kernel_name,
-        full_hash=full_id,
-        name=kernel_name,
-        base_name=parsed.base_name,
-        version=version,
-        arch=arch,
-        type=kernel_type,
-        last_modified=last_modified,
-    )
-    return full_id
-
-
-def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
-    kernels_dir.mkdir(parents=True, exist_ok=True)
-
-    cache_dir = get_cache_dir()
-
-    entries = list_kernel_entries(cache_dir, kernels_dir, include_missing=True)
-
-    results: list[dict[str, str]] = []
-
-    for entry_id, meta in sorted(entries.items()):
-        path = str(meta.get("path", entry_id))
-        kernel_file_path = kernels_dir / path
-        # Include entries even if file is missing - CLI will show X mark
-        file_exists = kernel_file_path.is_file()
-
-        size_mb = kernel_file_path.stat().st_size / CONST_MEBIBYTE_BYTES if file_exists else 0
-
-        last_modified = meta.get("last_modified")
-        if not last_modified:
-            last_modified = meta.get("built_at", "-")
-
-        if meta.get("base_name"):
-            base_name = str(meta["base_name"])
-            version = str(meta.get("version", "-"))
-            arch = str(meta.get("arch", "-"))
-            kernel_type = str(meta.get("type", KERNEL_TYPE_UNKNOWN))
-        else:
-            parsed = parse_kernel_filename(path)
-            base_name = parsed.base_name
-            version = parsed.version
-            arch = parsed.arch
-            kernel_type = KERNEL_TYPE_UNKNOWN
-
-        is_default_val = meta.get("is_default", 0)
-        is_default_flag = "true" if str(is_default_val) in ("1", "true") else "false"
-
-        results.append(
-            {
-                "id": entry_id,
-                "name": base_name,
-                "path": path,
-                "full_name": path,
-                "version": version,
-                "type": kernel_type,
-                "arch": arch,
-                "last_modified": str(last_modified) if last_modified else "-",
-                "size": f"{size_mb:.1f} MiB",
-                "is_default": is_default_flag,
-            }
-        )
-
-    return results
-
-
-def _load_default_kernel(kernels_dir: Path) -> str | None:
-    from mvmctl.api.metadata import get_default_kernel_entry
-
-    default_entry = get_default_kernel_entry(get_cache_dir())
-    if default_entry is None:
-        return None
-    _kernel_id, entry = default_entry
-    path = entry.get("path")
-    if isinstance(path, str) and path:
-        return path
-    return None
-
-
-def set_default_kernel(kernels_dir: Path, kernel_name: str) -> None:
-    kernel_path = kernels_dir / kernel_name
-    if not kernel_path.exists():
-        raise KernelError(f"Kernel not found: {kernel_path}")
-    set_default_kernel_by_filename(get_cache_dir(), kernel_name)
-    logger.info("Default kernel set to: %s", kernel_name)
-
-
-def get_default_kernel_path(kernels_dir: Path) -> Path | None:
-    name = _load_default_kernel(kernels_dir)
-    if name is None:
-        return None
-    path = kernels_dir / name
-    return path if path.exists() else None
 
 
 def download_firecracker_kernel(
@@ -1191,13 +1042,6 @@ def download_firecracker_kernel(
 
     if resolved_output_path.exists():
         logger.info("Firecracker CI kernel already cached: %s", resolved_output_path)
-        save_kernel_metadata(
-            kernels_dir,
-            resolved_output_path.name,
-            version=kernel_version,
-            kernel_type=KERNEL_TYPE_FIRECRACKER,
-            arch=arch,
-        )
         return resolved_output_path
 
     intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None
@@ -1240,19 +1084,26 @@ def download_firecracker_kernel(
 
     resolved_output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
 
-    save_kernel_metadata(
-        kernels_dir,
-        resolved_output_path.name,
-        version=kernel_version,
-        kernel_type=KERNEL_TYPE_FIRECRACKER,
-        arch=arch,
-    )
     logger.info("Firecracker CI kernel saved: %s", resolved_output_path)
     return resolved_output_path
 
 
 def resolve_kernel_path(kernel: str) -> Path:
-    from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
+    """Resolve a kernel identifier to a filesystem path.
+
+    Performs simple file-based resolution only (no database queries).
+    For full resolution including database lookup, use api/assets.py.
+
+    Args:
+        kernel: Kernel identifier (filename or path)
+
+    Returns:
+        Resolved path to the kernel file
+
+    Raises:
+        MVMError: If kernel cannot be found
+    """
+    from mvmctl.utils.fs import get_kernels_dir
 
     kernels_dir = get_kernels_dir()
     candidate = kernels_dir / kernel
@@ -1263,56 +1114,7 @@ def resolve_kernel_path(kernel: str) -> Path:
     if direct.is_absolute() and direct.exists():
         return direct
 
-    from mvmctl.core.metadata import list_kernel_entries
-
-    matches = [
-        (k, m)
-        for k, m in list_kernel_entries(get_cache_dir(), kernels_dir).items()
-        if k.startswith(kernel)
-    ]
-    if len(matches) == 1:
-        full_key, meta = matches[0]
-        path = str(meta.get("path", ""))
-        if path:
-            candidate = kernels_dir / path
-            if candidate.exists():
-                return candidate
-        candidate = kernels_dir / full_key
-        if candidate.exists():
-            return candidate
-
     if direct.exists():
         return direct
-
-    raise MVMError(f"Kernel not found: {kernel!r}")
-
-
-def resolve_kernel_id_path(kernel: str) -> Path:
-    from mvmctl.core.metadata import list_kernel_entries
-    from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
-    from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
-
-    kernels_dir = get_kernels_dir()
-
-    def _find(cache_dir: Path, prefix: str) -> list[tuple[str, dict[str, object]]]:
-        return [
-            (k, m)
-            for k, m in list_kernel_entries(cache_dir, kernels_dir).items()
-            if k.startswith(prefix)
-        ]
-
-    match = resolve_single_by_id_prefix(kernel, _find, get_cache_dir())
-    if match is None:
-        raise MVMError(f"Kernel ID not found or ambiguous: {kernel!r}")
-
-    full_key, meta = match
-    path = str(meta.get("path", ""))
-    if path:
-        candidate = kernels_dir / path
-        if candidate.exists():
-            return candidate
-    candidate = kernels_dir / full_key
-    if candidate.exists():
-        return candidate
 
     raise MVMError(f"Kernel not found: {kernel!r}")
