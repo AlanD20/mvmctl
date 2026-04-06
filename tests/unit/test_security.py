@@ -12,7 +12,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from mvmctl.core.host_privilege import _generate_sudoers_content
-from mvmctl.core.image import resolve_image_path as _resolve_image_path
+from mvmctl.api.assets import resolve_image_path as _resolve_image_path
 from mvmctl.core.vm_lifecycle import create_vm
 from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.http import download_file

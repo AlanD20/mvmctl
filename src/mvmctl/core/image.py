@@ -653,7 +653,7 @@ def extract_partition_from_raw(
     Raises:
         ImageError: On extraction failure
     """
-    from mvmctl.core.partition_detection import RootPartitionDetector
+    from mvmctl.utils.partition_detection import RootPartitionDetector
 
     try:
         # Check if the image is a direct filesystem (superfloppy) using blkid
@@ -888,20 +888,7 @@ def _handle_raw(
     )
 
 
-def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
-    try:
-        from mvmctl.api.metadata import get_default_binary_entry
-
-        default_binary = get_default_binary_entry()
-        ci_version = ""
-        if default_binary is not None:
-            _version, binary_meta = default_binary
-            raw_ci_version = binary_meta.get("ci_version")
-            if isinstance(raw_ci_version, str):
-                ci_version = raw_ci_version
-    except Exception:
-        ci_version = ""
-
+def _get_template_variables(spec: ImageSpec, ci_version: str = "") -> dict[str, str]:
     variables = {
         "ci_version": ci_version,
         "arch": spec.arch,
@@ -913,7 +900,7 @@ def _get_template_variables(spec: ImageSpec) -> dict[str, str]:
     return {k: str(v) for k, v in variables.items()}
 
 
-def _resolve_source_template(spec: ImageSpec) -> str:
+def _resolve_source_template(spec: ImageSpec, ci_version: str = "") -> str:
     import re
 
     if not spec.list_url_template:
@@ -921,7 +908,7 @@ def _resolve_source_template(spec: ImageSpec) -> str:
     if not spec.source_base:
         raise ImageError(f"Missing 'source_base' in images.yaml for {spec.id}")
 
-    template_vars = _get_template_variables(spec)
+    template_vars = _get_template_variables(spec, ci_version)
     list_url = render_template(spec.list_url_template, template_vars)
 
     try:
@@ -1139,6 +1126,7 @@ def fetch_image(
     force: bool = False,
     partition: int | None = None,
     skip_optimization: bool = False,
+    ci_version: str = "",
 ) -> ImageImportResult:
     """Fetch and convert an image.
 
@@ -1148,6 +1136,7 @@ def fetch_image(
         force: Re-download even if exists
         partition: Specific partition number to extract (1-indexed), or None for auto-detect
         skip_optimization: Skip shrink and compression, keep plain ext4
+        ci_version: CI version for template resolution
 
     Returns:
         Path to final image
@@ -1201,10 +1190,10 @@ def fetch_image(
     resume_from_existing = existing_uncompressed is not None and not force
     need_download = (not download_path.exists() and not resume_from_existing) or force
 
-    template_vars = _get_template_variables(spec)
+    template_vars = _get_template_variables(spec, ci_version)
     source = spec.source
     if "{" in spec.source:
-        source = _resolve_source_template(spec)
+        source = _resolve_source_template(spec, ci_version)
 
     resolved_sha256 = spec.sha256.lower() if spec.sha256 is not None else None
     sha256_url = render_optional_template(spec.sha256_url, template_vars)
@@ -1620,120 +1609,3 @@ def clean_ready_pool() -> int:
 
     logger.info("Cleaned ready pool: removed %d file(s)", removed_count)
     return removed_count
-
-
-def resolve_image_path(image: str) -> Path:
-    from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
-    from mvmctl.utils.fs import get_cache_dir, get_images_dir
-
-    images_dir = get_images_dir()
-    for ext in SUPPORTED_IMAGE_EXTENSIONS:
-        compressed = images_dir / f"{image}{ext}.zst"
-        if compressed.exists():
-            return compressed
-        candidate = images_dir / f"{image}{ext}"
-        if candidate.exists():
-            return candidate
-
-    direct = Path(image)
-    if direct.is_absolute() and direct.exists():
-        return direct
-
-    from mvmctl.core.metadata import find_images_by_id_prefix
-
-    matches = find_images_by_id_prefix(get_cache_dir(), image)
-    if len(matches) == 1:
-        full_key, meta = matches[0]
-        path = str(meta.get("path", ""))
-        if path:
-            compressed = images_dir / f"{path}.zst"
-            if compressed.exists():
-                return compressed
-            candidate = images_dir / path
-            if candidate.exists():
-                return candidate
-        for ext in SUPPORTED_IMAGE_EXTENSIONS:
-            compressed = images_dir / f"{full_key}{ext}.zst"
-            if compressed.exists():
-                return compressed
-            candidate = images_dir / f"{full_key}{ext}"
-            if candidate.exists():
-                return candidate
-
-    if direct.exists():
-        return direct
-
-    raise MVMError(f"Image not found: {image!r}")
-
-
-def resolve_image_fs_uuid(image: str) -> str | None:
-    from mvmctl.core.metadata import find_images_by_id_prefix, list_image_entries
-    from mvmctl.utils.fs import get_cache_dir
-
-    cache_dir = get_cache_dir()
-    for _full_key, meta in list_image_entries(cache_dir).items():
-        if image not in {str(meta.get("os_slug", "")), str(meta.get("path", ""))}:
-            continue
-        fs_uuid = meta.get("fs_uuid")
-        if isinstance(fs_uuid, str) and fs_uuid.strip():
-            return fs_uuid.strip()
-
-    matches = find_images_by_id_prefix(cache_dir, image)
-    if len(matches) == 1:
-        _, meta = matches[0]
-        fs_uuid = meta.get("fs_uuid")
-        if isinstance(fs_uuid, str) and fs_uuid.strip():
-            return fs_uuid.strip()
-    return None
-
-
-def resolve_image_fs_type(image: str) -> str | None:
-    from mvmctl.core.metadata import find_images_by_id_prefix, list_image_entries
-    from mvmctl.utils.fs import get_cache_dir
-
-    cache_dir = get_cache_dir()
-    for _full_key, meta in list_image_entries(cache_dir).items():
-        if image not in {str(meta.get("os_slug", "")), str(meta.get("path", ""))}:
-            continue
-        fs_type = meta.get("fs_type")
-        if isinstance(fs_type, str) and fs_type.strip():
-            return fs_type.strip()
-
-    matches = find_images_by_id_prefix(cache_dir, image)
-    if len(matches) == 1:
-        _, meta = matches[0]
-        fs_type = meta.get("fs_type")
-        if isinstance(fs_type, str) and fs_type.strip():
-            return fs_type.strip()
-    return None
-
-
-def resolve_image_id_path(image: str) -> Path:
-    from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
-    from mvmctl.core.metadata import find_images_by_id_prefix
-    from mvmctl.utils.fs import get_cache_dir, get_images_dir
-    from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
-
-    images_dir = get_images_dir()
-    match = resolve_single_by_id_prefix(image, find_images_by_id_prefix, get_cache_dir())
-    if match is None:
-        raise MVMError(f"Image ID not found or ambiguous: {image!r}")
-
-    full_key, meta = match
-    filename = str(meta.get("path", ""))
-    if filename:
-        compressed = images_dir / f"{filename}.zst"
-        if compressed.exists():
-            return compressed
-        candidate = images_dir / filename
-        if candidate.exists():
-            return candidate
-    for ext in SUPPORTED_IMAGE_EXTENSIONS:
-        compressed = images_dir / f"{full_key}{ext}.zst"
-        if compressed.exists():
-            return compressed
-        candidate = images_dir / f"{full_key}{ext}"
-        if candidate.exists():
-            return candidate
-
-    raise MVMError(f"Image not found: {image!r}")

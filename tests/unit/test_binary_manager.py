@@ -270,7 +270,6 @@ def test_fetch_binary_downloads_and_extracts(tmp_path: Path, mocker: MockerFixtu
     mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
     mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
     mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
-    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
     mocker.patch("mvmctl.core.binary_manager.set_active_version")
     result = fetch_binary("1.5.0", tmp_path)
 
@@ -358,7 +357,6 @@ def test_fetch_binary_sets_executable_permissions(tmp_path: Path, mocker: Mocker
 
     mocker.patch("mvmctl.utils.http.urlopen", return_value=mock_resp)
     mocker.patch("mvmctl.core.binary_manager.urlopen", return_value=sha_resp)
-    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
     mocker.patch("mvmctl.core.binary_manager.set_active_version")
 
     result = fetch_binary("1.5.0", tmp_path)
@@ -474,8 +472,6 @@ def test_set_active_version_creates_symlinks(tmp_path: Path, mocker: MockerFixtu
     fc_file.touch()
     jl_file.touch()
 
-    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
-    mocker.patch("mvmctl.core.binary_manager.set_default_binary_entry")
 
     set_active_version("1.0.0", tmp_path)
 
@@ -501,8 +497,6 @@ def test_set_active_version_updates_links(tmp_path: Path, mocker: MockerFixture)
     (tmp_path / "firecracker").symlink_to("firecracker-v1.0.0")
     (tmp_path / "jailer").symlink_to("jailer-v1.0.0")
 
-    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
-    mocker.patch("mvmctl.core.binary_manager.set_default_binary_entry")
 
     set_active_version("2.0.0", tmp_path)
 
@@ -521,8 +515,6 @@ def test_set_active_version_normalizes_version(tmp_path: Path, mocker: MockerFix
     fc_file.touch()
     jl_file.touch()
 
-    mocker.patch("mvmctl.core.binary_manager.update_binary_entry")
-    mocker.patch("mvmctl.core.binary_manager.set_default_binary_entry")
 
     set_active_version("v1.0.0", tmp_path)
 

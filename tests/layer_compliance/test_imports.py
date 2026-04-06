@@ -526,7 +526,7 @@ class TestCoreLayerIsolation(TestCoreLayerDBCompliance):
     - network_manager.py: metadata, network + lazy host_setup, vm_manager
     - cache_manager.py: core.metadata, network_manager, vm_lifecycle, vm_manager + api.metadata
     - kernel.py: core.metadata + api.metadata (lazy at line ~1117)
-    - image.py: partition_detection (lazy), core.metadata (lazy)
+    - image.py: RESOLVED - partition_detection moved to utils, metadata lookups moved to api
     - config_state.py: core.metadata + api.metadata
     - binary_manager.py: core.metadata
     - ssh.py: vm_manager
@@ -591,9 +591,10 @@ class TestCoreLayerIsolation(TestCoreLayerDBCompliance):
     def test_image_no_cross_core_imports(self):
         """image.py must not import from other core modules.
 
-        Known violations:
-        - partition_detection (lazy import)
-        - core.metadata (lazy import)
+        Status: RESOLVED - All cross-core imports have been refactored:
+        - partition_detection moved to utils/partition_detection.py
+        - metadata lookup functions (resolve_image_path, resolve_image_fs_uuid,
+          resolve_image_fs_type, resolve_image_id_path) moved to api/assets.py
         """
         self._check_file_cross_core_violations("image.py")
 

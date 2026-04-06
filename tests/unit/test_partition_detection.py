@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mvmctl.core.partition_detection import (
+from mvmctl.utils.partition_detection import (
     FilesystemDetector,
     LabelDetector,
     RootPartitionDetector,

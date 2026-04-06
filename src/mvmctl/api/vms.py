@@ -5,6 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from mvmctl.api.assets import (
+    resolve_image_id_path as _api_resolve_image_id_path,
+    resolve_image_path as _api_resolve_image_path,
+    resolve_kernel_id_path as _api_resolve_kernel_id_path,
+    resolve_kernel_path as _api_resolve_kernel_path,
+)
 from mvmctl.api.host import check_privileges_interactive
 from mvmctl.core.console import (
     check_escape_sequence,
@@ -15,18 +21,6 @@ from mvmctl.core.console import (
 )
 from mvmctl.core.console import (
     get_console_state as _get_console_state,
-)
-from mvmctl.core.image import (
-    resolve_image_id_path as _core_resolve_image_id_path,
-)
-from mvmctl.core.image import (
-    resolve_image_path as _core_resolve_image_path,
-)
-from mvmctl.core.kernel import (
-    resolve_kernel_id_path as _core_resolve_kernel_id_path,
-)
-from mvmctl.core.kernel import (
-    resolve_kernel_path as _core_resolve_kernel_path,
 )
 from mvmctl.core.logs import show_logs
 from mvmctl.core.network import teardown_nat
@@ -92,19 +86,19 @@ __all__ = [
 
 
 def resolve_image_path(image: str) -> Path:
-    return _core_resolve_image_path(image)
+    return _api_resolve_image_path(image)
 
 
 def resolve_kernel_path(kernel: str) -> Path:
-    return _core_resolve_kernel_path(kernel)
+    return _api_resolve_kernel_path(kernel)
 
 
 def resolve_image_id_path(image: str) -> Path:
-    return _core_resolve_image_id_path(image)
+    return _api_resolve_image_id_path(image)
 
 
 def resolve_kernel_id_path(kernel: str) -> Path:
-    return _core_resolve_kernel_id_path(kernel)
+    return _api_resolve_kernel_id_path(kernel)
 
 
 def resolve_image_multi_strategy(value: str) -> Path:
@@ -149,7 +143,7 @@ def resolve_image_multi_strategy(value: str) -> Path:
                     return candidate
 
     # ID prefix resolution
-    return _core_resolve_image_id_path(value)
+    return _api_resolve_image_id_path(value)
 
 
 def resolve_kernel_multi_strategy(value: str) -> Path:
@@ -175,7 +169,7 @@ def resolve_kernel_multi_strategy(value: str) -> Path:
         return candidate
 
     # ID prefix resolution
-    return _core_resolve_kernel_id_path(value)
+    return _api_resolve_kernel_id_path(value)
 
 
 def resolve_vm_selector(selector: str) -> str:
@@ -234,10 +228,8 @@ def create_vm(
     vm_manager: VMManager | None = None,
     nocloud_net_port: int = 0,
 ) -> VMInstance:
-    from mvmctl.core.image import (
+    from mvmctl.api.assets import (
         resolve_image_fs_type as _resolve_image_fs_type,
-    )
-    from mvmctl.core.image import (
         resolve_image_fs_uuid as _resolve_image_fs_uuid,
     )
     from mvmctl.core.metadata import list_image_entries

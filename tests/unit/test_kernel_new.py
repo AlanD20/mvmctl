@@ -4,13 +4,15 @@ from urllib.error import URLError
 
 import pytest
 
-from mvmctl.core.kernel import (
-    download_firecracker_kernel,
+from mvmctl.api.assets import (
     get_default_kernel_path,
     list_kernels,
-    parse_kernel_filename,
     save_kernel_metadata,
     set_default_kernel,
+)
+from mvmctl.core.kernel import (
+    download_firecracker_kernel,
+    parse_kernel_filename,
 )
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import Kernel

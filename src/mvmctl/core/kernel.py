@@ -33,15 +33,8 @@ from mvmctl.constants import (
     KERNEL_TYPE_OFFICIAL,
     KERNEL_TYPE_UNKNOWN,
 )
-from mvmctl.core.metadata import (
-    list_kernel_entries,
-    set_default_kernel_by_filename,
-    update_kernel_entry,
-)
 from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
 from mvmctl.models.kernel import KernelSpec
-from mvmctl.utils.fs import get_cache_dir
-from mvmctl.utils.full_hash import generate_full_hash_kernel
 from mvmctl.utils.progress import download_with_progress
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
@@ -51,35 +44,6 @@ from mvmctl.utils.yaml import (
     require_str,
     require_str_list,
 )
-
-
-# Compatibility wrapper: download_file now uses download_with_progress internally
-# This allows tests that patch download_file to still work
-def download_file(
-    url: str,
-    dest: Path,
-    expected_sha256: str | None = None,
-    show_progress: bool = True,
-    timeout: int = CONST_HTTP_TIMEOUT_SECONDS,
-    allow_missing_checksum: bool = False,
-    resume: bool = False,
-    silent_missing_checksum: bool = False,
-    title: str = "Downloading",
-) -> bool:
-    """Download file wrapper that delegates to download_with_progress.
-
-    This maintains compatibility with the old download_file signature
-    while using the new progress-based implementation.
-    """
-    return download_with_progress(
-        url=url,
-        dest=dest,
-        title=title,
-        expected_sha256=expected_sha256,
-        timeout=timeout,
-        allow_missing_checksum=allow_missing_checksum,
-        silent_missing_checksum=silent_missing_checksum,
-    )
 
 
 logger = logging.getLogger(__name__)
@@ -245,9 +209,6 @@ class ParsedKernelFilename:
     arch: str
 
 
-# Re-export for backward compatibility
-
-
 def parse_kernel_filename(filename: str) -> ParsedKernelFilename:
     """Parse a kernel filename to extract base name, version, and arch.
 
@@ -312,10 +273,11 @@ def download_kernel_source(
     """
     logger.info("Downloading kernel from %s", url)
     try:
-        download_file(
+        download_with_progress(
             url,
             dest,
-            expected_sha256,
+            title="Downloading kernel source",
+            expected_sha256=expected_sha256,
             timeout=HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
             allow_missing_checksum=allow_missing_checksum,
             silent_missing_checksum=silent_missing_checksum,
@@ -398,148 +360,29 @@ def download_firecracker_config(
         with urlopen(req, timeout=HTTP_TIMEOUT_KERNEL_CONFIG_S) as response:
             config_content = response.read().decode("utf-8")
             config_path = kernel_dir / ".config"
-
-            with open(config_path, "w") as f:
-                f.write(config_content)
-
-            logger.info("Config downloaded")
-
-    except URLError as e:
-        raise KernelError(f"Failed to download config: {e}") from e
+            config_path.write_text(config_content, encoding="utf-8")
+            logger.info("Config saved to %s", config_path)
+    except (URLError, OSError) as exc:
+        raise KernelError(f"Failed to download kernel config: {exc}") from exc
 
 
-def run_make(
-    kernel_dir: Path,
-    target: str,
-    jobs: int = DEFAULT_KERNEL_BUILD_JOBS,
-    capture_output: bool = False,
-) -> tuple[int, str, str]:
-    """Run make command in kernel directory.
+def fetch_kernel_sha256_from_url(sha256_url: str) -> str | None:
+    """Fetch SHA256 checksum from URL.
 
     Args:
-        kernel_dir: Kernel source directory
-        target: Make target
-        jobs: Number of parallel jobs
-        capture_output: Whether to capture output
+        sha256_url: URL to fetch SHA256 from
 
     Returns:
-        Tuple of (returncode, stdout, stderr)
+        SHA256 checksum string or None if fetch fails
     """
-    cmd = ["make", target, f"-j{jobs}"]
-
-    if capture_output:
-        result = subprocess.run(
-            cmd,
-            cwd=kernel_dir,
-            capture_output=True,
-            text=True,
-        )
-        return result.returncode, result.stdout, result.stderr
-    else:
-        returncode = subprocess.run(cmd, cwd=kernel_dir).returncode
-        return returncode, "", ""
-
-
-def _run_config_script(config_script: Path, args: list[str], kernel_dir: Path) -> None:
-    """Run scripts/config with the given args, logging a warning on failure.
-
-    Args:
-        config_script: Path to the kernel scripts/config helper
-        args: Arguments to pass (e.g. ["--enable", "CONFIG_FOO"])
-        kernel_dir: Kernel source directory (used as cwd)
-    """
-    result = subprocess.run(
-        [str(config_script)] + args,
-        cwd=kernel_dir,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        logger.warning(
-            "scripts/config %s failed (rc=%d): %s",
-            " ".join(args),
-            result.returncode,
-            result.stderr.strip(),
-        )
-
-
-def _fetch_fragment_content(url: str) -> str:
-    req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
-    with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
-        raw: bytes = resp.read()
-    return raw.decode("utf-8")
-
-
-def _extract_config_key(config_line: str) -> str | None:
-    line = config_line.strip()
-    if not line:
+    try:
+        req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
+        with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_SIDECAR_S) as response:
+            content = response.read().decode().strip()
+        parts = content.split()
+        return str(parts[0]).lower() if parts else None
+    except (URLError, OSError):
         return None
-
-    if line.startswith("# ") and line.endswith(" is not set"):
-        key = line[2:-11]
-        return key if key.startswith("CONFIG_") else None
-
-    if line.startswith("CONFIG_") and "=" in line:
-        return line.split("=", 1)[0]
-
-    return None
-
-
-def _apply_config_fragments(
-    fragments: list[str],
-    template_vars: dict[str, str],
-    kernel_dir: Path,
-) -> None:
-    config_path = kernel_dir / ".config"
-
-    for idx, fragment in enumerate(fragments):
-        rendered = render_template(fragment, template_vars)
-        if rendered.startswith("http://") or rendered.startswith("https://"):
-            try:
-                content = _fetch_fragment_content(rendered)
-            except (URLError, OSError) as exc:
-                raise KernelError(f"Failed to fetch config fragment {rendered}: {exc}") from exc
-            logger.info("Applying remote config fragment: %s", rendered)
-        else:
-            rel = rendered[len("assets/") :] if rendered.startswith("assets/") else rendered
-            path = _ASSETS_DIR / rel
-            if not path.exists():
-                raise KernelError(f"Config fragment not found: {path} (from '{fragment}')")
-            content = path.read_text(encoding="utf-8")
-            logger.info("Applying local config fragment: %s", path)
-
-        if idx == 0 and not config_path.exists():
-            base_content = content if content.endswith("\n") else f"{content}\n"
-            config_path.write_text(base_content, encoding="utf-8")
-            continue
-
-        if not config_path.exists():
-            config_path.write_text("", encoding="utf-8")
-
-        existing_lines = config_path.read_text(encoding="utf-8").splitlines()
-        key_to_index: dict[str, int] = {}
-
-        for line_index, line in enumerate(existing_lines):
-            key = _extract_config_key(line)
-            if key:
-                key_to_index[key] = line_index
-
-        for fragment_line in content.splitlines():
-            normalized = fragment_line.strip()
-            key = _extract_config_key(normalized)
-            if key is None:
-                continue
-
-            if key in key_to_index:
-                existing_lines[key_to_index[key]] = normalized
-            else:
-                key_to_index[key] = len(existing_lines)
-                existing_lines.append(normalized)
-
-        merged_content = "\n".join(existing_lines)
-        if merged_content:
-            merged_content += "\n"
-        config_path.write_text(merged_content, encoding="utf-8")
 
 
 def configure_kernel(
@@ -547,254 +390,188 @@ def configure_kernel(
     version: str,
     user_config_path: Path | None = None,
     kernel_spec: KernelSpec | None = None,
-    skip_confirm: bool = False,
     arch: str | None = None,
 ) -> KernelConfigResult:
-    """Configure kernel with Firecracker settings.
+    """Configure kernel with merged fragments and user overlay.
 
     Args:
         kernel_dir: Kernel source directory
-        version: Kernel version string (e.g. ``"6.1.102"``) used to select the
-            matching Firecracker config file.
-        user_config_path: Optional path to a user-supplied ``.config`` overlay.
-        kernel_spec: Kernel specification with config lists. Defaults to the
-            ``kernel-official`` entry from ``kernels.yaml``.
-        skip_confirm: If True, skip interactive confirmation for missing settings
-            and raise KernelError instead. Used by non-interactive callers.
+        version: Kernel version string
+        user_config_path: Optional path to user config overlay
+        kernel_spec: Kernel specification with config lists
+        arch: Target architecture
 
     Returns:
-        KernelConfigResult with status, warnings, and info messages for CLI display.
-
-    Raises:
-        KernelError: If configuration fails or required settings are missing
-            and skip_confirm is True.
+        KernelConfigResult with status and warnings
     """
     if kernel_spec is None:
         kernel_spec = resolve_kernel_spec(kernel_type=KERNEL_TYPE_OFFICIAL)
 
-    warnings: list[str] = []
-    info_messages: list[str] = []
+    # Download Firecracker config
+    download_firecracker_config(
+        kernel_dir, version, arch=arch or DEFAULT_KERNEL_ARCH, kernel_spec=kernel_spec
+    )
 
-    effective_arch = arch or DEFAULT_KERNEL_ARCH
-    major_minor = ".".join(version.split(".")[:2])
-    template_vars = {
-        "major_minor": major_minor,
-        "version": major_minor,
-        "kernel_version": version,
-        "ci_version": version,
-        "arch": effective_arch,
-    }
+    # Apply config fragments from kernel_spec
+    for fragment in kernel_spec.config_fragments:
+        fragment_path = _ASSETS_DIR / "kernel-configs" / fragment
+        if fragment_path.exists():
+            _apply_config_fragment(kernel_dir, fragment_path)
 
+    # Apply user config overlay if provided
+    if user_config_path and user_config_path.exists():
+        _apply_config_fragment(kernel_dir, user_config_path)
+
+    # Run olddefconfig to resolve any new symbols
     try:
-        download_firecracker_config(
-            kernel_dir,
-            version,
-            arch=effective_arch,
-            kernel_spec=kernel_spec,
+        subprocess.run(
+            ["make", "olddefconfig"],
+            cwd=kernel_dir,
+            capture_output=True,
+            text=True,
+            check=True,
         )
-        if kernel_spec.config_fragments:
-            _apply_config_fragments(kernel_spec.config_fragments, template_vars, kernel_dir)
-    except KernelError:
-        logger.info("Using defconfig instead...")
-        returncode, _, _ = run_make(kernel_dir, "defconfig")
-        if returncode != 0:
-            raise KernelError("defconfig failed")
+    except subprocess.CalledProcessError as e:
+        raise KernelError(f"Failed to run olddefconfig: {e.stderr}") from e
+    except FileNotFoundError as e:
+        raise KernelError("make not found — install build-essential") from e
 
-    # Sync config to current kernel version
-    logger.info("Synchronizing config...")
-    returncode, _, _ = run_make(kernel_dir, "olddefconfig")
-    if returncode != 0:
-        raise KernelError("olddefconfig failed")
-
-    config_script = kernel_dir / "scripts" / "config"
-
-    logger.info("Applying kernel options from kernels.yaml...")
-    for option in kernel_spec.enabled_configs:
-        _run_config_script(config_script, ["--enable", option], kernel_dir)
-
-    for option in kernel_spec.disabled_configs:
-        _run_config_script(config_script, ["--disable", option], kernel_dir)
-
-    for option, value in kernel_spec.set_val_configs:
-        _run_config_script(config_script, ["--set-val", option, value], kernel_dir)
-
-    if user_config_path is not None:
-        logger.info("Applying user kernel config overlay from %s...", user_config_path)
-        import shutil
-
-        shutil.copy2(user_config_path, kernel_dir / ".config")
-
-    logger.info("Resolving dependencies...")
-    returncode, _, _ = run_make(kernel_dir, "olddefconfig")
-    if returncode != 0:
-        raise KernelError("olddefconfig failed after enabling options")
-
-    logger.info("Verifying configuration...")
-    config_path = kernel_dir / ".config"
-    config_content = config_path.read_text()
-    config_lines = set(config_content.splitlines())
-    all_present = True
+    # Check for missing required settings
     missing_settings: list[str] = []
-
     for setting in kernel_spec.required_settings:
-        if "=" in setting:
-            present = setting in config_lines
-        else:
-            present = (
-                f"{setting}=y" in config_lines
-                or f"{setting}=m" in config_lines
-                or f"# {setting} is not set" in config_lines
-            )
-
-        if present:
-            logger.info("  %s", setting)
-        else:
-            logger.error("  MISSING: %s", setting)
+        if not _check_config_setting(kernel_dir, setting):
             missing_settings.append(setting)
-            all_present = False
 
-    if not all_present:
-        warnings.append(f"Required kernel settings missing: {', '.join(missing_settings)}")
-        if skip_confirm:
-            raise KernelError("Required kernel settings are missing from configuration")
-        # Return result indicating missing settings - caller (CLI) should handle confirmation
-        return KernelConfigResult(
-            success=False,
-            missing_settings=missing_settings,
-            warnings=warnings,
-            info_messages=info_messages,
-        )
+    warnings: list[str] = []
+    if missing_settings:
+        warnings.append(f"Missing required kernel settings: {', '.join(missing_settings)}")
 
     return KernelConfigResult(
         success=True,
-        missing_settings=[],
+        missing_settings=missing_settings,
         warnings=warnings,
-        info_messages=info_messages,
+        info_messages=["Kernel configuration completed"],
     )
+
+
+def _apply_config_fragment(kernel_dir: Path, fragment_path: Path) -> None:
+    """Apply a kernel config fragment.
+
+    Args:
+        kernel_dir: Kernel source directory
+        fragment_path: Path to config fragment file
+    """
+    try:
+        subprocess.run(
+            ["./scripts/kconfig/merge_config.sh", "-m", ".config", str(fragment_path)],
+            cwd=kernel_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise KernelError(f"Failed to apply config fragment {fragment_path}: {e.stderr}") from e
+
+
+def _check_config_setting(kernel_dir: Path, setting: str) -> bool:
+    """Check if a kernel config setting is enabled.
+
+    Args:
+        kernel_dir: Kernel source directory
+        setting: Config setting name (e.g., "CONFIG_VIRTIO_NET")
+
+    Returns:
+        True if setting is enabled (y or m), False otherwise
+    """
+    config_path = kernel_dir / ".config"
+    if not config_path.exists():
+        return False
+
+    config_content = config_path.read_text()
+    pattern = rf"^{re.escape(setting)}=(y|m)$"
+    return bool(re.search(pattern, config_content, re.MULTILINE))
 
 
 def build_kernel(
     kernel_dir: Path,
     output_path: Path,
-    jobs: int = DEFAULT_KERNEL_BUILD_JOBS,
-    build_log_path: Path | None = None,
+    jobs: int | None = None,
 ) -> KernelBuildResult:
     """Build the kernel.
 
     Args:
         kernel_dir: Kernel source directory
-        output_path: Where to copy vmlinux
-        jobs: Number of parallel jobs
-        build_log_path: Optional path to write build log (for caching)
+        output_path: Output path for the built kernel
+        jobs: Number of parallel jobs (defaults to CPU count)
 
     Returns:
-        KernelBuildResult with status, output path, warnings, and info messages.
-
-    Raises:
-        KernelError: If build fails
+        KernelBuildResult with status and output path
     """
-    logger.info("Building vmlinux with %d parallel jobs...", jobs)
-    logger.info("This may take 10-30 minutes...")
+    if jobs is None:
+        jobs = os.cpu_count() or 1
 
-    warnings: list[str] = []
-    info_messages: list[str] = []
-
-    warnings.append("Building kernel... (this may take 10-30 minutes)")
-
-    cmd = ["make", "vmlinux", f"-j{jobs}"]
-    temp_log_path: Path | None = None
-
-    if build_log_path is None:
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as tmp_log:
-            build_log_path = Path(tmp_log.name)
-        temp_log_path = build_log_path
+    logger.info("Building kernel with %d jobs...", jobs)
 
     try:
-        with open(build_log_path, "w", encoding="utf-8") as log_file:
-            proc = subprocess.Popen(
-                cmd,
-                cwd=kernel_dir,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-            )
-            returncode = proc.wait()
+        result = subprocess.run(
+            ["make", f"-j{jobs}", "vmlinux"],
+            cwd=kernel_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
 
-        build_output_lines: list[str] = []
-        with open(build_log_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.rstrip("\n")
-                logger.debug("%s", line)
-                if _BUILD_LOG_PATTERNS.search(line):
-                    build_output_lines.append(line)
+        # Check for warnings in build output
+        warnings: list[str] = []
+        for line in result.stderr.splitlines():
+            if _BUILD_LOG_PATTERNS.search(line):
+                warnings.append(line.strip())
 
-        if returncode != 0:
-            raise KernelError(f"Kernel build failed: Command failed (exit {returncode}): make")
+        # Copy the built kernel to output path
+        vmlinux_path = kernel_dir / "vmlinux"
+        if not vmlinux_path.exists():
+            raise KernelError("Build completed but vmlinux not found")
 
-    except OSError as e:
-        raise KernelError("Kernel build failed: unable to execute make") from e
-    finally:
-        if temp_log_path and temp_log_path.exists():
-            try:
-                temp_log_path.unlink()
-            except OSError:
-                pass
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(vmlinux_path, output_path)
+        output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
 
-    # Copy vmlinux to output
-    vmlinux_path = kernel_dir / "vmlinux"
-    if not vmlinux_path.exists():
-        raise KernelError("Build succeeded but vmlinux not found")
+        return KernelBuildResult(
+            success=True,
+            output_path=output_path,
+            warnings=warnings[:10],  # Limit warnings
+            info_messages=[f"Kernel built successfully: {output_path}"],
+        )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    shutil.copy2(vmlinux_path, output_path)
-    output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
-
-    size = output_path.stat().st_size
-    size_mb = size / CONST_MEBIBYTE_BYTES
-    logger.info("Kernel built: %s (%.1f MiB)", output_path.name, size_mb)
-
-    return KernelBuildResult(
-        success=True,
-        output_path=output_path,
-        warnings=warnings,
-        info_messages=info_messages,
-    )
-
-
-def fetch_kernel_sha256_from_url(sha256_url: str) -> str | None:
-    try:
-        req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
-        with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
-            content = resp.read().decode().strip()
-        parts = content.split()
-        return str(parts[0]).lower() if parts else None
-    except (URLError, OSError):
-        return None
+    except subprocess.CalledProcessError as e:
+        raise KernelError(f"Kernel build failed: {e.stderr}") from e
+    except FileNotFoundError as e:
+        raise KernelError("make not found — install build-essential") from e
 
 
 def check_build_dependencies() -> list[str]:
     """Check for required kernel build dependencies.
 
     Returns:
-        Empty list if all dependencies are present.
-
-    Raises:
-        KernelError: If any dependencies are missing, with install instructions.
+        List of missing dependency names (empty if all present)
     """
-    required_commands = ["git", "curl", "make", "gcc", "flex", "bison", "bc", "pahole", "ld"]
+    required_tools = [
+        ("make", "make"),
+        ("gcc", "gcc"),
+        ("bison", "bison"),
+        ("flex", "flex"),
+    ]
+
     missing_deps: list[str] = []
 
-    # Check for required commands
-    for cmd in required_commands:
-        if shutil.which(cmd) is None:
-            missing_deps.append(cmd)
+    for cmd, name in required_tools:
+        if not shutil.which(cmd):
+            missing_deps.append(name)
 
     # Check for required libraries via pkg-config
     library_checks = [
-        ("libelf", "libelf"),
-        ("openssl", "libssl-dev"),
+        ("ncurses", "ncurses-dev"),
+        ("libssl", "libssl-dev"),
     ]
 
     for pkg_name, display_name in library_checks:
@@ -872,6 +649,24 @@ def build_kernel_pipeline(
     kernel_spec: KernelSpec | None = None,
     use_cache: bool = True,
 ) -> KernelPipelineResult:
+    """Run the complete kernel build pipeline.
+
+    Args:
+        version: Kernel version to build
+        source_url: URL to download kernel source from
+        output_path: Path where the built kernel should be saved
+        build_dir: Directory for building (defaults to temp dir)
+        sha256: Expected SHA256 of source tarball
+        jobs: Number of parallel build jobs
+        keep_build_dir: If True, don't clean up build directory
+        user_config_path: Optional path to user kernel config overlay
+        arch: Target architecture
+        kernel_spec: Kernel specification
+        use_cache: Whether to use build caching
+
+    Returns:
+        KernelPipelineResult with build results
+    """
     check_build_dependencies()
 
     if kernel_spec is None:
@@ -901,13 +696,6 @@ def build_kernel_pipeline(
         shutil.copy2(cached_kernel_path, output_path)
         output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
         logger.info("Using cached kernel build (config hash match): %s", output_path)
-        save_kernel_metadata(
-            output_path.parent,
-            output_path.name,
-            version=version,
-            kernel_type=KERNEL_TYPE_OFFICIAL,
-            arch=arch,
-        )
         return KernelPipelineResult(
             build_dir=build_dir,
             config_result=None,
@@ -916,13 +704,6 @@ def build_kernel_pipeline(
 
     if use_cache and output_path.exists() and cache_marker.exists():
         logger.info("Using cached kernel (config hash match): %s", output_path)
-        save_kernel_metadata(
-            output_path.parent,
-            output_path.name,
-            version=version,
-            kernel_type=KERNEL_TYPE_OFFICIAL,
-            arch=arch,
-        )
         return KernelPipelineResult(
             build_dir=build_dir,
             config_result=None,
@@ -957,14 +738,15 @@ def build_kernel_pipeline(
     tarball = build_dir / f"linux-{version}.tar.xz"
     kernel_src_dir = build_dir / f"linux-{version}"
 
+    config_result: KernelConfigResult | None = None
+    build_result: KernelBuildResult | None = None
+
     try:
         if not tarball.exists():
-            download_file(
+            download_kernel_source(
                 resolved_source_url,
                 tarball,
-                title="Downloading kernel source",
                 expected_sha256=sha256,
-                timeout=HTTP_TIMEOUT_KERNEL_DOWNLOAD_S,
             )
         else:
             logger.info("Using cached tarball: %s", tarball)
@@ -988,13 +770,6 @@ def build_kernel_pipeline(
             shutil.copy2(output_path, cached_kernel_path)
             cache_marker.write_text(cache_key)
 
-        save_kernel_metadata(
-            output_path.parent,
-            output_path.name,
-            version=version,
-            kernel_type=KERNEL_TYPE_OFFICIAL,
-            arch=arch,
-        )
     except Exception:
         raise
     else:
@@ -1014,134 +789,6 @@ def build_kernel_pipeline(
     )
 
 
-def save_kernel_metadata(
-    kernels_dir: Path,
-    kernel_name: str,
-    version: str | None = None,
-    kernel_type: str | None = None,
-    arch: str | None = None,
-) -> str:
-    kernel_path = kernels_dir / kernel_name
-
-    parsed = parse_kernel_filename(kernel_name)
-
-    if version is None:
-        version = parsed.version
-    if arch is None:
-        arch = parsed.arch
-    if kernel_type is None:
-        kernel_type = KERNEL_TYPE_UNKNOWN
-
-    last_modified = "-"
-    if kernel_path.exists():
-        mtime = kernel_path.stat().st_mtime
-        last_modified = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
-
-    full_id = generate_full_hash_kernel(
-        kernel_path,
-        version,
-        arch,
-    )
-
-    cache_dir = get_cache_dir()
-    update_kernel_entry(
-        cache_dir,
-        full_id,
-        path=kernel_name,
-        full_hash=full_id,
-        name=kernel_name,
-        base_name=parsed.base_name,
-        version=version,
-        arch=arch,
-        type=kernel_type,
-        last_modified=last_modified,
-    )
-    return full_id
-
-
-def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
-    kernels_dir.mkdir(parents=True, exist_ok=True)
-
-    cache_dir = get_cache_dir()
-
-    entries = list_kernel_entries(cache_dir, kernels_dir, include_missing=True)
-
-    results: list[dict[str, str]] = []
-
-    for entry_id, meta in sorted(entries.items()):
-        path = str(meta.get("path", entry_id))
-        kernel_file_path = kernels_dir / path
-        # Include entries even if file is missing - CLI will show X mark
-        file_exists = kernel_file_path.is_file()
-
-        size_mb = kernel_file_path.stat().st_size / CONST_MEBIBYTE_BYTES if file_exists else 0
-
-        last_modified = meta.get("last_modified")
-        if not last_modified:
-            last_modified = meta.get("built_at", "-")
-
-        if meta.get("base_name"):
-            base_name = str(meta["base_name"])
-            version = str(meta.get("version", "-"))
-            arch = str(meta.get("arch", "-"))
-            kernel_type = str(meta.get("type", KERNEL_TYPE_UNKNOWN))
-        else:
-            parsed = parse_kernel_filename(path)
-            base_name = parsed.base_name
-            version = parsed.version
-            arch = parsed.arch
-            kernel_type = KERNEL_TYPE_UNKNOWN
-
-        is_default_val = meta.get("is_default", 0)
-        is_default_flag = "true" if str(is_default_val) in ("1", "true") else "false"
-
-        results.append(
-            {
-                "id": entry_id,
-                "name": base_name,
-                "path": path,
-                "full_name": path,
-                "version": version,
-                "type": kernel_type,
-                "arch": arch,
-                "last_modified": str(last_modified) if last_modified else "-",
-                "size": f"{size_mb:.1f} MiB",
-                "is_default": is_default_flag,
-            }
-        )
-
-    return results
-
-
-def _load_default_kernel(kernels_dir: Path) -> str | None:
-    from mvmctl.api.metadata import get_default_kernel_entry
-
-    default_entry = get_default_kernel_entry(get_cache_dir())
-    if default_entry is None:
-        return None
-    _kernel_id, entry = default_entry
-    path = entry.get("path")
-    if isinstance(path, str) and path:
-        return path
-    return None
-
-
-def set_default_kernel(kernels_dir: Path, kernel_name: str) -> None:
-    kernel_path = kernels_dir / kernel_name
-    if not kernel_path.exists():
-        raise KernelError(f"Kernel not found: {kernel_path}")
-    set_default_kernel_by_filename(get_cache_dir(), kernel_name)
-    logger.info("Default kernel set to: %s", kernel_name)
-
-
-def get_default_kernel_path(kernels_dir: Path) -> Path | None:
-    name = _load_default_kernel(kernels_dir)
-    if name is None:
-        return None
-    path = kernels_dir / name
-    return path if path.exists() else None
-
-
 def download_firecracker_kernel(
     ci_version: str,
     arch: str = DEFAULT_KERNEL_ARCH,
@@ -1150,6 +797,22 @@ def download_firecracker_kernel(
     output_path: Path | None = None,
     kernel_spec: KernelSpec | None = None,
 ) -> Path:
+    """Download a pre-built kernel from Firecracker CI.
+
+    Args:
+        ci_version: Firecracker CI version (e.g., "v1.15.0")
+        arch: Target architecture
+        kernels_dir: Directory to store kernel (defaults to standard location)
+        output_name: Name for the output file
+        output_path: Full path for output (overrides output_name)
+        kernel_spec: Kernel specification
+
+    Returns:
+        Path to the downloaded kernel
+
+    Raises:
+        KernelError: If download fails
+    """
     if kernels_dir is None:
         from mvmctl.utils.fs import get_kernels_dir
 
@@ -1196,13 +859,6 @@ def download_firecracker_kernel(
 
     if resolved_output_path.exists():
         logger.info("Firecracker CI kernel already cached: %s", resolved_output_path)
-        save_kernel_metadata(
-            kernels_dir,
-            resolved_output_path.name,
-            version=kernel_version,
-            kernel_type=KERNEL_TYPE_FIRECRACKER,
-            arch=arch,
-        )
         return resolved_output_path
 
     intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None
@@ -1231,7 +887,7 @@ def download_firecracker_kernel(
 
     logger.info("Downloading Firecracker CI kernel from %s", download_url)
     try:
-        download_file(
+        download_with_progress(
             download_url,
             resolved_output_path,
             title=f"Downloading kernel {ci_version}",
@@ -1245,19 +901,26 @@ def download_firecracker_kernel(
 
     resolved_output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
 
-    save_kernel_metadata(
-        kernels_dir,
-        resolved_output_path.name,
-        version=kernel_version,
-        kernel_type=KERNEL_TYPE_FIRECRACKER,
-        arch=arch,
-    )
     logger.info("Firecracker CI kernel saved: %s", resolved_output_path)
     return resolved_output_path
 
 
 def resolve_kernel_path(kernel: str) -> Path:
-    from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
+    """Resolve a kernel identifier to a filesystem path.
+
+    Performs simple file-based resolution only (no database queries).
+    For full resolution including database lookup, use api/assets.py.
+
+    Args:
+        kernel: Kernel identifier (filename or path)
+
+    Returns:
+        Resolved path to the kernel file
+
+    Raises:
+        MVMError: If kernel cannot be found
+    """
+    from mvmctl.utils.fs import get_kernels_dir
 
     kernels_dir = get_kernels_dir()
     candidate = kernels_dir / kernel
@@ -1268,56 +931,44 @@ def resolve_kernel_path(kernel: str) -> Path:
     if direct.is_absolute() and direct.exists():
         return direct
 
-    from mvmctl.core.metadata import list_kernel_entries
-
-    matches = [
-        (k, m)
-        for k, m in list_kernel_entries(get_cache_dir(), kernels_dir).items()
-        if k.startswith(kernel)
-    ]
-    if len(matches) == 1:
-        full_key, meta = matches[0]
-        path = str(meta.get("path", ""))
-        if path:
-            candidate = kernels_dir / path
-            if candidate.exists():
-                return candidate
-        candidate = kernels_dir / full_key
-        if candidate.exists():
-            return candidate
-
     if direct.exists():
         return direct
 
     raise MVMError(f"Kernel not found: {kernel!r}")
 
 
-def resolve_kernel_id_path(kernel: str) -> Path:
-    from mvmctl.core.metadata import list_kernel_entries
-    from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
-    from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
+def run_make(
+    kernel_dir: Path,
+    target: str,
+    jobs: int = DEFAULT_KERNEL_BUILD_JOBS,
+    capture_output: bool = False,
+) -> tuple[int, str, str]:
+    """Run make command in kernel directory.
 
-    kernels_dir = get_kernels_dir()
+    Args:
+        kernel_dir: Kernel source directory
+        target: Make target
+        jobs: Number of parallel jobs
+        capture_output: Whether to capture output
 
-    def _find(cache_dir: Path, prefix: str) -> list[tuple[str, dict[str, object]]]:
-        return [
-            (k, m)
-            for k, m in list_kernel_entries(cache_dir, kernels_dir).items()
-            if k.startswith(prefix)
-        ]
+    Returns:
+        Tuple of (returncode, stdout, stderr)
+    """
+    cmd = ["make", target, f"-j{jobs}"]
 
-    match = resolve_single_by_id_prefix(kernel, _find, get_cache_dir())
-    if match is None:
-        raise MVMError(f"Kernel ID not found or ambiguous: {kernel!r}")
-
-    full_key, meta = match
-    path = str(meta.get("path", ""))
-    if path:
-        candidate = kernels_dir / path
-        if candidate.exists():
-            return candidate
-    candidate = kernels_dir / full_key
-    if candidate.exists():
-        return candidate
-
-    raise MVMError(f"Kernel not found: {kernel!r}")
+    if capture_output:
+        result = subprocess.run(
+            cmd,
+            cwd=kernel_dir,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode, result.stdout, result.stderr
+    else:
+        result = subprocess.run(
+            cmd,
+            cwd=kernel_dir,
+            capture_output=False,
+            text=True,
+        )
+        return result.returncode, "", ""

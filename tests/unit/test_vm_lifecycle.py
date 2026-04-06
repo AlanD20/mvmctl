@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.core.image import resolve_image_fs_type as _resolve_image_fs_type
-from mvmctl.core.image import resolve_image_path as _resolve_image_path
+from mvmctl.api.assets import resolve_image_fs_type as _resolve_image_fs_type
+from mvmctl.api.assets import resolve_image_path as _resolve_image_path
 from mvmctl.core.kernel import resolve_kernel_path as _resolve_kernel_path
 from mvmctl.core.vm_lifecycle import (
     _read_pid_file,
@@ -808,7 +808,7 @@ def test_resolve_image_path_by_short_hash(tmp_path):
 
 
 def test_resolve_image_fs_uuid_by_short_hash(tmp_path):
-    from mvmctl.core.image import resolve_image_fs_uuid as _resolve_image_fs_uuid
+    from mvmctl.api.assets import resolve_image_fs_uuid as _resolve_image_fs_uuid
 
     full_hash = "a" * 64
     _seed_image(full_hash, "ubuntu-24.04.ext4", fs_uuid="11111111-2222-3333-4444-555555555555")
@@ -818,7 +818,7 @@ def test_resolve_image_fs_uuid_by_short_hash(tmp_path):
 
 
 def test_resolve_image_fs_uuid_missing_returns_none(tmp_path):
-    from mvmctl.core.image import resolve_image_fs_uuid as _resolve_image_fs_uuid
+    from mvmctl.api.assets import resolve_image_fs_uuid as _resolve_image_fs_uuid
 
     full_hash = "b" * 64
     _seed_image(full_hash, "ubuntu-24.04.ext4")
@@ -914,7 +914,7 @@ def test_resolve_kernel_path_not_found(tmp_path):
 
 
 def test_resolve_image_id_path_unique(tmp_path):
-    from mvmctl.core.image import resolve_image_id_path as _resolve_image_id_path
+    from mvmctl.api.assets import resolve_image_id_path as _resolve_image_id_path
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()

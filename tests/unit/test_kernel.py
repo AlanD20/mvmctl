@@ -15,7 +15,6 @@ from mvmctl.core.kernel import (
     download_firecracker_config,
     download_kernel_source,
     extract_kernel_tarball,
-    run_make,
 )
 from mvmctl.exceptions import ChecksumMismatchError, KernelError
 
