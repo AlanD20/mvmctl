@@ -7,6 +7,7 @@ functions to read and write metadata through the database layer.
 from __future__ import annotations
 
 import logging
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -86,12 +87,19 @@ def set_default_kernel_by_filename(cache_dir: Path, filename: str) -> None:
 
 
 def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Return the default kernel entry as (id, metadata) or None."""
-    db = MVMDatabase()
-    kernel = db.get_default_kernel()
-    if kernel is None:
-        return None
-    return kernel.id, KernelRecord.from_db(kernel).to_dict()
+    """Return the default kernel entry as (id, metadata) or None.
+
+    .. deprecated::
+        Use :func:`mvmctl.api.metadata.get_default_kernel_entry` instead.
+    """
+    warnings.warn(
+        "get_default_kernel_entry() is deprecated. Use mvmctl.api.metadata.get_default_kernel_entry() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.api.metadata import get_default_kernel_entry as _api_get_default_kernel_entry
+
+    return _api_get_default_kernel_entry(cache_dir)
 
 
 def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
@@ -255,12 +263,19 @@ def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
 
 
 def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
-    """Return the default image entry as (id, metadata) or None."""
-    db = MVMDatabase()
-    image = db.get_default_image()
-    if image is None:
-        return None
-    return image.id, ImageRecord.from_db(image).to_dict()
+    """Return the default image entry as (id, metadata) or None.
+
+    .. deprecated::
+        Use :func:`mvmctl.api.metadata.get_default_image_entry` instead.
+    """
+    warnings.warn(
+        "get_default_image_entry() is deprecated. Use mvmctl.api.metadata.get_default_image_entry() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.api.metadata import get_default_image_entry as _api_get_default_image_entry
+
+    return _api_get_default_image_entry()
 
 
 def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str, Any]] | None:
@@ -472,12 +487,19 @@ def set_default_binary_entry(cache_dir: Path, version: str) -> None:
 
 
 def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
-    """Return the default binary entry as (version, metadata) or None."""
-    db = MVMDatabase()
-    binary = _find_db_default_binary(db)
-    if binary is not None:
-        return binary.version, BinaryRecord.from_db(binary).to_dict()
-    return None
+    """Return the default binary entry as (version, metadata) or None.
+
+    .. deprecated::
+        Use :func:`mvmctl.api.metadata.get_default_binary_entry` instead.
+    """
+    warnings.warn(
+        "get_default_binary_entry() is deprecated. Use mvmctl.api.metadata.get_default_binary_entry() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.api.metadata import get_default_binary_entry as _api_get_default_binary_entry
+
+    return _api_get_default_binary_entry()
 
 
 # =============================================================================
@@ -552,9 +574,16 @@ def set_default_network_entry(cache_dir: Path, network_name: str) -> None:
 
 
 def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Return the default network entry as (name, metadata) or None."""
-    db = MVMDatabase()
-    network = db.get_default_network()
-    if network:
-        return network.name, NetworkRecord.from_db(network).to_dict()
-    return None
+    """Return the default network entry as (name, metadata) or None.
+
+    .. deprecated::
+        Use :func:`mvmctl.api.metadata.get_default_network_entry` instead.
+    """
+    warnings.warn(
+        "get_default_network_entry() is deprecated. Use mvmctl.api.metadata.get_default_network_entry() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.api.metadata import get_default_network_entry as _api_get_default_network_entry
+
+    return _api_get_default_network_entry(cache_dir)
