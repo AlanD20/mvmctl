@@ -75,7 +75,7 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.api.vms.allocate_network_ip")
     @patch("mvmctl.api.vms.release_network_ip")
     @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.core.kernel.resolve_kernel_path")
+    @patch("mvmctl.api.assets.resolve_kernel_path")
     @patch("mvmctl.api.vms._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_full_nocloud_net_lifecycle(
@@ -197,7 +197,7 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.api.vms.allocate_network_ip")
     @patch("mvmctl.api.vms.release_network_ip")
     @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.core.kernel.resolve_kernel_path")
+    @patch("mvmctl.api.assets.resolve_kernel_path")
     @patch("mvmctl.api.vms._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_nocloud_net_remove_cleanup(
@@ -322,7 +322,7 @@ class TestMultipleVMsDifferentPorts:
     @patch("mvmctl.api.vms.add_nocloud_input_rule")
     @patch("mvmctl.api.vms.subprocess.Popen")
     @patch("mvmctl.api.assets.resolve_image_path")
-    @patch("mvmctl.core.kernel.resolve_kernel_path")
+    @patch("mvmctl.api.assets.resolve_kernel_path")
     def test_multiple_vms_different_ports(
         self,
         mock_resolve_kernel,
@@ -501,7 +501,7 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.vms.release_network_ip")
     @patch("mvmctl.api.vms.setup_nocloud_input_chain")
     @patch("mvmctl.api.assets.resolve_image_path")
-    @patch("mvmctl.core.kernel.resolve_kernel_path")
+    @patch("mvmctl.api.assets.resolve_kernel_path")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_failure_cleanup_on_firewall_error(
         self,
@@ -608,7 +608,7 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.vms.release_network_ip")
     @patch("mvmctl.api.vms.setup_nocloud_input_chain")
     @patch("mvmctl.api.assets.resolve_image_path")
-    @patch("mvmctl.core.kernel.resolve_kernel_path")
+    @patch("mvmctl.api.assets.resolve_kernel_path")
     @patch("mvmctl.api.vms._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
     def test_failure_cleanup_on_firecracker_error(
@@ -717,7 +717,7 @@ class TestVMWithoutNocloudNet:
     @patch("mvmctl.api.vms.subprocess.Popen")
     @patch("mvmctl.api.vms.create_cloud_init_iso")
     @patch("mvmctl.api.assets.resolve_image_path")
-    @patch("mvmctl.core.kernel.resolve_kernel_path")
+    @patch("mvmctl.api.assets.resolve_kernel_path")
     def test_vm_with_disabled_mode_no_nocloud(
         self,
         mock_resolve_kernel,
