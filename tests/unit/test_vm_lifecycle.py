@@ -5,7 +5,7 @@ import pytest
 
 from mvmctl.api.assets import resolve_image_fs_type as _resolve_image_fs_type
 from mvmctl.api.assets import resolve_image_path as _resolve_image_path
-from mvmctl.core.kernel import resolve_kernel_path as _resolve_kernel_path
+from mvmctl.api.assets import resolve_kernel_path as _resolve_kernel_path
 from mvmctl.api.vms import (
     create_vm,
     load_snapshot,
@@ -227,8 +227,8 @@ def test_create_vm_core_success(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_inject_mode_is_default(
@@ -697,7 +697,7 @@ def test_create_vm_reconciles_nat_when_bridge_exists(
 
 
 @patch("mvmctl.api.vms.get_vm_socket_path")
-@patch("mvmctl.core.vm_process.FirecrackerClient")
+@patch("mvmctl.api.vms.FirecrackerClient")
 def test_snapshot_vm(mock_client, mock_socket_path):
     """snapshot_vm calls FirecrackerClient create_snapshot."""
     mock_socket_path.return_value = Path("fake.sock")
@@ -714,7 +714,7 @@ def test_snapshot_vm_no_socket(mock_socket_path):
 
 
 @patch("mvmctl.api.vms.get_vm_socket_path")
-@patch("mvmctl.core.vm_process.FirecrackerClient")
+@patch("mvmctl.api.vms.FirecrackerClient")
 def test_load_snapshot(mock_client, mock_socket_path):
     """load_snapshot checks socket and forwards to client."""
     mock_socket_path.return_value = Path("fake.sock")
@@ -1052,8 +1052,8 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 @patch("mvmctl.api.vms.get_network")
 @patch("mvmctl.api.vms.allocate_network_ip")
 @patch("mvmctl.api.vms.generate_mac")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.api.vms.write_cloud_init")
 @patch("mvmctl.api.vms.create_cloud_init_iso")
 @patch("mvmctl.api.vms.ConfigGenerator")
@@ -1178,8 +1178,8 @@ def test_create_vm_uses_cached_image_path_not_copy(
 @patch("mvmctl.api.vms.get_network")
 @patch("mvmctl.api.vms.allocate_network_ip")
 @patch("mvmctl.api.vms.generate_mac")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.api.vms.write_cloud_init")
 @patch("mvmctl.api.vms.create_cloud_init_iso")
 @patch("mvmctl.api.vms.ConfigGenerator")
@@ -1306,8 +1306,8 @@ def test_create_vm_disk_size_resizes_local_copy_only(
 @patch("mvmctl.api.vms.get_network")
 @patch("mvmctl.api.vms.allocate_network_ip")
 @patch("mvmctl.api.vms.generate_mac")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.api.vms.write_cloud_init")
 @patch("mvmctl.api.vms.create_cloud_init_iso")
 @patch("mvmctl.api.vms.ConfigGenerator")
@@ -1439,8 +1439,8 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
 @patch("mvmctl.api.vms.get_network")
 @patch("mvmctl.api.vms.allocate_network_ip")
 @patch("mvmctl.api.vms.generate_mac")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.api.vms.write_cloud_init")
 @patch("mvmctl.api.vms.create_cloud_init_iso")
 @patch("mvmctl.api.vms.ConfigGenerator")
@@ -1586,8 +1586,8 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_nocloud_net_starts_server(
@@ -1700,8 +1700,8 @@ def test_create_vm_nocloud_net_starts_server(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.api.vms.cleanup_tap")
 @patch("mvmctl.api.vms.shutil.rmtree")
 @patch("builtins.open", new_callable=MagicMock)
@@ -1822,8 +1822,8 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_nocloud_net_success_sets_port(
@@ -1942,8 +1942,8 @@ def test_create_vm_nocloud_net_success_sets_port(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_nocloud_net_adds_firewall_rule(
@@ -2064,8 +2064,8 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
 @patch("mvmctl.api.vms.setup_nat")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.api.vms.cleanup_tap")
 @patch("mvmctl.api.vms.release_network_ip")
 @patch("mvmctl.api.vms.shutil.rmtree")
@@ -2200,8 +2200,8 @@ def test_firewall_failure_stops_server_and_raises(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_returns_immediately_with_nocloud_net(
@@ -2316,8 +2316,8 @@ def test_create_vm_returns_immediately_with_nocloud_net(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_starts_nocloud_server(
@@ -2416,7 +2416,7 @@ def test_create_vm_starts_nocloud_server(
     mock_net_mgr.return_value.start_server.assert_called_once()
 
 
-@patch("mvmctl.api.vms.secure_mkdir")
+@patch("mvmctl.api.vms._secure_mkdir_vm")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
 @patch("mvmctl.api.vms.get_vm_manager")
 @patch("mvmctl.api.vms.get_vm_dir_by_hash")
@@ -2432,8 +2432,8 @@ def test_create_vm_starts_nocloud_server(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 @patch("mvmctl.api.vms.inject_cloud_init")
@@ -2542,7 +2542,7 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
     )
 
 
-@patch("mvmctl.api.vms.secure_mkdir")
+@patch("mvmctl.api.vms._secure_mkdir_vm")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
 @patch("mvmctl.api.vms.get_vm_manager")
 @patch("mvmctl.api.vms.get_vm_dir_by_hash")
@@ -2558,8 +2558,8 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 @patch("mvmctl.api.vms.inject_cloud_init")
@@ -2679,8 +2679,8 @@ def test_direct_injection_cleanup_on_injection_failure(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 @patch("mvmctl.core.key_manager.get_default_keys")
@@ -2795,8 +2795,8 @@ def test_create_vm_without_ssh_key_injects_default_keys(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 @patch("mvmctl.api.vms.resolve_ssh_key")
@@ -2902,8 +2902,8 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.core.image.resolve_image_fs_uuid")
-@patch("mvmctl.core.image.resolve_image_fs_type")
+@patch("mvmctl.api.assets.resolve_image_fs_uuid")
+@patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 @patch("mvmctl.core.key_manager.get_default_keys")

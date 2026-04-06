@@ -6,7 +6,7 @@ from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
 from mvmctl.cli.host import app
-from mvmctl.core.host import HostStateChange, HostState
+from mvmctl.models.host import HostStateChange, HostState
 from mvmctl.exceptions import HostError
 
 runner = CliRunner()

@@ -608,6 +608,7 @@ CONST_FILE_PERMS_PUBLIC_KEY: Final[int] = 0o644
 CONST_FILE_PERMS_METADATA: Final[int] = 0o600
 CONST_DIR_PERMS_CACHE: Final[int] = 0o700
 CONST_FILE_PERMS_STATE_FILE: Final[int] = 0o640
+CONST_FILE_PERMS_SHADOW: Final[int] = 0o640
 CONST_FILE_PERMS_SUDOERS: Final[int] = 0o440
 CONST_FILE_PERMS_CONFIG: Final[int] = 0o600
 CONST_FILE_PERMS_EXECUTABLE: Final[int] = 0o755
@@ -615,6 +616,18 @@ CONST_FILE_PERMS_PID_FILE: Final[int] = 0o600
 CONST_FILE_PERMS_NETWORK_CONFIG: Final[int] = 0o600
 CONST_FILE_PERMS_DHCP_LEASES: Final[int] = 0o600
 CONST_FILE_PERMS_VM_STATE: Final[int] = 0o600
+
+# Default user constants (for cloud-init user creation)
+CONST_DEFAULT_USER_UID: Final[int] = 1000
+CONST_DEFAULT_USER_GID: Final[int] = 1000
+CONST_ROOT_UID: Final[int] = 0
+CONST_ROOT_GID: Final[int] = 0
+
+# Shadow file constants (for /etc/shadow entries)
+CONST_SHADOW_DAYS_SINCE_EPOCH: Final[int] = 19700  # Days since Jan 1, 1970
+CONST_SHADOW_MIN_DAYS: Final[int] = 0
+CONST_SHADOW_MAX_DAYS: Final[int] = 99999
+CONST_SHADOW_WARN_DAYS: Final[int] = 7
 
 # HTTP status codes
 CONST_HTTP_STATUS_NO_CONTENT: Final[int] = 204

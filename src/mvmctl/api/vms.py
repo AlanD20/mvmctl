@@ -32,7 +32,21 @@ from mvmctl.api.network import (
     release_network_ip,
 )
 from mvmctl.constants import (
+    CONST_DEFAULT_USER_GID,
+    CONST_DEFAULT_USER_UID,
     CONST_DIR_PERMS_CACHE,
+    CONST_FILE_PERMS_EXECUTABLE,
+    CONST_FILE_PERMS_PRIVATE_KEY,
+    CONST_FILE_PERMS_PUBLIC_KEY,
+    CONST_FILE_PERMS_SHADOW,
+    CONST_FILE_PERMS_SUDOERS,
+    CONST_FILE_PERMS_STATE_FILE,
+    CONST_ROOT_GID,
+    CONST_ROOT_UID,
+    CONST_SHADOW_DAYS_SINCE_EPOCH,
+    CONST_SHADOW_MAX_DAYS,
+    CONST_SHADOW_MIN_DAYS,
+    CONST_SHADOW_WARN_DAYS,
     CONST_SIGNAL_EXIT_CODE_BASE,
     CONST_VM_MEM_MAX_MIB,
     CONST_VM_MEM_MIN_MIB,
@@ -370,7 +384,7 @@ def _enforce_ssh_key_auth(guestfs_handle: Any, rootfs_path: Path, user: str) -> 
             config_lines.append("PermitRootLogin prohibit-password")
 
         guestfs_handle.write(f"{sshd_config_dir}/mvm.conf", "\n".join(config_lines) + "\n")
-        guestfs_handle.chmod(0o644, f"{sshd_config_dir}/mvm.conf")
+        guestfs_handle.chmod(CONST_FILE_PERMS_PUBLIC_KEY, f"{sshd_config_dir}/mvm.conf")
         logger.info("Configured SSH key authentication for user '%s' in %s", user, rootfs_path.name)
     except Exception as exc:
         logger.warning("Failed to configure sshd: %s", exc)
@@ -395,17 +409,25 @@ def _ensure_user_exists(guestfs_handle: Any, user: str, rootfs_path: Path) -> No
         home_dir = f"/home/{user}"
         guestfs_handle.mkdir_p(home_dir)
         guestfs_handle.mkdir_p(f"{home_dir}/.ssh")
-        guestfs_handle.write("/etc/passwd", f"{user}:!:1000:1000::{home_dir}:/bin/bash\n", mode="a")
-        guestfs_handle.chmod(0o644, "/etc/passwd")
-        guestfs_handle.write("/etc/shadow", f"{user}:!:19700:0:99999:7:::\n", mode="a")
-        guestfs_handle.chmod(0o640, "/etc/shadow")
-        guestfs_handle.write("/etc/group", f"{user}:x:1000:\n", mode="a")
-        guestfs_handle.chmod(0o644, "/etc/group")
+        guestfs_handle.write(
+            "/etc/passwd",
+            f"{user}:!:{CONST_DEFAULT_USER_UID}:{CONST_DEFAULT_USER_GID}::{home_dir}:/bin/bash\n",
+            mode="a",
+        )
+        guestfs_handle.chmod(CONST_FILE_PERMS_PUBLIC_KEY, "/etc/passwd")
+        guestfs_handle.write(
+            "/etc/shadow",
+            f"{user}:!:{CONST_SHADOW_DAYS_SINCE_EPOCH}:{CONST_SHADOW_MIN_DAYS}:{CONST_SHADOW_MAX_DAYS}:{CONST_SHADOW_WARN_DAYS}:::\n",
+            mode="a",
+        )
+        guestfs_handle.chmod(CONST_FILE_PERMS_SHADOW, "/etc/shadow")
+        guestfs_handle.write("/etc/group", f"{user}:x:{CONST_DEFAULT_USER_GID}:\n", mode="a")
+        guestfs_handle.chmod(CONST_FILE_PERMS_PUBLIC_KEY, "/etc/group")
         guestfs_handle.mkdir_p("/etc/sudoers.d")
         guestfs_handle.write(f"/etc/sudoers.d/{user}", f"{user} ALL=(ALL) NOPASSWD: ALL\n")
-        guestfs_handle.chmod(0o440, f"/etc/sudoers.d/{user}")
-        guestfs_handle.chown(1000, 1000, home_dir)
-        guestfs_handle.chown(1000, 1000, f"{home_dir}/.ssh")
+        guestfs_handle.chmod(CONST_FILE_PERMS_SUDOERS, f"/etc/sudoers.d/{user}")
+        guestfs_handle.chown(CONST_DEFAULT_USER_UID, CONST_DEFAULT_USER_GID, home_dir)
+        guestfs_handle.chown(CONST_DEFAULT_USER_UID, CONST_DEFAULT_USER_GID, f"{home_dir}/.ssh")
         logger.info("Created user '%s' with UID/GID 1000 in %s", user, rootfs_path.name)
     except Exception as exc:
         logger.warning("Failed to create user '%s': %s", user, exc)
@@ -439,7 +461,7 @@ def _generate_ssh_host_keys(guestfs_handle: Any, rootfs_path: Path) -> None:
             "rm -f /etc/local.d/ssh-keygen.start 2>/dev/null\n"
             "exit 0\n",
         )
-        guestfs_handle.chmod(0o755, "/etc/local.d/ssh-keygen.start")
+        guestfs_handle.chmod(CONST_FILE_PERMS_EXECUTABLE, "/etc/local.d/ssh-keygen.start")
         if guestfs_handle.exists("/sbin/openrc") or guestfs_handle.exists("/usr/sbin/openrc"):
             guestfs_handle.mkdir_p("/etc/runlevels/default")
             if not guestfs_handle.exists("/etc/runlevels/default/local"):
@@ -742,7 +764,7 @@ def create_vm(
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.utils.disk_size import parse_disk_size
 
-    if image is None:
+    if image is None and image_path is None:
         db = MVMDatabase()
         default_image = db.get_default_image()
         if default_image is None:
