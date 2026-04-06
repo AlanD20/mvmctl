@@ -75,15 +75,16 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.api.vms.allocate_network_ip")
     @patch("mvmctl.api.vms.release_network_ip")
     @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.api.assets.resolve_kernel_path")
+    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vms._resolve_kernel_path")
     @patch("mvmctl.api.vms._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
-    @pytest.mark.skip(reason="TODO: Requires test asset seeding fixture")
     def test_full_nocloud_net_lifecycle(
         self,
         mock_get_vm_dir,
         mock_write_pid,
         mock_resolve_kernel,
+        mock_resolve_image,
         mock_setup_chain,
         mock_release_ip,
         mock_alloc_ip,
@@ -115,6 +116,7 @@ class TestFullNocloudNetLifecycle:
         kernel_path.write_text("fake kernel")
 
         mock_resolve_kernel.return_value = kernel_path
+        mock_resolve_image.return_value = image_path
 
         # Mock network
         from mvmctl.models.network import NetworkConfig
@@ -198,15 +200,16 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.api.vms.allocate_network_ip")
     @patch("mvmctl.api.vms.release_network_ip")
     @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.api.assets.resolve_kernel_path")
+    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vms._resolve_kernel_path")
     @patch("mvmctl.api.vms._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
-    @pytest.mark.skip(reason="TODO: Requires test asset seeding fixture")
     def test_nocloud_net_remove_cleanup(
         self,
         mock_get_vm_dir,
         mock_write_pid,
         mock_resolve_kernel,
+        mock_resolve_image,
         mock_setup_chain,
         mock_release_ip,
         mock_alloc_ip,
@@ -238,6 +241,7 @@ class TestFullNocloudNetLifecycle:
         kernel_path.write_text("fake kernel")
 
         mock_resolve_kernel.return_value = kernel_path
+        mock_resolve_image.return_value = image_path
 
         # Mock network
         from mvmctl.models.network import NetworkConfig
@@ -323,9 +327,8 @@ class TestMultipleVMsDifferentPorts:
     @patch("mvmctl.api.vms.NoCloudNetServerManager")
     @patch("mvmctl.api.vms.add_nocloud_input_rule")
     @patch("mvmctl.api.vms.subprocess.Popen")
-    @patch("mvmctl.api.assets.resolve_image_path")
-    @patch("mvmctl.api.assets.resolve_kernel_path")
-    @pytest.mark.skip(reason="TODO: Requires test asset seeding fixture")
+    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vms._resolve_kernel_path")
     def test_multiple_vms_different_ports(
         self,
         mock_resolve_kernel,
@@ -501,10 +504,9 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.vms.allocate_network_ip")
     @patch("mvmctl.api.vms.release_network_ip")
     @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.api.assets.resolve_image_path")
-    @patch("mvmctl.api.assets.resolve_kernel_path")
+    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vms._resolve_kernel_path")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
-    @pytest.mark.skip(reason="TODO: Requires test asset seeding fixture")
     def test_failure_cleanup_on_firewall_error(
         self,
         mock_get_vm_dir,
@@ -609,11 +611,10 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.vms.allocate_network_ip")
     @patch("mvmctl.api.vms.release_network_ip")
     @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.api.assets.resolve_image_path")
-    @patch("mvmctl.api.assets.resolve_kernel_path")
+    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vms._resolve_kernel_path")
     @patch("mvmctl.api.vms._write_pid_file")
     @patch("mvmctl.utils.fs.get_vm_dir_by_hash")
-    @pytest.mark.skip(reason="TODO: Requires test asset seeding fixture")
     def test_failure_cleanup_on_firecracker_error(
         self,
         mock_get_vm_dir,
@@ -719,9 +720,8 @@ class TestVMWithoutNocloudNet:
     @patch("mvmctl.api.vms.add_nocloud_input_rule")
     @patch("mvmctl.api.vms.subprocess.Popen")
     @patch("mvmctl.api.vms.create_cloud_init_iso")
-    @patch("mvmctl.api.assets.resolve_image_path")
-    @patch("mvmctl.api.assets.resolve_kernel_path")
-    @pytest.mark.skip(reason="TODO: Requires test asset seeding fixture")
+    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vms._resolve_kernel_path")
     def test_vm_with_disabled_mode_no_nocloud(
         self,
         mock_resolve_kernel,
