@@ -109,7 +109,7 @@ class TestTableCreation:
             "compression_ratio": "REAL",
             "compressed_format": "TEXT",
             "pulled_at": "TIMESTAMP",
-            "is_default": "BOOLEAN",
+            "is_default": "INTEGER",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
         }
@@ -131,7 +131,7 @@ class TestTableCreation:
             "arch": "TEXT",
             "type": "TEXT",
             "path": "TEXT",
-            "is_default": "BOOLEAN",
+            "is_default": "INTEGER",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
         }
@@ -152,7 +152,7 @@ class TestTableCreation:
             "full_version": "TEXT",
             "ci_version": "TEXT",
             "path": "TEXT",
-            "is_default": "BOOLEAN",
+            "is_default": "INTEGER",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
         }
@@ -172,10 +172,10 @@ class TestTableCreation:
             "subnet": "TEXT",
             "bridge": "TEXT",
             "ipv4_gateway": "TEXT",
-            "bridge_active": "BOOLEAN",
+            "bridge_active": "INTEGER",
             "nat_gateways": "TEXT",
-            "nat_enabled": "BOOLEAN",
-            "is_default": "BOOLEAN",
+            "nat_enabled": "INTEGER",
+            "is_default": "INTEGER",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
         }
@@ -232,6 +232,12 @@ class TestTableCreation:
             "disk_size_mib": "INTEGER",
             "rootfs_path": "TEXT",
             "rootfs_suffix": "TEXT",
+            "enable_api_socket": "INTEGER",
+            "enable_pci": "INTEGER",
+            "lsm_flags": "TEXT",
+            "enable_logging": "INTEGER",
+            "enable_metrics": "INTEGER",
+            "enable_console": "INTEGER",
             "created_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
         }
@@ -247,10 +253,10 @@ class TestTableCreation:
 
         expected_columns = {
             "id": "INTEGER",
-            "initialized": "BOOLEAN",
-            "mvm_group_created": "BOOLEAN",
-            "sudoers_configured": "BOOLEAN",
-            "default_network_created": "BOOLEAN",
+            "initialized": "INTEGER",
+            "mvm_group_created": "INTEGER",
+            "sudoers_configured": "INTEGER",
+            "default_network_created": "INTEGER",
             "initialized_at": "TIMESTAMP",
             "updated_at": "TIMESTAMP",
         }
@@ -274,7 +280,7 @@ class TestTableCreation:
             "mechanism": "TEXT",
             "original_value": "TEXT",
             "applied_value": "TEXT",
-            "reverted": "BOOLEAN",
+            "reverted": "INTEGER",
             "reverted_at": "TIMESTAMP",
             "revert_mechanism": "TEXT",
             "change_order": "INTEGER",

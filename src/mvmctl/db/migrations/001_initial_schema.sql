@@ -18,7 +18,7 @@ CREATE TABLE images (
     compression_ratio REAL,
     compressed_format TEXT,
     pulled_at TIMESTAMP,
-    is_default BOOLEAN DEFAULT FALSE,
+    is_default INTEGER DEFAULT 0,  -- Boolean: 0 or 1
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -35,7 +35,7 @@ CREATE TABLE kernels (
     arch TEXT NOT NULL,
     type TEXT,
     path TEXT NOT NULL,
-    is_default BOOLEAN DEFAULT FALSE,
+    is_default INTEGER DEFAULT 0,  -- Boolean: 0 or 1
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -51,7 +51,7 @@ CREATE TABLE binaries (
     full_version TEXT,
     ci_version TEXT,
     path TEXT NOT NULL,
-    is_default BOOLEAN DEFAULT FALSE,
+    is_default INTEGER DEFAULT 0,  -- Boolean: 0 or 1
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -66,10 +66,10 @@ CREATE TABLE networks (
     subnet TEXT NOT NULL,
     bridge TEXT NOT NULL,
     ipv4_gateway TEXT NOT NULL,
-    bridge_active BOOLEAN DEFAULT FALSE,
+    bridge_active INTEGER DEFAULT 0,  -- Boolean: 0 or 1
     nat_gateways TEXT NULL,
-    nat_enabled BOOLEAN DEFAULT FALSE,
-    is_default BOOLEAN DEFAULT FALSE,
+    nat_enabled INTEGER DEFAULT 0,  -- Boolean: 0 or 1
+    is_default INTEGER DEFAULT 0,  -- Boolean: 0 or 1
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -120,6 +120,12 @@ CREATE TABLE vm_instances (
     disk_size_mib INTEGER,
     rootfs_path TEXT,
     rootfs_suffix TEXT,
+    enable_api_socket INTEGER,  -- Boolean: 0 or 1
+    enable_pci INTEGER,  -- Boolean: 0 or 1
+    lsm_flags TEXT,
+    enable_logging INTEGER,  -- Boolean: 0 or 1
+    enable_metrics INTEGER,  -- Boolean: 0 or 1
+    enable_console INTEGER,  -- Boolean: 0 or 1
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE RESTRICT,
@@ -133,10 +139,10 @@ CREATE INDEX idx_vm_instances_status ON vm_instances(status);
 -- HOST_STATE: Host initialization state (singleton, always id=1)
 CREATE TABLE host_state (
     id INTEGER PRIMARY KEY,
-    initialized BOOLEAN DEFAULT FALSE,
-    mvm_group_created BOOLEAN DEFAULT FALSE,
-    sudoers_configured BOOLEAN DEFAULT FALSE,
-    default_network_created BOOLEAN DEFAULT FALSE,
+    initialized INTEGER DEFAULT 0,  -- Boolean: 0 or 1
+    mvm_group_created INTEGER DEFAULT 0,  -- Boolean: 0 or 1
+    sudoers_configured INTEGER DEFAULT 0,  -- Boolean: 0 or 1
+    default_network_created INTEGER DEFAULT 0,  -- Boolean: 0 or 1
     initialized_at TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -150,7 +156,7 @@ CREATE TABLE host_state_changes (
     mechanism TEXT NOT NULL,
     original_value TEXT,
     applied_value TEXT NOT NULL,
-    reverted BOOLEAN DEFAULT FALSE,
+    reverted INTEGER DEFAULT 0,  -- Boolean: 0 or 1
     reverted_at TIMESTAMP,
     revert_mechanism TEXT,
     change_order INTEGER NOT NULL,
