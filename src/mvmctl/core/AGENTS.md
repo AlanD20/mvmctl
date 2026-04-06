@@ -151,13 +151,95 @@ Called in `api/` layer before entering core, or explicitly in core for ops needi
 
 ## DEFAULT VALUE POLICY
 
-The **Core layer MUST NOT have default values in function parameters**. Core functions must operate on explicit values passed from the API layer. The CLI layer is the **only** place where defaults are resolved at runtime via `_get_vm_defaults()` or similar patterns.
+The **Core layer MUST NOT have default values in function parameters**. Core functions must operate on explicit values passed from the API layer. 
 
-Core functions should never provide fallback defaults because:
-- It violates the layer boundary (defaults belong in CLI only)
-- It creates hidden behavior that bypasses user configuration
-- It makes testing harder by introducing implicit state
-- It duplicates default logic that should be centralized in CLI
+### Database Query Boundary (CRITICAL RULE)
+
+**Core layer MUST NEVER query the database.** This is a strict architectural boundary:
+
+| Layer | Database Access | Policy |
+|-------|----------------|--------|
+| **CLI** | NO | Passes `None` or explicit values to API |
+| **API** | YES | Queries DB when CLI passes `None` for DB-backed defaults |
+| **Core** | **NO** — ABSOLUTELY FORBIDDEN | Receives explicit values from API only |
+
+### Data Flow for Database-Backed Defaults
+
+For values that live in the database (default image, kernel, binary, network):
+
+```
+User Input → CLI Layer → API Layer (queries DB) → Core Layer (explicit values)
+     ↓            ↓              ↓                        ↓
+  --image    image=None    db.get_default_image()   image="/path/to/img"
+```
+
+**Core receives explicit values only.** API layer handles all database resolution.
+
+### Example: Correct Data Flow
+
+**API layer (resolves from DB):**
+```python
+# api/vms.py — API resolves DB defaults
+def create_vm(image: Optional[str] = None, ...) -> VMInstance:
+    if image is None:
+        # API queries database
+        db = MVMDatabase()
+        default = db.get_default_image()
+        if default:
+            image = default.path
+        else:
+            raise AssetNotFoundError("No default image")
+    
+    # Pass explicit value to Core
+    return _core_create_vm(image=image, ...)  # image is NEVER None here
+```
+
+**Core layer (explicit values only):**
+```python
+# core/vm_lifecycle.py — Core receives explicit values
+def create_vm(image: str, ...) -> VMInstance:  # str, not Optional[str]
+    # image is guaranteed to be set by API layer
+    # Core focuses on business logic only
+    ...
+```
+
+### What Core Layer Receives
+
+Core functions receive:
+- **Explicit values from API** — never `None` for required parameters
+- **No database queries** — Core has no DB dependencies
+- **No default resolution** — API resolves all defaults before calling Core
+
+### Why This Matters
+
+Core functions should never:
+- Query the database — this is API's responsibility
+- Provide fallback defaults — API resolves all defaults
+- Handle `None` for required DB-backed parameters — API ensures values are set
+
+Core layer violations create:
+- Hidden dependencies on database state
+- Testing difficulties (need to mock DB in Core tests)
+- Architectural boundary violations
+- Duplicated default logic
+
+### Verification Checklist
+
+Before submitting Core changes:
+- [ ] **NO imports from `mvmctl.core.mvm_db`** (except for asset registration in specific modules)
+- [ ] **NO `MVMDatabase()` instantiation** in Core functions
+- [ ] Function parameters receive explicit values, not `Optional[T]` for required params
+- [ ] API layer guarantees required values are set before calling Core
+- [ ] Core raises typed exceptions, never returns None for required data
+
+### Enforcement
+
+CI checks will reject PRs containing:
+- Core code that imports from `mvmctl.core.mvm_db` (except metadata.py for asset registration)
+- Core functions with default parameter values
+- Core functions that handle `None` for required DB-backed parameters
+
+**NO EXCEPTIONS. NO WORKAROUNDS. NO DISCUSSION.**
 
 ## KNOWN VIOLATIONS
 

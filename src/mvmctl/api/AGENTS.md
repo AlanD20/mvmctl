@@ -84,12 +84,109 @@ The config file JSON includes a `firecracker_config` key with the Firecracker bo
 
 ## DEFAULT VALUE POLICY
 
-The **API layer MUST NOT have default values in function parameters**. All API functions must receive explicit values from the CLI layer. The CLI is responsible for:
-1. Using `None` as typer option defaults
-2. Runtime resolution via `_get_vm_defaults()` or similar
-3. Passing the resolved explicit values to API functions
+The **API layer MUST NOT have default values in function parameters**. All API functions must receive explicit values from the CLI layer. 
 
-API functions should never provide fallback defaults because:
-- It bypasses user configuration
-- It creates inconsistency between what CLI shows and what API uses
-- It duplicates default logic that belongs only in CLI
+### Database Query Responsibility (CRITICAL RULE)
+
+**The API layer is EXCLUSIVELY responsible for all database queries.** This is non-negotiable:
+
+| Layer | Database Access Policy | Violation Consequence |
+|-------|----------------------|----------------------|
+| **CLI** | **NO database queries** — passes `None` or explicit values | Architectural breach — CLI is a client, not a data resolver |
+| **API** | **MUST query database** when CLI passes `None` for DB-backed values | API owns the database boundary |
+| **Core** | **NO database queries** — receives explicit values from API | Core operates on explicit inputs only |
+
+### Database-Backed Defaults Resolution Flow
+
+When a default value lives in the database (e.g., default image, kernel, binary, network), the correct flow is:
+
+```
+CLI Layer:
+  1. Parse typer option with default=None
+  2. Pass None to API if user didn't specify
+
+API Layer:
+  1. Receive None from CLI
+  2. Query database to resolve default
+  3. Pass explicit value to Core
+
+Core Layer:
+  1. Receive explicit value from API
+  2. Execute business logic
+```
+
+### Example: Correct vs Incorrect
+
+**INCORRECT — CLI resolves database default:**
+```python
+# cli/vm.py (WRONG)
+def _resolve_default_image() -> str | None:
+    from mvmctl.api.metadata import get_default_image_entry
+    entry = get_default_image_entry()  # ❌ CLI querying DB
+    return entry[0] if entry else None
+
+@app.command()
+def create(image: Optional[str] = typer.Option(None, "--image")):
+    effective = image or _resolve_default_image()  # ❌ CLI resolving
+    create_vm(image=effective)  # Passes resolved value
+```
+
+**CORRECT — API resolves database default:**
+```python
+# cli/vm.py (CORRECT)
+@app.command()
+def create(image: Optional[str] = typer.Option(None, "--image")):
+    create_vm(image=image)  # ✅ Passes None directly
+
+# api/vms.py (CORRECT)
+def create_vm(image: Optional[str] = None, ...) -> VMInstance:
+    if image is None:
+        image = _resolve_default_image_from_db()  # ✅ API queries DB
+    check_privileges(...)  # API does privilege check
+    return _core_create_vm(image=image, ...)
+```
+
+### What the API Layer Must Do
+
+The CLI is responsible for:
+1. Using `None` as typer option defaults
+2. Passing user-provided values OR `None` to API
+
+The API layer is responsible for:
+1. **Querying the database** when CLI passes `None` for DB-backed values (image, kernel, binary, network)
+2. Adding `check_privileges()` before privileged operations
+3. Passing explicit values to Core — never pass `None` to Core for required parameters
+
+The Core layer receives:
+1. Explicit values from API — never `None` for required parameters
+2. No database queries — Core has no DB access
+
+### Why This Matters
+
+API functions should never receive fallback defaults because:
+- It violates the layer boundary (CLI passes `None`, API resolves from DB)
+- It creates hidden behavior that bypasses user configuration
+- It makes testing harder by introducing implicit state
+- It duplicates default logic that should be centralized in API layer
+
+**SQLite (`$MVM_CACHE_DIR/mvmdb.db`) is the canonical source of truth** for all binary/kernel/image/network defaults. The API layer is the ONLY layer that should query SQLite.
+
+### Verification Checklist
+
+Before submitting any API change:
+- [ ] **NO default values in API function parameters** (e.g., `def func(arg=DEFAULT)` is forbidden)
+- [ ] API functions accept `Optional[T]` for DB-backed defaults
+- [ ] When CLI passes `None`, API queries database via `mvmctl.core.mvm_db.MVMDatabase`
+- [ ] API never passes `None` to Core for required parameters
+- [ ] API adds `check_privileges()` before privileged operations
+- [ ] All database queries happen in API layer, never in CLI or Core
+
+### Enforcement
+
+CI checks will reject PRs containing:
+- Default values in API function parameters
+- CLI code that queries the database (even via API wrappers)
+- Core code that queries the database
+- API functions that pass `None` to Core for required parameters
+
+**NO EXCEPTIONS. NO WORKAROUNDS. NO DISCUSSION.**
