@@ -1163,6 +1163,11 @@ def create_vm(
             vm_instance.console_relay_pid = console_relay_pid
             vm_instance.console_socket_path = console_socket_path
             manager.register(vm_instance, binary_id)
+
+            from mvmctl.utils.audit import log_audit
+
+            log_audit("vm.create", f"name={name}")
+
             return vm_instance
         except (VMCreateError, NetworkError, CloudInitError, MVMError):
             _cleanup_vm_creation_resources(
@@ -1291,6 +1296,10 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
         NoCloudNetServerManager().cleanup_orphans()
     except Exception:
         pass
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("vm.remove", f"name={name}")
 
 
 def snapshot_vm(name: str, mem_out: Path, state_out: Path) -> None:
@@ -1507,6 +1516,10 @@ def ssh_vm(
         raise VMNotFoundError(f"VM '{name}' not found")
     if not vm.ipv4:
         raise MVMError(f"VM '{name}' has no IP address")
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("vm.ssh", f"name={name},user={user}")
 
     return connect_to_vm(
         ip=vm.ipv4,

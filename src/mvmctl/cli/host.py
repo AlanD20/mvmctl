@@ -134,10 +134,6 @@ def init_cmd() -> None:
             print_error(str(e))
         raise typer.Exit(code=1)
 
-    from mvmctl.utils.audit import log_audit
-
-    log_audit("host.init", f"changes={len(changes)}")
-
     if not changes:
         print_info("Host already configured — nothing to do.")
     else:
@@ -288,10 +284,6 @@ def reset_cmd(
     except MVMError as e:
         handle_mvm_error(e)
 
-    from mvmctl.utils.audit import log_audit
-
-    log_audit("host.reset")
-
     if summary:
         for item in summary:
             if item.startswith("Warning:"):
@@ -331,10 +323,6 @@ def clean_ready_pool_cmd(
         typer.confirm("Proceed with cleaning ready pool?", abort=True)
 
     removed_count = clean_ready_pool()
-
-    from mvmctl.utils.audit import log_audit
-
-    log_audit("host.clean_ready_pool", f"removed={removed_count}")
 
     if removed_count > 0:
         print_success(f"Ready pool cleaned: removed {removed_count} image(s).")

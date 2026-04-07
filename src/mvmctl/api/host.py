@@ -200,6 +200,10 @@ def init_host(cache_dir: Path | None = None) -> list[HostStateChange]:
 
     chown_to_real_user(cache_dir)
 
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("host.init", f"changes={len(changes)}")
+
     return changes
 
 
@@ -413,6 +417,10 @@ def clean_host(cache_dir: Path | None = None) -> list[str]:
     if not summary:
         summary.append("Warning: skipped host networking cleanup (already clean)")
 
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("host.clean", f"actions={len(summary)}")
+
     return summary
 
 
@@ -460,6 +468,10 @@ def reset_host(cache_dir: Path | None = None) -> list[str]:
             summary.append("Removed host state snapshot")
         except OSError:
             pass
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("host.reset", f"actions={len(summary)}")
 
     return summary
 

@@ -313,6 +313,10 @@ def create_network(
     if os.getuid() == 0:
         host_setup.save_iptables_rules()
 
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("network.create", f"name={name},subnet={subnet}")
+
     return config
 
 
@@ -372,6 +376,10 @@ def remove_network(name: str) -> None:
     # Persist iptables rules if root
     if os.getuid() == 0:
         host_setup.save_iptables_rules()
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("network.remove", f"name={name}")
 
 
 def inspect_network(name: str) -> dict[str, Any]:

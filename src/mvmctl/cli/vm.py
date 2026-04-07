@@ -481,9 +481,6 @@ def create(
             keep_cloud_init_iso=keep_cloud_init_iso,
             nocloud_net_port=nocloud_net_port if nocloud_net_port is not None else 0,
         )
-        from mvmctl.utils.audit import log_audit
-
-        log_audit("vm.create", f"name={name}")
         print_success(f"VM '{name}' started (PID {vm.pid})")
         print_info(f"  SSH ready in ~30-60s: mvm vm ssh --name {name}")
         print_info(f"  Logs: mvm vm logs --name {name} --type os --follow")
@@ -569,9 +566,6 @@ def rm(
     for vm in targets:
         try:
             remove_vm(vm.name)
-            from mvmctl.utils.audit import log_audit
-
-            log_audit("vm.remove", f"name={vm.name}")
             print_success(f"VM '{vm.name}' removed")
             removed_count += 1
         except MVMError as e:

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mvmctl.core.key_manager import (
     KeyInfo,
-    add_key,
-    create_key,
-    export_key,
+    add_key as _core_add_key,
+    create_key as _core_create_key,
+    export_key as _core_export_key,
     get_key,
     inspect_key,
     list_keys,
-    remove_key,
+    remove_key as _core_remove_key,
     resolve_key_input,
 )
 from mvmctl.core.key_manager import (
@@ -39,8 +41,63 @@ __all__ = [
 ]
 
 
+def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> KeyInfo:
+    """Add an existing SSH key to the registry."""
+    result = _core_add_key(name, pub_key_path, overwrite)
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("key.add", f"name={result.name}")
+
+    return result
+
+
+def create_key(
+    name: str,
+    output_dir: str | Path | None = None,
+    comment: str | None = None,
+    overwrite: bool = False,
+) -> tuple[KeyInfo, Path]:
+    """Create a new SSH keypair and add it to the registry."""
+    result = _core_create_key(name, output_dir, comment, overwrite)
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("key.create", f"name={name}")
+
+    return result
+
+
+def export_key(
+    name: str,
+    destination: str | Path | None = None,
+    overwrite: bool = False,
+) -> tuple[Path, Path]:
+    """Export a key from the registry to a destination."""
+    result = _core_export_key(name, destination, overwrite)
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("key.export", f"name={name}")
+
+    return result
+
+
+def remove_key(name: str) -> None:
+    """Remove a key from the registry."""
+    _core_remove_key(name)
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("key.remove", f"name={name}")
+
+
 def set_default_keys(names: list[str]) -> None:
     _core_set_default_keys(names)
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("key.set_defaults", f"count={len(names)}")
 
 
 def get_default_keys() -> list[str]:
@@ -49,6 +106,10 @@ def get_default_keys() -> list[str]:
 
 def clear_default_keys() -> None:
     _core_clear_default_keys()
+
+    from mvmctl.utils.audit import log_audit
+
+    log_audit("key.clear_defaults")
 
 
 def resolve_key_inputs(inputs: list[str]) -> list[str]:
