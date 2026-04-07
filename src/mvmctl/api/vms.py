@@ -1917,9 +1917,9 @@ def export_vm_config(name: str) -> "VMExportConfig":
     if vm.image_id:
         cache_dir = get_cache_dir()
         try:
-            matches = find_images_by_id_prefix(cache_dir, vm.image_id)
-            if matches:
-                _, meta = matches[0]
+            image_matches = find_images_by_id_prefix(cache_dir, vm.image_id)
+            if image_matches:
+                _, meta = image_matches[0]
                 image_os_slug = meta.get("os_slug", "")
                 image_arch = meta.get("arch", "")
         except Exception:
@@ -1944,9 +1944,9 @@ def export_vm_config(name: str) -> "VMExportConfig":
     if vm.kernel_id:
         cache_dir = get_cache_dir()
         try:
-            matches = find_kernels_by_id_prefix(cache_dir, vm.kernel_id)
-            if matches:
-                _, meta = matches[0]
+            kernel_matches = find_kernels_by_id_prefix(cache_dir, vm.kernel_id)
+            if kernel_matches:
+                _, meta = kernel_matches[0]
                 kernel_version = meta.get("version")
                 kernel_arch = meta.get("arch")
                 kernel_type = meta.get("type")
