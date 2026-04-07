@@ -152,8 +152,8 @@ class VMExportConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary, omitting None values for clean export."""
-        raw = asdict(self)
-        return _omit_none(raw)
+        raw: dict[str, Any] = asdict(self)
+        return _omit_none(raw)  # type: ignore[no-any-return]
 
     def to_json_file(self, path: Path) -> None:
         """Export to JSON file (creates parent directories if needed)."""
@@ -182,7 +182,7 @@ class VMExportConfig:
         ]:
             if field_name in data and isinstance(data[field_name], dict):
                 sub_data = data[field_name]
-                sub_known = {f for f in field_class.__dataclass_fields__}
+                sub_known = {f for f in field_class.__dataclass_fields__}  # type: ignore[attr-defined]
                 sub_filtered = {k: v for k, v in sub_data.items() if k in sub_known}
                 sub_configs[field_name] = field_class(**sub_filtered)
 

@@ -246,30 +246,30 @@ def create(
         merged = merge_cli_overrides(
             base_config,
             name=name,
-            image=image,
-            kernel=kernel,
+            os_slug=image,
+            kernel_version=kernel,
             vcpus=vcpus,
             mem=mem,
             ip=ip,
-            network=network_name,
+            network_name=network_name,
             mac=mac,
             ssh_key=ssh_key,
             user=user,
             enable_pci=enable_pci,
-            firecracker_bin=firecracker_bin,
+            binary_name=firecracker_bin,
         )
         name = merged.name
-        image = merged.image
-        kernel = merged.kernel
-        vcpus = merged.vcpus
-        mem = merged.mem
-        ip = merged.ip
-        network_name = merged.network
-        mac = merged.mac
-        ssh_key = merged.ssh_key
-        user = merged.user
-        enable_pci = merged.enable_pci
-        firecracker_bin = merged.firecracker_bin
+        image = merged.image.os_slug
+        kernel = merged.kernel.version
+        vcpus = merged.compute.vcpus
+        mem = merged.compute.mem
+        ip = merged.network.ip
+        network_name = merged.network.name
+        mac = merged.network.mac
+        ssh_key = merged.cloud_init.ssh_key
+        user = merged.cloud_init.user
+        enable_pci = merged.firecracker.enable_pci
+        firecracker_bin = merged.binary.name
 
     _defaults = _get_vm_defaults()
     effective_vcpus: int = vcpus if vcpus is not None else _defaults.vcpu_count
