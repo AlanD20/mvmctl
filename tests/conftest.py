@@ -110,6 +110,25 @@ def _block_real_sudo_invocations(request, monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.fixture(autouse=True)
+def _mock_privilege_checks(request, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock privilege checks so tests don't require the mvm group.
+
+    Skipped for system tests (marked with @pytest.mark.system).
+    """
+    # Skip for system tests
+    if request.node.get_closest_marker("system"):
+        return
+
+    from unittest.mock import MagicMock
+
+    # Mock check_privileges and check_privileges_interactive
+    monkeypatch.setattr("mvmctl.core.host_privilege.check_privileges", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        "mvmctl.api.host.check_privileges_interactive", MagicMock(return_value=None)
+    )
+
+
+@pytest.fixture(autouse=True)
 def _setup_database(request, isolate_config_and_cache) -> None:  # type: ignore[return]
     """Set up SQLite database with migrations for each test.
 
