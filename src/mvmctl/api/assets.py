@@ -25,8 +25,15 @@ from mvmctl.core.binary_manager import (
 from mvmctl.core.binary_manager import (
     set_active_version as _core_set_active_version,
 )
-from mvmctl.core.image import fetch_image as _core_fetch_image
-from mvmctl.core.image import get_filesystem_uuid, import_image, load_images_config
+from mvmctl.core.image import (
+    ImageImportResult,
+    get_filesystem_uuid,
+    import_image,
+    load_images_config,
+)
+from mvmctl.core.image import (
+    fetch_image as _core_fetch_image,
+)
 from mvmctl.core.kernel import (
     build_kernel_pipeline,
     download_firecracker_kernel,
@@ -49,7 +56,7 @@ from mvmctl.core.metadata import (
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import Binary
 from mvmctl.exceptions import AssetNotFoundError, KernelError, MVMError
-from mvmctl.models.image import ImageImportSpec
+from mvmctl.models.image import ImageImportSpec, ImageSpec
 from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
 from mvmctl.utils.full_hash import generate_full_hash_kernel
 
@@ -298,12 +305,12 @@ def remove_version(version: str, bin_dir: Path | None = None) -> None:
 
 
 def fetch_image(
-    spec,
+    spec: ImageSpec,
     output_dir: Path,
     force: bool = False,
     partition: int | None = None,
     skip_optimization: bool = False,
-):
+) -> ImageImportResult:
     """Fetch and convert an image.
 
     Args:

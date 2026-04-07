@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
@@ -310,7 +311,7 @@ def restore_host(cache_dir: Path | None = None) -> list[HostStateChange]:
     return _restore_host(db)
 
 
-def _list_networks_from_api() -> list:
+def _list_networks_from_api() -> list[Any]:
     """Get list of networks from api/network module.
 
     Returns:
