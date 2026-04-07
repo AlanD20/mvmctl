@@ -2228,11 +2228,12 @@ class TestAddUserToGroupErrorPaths:
 
 
 class TestPruneHostErrorPaths:
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host.clean_host", return_value=["cleaned"])
     @patch("mvmctl.api.host._restore_host")
     @patch("mvmctl.api.host._state_file")
     def test_prune_host_restore_fails(
-        self, mock_state_file, mock_restore, mock_clean, tmp_path, db
+        self, mock_state_file, mock_restore, mock_clean, mock_check_priv, tmp_path, db
     ):
         """prune_host catches HostError from restore_host but still returns clean summary and removes state."""
         mock_restore.side_effect = HostError("fake restore error")
@@ -2250,13 +2251,14 @@ class TestPruneHostErrorPaths:
 
 
 class TestResetHostErrorPaths:
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host.clean_host", return_value=["cleaned"])
     @patch("mvmctl.api.host._restore_host", side_effect=HostError("fake restore error"))
     @patch("mvmctl.api.host._remove_sudoers", side_effect=HostError("fake sudoers error"))
     @patch("mvmctl.api.host._remove_group", side_effect=HostError("fake group error"))
     @patch("mvmctl.api.host._state_file")
     def test_reset_host_all_errors(
-        self, mock_state_file, mock_rg, mock_rs, mock_rh, mock_ch, tmp_path, db
+        self, mock_state_file, mock_rg, mock_rs, mock_rh, mock_ch, mock_check_priv, tmp_path, db
     ):
         """reset_host catches all intermediary HostErrors and still returns a summary."""
         mock_sf = MagicMock()

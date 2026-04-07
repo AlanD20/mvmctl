@@ -179,7 +179,7 @@ class TestHostWithSubprocessMocking:
                                                 mock_create_group.return_value = True
                                                 mock_add_user.return_value = True
                                                 with patch(
-                                                    "mvmctl.core.host_setup._persist_sysctl",
+                                                    "mvmctl.api.host._persist_sysctl",
                                                     return_value=None,
                                                 ):
                                                     with patch(
@@ -197,11 +197,13 @@ class TestHostWithSubprocessMocking:
 
                             assert len(result) > 0
 
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host._restore_host")
-    def test_reset_with_subprocess_mocking(self, mock_restore):
+    def test_reset_with_subprocess_mocking(self, mock_restore, mock_check_priv):
         from mvmctl.api.host import reset_host
 
         mock_restore.return_value = []
+        mock_check_priv.return_value = None
 
         with patch("mvmctl.api.host.clean_host", return_value=[]):
             with patch("mvmctl.api.host._remove_sudoers", return_value=False):
