@@ -1149,6 +1149,7 @@ def image_fetch(
             compressed_size=result.compressed_size,
             original_size=result.original_size,
             compression_ratio=result.compression_ratio,
+            arch=spec.arch
         )
         print_success(f"Image ready: {result_path}")
         print_info(f"  ID: {short_id}")

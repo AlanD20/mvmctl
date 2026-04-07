@@ -1427,14 +1427,12 @@ def test_handle_squashfs_success(mock_which: MagicMock, mock_run: MagicMock, tmp
 def test_handle_squashfs_uses_size_mib(mock_which: MagicMock, mock_run: MagicMock, tmp_path: Path):
     download_path = tmp_path / "image.squashfs"
     final_path = tmp_path / "image.ext4"
-    mock_which.return_value = True  # virt-make-fs is available
+    mock_which.return_value = True
 
     def side_effect(cmd, **kwargs):
         mock_result = MagicMock()
-        if cmd[0] == "unsquashfs":
-            mock_result.returncode = 0
-        elif cmd[0] == "virt-make-fs":
-            mock_result.returncode = 0
+        if cmd[0] == "du":
+            mock_result.stdout = "512\t/some/dir\n"
         else:
             mock_result.returncode = 0
         return mock_result
@@ -1444,8 +1442,8 @@ def test_handle_squashfs_uses_size_mib(mock_which: MagicMock, mock_run: MagicMoc
 
     _handle_squashfs(download_path, final_path, 2048)
 
-    virt_call = next(call for call in mock_run.call_args_list if call[0][0][0] == "virt-make-fs")
-    assert "+2048M" in virt_call[0][0]
+    truncate_call = next(call for call in mock_run.call_args_list if call[0][0][0] == "truncate")
+    assert "2560M" in truncate_call[0][0]
 
 
 @patch("mvmctl.core.image.subprocess.run")
@@ -1493,19 +1491,22 @@ def test_handle_squashfs_unsquashfs_not_found(mock_run: MagicMock, tmp_path: Pat
 @patch("mvmctl.core.image.subprocess.run")
 @patch("shutil.which")
 def test_handle_squashfs_mkfs_failure(mock_which: MagicMock, mock_run: MagicMock, tmp_path: Path):
-    """Test _handle_squashfs raises ImageError when mkfs.ext4 fails."""
     download_path = tmp_path / "image.squashfs"
     final_path = tmp_path / "image.ext4"
 
-    mock_which.return_value = True  # virt-make-fs is available
+    mock_which.return_value = True
     download_path.write_bytes(b"squashfs data")
 
     def side_effect(cmd, **kwargs):
         mock_result = MagicMock()
         if cmd[0] == "unsquashfs":
             mock_result.returncode = 0
-        elif cmd[0] == "virt-make-fs":
-            raise subprocess.CalledProcessError(1, "virt-make-fs", stderr="format failed")
+        elif cmd[0] == "du":
+            mock_result.stdout = "512\t/some/dir\n"
+        elif cmd[0] == "truncate":
+            mock_result.returncode = 0
+        elif cmd[0] == "mkfs.ext4":
+            raise subprocess.CalledProcessError(1, "mkfs.ext4", stderr="format failed")
         else:
             mock_result.returncode = 0
         return mock_result

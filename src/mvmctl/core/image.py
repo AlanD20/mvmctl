@@ -1032,20 +1032,34 @@ def _handle_squashfs(
         except FileNotFoundError as e:
             raise ImageError("unsquashfs not found. Install squashfs-tools.") from e
 
-        if not shutil.which("virt-make-fs"):
-            raise ImageError("virt-make-fs not found. Install libguestfs-tools package.")
+        if not shutil.which("mkfs.ext4"):
+            raise ImageError("mkfs.ext4 not found. Install e2fsprogs package.")
+
+        try:
+            du = subprocess.run(
+                ["du", "-s", "--block-size=1M", str(extract_dir)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            content_mb = int(du.stdout.split()[0])
+        except (subprocess.CalledProcessError, ValueError, IndexError):
+            content_mb = 0
+
+        image_size_mb = content_mb + minimum_rootfs_size
 
         try:
             subprocess.run(
-                [
-                    "virt-make-fs",
-                    "--type=ext4",
-                    "--format=raw",
-                    "--size",
-                    f"+{minimum_rootfs_size}M",
-                    str(extract_dir),
-                    str(final_path),
-                ],
+                ["truncate", "-s", f"{image_size_mb}M", str(final_path)],
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise ImageError("Failed to allocate ext4 image file") from e
+
+        try:
+            subprocess.run(
+                ["mkfs.ext4", "-d", str(extract_dir), "-L", "", str(final_path)],
                 capture_output=True,
                 text=True,
                 check=True,
