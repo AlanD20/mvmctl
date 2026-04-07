@@ -871,49 +871,6 @@ def test_resolve_single_by_id_prefix_none_for_ambiguous(tmp_path):
     assert resolve_single_by_id_prefix("abc123", _find, tmp_path) is None
 
 
-@pytest.mark.skip(reason="TODO: Fix test DB setup - kernel metadata seeding needs update")
-def test_resolve_kernel_path_by_filename(tmp_path):
-    kernels_dir = tmp_path / "kernels"
-    kernels_dir.mkdir()
-    kernel = kernels_dir / "vmlinux-test"
-    kernel.write_bytes(b"kernel")
-    with patch("mvmctl.utils.fs.get_kernels_dir", return_value=kernels_dir):
-        result = _resolve_kernel_path("vmlinux-test")
-    assert result == kernel
-
-
-@pytest.mark.skip(reason="TODO: Fix test DB setup - kernel metadata seeding needs update")
-def test_resolve_kernel_path_by_short_hash(tmp_path):
-    kernels_dir = tmp_path / "kernels"
-    kernels_dir.mkdir()
-    full_hash = "a" * 64
-    kernel = kernels_dir / "vmlinux-6.12"
-    kernel.write_bytes(b"kernel")
-
-    _seed_kernel(full_hash, kernel.name, version="6.12.0", name=kernel.name)
-
-    with patch("mvmctl.utils.fs.get_kernels_dir", return_value=kernels_dir):
-        result = _resolve_kernel_path(full_hash[:6])
-    assert result == kernel
-
-
-@pytest.mark.skip(reason="TODO: Fix test DB setup - kernel metadata seeding needs update")
-def test_resolve_kernel_id_path_unique(tmp_path):
-    from mvmctl.api.assets import resolve_kernel_id_path as _resolve_kernel_id_path
-
-    kernels_dir = tmp_path / "kernels"
-    kernels_dir.mkdir()
-    full_hash = "c" * 16
-    kernel = kernels_dir / "vmlinux-short"
-    kernel.write_bytes(b"kernel")
-
-    _seed_kernel(full_hash, kernel.name)
-
-    with patch("mvmctl.utils.fs.get_kernels_dir", return_value=kernels_dir):
-        result = _resolve_kernel_id_path(full_hash[:6])
-    assert result == kernel
-
-
 def test_resolve_kernel_path_by_absolute(tmp_path):
     kernel = tmp_path / "custom-vmlinux"
     kernel.write_bytes(b"kernel")

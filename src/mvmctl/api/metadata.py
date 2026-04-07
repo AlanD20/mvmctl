@@ -24,11 +24,14 @@ from mvmctl.core.metadata import set_default_binary_entry as _set_default_binary
 from mvmctl.core.metadata import set_default_image_by_os_slug as _set_default_image_by_os_slug
 from mvmctl.core.metadata import set_default_image_entry as _set_default_image_entry
 from mvmctl.core.metadata import update_image_entry as _update_image_entry
-from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.models.binary import BinaryRecord
-from mvmctl.models.image import ImageRecord
-from mvmctl.models.kernel import KernelRecord
-from mvmctl.models.network import NetworkRecord
+
+
+def _create_db():
+    """Create fresh MVMDatabase instance to respect environment changes."""
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    return MVMDatabase()
+
 
 __all__ = [
     "list_image_entries",
@@ -104,31 +107,24 @@ def find_kernels_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, d
 
 
 def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
-    """Get the default image entry from the database.
-
-    Returns:
-        Tuple of (image_id, metadata_dict) or None if no default is set.
-    """
-    db = MVMDatabase()
+    """Get the default image entry from the database."""
+    db = _create_db()
     image = db.get_default_image()
     if image is None:
         return None
+    from mvmctl.models.image import ImageRecord
+
     return image.id, ImageRecord.from_db(image).to_dict()
 
 
 def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Get the default kernel entry from the database.
-
-    Args:
-        cache_dir: Directory containing kernels subdirectory
-
-    Returns:
-        Tuple of (kernel_id, metadata_dict) or None if no default is set.
-    """
-    db = MVMDatabase()
+    """Get the default kernel entry from the database."""
+    db = _create_db()
     kernel = db.get_default_kernel()
     if kernel is None:
         return None
+    from mvmctl.models.kernel import KernelRecord
+
     return kernel.id, KernelRecord.from_db(kernel).to_dict()
 
 
@@ -167,15 +163,13 @@ def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
 
 
 def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
-    """Get the default binary entry from the database.
-
-    Returns:
-        Tuple of (version, metadata_dict) or None if no default is set.
-    """
-    db = MVMDatabase()
+    """Get the default binary entry from the database."""
+    db = _create_db()
     binary = db.get_default_binary("firecracker")
     if binary is None:
         return None
+    from mvmctl.models.binary import BinaryRecord
+
     return binary.version, BinaryRecord.from_db(binary).to_dict()
 
 
@@ -184,16 +178,11 @@ def set_default_binary_entry(cache_dir: Path, version: str) -> None:
 
 
 def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Get the default network entry from the database.
-
-    Args:
-        cache_dir: Directory containing network configs
-
-    Returns:
-        Tuple of (name, metadata_dict) or None if no default is set.
-    """
-    db = MVMDatabase()
+    """Get the default network entry from the database."""
+    db = _create_db()
     network = db.get_default_network()
     if network is None:
         return None
+    from mvmctl.models.network import NetworkRecord
+
     return network.name, NetworkRecord.from_db(network).to_dict()

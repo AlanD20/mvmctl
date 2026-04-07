@@ -617,9 +617,7 @@ def kernel_fetch(
         "--version",
         help="Kernel spec version from kernels.yaml (required if multiple specs share the same type)",
     ),
-    arch: Optional[str] = typer.Option(
-        None, "--arch", help="Architecture"
-    ),
+    arch: Optional[str] = typer.Option(None, "--arch", help="Architecture"),
     out: Optional[Path] = typer.Option(None, "--out", help="Output path/name"),
     name: Optional[str] = typer.Option(
         None,

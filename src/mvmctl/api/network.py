@@ -12,7 +12,6 @@ import os
 from typing import Any
 
 from mvmctl.api.host import check_privileges_interactive
-from mvmctl.api.metadata import get_default_network_entry
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET, MVM_POSTROUTING_CHAIN
 from mvmctl.core import host_setup, metadata
 from mvmctl.core import network as network_core
@@ -39,6 +38,19 @@ from mvmctl.utils.network import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _get_metadata_api():
+    """Lazy import metadata API to avoid circular import overhead."""
+    from mvmctl.api import metadata
+
+    return metadata
+
+
+def get_default_network_entry(cache_dir):
+    """Get default network entry (lazy loaded from metadata)."""
+    return _get_metadata_api().get_default_network_entry(cache_dir)
+
 
 __all__ = [
     "NetworkConfig",

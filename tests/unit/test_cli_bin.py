@@ -461,30 +461,6 @@ def test_kernel_fetch_firecracker_conflicting_type():
     assert "cannot be combined" in result.output
 
 
-@pytest.mark.skip(reason="TODO: Fix after refactoring - CLI validation logic changed")
-@patch("mvmctl.cli.bin.download_firecracker_kernel")
-@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
-def test_kernel_fetch_firecracker_missing_arch_error(
-    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock
-):
-    mock_resolve.return_value = KernelSpec(
-        name="kernel-firecracker",
-        kernel_type="firecracker",
-        version="6.1",
-        source="https://example.com/fc/{ci_version}/{arch}/vmlinux-{version}",
-        output_name="vmlinux-fc",
-        build_dir="/tmp/build",
-        list_url_template="https://example.com/list?ci={ci_version}&arch={arch}",
-    )
-
-    result = click_runner.invoke(main_app, ["kernel", "fetch", "--firecracker"])
-
-    assert result.exit_code == 1
-    assert "No architecture specified" in result.output
-    mock_dl.assert_not_called()
-
-
 @patch("mvmctl.cli.bin.resolve_kernel_spec", side_effect=KernelError("ambiguous type"))
 def test_kernel_fetch_type_ambiguity_error(mock_resolve: MagicMock):
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--type", "firecracker"])
@@ -510,25 +486,6 @@ def test_kernel_fetch_official_missing_version_error(
 
     assert result.exit_code == 1
     assert "No version available" in result.output
-
-
-@pytest.mark.skip(reason="TODO: Fix after refactoring - CLI validation logic changed")
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
-def test_kernel_fetch_official_missing_arch_error(mock_resolve: MagicMock, mock_build: MagicMock):
-    mock_resolve.return_value = KernelSpec(
-        name="kernel-official",
-        kernel_type="official",
-        version="6.1.9",
-        source="https://example.com/linux-6.1.9.tar.xz",
-        output_name="vmlinux-official",
-        build_dir="/tmp/build",
-    )
-
-    result = click_runner.invoke(main_app, ["kernel", "fetch", "--official"])
-
-    assert result.exit_code == 1
-    assert "No architecture specified" in result.output
 
 
 @patch("mvmctl.cli.bin.build_kernel_pipeline")

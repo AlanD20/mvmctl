@@ -1521,7 +1521,6 @@ def test_handle_squashfs_mkfs_failure(mock_which: MagicMock, mock_run: MagicMock
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="TODO: Fix test data - S3 XML response parsing changed")
 @patch("urllib.request.urlopen")
 @patch("urllib.request.Request")
 @patch("mvmctl.api.metadata.get_default_binary_entry")
@@ -1558,7 +1557,7 @@ def test_resolve_source_template_success(
         source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
 
-    result = _resolve_source_template(spec)
+    result = _resolve_source_template(spec, ci_version="v1.15")
 
     assert "ubuntu-24.04.squashfs" in result
     assert "s3.amazonaws.com" in result

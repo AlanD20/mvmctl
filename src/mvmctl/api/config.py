@@ -2,11 +2,6 @@
 
 from typing import Any
 
-from mvmctl.api.metadata import (
-    get_default_binary_entry,
-    get_default_image_entry,
-    get_default_kernel_entry,
-)
 from mvmctl.core.config import dump_config, load_config, validate_config
 from mvmctl.core.config_state import (
     get_defaults_config as _core_get_defaults_config,
@@ -23,6 +18,28 @@ from mvmctl.core.config_state import (
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.user_config import get_config_value, get_full_user_config, set_config_value
 from mvmctl.models.config import SystemDefaultsConfig
+
+
+def _get_metadata_module():
+    """Lazy import metadata module to avoid circular import overhead."""
+    from mvmctl.api import metadata
+
+    return metadata
+
+
+def get_default_binary_entry():
+    """Get default binary entry from metadata (lazy loaded)."""
+    return _get_metadata_module().get_default_binary_entry()
+
+
+def get_default_image_entry():
+    """Get default image entry from metadata (lazy loaded)."""
+    return _get_metadata_module().get_default_image_entry()
+
+
+def get_default_kernel_entry():
+    """Get default kernel entry from metadata (lazy loaded)."""
+    return _get_metadata_module().get_default_kernel_entry()
 
 
 def get_firecracker_config() -> dict[str, str]:
