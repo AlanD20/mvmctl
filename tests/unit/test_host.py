@@ -1892,6 +1892,7 @@ class TestCleanHost:
 
 
 class TestResetHost:
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host._state_file")
     @patch("mvmctl.api.host._remove_group", return_value=True)
     @patch("mvmctl.api.host._remove_sudoers", return_value=True)
@@ -1900,7 +1901,14 @@ class TestResetHost:
         "mvmctl.api.host.clean_host", return_value=["Removed network 'default' (bridge: mvm-br0)"]
     )
     def test_reset_host_full(
-        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
+        self,
+        mock_clean,
+        mock_restore,
+        mock_rm_sudoers,
+        mock_rm_group,
+        mock_state_file,
+        mock_check_priv,
+        db,
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
@@ -1911,13 +1919,21 @@ class TestResetHost:
         assert any("sudoers" in s for s in summary)
         assert any("group" in s for s in summary)
 
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host._state_file")
     @patch("mvmctl.api.host._remove_group", return_value=False)
     @patch("mvmctl.api.host._remove_sudoers", return_value=False)
     @patch("mvmctl.api.host._restore_host", side_effect=HostError("no state"))
     @patch("mvmctl.api.host.clean_host", return_value=[])
     def test_reset_host_nothing_to_do(
-        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
+        self,
+        mock_clean,
+        mock_restore,
+        mock_rm_sudoers,
+        mock_rm_group,
+        mock_state_file,
+        mock_check_priv,
+        db,
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = False
@@ -2335,6 +2351,7 @@ class TestPersistHostStateToDb:
 
 
 class TestPruneHostAdditional:
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host.clean_host", return_value=["cleaned"])
     @patch(
         "mvmctl.api.host._restore_host",
@@ -2349,7 +2366,7 @@ class TestPruneHostAdditional:
     )
     @patch("mvmctl.api.host._state_file")
     def test_prune_host_with_restore_changes(
-        self, mock_state_file, mock_restore, mock_clean, tmp_path, db
+        self, mock_state_file, mock_restore, mock_clean, mock_check_priv, tmp_path, db
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
@@ -2362,11 +2379,12 @@ class TestPruneHostAdditional:
         assert any("net.ipv4.ip_forward" in s for s in summary)
         assert "Removed host state snapshot" in summary
 
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host.clean_host", return_value=["cleaned"])
     @patch("mvmctl.api.host._restore_host", side_effect=HostError("no state"))
     @patch("mvmctl.api.host._state_file")
     def test_prune_host_unlink_oserror(
-        self, mock_state_file, mock_restore, mock_clean, tmp_path, db
+        self, mock_state_file, mock_restore, mock_clean, mock_check_priv, tmp_path, db
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
@@ -2503,6 +2521,7 @@ class TestCleanHostAdditional:
 
 
 class TestResetHostAdditional:
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host._state_file")
     @patch("mvmctl.api.host._remove_group", return_value=True)
     @patch("mvmctl.api.host._remove_sudoers", return_value=True)
@@ -2519,7 +2538,14 @@ class TestResetHostAdditional:
     )
     @patch("mvmctl.api.host.clean_host", return_value=[])
     def test_reset_host_with_restore_changes(
-        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
+        self,
+        mock_clean,
+        mock_restore,
+        mock_rm_sudoers,
+        mock_rm_group,
+        mock_state_file,
+        mock_check_priv,
+        db,
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True
@@ -2532,13 +2558,21 @@ class TestResetHostAdditional:
         assert any("sudoers" in s for s in summary)
         assert any("group" in s for s in summary)
 
+    @patch("mvmctl.api.host.check_privileges")
     @patch("mvmctl.api.host._state_file")
     @patch("mvmctl.api.host._remove_group", return_value=False)
     @patch("mvmctl.api.host._remove_sudoers", return_value=False)
     @patch("mvmctl.api.host._restore_host", return_value=[])
     @patch("mvmctl.api.host.clean_host", return_value=[])
     def test_reset_host_state_file_unlink_oserror(
-        self, mock_clean, mock_restore, mock_rm_sudoers, mock_rm_group, mock_state_file, db
+        self,
+        mock_clean,
+        mock_restore,
+        mock_rm_sudoers,
+        mock_rm_group,
+        mock_state_file,
+        mock_check_priv,
+        db,
     ):
         mock_sf = MagicMock()
         mock_sf.exists.return_value = True

@@ -154,32 +154,46 @@ class TestHostWithSubprocessMocking:
         state_dir.exists.return_value = True
         mock_state_dir.return_value = state_dir
 
-        with patch("mvmctl.core.host_setup.os.getuid", return_value=0):
-            with patch("mvmctl.core.host_setup.check_kvm_access", return_value=True):
-                with patch("mvmctl.core.host_setup.check_required_binaries", return_value=[]):
-                    with patch("mvmctl.core.host_setup._enable_ip_forward") as mock_ip_forward:
-                        with patch("mvmctl.core.host_setup._ensure_kvm_modules") as mock_kvm:
-                            with patch(
-                                "mvmctl.core.host_privilege._create_group"
-                            ) as mock_create_group:
+        with patch("mvmctl.api.host.check_privileges"):
+            with patch("mvmctl.core.host_privilege._validate_sudoers_binaries"):
+                with patch("mvmctl.api.host.check_cloud_localds", return_value=True):
+                    with patch("mvmctl.core.host_setup.os.getuid", return_value=0):
+                        with patch("mvmctl.core.host_setup.check_kvm_access", return_value=True):
+                            with patch("mvmctl.api.host.check_required_binaries", return_value=[]):
                                 with patch(
-                                    "mvmctl.core.host_privilege._add_user_to_group"
-                                ) as mock_add_user:
-                                    mock_ip_forward.return_value = _host_change(
-                                        "net.ipv4.ip_forward", "0", "1", "sysctl"
-                                    )
-                                    mock_kvm.return_value = []
-                                    mock_create_group.return_value = True
-                                    mock_add_user.return_value = True
+                                    "mvmctl.core.host_setup._enable_ip_forward"
+                                ) as mock_ip_forward:
                                     with patch(
-                                        "mvmctl.core.host_setup._persist_sysctl", return_value=None
-                                    ):
-                                        with patch("mvmctl.core.network.setup_mvm_chains"):
-                                            with patch("mvmctl.core.host_state._save_state"):
+                                        "mvmctl.core.host_setup._ensure_kvm_modules"
+                                    ) as mock_kvm:
+                                        with patch(
+                                            "mvmctl.core.host_privilege._create_group"
+                                        ) as mock_create_group:
+                                            with patch(
+                                                "mvmctl.core.host_privilege._add_user_to_group"
+                                            ) as mock_add_user:
+                                                mock_ip_forward.return_value = _host_change(
+                                                    "net.ipv4.ip_forward", "0", "1", "sysctl"
+                                                )
+                                                mock_kvm.return_value = []
+                                                mock_create_group.return_value = True
+                                                mock_add_user.return_value = True
                                                 with patch(
-                                                    "mvmctl.core.host_privilege._write_sudoers"
+                                                    "mvmctl.core.host_setup._persist_sysctl",
+                                                    return_value=None,
                                                 ):
-                                                    result = init_host(Path("/tmp/cache"))
+                                                    with patch(
+                                                        "mvmctl.core.network.setup_mvm_chains"
+                                                    ):
+                                                        with patch(
+                                                            "mvmctl.core.host_state._save_state"
+                                                        ):
+                                                            with patch(
+                                                                "mvmctl.core.host_privilege._write_sudoers"
+                                                            ):
+                                                                result = init_host(
+                                                                    Path("/tmp/cache")
+                                                                )
 
                             assert len(result) > 0
 
