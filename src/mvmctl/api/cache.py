@@ -7,7 +7,12 @@ prune operations across VMs, networks, images, and kernels.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from typing import Any
 
+from mvmctl.api import metadata as metadata_api
+from mvmctl.api import network as network_api
+from mvmctl.api import vms as vms_api
 from mvmctl.api.host import check_privileges_interactive
 from mvmctl.constants import DEFAULT_NETWORK_NAME, SUPPORTED_IMAGE_EXTENSIONS
 from mvmctl.core import cache_manager as core_cache_manager
@@ -28,54 +33,34 @@ from mvmctl.utils.fs import (
 logger = logging.getLogger(__name__)
 
 
-def _get_metadata_api():
-    """Lazy import metadata API to avoid circular import overhead."""
-    from mvmctl.api import metadata
-
-    return metadata
+def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
+    """Get default image entry from metadata API."""
+    return metadata_api.get_default_image_entry()
 
 
-def _get_network_api():
-    """Lazy import network API to avoid circular import overhead."""
-    from mvmctl.api import network
-
-    return network
+def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    """Get default kernel entry from metadata API."""
+    return metadata_api.get_default_kernel_entry(cache_dir)
 
 
-def _get_vms_api():
-    """Lazy import vms API to avoid circular import overhead."""
-    from mvmctl.api import vms
-
-    return vms
+def get_network_leases(network_name: str) -> list[Any]:
+    """Get network leases from network API."""
+    return network_api.get_network_leases(network_name)
 
 
-def get_default_image_entry():
-    """Get default image entry (lazy loaded from metadata)."""
-    return _get_metadata_api().get_default_image_entry()
+def list_networks() -> list[Any]:
+    """List networks from network API."""
+    return network_api.list_networks()
 
 
-def get_default_kernel_entry(cache_dir):
-    return _get_metadata_api().get_default_kernel_entry(cache_dir)
+def remove_network(network_name: str) -> None:
+    """Remove network using network API."""
+    return network_api.remove_network(network_name)
 
 
-def get_network_leases(network_name):
-    """Get network leases (lazy loaded from network API)."""
-    return _get_network_api().get_network_leases(network_name)
-
-
-def list_networks():
-    """List networks (lazy loaded from network API)."""
-    return _get_network_api().list_networks()
-
-
-def remove_network(network_name):
-    """Remove network (lazy loaded from network API)."""
-    return _get_network_api().remove_network(network_name)
-
-
-def remove_vm(vm_name):
-    """Remove VM (lazy loaded from vms API)."""
-    return _get_vms_api().remove_vm(vm_name)
+def remove_vm(vm_name: str) -> None:
+    """Remove VM using vms API."""
+    return vms_api.remove_vm(vm_name)
 
 
 __all__ = [

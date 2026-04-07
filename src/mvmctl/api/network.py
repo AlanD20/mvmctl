@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
+from mvmctl.api import metadata as metadata_api
 from mvmctl.api.host import check_privileges_interactive
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET, MVM_POSTROUTING_CHAIN
 from mvmctl.core import host_setup, metadata
@@ -40,16 +42,9 @@ from mvmctl.utils.network import (
 logger = logging.getLogger(__name__)
 
 
-def _get_metadata_api():
-    """Lazy import metadata API to avoid circular import overhead."""
-    from mvmctl.api import metadata
-
-    return metadata
-
-
-def get_default_network_entry(cache_dir):
-    """Get default network entry (lazy loaded from metadata)."""
-    return _get_metadata_api().get_default_network_entry(cache_dir)
+def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+    """Get default network entry from metadata API."""
+    return metadata_api.get_default_network_entry(cache_dir)
 
 
 __all__ = [

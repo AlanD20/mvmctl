@@ -11,7 +11,7 @@ looked up by their full name, not by ID prefix.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mvmctl.core.metadata import find_images_by_id_prefix as _find_images_by_id_prefix
 from mvmctl.core.metadata import get_image_entry as _get_image_entry
@@ -25,8 +25,11 @@ from mvmctl.core.metadata import set_default_image_by_os_slug as _set_default_im
 from mvmctl.core.metadata import set_default_image_entry as _set_default_image_entry
 from mvmctl.core.metadata import update_image_entry as _update_image_entry
 
+if TYPE_CHECKING:
+    from mvmctl.core.mvm_db import MVMDatabase
 
-def _create_db():
+
+def _create_db() -> "MVMDatabase":
     """Create fresh MVMDatabase instance to respect environment changes."""
     from mvmctl.core.mvm_db import MVMDatabase
 

@@ -201,30 +201,24 @@ class TestSetDefaultsValue:
                 mock_core.assert_called_once()
 
 
-class TestLazyMetadataImports:
+class TestMetadataImports:
     def test_get_default_binary_entry(self):
-        with patch("mvmctl.api.config._get_metadata_module") as mock_get_meta:
-            mock_meta = MagicMock()
+        with patch("mvmctl.api.config.metadata") as mock_meta:
             mock_meta.get_default_binary_entry.return_value = ("1.15.0", {})
-            mock_get_meta.return_value = mock_meta
 
             result = get_default_binary_entry()
             assert result == ("1.15.0", {})
 
     def test_get_default_image_entry(self):
-        with patch("mvmctl.api.config._get_metadata_module") as mock_get_meta:
-            mock_meta = MagicMock()
+        with patch("mvmctl.api.config.metadata") as mock_meta:
             mock_meta.get_default_image_entry.return_value = ("img123", {})
-            mock_get_meta.return_value = mock_meta
 
             result = get_default_image_entry()
             assert result == ("img123", {})
 
     def test_get_default_kernel_entry(self):
-        with patch("mvmctl.api.config._get_metadata_module") as mock_get_meta:
-            mock_meta = MagicMock()
+        with patch("mvmctl.api.config.metadata") as mock_meta:
             mock_meta.get_default_kernel_entry.return_value = ("kern123", {})
-            mock_get_meta.return_value = mock_meta
 
-            result = get_default_kernel_entry()
+            result = get_default_kernel_entry(Path("/cache"))
             assert result == ("kern123", {})
