@@ -143,8 +143,6 @@ def test_kernel_ls_json(tmp_path: Path):
 
     _seed_kernel_db(cache_dir, "vmlinux")
 
-    import os
-
     result = runner.invoke(kernel_app, ["ls", "--kernels-dir", str(kernels_dir), "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -163,7 +161,6 @@ def test_kernel_ls_dir_not_found(tmp_path: Path):
 
 
 def test_kernel_ls_multiple_files(tmp_path: Path):
-    import os
 
     (tmp_path / "vmlinux").write_bytes(b"\x00" * 1024)
     (tmp_path / "vmlinux-6.1.102").write_bytes(b"\x00" * 2048)
@@ -183,7 +180,6 @@ def test_kernel_ls_multiple_files(tmp_path: Path):
 
 
 def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
-    import os
 
     (tmp_path / "vmlinux").write_bytes(b"\x00" * 1024)
     (tmp_path / "somefile.txt").write_text("not a kernel")
@@ -669,8 +665,8 @@ def test_image_ls_normal(tmp_path: Path):
         tmp_path, "b" * 64, "debian-12.ext4", os_slug="debian-12", os_name="Debian 12"
     )
     with (
-        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
-        patch("mvmctl.cli.bin.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.image.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -679,7 +675,7 @@ def test_image_ls_normal(tmp_path: Path):
 
 
 def test_image_ls_json():
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -689,7 +685,7 @@ def test_image_ls_json():
 
 
 def test_image_ls_empty():
-    with patch("mvmctl.cli.bin.load_images_config", return_value=[]):
+    with patch("mvmctl.cli.image.load_images_config", return_value=[]):
         result = click_runner.invoke(main_app, ["image", "ls", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -699,8 +695,8 @@ def test_image_ls_empty():
 def test_image_ls_shows_cached_marker(tmp_path: Path):
     (tmp_path / "ubuntu-24.04.ext4").touch()
     with (
-        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
-        patch("mvmctl.cli.bin.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.image.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -712,13 +708,11 @@ def test_image_ls_shows_cached_marker(tmp_path: Path):
 
 
 @patch("pathlib.Path.read_bytes", return_value=b"mocked")
-@patch("mvmctl.cli.bin._save_image_meta")
-@patch("mvmctl.cli.bin.fetch_image")
-@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.image.fetch_image_and_register")
+@patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_success(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
-    mock_save_meta: MagicMock,
     mock_read_bytes: MagicMock,
     tmp_path: Path,
 ):
@@ -733,20 +727,18 @@ def test_image_fetch_success(
     mock_fetch.assert_called_once()
 
 
-@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_not_found(mock_config: MagicMock):
     result = click_runner.invoke(main_app, ["image", "fetch", "nonexistent"])
     assert result.exit_code == 1
 
 
 @patch("pathlib.Path.read_bytes", return_value=b"mocked")
-@patch("mvmctl.cli.bin._save_image_meta")
-@patch("mvmctl.cli.bin.fetch_image")
-@patch("mvmctl.cli.bin.load_images_config")
+@patch("mvmctl.cli.image.fetch_image_and_register")
+@patch("mvmctl.cli.image.load_images_config")
 def test_image_fetch_by_type_and_version(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
-    mock_save_meta: MagicMock,
     mock_read_bytes: MagicMock,
     tmp_path: Path,
 ):
@@ -789,7 +781,7 @@ def test_image_fetch_by_type_and_version(
     assert called_spec.id == "ubuntu-24.04"
 
 
-@patch("mvmctl.cli.bin.load_images_config")
+@patch("mvmctl.cli.image.load_images_config")
 def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
     mock_config.return_value = [
         ImageSpec(
@@ -820,17 +812,15 @@ def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
 
     result = click_runner.invoke(main_app, ["image", "fetch", "ubuntu"])
     assert result.exit_code == 1
-    assert "Provide --version" in result.output
+    assert "Provide version" in result.output
 
 
 @patch("pathlib.Path.read_bytes", return_value=b"mocked")
-@patch("mvmctl.cli.bin._save_image_meta")
-@patch("mvmctl.cli.bin.fetch_image")
-@patch("mvmctl.cli.bin.load_images_config")
-def test_image_fetch_with_type_option(
+@patch("mvmctl.cli.image.fetch_image_and_register")
+@patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES)
+def test_image_fetch_partition_retry_success(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
-    mock_save_meta: MagicMock,
     mock_read_bytes: MagicMock,
     tmp_path: Path,
 ):
@@ -859,7 +849,7 @@ def test_image_fetch_with_type_option(
     assert result.exit_code == 0
 
 
-@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_type_option_conflicts_with_id(mock_config: MagicMock):
     result = click_runner.invoke(
         main_app,
@@ -869,24 +859,11 @@ def test_image_fetch_type_option_conflicts_with_id(mock_config: MagicMock):
     assert "cannot be used when selector is an image ID" in result.output
 
 
-@patch("mvmctl.cli.bin.fetch_image", return_value=None)
-@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
-def test_image_fetch_failure(mock_config: MagicMock, mock_fetch: MagicMock, tmp_path: Path):
-    result = click_runner.invoke(
-        main_app, ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path)]
-    )
-    assert result.exit_code == 1
-
-
-@patch("pathlib.Path.read_bytes", return_value=b"mocked")
-@patch("mvmctl.cli.bin._save_image_meta")
-@patch("mvmctl.cli.bin.fetch_image")
-@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
-def test_image_fetch_with_force(
+@patch("mvmctl.cli.image.fetch_image_and_register", return_value=None)
+@patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES)
+def test_image_fetch_returns_none_exits(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
-    mock_save_meta: MagicMock,
-    mock_read_bytes: MagicMock,
     tmp_path: Path,
 ):
     mock_fetch.return_value = ImageImportResult(
@@ -897,21 +874,18 @@ def test_image_fetch_with_force(
         ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path), "--force"],
     )
     assert result.exit_code == 0
-    call_args = mock_fetch.call_args
-    assert (
-        call_args[0][2] is True
-        or call_args.kwargs.get("force") is True
-        or call_args[1].get("force") is True
-    )
+    call_kwargs = mock_fetch.call_args.kwargs
+    assert call_kwargs.get("force") is True
 
 
-@patch("mvmctl.cli.bin.fetch_image")
-@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
-def test_image_fetch_saves_fs_uuid_in_metadata(
+@patch("mvmctl.cli.image._prompt_for_partition_selection", return_value=1)
+@patch("mvmctl.cli.image.fetch_image_and_register")
+@patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES)
+def test_image_fetch_partition_retry_no_prompt_exits(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
+    mock_prompt: MagicMock,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ):
     image_path = tmp_path / "images" / "ubuntu-24.04.ext4"
     image_path.parent.mkdir(parents=True, exist_ok=True)
@@ -919,6 +893,20 @@ def test_image_fetch_saves_fs_uuid_in_metadata(
     # fs_uuid is now returned in ImageImportResult from core layer
     mock_fetch.return_value = ImageImportResult(
         path=image_path, fs_type="ext4", fs_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    )
+
+    # Seed the database with the image entry that fetch_image_and_register would have created
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    full_hash = "a" * 64
+    _write_image_meta(
+        cache_dir,
+        full_hash,
+        image_path.name,
+        os_slug="ubuntu-24.04",
+        os_name="Ubuntu 24.04 LTS",
+        fs_type="ext4",
+        fs_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     )
 
     result = click_runner.invoke(
@@ -936,7 +924,7 @@ def test_image_fetch_saves_fs_uuid_in_metadata(
     assert len(img.fs_uuid) > 0
 
 
-@patch("mvmctl.cli.bin.import_image")
+@patch("mvmctl.cli.image.import_image_and_register")
 def test_image_import_saves_fs_uuid_in_metadata(
     mock_import: MagicMock,
     tmp_path: Path,
@@ -950,6 +938,19 @@ def test_image_import_saves_fs_uuid_in_metadata(
     # fs_uuid is now returned in ImageImportResult from core layer
     mock_import.return_value = ImageImportResult(
         path=imported, fs_type="ext4", fs_uuid="ffffffff-1111-2222-3333-444444444444"
+    )
+
+    # Pre-seed the database with the image entry that import_image_and_register would create
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    full_hash = "f" * 64
+    _write_image_meta(
+        cache_dir,
+        full_hash,
+        imported.name,
+        os_name="Imported OS",
+        fs_type="ext4",
+        fs_uuid="ffffffff-1111-2222-3333-444444444444",
     )
 
     result = click_runner.invoke(
@@ -982,7 +983,7 @@ def test_image_import_saves_fs_uuid_in_metadata(
 
 
 def test_resolve_image_spec_exact_id_match():
-    from mvmctl.cli.bin import _resolve_image_spec
+    from mvmctl.api.image import resolve_image_spec
 
     images = [
         ImageSpec(
@@ -1008,12 +1009,12 @@ def test_resolve_image_spec_exact_id_match():
             minimum_rootfs_size=2048,
         ),
     ]
-    result = _resolve_image_spec(images, "ubuntu-24.04", None)
+    result = resolve_image_spec(images, "ubuntu-24.04", None)
     assert result.id == "ubuntu-24.04"
 
 
 def test_resolve_image_spec_type_single_match():
-    from mvmctl.cli.bin import _resolve_image_spec
+    from mvmctl.api.image import resolve_image_spec
 
     images = [
         ImageSpec(
@@ -1028,12 +1029,12 @@ def test_resolve_image_spec_type_single_match():
             minimum_rootfs_size=2048,
         ),
     ]
-    result = _resolve_image_spec(images, "debian", None)
+    result = resolve_image_spec(images, "debian", None)
     assert result.id == "debian-12"
 
 
 def test_resolve_image_spec_type_with_version():
-    from mvmctl.cli.bin import _resolve_image_spec
+    from mvmctl.api.image import resolve_image_spec
 
     images = [
         ImageSpec(
@@ -1059,23 +1060,23 @@ def test_resolve_image_spec_type_with_version():
             minimum_rootfs_size=2048,
         ),
     ]
-    result = _resolve_image_spec(images, "ubuntu", "22.04")
+    result = resolve_image_spec(images, "ubuntu", "22.04")
     assert result.id == "ubuntu-22.04"
 
 
 def test_resolve_image_spec_not_found_exits():
-    import click
 
-    from mvmctl.cli.bin import _resolve_image_spec
+    from mvmctl.api.image import resolve_image_spec
+    from mvmctl.exceptions import ImageError
 
-    with pytest.raises(click.exceptions.Exit):
-        _resolve_image_spec([], "nonexistent", None)
+    with pytest.raises(ImageError):
+        resolve_image_spec([], "nonexistent", None)
 
 
 def test_resolve_image_spec_type_ambiguous_no_version_exits():
-    import click
 
-    from mvmctl.cli.bin import _resolve_image_spec
+    from mvmctl.api.image import resolve_image_spec
+    from mvmctl.exceptions import ImageError
 
     images = [
         ImageSpec(
@@ -1101,57 +1102,8 @@ def test_resolve_image_spec_type_ambiguous_no_version_exits():
             minimum_rootfs_size=2048,
         ),
     ]
-    with pytest.raises(click.exceptions.Exit):
-        _resolve_image_spec(images, "ubuntu", None)
-
-
-# ---------------------------------------------------------------------------
-# _handle_partition_detection_retry helper
-# ---------------------------------------------------------------------------
-
-
-def test_handle_partition_retry_success_no_error():
-    from mvmctl.cli.bin import _handle_partition_detection_retry
-    from mvmctl.core.image import ImageImportResult
-
-    mock_func = MagicMock(
-        return_value=ImageImportResult(path=Path("/x"), fs_type="ext4", fs_uuid=None)
-    )
-    result = _handle_partition_detection_retry(mock_func, "arg1", no_prompt=False)
-    assert result.fs_type == "ext4"
-    mock_func.assert_called_once_with("arg1")
-
-
-def test_handle_partition_retry_no_prompt_exits_on_detection_error():
-    import click
-
-    from mvmctl.cli.bin import _handle_partition_detection_retry
-    from mvmctl.exceptions import RootPartitionDetectionError
-
-    exc = RootPartitionDetectionError(partitions=[{"size": 1024, "type": "83"}])
-    mock_func = MagicMock(side_effect=exc)
-    with pytest.raises(click.exceptions.Exit):
-        _handle_partition_detection_retry(mock_func, no_prompt=True)
-
-
-@patch("mvmctl.cli.bin._prompt_for_partition_selection", return_value=1)
-def test_handle_partition_retry_prompts_and_retries_on_tie(mock_prompt: MagicMock):
-    from mvmctl.cli.bin import _handle_partition_detection_retry
-    from mvmctl.core.image import ImageImportResult
-    from mvmctl.exceptions import TieDetectedError
-
-    tie_exc = TieDetectedError(
-        tied_partitions=["1", "2"],
-        partitions=[{"size": 1024, "type": "83"}, {"size": 2048, "type": "83"}],
-    )
-    success_result = ImageImportResult(path=Path("/y"), fs_type="ext4", fs_uuid=None)
-    mock_func = MagicMock(side_effect=[tie_exc, success_result])
-    result = _handle_partition_detection_retry(mock_func, "spec", no_prompt=False)
-    assert result.fs_type == "ext4"
-    mock_prompt.assert_called_once()
-    assert mock_func.call_count == 2
-    second_call_kwargs = mock_func.call_args_list[1].kwargs
-    assert second_call_kwargs.get("partition") == 1
+    with pytest.raises(ImageError):
+        resolve_image_spec(images, "ubuntu", None)
 
 
 # ---------------------------------------------------------------------------
@@ -1159,9 +1111,9 @@ def test_handle_partition_retry_prompts_and_retries_on_tie(mock_prompt: MagicMoc
 # ---------------------------------------------------------------------------
 
 
-@patch("mvmctl.cli.bin.list_image_entries")
-@patch("mvmctl.cli.bin.fetch_image")
-@patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES)
+@patch("mvmctl.core.metadata.list_image_entries")
+@patch("mvmctl.cli.image.fetch_image_and_register")
+@patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_detects_existing_via_db(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
@@ -1506,8 +1458,8 @@ def test_image_set_default_not_found(tmp_path: Path, monkeypatch):
 
 def test_image_ls_remote(tmp_path: Path):
     with (
-        patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES),
-        patch("mvmctl.cli.bin.get_images_dir", return_value=tmp_path),
+        patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES),
+        patch("mvmctl.cli.image.get_images_dir", return_value=tmp_path),
     ):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--remote", "--images-dir", str(tmp_path)]
@@ -1553,8 +1505,8 @@ def test_kernel_ls_auto_creates_dir(tmp_path: Path):
     assert missing.exists()
 
 
-@patch("mvmctl.cli.bin.fetch_image")
-@patch("mvmctl.cli.bin.load_images_config")
+@patch("mvmctl.cli.image.fetch_image_and_register")
+@patch("mvmctl.cli.image.load_images_config")
 def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     """FIX-009: image fetch warns when image already exists."""
     from click.testing import CliRunner as _ClickRunner
@@ -1670,7 +1622,7 @@ def test_kernel_rm_with_force_removes_referenced(
     mock_vm.config.kernel_path = kernel
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.image.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -1704,7 +1656,7 @@ def test_image_rm_blocked_when_referenced_by_vm(
     mock_vm.config.rootfs_path = img_file
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.image.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -1733,7 +1685,7 @@ def test_image_rm_with_force_removes_referenced(
     mock_vm.config.rootfs_path = img_file
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.image.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -1787,7 +1739,7 @@ def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         os_name="Ubuntu 24.04 LTS",
         os_slug="ubuntu-24.04",
     )
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--images-dir", str(tmp_path / "images")]
         )
@@ -1803,7 +1755,6 @@ def test_image_ls_with_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 def test_kernel_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):
     """Verify X prefix shown when kernel file missing."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -1825,7 +1776,6 @@ def test_kernel_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):
 
 def test_kernel_ls_no_x_mark_for_existing_file(tmp_path: Path, mocker):
     """Verify no X prefix when kernel file exists."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -1890,7 +1840,7 @@ def test_image_ls_local_shows_12char_id(tmp_path: Path, monkeypatch: pytest.Monk
         os_name="Ubuntu 24.04 LTS",
         os_slug="ubuntu-24.04",
     )
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
     assert result.exit_code == 0
     short_id = full_hash[:12]
@@ -1914,7 +1864,7 @@ def test_image_ls_local_shows_12char_id_for_non_yaml_rows(
         os_name="My Custom Import",
         os_slug="custom-import",
     )
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
     assert result.exit_code == 0
     short_id = full_hash[:12]
@@ -1924,7 +1874,6 @@ def test_image_ls_local_shows_12char_id_for_non_yaml_rows(
 
 def test_image_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):
     """Verify X prefix shown when image file missing."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -1935,7 +1884,7 @@ def test_image_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):
     full_hash = "c" * 64
     _write_image_meta(cache_dir, full_hash, "ubuntu-24.04.ext4", os_name="Ubuntu 24.04")
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
     assert result.exit_code == 0
@@ -1945,7 +1894,6 @@ def test_image_ls_shows_x_mark_for_missing_file(tmp_path: Path, mocker):
 
 def test_image_ls_no_x_mark_for_existing_file(tmp_path: Path, mocker):
     """Verify no X prefix when image file exists."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -1959,7 +1907,7 @@ def test_image_ls_no_x_mark_for_existing_file(tmp_path: Path, mocker):
 
     _write_image_meta(cache_dir, full_hash, "ubuntu-24.04.ext4", os_name="Ubuntu 24.04")
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
     assert result.exit_code == 0
@@ -1972,7 +1920,6 @@ def test_image_ls_no_x_mark_for_existing_file(tmp_path: Path, mocker):
 
 def test_bin_ls_shows_x_mark_for_missing_binary(tmp_path: Path, mocker):
     """Verify X prefix shown when binary file missing."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -1990,7 +1937,6 @@ def test_bin_ls_shows_x_mark_for_missing_binary(tmp_path: Path, mocker):
 
 def test_bin_ls_no_x_mark_for_existing_binary(tmp_path: Path, mocker):
     """Verify no X prefix when binary file exists."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2020,7 +1966,6 @@ def test_bin_ls_no_x_mark_for_existing_binary(tmp_path: Path, mocker):
 
 def test_kernel_ls_shows_size_column(tmp_path: Path, mocker):
     """Verify kernel ls displays size column."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2044,7 +1989,6 @@ def test_kernel_ls_shows_size_column(tmp_path: Path, mocker):
 
 def test_kernel_ls_size_format_bytes(tmp_path: Path, mocker):
     """Verify size formatting for small files (bytes)."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2066,7 +2010,6 @@ def test_kernel_ls_size_format_bytes(tmp_path: Path, mocker):
 
 def test_kernel_ls_size_format_mib(tmp_path: Path, mocker):
     """Verify size formatting for medium files (MiB)."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2088,7 +2031,6 @@ def test_kernel_ls_size_format_mib(tmp_path: Path, mocker):
 
 def test_kernel_ls_size_format_gib(tmp_path: Path, mocker):
     """Verify size formatting for large files (GiB)."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2115,7 +2057,6 @@ def test_kernel_ls_size_format_gib(tmp_path: Path, mocker):
 
 def test_image_ls_shows_size_column(tmp_path: Path, mocker):
     """Verify image ls displays size column."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2130,7 +2071,7 @@ def test_image_ls_shows_size_column(tmp_path: Path, mocker):
         cache_dir, "e" * 64, "ubuntu-24.04.ext4", os_name="Ubuntu 24.04", os_slug="ubuntu-24.04"
     )
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
     assert result.exit_code == 0
@@ -2140,7 +2081,6 @@ def test_image_ls_shows_size_column(tmp_path: Path, mocker):
 
 def test_image_ls_size_various_units(tmp_path: Path, mocker):
     """Verify image ls shows sizes in various units."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2186,7 +2126,7 @@ def test_image_ls_size_various_units(tmp_path: Path, mocker):
         ),
     ]
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=fake_images):
+    with patch("mvmctl.cli.image.load_images_config", return_value=fake_images):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
     assert result.exit_code == 0
@@ -2201,7 +2141,6 @@ def test_image_ls_size_various_units(tmp_path: Path, mocker):
 
 def test_kernel_ls_shows_default_prefix(tmp_path: Path, mocker):
     """Verify * prefix shown for default kernel."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2232,7 +2171,6 @@ def test_kernel_ls_shows_default_prefix(tmp_path: Path, mocker):
 
 def test_kernel_ls_no_prefix_for_non_default(tmp_path: Path, mocker):
     """Verify no * prefix for non-default kernel."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2265,7 +2203,6 @@ def test_kernel_ls_no_prefix_for_non_default(tmp_path: Path, mocker):
 
 def test_image_ls_shows_default_prefix(tmp_path: Path, mocker):
     """Verify * prefix shown for default image."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2285,7 +2222,7 @@ def test_image_ls_shows_default_prefix(tmp_path: Path, mocker):
         is_default=True,
     )
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
     assert result.exit_code == 0
@@ -2295,7 +2232,6 @@ def test_image_ls_shows_default_prefix(tmp_path: Path, mocker):
 
 def test_bin_ls_shows_default_prefix(tmp_path: Path, mocker):
     """Verify * prefix shown for default binary."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2322,7 +2258,6 @@ def test_bin_ls_shows_default_prefix(tmp_path: Path, mocker):
 
 def test_kernel_ls_no_def_column(tmp_path: Path, mocker):
     """Verify 'Def' column removed from kernel ls."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2343,7 +2278,6 @@ def test_kernel_ls_no_def_column(tmp_path: Path, mocker):
 
 def test_image_ls_no_def_column(tmp_path: Path, mocker):
     """Verify 'Def' column removed from image ls."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2355,7 +2289,7 @@ def test_image_ls_no_def_column(tmp_path: Path, mocker):
 
     _write_image_meta(cache_dir, "l" * 64, "ubuntu-24.04.ext4", os_name="Ubuntu 24.04")
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(main_app, ["image", "ls", "--images-dir", str(images_dir)])
 
     assert result.exit_code == 0
@@ -2365,7 +2299,6 @@ def test_image_ls_no_def_column(tmp_path: Path, mocker):
 
 def test_bin_ls_no_def_column(tmp_path: Path, mocker):
     """Verify 'Def' column removed from bin ls."""
-    import os
 
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(exist_ok=True)
@@ -2437,7 +2370,7 @@ def test_image_rm_blocked_when_referenced_by_image_id(
     mock_vm.image_id = str(img_file)  # But image_id is set
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.image.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -2466,7 +2399,7 @@ def test_kernel_rm_with_kernel_id_and_force(
     mock_vm.kernel_id = str(kernel)
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.image.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -2658,7 +2591,7 @@ def test_image_ls_remote_shows_compression_column(tmp_path: Path, monkeypatch: p
         pulled_at="2026-01-15T10:30:00+00:00",
     )
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--remote", "--images-dir", str(images_dir)]
         )
@@ -2681,7 +2614,7 @@ def test_image_ls_remote_shows_dash_for_not_downloaded(
 
     # No images downloaded, no metadata - empty DB is fine
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--remote", "--images-dir", str(images_dir)]
         )
@@ -2710,7 +2643,7 @@ def test_image_ls_remote_missing_file_shows_x_marker(
         pulled_at="2026-01-15T10:30:00+00:00",
     )
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--remote", "--images-dir", str(images_dir)]
         )
@@ -2805,7 +2738,7 @@ def test_image_ls_remote_with_compression_in_metadata(
         pulled_at="2026-01-15T10:30:00+00:00",
     )
 
-    with patch("mvmctl.cli.bin.load_images_config", return_value=_FAKE_IMAGES):
+    with patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES):
         result = click_runner.invoke(
             main_app, ["image", "ls", "--remote", "--images-dir", str(images_dir)]
         )

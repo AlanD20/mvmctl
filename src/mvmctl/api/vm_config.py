@@ -150,7 +150,8 @@ def _prompt_missing_assets(
 ) -> None:
     import click
 
-    from mvmctl.api.assets import fetch_binary, fetch_image
+    from mvmctl.api.assets import fetch_binary
+    from mvmctl.api.image import fetch_image_and_register
     from mvmctl.api.kernel import download_firecracker_kernel
 
     if not missing:
@@ -178,7 +179,7 @@ def _prompt_missing_assets(
                     sha256="",
                     sha256_url="",
                 )
-                fetch_image(spec, output_dir=get_images_dir())
+                fetch_image_and_register(spec, output_dir=get_images_dir())
             elif asset_type == "kernel":
                 download_firecracker_kernel(ci_version=identifier, arch=qualifier)
             elif asset_type == "binary":

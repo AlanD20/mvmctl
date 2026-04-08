@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 from mvmctl.api.assets import (
     AssetInfo,
     fetch_binary,
-    fetch_image,
     list_local_versions,
 )
 from mvmctl.api.kernel import list_kernels
@@ -34,32 +33,6 @@ def test_asset_info_with_none_values():
     }
     assert info["active"] is None
     assert info["size_mib"] is None
-
-
-class TestFetchImage:
-    def test_fetch_image_success(self, tmp_path: Path):
-        with patch("mvmctl.core.image.fetch_image") as mock_fetch:
-            mock_fetch.return_value = Path("/path/to/image.ext4")
-
-            with patch("mvmctl.api.assets.MVMDatabase") as mock_db_class:
-                mock_db = MagicMock()
-                mock_db_class.return_value = mock_db
-
-                result = fetch_image("ubuntu-24.04", output_dir=tmp_path, force=False)
-
-                mock_fetch.assert_called_once()
-
-    def test_fetch_image_force(self, tmp_path: Path):
-        with patch("mvmctl.core.image.fetch_image") as mock_fetch:
-            mock_fetch.return_value = Path("/path/to/image.ext4")
-
-            with patch("mvmctl.api.assets.MVMDatabase") as mock_db_class:
-                mock_db = MagicMock()
-                mock_db_class.return_value = mock_db
-
-                result = fetch_image("ubuntu-24.04", output_dir=tmp_path, force=True)
-
-                mock_fetch.assert_called_once()
 
 
 class TestFetchBinary:

@@ -1,45 +1,38 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
+from mvmctl.core.binary_manager import BinaryVersion
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import Binary
 from mvmctl.exceptions import AssetNotFoundError
-from mvmctl.models.image import ImageSpec
 from mvmctl.utils.fs import get_cache_dir
 
 if TYPE_CHECKING:
-    from mvmctl.core.binary_manager import BinaryVersion
-    from mvmctl.core.image import ImageImportResult
-    from mvmctl.models.image import ImageImportSpec
-
-from mvmctl.core.binary_manager import BinaryVersion
-from mvmctl.models.image import ImageImportSpec
+    pass
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "AssetInfo",
+    "BinaryEntry",
     "BinaryVersion",
-    "ImageImportResult",
-    "ImageImportSpec",
     "ensure_default_binary",
     "fetch_binary",
     "get_binary_path",
+    "list_binaries",
     "list_local_versions",
     "register_binary",
     "set_active_version",
     "remove_version",
-    "fetch_image",
     "resolve_image_path",
     "resolve_image_fs_uuid",
     "resolve_image_fs_type",
     "resolve_image_id_path",
     "list_remote_versions",
-    "load_images_config",
-    "import_image",
 ]
 
 
@@ -224,6 +217,53 @@ def list_local_versions(bin_dir: Path | None = None) -> list[BinaryVersion]:
     return result
 
 
+@dataclass
+class BinaryEntry:
+    """A binary version entry from metadata."""
+
+    version: str
+    full_version: str
+    binary_path: str
+    is_default: bool
+    file_exists: bool
+
+
+def list_binaries() -> list[BinaryEntry]:
+    """List all binary versions from metadata, with file existence check.
+
+    Combines filesystem existence check with metadata query so CLI can display
+    both present and missing binaries without calling get_cache_dir() directly.
+
+    Returns:
+        List of BinaryEntry objects sorted by version (newest first).
+    """
+    from mvmctl.core.metadata import list_binary_entries
+
+    cache_dir = get_cache_dir()
+    binary_meta = list_binary_entries(cache_dir)
+
+    result: list[BinaryEntry] = []
+    for name, entry in binary_meta.items():
+        binary_path = entry.get("binary_path", "")
+        full_version = entry.get("full_version", "")
+        version = full_version.lstrip("v") if full_version else ""
+        is_default = entry.get("is_default") == 1
+        file_exists = Path(binary_path).exists() if binary_path else False
+
+        result.append(
+            BinaryEntry(
+                version=version,
+                full_version=full_version,
+                binary_path=binary_path,
+                is_default=is_default,
+                file_exists=file_exists,
+            )
+        )
+
+    result.sort(key=lambda b: b.version, reverse=True)
+    return result
+
+
 def set_active_version(version: str, bin_dir: Path | None = None) -> None:
     """Create/update symlinks and database entry for the active Firecracker version.
 
@@ -272,50 +312,6 @@ def remove_version(version: str, bin_dir: Path | None = None) -> None:
     normalized = _normalize_version(version)
     db.delete_binary_by_name_and_version("firecracker", normalized)
     db.delete_binary_by_name_and_version("jailer", normalized)
-
-
-def fetch_image(
-    spec: ImageSpec,
-    output_dir: Path,
-    force: bool = False,
-    partition: int | None = None,
-    skip_optimization: bool = False,
-) -> "ImageImportResult":
-    """Fetch and convert an image.
-
-    Args:
-        spec: Image specification
-        output_dir: Directory to store images
-        force: Re-download even if exists
-        partition: Specific partition number to extract (1-indexed), or None for auto-detect
-        skip_optimization: Skip shrink and compression, keep plain ext4
-
-    Returns:
-        Path to final image
-    """
-    from mvmctl.api.metadata import get_default_binary_entry
-    from mvmctl.core.image import fetch_image as _core_fetch_image
-
-    # Fetch CI version from default binary for template resolution
-    ci_version = ""
-    try:
-        default_binary = get_default_binary_entry()
-        if default_binary is not None:
-            _version, binary_meta = default_binary
-            raw_ci_version = binary_meta.get("ci_version")
-            if isinstance(raw_ci_version, str):
-                ci_version = raw_ci_version
-    except Exception:
-        pass
-
-    return _core_fetch_image(
-        spec,
-        output_dir,
-        force=force,
-        partition=partition,
-        skip_optimization=skip_optimization,
-        ci_version=ci_version,
-    )
 
 
 class AssetInfo(TypedDict):
@@ -492,15 +488,3 @@ def list_remote_versions(limit: int = 10) -> list[str]:
     from mvmctl.core.binary_manager import list_remote_versions as _list_remote_versions
 
     return _list_remote_versions(limit)
-
-
-def load_images_config(path: Path) -> list[Any]:
-    from mvmctl.core.image import load_images_config as _load_images_config
-
-    return _load_images_config(path)
-
-
-def import_image(spec: Any, output_dir: Path) -> Any:
-    from mvmctl.core.image import import_image as _import_image
-
-    return _import_image(spec, output_dir)
