@@ -73,3 +73,18 @@ class CloudInitConfig:
             keep_iso=data.get("keep_iso", False),
             nocloud_net_url=data.get("nocloud_net_url"),
         )
+
+
+@dataclass
+class CloudInitWriteConfig:
+    """Input configuration for writing cloud-init files."""
+
+    cloud_init_dir: Path
+    vm_name: str
+    guest_ip: str
+    user: str
+    ipv4_gateway: str
+    ssh_pub_key: str | list[str] | None
+    custom_user_data: Path | None = None
+    prefix_len: int = 24
+    skip_network_config: bool = False

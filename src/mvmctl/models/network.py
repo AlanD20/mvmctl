@@ -41,6 +41,27 @@ class NetworkInspectInfo:
     vms: list[dict[str, Any]]  # vm_id, ipv4, status, pid
 
 
+class LeaseEntry(TypedDict):
+    """Dict shape for network lease data from metadata files."""
+
+    vm_id: str
+    ipv4: str
+    assigned_at: str | None
+
+
+class NetworkEntry(TypedDict):
+    """Dict shape for network metadata entries."""
+
+    name: str
+    subnet: str
+    ipv4_gateway: str
+    bridge: str
+    nat_enabled: bool
+    nat_gateways: list[str]
+    created_at: str
+    is_default: bool
+
+
 @dataclass
 class NetworkItem:
     id: str

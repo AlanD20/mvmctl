@@ -1,9 +1,15 @@
 """Data models for MicroVM Manager."""
 
 from mvmctl.models.cache import PruneAllResult
-from mvmctl.models.cloud_init import CloudInitConfig, CloudInitMode, CloudInitStatus
+from mvmctl.models.cloud_init import (
+    CloudInitConfig,
+    CloudInitMode,
+    CloudInitStatus,
+    CloudInitWriteConfig,
+)
 from mvmctl.models.image import ImageSpec
-from mvmctl.models.kernel import KernelSpec
+from mvmctl.models.key import KeyCreateInput
+from mvmctl.models.kernel import KernelFetchInput, KernelSpec
 from mvmctl.models.network import NetworkInspectInfo
 from mvmctl.models.vm import (
     ConsoleInfo,
@@ -29,9 +35,12 @@ __all__ = [
     "CloudInitConfig",
     "CloudInitMode",
     "CloudInitStatus",
+    "CloudInitWriteConfig",
     "ConsoleInfo",
     "ConsoleState",
     "ImageSpec",
+    "KeyCreateInput",
+    "KernelFetchInput",
     "KernelSpec",
     "NetworkInspectInfo",
     "PruneAllResult",

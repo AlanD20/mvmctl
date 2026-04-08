@@ -96,3 +96,19 @@ class KernelSpec:
     disabled_configs: list[str] = field(default_factory=list)
     set_val_configs: list[tuple[str, str]] = field(default_factory=list)
     required_settings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class KernelFetchInput:
+    """Input for kernel fetch/build operations."""
+
+    kernel_type: str
+    version: str | None
+    arch: str
+    output_dir: Path
+    output_name: str | None = None
+    output_path: Path | None = None
+    jobs: int | None = None
+    keep_build_dir: bool = False
+    clean_build: bool = False
+    kernel_config: Path | None = None
