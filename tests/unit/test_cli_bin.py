@@ -1594,7 +1594,7 @@ def test_kernel_rm_blocked_when_referenced_by_vm(
     mock_vm.config.kernel_path = kernel
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.kernel.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.api.kernel.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -2340,7 +2340,7 @@ def test_kernel_rm_blocked_when_referenced_by_kernel_id(
     mock_vm.kernel_id = str(kernel)  # But kernel_id is set
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.kernel.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.api.kernel.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,

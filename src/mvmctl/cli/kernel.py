@@ -16,8 +16,6 @@ from mvmctl.api.kernel import (
     resolve_kernel_spec,
     set_default_kernel,
 )
-from mvmctl.api.metadata import find_kernels_by_id_prefix
-from mvmctl.api.vms import get_vm_manager
 from mvmctl.constants import (
     DEFAULT_IMAGE_ARCH,
     KERNEL_TYPE_FIRECRACKER,
@@ -48,19 +46,6 @@ kernel_app = typer.Typer(
 @kernel_app.callback()
 def kernel_callback(ctx: typer.Context) -> None:
     pass
-
-
-def _get_vms_using_kernel(kernel_path: Path) -> list[str]:
-    vm_manager = get_vm_manager()
-    vms = vm_manager.list_all()
-    kernel_path_str = str(kernel_path)
-    result = []
-    for vm in vms:
-        if vm.config and vm.config.kernel_path == kernel_path:
-            result.append(vm.name)
-        elif vm.kernel_id and vm.kernel_id == kernel_path_str:
-            result.append(vm.name)
-    return result
 
 
 @kernel_app.command(name="ls")
@@ -247,8 +232,6 @@ def kernel_rm(
     force: bool = typer.Option(False, "--force", "-f", help="Remove even if referenced by VMs"),
 ) -> None:
     """Remove cached kernels by ID prefix."""
-    from mvmctl.utils.fs import get_cache_dir
-
     kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
     effective_ids: list[str] = list(prefixes) if prefixes else []
     if not effective_ids:
@@ -259,24 +242,6 @@ def kernel_rm(
 
     for prefix in effective_ids:
         try:
-            cache_dir = get_cache_dir()
-            match = find_kernels_by_id_prefix(cache_dir, prefix)
-            if not match:
-                raise KernelError(f"Kernel not found: {prefix}")
-            if len(match) > 1:
-                raise KernelError(f"Ambiguous prefix '{prefix}' matches {len(match)} kernels")
-            full_id, meta = match[0]
-            kernel_path_str = str(meta.get("path", ""))
-            kernel_path = kernels_dir / kernel_path_str if kernel_path_str else None
-
-            if not force and kernel_path:
-                referencing = _get_vms_using_kernel(kernel_path)
-                if referencing:
-                    print_error(
-                        f"Kernel '{prefix}' is referenced by active VMs: {', '.join(referencing)}"
-                    )
-                    raise typer.Exit(code=1)
-
             remove_kernel(prefix, kernels_dir, force=force)
             print_success(f"Removed: {prefix}")
         except KernelError as exc:

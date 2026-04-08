@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -12,19 +11,17 @@ import typer
 from mvmctl.api.image import (
     fetch_image_and_register,
     find_existing_image_files,
+    get_image_metadata,
     import_image_and_register,
+    list_images_metadata,
     load_images_config,
+    remove_image,
     resolve_image_spec,
+    set_default_image,
+    set_default_image_by_id,
     validate_image_type_selector,
 )
-from mvmctl.api.metadata import (
-    find_images_by_id_prefix,
-    get_image_entry,
-    list_image_entries,
-    remove_image_entry,
-    set_default_image_by_os_slug,
-    set_default_image_entry,
-)
+from mvmctl.api.metadata import find_images_by_id_prefix
 from mvmctl.api.vms import get_vm_manager
 from mvmctl.constants import (
     DEFAULT_IMAGE_ARCH,
@@ -249,7 +246,7 @@ def _output_remote_images(images: list[Any], images_dir: Path, json_output: bool
         )
         return
 
-    all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=True)
+    all_meta = list_images_metadata(images_dir)
     rows: list[list[str]] = []
     for img in images:
         entry = _find_image_by_os_slug(all_meta, img.id)
@@ -284,8 +281,7 @@ def _output_remote_images(images: list[Any], images_dir: Path, json_output: bool
 
 
 def _output_local_images(images: list[Any], images_dir: Path, json_output: bool) -> None:
-    cache_dir = get_cache_dir()
-    all_meta = list_image_entries(cache_dir, images_dir, include_missing=True)
+    all_meta = list_images_metadata(images_dir)
     os_slugs = {img.id for img in images}
 
     if json_output:
@@ -474,14 +470,14 @@ def image_fetch(
             print_warning(f"Image '{spec.id}' already exists locally:")
             for path in existing:
                 print_info(f"  {path}")
-            meta = get_image_entry(get_cache_dir(), spec.id)
-            if meta.get("pulled_at"):
+            meta = get_image_metadata(spec.id)
+            if meta and meta.get("pulled_at"):
                 print_info(f"    Pulled: {str(meta['pulled_at'])[:19]}")
             if not typer.confirm("Re-download anyway?", default=False):
                 print_info("Skipping download. Use --force to overwrite.")
                 if set_default:
                     try:
-                        set_default_image_by_os_slug(get_cache_dir(), spec.id)
+                        set_default_image(spec.id)
                     except KeyError:
                         pass
                     print_success(f"Default image set to: {spec.id}")
@@ -513,7 +509,7 @@ def image_fetch(
     print_success(f"Image ready: {result.path}")
     print_info(f"  ID: {short_id}")
     if set_default:
-        set_default_image_by_os_slug(get_cache_dir(), spec.id)
+        set_default_image(spec.id)
         print_success(f"Default image set to: {spec.id}")
 
     raise typer.Exit(code=0)
@@ -527,9 +523,8 @@ def image_set_default(
     """Set the default image for VM creation."""
     images_dir = images_dir if images_dir is not None else get_images_dir()
     images_dir.mkdir(parents=True, exist_ok=True)
-    cache_dir = get_cache_dir()
 
-    match = resolve_single_by_id_prefix(prefix, find_images_by_id_prefix, cache_dir, "image")
+    match = resolve_single_by_id_prefix(prefix, find_images_by_id_prefix, get_cache_dir(), "image")
     if match is None:
         raise typer.Exit(code=1)
 
@@ -546,7 +541,7 @@ def image_set_default(
             print_error(f"Image file not found for ID '{prefix}'")
             raise typer.Exit(code=1)
 
-    set_default_image_entry(cache_dir, full_key)
+    set_default_image_by_id(full_key)
     print_success(f"Default image set to: {prefix}")
 
 
@@ -568,47 +563,48 @@ def image_rm(
         print_error("Provide at least one image ID prefix")
         raise typer.Exit(code=1)
 
-    cache_dir = get_cache_dir()
     exit_code = 0
 
     for prefix in effective_ids:
-        match = resolve_single_by_id_prefix(prefix, find_images_by_id_prefix, cache_dir, "image")
+        match = resolve_single_by_id_prefix(
+            prefix, find_images_by_id_prefix, get_cache_dir(), "image"
+        )
         if match is None:
-            if not find_images_by_id_prefix(cache_dir, prefix):
+            if not find_images_by_id_prefix(get_cache_dir(), prefix):
                 print_error(f"No image found with ID prefix '{prefix}'")
             else:
                 print_error(
-                    f"Ambiguous ID prefix '{prefix}' matches {len(find_images_by_id_prefix(cache_dir, prefix))} images — use more characters"
+                    f"Ambiguous ID prefix '{prefix}' matches {len(find_images_by_id_prefix(get_cache_dir(), prefix))} images — use more characters"
                 )
             exit_code = 1
             continue
 
         full_key, meta = match
         filename = str(meta.get("path", ""))
-        files_to_remove: list[Path] = []
+        files_to_check: list[Path] = []
 
         if filename:
             candidate = images_dir / filename
             if candidate.exists():
-                files_to_remove.append(candidate)
+                files_to_check.append(candidate)
 
-        if not files_to_remove:
-            files_to_remove = [
+        if not files_to_check:
+            files_to_check = [
                 images_dir / f"{full_key}{ext}"
                 for ext in SUPPORTED_IMAGE_EXTENSIONS
                 if (images_dir / f"{full_key}{ext}").exists()
             ]
 
-        if not files_to_remove:
+        if not files_to_check:
+            remove_image(full_key, force, images_dir)
             print_error(
                 f"Image file not found for ID '{prefix}' (metadata exists but file missing)"
             )
-            remove_image_entry(cache_dir, full_key)
             exit_code = 1
             continue
 
         # Check if image is referenced by any VMs
-        for path in files_to_remove:
+        for path in files_to_check:
             referencing_vms = _get_vms_using_image(path)
             if referencing_vms and not force:
                 print_warning(
@@ -618,15 +614,9 @@ def image_rm(
                 exit_code = 1
                 break
         else:
-            # No referencing VMs found (or force is True) - proceed with removal
-            for path in files_to_remove:
-                if path.is_dir():
-                    shutil.rmtree(path)
-                else:
-                    path.unlink()
+            files_removed, _ = remove_image(full_key, force, images_dir)
+            for path in files_removed:
                 print_success(f"Removed: {path}")
-
-            remove_image_entry(cache_dir, full_key)
 
     raise typer.Exit(code=exit_code)
 
@@ -846,7 +836,7 @@ def image_import(
     print_info(f"  ID:   {short_id}")
 
     if set_default:
-        set_default_image_entry(get_cache_dir(), image_id)
+        set_default_image_by_id(image_id)
         print_success(f"Default image set to: {image_id}")
 
     raise typer.Exit(code=0)

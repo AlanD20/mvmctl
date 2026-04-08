@@ -11,9 +11,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from mvmctl.api.metadata import (
+    find_images_by_id_prefix,
+    get_image_entry,
+    list_image_entries,
+    remove_image_entry,
+)
+from mvmctl.api.metadata import (
+    set_default_image_by_os_slug as _set_default_image_by_os_slug,
+)
+from mvmctl.api.metadata import (
+    set_default_image_entry as _set_default_image_entry,
+)
 from mvmctl.exceptions import ImageError, RootPartitionDetectionError, TieDetectedError
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.full_hash import generate_full_hash_image
+from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
 if TYPE_CHECKING:
     from mvmctl.core.image import ImageImportResult
@@ -35,6 +48,116 @@ def load_images_config(path: Path) -> list[Any]:
     return _load_images_config(path)
 
 
+def set_default_image(os_slug: str) -> None:
+    """Set default image by os_slug.
+
+    Args:
+        os_slug: The OS slug to set as default.
+    """
+    cache_dir = get_cache_dir()
+    _set_default_image_by_os_slug(cache_dir, os_slug)
+
+
+def set_default_image_by_id(image_id: str) -> None:
+    """Set default image by full image ID.
+
+    Args:
+        image_id: The full 64-character image ID.
+    """
+    cache_dir = get_cache_dir()
+    _set_default_image_entry(cache_dir, image_id)
+
+
+def remove_image(
+    image_id: str, force: bool = False, images_dir: Path | None = None
+) -> tuple[list[Path], bool]:
+    """Remove image by ID prefix.
+
+    Args:
+        image_id: The image ID (can be prefix that resolves to full ID).
+        force: If True, remove even if referenced by VMs.
+        images_dir: Optional directory to search for image files. Defaults to get_images_dir().
+
+    Returns:
+        Tuple of (files_removed, had_metadata_entry).
+
+    Raises:
+        ImageError: If image not found or ambiguous prefix.
+    """
+    from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
+    from mvmctl.utils.fs import get_images_dir
+
+    cache_dir = get_cache_dir()
+    effective_images_dir = images_dir if images_dir is not None else get_images_dir()
+
+    match = resolve_single_by_id_prefix(image_id, find_images_by_id_prefix, cache_dir, "image")
+    if match is None:
+        matches = find_images_by_id_prefix(cache_dir, image_id)
+        if not matches:
+            raise ImageError(f"No image found with ID prefix '{image_id}'")
+        raise ImageError(
+            f"Ambiguous ID prefix '{image_id}' matches {len(matches)} images — use more characters"
+        )
+
+    full_key, meta = match
+    filename = str(meta.get("path", ""))
+    files_to_remove: list[Path] = []
+
+    if filename:
+        candidate = effective_images_dir / filename
+        if candidate.exists():
+            files_to_remove.append(candidate)
+
+    if not files_to_remove:
+        files_to_remove = [
+            effective_images_dir / f"{full_key}{ext}"
+            for ext in SUPPORTED_IMAGE_EXTENSIONS
+            if (effective_images_dir / f"{full_key}{ext}").exists()
+        ]
+
+    had_metadata = bool(meta)
+
+    if files_to_remove:
+        for path in files_to_remove:
+            if path.is_dir():
+                import shutil
+
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+    remove_image_entry(cache_dir, full_key)
+
+    return files_to_remove, had_metadata
+
+
+def get_image_metadata(image_id: str) -> dict[str, Any] | None:
+    """Return the metadata dict for an image, or None if not found.
+
+    Args:
+        image_id: The full image ID (64-char hash).
+
+    Returns:
+        Image metadata dictionary or None if not found.
+    """
+    cache_dir = get_cache_dir()
+    result = get_image_entry(cache_dir, image_id)
+    return result if result else None
+
+
+def list_images_metadata(images_dir: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Return all image entries from DB.
+
+    Args:
+        images_dir: Optional directory to validate image files exist.
+
+    Returns:
+        Dictionary mapping image IDs to their metadata.
+    """
+    cache_dir = get_cache_dir()
+    return list_image_entries(cache_dir, images_dir, include_missing=True)
+
+
 __all__ = [
     "resolve_image_spec",
     "validate_image_type_selector",
@@ -43,6 +166,11 @@ __all__ = [
     "fetch_image_and_register",
     "import_image_and_register",
     "load_images_config",
+    "set_default_image",
+    "set_default_image_by_id",
+    "remove_image",
+    "get_image_metadata",
+    "list_images_metadata",
 ]
 
 

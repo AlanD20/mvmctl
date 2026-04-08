@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mvmctl.api.metadata import find_kernels_by_id_prefix
+from mvmctl.api.vms import get_vm_manager
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
     KERNEL_TYPE_FIRECRACKER,
@@ -499,10 +500,10 @@ def remove_kernel(prefix: str, kernels_dir: Path, force: bool = False) -> None:
     Args:
         prefix: Kernel ID prefix to remove
         kernels_dir: Directory containing kernels
-        force: Remove even if referenced by VMs (not yet implemented)
+        force: Remove even if referenced by VMs
 
     Raises:
-        KernelError: If kernel not found or removal fails
+        KernelError: If kernel not found or referenced by running VMs (and force=False)
     """
     from mvmctl.core.metadata import remove_kernel_entry
 
@@ -514,11 +515,26 @@ def remove_kernel(prefix: str, kernels_dir: Path, force: bool = False) -> None:
 
     full_id, meta = match
     path = str(meta.get("path", ""))
+    kernel_path = kernels_dir / path if path else None
 
-    if path:
-        kernel_path = kernels_dir / path
-        if kernel_path.exists():
-            kernel_path.unlink()
+    # Check for VM references unless force is True
+    if not force and kernel_path:
+        vm_manager = get_vm_manager()
+        vms = vm_manager.list_all()
+        kernel_path_str = str(kernel_path)
+        referencing = [
+            vm.name
+            for vm in vms
+            if (vm.config and vm.config.kernel_path == kernel_path)
+            or (vm.kernel_id and vm.kernel_id == kernel_path_str)
+        ]
+        if referencing:
+            raise KernelError(
+                f"Kernel '{prefix}' is referenced by active VMs: {', '.join(referencing)}"
+            )
+
+    if kernel_path and kernel_path.exists():
+        kernel_path.unlink()
 
     remove_kernel_entry(cache_dir, full_id)
     logger.info("Removed kernel: %s", full_id[:6])
