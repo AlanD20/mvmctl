@@ -193,7 +193,7 @@ def _build_official_kernel(
         source_url=spec.source,
         output_path=effective_output_path,
         build_dir=None,
-        sha256=None,
+        sha256=spec.sha256,
         jobs=jobs,
         keep_build_dir=keep_build_dir,
         user_config_path=kernel_config,
