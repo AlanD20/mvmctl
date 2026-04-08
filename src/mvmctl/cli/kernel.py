@@ -22,6 +22,7 @@ from mvmctl.constants import (
     KERNEL_TYPE_OFFICIAL,
 )
 from mvmctl.exceptions import KernelError
+from mvmctl.models import KernelFetchInput
 from mvmctl.utils.console import (
     get_combined_marker,
     print_error,
@@ -177,7 +178,7 @@ def kernel_fetch(
         arch = DEFAULT_IMAGE_ARCH
 
     try:
-        result = fetch_kernel(
+        fetch_input = KernelFetchInput(
             kernel_type=resolved_type,
             version=version,
             arch=arch,
@@ -189,6 +190,7 @@ def kernel_fetch(
             clean_build=clean_build,
             kernel_config=kernel_config,
         )
+        result = fetch_kernel(input=fetch_input)
     except KernelError as exc:
         print_error(f"Kernel fetch failed: {exc}")
         raise typer.Exit(code=1) from exc
