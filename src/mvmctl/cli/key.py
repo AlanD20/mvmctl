@@ -21,6 +21,7 @@ from mvmctl.api.keys import (
 )
 from mvmctl.cli._helpers import check_name_arg
 from mvmctl.exceptions import MVMKeyError
+from mvmctl.models import KeyCreateInput
 from mvmctl.utils.console import (
     get_combined_marker,
     print_error,
@@ -177,12 +178,13 @@ def key_create(
             raise typer.Exit(code=0)
 
     try:
-        info, private_key_path = create_key(
+        input_data = KeyCreateInput(
             name=name,
-            output_dir=output,
+            output_dir=Path(output) if output else None,
             comment=comment,
             overwrite=force,
         )
+        info, private_key_path = create_key(input=input_data)
     except MVMKeyError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
