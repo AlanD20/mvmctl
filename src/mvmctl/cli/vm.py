@@ -237,7 +237,30 @@ def _resolve_image_strategy(
             handle_mvm_error(e)
             raise typer.Exit(1) from e
 
-    return _ResolvedImageResult(path=None, id_for_lookup="")
+    if image_path is not None:
+        return _ResolvedImageResult(
+            path=image_path,
+            id_for_lookup=str(image_path),
+        )
+
+    # No image specified — use DB default
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    default_image = db.get_default_image()
+    if default_image is None:
+        print_error(
+            "No default image set. Run 'mvm image fetch <name>' or 'mvm image set-default <name>' first."
+        )
+        raise typer.Exit(code=1)
+    from mvmctl.utils.fs import get_images_dir
+
+    images_dir = get_images_dir()
+    default_path = images_dir / default_image.path
+    return _ResolvedImageResult(
+        path=default_path if default_path.exists() else None,
+        id_for_lookup=default_image.os_slug,
+    )
 
 
 def _resolve_kernel_strategy(
