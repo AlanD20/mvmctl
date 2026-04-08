@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from mvmctl.cli.console import _do_attach, _do_kill, _show_state, console_app as app
 from mvmctl.exceptions import MVMError, VMNotFoundError
+from mvmctl.models import ConsoleInfo, ConsoleState
 
 # Convert Typer app to Click command for CliRunner
 click_app = typer.main.get_command(app)
@@ -151,11 +152,11 @@ class TestShowStateFunction:
         """Shows running state with PID and socket."""
         with patch("mvmctl.cli.console.print_info") as mock_print:
             with patch("mvmctl.cli.console._get_console_state") as mock_get_state:
-                mock_get_state.return_value = {
-                    "running": True,
-                    "pid": 12345,
-                    "socket_path": "/tmp/test.sock",
-                }
+                mock_get_state.return_value = ConsoleState(
+                    running=True,
+                    pid=12345,
+                    socket_path="/tmp/test.sock",
+                )
 
                 _show_state("testvm")
 
@@ -167,11 +168,11 @@ class TestShowStateFunction:
         """Shows stopped state."""
         with patch("mvmctl.cli.console.print_info") as mock_print:
             with patch("mvmctl.cli.console._get_console_state") as mock_get_state:
-                mock_get_state.return_value = {
-                    "running": False,
-                    "pid": None,
-                    "socket_path": None,
-                }
+                mock_get_state.return_value = ConsoleState(
+                    running=False,
+                    pid=None,
+                    socket_path=None,
+                )
 
                 _show_state("testvm")
 
@@ -266,7 +267,12 @@ class TestDoAttachFunction:
             with patch("mvmctl.cli.console.disconnect_from_relay"):
                 with patch("mvmctl.cli.console.connect_to_relay") as mock_connect:
                     with patch("mvmctl.cli.console._attach_console") as mock_attach:
-                        mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+                        from mvmctl.models import ConsoleInfo
+
+                        mock_attach.return_value = ConsoleInfo(
+                            socket_path=Path("/tmp/test.sock"),
+                            vm_name="testvm",
+                        )
                         mock_sock = MagicMock()
                         mock_connect.return_value = mock_sock
 
@@ -315,7 +321,9 @@ class TestDoAttachFunction:
             with patch("mvmctl.cli.console.print_error") as mock_print:
                 with patch("mvmctl.cli.console.connect_to_relay") as mock_connect:
                     with patch("mvmctl.cli.console._attach_console") as mock_attach:
-                        mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+                        mock_attach.return_value = ConsoleInfo(
+                            socket_path=Path("/tmp/test.sock"), vm_name="testvm"
+                        )
                         mock_connect.side_effect = ConnectionRefusedError("Connection refused")
 
                         try:
@@ -331,7 +339,9 @@ class TestDoAttachFunction:
             with patch("mvmctl.cli.console.print_error") as mock_print:
                 with patch("mvmctl.cli.console.connect_to_relay") as mock_connect:
                     with patch("mvmctl.cli.console._attach_console") as mock_attach:
-                        mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+                        mock_attach.return_value = ConsoleInfo(
+                            socket_path=Path("/tmp/test.sock"), vm_name="testvm"
+                        )
                         mock_connect.side_effect = FileNotFoundError("Socket not found")
 
                         try:
@@ -347,7 +357,9 @@ class TestDoAttachFunction:
             with patch("mvmctl.cli.console.print_error") as mock_print:
                 with patch("mvmctl.cli.console.connect_to_relay") as mock_connect:
                     with patch("mvmctl.cli.console._attach_console") as mock_attach:
-                        mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+                        mock_attach.return_value = ConsoleInfo(
+                            socket_path=Path("/tmp/test.sock"), vm_name="testvm"
+                        )
                         mock_connect.side_effect = TimeoutError("Connection timed out")
 
                         try:
@@ -365,7 +377,9 @@ class TestDoAttachFunction:
                     with patch("mvmctl.cli.console.disconnect_from_relay") as mock_disconnect:
                         with patch("mvmctl.cli.console.connect_to_relay") as mock_connect:
                             with patch("mvmctl.cli.console._attach_console") as mock_attach:
-                                mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+                                mock_attach.return_value = ConsoleInfo(
+                                    socket_path=Path("/tmp/test.sock"), vm_name="testvm"
+                                )
                                 mock_sock = MagicMock()
                                 mock_connect.return_value = mock_sock
 
@@ -399,7 +413,9 @@ class TestDoAttachFunction:
                 with patch("mvmctl.cli.console.check_escape_sequence") as mock_check:
                     with patch("mvmctl.cli.console.connect_to_relay") as mock_connect:
                         with patch("mvmctl.cli.console._attach_console") as mock_attach:
-                            mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+                            mock_attach.return_value = ConsoleInfo(
+                                socket_path=Path("/tmp/test.sock"), vm_name="testvm"
+                            )
                             mock_sock = MagicMock()
                             mock_connect.return_value = mock_sock
 
@@ -460,7 +476,9 @@ class TestDoAttachFunction:
                             ) as _mock_disconnect:
                                 with patch("mvmctl.cli.console.connect_to_relay") as mock_connect:
                                     with patch("mvmctl.cli.console._attach_console") as mock_attach:
-                                        mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+                                        mock_attach.return_value = ConsoleInfo(
+                                            socket_path=Path("/tmp/test.sock"), vm_name="testvm"
+                                        )
                                         mock_sock = MagicMock()
                                         mock_connect.return_value = mock_sock
 
@@ -495,7 +513,9 @@ class TestDoAttachFunction:
                     with patch("mvmctl.cli.console.disconnect_from_relay") as mock_disconnect:
                         with patch("mvmctl.cli.console.connect_to_relay") as mock_connect:
                             with patch("mvmctl.cli.console._attach_console") as mock_attach:
-                                mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+                                mock_attach.return_value = ConsoleInfo(
+                                    socket_path=Path("/tmp/test.sock"), vm_name="testvm"
+                                )
                                 mock_sock = MagicMock()
                                 mock_connect.return_value = mock_sock
 

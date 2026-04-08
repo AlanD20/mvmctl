@@ -66,12 +66,12 @@ def kernel_ls(
     kernels = list_kernels(kernels_dir)
 
     if firecracker_only:
-        kernels = [k for k in kernels if k.get("type") == KERNEL_TYPE_FIRECRACKER]
+        kernels = [k for k in kernels if k.type == KERNEL_TYPE_FIRECRACKER]
     elif official_only:
-        kernels = [k for k in kernels if k.get("type") == KERNEL_TYPE_OFFICIAL]
+        kernels = [k for k in kernels if k.type == KERNEL_TYPE_OFFICIAL]
 
     if json_output:
-        typer.echo(json.dumps(kernels, indent=2))
+        typer.echo(json.dumps([k.to_dict() for k in kernels], indent=2))
         return
 
     if not kernels:
@@ -79,21 +79,21 @@ def kernel_ls(
 
     rows: list[list[str]] = []
     for k in kernels:
-        is_default = k.get("is_default") == "true"
-        last_modified_display = human_readable_time(k.get("last_modified", "-"))
-        path_str = k.get("path", "")
+        is_default = k.is_default
+        last_modified_display = human_readable_time(k.updated_at or "-")
+        path_str = k.path
         path = kernels_dir / path_str if path_str else None
         is_missing = is_file_missing(path)
-        display_id = get_combined_marker(is_default, is_missing) + shorten_hash(k.get("id", ""), 12)
+        display_id = get_combined_marker(is_default, is_missing) + shorten_hash(k.id, 12)
         size = path.stat().st_size if path and path.exists() else 0
         size_str = format_bytes_human_readable(size) if size > 0 else "-"
         rows.append(
             [
                 display_id,
-                k.get("name", "-"),
-                k.get("version", ""),
-                k.get("arch", "-"),
-                k.get("type", ""),
+                k.name or "-",
+                k.version or "",
+                k.arch or "-",
+                k.type or "",
                 last_modified_display,
                 size_str,
             ]

@@ -377,8 +377,7 @@ def fetch_image_and_register(input: ImageFetchInput) -> Any:
     try:
         default_binary = get_default_binary_entry()
         if default_binary is not None:
-            _version, binary_meta = default_binary
-            raw_ci_version = binary_meta.get("ci_version")
+            raw_ci_version = default_binary.ci_version
             if isinstance(raw_ci_version, str):
                 ci_version = raw_ci_version
     except Exception:

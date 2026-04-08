@@ -303,9 +303,9 @@ def test_inspect_network(mock_bridge_exists, mock_cache_dir: Path):
     )
 
     info = inspect_network("mynet")
-    assert info["name"] == "mynet"
-    assert info["bridge_exists"] is True
-    vms = info["vms"]
+    assert info.name == "mynet"
+    assert info.bridge_exists is True
+    vms = info.vms
     assert isinstance(vms, list)
     assert len(vms) == 1
     assert vms[0]["vm_id"] == "vm1"
@@ -469,7 +469,7 @@ def test_ensure_default_network_creates_default_network_metadata(
     assert config is not None
     default_entry = get_default_network_entry(mock_cache_dir)
     assert default_entry is not None
-    assert default_entry[0] == "default"
+    assert default_entry.name == "default"
 
 
 def test_ensure_default_network_sets_default_when_none_exists(mock_cache_dir: Path):
@@ -505,7 +505,7 @@ def test_ensure_default_network_sets_default_when_none_exists(mock_cache_dir: Pa
     assert config is not None
     default_entry = get_default_network_entry(mock_cache_dir)
     assert default_entry is not None
-    assert default_entry[0] == "default"
+    assert default_entry.name == "default"
 
 
 def test_ensure_default_network_preserves_existing_other_default(mock_cache_dir: Path):
@@ -550,7 +550,7 @@ def test_ensure_default_network_preserves_existing_other_default(mock_cache_dir:
     assert config is not None
     default_entry = get_default_network_entry(mock_cache_dir)
     assert default_entry is not None
-    assert default_entry[0] == "custom"
+    assert default_entry.name == "custom"
 
 
 @patch("mvmctl.api.network.bridge_exists", return_value=False)

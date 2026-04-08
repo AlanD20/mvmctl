@@ -102,6 +102,7 @@ from mvmctl.exceptions import (
 )
 from mvmctl.models import (
     CloudInitMode,
+    CloudInitWriteConfig,
     ConsoleInfo,
     ConsoleState,
     VMConfig,
@@ -1065,17 +1066,18 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
                 ssh_pub_key = _resolve_default_public_keys(ssh_key)
                 prefix_len = ipaddress_module.IPv4Network(net_config.subnet, strict=False).prefixlen
-                write_cloud_init(
-                    cloud_init_dir,
-                    name,
-                    guest_ip,
-                    user,
+                cloud_init_write_config = CloudInitWriteConfig(
+                    cloud_init_dir=cloud_init_dir,
+                    vm_name=name,
+                    guest_ip=guest_ip,
+                    user=user,
                     ssh_pub_key=ssh_pub_key,
                     custom_user_data=user_data,
                     ipv4_gateway=net_config.ipv4_gateway,
                     prefix_len=prefix_len,
                     skip_network_config=False,
                 )
+                write_cloud_init(cloud_init_write_config)
 
                 if effective_mode == CloudInitMode.ISO:
                     if cloud_init_iso_path is None:

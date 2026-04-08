@@ -19,7 +19,7 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import AssetNotFoundError
 from mvmctl.models.cloud_init import CloudInitMode
-from mvmctl.models.image import ImageSpec
+from mvmctl.models.image import ImageFetchInput, ImageSpec
 from mvmctl.models.vm_config_file import VMExportConfig
 
 __all__ = [
@@ -180,7 +180,8 @@ def _prompt_missing_assets(
                     sha256="",
                     sha256_url="",
                 )
-                fetch_image_and_register(spec, output_dir=get_images_dir())
+                fetch_input = ImageFetchInput(spec=spec, output_dir=get_images_dir())
+                fetch_image_and_register(fetch_input)
             elif asset_type == "kernel":
                 download_firecracker_kernel(ci_version=identifier, arch=qualifier)
             elif asset_type == "binary":

@@ -49,7 +49,7 @@ class LeaseEntry(TypedDict):
     assigned_at: str | None
 
 
-class NetworkEntry(TypedDict):
+class NetworkEntry(TypedDict, total=False):
     """Dict shape for network metadata entries."""
 
     name: str
@@ -60,6 +60,8 @@ class NetworkEntry(TypedDict):
     nat_gateways: list[str]
     created_at: str
     is_default: bool
+    leases: list[dict[str, Any]]
+    bridge_active: bool
 
 
 @dataclass

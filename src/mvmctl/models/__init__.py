@@ -1,5 +1,6 @@
 """Data models for MicroVM Manager."""
 
+from mvmctl.models.binary import BinaryItem
 from mvmctl.models.cache import PruneAllResult
 from mvmctl.models.cloud_init import (
     CloudInitConfig,
@@ -8,10 +9,17 @@ from mvmctl.models.cloud_init import (
     CloudInitWriteConfig,
 )
 from mvmctl.models.firecracker import InstanceDescription, InstanceInfo
-from mvmctl.models.image import ImageFetchInput, ImageSpec
-from mvmctl.models.kernel import KernelFetchInput, KernelSpec
+from mvmctl.models.image import ImageFetchInput, ImageItem, ImageSpec
+from mvmctl.models.kernel import KernelFetchInput, KernelItem, KernelSpec
 from mvmctl.models.key import KeyCreateInput
-from mvmctl.models.network import LeaseEntry, NetworkEntry, NetworkInspectInfo, NetworkItem
+from mvmctl.models.network import (
+    LeaseEntry,
+    NetworkConfig,
+    NetworkEntry,
+    NetworkInspectInfo,
+    NetworkItem,
+    NetworkLease,
+)
 from mvmctl.models.vm import (
     ConsoleInfo,
     ConsoleState,
@@ -34,6 +42,7 @@ from mvmctl.models.vm_config_file import (
 )
 
 __all__ = [
+    "BinaryItem",
     "CloudInitConfig",
     "CloudInitMode",
     "CloudInitStatus",
@@ -41,16 +50,20 @@ __all__ = [
     "ConsoleInfo",
     "ConsoleState",
     "ImageFetchInput",
+    "ImageItem",
     "ImageSpec",
     "InstanceDescription",
     "InstanceInfo",
     "KeyCreateInput",
     "KernelFetchInput",
+    "KernelItem",
     "KernelSpec",
     "LeaseEntry",
+    "NetworkConfig",
     "NetworkEntry",
     "NetworkInspectInfo",
     "NetworkItem",
+    "NetworkLease",
     "PruneAllResult",
     "VMConfig",
     "VMCreateInput",

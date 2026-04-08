@@ -21,20 +21,21 @@ from mvmctl.core.config_state import (
 )
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.user_config import get_config_value, get_full_user_config, set_config_value
+from mvmctl.models import BinaryItem, ImageItem, KernelItem
 from mvmctl.models.config import SystemDefaultsConfig
 
 
-def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
+def get_default_binary_entry() -> BinaryItem | None:
     """Get default binary entry from metadata."""
     return metadata.get_default_binary_entry()
 
 
-def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
+def get_default_image_entry() -> ImageItem | None:
     """Get default image entry from metadata."""
     return metadata.get_default_image_entry()
 
 
-def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+def get_default_kernel_entry(cache_dir: Path) -> KernelItem | None:
     """Get default kernel entry from metadata."""
     return metadata.get_default_kernel_entry(cache_dir)
 

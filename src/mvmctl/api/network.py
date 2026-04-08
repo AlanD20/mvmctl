@@ -10,14 +10,12 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET, MVM_POSTROUTING_CHAIN
 from mvmctl.core import host_setup, metadata
 from mvmctl.core import network as network_core
 from mvmctl.core.network_manager import (
-    NetworkConfig,
-    NetworkLease,
     build_network_config,
     config_to_network_entry,
     leases_from_entry,
@@ -28,7 +26,7 @@ from mvmctl.core.network_manager import (
     validate_no_subnet_overlap,
 )
 from mvmctl.exceptions import NetworkError
-from mvmctl.models import NetworkInspectInfo, NetworkItem
+from mvmctl.models import NetworkConfig, NetworkEntry, NetworkInspectInfo, NetworkItem, NetworkLease
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.network import (
     bridge_exists,
@@ -98,7 +96,7 @@ def list_networks() -> list[NetworkConfig]:
 
     configs: list[NetworkConfig] = []
     for name, entry in entries.items():
-        config = network_entry_to_config(name, entry)
+        config = network_entry_to_config(name, cast("NetworkEntry", entry))
         if config is not None:
             config.is_default = name == default_name
             configs.append(config)
@@ -110,7 +108,7 @@ def get_network(name: str) -> NetworkConfig | None:
     """Get a named network by name."""
     cache_dir = get_cache_dir()
     entry = metadata.get_network_entry(cache_dir, name)
-    return network_entry_to_config(name, entry)
+    return network_entry_to_config(name, cast("NetworkEntry", entry))
 
 
 def get_network_leases(name: str) -> list[NetworkLease]:
