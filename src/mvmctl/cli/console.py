@@ -2,7 +2,6 @@ import select
 import sys
 import termios
 import tty
-from pathlib import Path
 from typing import Optional
 
 import typer
@@ -25,6 +24,7 @@ from mvmctl.api.vms import (
 )
 from mvmctl.cli._helpers import resolve_vm_by_id_or_name
 from mvmctl.exceptions import MVMError, VMNotFoundError
+from mvmctl.models import ConsoleInfo, ConsoleState
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.error_handler import handle_mvm_error
 
@@ -63,13 +63,13 @@ def console_attach(
 
 def _show_state(name: str) -> None:
     try:
-        state = _get_console_state(name)
-        status = "running" if state["running"] else "stopped"
+        state: ConsoleState = _get_console_state(name)
+        status = "running" if state.running else "stopped"
         print_info(f"Console for '{name}': {status}")
-        if state["pid"]:
-            print_info(f"  PID: {state['pid']}")
-        if state["socket_path"]:
-            print_info(f"  Socket: {state['socket_path']}")
+        if state.pid:
+            print_info(f"  PID: {state.pid}")
+        if state.socket_path:
+            print_info(f"  Socket: {state.socket_path}")
     except VMNotFoundError as e:
         print_error(str(e))
         raise typer.Exit(1)
@@ -94,8 +94,8 @@ def _do_kill(name: str) -> None:
 
 def _do_attach(name: str) -> None:
     try:
-        info = _attach_console(name)
-        socket_path = Path(info["socket_path"])
+        info: ConsoleInfo = _attach_console(name)
+        socket_path = info.socket_path
     except VMNotFoundError as e:
         print_error(str(e))
         raise typer.Exit(1)

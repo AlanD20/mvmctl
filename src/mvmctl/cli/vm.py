@@ -36,7 +36,7 @@ from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_SEED_PATH,
 )
 from mvmctl.exceptions import AssetNotFoundError, MVMError
-from mvmctl.models import CloudInitMode
+from mvmctl.models import CloudInitMode, VMCreateInput, VMInspectInfo
 from mvmctl.utils.console import (
     format_timestamp,
     get_state_marker,
@@ -612,20 +612,10 @@ def vm_create(
         return
 
     try:
-        vm = create_vm(
+        input_data = VMCreateInput(
             name=name,
-            image=image_result.id_for_lookup,
-            kernel=kernel_result.id_for_lookup,
-            image_path=image_result.path,
-            kernel_path=kernel_result.path,
             vcpus=effective_vcpus,
             mem=effective_mem,
-            disk_size=disk_size,
-            ip=ip,
-            network_name=effective_network,
-            mac=mac,
-            ssh_key=ssh_key,
-            user_data=user_data,
             user=effective_user,
             enable_api_socket=True,
             enable_pci=effective_pci,
@@ -634,11 +624,22 @@ def vm_create(
             lsm_flags=effective_lsm_flags,
             enable_logging=effective_enable_logging,
             enable_metrics=effective_enable_metrics,
+            image=image_result.id_for_lookup,
+            kernel=kernel_result.id_for_lookup,
+            image_path=image_result.path,
+            kernel_path=kernel_result.path,
+            disk_size=disk_size,
+            ip=ip,
+            network_name=effective_network,
+            mac=mac,
+            ssh_key=ssh_key,
+            user_data=user_data,
             cloud_init_mode=cloud_init_result.mode,
             cloud_init_iso_path=cloud_init_result.iso_path,
             keep_cloud_init_iso=keep_cloud_init_iso,
             nocloud_net_port=nocloud_net_port if nocloud_net_port is not None else 0,
         )
+        vm = create_vm(input=input_data)
         print_success(f"VM '{name}' started (PID {vm.pid})")
         print_info(f"  SSH ready in ~30-60s: mvm vm ssh --name {name}")
         print_info(f"  Logs: mvm vm logs --name {name} --type os --follow")
@@ -896,26 +897,26 @@ def vm_inspect(
         raise typer.Exit(code=1)
 
     try:
-        vm_info = inspect_vm(effective_selector)
+        vm_info: VMInspectInfo = inspect_vm(effective_selector)
     except MVMError as e:
         handle_mvm_error(e)
 
     if json_output:
-        typer.echo(json.dumps(vm_info, indent=2, default=str))
+        typer.echo(json.dumps(vm_info.__dict__, indent=2, default=str))
     elif tree:
         _print_vm_details_tree(vm_info)
     else:
         _print_vm_details(vm_info)
 
 
-def _print_vm_details(info: dict[str, Any]) -> None:
-    name = info.get("name", "-")
-    status = info.get("status", "-")
+def _print_vm_details(info: VMInspectInfo) -> None:
+    name = info.name or "-"
+    status = info.status or "-"
 
-    created_str = format_timestamp(info.get("created_at"))
+    created_str = format_timestamp(info.created_at)
 
     disk_size_str = "-"
-    rootfs_path = info.get("paths", {}).get("rootfs")
+    rootfs_path = info.paths.get("rootfs")
     if rootfs_path:
         try:
             rootfs_size = Path(rootfs_path).stat().st_size
@@ -924,20 +925,20 @@ def _print_vm_details(info: dict[str, Any]) -> None:
         except (OSError, ValueError):
             pass
 
-    cloud_init_mode = info.get("cloud_init_mode", "inject").lower()
-    features = info.get("features", {})
+    cloud_init_mode = info.cloud_init_mode.lower()
+    features = info.features
 
     print_inspect_header(f"VM: {name}", status)
 
     print_section_header("BASIC INFO")
     print_key_value("Name", name)
-    print_key_value("Full ID", info.get("id", "-"))
+    print_key_value("Full ID", info.id or "-")
     print_key_value("Created", created_str)
-    print_key_value("PID", info.get("pid") or "-")
-    print_key_value("IP", info.get("ip") or "-")
-    print_key_value("MAC", info.get("mac") or "-")
-    print_key_value("Network", info.get("network_name") or "-")
-    print_key_value("TAP Device", info.get("tap_device") or "-")
+    print_key_value("PID", str(info.pid) if info.pid else "-")
+    print_key_value("IP", info.ip or "-")
+    print_key_value("MAC", info.mac or "-")
+    print_key_value("Network", info.network_name or "-")
+    print_key_value("TAP Device", info.tap_device or "-")
 
     print_section_header("RESOURCES")
     print_key_value("Disk Size", disk_size_str)
@@ -947,31 +948,31 @@ def _print_vm_details(info: dict[str, Any]) -> None:
 
     print_section_header("ASSETS")
 
-    image_id = info.get("image_id")
+    image_id = info.image_id
     if image_id:
-        image_name = info.get("image_name") or image_id
+        image_name = info.image_name or image_id
         print_key_value("Image", f"{image_name} ({image_id})")
 
-    kernel_id = info.get("kernel_id")
+    kernel_id = info.kernel_id
     if kernel_id:
-        kernel_name = info.get("kernel_name") or kernel_id
+        kernel_name = info.kernel_name or kernel_id
         print_key_value("Kernel", f"{kernel_name} ({kernel_id})")
 
     print_section_header("PATHS")
-    paths = info.get("paths", {})
-    vm_dir = paths.get("vm_dir", "-")
+    paths = info.paths
+    vm_dir = paths.get("vm_dir") or "-"
     print_key_value("State Dir", vm_dir)
     if paths.get("rootfs"):
-        print_key_value("Rootfs", paths["rootfs"])
+        print_key_value("Rootfs", paths["rootfs"] or "-")
     if paths.get("config"):
-        print_key_value("Config", paths["config"])
+        print_key_value("Config", paths["config"] or "-")
 
 
-def _print_vm_details_tree(info: dict[str, Any]) -> None:
-    name = info.get("name", "-")
-    status = info.get("status", "-")
+def _print_vm_details_tree(info: VMInspectInfo) -> None:
+    name = info.name or "-"
+    status = info.status or "-"
 
-    created_at = info.get("created_at")
+    created_at = info.created_at
     if created_at:
         try:
             dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
@@ -982,7 +983,7 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
         created_str = "-"
 
     disk_size_str = "-"
-    rootfs_path = info.get("paths", {}).get("rootfs")
+    rootfs_path = info.paths.get("rootfs")
     if rootfs_path:
         try:
             rootfs_size = Path(rootfs_path).stat().st_size
@@ -991,21 +992,21 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
         except (OSError, ValueError):
             pass
 
-    cloud_init_mode = info.get("cloud_init_mode", "inject").lower()
-    features = info.get("features", {})
+    cloud_init_mode = info.cloud_init_mode.lower()
+    features = info.features
 
     print(f"{name} ({status})")
 
     tree_lines = [
         f"├── Status:     {status}",
         f"├── Created:    {created_str}",
-        f"├── PID:        {info.get('pid') or '-'}",
+        f"├── PID:        {info.pid or '-'}",
     ]
 
     tree_lines.append("├── Network")
-    tree_lines.append(f"│   ├── IP:     {info.get('ip') or '-'}")
-    tree_lines.append(f"│   ├── MAC:    {info.get('mac') or '-'}")
-    tree_lines.append(f"│   └── TAP:    {info.get('tap_device') or '-'}")
+    tree_lines.append(f"│   ├── IP:     {info.ip or '-'}")
+    tree_lines.append(f"│   ├── MAC:    {info.mac or '-'}")
+    tree_lines.append(f"│   └── TAP:    {info.tap_device or '-'}")
 
     tree_lines.append("├── Resources")
     tree_lines.append(f"│   ├── Disk:   {disk_size_str}")
@@ -1013,18 +1014,18 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
     tree_lines.append(f"│   ├── API:    {'enabled' if features.get('api_socket') else 'off'}")
     tree_lines.append(f"│   └── Console: {'enabled' if features.get('console') else 'off'}")
 
-    image_id = info.get("image_id")
+    image_id = info.image_id
     if image_id:
-        image_name = info.get("image_name") or image_id
+        image_name = info.image_name or image_id
         tree_lines.append(f"├── Image:      {image_name} ({image_id})")
 
-    kernel_id = info.get("kernel_id")
+    kernel_id = info.kernel_id
     if kernel_id:
-        kernel_name = info.get("kernel_name") or kernel_id
+        kernel_name = info.kernel_name or kernel_id
         tree_lines.append(f"├── Kernel:     {kernel_name} ({kernel_id})")
 
-    paths = info.get("paths", {})
-    vm_dir = paths.get("vm_dir", "-")
+    paths = info.paths
+    vm_dir = paths.get("vm_dir") or "-"
     tree_lines.append("└── Paths")
     tree_lines.append(f"    ├── State:  {vm_dir}")
     if paths.get("rootfs"):
