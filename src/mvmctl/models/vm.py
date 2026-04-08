@@ -173,6 +173,47 @@ class VMConfig:
 
 
 @dataclass
+class ConsoleInfo:
+    """Inspection info for VM console."""
+
+    socket_path: Path
+    vm_name: str
+
+
+@dataclass
+class ConsoleState:
+    """Current state of the console relay process."""
+
+    running: bool
+    pid: int | None
+    socket_path: str | None
+
+
+@dataclass
+class VMInspectInfo:
+    """Complete inspection output for a VM."""
+
+    id: str
+    name: str
+    status: str
+    created_at: str | None
+    pid: int | None
+    ip: str | None
+    mac: str | None
+    network_name: str | None
+    tap_device: str | None
+    cloud_init_mode: str
+    image_id: str | None
+    image_name: str | None
+    kernel_id: str | None
+    kernel_name: str | None
+    paths: dict[str, str | None]  # vm_dir, rootfs, rootfs_source, config
+    features: dict[str, bool]  # api_socket, console, nocloud_net
+    nocloud_net: dict[str, Any] | None = None
+    console: dict[str, Any] | None = None
+
+
+@dataclass
 class VMInstance:
     """VM instance metadata.
 
