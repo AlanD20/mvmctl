@@ -28,8 +28,12 @@ tasks:
   test:
     desc: Run pytest with 80% branch coverage gate
     cmds:
+      - uv run pytest tests/ -v -n auto --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=80
+  test-ci:
+    desc: Run pytest with 80% branch coverage gate
+    cmds:
       - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -v --tb=short --cov=src/mvmctl --cov-report=term-missing --cov-fail-under=80
-  test-fast:
+  test-ci-fast:
     desc: Run tests without coverage — stop on first failure (fast feedback)
     cmds:
       - MVM_TEST_ENFORCE_NO_SUDO=1 uv run pytest tests/ -x -q
