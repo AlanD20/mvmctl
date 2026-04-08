@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class ImageRecord:
+class ImageItem:
     id: str
     os_slug: str
     path: str
@@ -30,7 +30,7 @@ class ImageRecord:
     updated_at: str | None = None
 
     @classmethod
-    def from_db(cls, record: "DBImage") -> "ImageRecord":
+    def from_db(cls, record: "DBImage") -> "ImageItem":
         return cls(
             id=record.id,
             os_slug=record.os_slug,
@@ -86,7 +86,7 @@ class ImageSpec:
 
 
 @dataclass
-class ImageImportSpec:
+class ImageImportInput:
     """Specification for importing a local image file."""
 
     id: str

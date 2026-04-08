@@ -27,7 +27,7 @@ class NetworkConfig:
 
 
 @dataclass
-class NetworkRecord:
+class NetworkItem:
     id: str
     name: str
     subnet: str
@@ -41,7 +41,7 @@ class NetworkRecord:
     updated_at: str | None = None
 
     @classmethod
-    def from_db(cls, record: "DBNetwork") -> "NetworkRecord":
+    def from_db(cls, record: "DBNetwork") -> "NetworkItem":
         return cls(
             id=record.id,
             name=record.name,

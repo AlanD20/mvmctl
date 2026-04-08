@@ -13,9 +13,9 @@ from typing import Any
 
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import Binary, Image, Kernel
-from mvmctl.models.binary import BinaryRecord
-from mvmctl.models.image import ImageRecord
-from mvmctl.models.kernel import KernelRecord
+from mvmctl.models.binary import BinaryItem
+from mvmctl.models.image import ImageItem
+from mvmctl.models.kernel import KernelItem
 from mvmctl.utils.full_hash import generate_full_hash_binary
 
 logger = logging.getLogger(__name__)
@@ -91,12 +91,12 @@ def get_kernel_entry(cache_dir: Path, kernel_name: str) -> dict[str, Any]:
     # Try by ID first
     kernel = db.get_kernel(kernel_name)
     if kernel:
-        return KernelRecord.from_db(kernel).to_dict()
+        return KernelItem.from_db(kernel).to_dict()
 
     # Try by name
     kernel = db.get_kernel_by_name(kernel_name)
     if kernel:
-        return KernelRecord.from_db(kernel).to_dict()
+        return KernelItem.from_db(kernel).to_dict()
 
     return {}
 
@@ -120,13 +120,13 @@ def list_kernel_entries(
         if kernels_dir is not None and kernels_dir.exists():
             full_path = kernels_dir / kernel_path.name
             if full_path.exists():
-                result[kernel.id] = KernelRecord.from_db(kernel).to_dict()
+                result[kernel.id] = KernelItem.from_db(kernel).to_dict()
             elif include_missing:
-                result[kernel.id] = KernelRecord.from_db(kernel).to_dict()
+                result[kernel.id] = KernelItem.from_db(kernel).to_dict()
             else:
                 orphaned.append(kernel.id)
         else:
-            result[kernel.id] = KernelRecord.from_db(kernel).to_dict()
+            result[kernel.id] = KernelItem.from_db(kernel).to_dict()
 
     # Clean up orphaned entries
     for kernel_id in orphaned:
@@ -179,7 +179,7 @@ def get_image_entry(cache_dir: Path, image_id: str) -> dict[str, Any]:
     db = MVMDatabase()
     image = db.get_image(image_id)
     if image:
-        return ImageRecord.from_db(image).to_dict()
+        return ImageItem.from_db(image).to_dict()
     return {}
 
 
@@ -202,13 +202,13 @@ def list_image_entries(
             filename = image.path
             image_path = images_dir / filename
             if image_path.exists():
-                result[image.id] = ImageRecord.from_db(image).to_dict()
+                result[image.id] = ImageItem.from_db(image).to_dict()
             elif include_missing:
-                result[image.id] = ImageRecord.from_db(image).to_dict()
+                result[image.id] = ImageItem.from_db(image).to_dict()
             else:
                 orphaned.append(image.id)
         else:
-            result[image.id] = ImageRecord.from_db(image).to_dict()
+            result[image.id] = ImageItem.from_db(image).to_dict()
 
     # Clean up orphaned entries
     for image_id in orphaned:
@@ -249,7 +249,7 @@ def find_image_by_id_prefix(cache_dir: Path, prefix: str) -> tuple[str, dict[str
     db = MVMDatabase()
     images = db.find_images_by_prefix(prefix)
     if len(images) == 1:
-        return images[0].id, ImageRecord.from_db(images[0]).to_dict()
+        return images[0].id, ImageItem.from_db(images[0]).to_dict()
     return None
 
 
@@ -257,7 +257,7 @@ def find_images_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, di
     """Return all image entries whose key starts with prefix."""
     db = MVMDatabase()
     images = db.find_images_by_prefix(prefix)
-    return [(img.id, ImageRecord.from_db(img).to_dict()) for img in images]
+    return [(img.id, ImageItem.from_db(img).to_dict()) for img in images]
 
 
 # =============================================================================
@@ -408,7 +408,7 @@ def get_binary_entry(cache_dir: Path, version: str) -> dict[str, Any]:
     db = MVMDatabase()
     binary = _find_db_binary_by_name_and_version(db, version)
     if binary is not None:
-        return BinaryRecord.from_db(binary).to_dict()
+        return BinaryItem.from_db(binary).to_dict()
     return {}
 
 
@@ -421,7 +421,7 @@ def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for binary in binaries:
         if binary.name in _BINARY_METADATA_NAMES:
-            result[binary.name] = BinaryRecord.from_db(binary).to_dict()
+            result[binary.name] = BinaryItem.from_db(binary).to_dict()
 
     return result
 

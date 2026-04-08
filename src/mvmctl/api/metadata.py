@@ -115,9 +115,9 @@ def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
     image = db.get_default_image()
     if image is None:
         return None
-    from mvmctl.models.image import ImageRecord
+    from mvmctl.models.image import ImageItem
 
-    return image.id, ImageRecord.from_db(image).to_dict()
+    return image.id, ImageItem.from_db(image).to_dict()
 
 
 def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
@@ -126,9 +126,9 @@ def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | No
     kernel = db.get_default_kernel()
     if kernel is None:
         return None
-    from mvmctl.models.kernel import KernelRecord
+    from mvmctl.models.kernel import KernelItem
 
-    return kernel.id, KernelRecord.from_db(kernel).to_dict()
+    return kernel.id, KernelItem.from_db(kernel).to_dict()
 
 
 def remove_kernel_entry(cache_dir: Path, kernel_id: str) -> None:
@@ -171,9 +171,9 @@ def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
     binary = db.get_default_binary("firecracker")
     if binary is None:
         return None
-    from mvmctl.models.binary import BinaryRecord
+    from mvmctl.models.binary import BinaryItem
 
-    return binary.version, BinaryRecord.from_db(binary).to_dict()
+    return binary.version, BinaryItem.from_db(binary).to_dict()
 
 
 def set_default_binary_entry(cache_dir: Path, version: str) -> None:
@@ -186,6 +186,6 @@ def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | N
     network = db.get_default_network()
     if network is None:
         return None
-    from mvmctl.models.network import NetworkRecord
+    from mvmctl.models.network import NetworkItem
 
-    return network.name, NetworkRecord.from_db(network).to_dict()
+    return network.name, NetworkItem.from_db(network).to_dict()

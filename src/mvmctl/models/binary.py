@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class BinaryRecord:
+class BinaryItem:
     id: str
     name: str
     version: str
@@ -20,7 +20,7 @@ class BinaryRecord:
     updated_at: str | None = None
 
     @classmethod
-    def from_db(cls, record: "DBBinary") -> "BinaryRecord":
+    def from_db(cls, record: "DBBinary") -> "BinaryItem":
         return cls(
             id=record.id,
             name=record.name,

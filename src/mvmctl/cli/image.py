@@ -35,7 +35,7 @@ from mvmctl.exceptions import (
     RootPartitionDetectionError,
     TieDetectedError,
 )
-from mvmctl.models.image import ImageImportSpec
+from mvmctl.models.image import ImageImportInput
 from mvmctl.utils.console import (
     format_timestamp,
     get_combined_marker,
@@ -799,7 +799,7 @@ def image_import(
         )
         raise typer.Exit(code=1)
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id=image_id,
         name=name,
         source_path=source_path,

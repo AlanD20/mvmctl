@@ -372,7 +372,7 @@ The core layer **must not** produce console output. All output formatting belong
 All other core modules must receive database-resolved values from the API layer.
 
 - `MVMDatabase` class — single entry point for all SQLite operations
-- `get_default_binary(name)` → `BinaryRecord | None`
+- `get_default_binary(name)` → `BinaryItem | None`
 - `get_default_image()`, `get_default_kernel()`
 - `list_binaries()`, `list_images()`, `list_kernels()`
 - Do NOT bypass this with raw sqlite3 calls from `core/` or above

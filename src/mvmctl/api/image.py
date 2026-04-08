@@ -415,7 +415,7 @@ def import_image_and_register(
     Same pattern as fetch_image_and_register but for local source files.
 
     Args:
-        spec: ImageImportSpec with source_path, format, convert_to, etc.
+        spec: ImageImportInput with source_path, format, convert_to, etc.
         output_dir: Directory to store the imported image.
         force: Overwrite existing image if present.
         partition: Specific partition number (1-indexed) for retry, or None for auto.

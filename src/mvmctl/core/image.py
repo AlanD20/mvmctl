@@ -27,7 +27,7 @@ from mvmctl.constants import (
     HTTP_USER_AGENT,
 )
 from mvmctl.exceptions import ConfigError, ImageError
-from mvmctl.models.image import ImageImportSpec, ImageSpec
+from mvmctl.models.image import ImageImportInput, ImageSpec
 from mvmctl.utils.guestfs import extract_partition_with_guestfs
 from mvmctl.utils.http import download_file as _download_file
 from mvmctl.utils.progress import download_with_progress
@@ -1347,7 +1347,7 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
 
 
 def import_image(
-    spec: ImageImportSpec,
+    spec: ImageImportInput,
     output_dir: Path,
     force: bool = False,
     partition: int | None = None,

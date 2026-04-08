@@ -137,15 +137,15 @@ def register_fetched_image(result: ImageImportResult, spec: ImageSpec) -> str:
     """Persist image to DB after successful fetch/import. Returns full image ID.
     
     Takes ImageImportResult (from core/image.py) and ImageSpec (from models/image.py).
-    Assembles ImageRecord, generates full hash, upserts via update_image_entry().
+    Assembles ImageItem, generates full hash, upserts via update_image_entry().
     """
     from datetime import datetime, timezone
-    from mvmctl.models.image import ImageRecord
+    from mvmctl.models.image import ImageItem
 
     timestamp = datetime.now(tz=timezone.utc).isoformat()
     full_id = generate_full_hash_image(result.path, spec.id, timestamp)
 
-    record = ImageRecord(
+    record = ImageItem(
         id=full_id,
         os_slug=spec.id,
         path=result.path.name,
@@ -193,7 +193,7 @@ def fetch_image_and_register(
     """
 
 def import_image_and_register(
-    spec: ImageImportSpec,
+    spec: ImageImportInput,
     output_dir: Path,
     force: bool = False,
     partition: int | None = None,
@@ -309,7 +309,7 @@ def image_import(
     # SETUP
     images_dir = out or get_images_dir()
     images_dir.mkdir(parents=True, exist_ok=True)
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id=generate_image_id(source, format),  # or from user
         name=name,
         source_path=source,
@@ -640,7 +640,7 @@ Should return **zero results**.
 ```python
 # models/image.py
 @dataclass
-class ImageRecord:
+class ImageItem:
     id: str
     os_slug: str
     path: str
@@ -659,7 +659,7 @@ class ImageRecord:
 
 # models/kernel.py
 @dataclass
-class KernelRecord:
+class KernelItem:
     id: str
     name: str
     version: str
@@ -697,7 +697,7 @@ class ImageSpec:
     ...
 
 @dataclass
-class ImageImportSpec:
+class ImageImportInput:
     id: str
     name: str
     source_path: Path
@@ -787,6 +787,6 @@ All must pass. No test deletion to make things pass.
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-04-08 | Don't create `api/bin.py` | Binary flow is simple enough; `register_binary()` goes in `api/assets.py` |
-| 2026-04-08 | `import_image_and_register()` separate from `fetch_image_and_register()` | Different input types (`ImageImportSpec` vs `ImageSpec`) — local vs remote path |
+| 2026-04-08 | `import_image_and_register()` separate from `fetch_image_and_register()` | Different input types (`ImageImportInput` vs `ImageSpec`) — local vs remote path |
 | 2026-04-08 | Partition prompt stays in CLI | User interaction (`typer.confirm`, `input()`) is CLI's job; API handles retry when given partition number |
 | 2026-04-08 | Kernel full redesign via `free-refactor` | User confirmed over-engineering requires exhaustive redesign — kernel is pattern prototype for image |

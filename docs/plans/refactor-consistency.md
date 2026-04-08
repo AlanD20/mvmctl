@@ -58,15 +58,15 @@ Every `cli/` file has imports inside function bodies that should be at module to
 
 | File | Function | Current | Should be |
 |------|----------|---------|-----------|
-| `cli/image.py` | `_output_local_images()` | `dict[str, dict[str, Any]]` from `list_images_metadata()` | `dict[str, ImageRecord]` |
+| `cli/image.py` | `_output_local_images()` | `dict[str, dict[str, Any]]` from `list_images_metadata()` | `dict[str, ImageItem]` |
 | `cli/image.py` | `_output_remote_images()` | Raw dicts built inline | `list[RemoteImage]` (already typed from YAML) |
-| `cli/image.py` | `image_inspect()` | Inline dict construction (`info = {...}`) | Return `ImageRecord` from API |
-| `cli/image.py` | `_print_image_details()` | Raw dict `info: dict[str, Any]` | `ImageRecord` |
-| `cli/image.py` | `_print_image_details_tree()` | Raw dict | `ImageRecord` |
+| `cli/image.py` | `image_inspect()` | Inline dict construction (`info = {...}`) | Return `ImageItem` from API |
+| `cli/image.py` | `_print_image_details()` | Raw dict `info: dict[str, Any]` | `ImageItem` |
+| `cli/image.py` | `_print_image_details_tree()` | Raw dict | `ImageItem` |
 | `cli/vm.py` | `ls_vms()` | Inline dict building per VM | `VMInstance` (already imported) |
 | `cli/vm.py` | `_print_vm_details()` | Raw `info: dict[str, Any]` | `VMInstance` |
 | `cli/vm.py` | `_print_vm_details_tree()` | Raw dict | `VMInstance` |
-| `cli/kernel.py` | `_print_kernel_details()` | Raw dict | `KernelRecord` |
+| `cli/kernel.py` | `_print_kernel_details()` | Raw dict | `KernelItem` |
 | `cli/network.py` | `ls()` | Inline dict from `list_networks()` | `NetworkConfig` (already in `models/network.py`) |
 
 ### Finding 4 — Functions doing too much
@@ -216,10 +216,10 @@ def get_vm_defaults() -> VMDefaultsConfig:
 Replace `dict[str, Any]` parameters with actual model types where models already exist.
 
 **`cli/image.py`:**
-- `image_inspect()`: build `ImageRecord` from API result, pass to `_print_image_details` / `_print_image_details_tree` instead of raw dict
-- `_output_local_images()`: use `ImageRecord` from `list_images_metadata()` — already returns the right shape
-- `_print_image_details()`: parameter type `ImageRecord` instead of `dict[str, Any]`
-- `_print_image_details_tree()`: parameter type `ImageRecord`
+- `image_inspect()`: build `ImageItem` from API result, pass to `_print_image_details` / `_print_image_details_tree` instead of raw dict
+- `_output_local_images()`: use `ImageItem` from `list_images_metadata()` — already returns the right shape
+- `_print_image_details()`: parameter type `ImageItem` instead of `dict[str, Any]`
+- `_print_image_details_tree()`: parameter type `ImageItem`
 
 **`cli/vm.py`:**
 - `ls_vms()`: use `VMInstance` attributes directly instead of building inline dicts
@@ -340,7 +340,7 @@ Pass 1  ──► Pass 2 ──► Pass 3 ──► Pass 4 ──► Pass 5
 
 | Pattern | Replace with |
 |---------|-------------|
-| `info: dict[str, Any]` in display helpers | Model type (`VMInstance`, `ImageRecord`) |
+| `info: dict[str, Any]` in display helpers | Model type (`VMInstance`, `ImageItem`) |
 | `import json` inside function | Top-level `import json` |
 | `from mvmctl.api import func` inside function | Top-level import |
 | `def create(...27 params...)` | Split: CLI collects → API resolves → Core executes |

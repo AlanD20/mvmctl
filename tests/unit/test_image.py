@@ -29,7 +29,7 @@ from mvmctl.core.image import (
     load_images_config,
 )
 from mvmctl.exceptions import ChecksumMismatchError, ConfigError, ImageError, MVMError
-from mvmctl.models.image import ImageImportSpec, ImageSpec
+from mvmctl.models.image import ImageImportInput, ImageSpec
 
 # ---------------------------------------------------------------------------
 # load_images_config
@@ -1849,7 +1849,7 @@ def test_fetch_image_ubuntu_fc_resolves_source(
 
 def test_import_image_already_exists_no_force(tmp_path: Path):
     """Test import_image raises error when image exists and force=False."""
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=tmp_path / "source.raw",
@@ -1870,7 +1870,7 @@ def test_import_image_already_exists_no_force(tmp_path: Path):
 
 def test_import_image_source_not_found(tmp_path: Path):
     """Test import_image raises error when source file doesn't exist."""
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=tmp_path / "nonexistent.raw",
@@ -1891,7 +1891,7 @@ def test_import_image_raw_format(mock_copy: MagicMock, tmp_path: Path):
     source = tmp_path / "source.raw"
     source.write_text("raw image data")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
@@ -1918,7 +1918,7 @@ def test_import_image_qcow2_format(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
@@ -1951,7 +1951,7 @@ def test_import_image_qcow2_cleans_up_raw(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
@@ -1981,7 +1981,7 @@ def test_import_image_qcow2_convert_fails(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
@@ -2004,7 +2004,7 @@ def test_import_image_tar_rootfs_format(mock_create: MagicMock, tmp_path: Path):
     source = tmp_path / "rootfs.tar.gz"
     source.write_text("tar archive")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
@@ -2029,7 +2029,7 @@ def test_import_image_unsupported_format(tmp_path: Path):
     source = tmp_path / "source.xyz"
     source.write_text("unknown format")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
@@ -2057,7 +2057,7 @@ def test_import_image_force_overwrite(
     source = tmp_path / "source.raw"
     source.write_text("new image data")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
@@ -2223,7 +2223,7 @@ def test_import_image_qcow2_uses_tempfile_context_manager(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
@@ -2264,7 +2264,7 @@ def test_import_image_qcow2_cleans_up_on_exception(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
-    spec = ImageImportSpec(
+    spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,

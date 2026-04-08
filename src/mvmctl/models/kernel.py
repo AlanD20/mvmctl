@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class KernelRecord:
+class KernelItem:
     id: str
     name: str
     version: str
@@ -24,7 +24,7 @@ class KernelRecord:
     updated_at: str | None = None
 
     @classmethod
-    def from_db(cls, record: "DBKernel") -> "KernelRecord":
+    def from_db(cls, record: "DBKernel") -> "KernelItem":
         return cls(
             id=record.id,
             name=record.name,

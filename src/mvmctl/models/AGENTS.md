@@ -4,6 +4,21 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** `@dataclass` only; no methods with business logic; **NO default values for config-backed fields**
 
+## NAMING CONVENTION (MANDATORY — ALL NEW CODE)
+
+| Suffix | Meaning | Examples |
+|--------|---------|----------|
+| `Input` | API creation/update input — what you pass to create something | `VMCreateInput`, `ImageFetchInput`, `ImageImportInput`, `NetworkCreateInput` |
+| `Item` | Persisted DB record | `ImageItem`, `KernelItem`, `BinaryItem`, `NetworkItem` |
+| `Spec` | YAML source definition (remote or local) | `ImageSpec`, `KernelSpec` |
+| `Config` | Runtime configuration (not persisted as a DB row) | `VMConfig`, `CloudInitConfig`, `NetworkConfig`, `SystemDefaultsConfig` |
+| `Instance` | Active/runtime entity | `VMInstance` |
+| `State` | Snapshot of current state | `HostState` |
+| `Result` | Operation output (synthetic, not stored) | `KernelFetchResult` |
+| `*Mode` / `*Status` | StrEnum for constrained string values | `VMStatus`, `CloudInitMode`, `CloudInitStatus` |
+
+**Legacy names to NEVER use:** `*Record` (use `*Item`), `ImageImportSpec` (use `ImageImportInput`)
+
 ## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
 
 **Models are pure data containers. They resolve nothing.**
@@ -35,12 +50,12 @@ src/mvmctl/models/
 ├── __init__.py       # Exports: VMStatus, VMConfig, VMInstance, ImageSpec, KernelSpec,
 │                     #          CloudInitConfig, CloudInitMode, CloudInitStatus
 ├── vm.py             # VMStatus (StrEnum), VMConfig, VMInstance
-├── image.py          # ImageSpec, ImageImportSpec
-├── kernel.py         # KernelSpec
+├── image.py          # ImageSpec, ImageImportInput, ImageItem
+├── kernel.py         # KernelSpec, KernelItem
 ├── cloud_init.py     # CloudInitMode, CloudInitStatus, CloudInitConfig
-├── network.py        # NetworkLease, NetworkConfig, NetworkRecord
+├── network.py        # NetworkLease, NetworkConfig, NetworkItem
 ├── host.py           # HostStateChange, HostState
-├── binary.py         # BinaryRecord
+├── binary.py         # BinaryItem
 └── vm_config_file.py # VMCreateConfigFile — JSON config file schema
 ```
 
@@ -119,7 +134,7 @@ Methods: `to_dict()`, `from_dict()`
 Fields: `id`, `name`, `source` (URL), `format`, `convert_to`, `minimum_rootfs_size`, `sha256`, `sha256_url`
 Used for YAML-defined images in `images.yaml`.
 
-### ImageImportSpec — `image.py`
+### ImageImportInput — `image.py`
 Fields: `id`, `name`, `source_path` (local), `format`, `convert_to`, `minimum_rootfs_size`
 **Not in `models/__init__.__all__`** — import directly from `mvmctl.models.image`.
 
@@ -127,13 +142,21 @@ Fields: `id`, `name`, `source_path` (local), `format`, `convert_to`, `minimum_ro
 Fields: `id`, `name`, `source` (URL), `version`, `arch`
 Used for YAML-defined kernels in `kernels.yaml`.
 
+### KernelItem — `kernel.py`
+Fields: `id`, `name`, `version`, `path`, `arch`, `fs_type`, `is_default`, `created_at`, `updated_at`
+Methods: `from_db(record)`, `to_dict()`
+
+### ImageItem — `image.py`
+Fields: `id`, `os_slug`, `path`, `os_name`, `fs_type`, `fs_uuid`, `arch`, `is_default`, `created_at`, `updated_at`
+Methods: `from_db(record)`, `to_dict()`
+
 ### NetworkLease — `network.py`
 Fields: `vm_id`, `ipv4`
 
 ### NetworkConfig — `network.py`
 Fields: `name`, `subnet`, `ipv4_gateway`, `bridge`, `nat_enabled`, `nat_gateways`, `created_at`, `is_default`
 
-### NetworkRecord — `network.py`
+### NetworkItem — `network.py`
 Fields: `id`, `name`, `subnet`, `bridge`, `ipv4_gateway`, `bridge_active`, `nat_gateways`, `nat_enabled`, `is_default`, `created_at`, `updated_at`
 Methods: `from_db(record)`, `to_dict()`
 
@@ -143,7 +166,7 @@ Fields: `setting`, `original_value`, `applied_value`, `mechanism`
 ### HostState — `host.py`
 Fields: `init_timestamp`, `changes` (list[HostStateChange])
 
-### BinaryRecord — `binary.py`
+### BinaryItem — `binary.py`
 Fields: `id`, `name`, `version`, `path`, `full_version`, `ci_version`, `is_default`, `created_at`, `updated_at`
 Methods: `from_db(record)`, `to_dict()`
 
