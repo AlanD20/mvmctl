@@ -59,8 +59,8 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
     return None
 
 
-@app.command()
-def ssh(
+@app.command(name="ssh")
+def ssh_connect(
     vm_id: str = typer.Argument(None, help="VM name, ID prefix, or IP address"),
     user: Optional[str] = typer.Option(
         None, "--user", "-u", help="SSH user (default: from user config)"

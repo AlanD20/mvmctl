@@ -88,7 +88,7 @@ def help_cmd(ctx: typer.Context) -> None:
 
 
 @app.command(name="init")
-def init_cmd() -> None:
+def host_init() -> None:
     """Apply host configuration changes. Idempotent.
 
     This command must be run with sudo the first time. It performs the
@@ -165,7 +165,7 @@ def init_cmd() -> None:
 
 
 @app.command(name="ls")
-def ls_cmd(
+def host_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show current host configuration state vs expected."""
@@ -216,7 +216,7 @@ def ls_cmd(
 
 
 @app.command(name="clean")
-def clean_cmd(
+def host_clean(
     force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
     """Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group."""
@@ -246,7 +246,7 @@ def clean_cmd(
 
 
 @app.command(name="reset")
-def reset_cmd(
+def host_reset(
     force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
     """Full rollback: remove networking, revert sysctl, remove sudoers and group.
@@ -290,7 +290,7 @@ def reset_cmd(
 
 
 @app.command(name="clean-ready-pool")
-def clean_ready_pool_cmd(
+def host_clean_ready_pool(
     force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
     """Clear the tmpfs ready pool to free RAM.

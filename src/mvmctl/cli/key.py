@@ -48,7 +48,7 @@ def help_cmd(ctx: typer.Context) -> None:
 
 
 @app.command(name="ls")
-def ls(
+def key_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List all keys in the cache."""
@@ -89,8 +89,10 @@ def ls(
     )
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def add(
+@app.command(
+    name="add", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def key_add(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Name for this key"),
     public_key_path: str | None = typer.Argument(None, help="Path to public key file"),
@@ -149,8 +151,10 @@ def add(
         print_info(f"  Comment:     {info.comment}")
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def create(
+@app.command(
+    name="create", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def key_create(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Name for the new keypair"),
     output: str | None = typer.Option(
@@ -194,7 +198,7 @@ def create(
     hidden=True,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def remove(
+def key_remove(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Key name"),
 ) -> None:
@@ -215,16 +219,18 @@ def remove(
     name="rm",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def rm(
+def key_rm(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Key name"),
 ) -> None:
     """Alias for remove."""
-    remove(ctx=ctx, name=name)
+    key_remove(ctx=ctx, name=name)
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def export(
+@app.command(
+    name="export", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def key_export(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Key name to export"),
     output: str | None = typer.Option(
@@ -257,8 +263,10 @@ def export(
     print_info(f"  Public key:  {public_path}")
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def inspect(
+@app.command(
+    name="inspect", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def key_inspect(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Key name"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -293,7 +301,7 @@ def inspect(
     name="set-default",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def set_default(
+def key_set_default(
     ctx: typer.Context,
     keys: list[str] | None = typer.Argument(None, help="Key names, paths, or fingerprints"),
     clear: bool = typer.Option(False, "--clear", help="Clear all default keys instead of setting"),

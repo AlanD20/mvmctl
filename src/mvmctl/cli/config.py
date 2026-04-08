@@ -31,8 +31,8 @@ def config_callback(ctx: typer.Context) -> None:
         raise typer.Exit()
 
 
-@app.command()
-def show(
+@app.command(name="show")
+def config_show(
     section: str | None = typer.Option(None, "--section", help="Config section to show"),
     config_dir: Path = typer.Option(
         None,
@@ -50,8 +50,8 @@ def show(
         handle_mvm_error(e)
 
 
-@app.command()
-def validate(
+@app.command(name="validate")
+def config_validate(
     config_dir: Path = typer.Option(
         None,
         "--config-dir",
@@ -75,8 +75,8 @@ def validate(
         handle_mvm_error(e)
 
 
-@app.command()
-def dump_vm(
+@app.command(name="dump-vm")
+def config_dump(
     name: str = typer.Option(..., "--name", help="VM name"),
 ) -> None:
     """Print the Firecracker JSON config for a VM."""

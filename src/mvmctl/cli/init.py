@@ -236,7 +236,7 @@ def _step_summary() -> None:
 
 
 @app.callback(invoke_without_command=True)
-def init(
+def init_run(
     non_interactive: bool = typer.Option(
         False, "--non-interactive", help="Use defaults, skip prompts"
     ),

@@ -41,7 +41,7 @@ def _resolve_vm(vm_id: Optional[str], name: Optional[str]) -> str:
 
 
 @app.command()
-def attach(
+def console_attach(
     vm_id: Optional[str] = typer.Argument(None, help="VM ID prefix or name"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name"),
     state: bool = typer.Option(False, "--state", help="Show console state without attaching"),

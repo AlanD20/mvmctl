@@ -106,7 +106,7 @@ def network_ls(
 @app.command(
     name="set-default", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
-def set_default(
+def network_set_default(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name to set as default"),
 ) -> None:
@@ -246,7 +246,7 @@ def network_create(
     hidden=True,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def remove(
+def network_remove(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
 ) -> None:
@@ -267,16 +267,18 @@ def remove(
     name="rm",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
-def rm(
+def network_rm(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
 ) -> None:
     """Alias for remove."""
-    remove(ctx=ctx, name=name)
+    network_remove(ctx=ctx, name=name)
 
 
-@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def inspect(
+@app.command(
+    name="inspect", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def network_inspect(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),

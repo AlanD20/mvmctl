@@ -397,8 +397,8 @@ def _build_output_config(
     print_info(f"VM config written to: {output_config}")
 
 
-@app.command()
-def create(
+@app.command(name="create")
+def vm_create(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     image: Optional[str] = typer.Option(
         None,
@@ -647,7 +647,7 @@ def create(
 
 
 @app.command(name="rm")
-def rm(
+def vm_rm(
     ids: Optional[List[str]] = typer.Argument(None, help="VM ID prefixes to remove"),
     name: Optional[List[str]] = typer.Option(
         None, "--name", "-n", help="VM name to remove (can be specified multiple times)"
@@ -694,7 +694,7 @@ def rm(
 
 
 @app.command(name="ls")
-def ls_vms(
+def vm_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     all_vms: bool = typer.Option(False, "--all", "-a", help="Show all VMs including stopped"),
 ) -> None:
@@ -735,16 +735,16 @@ def ls_vms(
 
 
 @app.command(name="ps")
-def ps_vms(
+def vm_ps(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     all_vms: bool = typer.Option(False, "--all", "-a", help="Show all VMs including stopped"),
 ) -> None:
     """List running VMs (alias for ls)."""
-    ls_vms(json_output=json_output, all_vms=all_vms)
+    vm_ls(json_output=json_output, all_vms=all_vms)
 
 
-@app.command()
-def snapshot(
+@app.command(name="snapshot")
+def vm_snapshot(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     mem_out: Path = typer.Option(..., "--mem-out", help="Memory snapshot output path"),
     state_out: Path = typer.Option(..., "--state-out", help="VM state output path"),
@@ -758,8 +758,8 @@ def snapshot(
         handle_mvm_error(exc)
 
 
-@app.command()
-def load(
+@app.command(name="load")
+def vm_load(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     mem_in: Path = typer.Option(..., "--mem-in", help="Memory snapshot input path"),
     state_in: Path = typer.Option(..., "--state-in", help="VM state input path"),
@@ -774,8 +774,8 @@ def load(
         handle_mvm_error(exc)
 
 
-@app.command()
-def pause(
+@app.command(name="pause")
+def vm_pause(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
 ) -> None:
@@ -793,8 +793,8 @@ def pause(
         handle_mvm_error(exc)
 
 
-@app.command()
-def resume(
+@app.command(name="resume")
+def vm_resume(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
 ) -> None:
@@ -812,8 +812,8 @@ def resume(
         handle_mvm_error(exc)
 
 
-@app.command()
-def stop(
+@app.command(name="stop")
+def vm_stop(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
     force: bool = typer.Option(
@@ -834,8 +834,8 @@ def stop(
         handle_mvm_error(exc)
 
 
-@app.command()
-def start(
+@app.command(name="start")
+def vm_start(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
 ) -> None:
@@ -853,8 +853,8 @@ def start(
         handle_mvm_error(exc)
 
 
-@app.command()
-def reboot(
+@app.command(name="reboot")
+def vm_reboot(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
     force: bool = typer.Option(
@@ -875,8 +875,8 @@ def reboot(
         handle_mvm_error(exc)
 
 
-@app.command()
-def inspect(
+@app.command(name="inspect")
+def vm_inspect(
     selector: Optional[str] = typer.Argument(None, help="VM ID prefix or name"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -1037,7 +1037,7 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
 
 
 @app.command(name="export")
-def export_vm(
+def vm_export(
     name: str = typer.Option(..., "--name", "-n", help="VM name to export"),
     output: Optional[Path] = typer.Option(
         None, "--output", "-o", help="Output file path (default: <vm_name>.json)"

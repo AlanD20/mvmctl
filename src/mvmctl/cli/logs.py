@@ -23,7 +23,7 @@ app = typer.Typer(
 
 
 @app.command()
-def logs(
+def logs_show(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     follow: bool = typer.Option(None, "--follow", "-f", help="Follow log output"),
     lines: int = typer.Option(None, "--lines", help="Number of lines to show"),
