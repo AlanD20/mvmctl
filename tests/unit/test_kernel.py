@@ -180,7 +180,7 @@ def test_run_make_failure(tmp_path: Path):
     )
 
 
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_config_success(mock_urlopen: MagicMock, tmp_path: Path):
     config_content = "CONFIG_TEST=y\n"
     mock_response = MagicMock()
@@ -199,7 +199,7 @@ def test_download_firecracker_config_success(mock_urlopen: MagicMock, tmp_path: 
     assert config_path.read_text() == config_content
 
 
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_config_uses_yaml_template(mock_urlopen: MagicMock, tmp_path: Path):
     config_content = "CONFIG_TEST=y\n"
     mock_response = MagicMock()
@@ -217,7 +217,7 @@ def test_download_firecracker_config_uses_yaml_template(mock_urlopen: MagicMock,
     assert request.full_url.endswith("microvm-kernel-ci-x86_64-6.1.config")
 
 
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_config_supports_version_placeholder(
     mock_urlopen: MagicMock, tmp_path: Path
 ):
@@ -249,7 +249,7 @@ def test_download_firecracker_config_supports_version_placeholder(
     assert request.full_url.endswith("microvm-kernel-6.1.config")
 
 
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_config_url_error(mock_urlopen: MagicMock, tmp_path: Path):
     mock_urlopen.side_effect = URLError("Connection refused")
 
@@ -1220,7 +1220,7 @@ class TestApplyConfigFragments:
         finally:
             fragment_file.unlink(missing_ok=True)
 
-    @patch("mvmctl.core.kernel.urlopen")
+    @patch("urllib.request.urlopen")
     def test_remote_url_fragment_with_arch_template(
         self, mock_urlopen: MagicMock, tmp_path: Path
     ) -> None:
@@ -1258,7 +1258,7 @@ class TestApplyConfigFragments:
                 kernel_dir,
             )
 
-    @patch("mvmctl.core.kernel.urlopen", side_effect=URLError("network error"))
+    @patch("urllib.request.urlopen", side_effect=URLError("network error"))
     def test_remote_fetch_failure_raises(self, mock_urlopen: MagicMock, tmp_path: Path) -> None:
         from mvmctl.core.kernel import _apply_config_fragments
 

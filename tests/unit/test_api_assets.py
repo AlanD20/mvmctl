@@ -38,7 +38,7 @@ def test_asset_info_with_none_values():
 
 class TestFetchImage:
     def test_fetch_image_success(self, tmp_path: Path):
-        with patch("mvmctl.api.assets._core_fetch_image") as mock_fetch:
+        with patch("mvmctl.core.image.fetch_image") as mock_fetch:
             mock_fetch.return_value = Path("/path/to/image.ext4")
 
             with patch("mvmctl.api.assets.MVMDatabase") as mock_db_class:
@@ -50,7 +50,7 @@ class TestFetchImage:
                 mock_fetch.assert_called_once()
 
     def test_fetch_image_force(self, tmp_path: Path):
-        with patch("mvmctl.api.assets._core_fetch_image") as mock_fetch:
+        with patch("mvmctl.core.image.fetch_image") as mock_fetch:
             mock_fetch.return_value = Path("/path/to/image.ext4")
 
             with patch("mvmctl.api.assets.MVMDatabase") as mock_db_class:
@@ -64,7 +64,7 @@ class TestFetchImage:
 
 class TestFetchBinary:
     def test_fetch_binary_success(self, tmp_path: Path):
-        with patch("mvmctl.api.assets._core_fetch_binary") as mock_fetch:
+        with patch("mvmctl.core.binary_manager.fetch_binary") as mock_fetch:
             with patch("mvmctl.api.assets.MVMDatabase") as mock_db_class:
                 mock_db = MagicMock()
                 mock_db_class.return_value = mock_db

@@ -3,61 +3,22 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from mvmctl.constants import CONST_MEBIBYTE_BYTES, KERNEL_TYPE_UNKNOWN
-from mvmctl.core.binary_manager import (
-    BinaryVersion,
-    list_remote_versions,
-)
-from mvmctl.core.binary_manager import (
-    fetch_binary as _core_fetch_binary,
-)
-from mvmctl.core.binary_manager import (
-    get_binary_path as _core_get_binary_path,
-)
-from mvmctl.core.binary_manager import (
-    list_local_versions as _core_list_local_versions,
-)
-from mvmctl.core.binary_manager import (
-    remove_version as _core_remove_version,
-)
-from mvmctl.core.binary_manager import (
-    set_active_version as _core_set_active_version,
-)
-from mvmctl.core.image import (
-    ImageImportResult,
-    get_filesystem_uuid,
-    import_image,
-    load_images_config,
-)
-from mvmctl.core.image import (
-    fetch_image as _core_fetch_image,
-)
-from mvmctl.core.kernel import (
-    build_kernel_pipeline,
-    download_firecracker_kernel,
-    parse_kernel_filename,
-    resolve_kernel_spec,
-)
-from mvmctl.core.metadata import (
-    find_images_by_id_prefix as _find_images_by_id_prefix,
-)
-from mvmctl.core.metadata import (
-    list_image_entries as _list_image_entries,
-)
-from mvmctl.core.metadata import (
-    list_kernel_entries,
-    set_default_binary_entry,
-    set_default_kernel_by_filename,
-    update_binary_entry,
-    update_kernel_entry,
-)
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import Binary
 from mvmctl.exceptions import AssetNotFoundError, KernelError, MVMError
-from mvmctl.models.image import ImageImportSpec, ImageSpec
+from mvmctl.models.image import ImageSpec
 from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
+
+if TYPE_CHECKING:
+    from mvmctl.core.binary_manager import BinaryVersion
+    from mvmctl.core.image import ImageImportResult
+    from mvmctl.models.image import ImageImportSpec
+
+from mvmctl.core.binary_manager import BinaryVersion
+from mvmctl.models.image import ImageImportSpec
 from mvmctl.utils.full_hash import generate_full_hash_kernel
 
 logger = logging.getLogger(__name__)
@@ -65,31 +26,31 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "AssetInfo",
     "BinaryVersion",
+    "ImageImportResult",
     "ImageImportSpec",
     "ensure_default_binary",
     "fetch_binary",
     "get_binary_path",
     "list_local_versions",
-    "list_remote_versions",
     "set_active_version",
     "remove_version",
     "fetch_image",
-    "import_image",
-    "load_images_config",
-    "get_filesystem_uuid",
-    "build_kernel_pipeline",
-    "list_kernels",
-    "set_default_kernel",
-    "get_default_kernel_path",
-    "resolve_kernel_spec",
-    "download_firecracker_kernel",
     "resolve_image_path",
     "resolve_image_fs_uuid",
     "resolve_image_fs_type",
     "resolve_image_id_path",
+    "save_kernel_metadata",
+    "set_default_kernel",
+    "get_default_kernel_path",
+    "list_kernels",
     "resolve_kernel_path",
     "resolve_kernel_id_path",
-    "save_kernel_metadata",
+    "list_remote_versions",
+    "load_images_config",
+    "resolve_kernel_spec",
+    "import_image",
+    "build_kernel_pipeline",
+    "download_firecracker_kernel",
 ]
 
 
@@ -139,6 +100,9 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     db = MVMDatabase()
     no_default = db.get_default_binary("firecracker") is None
 
+    from mvmctl.core.binary_manager import fetch_binary as _core_fetch_binary
+    from mvmctl.core.metadata import update_binary_entry
+
     result = _core_fetch_binary(version, bin_dir, set_as_default=no_default)
 
     # Persist metadata to database
@@ -157,6 +121,14 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     )
 
     if no_default:
+        from mvmctl.core.binary_manager import (
+            fetch_binary as _core_fetch_binary,
+        )
+        from mvmctl.core.binary_manager import (
+            set_active_version as _core_set_active_version,
+        )
+        from mvmctl.core.metadata import set_default_binary_entry
+
         _core_set_active_version(result.version, bin_dir)
         set_default_binary_entry(cache_dir, normalized_version)
 
@@ -179,6 +151,8 @@ def get_binary_path(name: str, version: str | None = None) -> str:
         AssetNotFoundError: If version is None and no default is set.
         AssetNotFoundError: If the resolved path does not exist on disk.
     """
+    from mvmctl.core.binary_manager import get_binary_path as _core_get_binary_path
+
     if version is not None:
         return _core_get_binary_path(name, version)
 
@@ -215,6 +189,8 @@ def list_local_versions(bin_dir: Path | None = None) -> list[BinaryVersion]:
     Returns:
         List of BinaryVersion objects sorted by version (newest first).
     """
+    from mvmctl.core.binary_manager import list_local_versions as _core_list_local_versions
+
     if bin_dir is not None:
         return _core_list_local_versions(bin_dir)
 
@@ -257,6 +233,9 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
         version: The version to set as active (e.g., "1.15.0").
         bin_dir: Optional directory containing binaries. Uses default if None.
     """
+    from mvmctl.core.binary_manager import set_active_version as _core_set_active_version
+    from mvmctl.core.metadata import set_default_binary_entry, update_binary_entry
+
     _core_set_active_version(version, bin_dir)
 
     # Persist metadata to database
@@ -296,6 +275,8 @@ def remove_version(version: str, bin_dir: Path | None = None) -> None:
     Raises:
         AssetNotFoundError: If the version is not found locally.
     """
+    from mvmctl.core.binary_manager import remove_version as _core_remove_version
+
     _core_remove_version(version, bin_dir)
 
     db = MVMDatabase()
@@ -310,7 +291,7 @@ def fetch_image(
     force: bool = False,
     partition: int | None = None,
     skip_optimization: bool = False,
-) -> ImageImportResult:
+) -> "ImageImportResult":
     """Fetch and convert an image.
 
     Args:
@@ -324,6 +305,7 @@ def fetch_image(
         Path to final image
     """
     from mvmctl.api.metadata import get_default_binary_entry
+    from mvmctl.core.image import fetch_image as _core_fetch_image
 
     # Fetch CI version from default binary for template resolution
     ci_version = ""
@@ -368,6 +350,7 @@ def resolve_image_path(image: str) -> Path:
         AssetNotFoundError: If the image cannot be found.
     """
     from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
+    from mvmctl.core.metadata import find_images_by_id_prefix as _find_images_by_id_prefix
     from mvmctl.utils.fs import get_images_dir
 
     images_dir = get_images_dir()
@@ -417,6 +400,13 @@ def resolve_image_fs_uuid(image: str) -> str | None:
     Returns:
         Filesystem UUID string, or None if not found.
     """
+    from mvmctl.core.metadata import (
+        find_images_by_id_prefix as _find_images_by_id_prefix,
+    )
+    from mvmctl.core.metadata import (
+        list_image_entries as _list_image_entries,
+    )
+
     cache_dir = get_cache_dir()
     for _full_key, meta in _list_image_entries(cache_dir).items():
         if image not in {str(meta.get("os_slug", "")), str(meta.get("path", ""))}:
@@ -443,6 +433,13 @@ def resolve_image_fs_type(image: str) -> str | None:
     Returns:
         Filesystem type string (e.g., "ext4", "btrfs"), or None if not found.
     """
+    from mvmctl.core.metadata import (
+        find_images_by_id_prefix as _find_images_by_id_prefix,
+    )
+    from mvmctl.core.metadata import (
+        list_image_entries as _list_image_entries,
+    )
+
     cache_dir = get_cache_dir()
     for _full_key, meta in _list_image_entries(cache_dir).items():
         if image not in {str(meta.get("os_slug", "")), str(meta.get("path", ""))}:
@@ -473,6 +470,7 @@ def resolve_image_id_path(image: str) -> Path:
         AssetNotFoundError: If the image ID is not found or is ambiguous.
     """
     from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
+    from mvmctl.core.metadata import find_images_by_id_prefix as _find_images_by_id_prefix
     from mvmctl.utils.fs import get_images_dir
     from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
@@ -525,6 +523,9 @@ def save_kernel_metadata(
     Returns:
         The full hash ID of the kernel entry
     """
+    from mvmctl.core.kernel import parse_kernel_filename
+    from mvmctl.core.metadata import update_kernel_entry
+
     kernel_path = kernels_dir / kernel_name
 
     parsed = parse_kernel_filename(kernel_name)
@@ -592,6 +593,8 @@ def set_default_kernel(kernels_dir: Path, kernel_name: str) -> None:
     Raises:
         KernelError: If the kernel file does not exist
     """
+    from mvmctl.core.metadata import set_default_kernel_by_filename
+
     kernel_path = kernels_dir / kernel_name
     if not kernel_path.exists():
         raise KernelError(f"Kernel not found: {kernel_path}")
@@ -624,6 +627,9 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
     Returns:
         List of kernel metadata dictionaries
     """
+    from mvmctl.core.kernel import parse_kernel_filename
+    from mvmctl.core.metadata import list_kernel_entries
+
     kernels_dir.mkdir(parents=True, exist_ok=True)
 
     cache_dir = get_cache_dir()
@@ -694,6 +700,8 @@ def resolve_kernel_path(kernel: str) -> Path:
     Raises:
         MVMError: If kernel cannot be found
     """
+    from mvmctl.core.metadata import list_kernel_entries
+
     kernels_dir = get_kernels_dir()
     candidate = kernels_dir / kernel
     if candidate.exists():
@@ -739,6 +747,7 @@ def resolve_kernel_id_path(kernel: str) -> Path:
     Raises:
         MVMError: If kernel ID is not found or ambiguous
     """
+    from mvmctl.core.metadata import list_kernel_entries
     from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
     kernels_dir = get_kernels_dir()
@@ -766,3 +775,77 @@ def resolve_kernel_id_path(kernel: str) -> Path:
         return candidate
 
     raise MVMError(f"Kernel not found: {kernel!r}")
+
+
+def list_remote_versions(limit: int = 10) -> list[str]:
+    from mvmctl.core.binary_manager import list_remote_versions as _list_remote_versions
+
+    return _list_remote_versions(limit)
+
+
+def load_images_config(path: Path) -> list[Any]:
+    from mvmctl.core.image import load_images_config as _load_images_config
+
+    return _load_images_config(path)
+
+
+def resolve_kernel_spec(kernel_type: str, version: str | None = None) -> Any:
+    from mvmctl.core.kernel import resolve_kernel_spec as _resolve_kernel_spec
+
+    return _resolve_kernel_spec(kernel_type, version)
+
+
+def import_image(spec: Any, output_dir: Path) -> Any:
+    from mvmctl.core.image import import_image as _import_image
+
+    return _import_image(spec, output_dir)
+
+
+def build_kernel_pipeline(
+    version: str,
+    source_url: str,
+    output_path: Path,
+    build_dir: Path | None = None,
+    sha256: str | None = None,
+    jobs: int | None = None,
+    keep_build_dir: bool = False,
+    user_config_path: Path | None = None,
+    arch: str | None = None,
+    kernel_spec: Any | None = None,
+    use_cache: bool = True,
+) -> Any:
+    from mvmctl.core.kernel import build_kernel_pipeline as _build_kernel_pipeline
+
+    return _build_kernel_pipeline(
+        version=version,
+        source_url=source_url,
+        output_path=output_path,
+        build_dir=build_dir,
+        sha256=sha256,
+        jobs=jobs,
+        keep_build_dir=keep_build_dir,
+        user_config_path=user_config_path,
+        arch=arch,
+        kernel_spec=kernel_spec,
+        use_cache=use_cache,
+    )
+
+
+def download_firecracker_kernel(
+    ci_version: str,
+    arch: str = "x86_64",
+    kernels_dir: Path | None = None,
+    output_name: str | None = None,
+    output_path: Path | None = None,
+    kernel_spec: Any | None = None,
+) -> Path:
+    from mvmctl.core.kernel import download_firecracker_kernel as _download_firecracker_kernel
+
+    return _download_firecracker_kernel(
+        ci_version=ci_version,
+        arch=arch,
+        kernels_dir=kernels_dir,
+        output_name=output_name,
+        output_path=output_path,
+        kernel_spec=kernel_spec,
+    )

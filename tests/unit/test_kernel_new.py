@@ -316,7 +316,7 @@ def test_list_kernels_shows_default_marker():
 
 
 @patch("mvmctl.core.kernel.download_file")
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_kernel_success(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -373,13 +373,13 @@ def test_resolve_kernel_spec_by_type_and_version():
     assert spec.version == "6.1"
 
 
-@patch("mvmctl.core.kernel.urlopen", side_effect=URLError("network error"))
+@patch("urllib.request.urlopen", side_effect=URLError("network error"))
 def test_download_firecracker_kernel_list_failure(mock_urlopen: MagicMock, tmp_path: Path):
     with pytest.raises(KernelError):
         download_firecracker_kernel("1.12", "amd64", kernels_dir=tmp_path)
 
 
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_kernel_no_keys(mock_urlopen: MagicMock, tmp_path: Path):
     mock_resp = MagicMock()
     mock_resp.read.return_value = (
@@ -394,7 +394,7 @@ def test_download_firecracker_kernel_no_keys(mock_urlopen: MagicMock, tmp_path: 
 
 
 @patch("mvmctl.core.kernel.download_file")
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_kernel_requires_checksum_when_sha256_url_set(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -433,7 +433,7 @@ def test_download_firecracker_kernel_requires_checksum_when_sha256_url_set(
 
 
 @patch("mvmctl.core.kernel.download_file")
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_kernel_supports_version_placeholder_in_source(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -478,7 +478,7 @@ def test_download_firecracker_kernel_supports_version_placeholder_in_source(
 
 
 @patch("mvmctl.core.kernel.download_file")
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_kernel_output_name_overrides_base_only(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -514,7 +514,7 @@ def test_download_firecracker_kernel_output_name_overrides_base_only(
 
 
 @patch("mvmctl.core.kernel.download_file")
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_kernel_output_path_is_explicit(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):
@@ -552,7 +552,7 @@ def test_download_firecracker_kernel_output_path_is_explicit(
 
 
 @patch("mvmctl.core.kernel.download_file")
-@patch("mvmctl.core.kernel.urlopen")
+@patch("urllib.request.urlopen")
 def test_download_firecracker_kernel_uses_templated_sha256_url(
     mock_urlopen: MagicMock, mock_dl: MagicMock, tmp_path: Path
 ):

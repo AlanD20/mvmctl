@@ -64,7 +64,7 @@ class TestMergeCliOverrides:
 
 class TestBuildVmConfigFile:
     def test_returns_vm_export_config(self):
-        with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
+        with patch("mvmctl.core.config_gen.ConfigGenerator") as mock_gen:
             mock_gen.return_value.generate.return_value = {"boot-source": {}}
             result = build_vm_config_file(name="test", image="ubuntu-24.04")
             assert isinstance(result, VMExportConfig)
@@ -72,21 +72,21 @@ class TestBuildVmConfigFile:
             assert result.image.os_slug == "ubuntu-24.04"
 
     def test_uses_provided_values(self):
-        with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
+        with patch("mvmctl.core.config_gen.ConfigGenerator") as mock_gen:
             mock_gen.return_value.generate.return_value = {}
             result = build_vm_config_file(name="test", image="ubuntu", vcpus=4, mem=1024)
             assert result.compute.vcpus == 4
             assert result.compute.mem == 1024
 
     def test_handles_config_generator_exception(self):
-        with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
+        with patch("mvmctl.core.config_gen.ConfigGenerator") as mock_gen:
             mock_gen.return_value.generate.side_effect = RuntimeError("fail")
             result = build_vm_config_file(name="test", image="ubuntu")
             # Firecracker config won't be populated on exception
             assert result.name == "test"
 
     def test_passes_kernel_and_network_params(self):
-        with patch("mvmctl.api.vm_config.ConfigGenerator") as mock_gen:
+        with patch("mvmctl.core.config_gen.ConfigGenerator") as mock_gen:
             mock_gen.return_value.generate.return_value = {}
             result = build_vm_config_file(
                 name="test",

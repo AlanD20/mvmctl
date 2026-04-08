@@ -1,13 +1,8 @@
 import functools
-import importlib.resources
 import logging
 import textwrap
 from pathlib import Path
 from typing import Any
-
-import yaml
-from jinja2 import StrictUndefined
-from jinja2.sandbox import SandboxedEnvironment
 
 from mvmctl.constants import (
     REQUIRED_ISO_TOOL,
@@ -60,6 +55,8 @@ def _load_cloud_init_template() -> str:
     Returns:
         The template string content.
     """
+    import importlib.resources
+
     template_path = importlib.resources.files("mvmctl.assets") / "cloud-init.template.yaml"
     return template_path.read_text()
 
@@ -83,6 +80,9 @@ def _render_cloud_init_template(
     prefix_len: int,
     ssh_pub_key: "str | list[str] | None" = None,
 ) -> dict[str, str]:
+    from jinja2 import StrictUndefined
+    from jinja2.sandbox import SandboxedEnvironment
+
     env = SandboxedEnvironment(undefined=StrictUndefined)
     template_str = _load_cloud_init_template()
     template = env.from_string(template_str)
@@ -149,6 +149,8 @@ def write_cloud_init(
     prefix_len: int = 24,
     skip_network_config: bool = False,
 ) -> None:
+    import yaml
+
     ssh_pub_keys = _normalize_ssh_pub_keys(ssh_pub_key)
 
     rendered = _render_cloud_init_template(

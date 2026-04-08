@@ -12,7 +12,7 @@ from mvmctl.models.network import NetworkConfig
 
 class TestConsoleWorkflow:
     @patch("mvmctl.core.vm_manager.VMManager.register")
-    @patch("mvmctl.api.vms.ensure_default_network")
+    @patch("mvmctl.api.network.ensure_default_network")
     @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("shutil.copy2")
     @patch("subprocess.Popen")
@@ -32,7 +32,6 @@ class TestConsoleWorkflow:
     @patch("mvmctl.utils.fs.write_pid_file")
     @patch("mvmctl.api.vms.ConfigGenerator")
     @patch("mvmctl.core.cloud_init.write_cloud_init")
-    @patch("mvmctl.api.vms.write_cloud_init")
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.api.vms.add_nocloud_input_rule")
@@ -49,7 +48,6 @@ class TestConsoleWorkflow:
         mock_add_nocloud_rule,
         mock_require_group,
         mock_subprocess_run,
-        mock_write_ci2,
         mock_write_ci,
         mock_config_gen,
         mock_write_pid,
@@ -159,7 +157,6 @@ class TestConsoleWorkflow:
             return None
 
         mock_write_ci.side_effect = mock_write_ci_impl
-        mock_write_ci2.side_effect = mock_write_ci_impl
 
         # Debug: Print mock status
         print(f"mock_write_ci: {mock_write_ci}")
@@ -209,7 +206,7 @@ class TestConsoleWorkflow:
         assert mock_console_instance.start_relay.call_count == 1
 
     @patch("mvmctl.core.vm_manager.VMManager.register")
-    @patch("mvmctl.api.vms.ensure_default_network")
+    @patch("mvmctl.api.network.ensure_default_network")
     @patch("mvmctl.core.kernel.resolve_kernel_path")
     @patch("shutil.copy2")
     @patch("subprocess.Popen")

@@ -46,7 +46,7 @@ def get_cache_dir() -> Path:
                 f"must be under $HOME ({home}), /tmp, or /var/tmp"
             )
         return resolved
-    return _get_real_home() / ".cache" / PROJECT_NAME
+    return _get_real_home() / ".cache" / str(PROJECT_NAME)
 
 
 def get_config_dir() -> Path:
@@ -70,7 +70,7 @@ def get_config_dir() -> Path:
                 f"must be under $HOME ({home}), /tmp, or /var/tmp"
             )
         return resolved
-    return _get_real_home() / ".config" / PROJECT_NAME
+    return _get_real_home() / ".config" / str(PROJECT_NAME)
 
 
 def get_config_file() -> Path:

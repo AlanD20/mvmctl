@@ -14,7 +14,7 @@ from mvmctl.models.network import NetworkConfig
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges_interactive")
+@patch("mvmctl.api.host.check_privileges_interactive")
 @patch("mvmctl.core.cache_manager.cache_init_all")
 def test_init_all_calls_core_functions(mock_init_all, mock_check_privs):
     """Verify init_all delegates to core cache_manager functions."""
@@ -41,8 +41,8 @@ def test_init_all_calls_core_functions(mock_init_all, mock_check_privs):
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.api.cache.get_vm_manager")
+@patch("mvmctl.api.host.check_privileges_interactive")
+@patch("mvmctl.core.vm_manager.get_vm_manager")
 @patch("mvmctl.api.cache.remove_vm")
 def test_prune_vms_privilege_check(mock_remove_vm, mock_get_vm_manager, mock_check_privs):
     """Verify privilege check is called for prune_vms."""
@@ -58,8 +58,8 @@ def test_prune_vms_privilege_check(mock_remove_vm, mock_get_vm_manager, mock_che
     assert result == ["stopped-vm"]
 
 
-@patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.api.cache.get_vm_manager")
+@patch("mvmctl.api.host.check_privileges_interactive")
+@patch("mvmctl.core.vm_manager.get_vm_manager")
 @patch("mvmctl.api.cache.remove_vm")
 def test_prune_vms_passes_flags(mock_remove_vm, mock_get_vm_manager, mock_check_privs):
     """Verify flags are passed correctly to prune_vms."""
@@ -85,7 +85,7 @@ def test_prune_vms_passes_flags(mock_remove_vm, mock_get_vm_manager, mock_check_
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges_interactive")
+@patch("mvmctl.api.host.check_privileges_interactive")
 @patch("mvmctl.api.cache.list_networks")
 @patch("mvmctl.api.cache.remove_network")
 def test_prune_networks_privilege_check(mock_remove_network, mock_list_networks, mock_check_privs):
@@ -106,11 +106,11 @@ def test_prune_networks_privilege_check(mock_remove_network, mock_list_networks,
 # =============================================================================
 
 
-@patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.api.cache.get_vm_manager")
+@patch("mvmctl.api.host.check_privileges_interactive")
+@patch("mvmctl.core.vm_manager.get_vm_manager")
 @patch("mvmctl.api.cache.list_networks")
-@patch("mvmctl.api.cache.list_image_entries")
-@patch("mvmctl.api.cache.list_kernel_entries")
+@patch("mvmctl.core.metadata.list_image_entries")
+@patch("mvmctl.core.metadata.list_kernel_entries")
 def test_prune_all_privilege_check(
     mock_list_kernels,
     mock_list_images,
@@ -136,11 +136,11 @@ def test_prune_all_privilege_check(
     assert result["kernels"] == []
 
 
-@patch("mvmctl.api.cache.check_privileges_interactive")
-@patch("mvmctl.api.cache.get_vm_manager")
+@patch("mvmctl.api.host.check_privileges_interactive")
+@patch("mvmctl.core.vm_manager.get_vm_manager")
 @patch("mvmctl.api.cache.list_networks")
-@patch("mvmctl.api.cache.list_image_entries")
-@patch("mvmctl.api.cache.list_kernel_entries")
+@patch("mvmctl.core.metadata.list_image_entries")
+@patch("mvmctl.core.metadata.list_kernel_entries")
 def test_prune_all_passes_flags(
     mock_list_kernels,
     mock_list_images,

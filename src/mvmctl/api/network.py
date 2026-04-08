@@ -12,8 +12,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from mvmctl.api import metadata as metadata_api
-from mvmctl.api.host import check_privileges_interactive
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET, MVM_POSTROUTING_CHAIN
 from mvmctl.core import host_setup, metadata
 from mvmctl.core import network as network_core
@@ -44,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
     """Get default network entry from metadata API."""
+    from mvmctl.api import metadata as metadata_api
+
     return metadata_api.get_default_network_entry(cache_dir)
 
 
@@ -254,6 +254,8 @@ def create_network(
     Raises:
         NetworkError: If the network already exists or setup fails.
     """
+    from mvmctl.api.host import check_privileges_interactive
+
     check_privileges_interactive("/usr/sbin/ip", f"create network '{name}'")
 
     # Validate name
@@ -332,6 +334,8 @@ def remove_network(name: str) -> None:
     Raises:
         NetworkError: If the network has VMs attached or doesn't exist.
     """
+    from mvmctl.api.host import check_privileges_interactive
+
     check_privileges_interactive("/usr/sbin/ip", f"remove network '{name}'")
 
     # Check if trying to remove default network while VMs exist

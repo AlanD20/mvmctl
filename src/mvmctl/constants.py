@@ -212,7 +212,7 @@ def _require_str_float_dict(path: tuple[str, ...]) -> dict[str, float]:
 
 def _default_bridge_name(network_name: str) -> str:
     """Generate bridge name using the same logic as network manager."""
-    return f"{CLI_NAME}-{network_name[:10]}"
+    return f"{__getattr__('CLI_NAME')}-{network_name[:10]}"
 
 
 def _ipv4_gateway_subnet(ipv4_gateway: str, subnet: str) -> str:
@@ -242,12 +242,6 @@ DEFAULT_IMAGE_ARCH: Final[str] = _resolve_with_config_override(
     "DEFAULT_IMAGE_ARCH", _require_str(("image", "defaults", "arch"))
 )
 
-PROJECT_NAME: Final[str] = _resolve_project_name()
-
-PROJECT_NAME_UPPER: Final[str] = PROJECT_NAME.replace("-", "_").upper()
-
-CLI_NAME: Final[str] = _resolve_cli_name()
-
 
 def env_var(suffix: str) -> str:
     """Return the environment variable name for the given suffix.
@@ -258,17 +252,17 @@ def env_var(suffix: str) -> str:
     Returns:
         Full environment variable name in uppercase.
     """
-    return f"{CLI_NAME.upper()}_{suffix}"
+    return f"{__getattr__('CLI_NAME').upper()}_{suffix}"
 
 
 def cache_dir_name() -> str:
     """Return the project cache directory name derived from the project name."""
-    return PROJECT_NAME
+    return str(__getattr__("PROJECT_NAME"))
 
 
 def device_prefix() -> str:
     """Return the network device name prefix derived from the CLI name."""
-    return CLI_NAME
+    return str(__getattr__("CLI_NAME"))
 
 
 def bridge_name() -> str:
@@ -277,17 +271,10 @@ def bridge_name() -> str:
 
 def config_filename() -> str:
     """Return the config file name for the CLI."""
-    return f"{CLI_NAME}.yaml"
+    return f"{__getattr__('CLI_NAME')}.yaml"
 
-
-BRIDGE_NAME: Final[str] = f"{device_prefix()}-br0"
-
-TAP_PREFIX: Final[str] = f"{CLI_NAME}-tap"
 
 # iptables chain names for MVM rules
-MVM_FORWARD_CHAIN: Final[str] = f"{CLI_NAME.upper()}-FORWARD"
-MVM_POSTROUTING_CHAIN: Final[str] = f"{CLI_NAME.upper()}-POSTROUTING"
-MVM_NO_CLOUD_INPUT_CHAIN: Final[str] = f"{CLI_NAME.upper()}-NOCLOUD-INPUT"
 
 # Centralized registry of all iptables chains created by mvmctl
 # Each tuple is (chain_name, table_name, built_in_chain)
@@ -296,10 +283,6 @@ IPTABLES_CHAINS: Final[list[tuple[str, str, str]]] = _require_chain_list(
     ("host", "system_files", "iptables_chains")
 )
 
-PROJECT_GROUP: Final[str] = CLI_NAME
-SUDOERS_DROP_IN_PATH: Final[str] = _require_str(
-    ("host", "system_files", "sudoers_drop_in_template")
-).format(cli_name=CLI_NAME)
 DEFAULT_NETWORK_NAME: Final[str] = _require_str(("network", "defaults", "name"))
 FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: Final[int] = 5
 FIRECRACKER_SIGTERM_WAIT_S: Final[int] = 1
@@ -375,7 +358,6 @@ DEFAULT_NETWORK_SUBNET: Final[str] = _resolve_with_config_override(
 DEFAULT_NETWORK_IPV4_GATEWAY: Final[str] = _resolve_with_config_override(
     "DEFAULT_NETWORK_GATEWAY", _require_str(("network", "defaults", "ipv4_gateway"))
 )
-DEFAULT_BRIDGE_NAME: Final[str] = _default_bridge_name(DEFAULT_NETWORK_NAME)
 DEFAULT_NETWORK_BRIDGE_IP: Final[str] = _ipv4_gateway_subnet(
     ipv4_gateway=DEFAULT_NETWORK_IPV4_GATEWAY,
     subnet=DEFAULT_NETWORK_SUBNET,
@@ -584,8 +566,6 @@ def _resolve_version() -> str:
         return "0.0.0"
 
 
-HTTP_USER_AGENT: Final[str] = f"{CLI_NAME}/{_resolve_version()}"
-
 # ---------------------------------------------------------------------------
 # Hardcoded numeric constants extracted from core layer
 # ---------------------------------------------------------------------------
@@ -700,3 +680,63 @@ DEBUG_VERBOSE_ERRORS: Final[bool] = _load_defaults().get("debug", {}).get("verbo
 
 # When True, include full Python tracebacks in error output
 DEBUG_SHOW_TRACEBACKS: Final[bool] = _load_defaults().get("debug", {}).get("show_tracebacks", False)
+
+_LAZY_CONSTANTS: dict[str, Any] = {}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_CONSTANTS:
+        return _LAZY_CONSTANTS[name]
+
+    if name == "PROJECT_NAME":
+        val = _resolve_project_name()
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "PROJECT_NAME_UPPER":
+        val = __getattr__("PROJECT_NAME").replace("-", "_").upper()
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "CLI_NAME":
+        val = _resolve_cli_name()
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "HTTP_USER_AGENT":
+        val = f"{__getattr__('CLI_NAME')}/{_resolve_version()}"
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "BRIDGE_NAME":
+        val = f"{__getattr__('CLI_NAME')}-br0"
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "TAP_PREFIX":
+        val = f"{__getattr__('CLI_NAME')}-tap"
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "MVM_FORWARD_CHAIN":
+        val = f"{__getattr__('CLI_NAME').upper()}-FORWARD"
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "MVM_POSTROUTING_CHAIN":
+        val = f"{__getattr__('CLI_NAME').upper()}-POSTROUTING"
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "MVM_NO_CLOUD_INPUT_CHAIN":
+        val = f"{__getattr__('CLI_NAME').upper()}-NOCLOUD-INPUT"
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "PROJECT_GROUP":
+        val = __getattr__("CLI_NAME")
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "SUDOERS_DROP_IN_PATH":
+        val = _require_str(("host", "system_files", "sudoers_drop_in_template")).format(
+            cli_name=__getattr__("CLI_NAME")
+        )
+        _LAZY_CONSTANTS[name] = val
+        return val
+    if name == "DEFAULT_BRIDGE_NAME":
+        val = f"{__getattr__('CLI_NAME')}-{DEFAULT_NETWORK_NAME[:10]}"
+        _LAZY_CONSTANTS[name] = val
+        return val
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

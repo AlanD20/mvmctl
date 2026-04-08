@@ -61,7 +61,7 @@ def test_rm_vm_not_found(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_name.return_value = []
     mock_mgr.find_by_id_prefix.return_value = []
-    mocker.patch("mvmctl.core.vm_manager.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm", "--name", "nonexistent"])
     assert result.exit_code == 1
@@ -848,7 +848,7 @@ def test_resolve_image_id_prefix(mocker: MockerFixture, tmp_path: Path, monkeypa
     # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "images" / "abc123.ext4"
     mocker.patch(
-        "mvmctl.api.vms._api_resolve_image_id_path",
+        "mvmctl.api.assets.resolve_image_id_path",
         return_value=mock_path,
     )
 
@@ -874,7 +874,7 @@ def test_resolve_kernel_id_prefix(mocker: MockerFixture, tmp_path: Path):
     # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "kernels" / "abc123"
     mocker.patch(
-        "mvmctl.api.vms._api_resolve_kernel_id_path",
+        "mvmctl.api.assets.resolve_kernel_id_path",
         return_value=mock_path,
     )
 

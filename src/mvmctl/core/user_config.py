@@ -19,7 +19,7 @@ def _user_config_path() -> Path:
     dir_override = os.environ.get(f"{CLI_NAME.upper()}_CONFIG_DIR")
     if dir_override:
         return Path(dir_override) / "config.json"
-    return Path.home() / ".config" / CLI_NAME / "config.json"
+    return Path.home() / ".config" / str(CLI_NAME) / "config.json"
 
 
 def _load_user_config() -> dict[str, Any]:

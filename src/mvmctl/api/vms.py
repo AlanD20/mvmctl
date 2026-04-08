@@ -12,25 +12,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mvmctl.api.assets import (
-    resolve_image_id_path as _api_resolve_image_id_path,
-)
-from mvmctl.api.assets import (
-    resolve_image_path as _api_resolve_image_path,
-)
-from mvmctl.api.assets import (
-    resolve_kernel_id_path as _api_resolve_kernel_id_path,
-)
-from mvmctl.api.assets import (
-    resolve_kernel_path as _api_resolve_kernel_path,
-)
-from mvmctl.api.host import check_privileges_interactive
-from mvmctl.api.network import (
-    allocate_network_ip,
-    ensure_default_network,
-    get_network,
-    release_network_ip,
-)
 from mvmctl.constants import (
     CONST_DEFAULT_USER_GID,
     CONST_DEFAULT_USER_UID,
@@ -65,7 +46,6 @@ from mvmctl.constants import (
     DEFAULT_VM_KERNEL_FILENAME,
     MAX_VMS,
 )
-from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
 from mvmctl.core.config_gen import ConfigGenerator, DriveConfig
 from mvmctl.core.console import (
     check_escape_sequence,
@@ -95,7 +75,6 @@ from mvmctl.core.network import (
     setup_nat,
     teardown_nat,
 )
-from mvmctl.core.rootfs_injector import inject_cloud_init
 from mvmctl.core.ssh import connect_to_vm, resolve_ssh_key
 from mvmctl.core.vm_lifecycle import _secure_mkdir_vm, grow_rootfs_with_guestfs
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
@@ -173,18 +152,26 @@ __all__ = [
 
 
 def resolve_image_path(image: str) -> Path:
+    from mvmctl.api.assets import resolve_image_path as _api_resolve_image_path
+
     return _api_resolve_image_path(image)
 
 
 def resolve_kernel_path(kernel: str) -> Path:
+    from mvmctl.api.assets import resolve_kernel_path as _api_resolve_kernel_path
+
     return _api_resolve_kernel_path(kernel)
 
 
 def resolve_image_id_path(image: str) -> Path:
+    from mvmctl.api.assets import resolve_image_id_path as _api_resolve_image_id_path
+
     return _api_resolve_image_id_path(image)
 
 
 def resolve_kernel_id_path(kernel: str) -> Path:
+    from mvmctl.api.assets import resolve_kernel_id_path as _api_resolve_kernel_id_path
+
     return _api_resolve_kernel_id_path(kernel)
 
 
@@ -230,6 +217,8 @@ def resolve_image_multi_strategy(value: str) -> Path:
                     return candidate
 
     # ID prefix resolution
+    from mvmctl.api.assets import resolve_image_id_path as _api_resolve_image_id_path
+
     return _api_resolve_image_id_path(value)
 
 
@@ -240,6 +229,7 @@ def resolve_kernel_multi_strategy(value: str) -> Path:
     1. Direct path (if contains '/')
     2. Short-ID resolution against metadata.json
     """
+    from mvmctl.api.assets import resolve_kernel_id_path as _api_resolve_kernel_id_path
     from mvmctl.utils.fs import get_kernels_dir
 
     kernels_dir = get_kernels_dir()
@@ -646,6 +636,8 @@ def _cleanup_vm_creation_resources(
     log_fp: Any,
     console_fp: Any,
 ) -> None:
+    from mvmctl.api.network import release_network_ip
+
     if log_fp is not None:
         try:
             log_fp.close()
@@ -764,8 +756,15 @@ def create_vm(
     from mvmctl.api.assets import (
         resolve_image_fs_uuid as _resolve_image_fs_uuid,
     )
+    from mvmctl.api.network import (
+        allocate_network_ip,
+        ensure_default_network,
+        get_network,
+    )
+    from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
     from mvmctl.core.metadata import list_image_entries
     from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.core.rootfs_injector import inject_cloud_init
     from mvmctl.utils.disk_size import parse_disk_size
 
     if image is None and image_path is None:
@@ -790,6 +789,8 @@ def create_vm(
         db = MVMDatabase()
         default_binary = db.get_default_binary("firecracker")
         binary_id = default_binary.id if default_binary else None
+
+    from mvmctl.api.host import check_privileges_interactive
 
     check_privileges_interactive("/usr/sbin/ip", f"create VM '{name}'")
 
@@ -1228,6 +1229,9 @@ def create_vm(
 
 
 def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
+    from mvmctl.api.host import check_privileges_interactive
+    from mvmctl.api.network import get_network, release_network_ip
+
     check_privileges_interactive("/usr/sbin/ip", f"remove VM '{name}'")
     manager = vm_manager or get_vm_manager()
     vm = manager.get(name)
@@ -1553,6 +1557,9 @@ def cleanup_vms(
     all_vms: bool = False, dry_run: bool = False, vm_manager: VMManager | None = None
 ) -> list[VMInstance]:
     """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules."""
+    from mvmctl.api.host import check_privileges_interactive
+    from mvmctl.api.network import get_network
+
     check_privileges_interactive("/usr/sbin/ip", "cleanup VMs")
     import logging
     import os

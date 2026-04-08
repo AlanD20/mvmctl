@@ -10,56 +10,50 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from mvmctl.api import metadata as metadata_api
-from mvmctl.api import network as network_api
-from mvmctl.api import vms as vms_api
-from mvmctl.api.host import check_privileges_interactive
 from mvmctl.constants import DEFAULT_NETWORK_NAME, SUPPORTED_IMAGE_EXTENSIONS
-from mvmctl.core import cache_manager as core_cache_manager
-from mvmctl.core.metadata import (
-    list_image_entries,
-    list_kernel_entries,
-    remove_image_entry,
-    remove_kernel_entry,
-)
-from mvmctl.core.vm_manager import get_vm_manager
-from mvmctl.models.vm import VMStatus
-from mvmctl.utils.fs import (
-    get_cache_dir,
-    get_images_dir,
-    get_kernels_dir,
-)
 
 logger = logging.getLogger(__name__)
 
 
 def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
     """Get default image entry from metadata API."""
+    from mvmctl.api import metadata as metadata_api
+
     return metadata_api.get_default_image_entry()
 
 
 def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
     """Get default kernel entry from metadata API."""
+    from mvmctl.api import metadata as metadata_api
+
     return metadata_api.get_default_kernel_entry(cache_dir)
 
 
 def get_network_leases(network_name: str) -> list[Any]:
     """Get network leases from network API."""
+    from mvmctl.api import network as network_api
+
     return network_api.get_network_leases(network_name)
 
 
 def list_networks() -> list[Any]:
     """List networks from network API."""
+    from mvmctl.api import network as network_api
+
     return network_api.list_networks()
 
 
 def remove_network(network_name: str) -> None:
     """Remove network using network API."""
+    from mvmctl.api import network as network_api
+
     return network_api.remove_network(network_name)
 
 
 def remove_vm(vm_name: str) -> None:
     """Remove VM using vms API."""
+    from mvmctl.api import vms as vms_api
+
     return vms_api.remove_vm(vm_name)
 
 
@@ -82,12 +76,16 @@ def init_all() -> dict[str, str]:
     Returns:
         Dictionary mapping resource names to their directory paths as strings.
     """
+    from mvmctl.core import cache_manager as core_cache_manager
+
     result = core_cache_manager.cache_init_all()
     return {k: str(v) if v else "" for k, v in result.items()}
 
 
 def _get_image_references() -> set[str]:
     """Get set of image paths referenced by all VMs."""
+    from mvmctl.core.vm_manager import get_vm_manager
+
     vm_manager = get_vm_manager()
     vms = vm_manager.list_all()
 
@@ -101,6 +99,8 @@ def _get_image_references() -> set[str]:
 
 def _get_kernel_references() -> set[str]:
     """Get set of kernel paths referenced by all VMs."""
+    from mvmctl.core.vm_manager import get_vm_manager
+
     vm_manager = get_vm_manager()
     vms = vm_manager.list_all()
 
@@ -114,6 +114,8 @@ def _get_kernel_references() -> set[str]:
 
 def _get_network_references() -> set[str]:
     """Get set of network names referenced by all VMs."""
+    from mvmctl.core.vm_manager import get_vm_manager
+
     vm_manager = get_vm_manager()
     vms = vm_manager.list_all()
 
@@ -143,6 +145,10 @@ def prune_vms(
     Returns:
         List of VM names that were removed.
     """
+    from mvmctl.api.host import check_privileges_interactive
+    from mvmctl.core.vm_manager import get_vm_manager
+    from mvmctl.models.vm import VMStatus
+
     check_privileges_interactive("/usr/sbin/ip", "prune VMs")
     vm_manager = get_vm_manager()
     vms = vm_manager.list_all()
@@ -181,6 +187,8 @@ def prune_networks(dry_run: bool = False, include_all: bool = False) -> list[str
     Returns:
         List of network names that were removed.
     """
+    from mvmctl.api.host import check_privileges_interactive
+
     check_privileges_interactive("/usr/sbin/ip", "prune networks")
     referenced_networks = _get_network_references()
     all_networks = list_networks()
@@ -218,6 +226,9 @@ def prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]:
     Returns:
         List of image IDs that were removed.
     """
+    from mvmctl.core.metadata import list_image_entries, remove_image_entry
+    from mvmctl.utils.fs import get_cache_dir, get_images_dir
+
     cache_dir = get_cache_dir()
     images_dir = get_images_dir()
 
@@ -277,6 +288,9 @@ def prune_kernels(dry_run: bool = False, include_all: bool = False) -> list[str]
     Returns:
         List of kernel IDs that were removed.
     """
+    from mvmctl.core.metadata import list_kernel_entries, remove_kernel_entry
+    from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
+
     cache_dir = get_cache_dir()
     kernels_dir = get_kernels_dir()
 
@@ -335,6 +349,8 @@ def prune_all(
         - "images": list of removed image IDs
         - "kernels": list of removed kernel IDs
     """
+    from mvmctl.api.host import check_privileges_interactive
+
     check_privileges_interactive("/usr/sbin/ip", "prune all cache resources")
     return {
         "vms": prune_vms(include_stopped, include_running, dry_run),

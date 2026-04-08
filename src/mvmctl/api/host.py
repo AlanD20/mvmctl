@@ -40,8 +40,6 @@ from mvmctl.core.host_state import (
 from mvmctl.core.host_state import (
     restore_host as _restore_host,
 )
-from mvmctl.core.image import clean_ready_pool as _clean_ready_pool
-from mvmctl.core.image import get_ready_pool_dir as _get_ready_pool_dir
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.network import (
     delete_tap,
@@ -516,9 +514,13 @@ def prune_host(cache_dir: Path | None = None) -> list[str]:
 
 def clean_ready_pool() -> int:
     """Clean the ready pool and return the count of removed images."""
+    from mvmctl.core.image import clean_ready_pool as _clean_ready_pool
+
     return _clean_ready_pool()
 
 
 def get_ready_pool_dir() -> Path:
     """Get the path to the ready pool directory."""
+    from mvmctl.core.image import get_ready_pool_dir as _get_ready_pool_dir
+
     return _get_ready_pool_dir()

@@ -12,10 +12,6 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
-from urllib.request import Request, urlopen
-
-import yaml
 
 from mvmctl.constants import (
     CONST_FILE_PERMS_EXECUTABLE,
@@ -121,10 +117,14 @@ _ASSETS_DIR = _KERNELS_YAML_PATH.parent
 
 @functools.lru_cache(maxsize=1)
 def list_kernel_specs() -> dict[str, KernelSpec]:
+    import yaml
+
     try:
         with _KERNELS_YAML_PATH.open("r", encoding="utf-8") as fh:
             data: Any = yaml.safe_load(fh) or {}
-    except (OSError, yaml.YAMLError) as exc:
+    except Exception as exc:
+        if "yaml" in str(type(exc)).lower():
+            raise KernelError(f"Failed to load kernels.yaml: {exc}") from exc
         raise KernelError(f"Failed to load kernels.yaml: {exc}") from exc
 
     if not isinstance(data, dict):
@@ -383,6 +383,8 @@ def download_firecracker_config(
     config_url = config_url_template.format(**template_vars)
 
     try:
+        from urllib.request import Request, urlopen
+
         logger.info("Downloading Firecracker kernel config...")
         req = Request(config_url, headers={"User-Agent": HTTP_USER_AGENT})
 
@@ -395,8 +397,10 @@ def download_firecracker_config(
 
             logger.info("Config downloaded")
 
-    except URLError as e:
-        raise KernelError(f"Failed to download config: {e}") from e
+    except Exception as e:
+        if "url" in str(type(e)).lower():
+            raise KernelError(f"Failed to download config: {e}") from e
+        raise
 
 
 def run_make(
@@ -455,6 +459,8 @@ def _run_config_script(config_script: Path, args: list[str], kernel_dir: Path) -
 
 
 def _fetch_fragment_content(url: str) -> str:
+    from urllib.request import Request, urlopen
+
     req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
     with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
         raw: bytes = resp.read()
@@ -481,6 +487,8 @@ def _apply_config_fragments(
     template_vars: dict[str, str],
     kernel_dir: Path,
 ) -> None:
+    from urllib.error import URLError
+
     config_path = kernel_dir / ".config"
 
     for idx, fragment in enumerate(fragments):
@@ -756,13 +764,17 @@ def build_kernel(
 
 def fetch_kernel_sha256_from_url(sha256_url: str) -> str | None:
     try:
+        from urllib.request import Request, urlopen
+
         req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
         with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             content = resp.read().decode().strip()
         parts = content.split()
         return str(parts[0]).lower() if parts else None
-    except (URLError, OSError):
-        return None
+    except Exception as e:
+        if "url" in str(type(e)).lower() or isinstance(e, OSError):
+            return None
+        raise
 
 
 def check_build_dependencies() -> list[str]:
@@ -992,6 +1004,9 @@ def download_firecracker_kernel(
     output_path: Path | None = None,
     kernel_spec: KernelSpec | None = None,
 ) -> Path:
+    from urllib.error import URLError
+    from urllib.request import Request, urlopen
+
     if kernels_dir is None:
         from mvmctl.utils.fs import get_kernels_dir
 
@@ -1015,8 +1030,10 @@ def download_firecracker_kernel(
         req = Request(list_url, headers={"User-Agent": HTTP_USER_AGENT})
         with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             xml_content = resp.read().decode("utf-8")
-    except (URLError, OSError) as exc:
-        raise KernelError(f"Failed to list CI kernels: {exc}") from exc
+    except Exception as exc:
+        if "url" in str(type(exc)).lower() or isinstance(exc, OSError):
+            raise KernelError(f"Failed to list CI kernels: {exc}") from exc
+        raise
 
     pattern = (
         rf"<Key>(firecracker-ci/{re.escape(ci_version)}/{re.escape(arch)}/vmlinux-[\d.]+)</Key>"

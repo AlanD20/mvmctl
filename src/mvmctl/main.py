@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import importlib
-import importlib.metadata
 import logging
 import os
 import subprocess
@@ -15,6 +14,8 @@ from typing import TYPE_CHECKING
 import click
 
 if TYPE_CHECKING:
+    import importlib.metadata
+
     import typer
     import typer.models
 
@@ -33,7 +34,7 @@ def _get_cli_name() -> str:
     """Get CLI name lazily to avoid import-time overhead."""
     from mvmctl.constants import CLI_NAME
 
-    return CLI_NAME
+    return str(CLI_NAME)
 
 
 def _get_env_var(suffix: str) -> str:
@@ -86,8 +87,10 @@ def _get_git_version_info() -> str | None:
 def _get_version() -> str:
     bootstrap_name = _get_bootstrap_name()
     try:
-        version = importlib.metadata.version(bootstrap_name)
-    except importlib.metadata.PackageNotFoundError:
+        import importlib.metadata as _meta
+
+        version = _meta.version(bootstrap_name)
+    except Exception:
         from mvmctl import __version__
 
         version = __version__

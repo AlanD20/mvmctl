@@ -33,7 +33,7 @@ class TestNetworkLifecycleWorkflow:
 
     @patch("mvmctl.cli.network.list_networks")
     @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_create_and_list_network(
         self, mock_interfaces, mock_check_priv, mock_create, mock_list
@@ -61,7 +61,7 @@ class TestNetworkLifecycleWorkflow:
 
     @patch("mvmctl.cli.network.inspect_network")
     @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_create_and_inspect_network(
         self,
@@ -101,7 +101,7 @@ class TestNetworkLifecycleWorkflow:
     @patch("mvmctl.cli.network.list_networks")
     @patch("mvmctl.cli.network.remove_network")
     @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_full_network_lifecycle(
         self,
@@ -137,7 +137,7 @@ class TestNetworkLifecycleWorkflow:
         mock_remove.assert_called_once_with("lifecycle-net")
 
     @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_create_network_without_nat(self, mock_interfaces, mock_check_priv, mock_create):
         """Test creating a network without NAT."""
@@ -157,7 +157,7 @@ class TestNetworkLifecycleWorkflow:
         assert call_kwargs.get("nat") is False
 
     @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_create_network_with_custom_gateway(
         self, mock_interfaces, mock_check_priv, mock_create
@@ -190,7 +190,7 @@ class TestNetworkWorkflowEdgeCases:
     """Test edge cases in network workflow."""
 
     @patch("mvmctl.cli.network.create_network")
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.list_network_interfaces", return_value=["eth0"])
     def test_create_duplicate_network(self, mock_interfaces, mock_check_priv, mock_create):
         """Test attempting to create a network that already exists."""
@@ -204,7 +204,7 @@ class TestNetworkWorkflowEdgeCases:
         assert result.exit_code == 1
         assert "already exists" in result.output.lower()
 
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.remove_network")
     def test_remove_nonexistent_network(self, mock_remove, mock_check_priv):
         """Test attempting to remove a network that doesn't exist."""
@@ -215,7 +215,7 @@ class TestNetworkWorkflowEdgeCases:
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
 
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.inspect_network")
     def test_inspect_nonexistent_network(self, mock_inspect, mock_check_priv):
         """Test attempting to inspect a network that doesn't exist."""
@@ -231,7 +231,7 @@ class TestNetworkWorkflowEdgeCases:
         result = runner.invoke(network_app, ["create", "invalid-net"])
         assert result.exit_code != 0
 
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.network.create_network")
     def test_create_network_with_invalid_cidr(self, mock_create, mock_check_priv):
         """Test creating a network with an invalid CIDR."""
@@ -250,7 +250,7 @@ class TestNetworkWithSubprocessMocking:
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.core.network.subprocess.run")
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     def test_network_create_with_bridge_setup(
         self, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
     ):
@@ -262,7 +262,7 @@ class TestNetworkWithSubprocessMocking:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("mvmctl.core.network_manager.validate_no_subnet_overlap"):
-            with patch("mvmctl.core.network.setup_nat"):
+            with patch("mvmctl.api.vms.setup_nat"):
                 result = create_network("subprocess-net", subnet="10.77.0.0/24")
 
         assert result.name == "subprocess-net"
@@ -272,7 +272,7 @@ class TestNetworkWithSubprocessMocking:
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.core.network.subprocess.run")
-    @patch("mvmctl.api.network.check_privileges_interactive")
+    @patch("mvmctl.api.host.check_privileges_interactive")
     def test_network_remove_with_bridge_teardown(
         self, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
     ):

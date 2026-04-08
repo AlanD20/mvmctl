@@ -93,8 +93,8 @@ def test_get_logs(mock_show_logs):
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
 @patch("mvmctl.core.firewall.remove_nocloud_input_rule")
 @patch("os.kill")
-@patch("mvmctl.api.vms.check_privileges_interactive")
-@patch("mvmctl.api.vms.get_network")
+@patch("mvmctl.api.host.check_privileges_interactive")
+@patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms(
     mock_get_manager,
@@ -159,8 +159,8 @@ def test_cleanup_vms(
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
 @patch("mvmctl.core.firewall.remove_nocloud_input_rule")
 @patch("os.kill")
-@patch("mvmctl.api.vms.check_privileges_interactive")
-@patch("mvmctl.api.vms.get_network")
+@patch("mvmctl.api.host.check_privileges_interactive")
+@patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms_removes_hash_based_dir(
     mock_get_manager,
@@ -214,8 +214,8 @@ def test_cleanup_vms_removes_hash_based_dir(
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
 @patch("mvmctl.core.firewall.remove_nocloud_input_rule")
 @patch("os.kill")
-@patch("mvmctl.api.vms.check_privileges_interactive")
-@patch("mvmctl.api.vms.get_network")
+@patch("mvmctl.api.host.check_privileges_interactive")
+@patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.vms.get_vm_manager")
 def test_cleanup_vms_handles_missing_vm_id(
     mock_get_manager,
@@ -527,7 +527,7 @@ def test_start_vm_api(mock_popen, mock_write_pid, mock_sleep):
         mock_vm.config = MagicMock(enable_api_socket=False, enable_console=False, kernel_path=None)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
-        with patch("mvmctl.api.vms.get_vm_dir_by_hash", return_value=Path("/tmp/vm")):
+        with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=Path("/tmp/vm")):
             with patch("pathlib.Path.exists", return_value=True):
                 with patch("builtins.open", MagicMock()):
                     start_vm("myvm")

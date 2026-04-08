@@ -4,13 +4,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-import click
-
-from mvmctl.api.assets import (
-    download_firecracker_kernel,
-    fetch_binary,
-    fetch_image,
-)
 from mvmctl.constants import (
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
@@ -24,7 +17,6 @@ from mvmctl.constants import (
     DEFAULT_VM_SSH_USER,
     DEFAULT_VM_VCPU_COUNT,
 )
-from mvmctl.core.config_gen import ConfigGenerator
 from mvmctl.exceptions import AssetNotFoundError
 from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.models.image import ImageSpec
@@ -66,6 +58,7 @@ def build_vm_config_file(
     tap_device: str | None = None,
     cloud_init: dict[str, Any] | None = None,
 ) -> VMExportConfig:
+    from mvmctl.core.config_gen import ConfigGenerator
     from mvmctl.models.vm import VMConfig
     from mvmctl.models.vm_config_file import (
         VMExportBinaryConfig,
@@ -155,6 +148,14 @@ def build_vm_config_file(
 def _prompt_missing_assets(
     missing: list[tuple[str, str, str]],
 ) -> None:
+    import click
+
+    from mvmctl.api.assets import (
+        download_firecracker_kernel,
+        fetch_binary,
+        fetch_image,
+    )
+
     if not missing:
         return
 
