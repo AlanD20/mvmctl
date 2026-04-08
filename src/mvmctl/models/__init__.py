@@ -9,16 +9,16 @@ from mvmctl.models.cloud_init import (
 )
 from mvmctl.models.firecracker import InstanceDescription, InstanceInfo
 from mvmctl.models.image import ImageFetchInput, ImageSpec
-from mvmctl.models.key import KeyCreateInput
 from mvmctl.models.kernel import KernelFetchInput, KernelSpec
+from mvmctl.models.key import KeyCreateInput
 from mvmctl.models.network import LeaseEntry, NetworkEntry, NetworkInspectInfo
 from mvmctl.models.vm import (
     ConsoleInfo,
     ConsoleState,
     VMConfig,
     VMCreateInput,
-    VMInstance,
     VMInspectInfo,
+    VMInstance,
     VMStatus,
 )
 from mvmctl.models.vm_config_file import (
