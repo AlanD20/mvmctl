@@ -8,35 +8,37 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, SUPPORTED_IMAGE_EXTENSIONS
+from mvmctl.models.image import ImageItem
+from mvmctl.models.kernel import KernelItem
+from mvmctl.models.network import NetworkConfig, NetworkLease
 
 logger = logging.getLogger(__name__)
 
 
-def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
+def get_default_image_entry() -> ImageItem | None:
     """Get default image entry from metadata API."""
     from mvmctl.api import metadata as metadata_api
 
     return metadata_api.get_default_image_entry()
 
 
-def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
+def get_default_kernel_entry(cache_dir: Path) -> KernelItem | None:
     """Get default kernel entry from metadata API."""
     from mvmctl.api import metadata as metadata_api
 
     return metadata_api.get_default_kernel_entry(cache_dir)
 
 
-def get_network_leases(network_name: str) -> list[Any]:
+def get_network_leases(network_name: str) -> list[NetworkLease]:
     """Get network leases from network API."""
     from mvmctl.api import network as network_api
 
     return network_api.get_network_leases(network_name)
 
 
-def list_networks() -> list[Any]:
+def list_networks() -> list[NetworkConfig]:
     """List networks from network API."""
     from mvmctl.api import network as network_api
 
@@ -235,8 +237,8 @@ def prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]:
     referenced_paths = _get_image_references()
     all_images = list_image_entries(cache_dir, images_dir)
 
-    default_entry = get_default_image_entry()
-    default_id = default_entry[0] if default_entry else None
+    default_item = get_default_image_entry()
+    default_id = default_item.id if default_item else None
 
     removed: list[str] = []
     for image_id, meta in all_images.items():
@@ -297,8 +299,8 @@ def prune_kernels(dry_run: bool = False, include_all: bool = False) -> list[str]
     referenced_paths = _get_kernel_references()
     all_kernels = list_kernel_entries(cache_dir, kernels_dir)
 
-    default_entry = get_default_kernel_entry(cache_dir)
-    default_id = default_entry[0] if default_entry else None
+    default_item = get_default_kernel_entry(cache_dir)
+    default_id = default_item.id if default_item else None
 
     removed: list[str] = []
     for kernel_id, meta in all_kernels.items():

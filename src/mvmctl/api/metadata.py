@@ -113,26 +113,33 @@ def find_kernels_by_id_prefix(cache_dir: Path, prefix: str) -> list[tuple[str, d
     return [(full_id, data) for full_id, data in all_kernels.items() if full_id.startswith(prefix)]
 
 
-def get_default_image_entry() -> tuple[str, dict[str, Any]] | None:
-    """Get the default image entry from the database."""
+def get_default_image_entry() -> ImageItem | None:
+    """Get the default image entry from the database.
+
+    Returns:
+        ImageItem if a default image is set, None otherwise.
+    """
     db = _create_db()
     image = db.get_default_image()
     if image is None:
         return None
-    from mvmctl.models.image import ImageItem
-
-    return image.id, ImageItem.from_db(image).to_dict()
+    return ImageItem.from_db(image)
 
 
-def get_default_kernel_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Get the default kernel entry from the database."""
+def get_default_kernel_entry(cache_dir: Path) -> KernelItem | None:
+    """Get the default kernel entry from the database.
+
+    Args:
+        cache_dir: Directory containing metadata.json (unused, kept for API compatibility).
+
+    Returns:
+        KernelItem if a default kernel is set, None otherwise.
+    """
     db = _create_db()
     kernel = db.get_default_kernel()
     if kernel is None:
         return None
-    from mvmctl.models.kernel import KernelItem
-
-    return kernel.id, KernelItem.from_db(kernel).to_dict()
+    return KernelItem.from_db(kernel)
 
 
 def remove_kernel_entry(cache_dir: Path, kernel_id: str) -> None:
@@ -169,27 +176,34 @@ def set_default_image_by_os_slug(cache_dir: Path, os_slug: str) -> None:
     _set_default_image_by_os_slug(cache_dir, os_slug)
 
 
-def get_default_binary_entry() -> tuple[str, dict[str, Any]] | None:
-    """Get the default binary entry from the database."""
+def get_default_binary_entry() -> BinaryItem | None:
+    """Get the default binary entry from the database.
+
+    Returns:
+        BinaryItem if a default binary is set, None otherwise.
+    """
     db = _create_db()
     binary = db.get_default_binary("firecracker")
     if binary is None:
         return None
-    from mvmctl.models.binary import BinaryItem
-
-    return binary.version, BinaryItem.from_db(binary).to_dict()
+    return BinaryItem.from_db(binary)
 
 
 def set_default_binary_entry(cache_dir: Path, version: str) -> None:
     _set_default_binary_entry(cache_dir, version)
 
 
-def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Get the default network entry from the database."""
+def get_default_network_entry(cache_dir: Path) -> NetworkItem | None:
+    """Get the default network entry from the database.
+
+    Args:
+        cache_dir: Directory containing metadata.json (unused, kept for API compatibility).
+
+    Returns:
+        NetworkItem if a default network is set, None otherwise.
+    """
     db = _create_db()
     network = db.get_default_network()
     if network is None:
         return None
-    from mvmctl.models.network import NetworkItem
-
-    return network.name, NetworkItem.from_db(network).to_dict()
+    return NetworkItem.from_db(network)
