@@ -329,3 +329,43 @@ class VMInstance:
             kernel_id=data.get("kernel_id"),
             image_id=data.get("image_id"),
         )
+
+
+@dataclass
+class VMCreateInput:
+    """Input model for VM creation — replaces 31 function parameters."""
+
+    # Required fields (no defaults)
+    name: str
+    vcpus: int
+    mem: int
+    user: str
+    enable_api_socket: bool
+    enable_pci: bool
+    enable_console: bool
+    firecracker_bin: str
+    lsm_flags: str
+    enable_logging: bool
+    enable_metrics: bool
+
+    # Optional fields (DB-backed at API layer)
+    image: str | None = None
+    kernel: str | None = None
+    image_path: Path | None = None
+    kernel_path: Path | None = None
+    disk_size: str | None = None
+    ip: str | None = None
+    network_name: str | None = None
+    mac: str | None = None
+    ssh_key: str | None = None
+    user_data: Path | None = None
+    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT
+    cloud_init_iso_path: Path | None = None
+    keep_cloud_init_iso: bool = False
+    nocloud_net_port: int = 0
+
+    # Additional discovered fields
+    image_fs_uuid: str | None = None
+    image_fs_type: str | None = None
+    image_hash: str | None = None
+    binary_id: str | None = None

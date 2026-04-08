@@ -96,3 +96,14 @@ class ImageImportInput:
     convert_to: str = "ext4"
     minimum_rootfs_size: int = field(default=2048)
     disabled_detectors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ImageFetchInput:
+    """Input model for image fetch and registration operations."""
+
+    spec: ImageSpec
+    output_dir: Path
+    force: bool = False
+    partition: int | None = None
+    skip_optimization: bool = False

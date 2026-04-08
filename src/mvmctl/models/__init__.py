@@ -8,7 +8,7 @@ from mvmctl.models.cloud_init import (
     CloudInitWriteConfig,
 )
 from mvmctl.models.firecracker import InstanceDescription, InstanceInfo
-from mvmctl.models.image import ImageSpec
+from mvmctl.models.image import ImageFetchInput, ImageSpec
 from mvmctl.models.key import KeyCreateInput
 from mvmctl.models.kernel import KernelFetchInput, KernelSpec
 from mvmctl.models.network import LeaseEntry, NetworkEntry, NetworkInspectInfo
@@ -16,6 +16,7 @@ from mvmctl.models.vm import (
     ConsoleInfo,
     ConsoleState,
     VMConfig,
+    VMCreateInput,
     VMInstance,
     VMInspectInfo,
     VMStatus,
@@ -39,6 +40,7 @@ __all__ = [
     "CloudInitWriteConfig",
     "ConsoleInfo",
     "ConsoleState",
+    "ImageFetchInput",
     "ImageSpec",
     "InstanceDescription",
     "InstanceInfo",
@@ -50,6 +52,7 @@ __all__ = [
     "NetworkInspectInfo",
     "PruneAllResult",
     "VMConfig",
+    "VMCreateInput",
     "VMInstance",
     "VMInspectInfo",
     "VMStatus",

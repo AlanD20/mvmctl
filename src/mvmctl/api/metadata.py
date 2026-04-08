@@ -24,6 +24,10 @@ from mvmctl.core.metadata import set_default_binary_entry as _set_default_binary
 from mvmctl.core.metadata import set_default_image_by_os_slug as _set_default_image_by_os_slug
 from mvmctl.core.metadata import set_default_image_entry as _set_default_image_entry
 from mvmctl.core.metadata import update_image_entry as _update_image_entry
+from mvmctl.models.binary import BinaryItem
+from mvmctl.models.image import ImageItem
+from mvmctl.models.kernel import KernelItem
+from mvmctl.models.network import NetworkItem
 
 if TYPE_CHECKING:
     from mvmctl.core.mvm_db import MVMDatabase
