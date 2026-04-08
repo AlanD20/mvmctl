@@ -984,11 +984,16 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             elif kernel:
                 kernel_path_resolved = _resolve_kernel_path(kernel)
             else:
-                env_kernel = os.environ.get("MVM_KERNEL")
-                if env_kernel:
-                    kernel_path_resolved = _resolve_kernel_path(env_kernel)
+                db = MVMDatabase()
+                default_kernel = db.get_default_kernel()
+                if default_kernel is not None:
+                    kernel_path_resolved = Path(default_kernel.path)
                 else:
-                    kernel_path_resolved = get_kernels_dir() / DEFAULT_VM_KERNEL_FILENAME
+                    env_kernel = os.environ.get("MVM_KERNEL")
+                    if env_kernel:
+                        kernel_path_resolved = _resolve_kernel_path(env_kernel)
+                    else:
+                        kernel_path_resolved = get_kernels_dir() / DEFAULT_VM_KERNEL_FILENAME
 
             if not kernel_path_resolved.exists():
                 raise MVMError(f"Kernel not found: {kernel_path_resolved}")

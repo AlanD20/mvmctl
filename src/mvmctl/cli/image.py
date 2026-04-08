@@ -283,35 +283,23 @@ def _output_remote_images(images: list[Any], images_dir: Path, json_output: bool
 
 def _output_local_images(images: list[Any], images_dir: Path, json_output: bool) -> None:
     all_meta = list_images_metadata(images_dir)
-    os_slugs = {img.id for img in images}
+    yaml_specs_by_slug = {img.id: img for img in images}
 
     if json_output:
         result: list[dict[str, str]] = []
-        for img in images:
-            entry = _find_image_by_os_slug(all_meta, img.id)
-            if entry is None:
-                continue
-            meta_key, meta = entry
-            result.append(
-                {
-                    "id": meta_key,
-                    "name": img.name,
-                    "format": img.format,
-                    "fs_type": str(meta.get("fs_type", img.convert_to)),
-                    "added": human_readable_time(str(meta.get("pulled_at", "")))
-                    if meta.get("pulled_at")
-                    else "-",
-                }
-            )
         for meta_id, meta in all_meta.items():
-            if str(meta.get("os_slug", meta_id)) in os_slugs:
-                continue
+            os_slug = str(meta.get("os_slug", meta_id))
+            yaml_spec = yaml_specs_by_slug.get(os_slug)
+            display_name = yaml_spec.name if yaml_spec else str(meta.get("os_name", os_slug))
+            fs_type = str(meta.get("fs_type", yaml_spec.convert_to if yaml_spec else "unknown"))
             result.append(
                 {
                     "id": meta_id,
-                    "name": str(meta.get("os_name", meta_id)),
-                    "format": str(meta.get("fs_type", "unknown")),
-                    "fs_type": str(meta.get("fs_type", "unknown")),
+                    "name": display_name,
+                    "format": yaml_spec.format
+                    if yaml_spec
+                    else str(meta.get("fs_type", "unknown")),
+                    "fs_type": fs_type,
                     "added": human_readable_time(str(meta.get("pulled_at", "")))
                     if meta.get("pulled_at")
                     else "-",
@@ -322,42 +310,13 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
 
     rows: list[list[str]] = []
 
-    for img in images:
-        entry = _find_image_by_os_slug(all_meta, img.id)
-        if entry is None:
-            continue
-        meta_key, meta = entry
-        found_path = _resolve_image_file(images_dir, meta_key, meta)
-        is_default = bool(meta.get("is_default", 0))
-        is_missing = is_file_missing(found_path)
-        added = (
-            human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
-        )
-        fs_type = str(
-            meta.get("fs_type", found_path.suffix.lstrip(".") if found_path else "unknown")
-        )
-        display_id = get_combined_marker(is_default, is_missing) + shorten_hash(meta_key, 12)
-        _raw_size = meta.get("compressed_size")
-        size = get_file_size(
-            found_path, int(_raw_size) if isinstance(_raw_size, (int, float)) else 0
-        )
-        rows.append(
-            [
-                display_id,
-                img.name,
-                fs_type,
-                format_bytes_human_readable(size) if size > 0 else "-",
-                added,
-            ]
-        )
-
     for meta_id, meta in all_meta.items():
-        if str(meta.get("os_slug", meta_id)) in os_slugs:
-            continue
+        os_slug = str(meta.get("os_slug", meta_id))
+        yaml_spec = yaml_specs_by_slug.get(os_slug)
+        display_name = yaml_spec.name if yaml_spec else str(meta.get("os_name", os_slug))
         found_path = _resolve_image_file(images_dir, meta_id, meta)
         is_default = bool(meta.get("is_default", 0))
         is_missing = is_file_missing(found_path)
-        os_name = str(meta.get("os_name", meta_id))
         added = (
             human_readable_time(str(meta.get("pulled_at", ""))) if meta.get("pulled_at") else "-"
         )
@@ -372,7 +331,7 @@ def _output_local_images(images: list[Any], images_dir: Path, json_output: bool)
         rows.append(
             [
                 display_id,
-                os_name,
+                display_name,
                 fs_type,
                 format_bytes_human_readable(size) if size > 0 else "-",
                 added,
