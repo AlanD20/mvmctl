@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.network import network_app as app
 from mvmctl.exceptions import MVMError, NetworkError
-from mvmctl.models.network import NetworkConfig
+from mvmctl.models.network import NetworkConfig, NetworkInspectInfo
 
 runner = CliRunner()
 
@@ -130,17 +130,17 @@ def test_rm_alias(mock_remove):
 # network inspect
 # ---------------------------------------------------------------------------
 
-_FAKE_INSPECT = {
-    "name": "testnet",
-    "subnet": "192.168.100.0/24",
-    "ipv4_gateway": "192.168.100.1",
-    "bridge": "mvm-testnet",
-    "nat_enabled": True,
-    "nat_gateways": ["eth0"],
-    "bridge_exists": False,
-    "created_at": "2024-01-01T00:00:00+00:00",
-    "vms": [],
-}
+_FAKE_INSPECT = NetworkInspectInfo(
+    name="testnet",
+    subnet="192.168.100.0/24",
+    ipv4_gateway="192.168.100.1",
+    bridge="mvm-testnet",
+    nat_enabled=True,
+    nat_gateways=["eth0"],
+    bridge_exists=False,
+    created_at="2024-01-01T00:00:00+00:00",
+    vms=[],
+)
 
 
 @patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT)
@@ -154,7 +154,8 @@ def test_inspect_success(mock_inspect):
 def test_inspect_json(mock_inspect):
     result = runner.invoke(app, ["inspect", "testnet", "--json"])
     assert result.exit_code == 0
-    assert '"testnet"' in result.output
+    # The JSON output uses dataclass string representation via default=str
+    assert "testnet" in result.output
 
 
 @patch("mvmctl.cli.network.inspect_network", side_effect=NetworkError("not found"))
@@ -521,17 +522,17 @@ def test_create_success_prints_nat_gateways(mock_create, mock_ifaces):
 # network inspect — NAT section showing nat_gateways (covers NAT CONFIG block)
 # ---------------------------------------------------------------------------
 
-_FAKE_INSPECT_NAT = {
-    "name": "testnet",
-    "subnet": "192.168.100.0/24",
-    "ipv4_gateway": "192.168.100.1",
-    "bridge": "mvm-testnet",
-    "nat_enabled": True,
-    "nat_gateways": ["eth0"],
-    "bridge_exists": True,
-    "created_at": "2024-01-01T00:00:00+00:00",
-    "vms": [],
-}
+_FAKE_INSPECT_NAT = NetworkInspectInfo(
+    name="testnet",
+    subnet="192.168.100.0/24",
+    ipv4_gateway="192.168.100.1",
+    bridge="mvm-testnet",
+    nat_enabled=True,
+    nat_gateways=["eth0"],
+    bridge_exists=True,
+    created_at="2024-01-01T00:00:00+00:00",
+    vms=[],
+)
 
 
 @patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_NAT)
@@ -542,10 +543,17 @@ def test_inspect_nat_section_with_gateways(mock_inspect):
     assert "eth0" in result.output
 
 
-_FAKE_INSPECT_NAT_EMPTY = {
-    **_FAKE_INSPECT_NAT,
-    "nat_gateways": [],
-}
+_FAKE_INSPECT_NAT_EMPTY = NetworkInspectInfo(
+    name="testnet",
+    subnet="192.168.100.0/24",
+    ipv4_gateway="192.168.100.1",
+    bridge="mvm-testnet",
+    nat_enabled=True,
+    nat_gateways=[],
+    bridge_exists=True,
+    created_at="2024-01-01T00:00:00+00:00",
+    vms=[],
+)
 
 
 @patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_NAT_EMPTY)
@@ -559,17 +567,17 @@ def test_inspect_nat_section_no_gateways(mock_inspect):
 # network inspect — VMs section (covers lines 336-339)
 # ---------------------------------------------------------------------------
 
-_FAKE_INSPECT_WITH_VMS = {
-    "name": "testnet",
-    "subnet": "192.168.100.0/24",
-    "ipv4_gateway": "192.168.100.1",
-    "bridge": "mvm-testnet",
-    "nat_enabled": False,
-    "nat_gateways": [],
-    "bridge_exists": True,
-    "created_at": "2024-01-01T00:00:00+00:00",
-    "vms": [{"vm_id": "abc123", "ipv4": "192.168.100.2", "status": "running"}],
-}
+_FAKE_INSPECT_WITH_VMS = NetworkInspectInfo(
+    name="testnet",
+    subnet="192.168.100.0/24",
+    ipv4_gateway="192.168.100.1",
+    bridge="mvm-testnet",
+    nat_enabled=False,
+    nat_gateways=[],
+    bridge_exists=True,
+    created_at="2024-01-01T00:00:00+00:00",
+    vms=[{"vm_id": "abc123", "ipv4": "192.168.100.2", "status": "running"}],
+)
 
 
 @patch("mvmctl.cli.network.inspect_network", return_value=_FAKE_INSPECT_WITH_VMS)

@@ -275,11 +275,11 @@ def test_inspect_vm_by_id_prefix(mocker: MockerFixture):
 
     result = inspect_vm("abc123")
 
-    assert result["name"] == "test-vm"
-    assert result["id"] == mock_vm.id
-    assert result["status"] == "running"
-    assert result["pid"] == 1234
-    assert result["ip"] == "10.0.0.2"
+    assert result.name == "test-vm"
+    assert result.id == mock_vm.id
+    assert result.status == "running"
+    assert result.pid == 1234
+    assert result.ip == "10.0.0.2"
 
 
 def test_inspect_vm_by_name(mocker: MockerFixture):
@@ -299,8 +299,8 @@ def test_inspect_vm_by_name(mocker: MockerFixture):
 
     result = inspect_vm("myvm")
 
-    assert result["name"] == "myvm"
-    assert result["pid"] == 5678
+    assert result.name == "myvm"
+    assert result.pid == 5678
 
 
 def test_inspect_vm_ambiguous(mocker: MockerFixture):
@@ -431,8 +431,8 @@ def test_inspect_vm_rootfs_source_field(mocker: MockerFixture, tmp_path: Path):
 
         result = inspect_vm("abc123")
 
-    assert "paths" in result
-    assert result["paths"]["rootfs_source"] == "local"
+    assert result.paths is not None
+    assert result.paths["rootfs_source"] == "local"
 
 
 # -----------------------------------------------------------------------------

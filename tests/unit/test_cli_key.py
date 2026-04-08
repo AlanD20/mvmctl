@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from mvmctl.cli.key import key_app as app
 from mvmctl.core.key_manager import KeyInfo
 from mvmctl.exceptions import MVMKeyError
+from mvmctl.models import KeyCreateInput
 
 runner = CliRunner()
 
@@ -119,9 +120,12 @@ def test_create_success(mock_create):
     result = runner.invoke(app, ["create", "testkey"])
     assert result.exit_code == 0
     assert "created" in result.output.lower()
-    mock_create.assert_called_once_with(
-        name="testkey", output_dir=None, comment=None, overwrite=False
-    )
+    mock_create.assert_called_once()
+    call_input = mock_create.call_args.kwargs["input"]
+    assert call_input.name == "testkey"
+    assert call_input.output_dir is None
+    assert call_input.comment is None
+    assert call_input.overwrite is False
 
 
 @patch(
@@ -133,9 +137,12 @@ def test_create_with_options(mock_create):
         app, ["create", "testkey", "--out", "/custom", "--comment", "my comment"]
     )
     assert result.exit_code == 0
-    mock_create.assert_called_once_with(
-        name="testkey", output_dir="/custom", comment="my comment", overwrite=False
-    )
+    mock_create.assert_called_once()
+    call_input = mock_create.call_args.kwargs["input"]
+    assert call_input.name == "testkey"
+    assert str(call_input.output_dir) == "/custom"
+    assert call_input.comment == "my comment"
+    assert call_input.overwrite is False
 
 
 @patch("mvmctl.cli.key.create_key", side_effect=MVMKeyError("already exists"))

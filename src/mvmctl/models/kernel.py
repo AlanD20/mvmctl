@@ -100,7 +100,7 @@ class KernelSpec:
 
 @dataclass
 class KernelFetchInput:
-    """Input for kernel fetch/build operations."""
+    """Input model for kernel fetch and build operations."""
 
     kernel_type: str
     version: str | None

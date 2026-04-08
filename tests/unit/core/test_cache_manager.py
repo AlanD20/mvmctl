@@ -22,6 +22,8 @@ from mvmctl.core.cache_manager import (
     cache_init_kernels,
     cache_init_vms,
 )
+from mvmctl.models.image import ImageItem
+from mvmctl.models.kernel import KernelItem
 from mvmctl.models.vm import VMInstance
 
 # =============================================================================
@@ -363,7 +365,23 @@ class TestCachePruneImages:
         # Return the default entry
         mocker.patch(
             "mvmctl.api.cache.get_default_image_entry",
-            return_value=(default_hash, mock_entries[default_hash]),
+            return_value=ImageItem(
+                id=default_hash,
+                os_slug="test-os",
+                path="default.ext4",
+                os_name="Test OS",
+                fs_type="ext4",
+                fs_uuid=None,
+                compressed_size=None,
+                original_size=None,
+                compression_ratio=None,
+                compressed_format=None,
+                pulled_at=None,
+                arch=None,
+                is_default=True,
+                created_at=None,
+                updated_at=None,
+            ),
         )
         mock_remove_entry = mocker.patch("mvmctl.core.metadata.remove_image_entry")
 
@@ -473,7 +491,18 @@ class TestCachePruneKernels:
         mocker.patch("mvmctl.core.metadata.list_kernel_entries", return_value=mock_entries)
         mocker.patch(
             "mvmctl.api.cache.get_default_kernel_entry",
-            return_value=(default_hash, mock_entries[default_hash]),
+            return_value=KernelItem(
+                id=default_hash,
+                name="default-kernel",
+                version="1.0",
+                arch="x86_64",
+                path="default-vmlinux",
+                base_name=None,
+                type=None,
+                is_default=True,
+                created_at=None,
+                updated_at=None,
+            ),
         )
         mock_remove_entry = mocker.patch("mvmctl.core.metadata.remove_kernel_entry")
 

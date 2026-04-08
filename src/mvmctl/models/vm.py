@@ -174,7 +174,7 @@ class VMConfig:
 
 @dataclass
 class ConsoleInfo:
-    """Inspection info for VM console."""
+    """Information about a VM console socket."""
 
     socket_path: Path
     vm_name: str

@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from mvmctl.cli.vm import vm_app as app
 from mvmctl.exceptions import MVMError
 from mvmctl.main import app as main_app
-from mvmctl.models.vm import VMInstance, VMStatus
+from mvmctl.models.vm import VMCreateInput, VMInstance, VMInspectInfo, VMStatus
 
 runner = CliRunner()
 
@@ -154,8 +154,9 @@ def test_create_vm_id_prefix_preserves_identifier_for_uuid_lookup(mocker: Mocker
     )
     assert result.exit_code == 0
     mock_create.assert_called_once()
-    assert mock_create.call_args.kwargs["image"] == "1b0a"
-    assert mock_create.call_args.kwargs["kernel"] == "def456"
+    # create_vm now takes input=VMCreateInput(...) so check input field
+    assert mock_create.call_args.kwargs["input"].image == "1b0a"
+    assert mock_create.call_args.kwargs["input"].kernel == "def456"
 
     vm = _make_vm("newvm")
     mocker.patch("mvmctl.cli.vm.resolve_image_multi_strategy", return_value="/tmp/image.ext4")
@@ -167,8 +168,8 @@ def test_create_vm_id_prefix_preserves_identifier_for_uuid_lookup(mocker: Mocker
     )
     assert result.exit_code == 0
     mock_create.assert_called_once()
-    assert mock_create.call_args.kwargs["image"] == "abc123"
-    assert mock_create.call_args.kwargs["kernel"] == "def456"
+    assert mock_create.call_args.kwargs["input"].image == "abc123"
+    assert mock_create.call_args.kwargs["input"].kernel == "def456"
 
 
 def test_create_output_config_uses_resolved_absolute_paths(mocker: MockerFixture, tmp_path):
@@ -580,27 +581,32 @@ def test_rm_no_targets(mocker: MockerFixture):
 def test_inspect_vm_command(mocker: MockerFixture):
     """Test mvm vm inspect command displays VM info."""
     mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
-    mock_inspect.return_value = {
-        "name": "myvm",
-        "id": "abc123" + "x" * 10,
-        "status": "running",
-        "pid": 1234,
-        "ip": "10.0.0.2",
-        "mac": "02:FC:00:00:00:01",
-        "network_name": "default",
-        "tap_device": "mvm-def-abc-123",
-        "created_at": "2026-01-01T12:00:00",
-        "paths": {
+    mock_inspect.return_value = VMInspectInfo(
+        name="myvm",
+        id="abc123" + "x" * 10,
+        status="running",
+        pid=1234,
+        ip="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_name="default",
+        tap_device="mvm-def-abc-123",
+        created_at="2026-01-01T12:00:00",
+        cloud_init_mode="inject",
+        image_id="img123",
+        image_name="ubuntu-24.04",
+        kernel_id="krn456",
+        kernel_name="vmlinux",
+        paths={
             "vm_dir": "/home/user/.cache/mvmctl/vms/abc123xxx",
             "rootfs": "/home/user/.cache/mvmctl/vms/abc123xxx/rootfs.ext4",
             "config": "/home/user/.cache/mvmctl/vms/abc123xxx/firecracker.json",
         },
-        "features": {
+        features={
             "api_socket": True,
             "console": False,
             "nocloud_net": True,
         },
-    }
+    )
 
     result = runner.invoke(app, ["inspect", "--name", "myvm"])
 
@@ -614,15 +620,24 @@ def test_inspect_vm_command(mocker: MockerFixture):
 def test_inspect_vm_json_output(mocker: MockerFixture):
     """Test mvm vm inspect --json outputs valid JSON."""
     mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
-    mock_inspect.return_value = {
-        "name": "myvm",
-        "id": "abc123" + "x" * 10,
-        "status": "running",
-        "pid": 1234,
-        "ip": "10.0.0.2",
-        "paths": {"vm_dir": "/tmp", "rootfs": None, "config": None},
-        "features": {"api_socket": True, "console": False, "nocloud_net": False},
-    }
+    mock_inspect.return_value = VMInspectInfo(
+        name="myvm",
+        id="abc123" + "x" * 10,
+        status="running",
+        pid=1234,
+        ip="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_name="default",
+        tap_device="mvm-def-abc-123",
+        created_at="2026-01-01T12:00:00",
+        cloud_init_mode="inject",
+        image_id="img123",
+        image_name="ubuntu-24.04",
+        kernel_id="krn456",
+        kernel_name="vmlinux",
+        paths={"vm_dir": "/tmp", "rootfs": None, "config": None},
+        features={"api_socket": True, "console": False, "nocloud_net": False},
+    )
 
     result = runner.invoke(app, ["inspect", "--name", "myvm", "--json"])
 
@@ -884,23 +899,31 @@ def test_resolve_kernel_id_prefix(mocker: MockerFixture, tmp_path: Path):
 class TestInspectCommand:
     """Tests for vm inspect command with positional selector."""
 
+    def _make_inspect_info(self, name: str = "myvm") -> VMInspectInfo:
+        """Helper to create a VMInspectInfo for testing."""
+        return VMInspectInfo(
+            name=name,
+            id="a" * 64,
+            status="running",
+            created_at="2026-01-01",
+            pid=1234,
+            ip="10.0.0.2",
+            mac="02:FC:00:00:00:01",
+            network_name="default",
+            tap_device="mvm-def-aaa-123",
+            cloud_init_mode="inject",
+            image_id="img123",
+            image_name="ubuntu-24.04",
+            kernel_id="krn456",
+            kernel_name="vmlinux",
+            features={"api_socket": False, "console": True, "nocloud_net": True},
+            paths={"vm_dir": "/tmp/vm", "rootfs": None, "config": None},
+        )
+
     def test_inspect_accepts_positional_selector(self, mocker: MockerFixture):
         """inspect command accepts VM name/ID as positional argument."""
         mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
-        mock_inspect.return_value = {
-            "name": "myvm",
-            "id": "a" * 64,
-            "short_id": "aaaaaa",
-            "status": "running",
-            "created_at": "2026-01-01",
-            "pid": 1234,
-            "ip": "10.0.0.2",
-            "mac": "02:FC:00:00:00:01",
-            "network_name": "default",
-            "tap_device": "mvm-def-aaa-123",
-            "features": {"api_socket": False, "console": True, "nocloud_net": True},
-            "paths": {"vm_dir": "/tmp/vm", "rootfs": None, "config": None},
-        }
+        mock_inspect.return_value = self._make_inspect_info("myvm")
 
         result = runner.invoke(app, ["inspect", "myvm"])
         assert result.exit_code == 0
@@ -909,20 +932,7 @@ class TestInspectCommand:
     def test_inspect_accepts_name_option(self, mocker: MockerFixture):
         """inspect command still accepts --name option for backward compatibility."""
         mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
-        mock_inspect.return_value = {
-            "name": "myvm",
-            "id": "a" * 64,
-            "short_id": "aaaaaa",
-            "status": "running",
-            "created_at": "2026-01-01",
-            "pid": 1234,
-            "ip": "10.0.0.2",
-            "mac": "02:FC:00:00:00:01",
-            "network_name": "default",
-            "tap_device": "mvm-def-aaa-123",
-            "features": {"api_socket": False, "console": True, "nocloud_net": True},
-            "paths": {"vm_dir": "/tmp/vm", "rootfs": None, "config": None},
-        }
+        mock_inspect.return_value = self._make_inspect_info("myvm")
 
         result = runner.invoke(app, ["inspect", "--name", "myvm"])
         assert result.exit_code == 0
@@ -931,19 +941,7 @@ class TestInspectCommand:
     def test_inspect_prefers_positional_over_option(self, mocker: MockerFixture):
         """inspect command prefers positional argument over --name option."""
         mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
-        mock_inspect.return_value = {
-            "name": "positional-vm",
-            "id": "a" * 16,
-            "status": "running",
-            "created_at": "2026-01-01",
-            "pid": 1234,
-            "ip": "10.0.0.2",
-            "mac": "02:FC:00:00:00:01",
-            "network_name": "default",
-            "tap_device": "mvm-def-aaa-123",
-            "features": {"api_socket": False, "console": True, "nocloud_net": True},
-            "paths": {"vm_dir": "/tmp/vm", "rootfs": None, "config": None},
-        }
+        mock_inspect.return_value = self._make_inspect_info("positional-vm")
 
         result = runner.invoke(app, ["inspect", "positional-vm", "--name", "option-vm"])
         assert result.exit_code == 0
@@ -962,19 +960,7 @@ class TestInspectCommand:
     def test_inspect_json_output(self, mocker: MockerFixture):
         """inspect command supports --json output."""
         mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
-        mock_inspect.return_value = {
-            "name": "myvm",
-            "id": "a" * 16,
-            "status": "running",
-            "created_at": "2026-01-01",
-            "pid": 1234,
-            "ip": "10.0.0.2",
-            "mac": "02:FC:00:00:00:01",
-            "network_name": "default",
-            "tap_device": "mvm-def-aaa-123",
-            "features": {"api_socket": False, "console": True, "nocloud_net": True},
-            "paths": {"vm_dir": "/tmp/vm", "rootfs": None, "config": None},
-        }
+        mock_inspect.return_value = self._make_inspect_info("myvm")
 
         result = runner.invoke(app, ["inspect", "myvm", "--json"])
         assert result.exit_code == 0

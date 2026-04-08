@@ -12,6 +12,7 @@ from mvmctl.core.cloud_init import (
     write_cloud_init,
 )
 from mvmctl.exceptions import CloudInitError, ConfigError, ProcessError
+from mvmctl.models import CloudInitWriteConfig
 
 
 def _paths_by_name(
@@ -36,7 +37,7 @@ def test_write_cloud_init_basic(tmp_path):
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
-    paths = write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.20.0.1",
@@ -44,6 +45,7 @@ def test_write_cloud_init_basic(tmp_path):
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
     )
+    paths = write_cloud_init(config=config)
 
     by_name = _paths_by_name(paths, cloud_init_dir)
     meta_path = by_name["meta-data"]
@@ -95,7 +97,7 @@ def test_write_cloud_init_custom_user_data(tmp_path):
     custom_ud = tmp_path / "custom.yaml"
     custom_ud.write_text("custom_key: custom_value\n")
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.20.0.1",
@@ -104,6 +106,7 @@ def test_write_cloud_init_custom_user_data(tmp_path):
         ssh_pub_key="ssh-rsa CUSTOM",
         custom_user_data=custom_ud,
     )
+    write_cloud_init(config=config)
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
     assert ud["custom_key"] == "custom_value"
@@ -124,15 +127,17 @@ def test_validate_user_data_rejects_dangerous_directives(tmp_path):
     custom_ud = tmp_path / "dangerous.yaml"
     custom_ud.write_text("#cloud-config\nwrite_files:\n  - path: /etc/test\n")
 
+    config = CloudInitWriteConfig(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="testvm",
+        ipv4_gateway="10.20.0.1",
+        guest_ip="10.20.0.10",
+        user="myuser",
+        ssh_pub_key=None,
+        custom_user_data=custom_ud,
+    )
     with pytest.raises(ConfigError, match="write_files"):
-        write_cloud_init(
-            cloud_init_dir=cloud_init_dir,
-            vm_name="testvm",
-            ipv4_gateway="10.20.0.1",
-            guest_ip="10.20.0.10",
-            user="myuser",
-            custom_user_data=custom_ud,
-        )
+        write_cloud_init(config=config)
 
 
 def test_validate_user_data_rejects_runcmd(tmp_path):
@@ -142,15 +147,17 @@ def test_validate_user_data_rejects_runcmd(tmp_path):
     custom_ud = tmp_path / "runcmd.yaml"
     custom_ud.write_text("#cloud-config\nruncmd:\n  - echo hello\n")
 
+    config = CloudInitWriteConfig(
+        cloud_init_dir=cloud_init_dir,
+        vm_name="testvm",
+        ipv4_gateway="10.20.0.1",
+        guest_ip="10.20.0.10",
+        user="myuser",
+        ssh_pub_key=None,
+        custom_user_data=custom_ud,
+    )
     with pytest.raises(ConfigError, match="runcmd"):
-        write_cloud_init(
-            cloud_init_dir=cloud_init_dir,
-            vm_name="testvm",
-            ipv4_gateway="10.20.0.1",
-            guest_ip="10.20.0.10",
-            user="myuser",
-            custom_user_data=custom_ud,
-        )
+        write_cloud_init(config=config)
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +276,7 @@ def test_write_cloud_init_skips_network_config_when_requested(tmp_path):
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
-    paths = write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.20.0.1",
@@ -278,6 +285,7 @@ def test_write_cloud_init_skips_network_config_when_requested(tmp_path):
         ssh_pub_key="ssh-rsa AAAAB3...",
         skip_network_config=True,
     )
+    paths = write_cloud_init(config=config)
 
     by_name = _paths_by_name(paths, cloud_init_dir, include_network_config=False)
     meta_path = by_name["meta-data"]
@@ -310,7 +318,7 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
 
-    paths = write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.20.0.1",
@@ -319,6 +327,7 @@ def test_write_cloud_init_includes_network_config_by_default(tmp_path):
         ssh_pub_key="ssh-rsa AAAAB3...",
         # skip_network_config defaults to False
     )
+    paths = write_cloud_init(config=config)
 
     by_name = _paths_by_name(paths, cloud_init_dir)
     meta_path = by_name["meta-data"]
@@ -359,15 +368,17 @@ def test_write_cloud_init_custom_user_data_no_network_disable(tmp_path, monkeypa
 
     monkeypatch.setattr(ci_module.logger, "warning", _fake_logger_warning)
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
+        ssh_pub_key=None,
         skip_network_config=True,
         custom_user_data=custom_ud,
     )
+    write_cloud_init(config=config)
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
     assert ud.get("network") is None  # no network key injected
@@ -391,15 +402,17 @@ def test_write_cloud_init_custom_user_data_with_network_key_warns(tmp_path, monk
 
     monkeypatch.setattr(ci_module.logger, "warning", _fake_logger_warning)
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.20.0.1",
         guest_ip="10.20.0.10",
         user="myuser",
+        ssh_pub_key=None,
         skip_network_config=True,
         custom_user_data=custom_ud,
     )
+    write_cloud_init(config=config)
 
     # Should log warning (we do not inject or modify anything)
     assert any("network" in w.lower() for w in warnings_logged)
@@ -417,7 +430,7 @@ def test_write_cloud_init_uses_template(tmp_path):
 
     _load_cloud_init_template.cache_clear()
 
-    paths = write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="templatevm",
         ipv4_gateway="10.30.0.1",
@@ -426,6 +439,7 @@ def test_write_cloud_init_uses_template(tmp_path):
         ssh_pub_key="ssh-ed25519 AAAAC3... test@example.com",
         prefix_len=24,
     )
+    paths = write_cloud_init(config=config)
 
     by_name = _paths_by_name(paths, cloud_init_dir)
     meta_path = by_name["meta-data"]
@@ -463,7 +477,7 @@ def test_render_cloud_init_template_all_placeholders(tmp_path):
     # Also exercise write_cloud_init and capture returned paths
     cloud_init_dir = tmp_path / "cloud-init"
     cloud_init_dir.mkdir()
-    paths: Any = write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="myvm",
         ipv4_gateway="192.168.1.1",
@@ -472,6 +486,7 @@ def test_render_cloud_init_template_all_placeholders(tmp_path):
         ssh_pub_key="ssh-rsa AAAAB3...",
         prefix_len=24,
     )
+    paths: Any = write_cloud_init(config=config)
 
     from pathlib import Path
 
@@ -569,7 +584,7 @@ def test_write_cloud_init_dhcp_no_systemd_network_workaround(tmp_path):
     # Clear the cache to ensure we test fresh template loading
     _load_cloud_init_template.cache_clear()
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.20.0.1",
@@ -577,6 +592,7 @@ def test_write_cloud_init_dhcp_no_systemd_network_workaround(tmp_path):
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
     )
+    write_cloud_init(config=config)
 
     # With DHCP configuration, we don't need to create systemd .network files
     # because systemd-networkd properly manages DHCP interfaces
@@ -593,7 +609,7 @@ def test_write_cloud_init_dhcp_no_wait_online_masking(tmp_path):
     # Clear the cache to ensure we test fresh template loading
     _load_cloud_init_template.cache_clear()
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.20.0.1",
@@ -601,6 +617,7 @@ def test_write_cloud_init_dhcp_no_wait_online_masking(tmp_path):
         user="myuser",
         ssh_pub_key="ssh-rsa AAAAB3...",
     )
+    write_cloud_init(config=config)
 
     # With DHCP configuration, systemd-networkd-wait-online completes successfully
     # because systemd-networkd properly manages the DHCP interface
@@ -624,7 +641,7 @@ def test_write_cloud_init_with_multiple_keys_template(tmp_path):
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 key2@example.com",
     ]
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="multivm",
         ipv4_gateway="10.0.0.1",
@@ -632,6 +649,7 @@ def test_write_cloud_init_with_multiple_keys_template(tmp_path):
         user="ubuntu",
         ssh_pub_key=keys,
     )
+    write_cloud_init(config=config)
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
     users = ud["users"]
@@ -650,7 +668,7 @@ def test_write_cloud_init_with_empty_key_list_omits_ssh_section(tmp_path):
     cloud_init_dir.mkdir()
     _load_cloud_init_template.cache_clear()
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="nokeyvm",
         ipv4_gateway="10.0.0.1",
@@ -658,6 +676,7 @@ def test_write_cloud_init_with_empty_key_list_omits_ssh_section(tmp_path):
         user="ubuntu",
         ssh_pub_key=[],
     )
+    write_cloud_init(config=config)
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
     users = ud.get("users", [])
@@ -681,7 +700,7 @@ def test_write_cloud_init_custom_userdata_appends_multiple_keys(tmp_path):
         "ssh-ed25519 AAAC key-beta",
     ]
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.0.0.1",
@@ -690,6 +709,7 @@ def test_write_cloud_init_custom_userdata_appends_multiple_keys(tmp_path):
         ssh_pub_key=keys,
         custom_user_data=custom_ud,
     )
+    write_cloud_init(config=config)
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
     assert ud["custom_key"] == "custom_value"
@@ -715,7 +735,7 @@ def test_write_cloud_init_custom_userdata_existing_user_appends_keys(tmp_path):
 
     new_key = "ssh-ed25519 AAAC new-key"
 
-    write_cloud_init(
+    config = CloudInitWriteConfig(
         cloud_init_dir=cloud_init_dir,
         vm_name="testvm",
         ipv4_gateway="10.0.0.1",
@@ -724,6 +744,7 @@ def test_write_cloud_init_custom_userdata_existing_user_appends_keys(tmp_path):
         ssh_pub_key=["ssh-rsa AAAA existing-key", new_key],
         custom_user_data=custom_ud,
     )
+    write_cloud_init(config=config)
 
     ud = yaml.safe_load((cloud_init_dir / "user-data").read_text())
     ubuntu_entry = next(

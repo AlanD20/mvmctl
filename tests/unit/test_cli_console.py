@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.console import _do_attach, _do_kill, _show_state
 from mvmctl.exceptions import VMNotFoundError, MVMError
+from mvmctl.models import ConsoleInfo, ConsoleState
 
 runner = CliRunner()
 
@@ -17,11 +18,11 @@ class TestShowStateFunction:
     @patch("mvmctl.cli.console.print_info")
     @patch("mvmctl.cli.console._get_console_state")
     def test_show_state_prints_running_status(self, mock_get_state, mock_print):
-        mock_get_state.return_value = {
-            "running": True,
-            "pid": 12345,
-            "socket_path": "/tmp/test.sock",
-        }
+        mock_get_state.return_value = ConsoleState(
+            running=True,
+            pid=12345,
+            socket_path="/tmp/test.sock",
+        )
 
         _show_state("testvm")
 
@@ -75,7 +76,10 @@ class TestDoAttachFunction:
     @patch("mvmctl.cli.console.connect_to_relay")
     @patch("mvmctl.cli.console._attach_console")
     def test_do_attach_connects_to_socket(self, mock_attach, mock_connect, mock_disconnect):
-        mock_attach.return_value = {"socket_path": "/tmp/test.sock"}
+        mock_attach.return_value = ConsoleInfo(
+            socket_path=Path("/tmp/test.sock"),
+            vm_name="testvm",
+        )
         mock_sock = MagicMock()
         mock_connect.return_value = mock_sock
 

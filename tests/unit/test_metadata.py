@@ -89,7 +89,7 @@ class TestKernelMetadata:
 
         default = get_default_kernel_entry(cache_dir)
         assert default is not None
-        assert default[1]["name"] == "vmlinux-1"
+        assert default.name == "vmlinux-1"
 
     def test_get_kernel_entry_missing_returns_empty(self, tmp_path: Path):
         """Test that missing kernel entries return empty dict."""
@@ -159,7 +159,7 @@ class TestImageMetadata:
 
         default = get_default_image_entry()
         assert default is not None
-        assert default[0] == "img1"
+        assert default.id == "img1"
 
     def test_set_default_image_by_os_slug(self, tmp_path: Path):
         """Test setting a default image by internal ID."""
@@ -278,7 +278,7 @@ class TestBinaryMetadata:
 
         default = get_default_binary_entry()
         assert default is not None
-        assert default[0] == "1.15.0"
+        assert default.version == "1.15.0"
 
 
 class TestNetworkMetadata:
@@ -332,7 +332,7 @@ class TestNetworkMetadata:
 
         default = get_default_network_entry(cache_dir)
         assert default is not None
-        assert default[0] == "default"
+        assert default.name == "default"
 
 
 class TestOrphanedEntryCleanup:

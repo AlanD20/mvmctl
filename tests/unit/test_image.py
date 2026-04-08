@@ -1849,20 +1849,21 @@ def test_fetch_image_ubuntu_fc_resolves_source(
 
 def test_import_image_already_exists_no_force(tmp_path: Path):
     """Test import_image raises error when image exists and force=False."""
-    spec = ImageImportInput(
-        id="my-image",
-        name="My Image",
-        source_path=tmp_path / "source.raw",
-        format="raw",
-        convert_to="ext4",
-        minimum_rootfs_size=2048,
-    )
-
     # Pre-create the output file
     output_dir = tmp_path / "images"
     output_dir.mkdir()
     final_path = output_dir / "my-image.ext4"
     final_path.write_text("existing image")
+
+    spec = ImageImportInput(
+        id="my-image",
+        name="My Image",
+        source_path=tmp_path / "source.raw",
+        output_dir=output_dir,
+        format="raw",
+        convert_to="ext4",
+        minimum_rootfs_size=2048,
+    )
 
     with pytest.raises(ImageError, match="already exists"):
         import_image(spec, output_dir, force=False)
@@ -1870,16 +1871,17 @@ def test_import_image_already_exists_no_force(tmp_path: Path):
 
 def test_import_image_source_not_found(tmp_path: Path):
     """Test import_image raises error when source file doesn't exist."""
+    output_dir = tmp_path / "images"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=tmp_path / "nonexistent.raw",
+        output_dir=output_dir,
         format="raw",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
 
     with pytest.raises(ImageError, match="Source file not found"):
         import_image(spec, output_dir)
@@ -1891,16 +1893,17 @@ def test_import_image_raw_format(mock_copy: MagicMock, tmp_path: Path):
     source = tmp_path / "source.raw"
     source.write_text("raw image data")
 
+    output_dir = tmp_path / "images"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
+        output_dir=output_dir,
         format="raw",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
 
     result = import_image(spec, output_dir)
 
@@ -1918,17 +1921,18 @@ def test_import_image_qcow2_format(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
+    output_dir = tmp_path / "images"
+    expected_output = output_dir / "my-image.img"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
+        output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
-    expected_output = output_dir / "my-image.img"
 
     mock_convert.return_value = True
     mock_extract.return_value = expected_output
@@ -1951,17 +1955,18 @@ def test_import_image_qcow2_cleans_up_raw(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
+    output_dir = tmp_path / "images"
+    expected_output = output_dir / "my-image.img"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
+        output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
-    expected_output = output_dir / "my-image.img"
 
     mock_convert.return_value = True
     mock_extract.return_value = expected_output
@@ -1981,16 +1986,17 @@ def test_import_image_qcow2_convert_fails(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
+    output_dir = tmp_path / "images"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
+        output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
 
     mock_convert.side_effect = ImageError("qemu-img failed")
 
@@ -2004,17 +2010,18 @@ def test_import_image_tar_rootfs_format(mock_create: MagicMock, tmp_path: Path):
     source = tmp_path / "rootfs.tar.gz"
     source.write_text("tar archive")
 
+    output_dir = tmp_path / "images"
+    expected_output = output_dir / "my-image.ext4"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
+        output_dir=output_dir,
         format="tar-rootfs",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
-    expected_output = output_dir / "my-image.ext4"
 
     mock_create.return_value = True
 
@@ -2029,16 +2036,17 @@ def test_import_image_unsupported_format(tmp_path: Path):
     source = tmp_path / "source.xyz"
     source.write_text("unknown format")
 
+    output_dir = tmp_path / "images"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
+        output_dir=output_dir,
         format="xyz",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
 
     with pytest.raises(ImageError, match="Unsupported import format"):
         import_image(spec, output_dir)
@@ -2057,21 +2065,22 @@ def test_import_image_force_overwrite(
     source = tmp_path / "source.raw"
     source.write_text("new image data")
 
-    spec = ImageImportInput(
-        id="my-image",
-        name="My Image",
-        source_path=source,
-        format="raw",
-        convert_to="ext4",
-        minimum_rootfs_size=2048,
-    )
-
     output_dir = tmp_path / "images"
     output_dir.mkdir()
     final_path = output_dir / "my-image.ext4"
     final_path.write_text("old image data")
     compressed_path = final_path.with_suffix(".ext4.zst")
     compressed_path.write_text("compressed image data")
+
+    spec = ImageImportInput(
+        id="my-image",
+        name="My Image",
+        source_path=source,
+        output_dir=output_dir,
+        format="raw",
+        convert_to="ext4",
+        minimum_rootfs_size=2048,
+    )
 
     mock_shrink.return_value = (final_path, 1024, 512)
     mock_compress.return_value = compressed_path
@@ -2223,17 +2232,18 @@ def test_import_image_qcow2_uses_tempfile_context_manager(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
+    output_dir = tmp_path / "images"
+    expected_output = output_dir / "my-image.img"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
+        output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
-    expected_output = output_dir / "my-image.img"
 
     mock_convert.return_value = True
     mock_extract.return_value = expected_output
@@ -2264,16 +2274,17 @@ def test_import_image_qcow2_cleans_up_on_exception(
     source = tmp_path / "source.qcow2"
     source.write_text("qcow2 data")
 
+    output_dir = tmp_path / "images"
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
         source_path=source,
+        output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
         minimum_rootfs_size=2048,
     )
-
-    output_dir = tmp_path / "images"
 
     mock_convert.return_value = True
 

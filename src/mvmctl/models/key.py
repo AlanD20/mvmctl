@@ -8,7 +8,7 @@ from pathlib import Path
 
 @dataclass
 class KeyCreateInput:
-    """Input for SSH key creation."""
+    """Input model for SSH key creation."""
 
     name: str
     output_dir: Path | None = None

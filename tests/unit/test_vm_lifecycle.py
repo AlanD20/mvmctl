@@ -18,7 +18,7 @@ from mvmctl.api.vms import (
 from mvmctl.core.vm_lifecycle import _secure_mkdir_vm
 from mvmctl.core.vm_process import _read_pid_file, _write_pid_file, graceful_shutdown
 from mvmctl.exceptions import MVMError
-from mvmctl.models import CloudInitMode
+from mvmctl.models import CloudInitMode, VMCreateInput
 from mvmctl.models.vm import VMInstance, VMStatus
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
@@ -167,22 +167,24 @@ def test_create_vm_core_success(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     vm = create_vm(
-        name="myvm",
-        image_path=Path("/path/to/image.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
-        image_fs_uuid="11111111-2222-3333-4444-555555555555",
-        image_fs_type="ext4",
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/image.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+            image_fs_uuid="11111111-2222-3333-4444-555555555555",
+            image_fs_type="ext4",
+        )
     )
 
     assert isinstance(vm, VMInstance)
@@ -296,20 +298,22 @@ def test_create_vm_inject_mode_is_default(
 
     # Create VM with explicit AUTO mode
     create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.INJECT,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.INJECT,
+        )
     )
 
     # Verify NO_CLOUD_NET was used
@@ -333,19 +337,21 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
 
     with pytest.raises(MVMError, match="VM limit reached"):
         create_vm(
-            name="myvm",
-            image_path=Path("/path/to/img.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=False,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
+            input=VMCreateInput(
+                name="myvm",
+                image_path=Path("/path/to/img.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+            )
         )
 
 
@@ -969,19 +975,21 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 
         with pytest.raises(MVMError, match="symlink"):
             create_vm(
-                name="attackvm",
-                image_path=Path("/path/to/ubuntu-24.04.ext4"),
-                vcpus=2,
-                mem=256,
-                network_name="default",
-                user="root",
-                enable_api_socket=False,
-                enable_pci=False,
-                enable_console=False,
-                firecracker_bin="firecracker",
-                lsm_flags="",
-                enable_logging=False,
-                enable_metrics=False,
+                input=VMCreateInput(
+                    name="attackvm",
+                    image_path=Path("/path/to/ubuntu-24.04.ext4"),
+                    vcpus=2,
+                    mem=256,
+                    network_name="default",
+                    user="root",
+                    enable_api_socket=False,
+                    enable_pci=False,
+                    enable_console=False,
+                    firecracker_bin="firecracker",
+                    lsm_flags="",
+                    enable_logging=False,
+                    enable_metrics=False,
+                )
             )
 
 
@@ -1082,20 +1090,22 @@ def test_create_vm_uses_cached_image_path_not_copy(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     # Rootfs MUST be copied to VM directory (VM-local copy)
@@ -1210,21 +1220,23 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        disk_size="10G",
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            disk_size="10G",
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     # Verify copy happened first
@@ -1341,20 +1353,22 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
 
     with pytest.raises(Exception, match="TAP creation failed"):
         create_vm(
-            name="myvm",
-            image_path=Path("/path/to/ubuntu-22.04.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=False,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
-            cloud_init_mode=CloudInitMode.NET,
+            input=VMCreateInput(
+                name="myvm",
+                image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+                cloud_init_mode=CloudInitMode.NET,
+            )
         )
 
     # Verify copy happened before the failure
@@ -1474,20 +1488,22 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     vm = create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     # Verify VMInstance has config field set
@@ -1601,20 +1617,22 @@ def test_create_vm_nocloud_net_starts_server(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     vm = create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     # Verify the manager's start_server was called
@@ -1727,20 +1745,22 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
 
     with pytest.raises(MVMError, match="Firecracker binary not found"):
         create_vm(
-            name="myvm",
-            image_path=Path("/path/to/ubuntu-22.04.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=False,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
-            cloud_init_mode=CloudInitMode.NET,
+            input=VMCreateInput(
+                name="myvm",
+                image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+                cloud_init_mode=CloudInitMode.NET,
+            )
         )
 
     # Verify the manager's stop_server was called to cleanup
@@ -1841,20 +1861,22 @@ def test_create_vm_nocloud_net_success_sets_port(
     )
 
     vm = create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     # Verify VMInstance was created with the correct nocloud_net_port
@@ -1962,20 +1984,22 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     )
 
     vm = create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     # Verify add_nocloud_input_rule was called with correct parameters
@@ -2094,20 +2118,22 @@ def test_firewall_failure_stops_server_and_raises(
 
     with pytest.raises(NetworkError, match="Failed to add firewall rule"):
         create_vm(
-            name="myvm",
-            image_path=Path("/path/to/ubuntu-22.04.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=False,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
-            cloud_init_mode=CloudInitMode.NET,
+            input=VMCreateInput(
+                name="myvm",
+                image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+                cloud_init_mode=CloudInitMode.NET,
+            )
         )
 
     # Verify stop_server was called
@@ -2220,20 +2246,22 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     )
 
     vm = create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     # Verify VM was created successfully (no blocking wait for cloud-init)
@@ -2336,20 +2364,22 @@ def test_create_vm_starts_nocloud_server(
     )
 
     vm = create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     # Verify VM was created successfully
@@ -2452,20 +2482,22 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
     with patch("mvmctl.api.vms.shutil.copy2", side_effect=spy_copy2):
         mock_inject.side_effect = spy_inject
         create_vm(
-            name=vm_name,
-            image_path=Path("/path/to/ubuntu-22.04.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=False,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
-            cloud_init_mode=CloudInitMode.INJECT,
+            input=VMCreateInput(
+                name=vm_name,
+                image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+                cloud_init_mode=CloudInitMode.INJECT,
+            )
         )
 
     copy_calls = [e for e in call_log if e.startswith("copy2:")]
@@ -2579,20 +2611,22 @@ def test_direct_injection_cleanup_on_injection_failure(
         pytest.raises(CloudInitError, match="Direct injection failed"),
     ):
         create_vm(
-            name=vm_name,
-            image_path=Path("/path/to/ubuntu-22.04.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=False,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
-            cloud_init_mode=CloudInitMode.INJECT,
+            input=VMCreateInput(
+                name=vm_name,
+                image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+                cloud_init_mode=CloudInitMode.INJECT,
+            )
         )
 
     mock_rmtree.assert_called_once_with(vm_dir, ignore_errors=True)
@@ -2696,25 +2730,27 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     mock_write_ci.assert_called_once()
-    _, kwargs = mock_write_ci.call_args
-    injected_key = kwargs["ssh_pub_key"]
+    config_arg = mock_write_ci.call_args.args[0]
+    injected_key = config_arg.ssh_pub_key
     assert isinstance(injected_key, list)
     assert "ssh-rsa AAAA key1" in injected_key
     assert "ssh-ed25519 AAAC key2" in injected_key
@@ -2804,27 +2840,29 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        ssh_key="mykey",
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            ssh_key="mykey",
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     mock_resolve_ssh_key.assert_called_once_with("mykey")
     mock_write_ci.assert_called_once()
-    _, kwargs = mock_write_ci.call_args
-    assert kwargs["ssh_pub_key"] == "ssh-rsa AAAA explicit-key"
+    config_arg = mock_write_ci.call_args.args[0]
+    assert config_arg.ssh_pub_key == "ssh-rsa AAAA explicit-key"
 
 
 @patch("mvmctl.api.vms.shutil.copy2")
@@ -2914,20 +2952,22 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_net_mgr.return_value.start_server.return_value = ("http://10.20.0.1:8080", 8080)
 
     create_vm(
-        name="myvm",
-        image_path=Path("/path/to/ubuntu-22.04.ext4"),
-        vcpus=2,
-        mem=256,
-        network_name="default",
-        user="root",
-        enable_api_socket=False,
-        enable_pci=False,
-        enable_console=False,
-        firecracker_bin="firecracker",
-        lsm_flags="",
-        enable_logging=False,
-        enable_metrics=False,
-        cloud_init_mode=CloudInitMode.NET,
+        input=VMCreateInput(
+            name="myvm",
+            image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            vcpus=2,
+            mem=256,
+            network_name="default",
+            user="root",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            firecracker_bin="firecracker",
+            lsm_flags="",
+            enable_logging=False,
+            enable_metrics=False,
+            cloud_init_mode=CloudInitMode.NET,
+        )
     )
 
     mock_resolve_ssh_key.assert_called_once_with(None)
@@ -3013,20 +3053,22 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
 
     with pytest.raises(NetworkError, match="Network setup failed"):
         create_vm(
-            name="myvm",
-            image_path=Path("/path/to/ubuntu-22.04.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=False,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
-            cloud_init_mode=CloudInitMode.NET,
+            input=VMCreateInput(
+                name="myvm",
+                image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+                cloud_init_mode=CloudInitMode.NET,
+            )
         )
 
     # cleanup_tap must be called to remove TAP and iptables rules

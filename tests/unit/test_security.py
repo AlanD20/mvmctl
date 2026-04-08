@@ -15,6 +15,7 @@ from mvmctl.core.host_privilege import _generate_sudoers_content
 from mvmctl.api.assets import resolve_image_path as _resolve_image_path
 from mvmctl.api.vms import create_vm
 from mvmctl.exceptions import HostError, MVMError
+from mvmctl.models import VMCreateInput, CloudInitMode
 from mvmctl.utils.http import download_file
 from mvmctl.utils.validation import validate_boot_arg_component, validate_entity_name
 
@@ -244,18 +245,13 @@ def test_create_vm_rejects_malicious_names(
 ):
     """VM creation must reject malicious names before any filesystem operations."""
     mocker.patch("mvmctl.api.vms.get_vm_manager")
-    mocker.patch(
-        "mvmctl.api.vms.validate_entity_name", side_effect=MVMError("Invalid VM name")
-    )
+    mocker.patch("mvmctl.api.vms.validate_entity_name", side_effect=MVMError("Invalid VM name"))
 
     with pytest.raises(MVMError, match="Invalid VM name"):
-        create_vm(
+        input_data = VMCreateInput(
             name=malicious_name,
-            image_path=Path("/tmp/ubuntu-24.04.ext4"),
-            kernel_path=Path("/tmp/vmlinux"),
             vcpus=2,
             mem=256,
-            network_name="default",
             user="root",
             enable_api_socket=False,
             enable_pci=False,
@@ -264,7 +260,12 @@ def test_create_vm_rejects_malicious_names(
             lsm_flags="",
             enable_logging=False,
             enable_metrics=False,
+            image_path=Path("/tmp/ubuntu-24.04.ext4"),
+            kernel_path=Path("/tmp/vmlinux"),
+            network_name="default",
+            cloud_init_mode=CloudInitMode.INJECT,
         )
+        create_vm(input=input_data)
 
 
 # -----------------------------------------------------------------------------

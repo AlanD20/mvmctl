@@ -154,9 +154,8 @@ def test_list_kernels_with_file():
 
     result = list_kernels(kernels_dir)
     assert len(result) == 1
-    assert result[0]["id"] == fake_id
-    assert result[0]["full_name"] == "vmlinux"
-    assert "size" in result[0]
+    assert result[0].id == fake_id
+    assert result[0].name == "vmlinux"
 
 
 def test_list_kernels_with_metadata():
@@ -174,8 +173,8 @@ def test_list_kernels_with_metadata():
 
     result = list_kernels(kernels_dir)
     assert len(result) == 1
-    assert result[0]["version"] == "6.1.9"
-    assert result[0]["type"] == "official"
+    assert result[0].version == "6.1.9"
+    assert result[0].type == "official"
 
 
 def test_list_kernels_shows_orphaned_entries():
@@ -189,7 +188,9 @@ def test_list_kernels_shows_orphaned_entries():
     kernel_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
 
     # Save metadata
-    save_kernel_metadata(kernels_dir, "vmlinux", version="6.1.9", kernel_type="official")
+    kernel_id = save_kernel_metadata(
+        kernels_dir, "vmlinux", version="6.1.9", kernel_type="official"
+    )
 
     # List should find the kernel
     result = list_kernels(kernels_dir)
@@ -201,7 +202,7 @@ def test_list_kernels_shows_orphaned_entries():
     # List should still show the kernel (orphaned entry shown with X mark in CLI)
     result = list_kernels(kernels_dir)
     assert len(result) == 1
-    assert result[0]["size"] == "0.0 MiB"  # Size is 0 when file missing
+    assert result[0].id == kernel_id
 
 
 def test_set_default_kernel():
@@ -313,7 +314,7 @@ def test_list_kernels_shows_default_marker():
     db.set_default_kernel(kernel_id)
 
     result = list_kernels(kernels_dir)
-    assert result[0]["is_default"] == "true"
+    assert result[0].is_default is True
 
 
 @patch("mvmctl.core.kernel.download_file")

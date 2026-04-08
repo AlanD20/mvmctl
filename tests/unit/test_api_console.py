@@ -7,7 +7,7 @@ import pytest
 
 from mvmctl.api import vms
 from mvmctl.exceptions import MVMError, VMNotFoundError
-from mvmctl.models.vm import VMInstance, VMStatus
+from mvmctl.models.vm import ConsoleInfo, ConsoleState, VMInstance, VMStatus
 
 
 class TestAttachConsole:
@@ -34,8 +34,8 @@ class TestAttachConsole:
         result = vms.attach_console("testvm")
 
         # Assertions
-        assert result["vm_name"] == "testvm"
-        assert result["socket_path"] == str(mock_socket_path)
+        assert result.vm_name == "testvm"
+        assert result.socket_path == mock_socket_path
         mock_manager.get.assert_called_once_with("testvm")
         mock_mgr.is_relay_running.assert_called_once_with("testvm", None)
         mock_mgr.get_socket_path.assert_called_once_with("testvm")
@@ -145,9 +145,9 @@ class TestGetConsoleState:
 
         result = vms.get_console_state("testvm")
 
-        assert result["running"] is True
-        assert result["pid"] == 12345
-        assert result["socket_path"] == "/tmp/mvm-testvm/console.sock"
+        assert result.running is True
+        assert result.pid == 12345
+        assert result.socket_path == "/tmp/mvm-testvm/console.sock"
         mock_manager.get.assert_called_once_with("testvm")
         mock_core_get_state.assert_called_once_with("testvm", None)
 
@@ -168,8 +168,8 @@ class TestGetConsoleState:
 
         result = vms.get_console_state("testvm")
 
-        assert result["running"] is False
-        assert result["pid"] is None
+        assert result.running is False
+        assert result.pid is None
 
     @patch("mvmctl.api.vms._get_console_state")
     @patch("mvmctl.api.vms.get_vm_manager")

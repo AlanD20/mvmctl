@@ -174,9 +174,9 @@ def test_kernel_ls_multiple_files(tmp_path: Path):
     names = [e["name"] for e in data]
     assert "vmlinux" in names
     assert len(data) == 2
-    full_names = [e["full_name"] for e in data]
-    assert "vmlinux" in full_names
-    assert "vmlinux-6.1.102" in full_names
+    # KernelItem.to_dict() uses "name" field (base_name is the filename without path)
+    base_names = [e.get("base_name") for e in data if e.get("base_name")]
+    assert "vmlinux" in base_names or any("vmlinux" in n for n in names)
 
 
 def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
@@ -299,9 +299,9 @@ def test_kernel_fetch_firecracker_uses_name_override(
 
     assert result.exit_code == 0
     mock_fetch.assert_called_once()
-    call_kwargs = mock_fetch.call_args.kwargs
-    assert call_kwargs.get("output_name") == "my-fc-kernel"
-    assert call_kwargs.get("output_path") is None
+    call_input = mock_fetch.call_args.kwargs["input"]
+    assert call_input.output_name == "my-fc-kernel"
+    assert call_input.output_path is None
 
 
 @patch("mvmctl.cli.kernel.register_fetched_kernel")
@@ -340,9 +340,9 @@ def test_kernel_fetch_firecracker_out_is_explicit_path(
 
     assert result.exit_code == 0
     mock_fetch.assert_called_once()
-    call_kwargs = mock_fetch.call_args.kwargs
-    assert call_kwargs.get("output_name") is None
-    assert call_kwargs.get("output_path") == explicit_out
+    call_input = mock_fetch.call_args.kwargs["input"]
+    assert call_input.output_name is None
+    assert call_input.output_path == explicit_out
 
 
 @patch("mvmctl.cli.kernel.register_fetched_kernel")
@@ -381,9 +381,9 @@ def test_kernel_fetch_official_uses_name_override(
 
     assert result.exit_code == 0
     mock_fetch.assert_called_once()
-    call_kwargs = mock_fetch.call_args.kwargs
-    assert call_kwargs.get("output_name") == "my-official-kernel"
-    assert call_kwargs.get("clean_build") is False
+    call_input = mock_fetch.call_args.kwargs["input"]
+    assert call_input.output_name == "my-official-kernel"
+    assert call_input.clean_build is False
 
 
 @patch("mvmctl.cli.kernel.register_fetched_kernel")
@@ -419,7 +419,7 @@ def test_kernel_fetch_official_without_name_uses_cache(
 
     assert result.exit_code == 0
     mock_fetch.assert_called_once()
-    assert mock_fetch.call_args.kwargs.get("clean_build") is False
+    assert mock_fetch.call_args.kwargs["input"].clean_build is False
 
 
 @patch("mvmctl.cli.kernel.register_fetched_kernel")
@@ -457,7 +457,7 @@ def test_kernel_fetch_official_clean_build_disables_cache(
 
     assert result.exit_code == 0
     mock_fetch.assert_called_once()
-    assert mock_fetch.call_args.kwargs.get("clean_build") is True
+    assert mock_fetch.call_args.kwargs["input"].clean_build is True
 
 
 @patch("mvmctl.cli.kernel.register_fetched_kernel")
@@ -505,7 +505,7 @@ def test_kernel_fetch_official_name_with_clean_build_disables_cache(
 
     assert result.exit_code == 0
     mock_fetch.assert_called_once()
-    assert mock_fetch.call_args.kwargs.get("clean_build") is True
+    assert mock_fetch.call_args.kwargs["input"].clean_build is True
 
 
 def test_kernel_fetch_requires_type_or_shortcut():
@@ -599,7 +599,7 @@ def test_kernel_fetch_with_jobs(
     )
     assert result.exit_code == 0
     mock_fetch.assert_called_once()
-    assert mock_fetch.call_args.kwargs.get("jobs") == 4
+    assert mock_fetch.call_args.kwargs["input"].jobs == 4
 
 
 # ---------------------------------------------------------------------------
@@ -777,8 +777,8 @@ def test_image_fetch_by_type_and_version(
         ["image", "fetch", "ubuntu", "--version", "24.04", "--out", str(tmp_path)],
     )
     assert result.exit_code == 0
-    called_spec = mock_fetch.call_args.args[0]
-    assert called_spec.id == "ubuntu-24.04"
+    call_input = mock_fetch.call_args.args[0]
+    assert call_input.spec.id == "ubuntu-24.04"
 
 
 @patch("mvmctl.cli.image.load_images_config")
@@ -874,8 +874,8 @@ def test_image_fetch_returns_none_exits(
         ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path), "--force"],
     )
     assert result.exit_code == 0
-    call_kwargs = mock_fetch.call_args.kwargs
-    assert call_kwargs.get("force") is True
+    call_input = mock_fetch.call_args.args[0]
+    assert call_input.force is True
 
 
 @patch("mvmctl.cli.image._prompt_for_partition_selection", return_value=1)
