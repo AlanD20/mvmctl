@@ -3,7 +3,7 @@ kernel-official:
   version: "6.19.9"
   source: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz
   sha256: null
-  sha256_url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-{version}.tar.xz.sha256"
+  sha256_url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc"
   config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config"
   config_fragments:
     - https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config

@@ -762,15 +762,43 @@ def build_kernel(
     )
 
 
-def fetch_kernel_sha256_from_url(sha256_url: str) -> str | None:
+def fetch_kernel_sha256_from_url(sha256_url: str, filename: str | None = None) -> str | None:
+    """Fetch SHA256 hash from a kernel.org SHA256SUMS.asc URL.
+
+    The URL can be either:
+    - A per-file sidecar URL (e.g. linux-6.19.9.tar.xz.sha256) - returns hash directly
+    - An aggregated SHA256SUMS.asc URL - searches for the filename within
+
+    Args:
+        sha256_url: URL to the SHA256 file or SHA256SUMS.asc
+        filename: Filename to search for in aggregated SHA256SUMS.asc
+
+    Returns:
+        SHA256 hash as hex string, or None if not found/fetch failed
+    """
     try:
         from urllib.request import Request, urlopen
 
         req = Request(sha256_url, headers={"User-Agent": HTTP_USER_AGENT})
         with urlopen(req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S) as resp:
             content = resp.read().decode().strip()
-        parts = content.split()
-        return str(parts[0]).lower() if parts else None
+
+        # If no filename specified, assume per-file sidecar format: "<hash>  <filename>"
+        if filename is None:
+            parts = content.split()
+            return str(parts[0]).lower() if parts else None
+
+        # Aggregated SHA256SUMS.asc format: "<hash>  <filename>" per line
+        # May include PGP header content before the actual checksums
+        for line in content.split("\n"):
+            line = line.strip()
+            if not line or line.startswith("-----") or line.startswith("Hash:"):
+                continue
+            # kernel.org format: <hash>  <filename> (two spaces)
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == filename:
+                return str(parts[0]).lower()
+        return None
     except Exception as e:
         if "url" in str(type(e)).lower() or isinstance(e, OSError):
             return None
@@ -938,7 +966,8 @@ def build_kernel_pipeline(
     if sha256 is None and not intentional_no_checksum:
         resolved_sha256_url = render_optional_template(kernel_spec.sha256_url, template_vars)
         if resolved_sha256_url is not None:
-            sha256 = fetch_kernel_sha256_from_url(resolved_sha256_url)
+            filename = f"linux-{version}.tar.xz"
+            sha256 = fetch_kernel_sha256_from_url(resolved_sha256_url, filename)
 
     if sha256 is None and not intentional_no_checksum:
         raise KernelError(f"Checksum required for kernel source download: {resolved_source_url}")
