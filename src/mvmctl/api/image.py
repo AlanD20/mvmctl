@@ -24,6 +24,8 @@ from mvmctl.api.metadata import (
     set_default_image_entry as _set_default_image_entry,
 )
 from mvmctl.exceptions import ImageError, RootPartitionDetectionError, TieDetectedError
+from mvmctl.models import ImageFetchInput
+from mvmctl.models.image import ImageImportInput
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.full_hash import generate_full_hash_image
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
@@ -328,13 +330,7 @@ def register_fetched_image(result: Any, spec: Any) -> str:
     return full_id
 
 
-def fetch_image_and_register(
-    spec: Any,
-    output_dir: Path,
-    force: bool = False,
-    partition: int | None = None,
-    skip_optimization: bool = False,
-) -> Any:
+def fetch_image_and_register(input: ImageFetchInput) -> Any:
     """Fetch image from remote URL, handle partition detection/retry, persist to DB.
 
     Flow:
@@ -346,11 +342,8 @@ def fetch_image_and_register(
     NOTE: partition retry is handled here when partition is provided.
 
     Args:
-        spec: ImageSpec with source URL, format, convert_to, etc.
-        output_dir: Directory to store the fetched image.
-        force: Re-download even if exists.
-        partition: Specific partition number (1-indexed) for retry, or None for auto.
-        skip_optimization: Skip shrink and compression, keep plain ext4.
+        input: ImageFetchInput containing spec, output_dir, force, partition,
+               and skip_optimization.
 
     Returns:
         ImageImportResult with path and metadata.
@@ -360,6 +353,12 @@ def fetch_image_and_register(
     """
     from mvmctl.api.metadata import get_default_binary_entry
     from mvmctl.core.image import fetch_image as _core_fetch_image
+
+    spec = input.spec
+    output_dir = input.output_dir
+    force = input.force
+    partition = input.partition
+    skip_optimization = input.skip_optimization
 
     # Check for existing files
     if not force:
@@ -404,21 +403,15 @@ def fetch_image_and_register(
     return result
 
 
-def import_image_and_register(
-    spec: Any,
-    output_dir: Path,
-    force: bool = False,
-    partition: int | None = None,
-) -> Any:
+def import_image_and_register(input: ImageImportInput) -> Any:
     """Import local image file, convert, persist to DB.
 
     Same pattern as fetch_image_and_register but for local source files.
 
     Args:
-        spec: ImageImportInput with source_path, format, convert_to, etc.
-        output_dir: Directory to store the imported image.
-        force: Overwrite existing image if present.
-        partition: Specific partition number (1-indexed) for retry, or None for auto.
+        input: ImageImportInput containing id, name, source_path, format,
+               convert_to, minimum_rootfs_size, disabled_detectors, output_dir,
+               force, and partition.
 
     Returns:
         ImageImportResult with path and metadata.
@@ -427,6 +420,11 @@ def import_image_and_register(
         ImageError: If import fails or partition detection fails.
     """
     from mvmctl.core.image import import_image as _core_import_image
+
+    spec = input
+    output_dir = input.output_dir
+    force = input.force
+    partition = input.partition
 
     # Check for existing files
     if not force:

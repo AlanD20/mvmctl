@@ -28,6 +28,7 @@ from mvmctl.core.network_manager import (
     validate_no_subnet_overlap,
 )
 from mvmctl.exceptions import NetworkError
+from mvmctl.models import NetworkInspectInfo, NetworkItem
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.network import (
     bridge_exists,
@@ -40,8 +41,15 @@ from mvmctl.utils.network import (
 logger = logging.getLogger(__name__)
 
 
-def get_default_network_entry(cache_dir: Path) -> tuple[str, dict[str, Any]] | None:
-    """Get default network entry from metadata API."""
+def get_default_network_entry(cache_dir: Path) -> NetworkItem | None:
+    """Get default network entry from metadata API.
+
+    Args:
+        cache_dir: Directory containing metadata.json (unused, kept for API compatibility).
+
+    Returns:
+        NetworkItem if a default network is set, None otherwise.
+    """
     from mvmctl.api import metadata as metadata_api
 
     return metadata_api.get_default_network_entry(cache_dir)
@@ -86,7 +94,7 @@ def list_networks() -> list[NetworkConfig]:
         return []
 
     default_entry = get_default_network_entry(cache_dir)
-    default_name = default_entry[0] if default_entry else None
+    default_name = default_entry.name if default_entry else None
 
     configs: list[NetworkConfig] = []
     for name, entry in entries.items():
@@ -135,7 +143,7 @@ def _get_default_network_entry_name() -> str | None:
     default_entry = get_default_network_entry(cache_dir)
     if default_entry is None:
         return None
-    return default_entry[0]
+    return default_entry.name
 
 
 # ---------------------------------------------------------------------------
@@ -381,19 +389,18 @@ def remove_network(name: str) -> None:
     log_audit("network.remove", f"name={name}")
 
 
-def inspect_network(name: str) -> dict[str, Any]:
+def inspect_network(name: str) -> NetworkInspectInfo:
     """Return full details for a named network.
 
     Args:
         name: Network name to inspect.
 
     Returns:
-        Dict with network details and attached VMs.
+        NetworkInspectInfo with network details and attached VMs.
 
     Raises:
         NetworkError: If network not found.
     """
-    from mvmctl.core.network_manager import VMLease
     from mvmctl.core.vm_manager import VMManager
 
     config = get_network(name)
@@ -408,7 +415,7 @@ def inspect_network(name: str) -> dict[str, Any]:
     metadata.update_network_entry(cache_dir, name, bridge_active=active)
 
     vm_manager = VMManager()
-    enriched_vms: list[VMLease] = []
+    enriched_vms: list[dict[str, Any]] = []
     for lease in leases:
         vm = vm_manager.get(lease.vm_id)
         if vm is not None:
@@ -432,17 +439,17 @@ def inspect_network(name: str) -> dict[str, Any]:
                 }
             )
 
-    return {
-        "name": config.name,
-        "subnet": config.subnet,
-        "ipv4_gateway": config.ipv4_gateway,
-        "bridge": config.bridge,
-        "nat_enabled": config.nat_enabled,
-        "nat_gateways": config.nat_gateways,
-        "created_at": config.created_at,
-        "bridge_exists": active,
-        "vms": enriched_vms,
-    }
+    return NetworkInspectInfo(
+        name=config.name,
+        subnet=config.subnet,
+        ipv4_gateway=config.ipv4_gateway,
+        bridge=config.bridge,
+        nat_enabled=config.nat_enabled,
+        nat_gateways=config.nat_gateways,
+        created_at=config.created_at,
+        bridge_exists=active,
+        vms=enriched_vms,
+    )
 
 
 def ensure_default_network() -> NetworkConfig:
@@ -541,20 +548,18 @@ def ensure_default_network() -> NetworkConfig:
     return config
 
 
-def reconcile_networks() -> list[dict[str, Any]]:
+def reconcile_networks() -> list[NetworkInspectInfo]:
     """Compare stored network state with actual kernel bridge state.
 
     For each network in metadata, checks whether its bridge device still
     exists on the host. Updates bridge_active in metadata and
-    returns a list of reconciliation results.
+    returns a list of network inspection results.
 
     Returns:
-        List of dicts with reconciliation results.
+        List of NetworkInspectInfo with reconciliation results.
     """
-    from mvmctl.core.network_manager import ReconcileResult
-
     cache_dir = get_cache_dir()
-    results: list[ReconcileResult] = []
+    results: list[NetworkInspectInfo] = []
 
     for config in list_networks():
         entry = metadata.get_network_entry(cache_dir, config.name)
@@ -565,21 +570,28 @@ def reconcile_networks() -> list[dict[str, Any]]:
 
         metadata.update_network_entry(cache_dir, config.name, bridge_active=actual_active)
 
+        # Get leases for this network to populate vms field
+        leases = get_network_leases(config.name)
+        vms: list[dict[str, Any]] = [{"vm_id": lease.vm_id, "ipv4": lease.ipv4} for lease in leases]
+
         results.append(
-            ReconcileResult(
+            NetworkInspectInfo(
                 name=config.name,
+                subnet=config.subnet,
+                ipv4_gateway=config.ipv4_gateway,
                 bridge=config.bridge,
-                stored_active=stored_active,
-                actual_active=actual_active,
-                stale=stale,
+                nat_enabled=config.nat_enabled,
+                nat_gateways=config.nat_gateways,
+                created_at=config.created_at,
+                bridge_exists=actual_active,
+                vms=vms,
             )
         )
 
-    if any(r.stale for r in results):
-        stale_names = [r.name for r in results if r.stale]
-        logger.warning("Stale networks detected (bridge missing): %s", ", ".join(stale_names))
+        if stale:
+            logger.warning("Stale network detected (bridge missing): %s", config.name)
 
-    return [r.__dict__ for r in results]
+    return results
 
 
 def restore_networks() -> list[str]:

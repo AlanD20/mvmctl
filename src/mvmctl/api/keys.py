@@ -34,6 +34,7 @@ from mvmctl.core.key_manager import (
     set_default_keys as _core_set_default_keys,
 )
 from mvmctl.exceptions import MVMKeyError
+from mvmctl.models import KeyCreateInput
 
 __all__ = [
     "KeyInfo",
@@ -94,18 +95,20 @@ def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> Key
     return result
 
 
-def create_key(
-    name: str,
-    output_dir: str | Path | None = None,
-    comment: str | None = None,
-    overwrite: bool = False,
-) -> tuple[KeyInfo, Path]:
-    """Create a new SSH keypair and add it to the registry."""
-    result = _core_create_key(name, output_dir, comment, overwrite)
+def create_key(input: KeyCreateInput) -> tuple[KeyInfo, Path]:
+    """Create a new SSH keypair and add it to the registry.
+
+    Args:
+        input: KeyCreateInput containing name, output_dir, comment, and overwrite.
+
+    Returns:
+        Tuple of (KeyInfo, Path) for the created key.
+    """
+    result = _core_create_key(input.name, input.output_dir, input.comment, input.overwrite)
 
     from mvmctl.utils.audit import log_audit
 
-    log_audit("key.create", f"name={name}")
+    log_audit("key.create", f"name={input.name}")
 
     return result
 

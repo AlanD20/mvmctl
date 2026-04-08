@@ -11,7 +11,7 @@ from mvmctl.models.firecracker import InstanceDescription, InstanceInfo
 from mvmctl.models.image import ImageFetchInput, ImageSpec
 from mvmctl.models.kernel import KernelFetchInput, KernelSpec
 from mvmctl.models.key import KeyCreateInput
-from mvmctl.models.network import LeaseEntry, NetworkEntry, NetworkInspectInfo
+from mvmctl.models.network import LeaseEntry, NetworkEntry, NetworkInspectInfo, NetworkItem
 from mvmctl.models.vm import (
     ConsoleInfo,
     ConsoleState,
@@ -50,6 +50,7 @@ __all__ = [
     "LeaseEntry",
     "NetworkEntry",
     "NetworkInspectInfo",
+    "NetworkItem",
     "PruneAllResult",
     "VMConfig",
     "VMCreateInput",

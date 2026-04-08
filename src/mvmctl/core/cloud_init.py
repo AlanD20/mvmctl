@@ -8,6 +8,7 @@ from mvmctl.constants import (
     REQUIRED_ISO_TOOL,
 )
 from mvmctl.exceptions import CloudInitError, ConfigError, ProcessError
+from mvmctl.models import CloudInitWriteConfig
 
 logger = logging.getLogger(__name__)
 
@@ -137,39 +138,36 @@ def _render_cloud_init_template(
     return result
 
 
-def write_cloud_init(
-    cloud_init_dir: Path,
-    vm_name: str,
-    guest_ip: str,
-    user: str,
-    *,
-    ipv4_gateway: str,
-    ssh_pub_key: "str | list[str] | None" = None,
-    custom_user_data: Path | None = None,
-    prefix_len: int = 24,
-    skip_network_config: bool = False,
-) -> None:
+def write_cloud_init(config: CloudInitWriteConfig) -> None:
+    """Write cloud-init configuration files to the specified directory.
+
+    Args:
+        config: CloudInitWriteConfig containing all parameters for cloud-init file generation.
+
+    Raises:
+        ConfigError: If custom user-data is invalid or contains dangerous directives.
+    """
     import yaml
 
-    ssh_pub_keys = _normalize_ssh_pub_keys(ssh_pub_key)
+    ssh_pub_keys = _normalize_ssh_pub_keys(config.ssh_pub_key)
 
     rendered = _render_cloud_init_template(
-        vm_name=vm_name,
-        user=user,
-        guest_ip=guest_ip,
-        ipv4_gateway=ipv4_gateway,
-        prefix_len=prefix_len,
+        vm_name=config.vm_name,
+        user=config.user,
+        guest_ip=config.guest_ip,
+        ipv4_gateway=config.ipv4_gateway,
+        prefix_len=config.prefix_len,
         ssh_pub_key=ssh_pub_keys,
     )
 
-    (cloud_init_dir / "meta-data").write_text(rendered["meta_data"])
+    (config.cloud_init_dir / "meta-data").write_text(rendered["meta_data"])
 
-    if not skip_network_config:
-        (cloud_init_dir / "network-config").write_text(rendered["network_config"])
+    if not config.skip_network_config:
+        (config.cloud_init_dir / "network-config").write_text(rendered["network_config"])
 
-    if custom_user_data is not None:
+    if config.custom_user_data is not None:
         ud: dict[str, Any] = {}
-        content = custom_user_data.read_text()
+        content = config.custom_user_data.read_text()
         if not (content.startswith("#cloud-config") or content.startswith("Content-Type:")):
             logger.warning(
                 "user-data file does not start with '#cloud-config' or MIME boundary header"
@@ -185,13 +183,13 @@ def write_cloud_init(
             raise ConfigError(f"Invalid YAML in user-data file: {exc}") from exc
         if ssh_pub_keys:
             if "users" not in ud:
-                ud["users"] = [{"name": user, "ssh-authorized-keys": list(ssh_pub_keys)}]
+                ud["users"] = [{"name": config.user, "ssh-authorized-keys": list(ssh_pub_keys)}]
             else:
                 users_list = ud["users"]
                 if isinstance(users_list, list):
                     user_found = False
                     for u in users_list:
-                        if isinstance(u, dict) and u.get("name") == user:
+                        if isinstance(u, dict) and u.get("name") == config.user:
                             existing_keys: list[str] = u.setdefault("ssh-authorized-keys", [])
                             for k in ssh_pub_keys:
                                 if k not in existing_keys:
@@ -199,18 +197,20 @@ def write_cloud_init(
                             user_found = True
                             break
                     if not user_found:
-                        users_list.append({"name": user, "ssh-authorized-keys": list(ssh_pub_keys)})
+                        users_list.append(
+                            {"name": config.user, "ssh-authorized-keys": list(ssh_pub_keys)}
+                        )
         if "network" in ud:
             logger.warning(
                 "Custom user-data already contains 'network' key; "
                 "cloud-init network stage will apply it. "
                 "Ensure this is intentional."
             )
-        (cloud_init_dir / "user-data").write_text(
+        (config.cloud_init_dir / "user-data").write_text(
             "#cloud-config\n" + yaml.dump(ud, default_flow_style=False)
         )
     else:
-        (cloud_init_dir / "user-data").write_text(rendered["user_data"])
+        (config.cloud_init_dir / "user-data").write_text(rendered["user_data"])
 
 
 def create_cloud_init_iso(cloud_init_dir: Path, output_iso: Path) -> None:

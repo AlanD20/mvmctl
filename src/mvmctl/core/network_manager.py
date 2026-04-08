@@ -16,8 +16,7 @@ from mvmctl.constants import (
     DEFAULT_NETWORK_SUBNET,
 )
 from mvmctl.exceptions import MVMError, NetworkError
-from mvmctl.models.network import NetworkConfig as NetworkConfig
-from mvmctl.models.network import NetworkLease as NetworkLease
+from mvmctl.models.network import LeaseEntry, NetworkConfig, NetworkEntry, NetworkLease
 from mvmctl.utils.network import allocate_ip
 from mvmctl.utils.network import (
     bridge_name_for as _bridge_name_for_util,
@@ -107,7 +106,7 @@ def build_network_config(
     )
 
 
-def network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig | None:
+def network_entry_to_config(name: str, entry: NetworkEntry) -> NetworkConfig | None:
     """Convert a metadata entry dict to NetworkConfig.
 
     Validates all fields from metadata to prevent injection attacks.
@@ -115,7 +114,7 @@ def network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig |
 
     Args:
         name: Network name.
-        entry: Metadata entry dict.
+        entry: NetworkEntry TypedDict containing network metadata.
 
     Returns:
         NetworkConfig or None if entry is invalid.
@@ -190,28 +189,36 @@ def network_entry_to_config(name: str, entry: dict[str, Any]) -> NetworkConfig |
     )
 
 
-def config_to_network_entry(config: NetworkConfig) -> dict[str, Any]:
+def config_to_network_entry(config: NetworkConfig) -> NetworkEntry:
     """Convert a NetworkConfig to a metadata entry dict.
 
     Args:
         config: NetworkConfig object.
 
     Returns:
-        Dict suitable for persistence via metadata API.
+        NetworkEntry TypedDict suitable for persistence via metadata API.
     """
     return {
+        "name": config.name,
         "subnet": config.subnet,
         "ipv4_gateway": config.ipv4_gateway,
         "bridge": config.bridge,
         "nat_enabled": config.nat_enabled,
         "nat_gateways": config.nat_gateways,
         "created_at": config.created_at,
-        "is_default": 1 if config.is_default else 0,
+        "is_default": config.is_default,
     }
 
 
-def leases_from_entry(entry: dict[str, Any]) -> list[NetworkLease]:
-    """Extract leases from a metadata entry dict."""
+def leases_from_entry(entry: LeaseEntry) -> list[NetworkLease]:
+    """Extract leases from a metadata entry dict.
+
+    Args:
+        entry: LeaseEntry TypedDict containing lease data.
+
+    Returns:
+        List of NetworkLease objects.
+    """
     raw_leases = entry.get("leases", [])
     if not isinstance(raw_leases, list):
         return []

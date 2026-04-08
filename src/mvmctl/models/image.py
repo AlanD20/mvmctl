@@ -92,10 +92,13 @@ class ImageImportInput:
     id: str
     name: str
     source_path: Path
+    output_dir: Path
     format: str  # noqa: N816  # "qcow2", "raw", "tar-rootfs"
     convert_to: str = "ext4"
     minimum_rootfs_size: int = field(default=2048)
     disabled_detectors: list[str] = field(default_factory=list)
+    force: bool = False
+    partition: int | None = None
 
 
 @dataclass
