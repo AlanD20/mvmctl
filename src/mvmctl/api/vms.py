@@ -987,7 +987,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 db = MVMDatabase()
                 default_kernel = db.get_default_kernel()
                 if default_kernel is not None:
-                    kernel_path_resolved = Path(default_kernel.path)
+                    kernel_path_resolved = get_kernels_dir() / default_kernel.path
                 else:
                     env_kernel = os.environ.get("MVM_KERNEL")
                     if env_kernel:
