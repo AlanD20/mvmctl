@@ -102,29 +102,26 @@ def test_validate_config_errors():
 
 def test_dump_vm_success(tmp_path: Path):
     """Test 'config dump-vm' prints firecracker.json for a VM."""
-    vm_dir = tmp_path / "test-vm"
-    vm_dir.mkdir()
     config_data = {"boot-source": {"kernel_image_path": "/vmlinux"}}
-    (vm_dir / "firecracker.json").write_text(json.dumps(config_data))
 
-    # Mock VM manager to return a VM with the expected ID
-    mock_vm = MagicMock()
-    mock_vm.id = "test-vm"
-    mock_manager = MagicMock()
-    mock_manager.get.return_value = mock_vm
-
-    with patch("mvmctl.cli.config.get_vm_dir_by_hash", return_value=vm_dir):
-        with patch("mvmctl.cli.config.get_vm_manager", return_value=mock_manager):
-            result = runner.invoke(app, ["dump-vm", "--name", "test-vm"])
-            assert result.exit_code == 0
-            data = json.loads(result.output)
-            assert data["boot-source"]["kernel_image_path"] == "/vmlinux"
+    with patch("mvmctl.cli.config.dump_vm_config", return_value=config_data):
+        result = runner.invoke(app, ["dump-vm", "--name", "test-vm"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["boot-source"]["kernel_image_path"] == "/vmlinux"
 
 
-def test_dump_vm_not_found(tmp_path: Path):
-    with patch("mvmctl.cli.config.get_vm_dir_by_hash", return_value=tmp_path / "nonexistent"):
+def test_dump_vm_not_found():
+    """Test 'config dump-vm' exits 1 when VM not found."""
+    from mvmctl.exceptions import VMNotFoundError
+
+    with patch(
+        "mvmctl.cli.config.dump_vm_config",
+        side_effect=VMNotFoundError("VM 'ghost' not found"),
+    ):
         result = runner.invoke(app, ["dump-vm", "--name", "ghost"])
         assert result.exit_code == 1
+        assert "ghost" in result.output
 
 
 def test_config_set(tmp_path: Path, monkeypatch):
@@ -171,37 +168,28 @@ def test_validate_config_mvm_error():
         assert result.exit_code == 1
 
 
-def test_dump_vm_config_file_missing(tmp_path: Path):
-    vm_dir = tmp_path / "myvm"
-    vm_dir.mkdir()
+def test_dump_vm_config_file_missing():
+    """Test 'config dump-vm' exits 1 when config file is missing."""
+    from mvmctl.exceptions import VMNotFoundError
 
-    mock_vm = MagicMock()
-    mock_vm.id = "abcdef1234567890"
-    mock_manager = MagicMock()
-    mock_manager.get.return_value = mock_vm
-
-    with patch("mvmctl.api.vms.get_vm_manager", return_value=mock_manager):
-        with patch("mvmctl.cli.config.get_vm_dir_by_hash", return_value=vm_dir):
-            result = runner.invoke(app, ["dump-vm", "--name", "myvm"])
-            assert result.exit_code == 1
+    with patch(
+        "mvmctl.cli.config.dump_vm_config",
+        side_effect=VMNotFoundError("VM 'myvm' not found or no config file"),
+    ):
+        result = runner.invoke(app, ["dump-vm", "--name", "myvm"])
+        assert result.exit_code == 1
+        assert "myvm" in result.output
 
 
-def test_dump_vm_invalid_json(tmp_path: Path):
-    vm_dir = tmp_path / "myvm"
-    vm_dir.mkdir()
-    from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
-
-    (vm_dir / DEFAULT_FC_CONFIG_FILENAME).write_text("{ not valid json !!!")
-
-    mock_vm = MagicMock()
-    mock_vm.id = "abcdef1234567890"
-    mock_manager = MagicMock()
-    mock_manager.get.return_value = mock_vm
-
-    with patch("mvmctl.api.vms.get_vm_manager", return_value=mock_manager):
-        with patch("mvmctl.cli.config.get_vm_dir_by_hash", return_value=vm_dir):
-            result = runner.invoke(app, ["dump-vm", "--name", "myvm"])
-            assert result.exit_code == 1
+def test_dump_vm_invalid_json():
+    """Test 'config dump-vm' exits 1 when config file has invalid JSON."""
+    with patch(
+        "mvmctl.cli.config.dump_vm_config",
+        side_effect=json.JSONDecodeError("Invalid JSON", "", 0),
+    ):
+        result = runner.invoke(app, ["dump-vm", "--name", "myvm"])
+        assert result.exit_code == 1
+        assert "Invalid JSON" in result.output
 
 
 def test_config_set_error(tmp_path: Path, monkeypatch):

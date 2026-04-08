@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, Union
@@ -91,6 +92,309 @@ def _resolve_active_firecracker_bin() -> str:
     except AssetNotFoundError as e:
         print_error(str(e))
         raise typer.Exit(1) from e
+
+
+@dataclass
+class _ResolvedImageResult:
+    path: Path | None
+    id_for_lookup: str
+
+
+@dataclass
+class _ResolvedKernelResult:
+    path: Path | None
+    id_for_lookup: str | None
+
+
+@dataclass
+class _ResolvedCloudInitResult:
+    mode: CloudInitMode
+    iso_path: Path | None
+
+
+@dataclass
+class _CreateInputs:
+    name: str
+    image: str | None
+    kernel: str | None
+    image_path: Path | None
+    kernel_path: Path | None
+    vcpus: int
+    mem: int
+    disk_size: str | None
+    ip: str | None
+    network_name: str | None
+    mac: str | None
+    ssh_key: str | None
+    user_data: Path | None
+    user: str
+    enable_pci: bool
+    no_console: bool
+    lsm_flags: str
+    enable_logging: bool
+    enable_metrics: bool
+    firecracker_bin: str
+    keep_cloud_init_iso: bool
+    cloud_init_mode: CloudInitMode
+    cloud_init_iso_path: Path | None
+    nocloud_net_port: int
+
+
+def _apply_import_config(
+    import_config: Path,
+    name: str,
+    image: str | None,
+    kernel: str | None,
+    vcpus: int | None,
+    mem: int | None,
+    ip: str | None,
+    network_name: str | None,
+    mac: str | None,
+    ssh_key: str | None,
+    user: str | None,
+    enable_pci: bool | None,
+    firecracker_bin: str | None,
+) -> tuple[
+    str,
+    str | None,
+    str | None,
+    int | None,
+    int | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    bool | None,
+    str | None,
+]:
+    try:
+        base_config = load_vm_config_file(import_config)
+    except (FileNotFoundError, ValueError) as e:
+        handle_mvm_error(e)
+        raise typer.Exit(1) from e
+
+    merged = merge_cli_overrides(
+        base_config,
+        name=name,
+        os_slug=image,
+        kernel_version=kernel,
+        vcpus=vcpus,
+        mem=mem,
+        ip=ip,
+        network_name=network_name,
+        mac=mac,
+        ssh_key=ssh_key,
+        user=user,
+        enable_pci=enable_pci,
+        binary_name=firecracker_bin,
+    )
+
+    return (
+        merged.name,
+        merged.image.os_slug,
+        merged.kernel.version,
+        merged.compute.vcpus,
+        merged.compute.mem,
+        merged.network.ip,
+        merged.network.name,
+        merged.network.mac,
+        merged.cloud_init.ssh_key,
+        merged.cloud_init.user,
+        merged.firecracker.enable_pci,
+        merged.binary.name,
+    )
+
+
+def _resolve_image_strategy(
+    image: str | None,
+    image_path: Path | None,
+) -> _ResolvedImageResult:
+    if image is not None and image_path is not None:
+        print_error("--image and --image-path are mutually exclusive")
+        raise typer.Exit(code=1)
+
+    if image_path is not None:
+        if not image_path.exists():
+            print_error(f"Image path not found: {image_path}")
+            raise typer.Exit(code=1)
+        if not image_path.is_file():
+            print_error(f"Image path is not a file: {image_path}")
+            raise typer.Exit(code=1)
+        return _ResolvedImageResult(
+            path=image_path,
+            id_for_lookup=image if image else str(image_path),
+        )
+
+    if image is not None:
+        try:
+            resolved_path = resolve_image_multi_strategy(image)
+            return _ResolvedImageResult(
+                path=resolved_path,
+                id_for_lookup=image,
+            )
+        except MVMError as e:
+            handle_mvm_error(e)
+            raise typer.Exit(1) from e
+
+    return _ResolvedImageResult(path=None, id_for_lookup="")
+
+
+def _resolve_kernel_strategy(
+    kernel: str | None,
+    kernel_path: Path | None,
+) -> _ResolvedKernelResult:
+    if kernel is not None and kernel_path is not None:
+        print_error("--kernel and --kernel-path are mutually exclusive")
+        raise typer.Exit(code=1)
+
+    if kernel_path is not None:
+        if not kernel_path.exists():
+            print_error(f"Kernel path not found: {kernel_path}")
+            raise typer.Exit(code=1)
+        if not kernel_path.is_file():
+            print_error(f"Kernel path is not a file: {kernel_path}")
+            raise typer.Exit(code=1)
+        return _ResolvedKernelResult(
+            path=kernel_path,
+            id_for_lookup=kernel if kernel else str(kernel_path),
+        )
+
+    if kernel is not None:
+        try:
+            resolved_path = resolve_kernel_multi_strategy(kernel)
+            return _ResolvedKernelResult(
+                path=resolved_path,
+                id_for_lookup=kernel,
+            )
+        except MVMError as e:
+            handle_mvm_error(e)
+            raise typer.Exit(1) from e
+
+    return _ResolvedKernelResult(path=None, id_for_lookup=None)
+
+
+def _resolve_cloud_init_mode(
+    cloud_init_mode: str | None,
+    no_cloud_init: bool,
+    cloud_init_iso: Path | None,
+    nocloud_net: bool,
+) -> _ResolvedCloudInitResult:
+    if no_cloud_init and cloud_init_iso is not None:
+        print_error("--no-cloud-init and --cloud-init-iso are mutually exclusive")
+        raise typer.Exit(code=1)
+
+    cloud_init_flags = sum(
+        [
+            no_cloud_init,
+            cloud_init_iso is not None and cloud_init_iso != USE_ISO_AUTO,  # type: ignore[comparison-overlap]
+            cloud_init_iso == USE_ISO_AUTO,  # type: ignore[comparison-overlap]
+            nocloud_net,
+            cloud_init_mode is not None,
+        ]
+    )
+    if cloud_init_flags > 1:
+        print_error(
+            "Only one of --cloud-init-mode, --no-cloud-init, --cloud-init-iso, or --nocloud-net can be specified"
+        )
+        raise typer.Exit(code=1)
+
+    if cloud_init_mode is not None:
+        mode_lower = cloud_init_mode.lower()
+        valid_modes = ["inject", "iso", "off", "net"]
+        if mode_lower not in valid_modes:
+            print_error(
+                f"Invalid --cloud-init-mode '{cloud_init_mode}'. Valid modes: {', '.join(valid_modes)}"
+            )
+            raise typer.Exit(code=1)
+
+        if mode_lower == "off":
+            return _ResolvedCloudInitResult(mode=CloudInitMode.OFF, iso_path=None)
+        if mode_lower == "iso":
+            return _ResolvedCloudInitResult(mode=CloudInitMode.ISO, iso_path=None)
+        if mode_lower == "net":
+            return _ResolvedCloudInitResult(mode=CloudInitMode.NET, iso_path=None)
+        return _ResolvedCloudInitResult(mode=CloudInitMode.INJECT, iso_path=None)
+
+    if no_cloud_init:
+        return _ResolvedCloudInitResult(mode=CloudInitMode.OFF, iso_path=None)
+
+    if cloud_init_iso is not None:
+        if cloud_init_iso != USE_ISO_AUTO:  # type: ignore[comparison-overlap]
+            custom_path = Path(cloud_init_iso)
+            if not custom_path.exists():
+                print_error(f"Cloud-init ISO not found: {custom_path}")
+                raise typer.Exit(code=1)
+        iso_path = (
+            None
+            if cloud_init_iso == USE_ISO_AUTO  # type: ignore[comparison-overlap]
+            else Path(cloud_init_iso)
+        )
+        return _ResolvedCloudInitResult(mode=CloudInitMode.ISO, iso_path=iso_path)
+
+    if nocloud_net:
+        return _ResolvedCloudInitResult(mode=CloudInitMode.NET, iso_path=None)
+
+    return _ResolvedCloudInitResult(mode=CloudInitMode.INJECT, iso_path=None)
+
+
+def _validate_create_inputs(
+    ip: str | None,
+    network_name: str | None,
+) -> None:
+    if ip is not None and network_name is not None:
+        check_ip_available(network_name, ip)
+
+
+def _build_output_config(
+    output_config: Path,
+    name: str,
+    resolved_image_path: Path | None,
+    resolved_kernel_path: Path | None,
+    effective_vcpus: int,
+    effective_mem: int,
+    ip: str | None,
+    effective_network: str | None,
+    mac: str | None,
+    ssh_key: str | None,
+    effective_user: str,
+    effective_pci: bool,
+    effective_bin: str,
+    cloud_init_result: _ResolvedCloudInitResult,
+    user_data: Path | None,
+    no_cloud_init: bool,
+) -> None:
+    cloud_init_config: dict[str, Any] = {
+        "mode": cloud_init_result.mode.value,
+        "seed_path": str(DEFAULT_CLOUD_INIT_SEED_PATH),
+        "kernel_cmdline_ds": DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
+        "final_message": DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
+        "user_data": str(user_data) if user_data else None,
+        "iso_path": str(cloud_init_result.iso_path) if cloud_init_result.iso_path else None,
+        "enabled": not no_cloud_init,
+    }
+    vm_config = build_vm_config_file(
+        name=name,
+        image=str(resolved_image_path),
+        kernel=str(resolved_kernel_path) if resolved_kernel_path else None,
+        vcpus=effective_vcpus,
+        mem=effective_mem,
+        ip=ip,
+        network=effective_network,
+        mac=mac,
+        ssh_key=ssh_key,
+        user=effective_user,
+        enable_api_socket=True,
+        enable_pci=effective_pci,
+        firecracker_bin=effective_bin,
+        rootfs_path=resolved_image_path,
+        ipv4_gateway=None,
+        subnet_mask=None,
+        tap_device=None,
+        cloud_init=cloud_init_config,
+    )
+    vm_config.to_json_file(output_config)
+    print_info(f"VM config written to: {output_config}")
 
 
 @app.command()
@@ -232,38 +536,34 @@ def create(
         mvm vm create --import-config myvm.json --name newname
     """
     if import_config is not None:
-        try:
-            base_config = load_vm_config_file(import_config)
-        except (FileNotFoundError, ValueError) as e:
-            handle_mvm_error(e)
-
-        merged = merge_cli_overrides(
-            base_config,
-            name=name,
-            os_slug=image,
-            kernel_version=kernel,
-            vcpus=vcpus,
-            mem=mem,
-            ip=ip,
-            network_name=network_name,
-            mac=mac,
-            ssh_key=ssh_key,
-            user=user,
-            enable_pci=enable_pci,
-            binary_name=firecracker_bin,
+        (
+            name,
+            image,
+            kernel,
+            vcpus,
+            mem,
+            ip,
+            network_name,
+            mac,
+            ssh_key,
+            user,
+            enable_pci,
+            firecracker_bin,
+        ) = _apply_import_config(
+            import_config,
+            name,
+            image,
+            kernel,
+            vcpus,
+            mem,
+            ip,
+            network_name,
+            mac,
+            ssh_key,
+            user,
+            enable_pci,
+            firecracker_bin,
         )
-        name = merged.name
-        image = merged.image.os_slug
-        kernel = merged.kernel.version
-        vcpus = merged.compute.vcpus
-        mem = merged.compute.mem
-        ip = merged.network.ip
-        network_name = merged.network.name
-        mac = merged.network.mac
-        ssh_key = merged.cloud_init.ssh_key
-        user = merged.cloud_init.user
-        enable_pci = merged.firecracker.enable_pci
-        firecracker_bin = merged.binary.name
 
     _defaults = get_vm_defaults()
     effective_vcpus: int = vcpus if vcpus is not None else _defaults.vcpu_count
@@ -276,184 +576,48 @@ def create(
     effective_enable_metrics: bool = (
         enable_metrics if enable_metrics is not None else _defaults.enable_metrics
     )
-
-    # Variables for path resolution
-    resolved_image_path: Path | None = None
-    image_id_for_lookup: str = ""
-    resolved_kernel_path: Path | None = None
-    kernel_id_for_lookup: str | None = None
-    effective_api_socket: bool = True
     effective_pci: bool = enable_pci if enable_pci is not None else _defaults.enable_pci
     effective_network: str | None = network_name
-    # Check IP availability before VM creation
-    if ip is not None and effective_network is not None:
-        check_ip_available(effective_network, ip)
 
-    # Check mutual exclusivity of --no-cloud-init and --cloud-init-iso
-    if no_cloud_init and cloud_init_iso is not None:
-        print_error("--no-cloud-init and --cloud-init-iso are mutually exclusive")
-        raise typer.Exit(code=1)
+    _validate_create_inputs(ip, effective_network)
 
-    # Mutual exclusivity check for image options
-    if image is not None and image_path is not None:
-        print_error("--image and --image-path are mutually exclusive")
-        raise typer.Exit(code=1)
+    image_result = _resolve_image_strategy(image, image_path)
+    kernel_result = _resolve_kernel_strategy(kernel, kernel_path)
 
-    # Mutual exclusivity check for kernel options
-    if kernel is not None and kernel_path is not None:
-        print_error("--kernel and --kernel-path are mutually exclusive")
-        raise typer.Exit(code=1)
+    cloud_init_result = _resolve_cloud_init_mode(
+        cloud_init_mode, no_cloud_init, cloud_init_iso, nocloud_net
+    )
 
-    # Path validation and resolution
-    if image_path is not None:
-        if not image_path.exists():
-            print_error(f"Image path not found: {image_path}")
-            raise typer.Exit(code=1)
-        if not image_path.is_file():
-            print_error(f"Image path is not a file: {image_path}")
-            raise typer.Exit(code=1)
-        resolved_image_path = image_path
-        image_id_for_lookup = image if image else str(image_path)
-    elif image is not None:
-        try:
-            resolved_image_path = resolve_image_multi_strategy(image)
-            image_id_for_lookup = image if image else str(resolved_image_path)
-        except MVMError as e:
-            handle_mvm_error(e)
-    # else: image is None — API will resolve default from DB
-
-    # Kernel path validation and resolution
-    if kernel_path is not None:
-        if not kernel_path.exists():
-            print_error(f"Kernel path not found: {kernel_path}")
-            raise typer.Exit(code=1)
-        if not kernel_path.is_file():
-            print_error(f"Kernel path is not a file: {kernel_path}")
-            raise typer.Exit(code=1)
-        resolved_kernel_path = kernel_path
-        kernel_id_for_lookup = kernel if kernel else str(kernel_path)
-    elif kernel is not None:
-        try:
-            resolved_kernel_path = resolve_kernel_multi_strategy(kernel)
-            kernel_id_for_lookup = kernel if kernel else str(resolved_kernel_path)
-        except MVMError as e:
-            handle_mvm_error(e)
-    # else: kernel is None — API will resolve default from DB
-
-    effective_bin = firecracker_bin or _resolve_active_firecracker_bin()
-
-    # Determine cloud_init_mode based on flags (must be before output_config handling)
-    if cloud_init_mode is not None:
-        mode_lower = cloud_init_mode.lower()
-        if mode_lower == "off":
-            effective_cloud_init_mode = CloudInitMode.OFF
-            effective_cloud_init_iso_path: Path | None = None
-        elif mode_lower == "iso":
-            effective_cloud_init_mode = CloudInitMode.ISO
-            effective_cloud_init_iso_path = None
-        elif mode_lower == "net":
-            effective_cloud_init_mode = CloudInitMode.NET
-            effective_cloud_init_iso_path = None
-        elif mode_lower == "inject":
-            effective_cloud_init_mode = CloudInitMode.INJECT
-            effective_cloud_init_iso_path = None
-        else:  # default to INJECT
-            effective_cloud_init_mode = CloudInitMode.INJECT
-            effective_cloud_init_iso_path = None
-    elif no_cloud_init:
-        effective_cloud_init_mode = CloudInitMode.OFF
-        effective_cloud_init_iso_path = None
-    elif cloud_init_iso is not None:
-        effective_cloud_init_mode = CloudInitMode.ISO
-        effective_cloud_init_iso_path = (
-            None
-            if cloud_init_iso == USE_ISO_AUTO  # type: ignore[comparison-overlap]
-            else Path(cloud_init_iso)
-        )
-    elif nocloud_net:
-        effective_cloud_init_mode = CloudInitMode.NET
-        effective_cloud_init_iso_path = None
-    else:
-        effective_cloud_init_mode = CloudInitMode.INJECT
-        effective_cloud_init_iso_path = None
+    effective_bin: str = firecracker_bin or _resolve_active_firecracker_bin()
 
     if output_config is not None:
-        # Keep this at the end of config computation so we provide the latest configuration to the user.
-        cloud_init_config: dict[str, Any] = {
-            "mode": effective_cloud_init_mode.value,
-            "seed_path": str(DEFAULT_CLOUD_INIT_SEED_PATH),
-            "kernel_cmdline_ds": DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
-            "final_message": DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
-            "user_data": str(user_data) if user_data else None,
-            "iso_path": str(effective_cloud_init_iso_path)
-            if effective_cloud_init_iso_path
-            else None,
-            "enabled": not no_cloud_init,
-        }
-        vm_config = build_vm_config_file(
-            name=name,
-            image=str(resolved_image_path),
-            kernel=str(resolved_kernel_path) if resolved_kernel_path else None,
-            vcpus=effective_vcpus,
-            mem=effective_mem,
-            ip=ip,
-            network=effective_network,
-            mac=mac,
-            ssh_key=ssh_key,
-            user=effective_user,
-            enable_api_socket=effective_api_socket,
-            enable_pci=effective_pci,
-            firecracker_bin=effective_bin,
-            rootfs_path=resolved_image_path,
-            ipv4_gateway=None,
-            subnet_mask=None,
-            tap_device=None,
-            cloud_init=cloud_init_config,
-        )
-        vm_config.to_json_file(output_config)
-        print_info(f"VM config written to: {output_config}")
-        return
-
-    # Validate cloud_init_iso path if it's a custom path (not USE_ISO_AUTO)
-    if cloud_init_iso is not None and cloud_init_iso != USE_ISO_AUTO:  # type: ignore[comparison-overlap]
-        custom_path = Path(cloud_init_iso)
-        if not custom_path.exists():
-            print_error(f"Cloud-init ISO not found: {custom_path}")
-            raise typer.Exit(code=1)
-
-    # Check mutual exclusivity of cloud-init flags
-    cloud_init_flags = sum(
-        [
+        _build_output_config(
+            output_config,
+            name,
+            image_result.path,
+            kernel_result.path,
+            effective_vcpus,
+            effective_mem,
+            ip,
+            effective_network,
+            mac,
+            ssh_key,
+            effective_user,
+            effective_pci,
+            effective_bin,
+            cloud_init_result,
+            user_data,
             no_cloud_init,
-            cloud_init_iso is not None and cloud_init_iso != USE_ISO_AUTO,  # type: ignore[comparison-overlap]
-            cloud_init_iso == USE_ISO_AUTO,  # type: ignore[comparison-overlap]
-            nocloud_net,
-            cloud_init_mode is not None,
-        ]
-    )
-    if cloud_init_flags > 1:
-        print_error(
-            "Only one of --cloud-init-mode, --no-cloud-init, --cloud-init-iso, or --nocloud-net can be specified"
         )
-        raise typer.Exit(code=1)
-
-    # Validate --cloud-init-mode if provided
-    if cloud_init_mode is not None:
-        mode_lower = cloud_init_mode.lower()
-        valid_modes = ["inject", "iso", "inject", "off", "net"]
-        if mode_lower not in valid_modes:
-            print_error(
-                f"Invalid --cloud-init-mode '{cloud_init_mode}'. Valid modes: {', '.join(valid_modes)}"
-            )
-            raise typer.Exit(code=1)
+        return
 
     try:
         vm = create_vm(
             name=name,
-            image=image_id_for_lookup,
-            kernel=kernel_id_for_lookup,
-            image_path=resolved_image_path if image_path else None,
-            kernel_path=resolved_kernel_path if kernel_path else None,
+            image=image_result.id_for_lookup,
+            kernel=kernel_result.id_for_lookup,
+            image_path=image_result.path,
+            kernel_path=kernel_result.path,
             vcpus=effective_vcpus,
             mem=effective_mem,
             disk_size=disk_size,
@@ -463,15 +627,15 @@ def create(
             ssh_key=ssh_key,
             user_data=user_data,
             user=effective_user,
-            enable_api_socket=effective_api_socket,
+            enable_api_socket=True,
             enable_pci=effective_pci,
             enable_console=not no_console,
             firecracker_bin=effective_bin,
             lsm_flags=effective_lsm_flags,
             enable_logging=effective_enable_logging,
             enable_metrics=effective_enable_metrics,
-            cloud_init_mode=effective_cloud_init_mode,
-            cloud_init_iso_path=effective_cloud_init_iso_path,
+            cloud_init_mode=cloud_init_result.mode,
+            cloud_init_iso_path=cloud_init_result.iso_path,
             keep_cloud_init_iso=keep_cloud_init_iso,
             nocloud_net_port=nocloud_net_port if nocloud_net_port is not None else 0,
         )

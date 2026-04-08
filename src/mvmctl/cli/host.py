@@ -16,6 +16,7 @@ from mvmctl.api.host import (
     get_host_state,
     get_ip_forward_status,
     get_ready_pool_dir,
+    get_running_vms,
     init_host,
     reset_host,
 )
@@ -71,8 +72,6 @@ def _abort_if_vms_running(action: str) -> None:
     Args:
         action: Short description of the action being blocked (used in the error message).
     """
-    from mvmctl.api.host import get_running_vms
-
     running = get_running_vms()
     if running:
         names = ", ".join(v.name for v in running)
