@@ -14,14 +14,13 @@ from pathlib import Path
 from mvmctl.api.metadata import find_kernels_by_id_prefix
 from mvmctl.api.vms import get_vm_manager
 from mvmctl.constants import (
-    CONST_MEBIBYTE_BYTES,
     KERNEL_TYPE_FIRECRACKER,
     KERNEL_TYPE_OFFICIAL,
     KERNEL_TYPE_UNKNOWN,
 )
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import KernelError
-from mvmctl.models.kernel import KernelFetchResult, KernelSpec
+from mvmctl.models.kernel import KernelFetchInput, KernelFetchResult, KernelItem, KernelSpec
 from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
 from mvmctl.utils.full_hash import generate_full_hash_kernel
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
@@ -43,18 +42,7 @@ __all__ = [
 ]
 
 
-def fetch_kernel(
-    kernel_type: str,
-    version: str | None,
-    arch: str,
-    output_dir: Path,
-    output_name: str | None = None,
-    output_path: Path | None = None,
-    jobs: int | None = None,
-    keep_build_dir: bool = False,
-    clean_build: bool = False,
-    kernel_config: Path | None = None,
-) -> KernelFetchResult:
+def fetch_kernel(input: KernelFetchInput) -> KernelFetchResult:
     """Fetch or build a kernel.
 
     This is the unified orchestration function that:
@@ -63,16 +51,17 @@ def fetch_kernel(
     3. Returns unified KernelFetchResult
 
     Args:
-        kernel_type: Type of kernel (firecracker, official)
-        version: Version string or None
-        arch: Architecture (x86_64, arm64)
-        output_dir: Directory to store kernel
-        output_name: Optional filename override
-        output_path: Optional explicit output path
-        jobs: Parallel build jobs (official only)
-        keep_build_dir: Keep build directory (official only)
-        clean_build: Skip cache (official only)
-        kernel_config: Custom config path (official only)
+        input: KernelFetchInput containing all fetch parameters:
+            - kernel_type: Type of kernel (firecracker, official)
+            - version: Version string or None
+            - arch: Architecture (x86_64, arm64)
+            - output_dir: Directory to store kernel
+            - output_name: Optional filename override
+            - output_path: Optional explicit output path
+            - jobs: Parallel build jobs (official only)
+            - keep_build_dir: Keep build directory (official only)
+            - clean_build: Skip cache (official only)
+            - kernel_config: Custom config path (official only)
 
     Returns:
         KernelFetchResult with path, version, arch, type, warnings, info
@@ -80,21 +69,23 @@ def fetch_kernel(
     Raises:
         KernelError: If kernel type is unsupported or fetch fails
     """
-    spec = _resolve_kernel_spec(kernel_type, version)
+    spec = _resolve_kernel_spec(input.kernel_type, input.version)
 
     if spec.kernel_type == KERNEL_TYPE_FIRECRACKER:
-        return _fetch_firecracker_kernel(spec, arch, output_dir, output_name, output_path)
+        return _fetch_firecracker_kernel(
+            spec, input.arch, input.output_dir, input.output_name, input.output_path
+        )
     if spec.kernel_type == KERNEL_TYPE_OFFICIAL:
         return _build_official_kernel(
             spec,
-            arch,
-            output_dir,
-            output_name,
-            output_path,
-            jobs,
-            keep_build_dir,
-            clean_build,
-            kernel_config,
+            input.arch,
+            input.output_dir,
+            input.output_name,
+            input.output_path,
+            input.jobs,
+            input.keep_build_dir,
+            input.clean_build,
+            input.kernel_config,
         )
 
     raise KernelError(f"Unsupported kernel type: {spec.kernel_type}")
@@ -316,14 +307,14 @@ def _resolve_kernel_spec(kernel_type: str, version: str | None = None) -> Kernel
         raise KernelError(f"Failed to resolve kernel spec: {exc}") from exc
 
 
-def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
+def list_kernels(kernels_dir: Path) -> list[KernelItem]:
     """List all kernels with their metadata.
 
     Args:
         kernels_dir: Directory containing kernels
 
     Returns:
-        List of kernel metadata dictionaries
+        List of KernelItem objects with kernel metadata
     """
     from mvmctl.core.kernel import parse_kernel_filename
     from mvmctl.core.metadata import list_kernel_entries
@@ -333,14 +324,10 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
 
     entries = list_kernel_entries(cache_dir, kernels_dir, include_missing=True)
 
-    results: list[dict[str, str]] = []
+    results: list[KernelItem] = []
 
     for entry_id, meta in sorted(entries.items()):
         path = str(meta.get("path", entry_id))
-        kernel_file_path = kernels_dir / path
-        file_exists = kernel_file_path.is_file()
-
-        size_mb = kernel_file_path.stat().st_size / CONST_MEBIBYTE_BYTES if file_exists else 0
 
         last_modified = meta.get("last_modified")
         if not last_modified:
@@ -359,21 +346,21 @@ def list_kernels(kernels_dir: Path) -> list[dict[str, str]]:
             kernel_type = KERNEL_TYPE_UNKNOWN
 
         is_default_val = meta.get("is_default", 0)
-        is_default_flag = "true" if str(is_default_val) in ("1", "true") else "false"
+        is_default_flag = str(is_default_val) in ("1", "true")
 
         results.append(
-            {
-                "id": entry_id,
-                "name": base_name,
-                "path": path,
-                "full_name": path,
-                "version": version,
-                "type": kernel_type,
-                "arch": arch,
-                "last_modified": str(last_modified) if last_modified else "-",
-                "size": f"{size_mb:.1f} MiB",
-                "is_default": is_default_flag,
-            }
+            KernelItem(
+                id=entry_id,
+                name=base_name,
+                path=path,
+                version=version,
+                arch=arch,
+                base_name=base_name,
+                type=kernel_type,
+                is_default=is_default_flag,
+                created_at=str(last_modified) if last_modified else None,
+                updated_at=str(last_modified) if last_modified else None,
+            )
         )
 
     return results
@@ -644,8 +631,7 @@ def _get_ci_version() -> str:
     try:
         default_binary = get_default_binary_entry()
         if default_binary is not None:
-            _version, binary_meta = default_binary
-            raw_ci_version = binary_meta.get("ci_version")
+            raw_ci_version = default_binary.ci_version
             if isinstance(raw_ci_version, str):
                 return raw_ci_version
     except Exception:
