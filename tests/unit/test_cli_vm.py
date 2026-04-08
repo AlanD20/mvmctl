@@ -58,11 +58,12 @@ def test_list_vms_all_flag(mocker: MockerFixture):
 
 
 def test_rm_vm_not_found(mocker: MockerFixture):
-    mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_name.return_value = []
-    mock_mgr.find_by_id_prefix.return_value = []
-    mocker.patch("mvmctl.cli.vm._get_vm_manager", return_value=mock_mgr)
-    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
+    from mvmctl.api.vms import ResolveVMTargetsResult
+
+    result = ResolveVMTargetsResult(
+        targets=[], errors=["No VM found with name 'nonexistent'"], exit_code=1
+    )
+    mocker.patch("mvmctl.cli.vm.resolve_vm_targets", return_value=result)
     result = runner.invoke(app, ["rm", "--name", "nonexistent"])
     assert result.exit_code == 1
 
@@ -571,12 +572,9 @@ def test_rm_multiple_names(mocker: MockerFixture):  # No --force needed
 
 
 def test_rm_no_targets(mocker: MockerFixture):
-    mock_mgr = mocker.MagicMock()
-    mock_mgr.find_by_id_prefix.return_value = []
-    mock_mgr.get_by_name.return_value = []
-    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm"])
     assert result.exit_code == 1
+    assert "Provide at least one VM ID prefix or --name" in result.output
 
 
 def test_inspect_vm_command(mocker: MockerFixture):

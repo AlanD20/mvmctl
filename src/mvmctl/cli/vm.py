@@ -21,13 +21,11 @@ from mvmctl.api.vms import (
     resolve_image_multi_strategy,
     resolve_kernel_multi_strategy,
     resolve_vm_selector,
+    resolve_vm_targets,
     resume_vm,
     snapshot_vm,
     start_vm,
     stop_vm,
-)
-from mvmctl.api.vms import (
-    get_vm_manager as _get_vm_manager,
 )
 from mvmctl.cli._helpers import get_vm_defaults
 from mvmctl.constants import (
@@ -36,7 +34,7 @@ from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_SEED_PATH,
 )
 from mvmctl.exceptions import AssetNotFoundError, MVMError
-from mvmctl.models import CloudInitMode, VMInstance
+from mvmctl.models import CloudInitMode
 from mvmctl.utils.console import (
     format_timestamp,
     get_state_marker,
@@ -502,64 +500,26 @@ def rm(
         # Remove by name (prompts if multiple with same name):
         mvm vm rm --name runner1 --name runner2
     """
-    manager = _get_vm_manager()
-    exit_code = 0
-    targets: list[VMInstance] = []
-    errors: list[str] = []
-
     effective_ids: list[str] = list(ids) if ids else []
+    effective_names: list[str] = name if name is not None else []
 
-    # Resolve ID prefixes
-    for prefix in effective_ids:
-        matches = manager.find_by_id_prefix(prefix)
-        if len(matches) == 0:
-            errors.append(f"No VM found with ID prefix '{prefix}'")
-        elif len(matches) > 1:
-            errors.append(f"Multiple VMs match ID prefix '{prefix}' — use a longer prefix or name")
-        else:
-            targets.append(matches[0])
-
-    # Resolve names
-    effective_names = name if name is not None else []
-    for n in effective_names:
-        matches = manager.get_by_name(n)
-        if len(matches) == 0:
-            errors.append(f"No VM found with name '{n}'")
-        elif len(matches) > 1:
-            print_error(
-                f"Multiple VMs match name '{n}'. Use ID instead of name, or remove VMs individually."
-            )
-            print_info("Matching VMs:")
-            for v in matches:
-                print_info(
-                    f"  - {v.name} (ID: {v.id}, IP: {v.ipv4 or '-'}, status: {v.status.value})"
-                )
-            exit_code = 1
-            continue
-        else:
-            targets.append(matches[0])
-
-    if not targets and not errors:
+    if not effective_ids and not effective_names:
         print_error("Provide at least one VM ID prefix or --name")
         raise typer.Exit(code=1)
 
-    if errors:
-        for err in errors:
-            print_error(err)
-        if not targets:
-            raise typer.Exit(code=1)
+    result = resolve_vm_targets(ids=effective_ids, names=effective_names)
 
-    # Deduplicate targets by ID
-    seen_ids: set[str] = set()
-    unique_targets: list[VMInstance] = []
-    for vm in targets:
-        if vm.id not in seen_ids:
-            seen_ids.add(vm.id)
-            unique_targets.append(vm)
-    targets = unique_targets
+    if not result.targets and result.errors:
+        for err in result.errors:
+            print_error(err)
+        raise typer.Exit(code=1)
+
+    if result.errors:
+        for err in result.errors:
+            print_error(err)
 
     removed_count = 0
-    for vm in targets:
+    for vm in result.targets:
         try:
             remove_vm(vm.name)
             print_success(f"VM '{vm.name}' removed")
@@ -567,8 +527,8 @@ def rm(
         except MVMError as e:
             handle_mvm_error(e)
 
-    if removed_count == 0 and targets:
-        raise typer.Exit(code=exit_code)
+    if removed_count == 0 and result.targets:
+        raise typer.Exit(code=result.exit_code)
 
 
 @app.command(name="ls")
