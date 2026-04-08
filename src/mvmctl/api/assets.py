@@ -29,6 +29,7 @@ __all__ = [
     "fetch_binary",
     "get_binary_path",
     "list_local_versions",
+    "register_binary",
     "set_active_version",
     "remove_version",
     "fetch_image",
@@ -44,6 +45,32 @@ __all__ = [
 
 def _normalize_version(version: str) -> str:
     return version.removeprefix("v")
+
+
+def register_binary(result: BinaryVersion, is_default: bool = False) -> None:
+    """Persist binary version record to DB.
+
+    Args:
+        result: BinaryVersion from core/binary_manager.fetch_binary()
+        is_default: Whether to set this as the default binary
+    """
+    from mvmctl.core.metadata import update_binary_entry
+
+    cache_dir = get_cache_dir()
+    normalized_version = result.version
+    full_version = f"v{normalized_version}"
+    parts = normalized_version.split(".")
+    ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else full_version
+
+    update_binary_entry(
+        cache_dir,
+        normalized_version,
+        full_version=full_version,
+        ci_version=ci_version,
+        firecracker_path=str(result.firecracker_path),
+        jailer_path=str(result.jailer_path),
+        is_default=1 if is_default else 0,
+    )
 
 
 def ensure_default_binary(bin_dir: Path | None = None) -> str | None:
@@ -89,36 +116,19 @@ def fetch_binary(version: str, bin_dir: Path | None = None) -> BinaryVersion:
     no_default = db.get_default_binary("firecracker") is None
 
     from mvmctl.core.binary_manager import fetch_binary as _core_fetch_binary
-    from mvmctl.core.metadata import update_binary_entry
 
     result = _core_fetch_binary(version, bin_dir, set_as_default=no_default)
 
-    # Persist metadata to database
-    cache_dir = get_cache_dir()
-    normalized_version = _normalize_version(result.version)
-    update_binary_entry(
-        cache_dir,
-        normalized_version,
-        full_version=f"v{normalized_version}",
-        ci_version=f"v{normalized_version.split('.')[0]}.{normalized_version.split('.')[1]}"
-        if len(normalized_version.split(".")) >= 2
-        else f"v{normalized_version}",
-        firecracker_path=str(result.firecracker_path),
-        jailer_path=str(result.jailer_path),
-        is_default=1 if no_default else 0,
-    )
+    register_binary(result, is_default=no_default)
 
     if no_default:
-        from mvmctl.core.binary_manager import (
-            fetch_binary as _core_fetch_binary,
-        )
         from mvmctl.core.binary_manager import (
             set_active_version as _core_set_active_version,
         )
         from mvmctl.core.metadata import set_default_binary_entry
 
         _core_set_active_version(result.version, bin_dir)
-        set_default_binary_entry(cache_dir, normalized_version)
+        set_default_binary_entry(get_cache_dir(), result.version)
 
     return result
 
@@ -221,36 +231,27 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
         version: The version to set as active (e.g., "1.15.0").
         bin_dir: Optional directory containing binaries. Uses default if None.
     """
+    from mvmctl.core.binary_manager import BinaryVersion
     from mvmctl.core.binary_manager import set_active_version as _core_set_active_version
-    from mvmctl.core.metadata import set_default_binary_entry, update_binary_entry
+    from mvmctl.core.metadata import set_default_binary_entry
 
     _core_set_active_version(version, bin_dir)
 
-    # Persist metadata to database
-    cache_dir = get_cache_dir()
     normalized_version = _normalize_version(version)
-
-    # Get the binary paths from the filesystem
     from mvmctl.utils.fs import get_bin_dir
 
     bin_directory = bin_dir if bin_dir is not None else get_bin_dir()
     fc_src = bin_directory / f"firecracker-v{normalized_version}"
     jl_src = bin_directory / f"jailer-v{normalized_version}"
 
-    parts = normalized_version.split(".")
-    ci_version = f"v{parts[0]}.{parts[1]}" if len(parts) >= 2 else f"v{normalized_version}"
-    full_version = f"v{normalized_version}"
-
-    update_binary_entry(
-        cache_dir,
-        normalized_version,
-        full_version=full_version,
-        ci_version=ci_version,
-        firecracker_path=str(fc_src),
-        jailer_path=str(jl_src),
-        is_default=1,
+    bin_version = BinaryVersion(
+        version=normalized_version,
+        firecracker_path=fc_src,
+        jailer_path=jl_src,
+        is_active=True,
     )
-    set_default_binary_entry(cache_dir, normalized_version)
+    register_binary(bin_version, is_default=True)
+    set_default_binary_entry(get_cache_dir(), normalized_version)
 
 
 def remove_version(version: str, bin_dir: Path | None = None) -> None:
