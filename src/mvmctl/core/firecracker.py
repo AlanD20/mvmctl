@@ -19,6 +19,7 @@ from mvmctl.constants import (
     DEFAULT_FC_API_SOCKET_FILENAME,
 )
 from mvmctl.exceptions import FirecrackerError, SocketNotFoundError
+from mvmctl.models.firecracker import InstanceDescription, InstanceInfo
 
 logger = logging.getLogger(__name__)
 
@@ -191,28 +192,28 @@ class FirecrackerClient:
                 msg += f" Response: {data}"
             raise FirecrackerError(msg)
 
-    def get_instance_info(self) -> dict[str, object] | None:
+    def get_instance_info(self) -> InstanceInfo | None:
         """Get VM instance information.
 
         Returns:
-            Instance info dict or None
+            InstanceInfo TypedDict or None
         """
         status, data = self._request("GET", "/")
 
         if status == CONST_HTTP_STATUS_SUCCESS and data:
-            return data
+            return data  # type: ignore[return-value]
         return None
 
-    def describe_instance(self) -> dict[str, object] | None:
+    def describe_instance(self) -> InstanceDescription | None:
         """Describe the VM instance.
 
         Returns:
-            Instance description or None
+            InstanceDescription TypedDict or None
         """
         status, data = self._request("GET", "/vm")
 
         if status == CONST_HTTP_STATUS_SUCCESS and data:
-            return data
+            return data  # type: ignore[return-value]
         return None
 
     def start_instance(self) -> bool:

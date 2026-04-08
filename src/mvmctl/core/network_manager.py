@@ -16,7 +16,7 @@ from mvmctl.constants import (
     DEFAULT_NETWORK_SUBNET,
 )
 from mvmctl.exceptions import MVMError, NetworkError
-from mvmctl.models.network import LeaseEntry, NetworkConfig, NetworkEntry, NetworkLease
+from mvmctl.models.network import NetworkConfig, NetworkEntry, NetworkLease
 from mvmctl.utils.network import allocate_ip
 from mvmctl.utils.network import (
     bridge_name_for as _bridge_name_for_util,
@@ -210,11 +210,11 @@ def config_to_network_entry(config: NetworkConfig) -> NetworkEntry:
     }
 
 
-def leases_from_entry(entry: LeaseEntry) -> list[NetworkLease]:
+def leases_from_entry(entry: dict[str, Any]) -> list[NetworkLease]:
     """Extract leases from a metadata entry dict.
 
     Args:
-        entry: LeaseEntry TypedDict containing lease data.
+        entry: Dict containing a 'leases' key with list of lease data.
 
     Returns:
         List of NetworkLease objects.
