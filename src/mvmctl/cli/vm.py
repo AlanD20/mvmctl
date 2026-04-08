@@ -812,14 +812,12 @@ def inspect(
 
 
 def _print_vm_details(info: dict[str, Any]) -> None:
-    from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
     from mvmctl.utils.console import (
         format_timestamp,
         print_inspect_header,
         print_key_value,
         print_section_header,
     )
-    from mvmctl.utils.fs import get_cache_dir
 
     name = info.get("name", "-")
     status = info.get("status", "-")
@@ -861,33 +859,13 @@ def _print_vm_details(info: dict[str, Any]) -> None:
 
     image_id = info.get("image_id")
     if image_id:
-        image_display = image_id
-        image_name = image_id
-        try:
-            matches = find_images_by_id_prefix(get_cache_dir(), image_id)
-            if matches:
-                _, meta = matches[0]
-                os_slug = meta.get("os_slug")
-                if os_slug:
-                    image_name = os_slug
-        except Exception:
-            pass
-        print_key_value("Image", f"{image_name} ({image_display})")
+        image_name = info.get("image_name") or image_id
+        print_key_value("Image", f"{image_name} ({image_id})")
 
     kernel_id = info.get("kernel_id")
     if kernel_id:
-        kernel_display = kernel_id
-        kernel_name = kernel_id
-        try:
-            matches = find_kernels_by_id_prefix(get_cache_dir(), kernel_id)
-            if matches:
-                _, meta = matches[0]
-                version = meta.get("version")
-                if version:
-                    kernel_name = version
-        except Exception:
-            pass
-        print_key_value("Kernel", f"{kernel_name} ({kernel_display})")
+        kernel_name = info.get("kernel_name") or kernel_id
+        print_key_value("Kernel", f"{kernel_name} ({kernel_id})")
 
     print_section_header("PATHS")
     paths = info.get("paths", {})
@@ -901,9 +879,6 @@ def _print_vm_details(info: dict[str, Any]) -> None:
 
 def _print_vm_details_tree(info: dict[str, Any]) -> None:
     from datetime import datetime
-
-    from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
-    from mvmctl.utils.fs import get_cache_dir
 
     name = info.get("name", "-")
     status = info.get("status", "-")
@@ -952,33 +927,13 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
 
     image_id = info.get("image_id")
     if image_id:
-        image_display = image_id
-        image_name = image_id
-        try:
-            matches = find_images_by_id_prefix(get_cache_dir(), image_id)
-            if matches:
-                _, meta = matches[0]
-                os_slug = meta.get("os_slug")
-                if os_slug:
-                    image_name = os_slug
-        except Exception:
-            pass
-        tree_lines.append(f"├── Image:      {image_name} ({image_display})")
+        image_name = info.get("image_name") or image_id
+        tree_lines.append(f"├── Image:      {image_name} ({image_id})")
 
     kernel_id = info.get("kernel_id")
     if kernel_id:
-        kernel_display = kernel_id
-        kernel_name = kernel_id
-        try:
-            matches = find_kernels_by_id_prefix(get_cache_dir(), kernel_id)
-            if matches:
-                _, meta = matches[0]
-                version = meta.get("version")
-                if version:
-                    kernel_name = version
-        except Exception:
-            pass
-        tree_lines.append(f"├── Kernel:     {kernel_name} ({kernel_display})")
+        kernel_name = info.get("kernel_name") or kernel_id
+        tree_lines.append(f"├── Kernel:     {kernel_name} ({kernel_id})")
 
     paths = info.get("paths", {})
     vm_dir = paths.get("vm_dir", "-")

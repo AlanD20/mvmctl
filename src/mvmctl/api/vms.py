@@ -1705,6 +1705,44 @@ def inspect_vm(name: str) -> dict[str, Any]:
     raise VMNotFoundError(f"VM '{name}' not found")
 
 
+def _resolve_asset_names(
+    image_id: str | None, kernel_id: str | None
+) -> tuple[str | None, str | None]:
+    """Resolve friendly names for image and kernel IDs from database.
+
+    Args:
+        image_id: Image ID prefix (can be None)
+        kernel_id: Kernel ID prefix (can be None)
+
+    Returns:
+        Tuple of (image_name, kernel_name) — either resolved from DB or None if not found
+    """
+    from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
+    from mvmctl.utils.fs import get_cache_dir
+
+    image_name: str | None = None
+    kernel_name: str | None = None
+
+    if image_id:
+        try:
+            matches = find_images_by_id_prefix(get_cache_dir(), image_id)
+            if matches:
+                _, meta = matches[0]
+                image_name = meta.get("os_slug") or image_id
+        except Exception:
+            image_name = image_id
+    if kernel_id:
+        try:
+            matches = find_kernels_by_id_prefix(get_cache_dir(), kernel_id)
+            if matches:
+                _, meta = matches[0]
+                kernel_name = meta.get("version") or kernel_id
+        except Exception:
+            kernel_name = kernel_id
+
+    return image_name, kernel_name
+
+
 def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
     """Gather comprehensive VM details."""
     from mvmctl.utils.fs import get_vm_dir_by_hash
@@ -1714,6 +1752,8 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
     rootfs_path, rootfs_source = _resolve_rootfs_path(vm, vm_dir)
 
     config_path = vm_dir / "firecracker.json"
+
+    image_name, kernel_name = _resolve_asset_names(vm.image_id, vm.kernel_id)
 
     info: dict[str, Any] = {
         "id": vm.id,
@@ -1727,7 +1767,9 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
         "tap_device": vm.tap_device,
         "cloud_init_mode": vm.config.cloud_init_mode.value if vm.config else "inject",
         "image_id": vm.image_id,
+        "image_name": image_name,
         "kernel_id": vm.kernel_id,
+        "kernel_name": kernel_name,
         "paths": {
             "vm_dir": str(vm_dir),
             "rootfs": str(rootfs_path) if rootfs_path else None,
