@@ -16,6 +16,7 @@ from mvmctl.api.network import (
 )
 from mvmctl.cli._helpers import check_name_arg
 from mvmctl.exceptions import MVMError, NetworkError
+from mvmctl.models import NetworkInspectInfo
 from mvmctl.utils.console import (
     format_timestamp,
     print_error,
@@ -287,7 +288,7 @@ def network_inspect(
     name = check_name_arg(ctx, name)
     validate_entity_name(name, "network")
     try:
-        info = inspect_network(name)
+        info: NetworkInspectInfo = inspect_network(name)
     except NetworkError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
@@ -296,25 +297,25 @@ def network_inspect(
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    status = "active" if info.get("bridge_exists") else "inactive"
-    print_inspect_header(f"Network: {info['name']}", status)
+    status = "active" if info.bridge_exists else "inactive"
+    print_inspect_header(f"Network: {info.name}", status)
 
     print_section_header("BASIC INFO")
-    print_key_value("Name", info["name"])
-    print_key_value("Subnet", info.get("subnet", "-"))
-    print_key_value("IPv4 Gateway", info.get("ipv4_gateway", "-"))
-    print_key_value("Bridge", info["bridge"])
-    print_key_value("NAT", "enabled" if info["nat_enabled"] else "disabled")
-    print_key_value("Created", format_timestamp(info.get("created_at")))
+    print_key_value("Name", info.name)
+    print_key_value("Subnet", info.subnet or "-")
+    print_key_value("IPv4 Gateway", info.ipv4_gateway or "-")
+    print_key_value("Bridge", info.bridge)
+    print_key_value("NAT", "enabled" if info.nat_enabled else "disabled")
+    print_key_value("Created", format_timestamp(info.created_at))
 
     print_section_header("RESOURCES")
-    vms = [v for v in info.get("vms") or [] if isinstance(v, dict)]
-    print_key_value("Bridge Active", "yes" if info.get("bridge_exists") else "no")
+    vms = [v for v in info.vms or [] if isinstance(v, dict)]
+    print_key_value("Bridge Active", "yes" if info.bridge_exists else "no")
     print_key_value("Leases", f"{len(vms)} assigned")
 
     # Show NAT config if enabled
-    if info.get("nat_enabled"):
-        nat_gateways: list[str] = info.get("nat_gateways") or []
+    if info.nat_enabled:
+        nat_gateways: list[str] = info.nat_gateways or []
         print_section_header("NAT CONFIG")
         print_key_value("NAT Gateways", ", ".join(nat_gateways) if nat_gateways else "-")
 
