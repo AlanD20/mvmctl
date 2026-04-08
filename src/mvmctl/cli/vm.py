@@ -542,21 +542,10 @@ def ls_vms(
     if json_output:
         data = []
         for v in vms:
-            status_str, exit_code = get_vm_status_with_exit_code(v)
-            data.append(
-                {
-                    "id": v.id if v.id else "-",
-                    "name": v.name,
-                    "ip": v.ipv4,
-                    "mac": v.mac,
-                    "status": status_str,
-                    "pid": v.pid,
-                    "exit_code": exit_code,
-                    "api_socket": v.api_socket_path is not None,
-                    "network": v.network_name or "-",
-                    "created_at": v.created_at.isoformat(),
-                }
-            )
+            status_str, _ = get_vm_status_with_exit_code(v)
+            record = v.to_dict()
+            record["status"] = status_str  # Use reconciled status
+            data.append(record)
         typer.echo(json.dumps(data, indent=2))
         return
 
