@@ -7,6 +7,7 @@ unified fetch and import flows with partition detection retry logic.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -34,6 +35,14 @@ if TYPE_CHECKING:
     from mvmctl.core.image import ImageImportResult
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ImageFetchResult:
+    """Result of fetch_image_and_register with both image metadata and full hash."""
+
+    result: "ImageImportResult"
+    full_hash: str
 
 
 def load_images_config(path: Path) -> list[Any]:
@@ -330,14 +339,14 @@ def register_fetched_image(result: Any, spec: Any) -> str:
     return full_id
 
 
-def fetch_image_and_register(input: ImageFetchInput) -> Any:
+def fetch_image_and_register(input: ImageFetchInput) -> ImageFetchResult:
     """Fetch image from remote URL, handle partition detection/retry, persist to DB.
 
     Flow:
     1. find_existing_image_files() → skip if exists and not force
     2. core/image.fetch_image(spec, output_dir, force, skip_optimization)
     3. register_fetched_image(result, spec)
-    4. return ImageImportResult
+    4. return ImageFetchResult
 
     NOTE: partition retry is handled here when partition is provided.
 
@@ -346,7 +355,7 @@ def fetch_image_and_register(input: ImageFetchInput) -> Any:
                and skip_optimization.
 
     Returns:
-        ImageImportResult with path and metadata.
+        ImageFetchResult with image metadata and full hash.
 
     Raises:
         ImageError: If fetch fails or partition detection fails (when no_prompt).
@@ -370,7 +379,14 @@ def fetch_image_and_register(input: ImageFetchInput) -> Any:
 
             fs_type = detect_filesystem_type(existing[0])
             fs_uuid = get_filesystem_uuid(existing[0])
-            return ImageImportResult(path=existing[0], fs_type=fs_type, fs_uuid=fs_uuid)
+            # Look up full hash from DB by os_slug prefix
+            cache_dir = get_cache_dir()
+            matches = find_images_by_id_prefix(cache_dir, spec.id)
+            full_hash = matches[0][0] if matches else spec.id
+            return ImageFetchResult(
+                result=ImageImportResult(path=existing[0], fs_type=fs_type, fs_uuid=fs_uuid),
+                full_hash=full_hash,
+            )
 
     # Fetch CI version from default binary for template resolution
     ci_version = ""
@@ -397,12 +413,12 @@ def fetch_image_and_register(input: ImageFetchInput) -> Any:
         raise exc
 
     # Register the fetched image
-    register_fetched_image(result, spec)
+    full_hash = register_fetched_image(result, spec)
 
-    return result
+    return ImageFetchResult(result=result, full_hash=full_hash)
 
 
-def import_image_and_register(input: ImageImportInput) -> Any:
+def import_image_and_register(input: ImageImportInput) -> ImageFetchResult:
     """Import local image file, convert, persist to DB.
 
     Same pattern as fetch_image_and_register but for local source files.
@@ -413,7 +429,7 @@ def import_image_and_register(input: ImageImportInput) -> Any:
                force, and partition.
 
     Returns:
-        ImageImportResult with path and metadata.
+        ImageFetchResult with image metadata and full hash.
 
     Raises:
         ImageError: If import fails or partition detection fails.
@@ -434,7 +450,14 @@ def import_image_and_register(input: ImageImportInput) -> Any:
 
             fs_type = detect_filesystem_type(existing[0])
             fs_uuid = get_filesystem_uuid(existing[0])
-            return ImageImportResult(path=existing[0], fs_type=fs_type, fs_uuid=fs_uuid)
+            # Look up full hash from DB by id prefix
+            cache_dir = get_cache_dir()
+            matches = find_images_by_id_prefix(cache_dir, spec.id)
+            full_hash = matches[0][0] if matches else spec.id
+            return ImageFetchResult(
+                result=ImageImportResult(path=existing[0], fs_type=fs_type, fs_uuid=fs_uuid),
+                full_hash=full_hash,
+            )
 
     try:
         result = _core_import_image(
@@ -448,6 +471,6 @@ def import_image_and_register(input: ImageImportInput) -> Any:
         raise exc
 
     # Register the imported image
-    register_fetched_image(result, spec)
+    full_hash = register_fetched_image(result, spec)
 
-    return result
+    return ImageFetchResult(result=result, full_hash=full_hash)

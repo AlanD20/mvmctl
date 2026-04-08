@@ -10,24 +10,22 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET, MVM_POSTROUTING_CHAIN
-from mvmctl.core import host_setup, metadata
+from mvmctl.core import host_setup
 from mvmctl.core import network as network_core
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.network_manager import (
     build_network_config,
-    config_to_network_entry,
-    leases_from_entry,
-    leases_to_dicts,
-    network_entry_to_config,
     should_preserve_current_default,
     validate_bridge_not_conflicting,
     validate_no_subnet_overlap,
 )
+from mvmctl.db.models import Network as DBNetwork
 from mvmctl.exceptions import NetworkError
-from mvmctl.models import NetworkConfig, NetworkEntry, NetworkInspectInfo, NetworkItem, NetworkLease
-from mvmctl.utils.fs import get_cache_dir
+from mvmctl.models import NetworkConfig, NetworkInspectInfo, NetworkItem, NetworkLease
+from mvmctl.utils.full_hash import generate_full_hash_network
 from mvmctl.utils.network import (
     bridge_exists,
     get_default_interface,
@@ -39,8 +37,31 @@ from mvmctl.utils.network import (
 logger = logging.getLogger(__name__)
 
 
+def _db_network_to_config(db_network: DBNetwork) -> NetworkConfig:
+    """Convert a DB Network row to a NetworkConfig dataclass.
+
+    DB Network fields: id, name, subnet, bridge, ipv4_gateway, bridge_active,
+                       nat_gateways (str|None), nat_enabled, is_default, created_at, updated_at
+    NetworkConfig fields: name, subnet, ipv4_gateway, bridge, nat_enabled,
+                         nat_gateways (list[str]), created_at, is_default
+    """
+    nat_gateways_list: list[str] = []
+    if db_network.nat_gateways:
+        nat_gateways_list = [g.strip() for g in db_network.nat_gateways.split(",") if g.strip()]
+    return NetworkConfig(
+        name=db_network.name,
+        subnet=db_network.subnet,
+        ipv4_gateway=db_network.ipv4_gateway,
+        bridge=db_network.bridge,
+        nat_enabled=db_network.nat_enabled,
+        nat_gateways=nat_gateways_list,
+        created_at=db_network.created_at or "",
+        is_default=db_network.is_default,
+    )
+
+
 def get_default_network_entry(cache_dir: Path) -> NetworkItem | None:
-    """Get default network entry from metadata API.
+    """Get default network entry from database.
 
     Args:
         cache_dir: Directory containing metadata.json (unused, kept for API compatibility).
@@ -48,9 +69,11 @@ def get_default_network_entry(cache_dir: Path) -> NetworkItem | None:
     Returns:
         NetworkItem if a default network is set, None otherwise.
     """
-    from mvmctl.api import metadata as metadata_api
-
-    return metadata_api.get_default_network_entry(cache_dir)
+    db = MVMDatabase()
+    db_network = db.get_default_network()
+    if db_network is None:
+        return None
+    return NetworkItem.from_db(db_network)
 
 
 __all__ = [
@@ -84,38 +107,42 @@ def list_networks() -> list[NetworkConfig]:
     """List all configured networks with their metadata.
 
     Returns:
-        List of NetworkConfig objects with is_default populated from metadata.
+        List of NetworkConfig objects with is_default populated from database.
     """
-    cache_dir = get_cache_dir()
-    entries = metadata.list_network_entries(cache_dir)
-    if not entries:
+    db = MVMDatabase()
+    db_networks = db.list_networks()
+    if not db_networks:
         return []
 
-    default_entry = get_default_network_entry(cache_dir)
-    default_name = default_entry.name if default_entry else None
+    default_network = db.get_default_network()
+    default_name = default_network.name if default_network else None
 
     configs: list[NetworkConfig] = []
-    for name, entry in entries.items():
-        config = network_entry_to_config(name, cast("NetworkEntry", entry))
-        if config is not None:
-            config.is_default = name == default_name
-            configs.append(config)
+    for db_network in db_networks:
+        config = _db_network_to_config(db_network)
+        config.is_default = db_network.name == default_name
+        configs.append(config)
 
     return sorted(configs, key=lambda c: c.name)
 
 
 def get_network(name: str) -> NetworkConfig | None:
     """Get a named network by name."""
-    cache_dir = get_cache_dir()
-    entry = metadata.get_network_entry(cache_dir, name)
-    return network_entry_to_config(name, cast("NetworkEntry", entry))
+    db = MVMDatabase()
+    db_network = db.get_network_by_name(name)
+    if db_network is None:
+        return None
+    return _db_network_to_config(db_network)
 
 
 def get_network_leases(name: str) -> list[NetworkLease]:
     """Get all IP leases for a network."""
-    cache_dir = get_cache_dir()
-    entry = metadata.get_network_entry(cache_dir, name)
-    return leases_from_entry(entry)
+    db = MVMDatabase()
+    network = db.get_network_by_name(name)
+    if network is None:
+        return []
+    db_leases = db.list_leases(network.id)
+    return [NetworkLease(vm_id=lease.vm_id or "", ipv4=lease.ipv4) for lease in db_leases]
 
 
 def set_default_network(name: str) -> None:
@@ -127,21 +154,21 @@ def set_default_network(name: str) -> None:
     Raises:
         NetworkError: If network does not exist.
     """
-    config = get_network(name)
-    if config is None:
+    db = MVMDatabase()
+    network = db.get_network_by_name(name)
+    if network is None:
         raise NetworkError(f"Network '{name}' does not exist")
 
-    cache_dir = get_cache_dir()
-    metadata.set_default_network_entry(cache_dir, name)
+    db.set_default_network(network.id)
 
 
 def _get_default_network_entry_name() -> str | None:
     """Get the name of the current default network."""
-    cache_dir = get_cache_dir()
-    default_entry = get_default_network_entry(cache_dir)
-    if default_entry is None:
+    db = MVMDatabase()
+    default_network = db.get_default_network()
+    if default_network is None:
         return None
-    return default_entry.name
+    return default_network.name
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +219,7 @@ def is_ip_available(network_name: str, ip: str) -> bool:
 def allocate_network_ip(network_name: str, vm_name: str) -> str:
     """Allocate the next available IP from a network's subnet.
 
-    Registers the lease in metadata.
+    Registers the lease in database.
 
     Returns:
         The allocated IP address string.
@@ -204,11 +231,14 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
     leases = get_network_leases(network_name)
     from mvmctl.core.network_manager import allocate_network_ip as _allocate_network_ip
 
-    ip, updated_leases = _allocate_network_ip(config, leases, vm_name)
+    ip, _updated_leases = _allocate_network_ip(config, leases, vm_name)
 
-    # Persist updated leases to metadata
-    cache_dir = get_cache_dir()
-    metadata.update_network_entry(cache_dir, network_name, leases=leases_to_dicts(updated_leases))
+    # Persist the lease to database
+    db = MVMDatabase()
+    network = db.get_network_by_name(network_name)
+    if network is None:
+        raise NetworkError(f"Network '{network_name}' not found")
+    db.acquire_lease(network.id, ip, vm_name)
 
     return ip
 
@@ -218,11 +248,19 @@ def release_network_ip(network_name: str, vm_name: str) -> None:
     leases = get_network_leases(network_name)
     from mvmctl.core.network_manager import release_network_ip as _release_network_ip
 
-    updated_leases = _release_network_ip(leases, vm_name)
+    _release_network_ip(leases, vm_name)
 
-    # Persist updated leases to metadata
-    cache_dir = get_cache_dir()
-    metadata.update_network_entry(cache_dir, network_name, leases=leases_to_dicts(updated_leases))
+    # Release the lease from database
+    db = MVMDatabase()
+    network = db.get_network_by_name(network_name)
+    if network is None:
+        return
+
+    # Find and release the IP for this VM
+    for lease in leases:
+        if lease.vm_id == vm_name:
+            db.release_lease(network.id, lease.ipv4)
+            break
 
 
 # ---------------------------------------------------------------------------
@@ -305,12 +343,24 @@ def create_network(
             logger.warning("Rollback: failed to tear down bridge: %s", e)
         raise
 
-    # Persist to metadata
-    cache_dir = get_cache_dir()
-    entry = config_to_network_entry(config)
-    entry["leases"] = []
-    entry["bridge_active"] = True
-    metadata.update_network_entry(cache_dir, name, **entry)
+    # Persist to database
+    from datetime import datetime, timezone
+
+    db = MVMDatabase()
+    created_at = datetime.now(tz=timezone.utc).isoformat()
+    db_network = DBNetwork(
+        id=generate_full_hash_network(name, config.subnet, created_at),
+        name=config.name,
+        subnet=config.subnet,
+        bridge=config.bridge,
+        ipv4_gateway=config.ipv4_gateway,
+        bridge_active=True,
+        nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
+        nat_enabled=config.nat_enabled,
+        is_default=False,
+        created_at=created_at,
+    )
+    db.upsert_network(db_network)
 
     # Persist iptables rules if root
     if os.getuid() == 0:
@@ -374,11 +424,13 @@ def remove_network(name: str) -> None:
     except NetworkError as e:
         logger.warning("Partial teardown for network '%s': %s", name, e)
 
-    # Remove from metadata
-    cache_dir = get_cache_dir()
-    metadata.remove_network_entry(cache_dir, name)
+    db = MVMDatabase()
+    network = db.get_network_by_name(name)
+    if network:
+        db.delete_network(network.id)
 
-    # Persist iptables rules if root
+    if os.getuid() == 0:
+        host_setup.save_iptables_rules()
     if os.getuid() == 0:
         host_setup.save_iptables_rules()
 
@@ -408,9 +460,10 @@ def inspect_network(name: str) -> NetworkInspectInfo:
     leases = get_network_leases(name)
     active = bridge_exists(config.bridge)
 
-    # Update bridge_active in metadata
-    cache_dir = get_cache_dir()
-    metadata.update_network_entry(cache_dir, name, bridge_active=active)
+    db = MVMDatabase()
+    network = db.get_network_by_name(name)
+    if network:
+        db.update_network_bridge_active(network.id, active)
 
     vm_manager = VMManager()
     enriched_vms: list[dict[str, Any]] = []
@@ -510,8 +563,10 @@ def ensure_default_network() -> NetworkConfig:
                     )
                     if os.getuid() == 0:
                         host_setup.save_iptables_rules()
-                cache_dir = get_cache_dir()
-                metadata.update_network_entry(cache_dir, DEFAULT_NETWORK_NAME, bridge_active=True)
+                db = MVMDatabase()
+                network = db.get_network_by_name(DEFAULT_NETWORK_NAME)
+                if network:
+                    db.update_network_bridge_active(network.id, True)
                 current_default = _get_default_network_entry_name()
                 if not should_preserve_current_default(current_default, DEFAULT_NETWORK_NAME):
                     set_default_network(DEFAULT_NETWORK_NAME)
@@ -549,26 +604,26 @@ def ensure_default_network() -> NetworkConfig:
 def reconcile_networks() -> list[NetworkInspectInfo]:
     """Compare stored network state with actual kernel bridge state.
 
-    For each network in metadata, checks whether its bridge device still
-    exists on the host. Updates bridge_active in metadata and
+    For each network in database, checks whether its bridge device still
+    exists on the host. Updates bridge_active in database and
     returns a list of network inspection results.
 
     Returns:
         List of NetworkInspectInfo with reconciliation results.
     """
-    cache_dir = get_cache_dir()
+    db = MVMDatabase()
     results: list[NetworkInspectInfo] = []
 
     for config in list_networks():
-        entry = metadata.get_network_entry(cache_dir, config.name)
-        stored_active = entry.get("bridge_active")
+        network = db.get_network_by_name(config.name)
+        stored_active = network.bridge_active if network else False
         actual_active = bridge_exists(config.bridge)
 
         stale = (stored_active is True) and (not actual_active)
 
-        metadata.update_network_entry(cache_dir, config.name, bridge_active=actual_active)
+        if network:
+            db.update_network_bridge_active(network.id, actual_active)
 
-        # Get leases for this network to populate vms field
         leases = get_network_leases(config.name)
         vms: list[dict[str, Any]] = [{"vm_id": lease.vm_id, "ipv4": lease.ipv4} for lease in leases]
 
@@ -593,7 +648,7 @@ def reconcile_networks() -> list[NetworkInspectInfo]:
 
 
 def restore_networks() -> list[str]:
-    """Restore all networks from metadata, recreating bridges and NAT rules.
+    """Restore all networks from database, recreating bridges and NAT rules.
 
     This function is called during host init to restore networks after a clean
     or reboot. It validates stored interfaces and recreates network resources.
@@ -606,7 +661,7 @@ def restore_networks() -> list[str]:
         return []
 
     status: list[str] = []
-    cache_dir = get_cache_dir()
+    db = MVMDatabase()
 
     for config in networks:
         if bridge_exists(config.bridge):
@@ -657,13 +712,16 @@ def restore_networks() -> list[str]:
                 )
 
                 if config.nat_gateways != validated_gateways:
-                    metadata.update_network_entry(
-                        cache_dir, config.name, nat_gateways=validated_gateways
-                    )
+                    network = db.get_network_by_name(config.name)
+                    if network:
+                        network.nat_gateways = ",".join(validated_gateways)
+                        db.upsert_network(network)
                     config.nat_gateways = validated_gateways
             except NetworkError as e:
                 status.append(f"Network '{config.name}': failed to configure NAT: {e}")
 
-        metadata.update_network_entry(cache_dir, config.name, bridge_active=True)
+        network = db.get_network_by_name(config.name)
+        if network:
+            db.update_network_bridge_active(network.id, True)
 
     return status

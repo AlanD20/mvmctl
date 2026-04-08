@@ -9,6 +9,7 @@ import pytest
 from click.testing import CliRunner as ClickCliRunner
 from typer.testing import CliRunner
 
+from mvmctl.api.image import ImageFetchResult
 from mvmctl.cli.kernel import kernel_app
 from mvmctl.core.binary_manager import BinaryVersion
 from mvmctl.core.image import ImageImportResult
@@ -716,8 +717,11 @@ def test_image_fetch_success(
     mock_read_bytes: MagicMock,
     tmp_path: Path,
 ):
-    mock_fetch.return_value = ImageImportResult(
-        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    mock_fetch.return_value = ImageFetchResult(
+        result=ImageImportResult(
+            path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+        ),
+        full_hash="a" * 64,
     )
     result = click_runner.invoke(
         main_app, ["image", "fetch", "ubuntu-24.04", "--out", str(tmp_path)]
@@ -768,8 +772,11 @@ def test_image_fetch_by_type_and_version(
             sha256=None,
         ),
     ]
-    mock_fetch.return_value = ImageImportResult(
-        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    mock_fetch.return_value = ImageFetchResult(
+        result=ImageImportResult(
+            path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+        ),
+        full_hash="a" * 64,
     )
 
     result = click_runner.invoke(
@@ -838,8 +845,11 @@ def test_image_fetch_partition_retry_success(
             sha256=None,
         )
     ]
-    mock_fetch.return_value = ImageImportResult(
-        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    mock_fetch.return_value = ImageFetchResult(
+        result=ImageImportResult(
+            path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+        ),
+        full_hash="a" * 64,
     )
 
     result = click_runner.invoke(
@@ -859,15 +869,18 @@ def test_image_fetch_type_option_conflicts_with_id(mock_config: MagicMock):
     assert "cannot be used when selector is an image ID" in result.output
 
 
-@patch("mvmctl.cli.image.fetch_image_and_register", return_value=None)
+@patch("mvmctl.cli.image.fetch_image_and_register")
 @patch("mvmctl.cli.image.load_images_config", return_value=_FAKE_IMAGES)
 def test_image_fetch_returns_none_exits(
     mock_config: MagicMock,
     mock_fetch: MagicMock,
     tmp_path: Path,
 ):
-    mock_fetch.return_value = ImageImportResult(
-        path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+    mock_fetch.return_value = ImageFetchResult(
+        result=ImageImportResult(
+            path=tmp_path / "ubuntu-24.04.ext4", fs_type="ext4", fs_uuid="test-uuid"
+        ),
+        full_hash="a" * 64,
     )
     result = click_runner.invoke(
         main_app,
@@ -891,8 +904,11 @@ def test_image_fetch_partition_retry_no_prompt_exits(
     image_path.parent.mkdir(parents=True, exist_ok=True)
     image_path.write_bytes(b"image")
     # fs_uuid is now returned in ImageImportResult from core layer
-    mock_fetch.return_value = ImageImportResult(
-        path=image_path, fs_type="ext4", fs_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    mock_fetch.return_value = ImageFetchResult(
+        result=ImageImportResult(
+            path=image_path, fs_type="ext4", fs_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        ),
+        full_hash="a" * 64,
     )
 
     # Seed the database with the image entry that fetch_image_and_register would have created
@@ -936,8 +952,11 @@ def test_image_import_saves_fs_uuid_in_metadata(
     imported.parent.mkdir(parents=True, exist_ok=True)
     imported.write_bytes(b"image")
     # fs_uuid is now returned in ImageImportResult from core layer
-    mock_import.return_value = ImageImportResult(
-        path=imported, fs_type="ext4", fs_uuid="ffffffff-1111-2222-3333-444444444444"
+    mock_import.return_value = ImageFetchResult(
+        result=ImageImportResult(
+            path=imported, fs_type="ext4", fs_uuid="ffffffff-1111-2222-3333-444444444444"
+        ),
+        full_hash="f" * 64,
     )
 
     # Pre-seed the database with the image entry that import_image_and_register would create
@@ -1530,8 +1549,11 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
     ]
     # Pre-create existing COMPRESSED image file (the final expected format)
     (tmp_path / "ubuntu-24.04.ext4.zst").touch()
-    mock_fetch.return_value = ImageImportResult(
-        path=tmp_path / "ubuntu-24.04.ext4.zst", fs_type="ext4", fs_uuid="test-uuid"
+    mock_fetch.return_value = ImageFetchResult(
+        result=ImageImportResult(
+            path=tmp_path / "ubuntu-24.04.ext4.zst", fs_type="ext4", fs_uuid="test-uuid"
+        ),
+        full_hash="a" * 64,
     )
 
     # User says NO to re-download

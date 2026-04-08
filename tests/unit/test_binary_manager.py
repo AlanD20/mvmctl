@@ -466,24 +466,22 @@ def test_get_binary_path_unknown_name_raises(tmp_path: Path, mocker: MockerFixtu
 # ---------------------------------------------------------------------------
 
 
-def test_set_active_version_creates_symlinks(tmp_path: Path, mocker: MockerFixture):
+def test_set_active_version_verifies_binaries_exist(tmp_path: Path, mocker: MockerFixture):
     fc_file = tmp_path / "firecracker-v1.0.0"
     jl_file = tmp_path / "jailer-v1.0.0"
     fc_file.touch()
     jl_file.touch()
 
-
     set_active_version("1.0.0", tmp_path)
 
+    # set_active_version no longer creates symlinks; SQLite is canonical for defaults
     fc_link = tmp_path / "firecracker"
     jl_link = tmp_path / "jailer"
-    assert fc_link.is_symlink()
-    assert jl_link.is_symlink()
-    assert os.readlink(fc_link) == "firecracker-v1.0.0"
-    assert os.readlink(jl_link) == "jailer-v1.0.0"
+    assert not fc_link.exists()
+    assert not jl_link.exists()
 
 
-def test_set_active_version_updates_links(tmp_path: Path, mocker: MockerFixture):
+def test_set_active_version_does_not_update_symlinks(tmp_path: Path, mocker: MockerFixture):
     fc_v1 = tmp_path / "firecracker-v1.0.0"
     jl_v1 = tmp_path / "jailer-v1.0.0"
     fc_v2 = tmp_path / "firecracker-v2.0.0"
@@ -493,15 +491,12 @@ def test_set_active_version_updates_links(tmp_path: Path, mocker: MockerFixture)
     fc_v2.touch()
     jl_v2.touch()
 
-    # Set initial version
-    (tmp_path / "firecracker").symlink_to("firecracker-v1.0.0")
-    (tmp_path / "jailer").symlink_to("jailer-v1.0.0")
-
-
+    # set_active_version no longer modifies symlinks; SQLite is canonical
     set_active_version("2.0.0", tmp_path)
 
-    assert os.readlink(tmp_path / "firecracker") == "firecracker-v2.0.0"
-    assert os.readlink(tmp_path / "jailer") == "jailer-v2.0.0"
+    # No symlinks should be created
+    assert not (tmp_path / "firecracker").exists()
+    assert not (tmp_path / "jailer").exists()
 
 
 def test_set_active_version_missing_binary_raises(tmp_path: Path):
@@ -515,12 +510,10 @@ def test_set_active_version_normalizes_version(tmp_path: Path, mocker: MockerFix
     fc_file.touch()
     jl_file.touch()
 
-
     set_active_version("v1.0.0", tmp_path)
 
-    fc_link = tmp_path / "firecracker"
-    assert fc_link.is_symlink()
-    assert os.readlink(fc_link) == "firecracker-v1.0.0"
+    # set_active_version no longer creates symlinks; SQLite is canonical for defaults
+    assert not (tmp_path / "firecracker").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -528,22 +521,24 @@ def test_set_active_version_normalizes_version(tmp_path: Path, mocker: MockerFix
 # ---------------------------------------------------------------------------
 
 
-def test_remove_version_deletes_files_and_links(tmp_path: Path):
+def test_remove_version_deletes_files_only(tmp_path: Path):
     fc_file = tmp_path / "firecracker-v1.0.0"
     jl_file = tmp_path / "jailer-v1.0.0"
     fc_file.touch()
     jl_file.touch()
 
-    # Create symlinks
+    # Create symlinks (these should NOT be removed by remove_version anymore)
     (tmp_path / "firecracker").symlink_to("firecracker-v1.0.0")
     (tmp_path / "jailer").symlink_to("jailer-v1.0.0")
 
     remove_version("1.0.0", tmp_path)
 
+    # Binary files are removed
     assert not fc_file.exists()
     assert not jl_file.exists()
-    assert not (tmp_path / "firecracker").exists()
-    assert not (tmp_path / "jailer").exists()
+    # Symlinks are NOT removed (remove_version no longer touches symlinks)
+    assert (tmp_path / "firecracker").is_symlink()
+    assert (tmp_path / "jailer").is_symlink()
 
 
 def test_remove_version_not_found_raises(tmp_path: Path):

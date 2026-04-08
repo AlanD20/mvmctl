@@ -515,8 +515,8 @@ def image_fetch(
         raise typer.Exit(code=1)
 
     # ── FINALIZE ─────────────────────────────────────────────────────────
-    short_id = shorten_hash(result.path.name.replace(".zst", "").replace(".ext4", ""), 12)
-    print_success(f"Image ready: {result.path}")
+    short_id = shorten_hash(result.full_hash, 12)
+    print_success(f"Image ready: {result.result.path}")
     print_info(f"  ID: {short_id}")
     if set_default:
         set_default_image(spec.id)
@@ -841,8 +841,8 @@ def image_import(
         raise typer.Exit(code=1)
 
     # import_image_and_register already registers the image in DB
-    short_id = shorten_hash(full_id, 12)
-    print_success(f"Image imported: {result.path}")
+    short_id = shorten_hash(result.full_hash, 12)
+    print_success(f"Image imported: {result.result.path}")
     print_info(f"  Name: {name}")
     print_info(f"  ID:   {short_id}")
 

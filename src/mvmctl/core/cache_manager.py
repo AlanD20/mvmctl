@@ -20,16 +20,10 @@ logger = logging.getLogger(__name__)
 def cache_init_vms() -> Path:
     """Initialize VM directory structure.
 
-    Creates vms/ directory and ensures state.json exists.
     Returns the vms directory path.
     """
     vms_dir = get_vms_dir()
     vms_dir.mkdir(parents=True, exist_ok=True)
-
-    # Ensure state.json exists (empty but valid)
-    state_file = vms_dir / "state.json"
-    if not state_file.exists():
-        state_file.write_text('{"vms": {}, "schema_version": 1}')
 
     return vms_dir
 

@@ -261,7 +261,11 @@ def _extract_member(tar: tarfile.TarFile, member: tarfile.TarInfo, dest: Path) -
 
 
 def set_active_version(version: str, bin_dir: Path | None = None) -> None:
-    """Create/update symlinks for the active Firecracker version."""
+    """Mark a binary version as active in the database.
+
+    Note: Symlink creation has been removed. SQLite is now the canonical
+    source of truth for binary defaults (is_default=1 in binaries table).
+    """
     version = _normalize_version(version)
     d = _resolve_bin_dir(bin_dir)
 
@@ -272,17 +276,6 @@ def set_active_version(version: str, bin_dir: Path | None = None) -> None:
         raise AssetNotFoundError(
             f"Version {version} not downloaded — run 'mvm bin fetch {version}' first"
         )
-
-    fc_link = d / "firecracker"
-    jl_link = d / "jailer"
-
-    if fc_link.is_symlink() or fc_link.exists():
-        fc_link.unlink()
-    if jl_link.is_symlink() or jl_link.exists():
-        jl_link.unlink()
-
-    fc_link.symlink_to(fc_src.name)
-    jl_link.symlink_to(jl_src.name)
 
 
 def get_binary_path(name: str, version: str) -> str:
@@ -321,8 +314,9 @@ def get_binary_path(name: str, version: str) -> str:
 def remove_version(version: str, bin_dir: Path | None = None) -> None:
     """Delete a locally cached binary version.
 
-    This function removes the binary files and their symlinks.
-    The caller is responsible for updating the database state.
+    This function removes the binary files.
+    Note: Symlink removal has been removed. The caller is responsible for
+    updating the database state.
 
     Args:
         version: The version to remove (e.g., "1.15.0").
@@ -339,14 +333,6 @@ def remove_version(version: str, bin_dir: Path | None = None) -> None:
 
     if not fc_path.exists() and not jl_path.exists():
         raise AssetNotFoundError(f"Version {version} not found locally")
-
-    fc_link = d / "firecracker"
-    jl_link = d / "jailer"
-
-    if fc_link.is_symlink() and os.readlink(fc_link) == fc_path.name:
-        fc_link.unlink()
-    if jl_link.is_symlink() and os.readlink(jl_link) == jl_path.name:
-        jl_link.unlink()
 
     fc_path.unlink(missing_ok=True)
     jl_path.unlink(missing_ok=True)

@@ -41,10 +41,6 @@ class TestCacheInitVms:
         assert result.exists()
         assert result.is_dir()
         assert result.name == "vms"
-        # Check state.json was created
-        state_file = result / "state.json"
-        assert state_file.exists()
-        assert '"vms": {}' in state_file.read_text()
 
 
 class TestCacheInitImages:

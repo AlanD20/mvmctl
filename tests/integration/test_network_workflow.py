@@ -277,28 +277,37 @@ class TestNetworkWithSubprocessMocking:
         self, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
     ):
         """Test network removal with mocked bridge teardown commands."""
-        from mvmctl.core.metadata import update_network_entry
         from mvmctl.api.network import get_network, remove_network
+        from mvmctl.core.mvm_db import MVMDatabase
+        from mvmctl.db.models import Network as DBNetwork
+        from mvmctl.utils.full_hash import generate_full_hash_network
 
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        # Add network to metadata first
-        update_network_entry(
-            mock_cache_dir,
-            "teardown-net",
-            subnet="10.66.0.0/24",
-            gateway="10.66.0.1",
-            bridge="mvm-teardown-n",
-            nat_enabled=True,
-            created_at="2024-01-01T00:00:00+00:00",
-            leases=[],
-            bridge_active=True,
+        # Add network to SQLite first
+        db = MVMDatabase()
+        network_id = generate_full_hash_network(
+            "teardown-net", "10.66.0.0/24", "2024-01-01T00:00:00+00:00"
         )
+        db_network = DBNetwork(
+            id=network_id,
+            name="teardown-net",
+            subnet="10.66.0.0/24",
+            bridge="mvm-teardown-n",
+            ipv4_gateway="10.66.0.1",
+            bridge_active=True,
+            nat_enabled=True,
+            nat_gateways=None,
+            is_default=False,
+            created_at="2024-01-01T00:00:00+00:00",
+            updated_at="2024-01-01T00:00:00+00:00",
+        )
+        db.upsert_network(db_network)
 
         remove_network("teardown-net")
 
         mock_run.assert_called()
-        # Verify removed from metadata
+        # Verify removed from database
         assert get_network("teardown-net") is None

@@ -106,7 +106,7 @@ Before finishing any implementation, you MUST verify:
 1. **Ruff Linting** — `uv run ruff check src/` must be clean
 2. **Ruff Formatting** — `uv run ruff format --check src/` must pass
 3. **Type Checking** — `uv run mypy src/` must pass (strict mode)
-4. **Tests** — `uv run pytest tests/ -q --cov=src/mvmctl --cov-fail-under=80` must pass
+4. **Tests** — `uv run pytest tests/ -q --cov=src/mvmctl -n auto --cov-fail-under=80` must pass
 
 **If checks fail:**
 - Fix linting/formatting issues with `uv run ruff check src/ --fix` and `uv run ruff format src/`
@@ -478,7 +478,7 @@ All enforced in CI (`ci.yml`):
 uv run ruff check src/         # Must be clean (line-length=100, py313, import sorting)
 uv run ruff format --check src/ # Must be clean (double quotes, space indent)
 uv run mypy src/               # Strict mode — no type: ignore allowed
-uv run pytest tests/ -q        # 80% branch coverage minimum
+uv run pytest tests/ -q -n auto       # 80% branch coverage minimum
 ```
 
 Tests must NOT require root, KVM, or real network. Mock all subprocess calls.
@@ -530,7 +530,7 @@ result = runner.invoke(app, ["rm", "--name", "myvm", "--force"])
 
 ```bash
 uv sync --group dev            # Install all deps
-uv run pytest tests/ -x -q    # Test (stop on first failure)
+uv run pytest tests/ -x -q  -n auto   # Test (stop on first failure)
 uv run ruff check src/ && uv run mypy src/  # Lint + types
 
 # Build standalone binary (Nuitka - Recommended for performance)
