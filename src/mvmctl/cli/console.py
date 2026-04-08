@@ -14,7 +14,6 @@ from mvmctl.api.vms import (
     check_escape_sequence,
     connect_to_relay,
     disconnect_from_relay,
-    get_vm_manager,
     read_console_output,  # noqa: F401 (exported for tests)
     send_console_input,
 )
@@ -25,7 +24,7 @@ from mvmctl.api.vms import (
     kill_console as _kill_console,
 )
 from mvmctl.cli._helpers import resolve_vm_by_id_or_name
-from mvmctl.exceptions import MVMError
+from mvmctl.exceptions import MVMError, VMNotFoundError
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.error_handler import handle_mvm_error
 
@@ -63,11 +62,6 @@ def attach(
 
 
 def _show_state(name: str) -> None:
-    manager = get_vm_manager()
-    if manager.get(name) is None:
-        print_error(f"VM '{name}' not found")
-        raise typer.Exit(1)
-
     try:
         state = _get_console_state(name)
         status = "running" if state["running"] else "stopped"
@@ -76,16 +70,14 @@ def _show_state(name: str) -> None:
             print_info(f"  PID: {state['pid']}")
         if state["socket_path"]:
             print_info(f"  Socket: {state['socket_path']}")
+    except VMNotFoundError as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     except MVMError as e:
         handle_mvm_error(e)
 
 
 def _do_kill(name: str) -> None:
-    manager = get_vm_manager()
-    if manager.get(name) is None:
-        print_error(f"VM '{name}' not found")
-        raise typer.Exit(1)
-
     try:
         killed = _kill_console(name)
         if killed:
@@ -93,19 +85,20 @@ def _do_kill(name: str) -> None:
         else:
             print_error(f"No console relay running for '{name}'")
             raise typer.Exit(1)
+    except VMNotFoundError as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     except MVMError as e:
         handle_mvm_error(e)
 
 
 def _do_attach(name: str) -> None:
-    manager = get_vm_manager()
-    if manager.get(name) is None:
-        print_error(f"VM '{name}' not found")
-        raise typer.Exit(1)
-
     try:
         info = _attach_console(name)
         socket_path = Path(info["socket_path"])
+    except VMNotFoundError as e:
+        print_error(str(e))
+        raise typer.Exit(1)
     except MVMError as e:
         handle_mvm_error(e)
 
