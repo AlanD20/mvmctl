@@ -100,7 +100,17 @@ from mvmctl.exceptions import (
     VMCreateError,
     VMNotFoundError,
 )
-from mvmctl.models import CloudInitMode, VMConfig, VMExportConfig, VMInstance, VMStatus
+from mvmctl.models import (
+    CloudInitMode,
+    ConsoleInfo,
+    ConsoleState,
+    VMConfig,
+    VMCreateInput,
+    VMExportConfig,
+    VMInspectInfo,
+    VMInstance,
+    VMStatus,
+)
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.services.nocloud_server import NoCloudNetServerManager
 from mvmctl.utils.fs import get_cache_dir, get_kernels_dir, get_vm_dir_by_hash
@@ -777,38 +787,23 @@ def _resolve_default_public_keys(ssh_key: str | None) -> list[str] | str | None:
     return resolve_ssh_key(None)
 
 
-def create_vm(
-    name: str,
-    vcpus: int,
-    mem: int,
-    user: str,
-    enable_api_socket: bool,
-    enable_pci: bool,
-    enable_console: bool,
-    firecracker_bin: str,
-    lsm_flags: str,
-    enable_logging: bool,
-    enable_metrics: bool,
-    image: str | None = None,
-    kernel: str | None = None,
-    image_path: Path | None = None,
-    kernel_path: Path | None = None,
-    disk_size: str | None = None,
-    ip: str | None = None,
-    network_name: str | None = None,
-    mac: str | None = None,
-    ssh_key: str | None = None,
-    user_data: Path | None = None,
-    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT,
-    cloud_init_iso_path: Path | None = None,
-    keep_cloud_init_iso: bool = False,
-    vm_manager: VMManager | None = None,
-    nocloud_net_port: int = 0,
-    image_fs_uuid: str | None = None,
-    image_fs_type: str | None = None,
-    image_hash: str | None = None,
-    binary_id: str | None = None,
-) -> VMInstance:
+def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMInstance:
+    """Create a new VM from the provided input configuration.
+
+    Args:
+        input: VM creation input containing all configuration parameters.
+        vm_manager: Optional VM manager instance for dependency injection.
+
+    Returns:
+        The created VM instance.
+
+    Raises:
+        AssetNotFoundError: If no image is specified and no default image is set.
+        MVMError: If VM limits are exceeded or validation fails.
+        VMCreateError: If VM creation fails.
+        NetworkError: If network setup fails.
+        CloudInitError: If cloud-init configuration fails.
+    """
     import ipaddress as ipaddress_module
     import re
 
@@ -828,6 +823,36 @@ def create_vm(
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.core.rootfs_injector import inject_cloud_init
     from mvmctl.utils.disk_size import parse_disk_size
+
+    name = input.name
+    vcpus = input.vcpus
+    mem = input.mem
+    user = input.user
+    enable_api_socket = input.enable_api_socket
+    enable_pci = input.enable_pci
+    enable_console = input.enable_console
+    firecracker_bin = input.firecracker_bin
+    lsm_flags = input.lsm_flags
+    enable_logging = input.enable_logging
+    enable_metrics = input.enable_metrics
+    image = input.image
+    kernel = input.kernel
+    image_path = input.image_path
+    kernel_path = input.kernel_path
+    disk_size = input.disk_size
+    ip = input.ip
+    network_name = input.network_name
+    mac = input.mac
+    ssh_key = input.ssh_key
+    user_data = input.user_data
+    cloud_init_mode = input.cloud_init_mode
+    cloud_init_iso_path = input.cloud_init_iso_path
+    keep_cloud_init_iso = input.keep_cloud_init_iso
+    nocloud_net_port = input.nocloud_net_port
+    image_fs_uuid = input.image_fs_uuid
+    image_fs_type = input.image_fs_type
+    image_hash = input.image_hash
+    binary_id = input.binary_id
 
     if image is None and image_path is None:
         db = MVMDatabase()
@@ -1704,7 +1729,19 @@ def cleanup_vms(
     return targets
 
 
-def attach_console(name: str) -> dict[str, Any]:
+def attach_console(name: str) -> ConsoleInfo:
+    """Attach to a VM's console relay.
+
+    Args:
+        name: The name of the VM to attach to.
+
+    Returns:
+        ConsoleInfo containing the socket path and VM name.
+
+    Raises:
+        VMNotFoundError: If the VM is not found.
+        MVMError: If no console relay is running for the VM.
+    """
     from mvmctl.exceptions import MVMError, VMNotFoundError
 
     manager = get_vm_manager()
@@ -1718,7 +1755,7 @@ def attach_console(name: str) -> dict[str, Any]:
         raise MVMError(f"No console relay running for VM '{name}'")
 
     socket_path = mgr.get_socket_path(vm_hash if vm_hash else name)
-    return {"socket_path": str(socket_path), "vm_name": name}
+    return ConsoleInfo(socket_path=socket_path, vm_name=name)
 
 
 def kill_console(name: str) -> bool:
@@ -1734,7 +1771,18 @@ def kill_console(name: str) -> bool:
     return mgr.kill_relay(name, vm_hash)
 
 
-def get_console_state(name: str) -> dict[str, Any]:
+def get_console_state(name: str) -> ConsoleState:
+    """Get the current console state for a VM.
+
+    Args:
+        name: The name of the VM to check.
+
+    Returns:
+        ConsoleState containing the relay status, PID, and socket path.
+
+    Raises:
+        VMNotFoundError: If the VM is not found.
+    """
     from mvmctl.exceptions import VMNotFoundError
 
     manager = get_vm_manager()
@@ -1743,11 +1791,27 @@ def get_console_state(name: str) -> dict[str, Any]:
         raise VMNotFoundError(f"VM '{name}' not found")
 
     vm_hash = vm.id if vm.id else None
-    return _get_console_state(name, vm_hash)
+    state = _get_console_state(name, vm_hash)
+    return ConsoleState(
+        running=state.get("running", False),
+        pid=state.get("pid"),
+        socket_path=state.get("socket_path"),
+    )
 
 
-def inspect_vm(name: str) -> dict[str, Any]:
-    """Get detailed VM information."""
+def inspect_vm(name: str) -> VMInspectInfo:
+    """Get detailed VM information.
+
+    Args:
+        name: VM name or ID prefix to look up.
+
+    Returns:
+        VMInspectInfo containing comprehensive VM details.
+
+    Raises:
+        VMNotFoundError: If the VM is not found.
+        MVMError: If multiple VMs match the name.
+    """
     from mvmctl.exceptions import MVMError, VMNotFoundError
 
     manager = get_vm_manager()
@@ -1805,7 +1869,7 @@ def _resolve_asset_names(
     return image_name, kernel_name
 
 
-def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
+def _gather_vm_details(vm: VMInstance) -> VMInspectInfo:
     """Gather comprehensive VM details."""
     from mvmctl.utils.fs import get_vm_dir_by_hash
 
@@ -1817,47 +1881,49 @@ def _gather_vm_details(vm: VMInstance) -> dict[str, Any]:
 
     image_name, kernel_name = _resolve_asset_names(vm.image_id, vm.kernel_id)
 
-    info: dict[str, Any] = {
-        "id": vm.id,
-        "name": vm.name,
-        "status": vm.status.value,
-        "created_at": vm.created_at.isoformat() if vm.created_at else None,
-        "pid": vm.pid,
-        "ip": vm.ipv4,
-        "mac": vm.mac,
-        "network_name": vm.network_name,
-        "tap_device": vm.tap_device,
-        "cloud_init_mode": vm.config.cloud_init_mode.value if vm.config else "inject",
-        "image_id": vm.image_id,
-        "image_name": image_name,
-        "kernel_id": vm.kernel_id,
-        "kernel_name": kernel_name,
-        "paths": {
+    nocloud_net = None
+    if vm.nocloud_net_port:
+        nocloud_net = {
+            "port": vm.nocloud_net_port,
+            "server_pid": vm.nocloud_server_pid,
+        }
+
+    console = None
+    if vm.console_socket_path:
+        console = {
+            "socket_path": str(vm.console_socket_path),
+            "relay_pid": vm.console_relay_pid,
+        }
+
+    return VMInspectInfo(
+        id=vm.id,
+        name=vm.name,
+        status=vm.status.value,
+        created_at=vm.created_at.isoformat() if vm.created_at else None,
+        pid=vm.pid,
+        ip=vm.ipv4,
+        mac=vm.mac,
+        network_name=vm.network_name,
+        tap_device=vm.tap_device,
+        cloud_init_mode=vm.config.cloud_init_mode.value if vm.config else "inject",
+        image_id=vm.image_id,
+        image_name=image_name,
+        kernel_id=vm.kernel_id,
+        kernel_name=kernel_name,
+        paths={
             "vm_dir": str(vm_dir),
             "rootfs": str(rootfs_path) if rootfs_path else None,
             "rootfs_source": rootfs_source,
             "config": str(config_path) if config_path.exists() else None,
         },
-        "features": {
+        features={
             "api_socket": vm.api_socket_path is not None,
             "console": vm.console_socket_path is not None,
             "nocloud_net": vm.nocloud_net_port is not None,
         },
-    }
-
-    if vm.nocloud_net_port:
-        info["nocloud_net"] = {
-            "port": vm.nocloud_net_port,
-            "server_pid": vm.nocloud_server_pid,
-        }
-
-    if vm.console_socket_path:
-        info["console"] = {
-            "socket_path": str(vm.console_socket_path),
-            "relay_pid": vm.console_relay_pid,
-        }
-
-    return info
+        nocloud_net=nocloud_net,
+        console=console,
+    )
 
 
 def _resolve_rootfs_path(vm: VMInstance, vm_dir: Path) -> tuple[Path | None, str]:
