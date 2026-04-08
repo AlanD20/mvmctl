@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING, Optional
 
 import typer
 
+from mvmctl.api.config import load_config
 from mvmctl.api.vms import ssh_vm
 from mvmctl.cli._helpers import build_mvm_defaults, resolve_ssh_target
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error
+from mvmctl.utils.fs import get_assets_dir, get_keys_dir
 
 if TYPE_CHECKING:
     from mvmctl.models.config import SystemDefaultsConfig
@@ -43,8 +45,6 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
         if resolved is None:
             raise MVMError(f"No SSH key found at: {key}")
         return resolved
-    from mvmctl.utils.fs import get_keys_dir
-
     mvm_keys_dir = get_keys_dir()
     if mvm_keys_dir.exists():
         for f in sorted(mvm_keys_dir.iterdir()):
@@ -64,9 +64,6 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
 
 
 def _get_vm_defaults() -> "SystemDefaultsConfig":
-    from mvmctl.api.config import load_config
-    from mvmctl.utils.fs import get_assets_dir
-
     return load_config(get_assets_dir(), build_mvm_defaults())
 
 

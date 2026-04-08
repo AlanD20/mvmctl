@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -635,8 +636,6 @@ def image_inspect(
         mvm image inspect abc123 --json
         mvm image inspect abc123 --tree
     """
-    from datetime import datetime
-
     images_dir = images_dir if images_dir is not None else get_images_dir()
     cache_dir = get_cache_dir()
 

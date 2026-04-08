@@ -113,8 +113,8 @@ def test_dump_vm_success(tmp_path: Path):
     mock_manager = MagicMock()
     mock_manager.get.return_value = mock_vm
 
-    with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir):
-        with patch("mvmctl.api.vms.get_vm_manager", return_value=mock_manager):
+    with patch("mvmctl.cli.config.get_vm_dir_by_hash", return_value=vm_dir):
+        with patch("mvmctl.cli.config.get_vm_manager", return_value=mock_manager):
             result = runner.invoke(app, ["dump-vm", "--name", "test-vm"])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -122,7 +122,7 @@ def test_dump_vm_success(tmp_path: Path):
 
 
 def test_dump_vm_not_found(tmp_path: Path):
-    with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=tmp_path / "nonexistent"):
+    with patch("mvmctl.cli.config.get_vm_dir_by_hash", return_value=tmp_path / "nonexistent"):
         result = runner.invoke(app, ["dump-vm", "--name", "ghost"])
         assert result.exit_code == 1
 
@@ -181,7 +181,7 @@ def test_dump_vm_config_file_missing(tmp_path: Path):
     mock_manager.get.return_value = mock_vm
 
     with patch("mvmctl.api.vms.get_vm_manager", return_value=mock_manager):
-        with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir):
+        with patch("mvmctl.cli.config.get_vm_dir_by_hash", return_value=vm_dir):
             result = runner.invoke(app, ["dump-vm", "--name", "myvm"])
             assert result.exit_code == 1
 
@@ -199,7 +199,7 @@ def test_dump_vm_invalid_json(tmp_path: Path):
     mock_manager.get.return_value = mock_vm
 
     with patch("mvmctl.api.vms.get_vm_manager", return_value=mock_manager):
-        with patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir):
+        with patch("mvmctl.cli.config.get_vm_dir_by_hash", return_value=vm_dir):
             result = runner.invoke(app, ["dump-vm", "--name", "myvm"])
             assert result.exit_code == 1
 

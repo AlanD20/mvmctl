@@ -137,10 +137,7 @@ def test_resolve_key_mvm_keys_dir_returns_private_key(tmp_path: Path, monkeypatc
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-    import importlib
-    import mvmctl.utils.fs as fs_mod
-
-    monkeypatch.setattr(fs_mod, "get_keys_dir", lambda: keys_dir)
+    monkeypatch.setattr("mvmctl.cli.ssh.get_keys_dir", lambda: keys_dir)
 
     result = _resolve_ssh_key_for_vm(None)
     assert result == private_key
@@ -157,9 +154,7 @@ def test_resolve_key_ssh_dir_fallback(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-    import mvmctl.utils.fs as fs_mod
-
-    monkeypatch.setattr(fs_mod, "get_keys_dir", lambda: cache_dir)
+    monkeypatch.setattr("mvmctl.cli.ssh.get_keys_dir", lambda: cache_dir)
 
     result = _resolve_ssh_key_for_vm(None)
     assert result == private_key

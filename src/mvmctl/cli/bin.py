@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import List, Optional
 
@@ -60,8 +61,6 @@ def bin_ls(
             present_binaries.append((entry.version, Path(entry.binary_path), entry.is_default))
 
     if json_output:
-        import json
-
         data = [
             {
                 "active": bv.is_active,

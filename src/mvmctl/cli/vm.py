@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional, Union
 
@@ -7,12 +8,15 @@ import typer
 if TYPE_CHECKING:
     from mvmctl.models.config import SystemDefaultsConfig
 
+from mvmctl.api.assets import get_binary_path
+from mvmctl.api.config import load_config
 from mvmctl.api.network import check_ip_available
 from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from mvmctl.api.vms import (
     create_vm,
     export_vm_config,
     get_vm_status_with_exit_code,
+    inspect_vm,
     list_vms,
     load_snapshot,
     pause_vm,
@@ -26,26 +30,34 @@ from mvmctl.api.vms import (
     start_vm,
     stop_vm,
 )
+from mvmctl.api.vms import (
+    get_vm_manager as _get_vm_manager,
+)
 from mvmctl.cli._helpers import build_mvm_defaults
 from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
     DEFAULT_CLOUD_INIT_SEED_PATH,
 )
-from mvmctl.exceptions import MVMError
+from mvmctl.exceptions import AssetNotFoundError, MVMError
 from mvmctl.models import CloudInitMode, VMInstance
 from mvmctl.utils.console import (
+    format_timestamp,
     get_state_marker,
     print_error,
     print_info,
+    print_inspect_header,
+    print_key_value,
+    print_section_header,
     print_success,
     print_table,
 )
 from mvmctl.utils.error_handler import handle_mvm_error
-from mvmctl.utils.fs import get_vm_dir_by_hash as get_vm_dir  # noqa: F401
-from mvmctl.utils.fs import get_vms_dir, is_file_missing  # noqa: F401
+from mvmctl.utils.fs import get_assets_dir, get_vms_dir, is_file_missing  # noqa: F401  # noqa: F401
+from mvmctl.utils.fs import get_vm_dir_by_hash as get_vm_dir
 from mvmctl.utils.process import is_process_running as is_vm_process_running
 from mvmctl.utils.time import human_readable_time
+from mvmctl.utils.validation import validate_entity_name
 
 # Sentinel for auto-generation mode
 USE_ISO_AUTO = "__use_iso_auto__"
@@ -82,16 +94,10 @@ def help_cmd(ctx: typer.Context) -> None:
 
 
 def _get_vm_defaults() -> "SystemDefaultsConfig":
-    from mvmctl.api.config import load_config
-    from mvmctl.utils.fs import get_assets_dir
-
     return load_config(get_assets_dir(), build_mvm_defaults())
 
 
 def _resolve_active_firecracker_bin() -> str:
-    from mvmctl.api.assets import get_binary_path
-    from mvmctl.exceptions import AssetNotFoundError
-
     try:
         return get_binary_path("firecracker")
     except AssetNotFoundError as e:
@@ -504,8 +510,6 @@ def rm(
         # Remove by name (prompts if multiple with same name):
         mvm vm rm --name runner1 --name runner2
     """
-    from mvmctl.api.vms import get_vm_manager as _get_vm_manager
-
     manager = _get_vm_manager()
     exit_code = 0
     targets: list[VMInstance] = []
@@ -647,8 +651,6 @@ def snapshot(
     state_out: Path = typer.Option(..., "--state-out", help="VM state output path"),
 ) -> None:
     """Snapshot VM memory and disk state. Requires --enable-api-socket."""
-    from mvmctl.utils.validation import validate_entity_name
-
     validate_entity_name(name, "VM")
     try:
         snapshot_vm(name=name, mem_out=mem_out, state_out=state_out)
@@ -665,8 +667,6 @@ def load(
     resume_after: bool = typer.Option(None, "--resume/--no-resume", help="Resume VM after loading"),
 ) -> None:
     """Load VM from snapshot. Requires --enable-api-socket."""
-    from mvmctl.utils.validation import validate_entity_name
-
     validate_entity_name(name, "VM")
     try:
         load_snapshot(name=name, mem_in=mem_in, state_in=state_in, resume_after=resume_after)
@@ -791,8 +791,6 @@ def inspect(
         mvm vm inspect myvm --json
         mvm vm inspect myvm --tree
     """
-    from mvmctl.api.vms import inspect_vm
-
     effective_selector = selector or name
     if not effective_selector:
         print_error("Error: Must provide VM selector via positional argument or --name")
@@ -812,13 +810,6 @@ def inspect(
 
 
 def _print_vm_details(info: dict[str, Any]) -> None:
-    from mvmctl.utils.console import (
-        format_timestamp,
-        print_inspect_header,
-        print_key_value,
-        print_section_header,
-    )
-
     name = info.get("name", "-")
     status = info.get("status", "-")
 
@@ -878,8 +869,6 @@ def _print_vm_details(info: dict[str, Any]) -> None:
 
 
 def _print_vm_details_tree(info: dict[str, Any]) -> None:
-    from datetime import datetime
-
     name = info.get("name", "-")
     status = info.get("status", "-")
 
@@ -961,8 +950,6 @@ def export_vm(
         mvm vm export --name myvm
         mvm vm export --name myvm --output /path/to/config.json
     """
-    from mvmctl.exceptions import MVMError
-
     effective_output = output or Path(f"{name}.json")
 
     try:

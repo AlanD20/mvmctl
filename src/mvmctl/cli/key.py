@@ -1,6 +1,9 @@
 """SSH key management commands."""
 
 import json
+import os
+from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 
 import typer
@@ -54,8 +57,6 @@ def ls(
     default_keys = get_default_keys()
 
     if json_output:
-        from dataclasses import asdict
-
         result = []
         for k in keys:
             d = asdict(k)
@@ -97,8 +98,6 @@ def add(
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing key"),
 ) -> None:
     """Import an existing public key into the cache."""
-    import os
-
     name = check_name_arg(ctx, name)
     validate_entity_name(name, "key")
     if public_key_path is None:
@@ -297,8 +296,6 @@ def inspect(
     if json_output:
         typer.echo(json.dumps(info, indent=2, default=str))
         return
-
-    from datetime import datetime
 
     added_formatted = datetime.fromisoformat(info["added_at"]).strftime("%Y/%m/%d %H:%M:%S")
     print_info(f"Key: {info['name']}")

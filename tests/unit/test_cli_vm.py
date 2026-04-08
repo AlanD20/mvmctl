@@ -61,7 +61,7 @@ def test_rm_vm_not_found(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_name.return_value = []
     mock_mgr.find_by_id_prefix.return_value = []
-    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("mvmctl.cli.vm._get_vm_manager", return_value=mock_mgr)
     mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
     result = runner.invoke(app, ["rm", "--name", "nonexistent"])
     assert result.exit_code == 1
@@ -581,7 +581,7 @@ def test_rm_no_targets(mocker: MockerFixture):
 
 def test_inspect_vm_command(mocker: MockerFixture):
     """Test mvm vm inspect command displays VM info."""
-    mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+    mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
     mock_inspect.return_value = {
         "name": "myvm",
         "id": "abc123" + "x" * 10,
@@ -615,7 +615,7 @@ def test_inspect_vm_command(mocker: MockerFixture):
 
 def test_inspect_vm_json_output(mocker: MockerFixture):
     """Test mvm vm inspect --json outputs valid JSON."""
-    mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+    mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
     mock_inspect.return_value = {
         "name": "myvm",
         "id": "abc123" + "x" * 10,
@@ -636,7 +636,7 @@ def test_inspect_vm_json_output(mocker: MockerFixture):
 
 def test_inspect_vm_not_found(mocker: MockerFixture):
     """Test inspect handles missing VM gracefully."""
-    mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+    mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
     mock_inspect.side_effect = MVMError("VM not found: missing-vm")
 
     result = runner.invoke(app, ["inspect", "--name", "missing-vm"])
@@ -887,7 +887,7 @@ class TestInspectCommand:
 
     def test_inspect_accepts_positional_selector(self, mocker: MockerFixture):
         """inspect command accepts VM name/ID as positional argument."""
-        mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+        mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
         mock_inspect.return_value = {
             "name": "myvm",
             "id": "a" * 64,
@@ -909,7 +909,7 @@ class TestInspectCommand:
 
     def test_inspect_accepts_name_option(self, mocker: MockerFixture):
         """inspect command still accepts --name option for backward compatibility."""
-        mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+        mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
         mock_inspect.return_value = {
             "name": "myvm",
             "id": "a" * 64,
@@ -931,7 +931,7 @@ class TestInspectCommand:
 
     def test_inspect_prefers_positional_over_option(self, mocker: MockerFixture):
         """inspect command prefers positional argument over --name option."""
-        mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+        mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
         mock_inspect.return_value = {
             "name": "positional-vm",
             "id": "a" * 16,
@@ -953,7 +953,7 @@ class TestInspectCommand:
 
     def test_inspect_requires_selector(self, mocker: MockerFixture):
         """inspect command requires either positional argument or --name option."""
-        mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+        mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
 
         result = runner.invoke(app, ["inspect"])
         assert result.exit_code == 1
@@ -962,7 +962,7 @@ class TestInspectCommand:
 
     def test_inspect_json_output(self, mocker: MockerFixture):
         """inspect command supports --json output."""
-        mock_inspect = mocker.patch("mvmctl.api.vms.inspect_vm")
+        mock_inspect = mocker.patch("mvmctl.cli.vm.inspect_vm")
         mock_inspect.return_value = {
             "name": "myvm",
             "id": "a" * 16,
@@ -1334,7 +1334,7 @@ def test_reboot_vm_api_error(mocker: MockerFixture):
 
 def test_export_vm_success(mocker: MockerFixture, tmp_path: Path):
     """export command creates JSON file with semantic refs."""
-    from mvmctl.models import VMExportConfig, VMExportComputeConfig, VMExportImageConfig
+    from mvmctl.models import VMExportComputeConfig, VMExportConfig, VMExportImageConfig
 
     mock_config = VMExportConfig(
         name="myvm",

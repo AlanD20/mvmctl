@@ -10,12 +10,13 @@ from mvmctl.api.config import (
     set_config_value,
     validate_config,
 )
+from mvmctl.api.vms import get_vm_manager
 from mvmctl.cli._helpers import build_mvm_defaults
 from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.error_handler import handle_mvm_error
-from mvmctl.utils.fs import get_assets_dir
+from mvmctl.utils.fs import get_assets_dir, get_vm_dir_by_hash
 
 app = typer.Typer(
     help="Configuration commands",
@@ -80,9 +81,6 @@ def dump_vm(
     name: str = typer.Option(..., "--name", help="VM name"),
 ) -> None:
     """Print the Firecracker JSON config for a VM."""
-    from mvmctl.api.vms import get_vm_manager
-    from mvmctl.utils.fs import get_vm_dir_by_hash
-
     manager = get_vm_manager()
     vm = manager.get(name)
     if vm is None:

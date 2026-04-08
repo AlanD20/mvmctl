@@ -1,6 +1,8 @@
 """Host configuration CLI commands."""
 
+import json
 import os
+import subprocess
 import sys
 
 import typer
@@ -21,6 +23,7 @@ from mvmctl.api.host import (
 from mvmctl.api.network import ensure_default_network, restore_networks
 from mvmctl.constants import PROJECT_GROUP
 from mvmctl.exceptions import HostError, MVMError
+from mvmctl.models.vm import VMStatus
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import chown_to_real_user, get_cache_dir
@@ -70,8 +73,6 @@ def _abort_if_vms_running(action: str) -> None:
     Args:
         action: Short description of the action being blocked (used in the error message).
     """
-    from mvmctl.models.vm import VMStatus
-
     manager = get_vm_manager()
     running = [v for v in manager.list_all() if v.status == VMStatus.RUNNING]
     if running:
@@ -116,8 +117,6 @@ def init_cmd() -> None:
             print_error("Root privileges required for: mvm host init")
             print_info("Run with sudo: sudo mvm host init")
             if typer.confirm("Run 'sudo mvm host init' now?", default=False):
-                import subprocess
-
                 if os.environ.get("MVM_SUDO_RESTART"):
                     print_error("Recursive sudo restart detected. Aborting to prevent lockout.")
                     print_info("Please run 'sudo mvm host init' manually.")
@@ -172,8 +171,6 @@ def ls_cmd(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show current host configuration state vs expected."""
-    import json
-
     kvm_ok = check_kvm_access()
     missing = check_required_binaries()
 
