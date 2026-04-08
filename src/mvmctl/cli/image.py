@@ -35,7 +35,7 @@ from mvmctl.exceptions import (
     RootPartitionDetectionError,
     TieDetectedError,
 )
-from mvmctl.models.image import ImageImportInput
+from mvmctl.models.image import ImageFetchInput, ImageImportInput
 from mvmctl.utils.console import (
     format_timestamp,
     get_combined_marker,
@@ -487,9 +487,13 @@ def image_fetch(
     # ── EXECUTE ─────────────────────────────────────────────────────────
     # Handle partition detection retry in CLI (user prompting stays in CLI)
     try:
-        result = fetch_image_and_register(
-            spec, images_dir, force=True, skip_optimization=skip_optimization
+        fetch_input = ImageFetchInput(
+            spec=spec,
+            output_dir=images_dir,
+            force=True,
+            skip_optimization=skip_optimization,
         )
+        result = fetch_image_and_register(fetch_input)
     except (RootPartitionDetectionError, TieDetectedError) as exc:
         if no_prompt:
             print_error(str(exc))
@@ -497,9 +501,14 @@ def image_fetch(
         tied = exc.tied_partitions if isinstance(exc, TieDetectedError) else None
         selected = _prompt_for_partition_selection(exc.partitions, tied_partitions=tied)
         print_info(f"Using user-selected partition: {selected}")
-        result = fetch_image_and_register(
-            spec, images_dir, force=True, partition=selected, skip_optimization=skip_optimization
+        fetch_input = ImageFetchInput(
+            spec=spec,
+            output_dir=images_dir,
+            force=True,
+            partition=selected,
+            skip_optimization=skip_optimization,
         )
+        result = fetch_image_and_register(fetch_input)
 
     if result is None:
         print_error(f"Failed to download image '{spec.id}'")
@@ -803,15 +812,17 @@ def image_import(
         id=image_id,
         name=name,
         source_path=source_path,
+        output_dir=images_dir,
         format=str(resolved_format),
         convert_to=convert_to,
         minimum_rootfs_size=size_mib,
         disabled_detectors=disabled_detectors,
+        force=force,
     )
 
     # Handle partition detection retry in CLI (user prompting stays in CLI)
     try:
-        result = import_image_and_register(spec, images_dir, force=force)
+        result = import_image_and_register(spec)
     except (RootPartitionDetectionError, TieDetectedError) as exc:
         if no_prompt:
             print_error(str(exc))
@@ -823,7 +834,8 @@ def image_import(
             disabled_detectors=disabled_detectors,
         )
         print_info(f"Using user-selected partition: {selected}")
-        result = import_image_and_register(spec, images_dir, force=force, partition=selected)
+        spec.partition = selected
+        result = import_image_and_register(spec)
     except ImageError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)
