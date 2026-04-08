@@ -500,7 +500,12 @@ def test_help_cmd():
     assert result.exit_code == 0
 
 
-@patch("mvmctl.cli.key.add_key")
+@patch(
+    "mvmctl.cli.key.add_key",
+    side_effect=MVMKeyError(
+        "File does not appear to be a public key: /tmp/mykey. Did you mean: /tmp/mykey.pub"
+    ),
+)
 def test_add_not_pub_extension_with_pub_sibling(mock_add, tmp_path):
     key_file = tmp_path / "mykey"
     key_file.write_text("private")
@@ -511,7 +516,12 @@ def test_add_not_pub_extension_with_pub_sibling(mock_add, tmp_path):
     assert ".pub" in result.output
 
 
-@patch("mvmctl.cli.key.add_key")
+@patch(
+    "mvmctl.cli.key.add_key",
+    side_effect=MVMKeyError(
+        "File does not appear to be a public key: /tmp/mykey_nopub. Public keys typically end in .pub"
+    ),
+)
 def test_add_not_pub_extension_no_pub_sibling(mock_add, tmp_path):
     key_file = tmp_path / "mykey_nopub"
     key_file.write_text("private")

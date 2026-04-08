@@ -9,6 +9,7 @@ from mvmctl.api.assets import get_binary_path
 from mvmctl.api.network import check_ip_available
 from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from mvmctl.api.vms import (
+    compute_vm_is_missing,
     create_vm,
     export_vm_config,
     get_vm_status_with_exit_code,
@@ -47,9 +48,6 @@ from mvmctl.utils.console import (
     print_table,
 )
 from mvmctl.utils.error_handler import handle_mvm_error
-from mvmctl.utils.fs import get_assets_dir, get_vms_dir, is_file_missing  # noqa: F401  # noqa: F401
-from mvmctl.utils.fs import get_vm_dir_by_hash as get_vm_dir
-from mvmctl.utils.process import is_process_running as is_vm_process_running
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import validate_entity_name
 
@@ -551,11 +549,7 @@ def ls_vms(
 
     rows = []
     for v in vms:
-        vm_dir = get_vm_dir(v.id) if v.id else None
-        dir_missing = is_file_missing(vm_dir)
-        process_running = is_vm_process_running(v.pid)
-        # VM is "missing" if directory missing OR (status says running but PID not running)
-        is_missing = dir_missing or (v.status.value == "running" and not process_running)
+        is_missing = compute_vm_is_missing(v)
         state_marker = get_state_marker(is_missing)
         status_str, _ = get_vm_status_with_exit_code(v)
         rows.append(

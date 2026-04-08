@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from mvmctl.core.key_manager import (
@@ -32,6 +33,7 @@ from mvmctl.core.key_manager import (
 from mvmctl.core.key_manager import (
     set_default_keys as _core_set_default_keys,
 )
+from mvmctl.exceptions import MVMKeyError
 
 __all__ = [
     "KeyInfo",
@@ -50,7 +52,39 @@ __all__ = [
 
 
 def add_key(name: str, pub_key_path: str | Path, overwrite: bool = False) -> KeyInfo:
-    """Add an existing SSH key to the registry."""
+    """Add an existing SSH key to the registry.
+
+    Validates the public key file path before importing:
+    - Checks file existence
+    - Checks .pub extension (with suggestion if .pub variant exists)
+    - Checks file readability
+
+    Raises:
+        MVMKeyError: If file doesn't exist, isn't readable, or lacks .pub extension.
+    """
+    path_obj = Path(pub_key_path)
+
+    # Validate file existence
+    if not path_obj.exists():
+        raise MVMKeyError(f"File not found: {pub_key_path}")
+
+    # Validate .pub extension (with suggestion logic)
+    if not str(pub_key_path).endswith(".pub"):
+        pub_path = Path(str(pub_key_path) + ".pub")
+        if pub_path.exists():
+            raise MVMKeyError(
+                f"File does not appear to be a public key: {pub_key_path}. Did you mean: {pub_path}"
+            )
+        else:
+            raise MVMKeyError(
+                f"File does not appear to be a public key: {pub_key_path}. "
+                "Public keys typically end in .pub"
+            )
+
+    # Validate file readability
+    if not os.access(path_obj, os.R_OK):
+        raise MVMKeyError(f"Cannot read file: {pub_key_path}")
+
     result = _core_add_key(name, pub_key_path, overwrite)
 
     from mvmctl.utils.audit import log_audit

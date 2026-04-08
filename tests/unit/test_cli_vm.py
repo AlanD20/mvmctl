@@ -655,10 +655,10 @@ def test_vm_ls_shows_x_mark_for_missing_directory(mocker: MockerFixture):
     # Mock list_vms to return the VM
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
 
-    # Mock get_vm_dir().exists() -> False
+    # Mock get_vm_dir_by_hash() in utils.fs to return a path that doesn't exist
     mock_path = mocker.MagicMock()
     mock_path.exists.return_value = False
-    mocker.patch("mvmctl.cli.vm.get_vm_dir", return_value=mock_path)
+    mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=mock_path)
 
     result = runner.invoke(app, ["ls"])
 
@@ -675,13 +675,13 @@ def test_vm_ls_shows_x_mark_for_dead_process(mocker: MockerFixture):
     # Mock list_vms to return the VM
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
 
-    # Mock get_vm_dir().exists() -> True (directory exists)
+    # Mock get_vm_dir_by_hash() in utils.fs to return a path that exists
     mock_path = mocker.MagicMock()
     mock_path.exists.return_value = True
-    mocker.patch("mvmctl.cli.vm.get_vm_dir", return_value=mock_path)
+    mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=mock_path)
 
-    # Mock os.kill(pid, 0) raises ProcessLookupError (process not running)
-    mocker.patch("os.kill", side_effect=ProcessLookupError())
+    # Mock is_process_running() to return False (process not running)
+    mocker.patch("mvmctl.utils.process.is_process_running", return_value=False)
 
     result = runner.invoke(app, ["ls"])
 
@@ -698,12 +698,15 @@ def test_vm_ls_no_x_mark_for_running_vm(mocker: MockerFixture):
     # Mock list_vms to return the VM
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
 
-    # Mock get_vm_dir().exists() -> True
+    # Mock get_vm_dir_by_hash() in utils.fs to return a path that exists
     mock_path = mocker.MagicMock()
     mock_path.exists.return_value = True
-    mocker.patch("mvmctl.cli.vm.get_vm_dir", return_value=mock_path)
+    mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=mock_path)
 
-    # Mock os.kill(pid, 0) succeeds (process running)
+    # Mock is_process_running() to return True (process running)
+    mocker.patch("mvmctl.utils.process.is_process_running", return_value=True)
+
+    # Mock os.kill() to succeed (process running) - used by get_vm_status_with_exit_code
     mocker.patch("os.kill", return_value=None)
 
     result = runner.invoke(app, ["ls"])
@@ -724,15 +727,13 @@ def test_vm_ls_shows_x_mark_for_missing_pid_file(mocker: MockerFixture):
     # Mock list_vms to return the VM
     mocker.patch("mvmctl.cli.vm.list_vms", return_value=[vm])
 
-    # Mock get_vm_dir() to return a path where pid file doesn't exist
-    mock_vm_dir = mocker.MagicMock()
-    mock_pid_file = mocker.MagicMock()
-    mock_pid_file.exists.return_value = False
-    mock_vm_dir.__truediv__ = lambda self, x: (
-        mock_pid_file if x == "firecracker.pid" else mocker.MagicMock()
-    )
-    mock_vm_dir.exists.return_value = True
-    mocker.patch("mvmctl.cli.vm.get_vm_dir", return_value=mock_vm_dir)
+    # Mock get_vm_dir_by_hash() in utils.fs to return a path that exists
+    mock_path = mocker.MagicMock()
+    mock_path.exists.return_value = True
+    mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=mock_path)
+
+    # Mock is_process_running() to return False (can't verify process)
+    mocker.patch("mvmctl.utils.process.is_process_running", return_value=False)
 
     result = runner.invoke(app, ["ls"])
 

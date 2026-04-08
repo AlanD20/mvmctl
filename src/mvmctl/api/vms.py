@@ -149,6 +149,7 @@ __all__ = [
     "read_console_output",
     "send_console_input",
     "export_vm_config",
+    "compute_vm_is_missing",
 ]
 
 
@@ -1969,6 +1970,30 @@ def _get_exit_code_from_sources(vm: VMInstance) -> int | None:
             pass
 
     return None
+
+
+def compute_vm_is_missing(vm: VMInstance) -> bool:
+    """Check if a VM's runtime state suggests it's missing from the filesystem.
+
+    A VM is considered "missing" if:
+    - The VM directory is missing from the filesystem
+    - OR the status says running but the PID is not actually running
+
+    Args:
+        vm: The VM instance to check.
+
+    Returns:
+        True if the VM appears to be missing, False otherwise.
+    """
+    from mvmctl.utils.fs import get_vm_dir_by_hash, is_file_missing
+    from mvmctl.utils.process import is_process_running
+
+    if not vm.id:
+        return False
+    vm_dir = get_vm_dir_by_hash(vm.id)
+    dir_missing = is_file_missing(vm_dir)
+    process_running = is_process_running(vm.pid) if vm.pid else False
+    return dir_missing or (vm.status.value == "running" and not process_running)
 
 
 def export_vm_config(name: str) -> "VMExportConfig":
