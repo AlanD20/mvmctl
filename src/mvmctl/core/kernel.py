@@ -28,7 +28,7 @@ from mvmctl.constants import (
     KERNEL_TYPE_OFFICIAL,
 )
 from mvmctl.exceptions import ChecksumMismatchError, KernelError, MVMError
-from mvmctl.models.kernel import KernelSpec
+from mvmctl.models.kernel import KernelFetchResult, KernelSpec
 from mvmctl.utils.progress import download_with_progress
 from mvmctl.utils.template import render_optional_template, render_template
 from mvmctl.utils.yaml import (
@@ -1003,7 +1003,7 @@ def download_firecracker_kernel(
     output_name: str | None = None,
     output_path: Path | None = None,
     kernel_spec: KernelSpec | None = None,
-) -> Path:
+) -> KernelFetchResult:
     from urllib.error import URLError
     from urllib.request import Request, urlopen
 
@@ -1055,7 +1055,14 @@ def download_firecracker_kernel(
 
     if resolved_output_path.exists():
         logger.info("Firecracker CI kernel already cached: %s", resolved_output_path)
-        return resolved_output_path
+        return KernelFetchResult(
+            path=resolved_output_path,
+            version=kernel_version,
+            arch=arch,
+            kernel_type=KERNEL_TYPE_FIRECRACKER,
+            warnings=[],
+            info_messages=[f"Firecracker kernel ready: {resolved_output_path}"],
+        )
 
     intentional_no_checksum = kernel_spec.sha256 is None and kernel_spec.sha256_url is None
 
@@ -1098,7 +1105,14 @@ def download_firecracker_kernel(
     resolved_output_path.chmod(CONST_FILE_PERMS_EXECUTABLE)
 
     logger.info("Firecracker CI kernel saved: %s", resolved_output_path)
-    return resolved_output_path
+    return KernelFetchResult(
+        path=resolved_output_path,
+        version=kernel_version,
+        arch=arch,
+        kernel_type=KERNEL_TYPE_FIRECRACKER,
+        warnings=[],
+        info_messages=[f"Firecracker kernel ready: {resolved_output_path}"],
+    )
 
 
 def resolve_kernel_path(kernel: str) -> Path:

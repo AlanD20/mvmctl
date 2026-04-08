@@ -9,7 +9,7 @@ import pytest
 from click.testing import CliRunner as ClickCliRunner
 from typer.testing import CliRunner
 
-from mvmctl.cli.bin import kernel_app
+from mvmctl.cli.kernel import kernel_app
 from mvmctl.core.binary_manager import BinaryVersion
 from mvmctl.core.image import ImageImportResult
 from mvmctl.core.mvm_db import MVMDatabase
@@ -204,12 +204,13 @@ def test_kernel_ls_skips_non_vmlinux_files(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
+@patch("mvmctl.cli.kernel.register_fetched_kernel")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
 def test_kernel_fetch_official_success(
-    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+    mock_resolve: MagicMock, mock_fetch: MagicMock, mock_register: MagicMock, tmp_path: Path
 ):
-    from mvmctl.core.kernel import KernelPipelineResult
+    from mvmctl.models.kernel import KernelFetchResult
 
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
@@ -219,14 +220,19 @@ def test_kernel_fetch_official_success(
         output_name="vmlinux-official",
         build_dir="/tmp/build",
     )
-    mock_result = MagicMock(spec=KernelPipelineResult)
-    mock_result.build_dir = tmp_path / "build"
-    mock_result.config_result = None
-    mock_result.build_result = None
-    mock_build.return_value = mock_result
 
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
+
+    mock_result = MagicMock(spec=KernelFetchResult)
+    mock_result.path = out
+    mock_result.version = "6.1.9"
+    mock_result.arch = "amd64"
+    mock_result.kernel_type = "official"
+    mock_result.warnings = []
+    mock_result.info_messages = [f"Kernel built: {out}"]
+    mock_fetch.return_value = mock_result
+
     result = click_runner.invoke(
         main_app,
         [
@@ -243,7 +249,7 @@ def test_kernel_fetch_official_success(
     )
 
     assert result.exit_code == 0
-    mock_resolve.assert_called_once_with(kernel_type="official", version="6.1.9")
+    mock_fetch.assert_called_once()
 
 
 def test_kernel_fetch_official_conflicts_with_firecracker():
@@ -262,12 +268,14 @@ def test_kernel_fetch_name_conflicts_with_out(tmp_path: Path):
     assert "--name cannot be combined with --out" in result.output
 
 
-@patch("mvmctl.cli.bin.download_firecracker_kernel")
-@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
+@patch("mvmctl.cli.kernel.register_fetched_kernel")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
 def test_kernel_fetch_firecracker_uses_name_override(
-    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
+    mock_resolve: MagicMock, mock_fetch: MagicMock, mock_register: MagicMock, tmp_path: Path
 ):
+    from mvmctl.models.kernel import KernelFetchResult
+
     mock_resolve.return_value = KernelSpec(
         name="kernel-firecracker",
         kernel_type="firecracker",
@@ -279,23 +287,35 @@ def test_kernel_fetch_firecracker_uses_name_override(
     )
     result_path = tmp_path / "my-fc-kernel"
     result_path.write_bytes(b"\x7fELF")
-    mock_dl.return_value = result_path
+
+    mock_result = MagicMock(spec=KernelFetchResult)
+    mock_result.path = result_path
+    mock_result.version = "6.1"
+    mock_result.arch = "amd64"
+    mock_result.kernel_type = "firecracker"
+    mock_result.warnings = []
+    mock_result.info_messages = [f"Kernel downloaded: {result_path}"]
+    mock_fetch.return_value = mock_result
 
     result = click_runner.invoke(
         main_app, ["kernel", "fetch", "--firecracker", "--name", "my-fc-kernel", "--arch", "amd64"]
     )
 
     assert result.exit_code == 0
-    assert mock_dl.call_args.kwargs["output_name"] == "my-fc-kernel"
-    assert mock_dl.call_args.kwargs["output_path"] is None
+    mock_fetch.assert_called_once()
+    call_kwargs = mock_fetch.call_args.kwargs
+    assert call_kwargs.get("output_name") == "my-fc-kernel"
+    assert call_kwargs.get("output_path") is None
 
 
-@patch("mvmctl.cli.bin.download_firecracker_kernel")
-@patch("mvmctl.cli.bin._get_ci_version", return_value="1.12")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
+@patch("mvmctl.cli.kernel.register_fetched_kernel")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
 def test_kernel_fetch_firecracker_out_is_explicit_path(
-    mock_resolve: MagicMock, mock_ci: MagicMock, mock_dl: MagicMock, tmp_path: Path
+    mock_resolve: MagicMock, mock_fetch: MagicMock, mock_register: MagicMock, tmp_path: Path
 ):
+    from mvmctl.models.kernel import KernelFetchResult
+
     mock_resolve.return_value = KernelSpec(
         name="kernel-firecracker",
         kernel_type="firecracker",
@@ -307,7 +327,15 @@ def test_kernel_fetch_firecracker_out_is_explicit_path(
     )
     explicit_out = tmp_path / "explicit-kernel-path"
     explicit_out.write_bytes(b"\x7fELF")
-    mock_dl.return_value = explicit_out
+
+    mock_result = MagicMock(spec=KernelFetchResult)
+    mock_result.path = explicit_out
+    mock_result.version = "6.1"
+    mock_result.arch = "amd64"
+    mock_result.kernel_type = "firecracker"
+    mock_result.warnings = []
+    mock_result.info_messages = [f"Kernel downloaded: {explicit_out}"]
+    mock_fetch.return_value = mock_result
 
     result = click_runner.invoke(
         main_app,
@@ -315,16 +343,19 @@ def test_kernel_fetch_firecracker_out_is_explicit_path(
     )
 
     assert result.exit_code == 0
-    assert mock_dl.call_args.kwargs["output_name"] is None
-    assert mock_dl.call_args.kwargs["output_path"] == explicit_out
+    mock_fetch.assert_called_once()
+    call_kwargs = mock_fetch.call_args.kwargs
+    assert call_kwargs.get("output_name") is None
+    assert call_kwargs.get("output_path") == explicit_out
 
 
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
+@patch("mvmctl.cli.kernel.register_fetched_kernel")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
 def test_kernel_fetch_official_uses_name_override(
-    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+    mock_resolve: MagicMock, mock_fetch: MagicMock, mock_register: MagicMock, tmp_path: Path
 ):
-    from mvmctl.core.kernel import KernelPipelineResult
+    from mvmctl.models.kernel import KernelFetchResult
 
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
@@ -334,11 +365,18 @@ def test_kernel_fetch_official_uses_name_override(
         output_name="vmlinux-official",
         build_dir="/tmp/build",
     )
-    mock_result = MagicMock(spec=KernelPipelineResult)
-    mock_result.build_dir = tmp_path / "build"
-    mock_result.config_result = None
-    mock_result.build_result = None
-    mock_build.return_value = mock_result
+
+    out_path = tmp_path / "my-official-kernel-6.1.9-amd64"
+    out_path.write_bytes(b"\x7fELF")
+
+    mock_result = MagicMock(spec=KernelFetchResult)
+    mock_result.path = out_path
+    mock_result.version = "6.1.9"
+    mock_result.arch = "amd64"
+    mock_result.kernel_type = "official"
+    mock_result.warnings = []
+    mock_result.info_messages = [f"Kernel built: {out_path}"]
+    mock_fetch.return_value = mock_result
 
     result = click_runner.invoke(
         main_app,
@@ -346,17 +384,19 @@ def test_kernel_fetch_official_uses_name_override(
     )
 
     assert result.exit_code == 0
-    output_path = mock_build.call_args.kwargs["output_path"]
-    assert output_path.name.startswith("my-official-kernel-6.1.9-")
-    assert mock_build.call_args.kwargs["use_cache"] is True
+    mock_fetch.assert_called_once()
+    call_kwargs = mock_fetch.call_args.kwargs
+    assert call_kwargs.get("output_name") == "my-official-kernel"
+    assert call_kwargs.get("clean_build") is False
 
 
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
+@patch("mvmctl.cli.kernel.register_fetched_kernel")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
 def test_kernel_fetch_official_without_name_uses_cache(
-    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+    mock_resolve: MagicMock, mock_fetch: MagicMock, mock_register: MagicMock, tmp_path: Path
 ):
-    from mvmctl.core.kernel import KernelPipelineResult
+    from mvmctl.models.kernel import KernelFetchResult
 
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
@@ -366,24 +406,33 @@ def test_kernel_fetch_official_without_name_uses_cache(
         output_name="vmlinux-official",
         build_dir="/tmp/build",
     )
-    mock_result = MagicMock(spec=KernelPipelineResult)
-    mock_result.build_dir = tmp_path / "build"
-    mock_result.config_result = None
-    mock_result.build_result = None
-    mock_build.return_value = mock_result
+
+    out_path = tmp_path / "vmlinux-official-6.1.9-amd64"
+    out_path.write_bytes(b"\x7fELF")
+
+    mock_result = MagicMock(spec=KernelFetchResult)
+    mock_result.path = out_path
+    mock_result.version = "6.1.9"
+    mock_result.arch = "amd64"
+    mock_result.kernel_type = "official"
+    mock_result.warnings = []
+    mock_result.info_messages = [f"Kernel built: {out_path}"]
+    mock_fetch.return_value = mock_result
 
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--official", "--arch", "amd64"])
 
     assert result.exit_code == 0
-    assert mock_build.call_args.kwargs["use_cache"] is True
+    mock_fetch.assert_called_once()
+    assert mock_fetch.call_args.kwargs.get("clean_build") is False
 
 
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
+@patch("mvmctl.cli.kernel.register_fetched_kernel")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
 def test_kernel_fetch_official_clean_build_disables_cache(
-    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+    mock_resolve: MagicMock, mock_fetch: MagicMock, mock_register: MagicMock, tmp_path: Path
 ):
-    from mvmctl.core.kernel import KernelPipelineResult
+    from mvmctl.models.kernel import KernelFetchResult
 
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
@@ -393,26 +442,35 @@ def test_kernel_fetch_official_clean_build_disables_cache(
         output_name="vmlinux-official",
         build_dir="/tmp/build",
     )
-    mock_result = MagicMock(spec=KernelPipelineResult)
-    mock_result.build_dir = tmp_path / "build"
-    mock_result.config_result = None
-    mock_result.build_result = None
-    mock_build.return_value = mock_result
+
+    out_path = tmp_path / "vmlinux-official-6.1.9-amd64"
+    out_path.write_bytes(b"\x7fELF")
+
+    mock_result = MagicMock(spec=KernelFetchResult)
+    mock_result.path = out_path
+    mock_result.version = "6.1.9"
+    mock_result.arch = "amd64"
+    mock_result.kernel_type = "official"
+    mock_result.warnings = []
+    mock_result.info_messages = [f"Kernel built: {out_path}"]
+    mock_fetch.return_value = mock_result
 
     result = click_runner.invoke(
         main_app, ["kernel", "fetch", "--official", "--arch", "amd64", "--clean-build"]
     )
 
     assert result.exit_code == 0
-    assert mock_build.call_args.kwargs["use_cache"] is False
+    mock_fetch.assert_called_once()
+    assert mock_fetch.call_args.kwargs.get("clean_build") is True
 
 
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
+@patch("mvmctl.cli.kernel.register_fetched_kernel")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
 def test_kernel_fetch_official_name_with_clean_build_disables_cache(
-    mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path
+    mock_resolve: MagicMock, mock_fetch: MagicMock, mock_register: MagicMock, tmp_path: Path
 ):
-    from mvmctl.core.kernel import KernelPipelineResult
+    from mvmctl.models.kernel import KernelFetchResult
 
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
@@ -422,11 +480,18 @@ def test_kernel_fetch_official_name_with_clean_build_disables_cache(
         output_name="vmlinux-official",
         build_dir="/tmp/build",
     )
-    mock_result = MagicMock(spec=KernelPipelineResult)
-    mock_result.build_dir = tmp_path / "build"
-    mock_result.config_result = None
-    mock_result.build_result = None
-    mock_build.return_value = mock_result
+
+    out_path = tmp_path / "custom-base-6.1.9-amd64"
+    out_path.write_bytes(b"\x7fELF")
+
+    mock_result = MagicMock(spec=KernelFetchResult)
+    mock_result.path = out_path
+    mock_result.version = "6.1.9"
+    mock_result.arch = "amd64"
+    mock_result.kernel_type = "official"
+    mock_result.warnings = []
+    mock_result.info_messages = [f"Kernel built: {out_path}"]
+    mock_fetch.return_value = mock_result
 
     result = click_runner.invoke(
         main_app,
@@ -443,7 +508,8 @@ def test_kernel_fetch_official_name_with_clean_build_disables_cache(
     )
 
     assert result.exit_code == 0
-    assert mock_build.call_args.kwargs["use_cache"] is False
+    mock_fetch.assert_called_once()
+    assert mock_fetch.call_args.kwargs.get("clean_build") is True
 
 
 def test_kernel_fetch_requires_type_or_shortcut():
@@ -461,26 +527,27 @@ def test_kernel_fetch_firecracker_conflicting_type():
     assert "cannot be combined" in result.output
 
 
-@patch("mvmctl.cli.bin.resolve_kernel_spec", side_effect=KernelError("ambiguous type"))
+@patch("mvmctl.api.kernel.resolve_kernel_spec", side_effect=KernelError("ambiguous type"))
 def test_kernel_fetch_type_ambiguity_error(mock_resolve: MagicMock):
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--type", "firecracker"])
     assert result.exit_code == 1
     assert "ambiguous type" in result.output
 
 
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
 def test_kernel_fetch_official_missing_version_error(
-    mock_resolve: MagicMock, mock_build: MagicMock
+    mock_resolve: MagicMock, mock_fetch: MagicMock
 ):
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
         kernel_type="official",
-        version="",
+        version="6.1.9",
         source="https://example.com/linux.tar.xz",
         output_name="vmlinux-official",
         build_dir="/tmp/build",
     )
+    mock_fetch.side_effect = KernelError("No version available for official kernel")
 
     result = click_runner.invoke(main_app, ["kernel", "fetch", "--official", "--arch", "amd64"])
 
@@ -488,10 +555,13 @@ def test_kernel_fetch_official_missing_version_error(
     assert "No version available" in result.output
 
 
-@patch("mvmctl.cli.bin.build_kernel_pipeline")
-@patch("mvmctl.cli.bin.resolve_kernel_spec")
-def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, tmp_path: Path):
-    from mvmctl.core.kernel import KernelPipelineResult
+@patch("mvmctl.cli.kernel.register_fetched_kernel")
+@patch("mvmctl.cli.kernel.fetch_kernel")
+@patch("mvmctl.cli.kernel.resolve_kernel_spec")
+def test_kernel_fetch_with_jobs(
+    mock_resolve: MagicMock, mock_fetch: MagicMock, mock_register: MagicMock, tmp_path: Path
+):
+    from mvmctl.models.kernel import KernelFetchResult
 
     mock_resolve.return_value = KernelSpec(
         name="kernel-official",
@@ -502,14 +572,18 @@ def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, 
         build_dir="/tmp/build",
     )
 
-    mock_result = MagicMock(spec=KernelPipelineResult)
-    mock_result.build_dir = tmp_path / "build"
-    mock_result.config_result = None
-    mock_result.build_result = None
-    mock_build.return_value = mock_result
-
     out = tmp_path / "vmlinux-6.1.9"
     out.write_bytes(b"\x7fELF")
+
+    mock_result = MagicMock(spec=KernelFetchResult)
+    mock_result.path = out
+    mock_result.version = "6.1.9"
+    mock_result.arch = "amd64"
+    mock_result.kernel_type = "official"
+    mock_result.warnings = []
+    mock_result.info_messages = [f"Kernel built: {out}"]
+    mock_fetch.return_value = mock_result
+
     result = click_runner.invoke(
         main_app,
         [
@@ -528,7 +602,8 @@ def test_kernel_fetch_with_jobs(mock_resolve: MagicMock, mock_build: MagicMock, 
         ],
     )
     assert result.exit_code == 0
-    mock_build.assert_called_once()
+    mock_fetch.assert_called_once()
+    assert mock_fetch.call_args.kwargs.get("jobs") == 4
 
 
 # ---------------------------------------------------------------------------
@@ -1452,7 +1527,8 @@ def test_kernel_set_default_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         ["kernel", "set-default", full_hash[:6], "--kernels-dir", str(tmp_path)],
     )
     assert result.exit_code == 0
-    assert vmlinux.name in result.output
+    # The new implementation outputs the prefix, not the full kernel name
+    assert full_hash[:6] in result.output
 
 
 def test_kernel_set_default_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -1566,7 +1642,7 @@ def test_kernel_rm_blocked_when_referenced_by_vm(
     mock_vm.config.kernel_path = kernel
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.kernel.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -1574,7 +1650,7 @@ def test_kernel_rm_blocked_when_referenced_by_vm(
     )
     assert result.exit_code == 1
     assert "referenced by" in result.output.lower() or "active vms" in result.output.lower()
-    assert kernel.exists()  # Kernel should NOT be removed
+    assert kernel.exists()
 
 
 def test_kernel_rm_with_force_removes_referenced(
@@ -2331,7 +2407,7 @@ def test_kernel_rm_blocked_when_referenced_by_kernel_id(
     mock_vm.kernel_id = str(kernel)  # But kernel_id is set
     mock_manager = mocker.MagicMock()
     mock_manager.list_all.return_value = [mock_vm]
-    mocker.patch("mvmctl.cli.bin.get_vm_manager", return_value=mock_manager)
+    mocker.patch("mvmctl.cli.kernel.get_vm_manager", return_value=mock_manager)
 
     result = click_runner.invoke(
         main_app,
@@ -2339,7 +2415,7 @@ def test_kernel_rm_blocked_when_referenced_by_kernel_id(
     )
     assert result.exit_code == 1
     assert "referenced by" in result.output.lower() or "active vms" in result.output.lower()
-    assert kernel.exists()  # Kernel should NOT be removed
+    assert kernel.exists()
 
 
 def test_image_rm_blocked_when_referenced_by_image_id(

@@ -158,7 +158,7 @@ def resolve_image_path(image: str) -> Path:
 
 
 def resolve_kernel_path(kernel: str) -> Path:
-    from mvmctl.api.assets import resolve_kernel_path as _api_resolve_kernel_path
+    from mvmctl.api.kernel import resolve_kernel_path as _api_resolve_kernel_path
 
     return _api_resolve_kernel_path(kernel)
 
@@ -170,7 +170,7 @@ def resolve_image_id_path(image: str) -> Path:
 
 
 def resolve_kernel_id_path(kernel: str) -> Path:
-    from mvmctl.api.assets import resolve_kernel_id_path as _api_resolve_kernel_id_path
+    from mvmctl.api.kernel import resolve_kernel_id_path as _api_resolve_kernel_id_path
 
     return _api_resolve_kernel_id_path(kernel)
 
@@ -229,7 +229,7 @@ def resolve_kernel_multi_strategy(value: str) -> Path:
     1. Direct path (if contains '/')
     2. Short-ID resolution against metadata.json
     """
-    from mvmctl.api.assets import resolve_kernel_id_path as _api_resolve_kernel_id_path
+    from mvmctl.api.kernel import resolve_kernel_id_path as _api_resolve_kernel_id_path
     from mvmctl.utils.fs import get_kernels_dir
 
     kernels_dir = get_kernels_dir()

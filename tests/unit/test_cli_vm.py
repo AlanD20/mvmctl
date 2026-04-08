@@ -874,7 +874,7 @@ def test_resolve_kernel_id_prefix(mocker: MockerFixture, tmp_path: Path):
     # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "kernels" / "abc123"
     mocker.patch(
-        "mvmctl.api.assets.resolve_kernel_id_path",
+        "mvmctl.api.kernel.resolve_kernel_id_path",
         return_value=mock_path,
     )
 

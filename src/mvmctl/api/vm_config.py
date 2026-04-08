@@ -150,11 +150,8 @@ def _prompt_missing_assets(
 ) -> None:
     import click
 
-    from mvmctl.api.assets import (
-        download_firecracker_kernel,
-        fetch_binary,
-        fetch_image,
-    )
+    from mvmctl.api.assets import fetch_binary, fetch_image
+    from mvmctl.api.kernel import download_firecracker_kernel
 
     if not missing:
         return

@@ -7,9 +7,9 @@ from mvmctl.api.assets import (
     AssetInfo,
     fetch_binary,
     fetch_image,
-    list_kernels,
     list_local_versions,
 )
+from mvmctl.api.kernel import list_kernels
 
 
 def test_asset_info_typed_dict():
@@ -86,9 +86,6 @@ class TestListLocalVersions:
 
 class TestListKernels:
     def test_list_kernels(self, tmp_path: Path):
-        with patch("mvmctl.api.assets.get_kernels_dir") as mock_get_dir:
-            mock_get_dir.return_value = tmp_path
+        result = list_kernels(kernels_dir=tmp_path)
 
-            result = list_kernels(kernels_dir=tmp_path)
-
-            assert isinstance(result, list)
+        assert isinstance(result, list)

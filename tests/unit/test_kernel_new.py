@@ -4,9 +4,10 @@ from urllib.error import URLError
 
 import pytest
 
-from mvmctl.api.assets import (
+from mvmctl.api.kernel import (
     get_default_kernel_path,
     list_kernels,
+    register_fetched_kernel,
     save_kernel_metadata,
     set_default_kernel,
 )
@@ -548,7 +549,7 @@ def test_download_firecracker_kernel_output_path_is_explicit(
         output_path=explicit_out,
     )
 
-    assert result == explicit_out
+    assert result.path == explicit_out
 
 
 @patch("mvmctl.core.kernel.download_file")

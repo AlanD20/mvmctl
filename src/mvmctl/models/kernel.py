@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -49,6 +50,30 @@ class KernelRecord:
             "created_at": self.created_at,
             "last_modified": self.updated_at,
         }
+
+
+@dataclass
+class KernelFetchResult:
+    """Unified result from kernel fetch/build operations.
+
+    This dataclass provides a consistent return type for both Firecracker
+    download and official kernel build paths, eliminating the need for
+    the caller to parse filenames or handle nested result structures.
+    """
+
+    path: Path
+    version: str
+    arch: str
+    kernel_type: str
+    warnings: list[str] = field(default_factory=list)
+    info_messages: list[str] = field(default_factory=list)
+
+    @property
+    def name(self) -> str:
+        return self.path.name
+
+    def exists(self) -> bool:
+        return self.path.exists()
 
 
 @dataclass

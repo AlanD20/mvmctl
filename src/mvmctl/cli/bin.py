@@ -10,27 +10,20 @@ import typer
 from mvmctl.api.assets import (
     BinaryVersion,
     ImageImportSpec,
-    build_kernel_pipeline,
-    download_firecracker_kernel,
     fetch_binary,
     fetch_image,
     import_image,
-    list_kernels,
     list_local_versions,
     list_remote_versions,
     load_images_config,
     remove_version,
-    resolve_kernel_spec,
     set_active_version,
-    set_default_kernel,
 )
 from mvmctl.api.metadata import (
     find_images_by_id_prefix,
-    find_kernels_by_id_prefix,
     get_image_entry,
     list_image_entries,
     remove_image_entry,
-    remove_kernel_entry,
     set_default_image_by_os_slug,
     set_default_image_entry,
     update_image_entry,
@@ -41,15 +34,12 @@ from mvmctl.constants import (
     DEFAULT_IMAGE_ARCH,
     DEFAULT_IMAGE_IMPORT_FORMAT,
     IMAGE_IMPORT_FORMAT_MAP,
-    KERNEL_TYPE_FIRECRACKER,
-    KERNEL_TYPE_OFFICIAL,
     SUPPORTED_IMAGE_EXTENSIONS,
 )
 from mvmctl.exceptions import (
     AssetNotFoundError,
     BinaryError,
     ImageError,
-    KernelError,
     RootPartitionDetectionError,
     TieDetectedError,
 )
@@ -71,7 +61,6 @@ from mvmctl.utils.fs import (
     get_cache_dir,
     get_file_size,
     get_images_dir,
-    get_kernels_dir,
     is_file_missing,
 )
 from mvmctl.utils.full_hash import generate_full_hash_image, shorten_hash
@@ -399,411 +388,6 @@ bin_app = typer.Typer(
     rich_markup_mode=None,
     add_completion=False,
 )
-
-
-@kernel_app.callback(invoke_without_command=True)
-def kernel_callback(ctx: typer.Context) -> None:
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-
-
-@image_app.callback(invoke_without_command=True)
-def image_callback(ctx: typer.Context) -> None:
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-
-
-@bin_app.callback(invoke_without_command=True)
-def bin_callback(ctx: typer.Context) -> None:
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
-
-
-@kernel_app.command(name="ls")
-def kernel_ls(
-    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
-    kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
-    firecracker_only: bool = typer.Option(
-        False, "--firecracker", help="Show only firecracker kernels"
-    ),
-    official_only: bool = typer.Option(
-        False, "--official", help="Show only official/upstream kernels"
-    ),
-) -> None:
-    """List cached kernels (both Firecracker CI and official upstream)."""
-    kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
-    kernels_dir.mkdir(parents=True, exist_ok=True)
-    kernels = list_kernels(kernels_dir)
-
-    if firecracker_only:
-        kernels = [k for k in kernels if k.get("type") == KERNEL_TYPE_FIRECRACKER]
-    elif official_only:
-        kernels = [k for k in kernels if k.get("type") == KERNEL_TYPE_OFFICIAL]
-
-    if json_output:
-        typer.echo(json.dumps(kernels, indent=2))
-        return
-
-    if not kernels:
-        from mvmctl.utils.console import print_info
-
-        print_info("No kernels found. Use 'mvm kernel fetch --type firecracker' to download one.")
-
-    rows: list[list[str]] = []
-    for k in kernels:
-        is_default = k.get("is_default") == "true"
-        last_modified_display = human_readable_time(k.get("last_modified", "-"))
-        path_str = k.get("path", "")
-        path = kernels_dir / path_str if path_str else None
-        is_missing = is_file_missing(path)
-        display_id = get_combined_marker(is_default, is_missing) + shorten_hash(k.get("id", ""), 12)
-        size = path.stat().st_size if path and path.exists() else 0
-        size_str = format_bytes_human_readable(size) if size > 0 else "-"
-        rows.append(
-            [
-                display_id,
-                k.get("name", "-"),
-                k.get("version", ""),
-                k.get("arch", "-"),
-                k.get("type", ""),
-                last_modified_display,
-                size_str,
-            ]
-        )
-    print_table(
-        columns=["ID", "Name", "Version", "Arch", "Type", "Last Modified", "Size"],
-        rows=rows,
-    )
-
-
-def _get_ci_version() -> str:
-    from mvmctl.api.config import get_firecracker_config
-
-    config = get_firecracker_config()
-    ci_version = config.get("ci_version", "")
-    if not ci_version:
-        from mvmctl.exceptions import AssetNotFoundError
-
-        raise AssetNotFoundError(
-            "No CI version found for firecracker. "
-            "Fetch a binary first with: mvm bin fetch <version>"
-        )
-    return ci_version
-
-
-def _fetch_firecracker_kernel(
-    spec: Any,
-    kernels_dir: Path,
-    arch: str | None,
-    name: str | None,
-    out: Path | None,
-) -> Path:
-    if arch is None:
-        print_error(
-            f"No architecture specified for kernel spec '{spec.name}'. Provide --arch explicitly."
-        )
-        raise typer.Exit(code=1)
-
-    ci_version = _get_ci_version()
-    try:
-        return download_firecracker_kernel(
-            ci_version=ci_version,
-            arch=arch,
-            kernels_dir=kernels_dir,
-            output_name=name,
-            output_path=out,
-            kernel_spec=spec,
-        )
-    except KernelError as exc:
-        print_error(f"Kernel fetch failed: {exc}")
-        raise typer.Exit(code=1) from exc
-
-
-def _build_official_kernel(
-    spec: Any,
-    kernels_dir: Path,
-    out: Path | None,
-    name: str | None,
-    arch: str | None,
-    jobs: int | None,
-    keep_build_dir: bool,
-    clean_build: bool,
-    kernel_config: Path | None,
-) -> Path:
-    """Build an official upstream kernel.
-
-    Args:
-        spec: The resolved KernelSpec for the official kernel.
-        kernels_dir: The kernels cache directory.
-        out: Explicit --out path.
-        name: --name override for the filename base.
-        arch: Architecture string (required for official kernels).
-        jobs: Parallel build jobs.
-        keep_build_dir: Whether to retain the build directory.
-        clean_build: Whether to skip the build cache.
-        kernel_config: Optional path to a custom .config file.
-
-    Returns:
-        Path to the built kernel file.
-
-    Raises:
-        typer.Exit: With code 1 on build failure or missing required inputs.
-    """
-    # Validate required inputs — no silent fallbacks
-    if not spec.version:
-        print_error(
-            f"No version available for kernel spec '{spec.name}'. Provide --version explicitly."
-        )
-        raise typer.Exit(code=1)
-
-    if arch is None:
-        print_error(
-            f"No architecture specified for kernel spec '{spec.name}'. Provide --arch explicitly."
-        )
-        raise typer.Exit(code=1)
-
-    if kernel_config and not kernel_config.exists():
-        print_error(f"Kernel config file not found: {kernel_config}")
-        raise typer.Exit(code=1)
-
-    output_path = _compute_official_output_path(
-        kernels_dir=kernels_dir,
-        out=out,
-        name=name,
-        spec_version=spec.version,
-        spec_output_name=spec.output_name,
-        arch=arch,
-    )
-
-    try:
-        pipeline_result = build_kernel_pipeline(
-            version=spec.version,
-            source_url=spec.source,
-            output_path=output_path,
-            build_dir=None,
-            jobs=jobs,
-            keep_build_dir=keep_build_dir,
-            user_config_path=kernel_config,
-            arch=arch,
-            kernel_spec=spec,
-            use_cache=not clean_build,
-        )
-    except KernelError as exc:
-        print_error(f"Kernel build failed: {exc}")
-        raise typer.Exit(code=1) from exc
-
-    _print_pipeline_results(pipeline_result)
-
-    if keep_build_dir:
-        print_info(f"Build directory kept at: {pipeline_result.build_dir}")
-
-    return output_path
-
-
-@kernel_app.command(name="fetch")
-def kernel_fetch(
-    kernel_type: Optional[str] = typer.Option(
-        None, "--type", help="Kernel type from kernels.yaml (e.g. firecracker, official)"
-    ),
-    firecracker: bool = typer.Option(
-        False, "--firecracker", help="Shortcut for --type firecracker"
-    ),
-    official: bool = typer.Option(False, "--official", help="Shortcut for --type official"),
-    version: Optional[str] = typer.Option(
-        None,
-        "--version",
-        help="Kernel spec version from kernels.yaml (required if multiple specs share the same type)",
-    ),
-    arch: Optional[str] = typer.Option(None, "--arch", help="Architecture"),
-    out: Optional[Path] = typer.Option(None, "--out", help="Output path/name"),
-    name: Optional[str] = typer.Option(
-        None,
-        "--name",
-        help="Override output filename only (placed in kernels directory unless --out is used)",
-    ),
-    jobs: Optional[int] = typer.Option(
-        None, "--jobs", "-j", help="Parallel build jobs (official only)"
-    ),
-    keep_build_dir: bool = typer.Option(
-        False, "--keep-build-dir", help="Keep build directory after build"
-    ),
-    clean_build: bool = typer.Option(
-        False,
-        "--clean-build",
-        help="Skip kernel build cache and force a clean build",
-    ),
-    kernel_config: Optional[Path] = typer.Option(
-        None, "--kernel-config", help="Path to custom kernel .config file"
-    ),
-    set_default: bool = typer.Option(False, "--set-default", help="Set this kernel as default"),
-) -> None:
-    # ── SETUP ──────────────────────────────────────────────────────────
-    kernels_dir = get_kernels_dir()
-    kernels_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── VALIDATE ───────────────────────────────────────────────────────
-    if name is not None and out is not None:
-        print_error("--name cannot be combined with --out")
-        raise typer.Exit(code=1)
-
-    if firecracker and official:
-        print_error("--firecracker cannot be combined with --official")
-        raise typer.Exit(code=1)
-
-    if firecracker:
-        if kernel_type is not None and kernel_type != KERNEL_TYPE_FIRECRACKER:
-            print_error("--firecracker cannot be combined with a different --type value")
-            raise typer.Exit(code=1)
-        resolved_type = KERNEL_TYPE_FIRECRACKER
-    elif official:
-        if kernel_type is not None and kernel_type != KERNEL_TYPE_OFFICIAL:
-            print_error("--official cannot be combined with a different --type value")
-            raise typer.Exit(code=1)
-        resolved_type = KERNEL_TYPE_OFFICIAL
-    elif kernel_type is None:
-        print_error("Provide --type <kernel-type> or use --firecracker/--official")
-        raise typer.Exit(code=1)
-    else:
-        resolved_type = kernel_type
-
-    try:
-        spec = resolve_kernel_spec(kernel_type=resolved_type, version=version)
-    except KernelError as exc:
-        print_error(str(exc))
-        raise typer.Exit(code=1) from exc
-
-    if arch is None:
-        arch = DEFAULT_IMAGE_ARCH
-
-    # ── EXECUTE ────────────────────────────────────────────────────────
-    if spec.kernel_type == KERNEL_TYPE_FIRECRACKER:
-        result = _fetch_firecracker_kernel(spec, kernels_dir, arch, name, out)
-        print_success(f"Firecracker kernel ready: {result}")
-
-    elif spec.kernel_type == KERNEL_TYPE_OFFICIAL:
-        result = _build_official_kernel(
-            spec=spec,
-            kernels_dir=kernels_dir,
-            out=out,
-            name=name,
-            arch=arch,
-            jobs=jobs,
-            keep_build_dir=keep_build_dir,
-            clean_build=clean_build,
-            kernel_config=kernel_config,
-        )
-        print_success(f"Kernel built: {result}")
-
-    else:
-        print_error(f"Unsupported kernel type in spec '{spec.name}': {spec.kernel_type!r}")
-        raise typer.Exit(code=1)
-
-    # ── FINALIZE ───────────────────────────────────────────────────────
-    if set_default:
-        set_default_kernel(kernels_dir, result.name)
-        print_success(f"Default kernel set to: {result.name}")
-
-    raise typer.Exit(code=0)
-
-
-@kernel_app.command(name="set-default")
-def kernel_set_default(
-    prefix: str = typer.Argument(..., help="Kernel ID prefix to set as default"),
-    kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
-) -> None:
-    """Set a kernel as the default for VM creation."""
-    kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
-    cache_dir = get_cache_dir()
-
-    match = resolve_single_by_id_prefix(prefix, find_kernels_by_id_prefix, cache_dir, "kernel")
-    if match is None:
-        raise typer.Exit(code=1)
-
-    _, meta = match
-    path_str = str(meta.get("path", ""))
-    if not path_str or not (kernels_dir / path_str).exists():
-        print_error(f"Kernel file not found for ID '{prefix}'")
-        raise typer.Exit(code=1)
-
-    try:
-        set_default_kernel(kernels_dir, path_str)
-    except KernelError as exc:
-        print_error(str(exc))
-        raise typer.Exit(code=1) from exc
-    print_success(f"Default kernel set to: {path_str}")
-
-
-@kernel_app.command(name="rm")
-def kernel_rm(
-    prefixes: Optional[List[str]] = typer.Argument(None, help="Kernel ID prefixes to remove"),
-    kernels_dir: Optional[Path] = typer.Option(None, "--kernels-dir", help="Kernels directory"),
-    force: bool = typer.Option(False, "--force", "-f", help="Remove even if referenced by VMs"),
-) -> None:
-    """Remove cached kernels by ID prefix.
-
-    Examples:
-        mvm kernel rm abc123
-        mvm kernel rm abc123 def456
-    """
-    kernels_dir = kernels_dir if kernels_dir is not None else get_kernels_dir()
-    effective_ids: list[str] = list(prefixes) if prefixes else []
-    if not effective_ids:
-        print_error("Provide at least one kernel ID prefix")
-        raise typer.Exit(code=1)
-
-    cache_dir = get_cache_dir()
-    exit_code = 0
-
-    for prefix in effective_ids:
-        match = resolve_single_by_id_prefix(prefix, find_kernels_by_id_prefix, cache_dir, "kernel")
-        if match is None:
-            if not find_kernels_by_id_prefix(cache_dir, prefix):
-                print_error(f"No kernel found with ID prefix '{prefix}'")
-            else:
-                print_error(
-                    f"Ambiguous ID prefix '{prefix}' matches {len(find_kernels_by_id_prefix(cache_dir, prefix))} kernels — use more characters"
-                )
-            exit_code = 1
-            continue
-
-        full_id, meta = match
-        path_str = str(meta.get("path", ""))
-
-        path: Path | None = kernels_dir / path_str if path_str else None
-        if path is None or not path.exists():
-            print_error(
-                f"Kernel file not found for ID '{prefix}' (metadata exists but file missing)"
-            )
-            remove_kernel_entry(cache_dir, full_id)
-            exit_code = 1
-            continue
-
-        # Check if kernel is referenced by any VMs
-        referencing_vms = _get_vms_using_kernel(path)
-        if referencing_vms and not force:
-            print_warning(
-                f"Kernel '{prefix}' is referenced by active VMs: {', '.join(referencing_vms)}"
-            )
-            print_info("Use --force to remove anyway (this may break those VMs)")
-            exit_code = 1
-            continue
-
-        path.unlink()
-
-        version = str(meta.get("version", ""))
-        if version and version != "-":
-            for stale in cache_dir.glob(f"kernel-cache-{version}-*.vmlinux"):
-                stale.unlink(missing_ok=True)
-            for stale in cache_dir.glob(f"kernel-cache-{version}-*.marker"):
-                stale.unlink(missing_ok=True)
-
-        remove_kernel_entry(cache_dir, full_id)
-        print_success(f"Removed: {path_str}")
-
-    raise typer.Exit(code=exit_code)
 
 
 def _load_image_meta(image_id: str) -> dict[str, str]:

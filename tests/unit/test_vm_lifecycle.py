@@ -5,7 +5,7 @@ import pytest
 
 from mvmctl.api.assets import resolve_image_fs_type as _resolve_image_fs_type
 from mvmctl.api.assets import resolve_image_path as _resolve_image_path
-from mvmctl.api.assets import resolve_kernel_path as _resolve_kernel_path
+from mvmctl.api.kernel import resolve_kernel_path as _resolve_kernel_path
 from mvmctl.api.vms import (
     create_vm,
     load_snapshot,
