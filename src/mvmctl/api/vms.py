@@ -905,6 +905,15 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
         resolved_image_fs_uuid = image_fs_uuid or _resolve_image_fs_uuid(image)
         resolved_image_fs_type = image_fs_type or _resolve_image_fs_type(image)
         resolved_image_hash = image_hash
+        if resolved_image_hash is None and resolved_image_path.suffix == ".zst":
+            cache_dir = get_cache_dir()
+            all_entries = list_image_entries(cache_dir)
+            for img_id, meta in all_entries.items():
+                if meta.get("path") == resolved_image_path.name:
+                    resolved_image_hash = img_id
+                    break
+            if resolved_image_hash is None:
+                resolved_image_hash = resolved_image_path.stem
 
     vm_dir: Path | None = None
     resources_created = {
