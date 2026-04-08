@@ -4,6 +4,7 @@ from typing import Optional
 
 import typer
 
+from mvmctl.api.config import load_config
 from mvmctl.api.vms import get_vm_manager
 from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
@@ -23,6 +24,7 @@ from mvmctl.constants import (
 from mvmctl.exceptions import MVMError
 from mvmctl.models.config import SystemDefaultsConfig
 from mvmctl.utils.console import print_error
+from mvmctl.utils.fs import get_assets_dir
 from mvmctl.utils.validation import is_ip_address, validate_entity_name
 
 
@@ -113,6 +115,15 @@ def resolve_ssh_target(
             return vm_id
 
     raise MVMError("Provide either a VM identifier, --name, or --ip")
+
+
+def get_vm_defaults() -> "SystemDefaultsConfig":
+    """Return the resolved VM defaults from config.json + constants.
+
+    Used by vm.py and ssh.py to resolve constants-backed defaults
+    (vcpus, mem, ssh_user, etc.) at runtime.
+    """
+    return load_config(get_assets_dir(), build_mvm_defaults())
 
 
 def build_mvm_defaults() -> SystemDefaultsConfig:

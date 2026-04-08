@@ -1,15 +1,11 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import typer
 
-if TYPE_CHECKING:
-    from mvmctl.models.config import SystemDefaultsConfig
-
 from mvmctl.api.assets import get_binary_path
-from mvmctl.api.config import load_config
 from mvmctl.api.network import check_ip_available
 from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from mvmctl.api.vms import (
@@ -33,7 +29,7 @@ from mvmctl.api.vms import (
 from mvmctl.api.vms import (
     get_vm_manager as _get_vm_manager,
 )
-from mvmctl.cli._helpers import build_mvm_defaults
+from mvmctl.cli._helpers import get_vm_defaults
 from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
     DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS,
@@ -91,10 +87,6 @@ def help_cmd(ctx: typer.Context) -> None:
     """Show help for the vm command group."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
     raise typer.Exit()
-
-
-def _get_vm_defaults() -> "SystemDefaultsConfig":
-    return load_config(get_assets_dir(), build_mvm_defaults())
 
 
 def _resolve_active_firecracker_bin() -> str:
@@ -277,7 +269,7 @@ def create(
         enable_pci = merged.firecracker.enable_pci
         firecracker_bin = merged.binary.name
 
-    _defaults = _get_vm_defaults()
+    _defaults = get_vm_defaults()
     effective_vcpus: int = vcpus if vcpus is not None else _defaults.vcpu_count
     effective_mem: int = mem if mem is not None else _defaults.mem_size_mib
     effective_user: str = user if user is not None else _defaults.ssh_user

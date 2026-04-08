@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import typer
 
-from mvmctl.api.config import load_config
 from mvmctl.api.vms import ssh_vm
-from mvmctl.cli._helpers import build_mvm_defaults, resolve_ssh_target
+from mvmctl.cli._helpers import get_vm_defaults, resolve_ssh_target
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error
-from mvmctl.utils.fs import get_assets_dir, get_keys_dir
-
-if TYPE_CHECKING:
-    from mvmctl.models.config import SystemDefaultsConfig
+from mvmctl.utils.fs import get_keys_dir
 
 app = typer.Typer(
     help="VM SSH access",
@@ -63,10 +59,6 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
     return None
 
 
-def _get_vm_defaults() -> "SystemDefaultsConfig":
-    return load_config(get_assets_dir(), build_mvm_defaults())
-
-
 @app.command()
 def ssh(
     vm_id: str = typer.Argument(None, help="VM name, ID prefix, or IP address"),
@@ -88,7 +80,7 @@ def ssh(
     try:
         target = resolve_ssh_target(vm_id, name, ip)
         resolved_key = _resolve_ssh_key_for_vm(key)
-        effective_user = user if user is not None else _get_vm_defaults().ssh_user
+        effective_user = user if user is not None else get_vm_defaults().ssh_user
         exit_code = ssh_vm(name=target, user=effective_user, key=resolved_key, cmd=cmd)
         raise typer.Exit(code=exit_code)
     except MVMError as e:
