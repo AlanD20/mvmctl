@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -275,6 +276,66 @@ def resolve_vm_selector(selector: str) -> str:
         raise MVMError(f"Ambiguous ID prefix '{selector}' matches {len(matches)} VMs: {names}")
     # No ID match — treat as name
     return selector
+
+
+@dataclass
+class ResolveVMTargetsResult:
+    targets: list[VMInstance]
+    errors: list[str]
+    exit_code: int
+
+
+def resolve_vm_targets(
+    ids: list[str],
+    names: list[str],
+) -> ResolveVMTargetsResult:
+    """Resolve multiple VM ID prefixes and names to VMInstance objects.
+
+    Collects all errors rather than failing on the first, then deduplicates
+    targets by ID. Used by CLI commands that accept multiple VM selectors.
+
+    Args:
+        ids: List of VM ID prefixes.
+        names: List of VM names.
+
+    Returns:
+        ResolveVMTargetsResult with resolved targets, error messages, and exit code.
+    """
+    manager = get_vm_manager()
+    targets: list[VMInstance] = []
+    errors: list[str] = []
+
+    for prefix in ids:
+        matches = manager.find_by_id_prefix(prefix)
+        if len(matches) == 0:
+            errors.append(f"No VM found with ID prefix '{prefix}'")
+        elif len(matches) > 1:
+            errors.append(f"Multiple VMs match ID prefix '{prefix}' — use a longer prefix or name")
+        else:
+            targets.append(matches[0])
+
+    for n in names:
+        matches = manager.get_by_name(n)
+        if len(matches) == 0:
+            errors.append(f"No VM found with name '{n}'")
+        elif len(matches) > 1:
+            errors.append(
+                f"Multiple VMs match name '{n}'. Use ID instead of name, or remove VMs individually."
+            )
+        else:
+            targets.append(matches[0])
+
+    # Deduplicate by ID
+    seen: set[str] = set()
+    unique: list[VMInstance] = []
+    for vm in targets:
+        if vm.id not in seen:
+            seen.add(vm.id)
+            unique.append(vm)
+    targets = unique
+
+    exit_code = 1 if errors and not targets else 0
+    return ResolveVMTargetsResult(targets=targets, errors=errors, exit_code=exit_code)
 
 
 def _detect_init_system_and_enable_ssh(guestfs_handle: Any, rootfs_path: Path) -> bool:
