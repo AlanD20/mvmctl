@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 from mvmctl.cli.vm import vm_app as vm_app
 from mvmctl.models import CloudInitMode
 from mvmctl.models.network import NetworkConfig
-from mvmctl.models.vm import VMInstance, VMStatus
+from mvmctl.models.vm import VMCreateInput, VMInstance, VMStatus
 
 runner = CliRunner()
 
@@ -156,21 +156,23 @@ class TestFullNocloudNetLifecycle:
         with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
             with patch("mvmctl.api.vms.setup_nat"):
                 vm = create_vm(
-                    name="nocloud-test-vm",
-                    image_path=image_path,
-                    kernel="vmlinux",
-                    vcpus=2,
-                    mem=2048,
-                    network_name="default",
-                    user="root",
-                    enable_api_socket=False,
-                    enable_pci=False,
-                    enable_console=False,
-                    firecracker_bin="firecracker",
-                    lsm_flags="",
-                    enable_logging=False,
-                    enable_metrics=False,
-                    cloud_init_mode=CloudInitMode.NET,
+                    VMCreateInput(
+                        name="nocloud-test-vm",
+                        image_path=image_path,
+                        kernel="vmlinux",
+                        vcpus=2,
+                        mem=2048,
+                        network_name="default",
+                        user="root",
+                        enable_api_socket=False,
+                        enable_pci=False,
+                        enable_console=False,
+                        firecracker_bin="firecracker",
+                        lsm_flags="",
+                        enable_logging=False,
+                        enable_metrics=False,
+                        cloud_init_mode=CloudInitMode.NET,
+                    ),
                     vm_manager=vm_mgr,
                 )
 
@@ -282,21 +284,23 @@ class TestFullNocloudNetLifecycle:
             with patch("mvmctl.api.vms.setup_nat"):
                 # Create VM
                 create_vm(
-                    name="cleanup-test-vm",
-                    image="ubuntu-24.04",
-                    kernel="vmlinux",
-                    vcpus=2,
-                    mem=256,
-                    network_name="default",
-                    user="root",
-                    enable_api_socket=False,
-                    enable_pci=False,
-                    enable_console=False,
-                    firecracker_bin="firecracker",
-                    lsm_flags="",
-                    enable_logging=False,
-                    enable_metrics=False,
-                    cloud_init_mode=CloudInitMode.NET,
+                    VMCreateInput(
+                        name="cleanup-test-vm",
+                        image="ubuntu-24.04",
+                        kernel="vmlinux",
+                        vcpus=2,
+                        mem=256,
+                        network_name="default",
+                        user="root",
+                        enable_api_socket=False,
+                        enable_pci=False,
+                        enable_console=False,
+                        firecracker_bin="firecracker",
+                        lsm_flags="",
+                        enable_logging=False,
+                        enable_metrics=False,
+                        cloud_init_mode=CloudInitMode.NET,
+                    ),
                     vm_manager=vm_mgr,
                 )
 
@@ -404,40 +408,44 @@ class TestMultipleVMsDifferentPorts:
                                                 )
 
                                                 vm1 = create_vm(
-                                                    name="vm1",
-                                                    image="ubuntu-24.04",
-                                                    kernel="vmlinux",
-                                                    vcpus=2,
-                                                    mem=256,
-                                                    network_name="default",
-                                                    user="root",
-                                                    enable_api_socket=False,
-                                                    enable_pci=False,
-                                                    enable_console=False,
-                                                    firecracker_bin="firecracker",
-                                                    lsm_flags="",
-                                                    enable_logging=False,
-                                                    enable_metrics=False,
-                                                    cloud_init_mode=CloudInitMode.NET,
+                                                    VMCreateInput(
+                                                        name="vm1",
+                                                        image="ubuntu-24.04",
+                                                        kernel="vmlinux",
+                                                        vcpus=2,
+                                                        mem=256,
+                                                        network_name="default",
+                                                        user="root",
+                                                        enable_api_socket=False,
+                                                        enable_pci=False,
+                                                        enable_console=False,
+                                                        firecracker_bin="firecracker",
+                                                        lsm_flags="",
+                                                        enable_logging=False,
+                                                        enable_metrics=False,
+                                                        cloud_init_mode=CloudInitMode.NET,
+                                                    ),
                                                     vm_manager=vm_mgr,
                                                 )
 
                                                 vm2 = create_vm(
-                                                    name="vm2",
-                                                    image="ubuntu-24.04",
-                                                    kernel="vmlinux",
-                                                    vcpus=2,
-                                                    mem=256,
-                                                    network_name="default",
-                                                    user="root",
-                                                    enable_api_socket=False,
-                                                    enable_pci=False,
-                                                    enable_console=False,
-                                                    firecracker_bin="firecracker",
-                                                    lsm_flags="",
-                                                    enable_logging=False,
-                                                    enable_metrics=False,
-                                                    cloud_init_mode=CloudInitMode.NET,
+                                                    VMCreateInput(
+                                                        name="vm2",
+                                                        image="ubuntu-24.04",
+                                                        kernel="vmlinux",
+                                                        vcpus=2,
+                                                        mem=256,
+                                                        network_name="default",
+                                                        user="root",
+                                                        enable_api_socket=False,
+                                                        enable_pci=False,
+                                                        enable_console=False,
+                                                        firecracker_bin="firecracker",
+                                                        lsm_flags="",
+                                                        enable_logging=False,
+                                                        enable_metrics=False,
+                                                        cloud_init_mode=CloudInitMode.NET,
+                                                    ),
                                                     vm_manager=vm_mgr,
                                                 )
 
@@ -573,21 +581,23 @@ class TestNocloudNetFailureCleanup:
         with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
             with pytest.raises(NetworkError):
                 create_vm(
-                    name="failing-vm",
-                    image="ubuntu-24.04",
-                    kernel="vmlinux",
-                    vcpus=2,
-                    mem=256,
-                    network_name="default",
-                    user="root",
-                    enable_api_socket=False,
-                    enable_pci=False,
-                    enable_console=False,
-                    firecracker_bin="firecracker",
-                    lsm_flags="",
-                    enable_logging=False,
-                    enable_metrics=False,
-                    cloud_init_mode=CloudInitMode.NET,
+                    VMCreateInput(
+                        name="failing-vm",
+                        image="ubuntu-24.04",
+                        kernel="vmlinux",
+                        vcpus=2,
+                        mem=256,
+                        network_name="default",
+                        user="root",
+                        enable_api_socket=False,
+                        enable_pci=False,
+                        enable_console=False,
+                        firecracker_bin="firecracker",
+                        lsm_flags="",
+                        enable_logging=False,
+                        enable_metrics=False,
+                        cloud_init_mode=CloudInitMode.NET,
+                    ),
                     vm_manager=vm_mgr,
                 )
 
@@ -689,21 +699,23 @@ class TestNocloudNetFailureCleanup:
             with patch("mvmctl.api.vms.setup_nat"):
                 with pytest.raises(MVMError, match="Firecracker binary not found"):
                     create_vm(
-                        name="fc-fail-vm",
-                        image="ubuntu-24.04",
-                        kernel="vmlinux",
-                        vcpus=2,
-                        mem=256,
-                        network_name="default",
-                        user="root",
-                        enable_api_socket=False,
-                        enable_pci=False,
-                        enable_console=False,
-                        firecracker_bin="firecracker",
-                        lsm_flags="",
-                        enable_logging=False,
-                        enable_metrics=False,
-                        cloud_init_mode=CloudInitMode.NET,
+                        VMCreateInput(
+                            name="fc-fail-vm",
+                            image="ubuntu-24.04",
+                            kernel="vmlinux",
+                            vcpus=2,
+                            mem=256,
+                            network_name="default",
+                            user="root",
+                            enable_api_socket=False,
+                            enable_pci=False,
+                            enable_console=False,
+                            firecracker_bin="firecracker",
+                            lsm_flags="",
+                            enable_logging=False,
+                            enable_metrics=False,
+                            cloud_init_mode=CloudInitMode.NET,
+                        ),
                         vm_manager=vm_mgr,
                     )
 
@@ -783,21 +795,23 @@ class TestVMWithoutNocloudNet:
                                                 )
 
                                                 vm = create_vm(
-                                                    name="disabled-mode-vm",
-                                                    image="ubuntu-24.04",
-                                                    kernel="vmlinux",
-                                                    vcpus=2,
-                                                    mem=256,
-                                                    network_name="default",
-                                                    user="root",
-                                                    enable_api_socket=False,
-                                                    enable_pci=False,
-                                                    enable_console=False,
-                                                    firecracker_bin="firecracker",
-                                                    lsm_flags="",
-                                                    enable_logging=False,
-                                                    enable_metrics=False,
-                                                    cloud_init_mode=CloudInitMode.OFF,
+                                                    VMCreateInput(
+                                                        name="disabled-mode-vm",
+                                                        image="ubuntu-24.04",
+                                                        kernel="vmlinux",
+                                                        vcpus=2,
+                                                        mem=256,
+                                                        network_name="default",
+                                                        user="root",
+                                                        enable_api_socket=False,
+                                                        enable_pci=False,
+                                                        enable_console=False,
+                                                        firecracker_bin="firecracker",
+                                                        lsm_flags="",
+                                                        enable_logging=False,
+                                                        enable_metrics=False,
+                                                        cloud_init_mode=CloudInitMode.OFF,
+                                                    ),
                                                     vm_manager=vm_mgr,
                                                 )
 
@@ -839,7 +853,7 @@ class TestNocloudNetCLIAuthoring:
 
         # Verify nocloud-net mode was passed
         call_kwargs = mock_create_vm.call_args.kwargs
-        assert call_kwargs.get("cloud_init_mode") == CloudInitMode.NET
+        assert call_kwargs.get("input").cloud_init_mode == CloudInitMode.NET
 
     @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
@@ -875,4 +889,4 @@ class TestNocloudNetCLIAuthoring:
 
         # Verify port was passed
         call_kwargs = mock_create_vm.call_args.kwargs
-        assert call_kwargs.get("nocloud_net_port") == 9999
+        assert call_kwargs.get("input").nocloud_net_port == 9999

@@ -58,7 +58,7 @@ class TestVMDirectInjection:
 
         # Verify create_vm was called with correct mode
         call_kwargs = mock_create_vm.call_args[1]
-        assert call_kwargs["cloud_init_mode"] == CloudInitMode.INJECT
+        assert call_kwargs["input"].cloud_init_mode == CloudInitMode.INJECT
 
     @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
@@ -92,7 +92,7 @@ class TestVMDirectInjection:
         assert mock_create_vm.called
         # Verify mode was passed correctly
         args, kwargs = mock_create_vm.call_args
-        assert kwargs.get("cloud_init_mode") == CloudInitMode.INJECT
+        assert kwargs.get("input").cloud_init_mode == CloudInitMode.INJECT
 
     @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")

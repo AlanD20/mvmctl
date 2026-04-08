@@ -81,8 +81,8 @@ class TestCloudInitISOCreation:
 
         # Verify create_vm was called with correct cloud-init mode
         call_kwargs = mock_create_vm.call_args.kwargs
-        assert call_kwargs["name"] == "cloud-init-vm"
-        assert call_kwargs["image"] == "abc123"
+        assert call_kwargs["input"].name == "cloud-init-vm"
+        assert call_kwargs["input"].image == "abc123"
 
     @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
@@ -126,8 +126,8 @@ class TestCloudInitISOCreation:
 
         # Verify custom ISO path was passed
         call_kwargs = mock_create_vm.call_args.kwargs
-        assert call_kwargs["name"] == "custom-iso-vm"
-        assert call_kwargs["cloud_init_iso_path"] == custom_iso
+        assert call_kwargs["input"].name == "custom-iso-vm"
+        assert call_kwargs["input"].cloud_init_iso_path == custom_iso
 
     @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
@@ -167,7 +167,7 @@ class TestCloudInitISOCreation:
 
         # Verify cloud-init is disabled
         call_kwargs = mock_create_vm.call_args.kwargs
-        assert call_kwargs["name"] == "no-cloud-init-vm"
+        assert call_kwargs["input"].name == "no-cloud-init-vm"
 
     @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")
@@ -207,8 +207,8 @@ class TestCloudInitISOCreation:
 
         # Verify keep flag was passed
         call_kwargs = mock_create_vm.call_args.kwargs
-        assert call_kwargs["name"] == "keep-iso-vm"
-        assert call_kwargs["keep_cloud_init_iso"] is True
+        assert call_kwargs["input"].name == "keep-iso-vm"
+        assert call_kwargs["input"].keep_cloud_init_iso is True
 
 
 class TestCloudInitISOSubprocessMocking:
@@ -379,7 +379,7 @@ class TestCloudInitISOEdgeCases:
         mock_create_vm.assert_called_once()
 
         call_kwargs = mock_create_vm.call_args.kwargs
-        assert call_kwargs["name"] == "nocloud-vm"
+        assert call_kwargs["input"].name == "nocloud-vm"
 
     @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.cli.vm._resolve_active_firecracker_bin")

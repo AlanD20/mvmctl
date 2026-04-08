@@ -8,6 +8,7 @@ from mvmctl.constants import env_var
 from mvmctl.core import vm_lifecycle  # noqa: F401 - imported for patch resolution
 from mvmctl.models import VMInstance
 from mvmctl.models.network import NetworkConfig
+from mvmctl.models.vm import VMCreateInput
 
 
 class TestConsoleWorkflow:
@@ -179,20 +180,22 @@ class TestConsoleWorkflow:
         from mvmctl.models import CloudInitMode
 
         vm = create_vm(
-            name="testvm",
-            image_path=Path("/tmp/test-image.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=True,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
-            cloud_init_mode=CloudInitMode.NET,
+            VMCreateInput(
+                name="testvm",
+                image_path=Path("/tmp/test-image.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=True,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+                cloud_init_mode=CloudInitMode.NET,
+            ),
         )
 
         assert isinstance(vm, VMInstance)
@@ -330,20 +333,22 @@ class TestConsoleWorkflow:
         from mvmctl.models import CloudInitMode
 
         vm = create_vm(
-            name="testvm",
-            image_path=Path("/tmp/test-image.ext4"),
-            vcpus=2,
-            mem=256,
-            network_name="default",
-            user="root",
-            enable_api_socket=False,
-            enable_pci=False,
-            enable_console=False,
-            firecracker_bin="firecracker",
-            lsm_flags="",
-            enable_logging=False,
-            enable_metrics=False,
-            cloud_init_mode=CloudInitMode.NET,
+            VMCreateInput(
+                name="testvm",
+                image_path=Path("/tmp/test-image.ext4"),
+                vcpus=2,
+                mem=256,
+                network_name="default",
+                user="root",
+                enable_api_socket=False,
+                enable_pci=False,
+                enable_console=False,
+                firecracker_bin="firecracker",
+                lsm_flags="",
+                enable_logging=False,
+                enable_metrics=False,
+                cloud_init_mode=CloudInitMode.NET,
+            ),
         )
 
         assert isinstance(vm, VMInstance)
@@ -432,8 +437,8 @@ class TestConsoleAPI:
 
         result = attach_console("testvm")
 
-        assert result["socket_path"] == "/tmp/test.sock"
-        assert result["vm_name"] == "testvm"
+        assert result.socket_path == Path("/tmp/test.sock")
+        assert result.vm_name == "testvm"
 
     @patch("mvmctl.api.vms.ConsoleRelayManager")
     @patch("mvmctl.api.vms.get_vm_manager")
@@ -473,6 +478,6 @@ class TestConsoleAPI:
 
         result = get_console_state("testvm")
 
-        assert result["running"] is True
-        assert result["pid"] == 12345
-        assert result["socket_path"] == "/tmp/test.sock"
+        assert result.running is True
+        assert result.pid == 12345
+        assert result.socket_path == "/tmp/test.sock"

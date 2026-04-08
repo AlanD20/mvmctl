@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.network import network_app as network_app
 from mvmctl.exceptions import NetworkError
-from mvmctl.models.network import NetworkConfig
+from mvmctl.models.network import NetworkConfig, NetworkInspectInfo
 
 runner = CliRunner()
 
@@ -75,17 +75,17 @@ class TestNetworkLifecycleWorkflow:
 
         network = _make_network("inspect-net", "172.16.0.0/24")
         mock_create.return_value = network
-        mock_inspect.return_value = {
-            "name": "inspect-net",
-            "subnet": "172.16.0.0/24",
-            "ipv4_gateway": "172.16.0.1",
-            "bridge": "mvm-inspect-net",
-            "nat_enabled": True,
-            "nat_gateways": ["eth0"],
-            "bridge_exists": True,
-            "created_at": "2024-01-01T00:00:00+00:00",
-            "vms": [],
-        }
+        mock_inspect.return_value = NetworkInspectInfo(
+            name="inspect-net",
+            subnet="172.16.0.0/24",
+            ipv4_gateway="172.16.0.1",
+            bridge="mvm-inspect-net",
+            nat_enabled=True,
+            nat_gateways=["eth0"],
+            bridge_exists=True,
+            created_at="2024-01-01T00:00:00+00:00",
+            vms=[],
+        )
 
         result = runner.invoke(
             network_app,
