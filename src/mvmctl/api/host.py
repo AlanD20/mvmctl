@@ -49,6 +49,7 @@ from mvmctl.core.network import (
 )
 from mvmctl.core.vm_manager import get_vm_manager
 from mvmctl.exceptions import HostError, NetworkError
+from mvmctl.models.vm import VMInstance, VMStatus
 from mvmctl.utils.fs import chown_to_real_user, get_cache_dir
 from mvmctl.utils.network import bridge_exists, list_bridges, list_tuntap_devices
 
@@ -66,6 +67,7 @@ __all__ = [
     "get_ready_pool_dir",
     "get_host_state",
     "get_ip_forward_status",
+    "get_running_vms",
     "get_vm_manager",
     "init_host",
     "prune_host",
@@ -524,3 +526,10 @@ def get_ready_pool_dir() -> Path:
     from mvmctl.core.image import get_ready_pool_dir as _get_ready_pool_dir
 
     return _get_ready_pool_dir()
+
+
+def get_running_vms() -> list[VMInstance]:
+    """Return all currently running VMs."""
+    from mvmctl.api.vms import list_vms
+
+    return [v for v in list_vms(include_stopped=True) if v.status == VMStatus.RUNNING]

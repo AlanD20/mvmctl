@@ -10,13 +10,12 @@ from mvmctl.api.config import (
     set_config_value,
     validate_config,
 )
-from mvmctl.api.vms import get_vm_manager
+from mvmctl.api.vm_config import dump_vm_config
 from mvmctl.cli._helpers import build_mvm_defaults
-from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
-from mvmctl.exceptions import MVMError
+from mvmctl.exceptions import MVMError, VMNotFoundError
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.error_handler import handle_mvm_error
-from mvmctl.utils.fs import get_assets_dir, get_vm_dir_by_hash
+from mvmctl.utils.fs import get_assets_dir
 
 app = typer.Typer(
     help="Configuration commands",
@@ -81,23 +80,12 @@ def dump_vm(
     name: str = typer.Option(..., "--name", help="VM name"),
 ) -> None:
     """Print the Firecracker JSON config for a VM."""
-    manager = get_vm_manager()
-    vm = manager.get(name)
-    if vm is None:
-        print_error(f"VM '{name}' not found")
-        raise typer.Exit(code=1)
-
-    vm_dir = get_vm_dir_by_hash(vm.id)
-    config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
-
-    if not config_file.exists():
-        print_error(f"VM '{name}' not found or no config file")
-        raise typer.Exit(code=1)
-
     try:
-        with open(config_file, "r") as f:
-            data = json.load(f)
-            typer.echo(json.dumps(data, indent=2))
+        data = dump_vm_config(name)
+        typer.echo(json.dumps(data, indent=2))
+    except VMNotFoundError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
     except json.JSONDecodeError as e:
         print_error(f"Invalid JSON in config file: {e}")
         raise typer.Exit(code=1)

@@ -16,14 +16,12 @@ from mvmctl.api.host import (
     get_host_state,
     get_ip_forward_status,
     get_ready_pool_dir,
-    get_vm_manager,
     init_host,
     reset_host,
 )
 from mvmctl.api.network import ensure_default_network, restore_networks
 from mvmctl.constants import PROJECT_GROUP
 from mvmctl.exceptions import HostError, MVMError
-from mvmctl.models.vm import VMStatus
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import chown_to_real_user, get_cache_dir
@@ -73,8 +71,9 @@ def _abort_if_vms_running(action: str) -> None:
     Args:
         action: Short description of the action being blocked (used in the error message).
     """
-    manager = get_vm_manager()
-    running = [v for v in manager.list_all() if v.status == VMStatus.RUNNING]
+    from mvmctl.api.host import get_running_vms
+
+    running = get_running_vms()
     if running:
         names = ", ".join(v.name for v in running)
         print_error(f"Cannot {action}: {len(running)} VM(s) still running: {names}")

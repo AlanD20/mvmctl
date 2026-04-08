@@ -27,6 +27,7 @@ __all__ = [
     "save_vm_config_file",
     "build_vm_config_file",
     "merge_cli_overrides",
+    "dump_vm_config",
 ]
 
 
@@ -291,3 +292,37 @@ def merge_cli_overrides(
         firecracker=new_firecracker,
         cloud_init=new_cloud_init,
     )
+
+
+def dump_vm_config(name: str) -> dict[str, Any]:
+    """Load and return the Firecracker config JSON for a VM by name.
+
+    Args:
+        name: VM name
+
+    Returns:
+        The parsed config dictionary
+
+    Raises:
+        VMNotFoundError: If VM not found or config file doesn't exist
+    """
+    import json
+
+    from mvmctl.api.vms import get_vm
+    from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
+    from mvmctl.exceptions import VMNotFoundError
+    from mvmctl.utils.fs import get_vm_dir_by_hash
+
+    vm = get_vm(name)
+    if vm is None:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    vm_dir = get_vm_dir_by_hash(vm.id)
+    config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
+
+    if not config_file.exists():
+        raise VMNotFoundError(f"VM '{name}' not found or no config file")
+
+    with open(config_file, "r") as f:
+        result: dict[str, Any] = json.load(f)
+        return result

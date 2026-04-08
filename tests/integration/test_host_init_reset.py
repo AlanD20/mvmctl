@@ -246,10 +246,10 @@ class TestHostEdgeCases:
         assert "permission" in result.output.lower() or "failed" in result.output.lower()
 
     @patch("mvmctl.cli.host.clean_host")
-    @patch("mvmctl.cli.host.get_vm_manager")
-    def test_clean_with_no_networks(self, mock_get_vm_manager, mock_clean):
+    @patch("mvmctl.api.host.get_running_vms")
+    def test_clean_with_no_networks(self, mock_get_running_vms, mock_clean):
         """Test clean when no networks exist."""
-        mock_get_vm_manager.return_value.list_all.return_value = []
+        mock_get_running_vms.return_value = []
         mock_clean.return_value = []
 
         result = runner.invoke(host_app, ["clean"], input="y\n")
