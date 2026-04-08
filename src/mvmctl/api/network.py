@@ -216,7 +216,7 @@ def is_ip_available(network_name: str, ip: str) -> bool:
     return _is_ip_available(config, leases, ip)
 
 
-def allocate_network_ip(network_name: str, vm_name: str) -> str:
+def allocate_network_ip(network_name: str, vm_id: str) -> str:
     """Allocate the next available IP from a network's subnet.
 
     Registers the lease in database.
@@ -231,36 +231,22 @@ def allocate_network_ip(network_name: str, vm_name: str) -> str:
     leases = get_network_leases(network_name)
     from mvmctl.core.network_manager import allocate_network_ip as _allocate_network_ip
 
-    ip, _updated_leases = _allocate_network_ip(config, leases, vm_name)
+    ip, _updated_leases = _allocate_network_ip(config, leases, vm_id)
 
     # Persist the lease to database
     db = MVMDatabase()
     network = db.get_network_by_name(network_name)
     if network is None:
         raise NetworkError(f"Network '{network_name}' not found")
-    db.acquire_lease(network.id, ip, vm_name)
+    db.acquire_lease(network.id, ip, vm_id)
 
     return ip
 
 
-def release_network_ip(network_name: str, vm_name: str) -> None:
+def release_network_ip(network_id: str, vm_id: str) -> None:
     """Release a VM's IP lease from a network."""
-    leases = get_network_leases(network_name)
-    from mvmctl.core.network_manager import release_network_ip as _release_network_ip
-
-    _release_network_ip(leases, vm_name)
-
-    # Release the lease from database
     db = MVMDatabase()
-    network = db.get_network_by_name(network_name)
-    if network is None:
-        return
-
-    # Find and release the IP for this VM
-    for lease in leases:
-        if lease.vm_id == vm_name:
-            db.release_lease(network.id, lease.ipv4)
-            break
+    db.release_vm_leases(vm_id)
 
 
 # ---------------------------------------------------------------------------

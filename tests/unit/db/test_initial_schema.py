@@ -638,8 +638,14 @@ class TestForeignKeyConstraints:
                         ("nonexistent", "10.0.0.2"),
                     )
 
-    def test_network_leases_vm_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify vm_id foreign key constraint in network_leases."""
+    def test_network_leases_vm_id_no_fk_constraint(
+        self, runner: MigrationRunner, db_path: Path
+    ) -> None:
+        """Verify vm_id has NO foreign key constraint - allows orphaned vm_id values.
+
+        Leases are acquired BEFORE the VM row exists, so vm_id cannot have an FK.
+        Lease cleanup is manual via release_vm_leases(vm_id).
+        """
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -649,12 +655,17 @@ class TestForeignKeyConstraints:
                     "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
                     ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
                 )
-                # Try to insert lease with non-existent vm_id
-                with pytest.raises(sqlite3.IntegrityError):
-                    conn.execute(
-                        "INSERT INTO network_leases (network_id, ipv4, vm_id) VALUES (?, ?, ?)",
-                        ("net1", "10.0.0.2", "nonexistent"),
-                    )
+                # Insert lease with non-existent vm_id - should succeed (no FK constraint)
+                conn.execute(
+                    "INSERT INTO network_leases (network_id, ipv4, vm_id) VALUES (?, ?, ?)",
+                    ("net1", "10.0.0.2", "nonexistent"),
+                )
+                # Verify the lease was inserted
+                cursor = conn.execute(
+                    "SELECT vm_id FROM network_leases WHERE network_id = ? AND ipv4 = ?",
+                    ("net1", "10.0.0.2"),
+                )
+                assert cursor.fetchone()[0] == "nonexistent"
 
     def test_vm_instances_network_id_fk(self, runner: MigrationRunner, db_path: Path) -> None:
         """Verify network_id foreign key constraint in vm_instances."""
@@ -733,10 +744,14 @@ class TestForeignKeyConstraints:
                 )
                 assert cursor.fetchone()[0] == 0
 
-    def test_network_leases_cascade_delete_on_vm(
+    def test_network_leases_manual_cleanup_on_vm_delete(
         self, runner: MigrationRunner, db_path: Path
     ) -> None:
-        """Verify network_leases cascade delete when VM is deleted."""
+        """Verify network_leases are NOT cascade deleted - manual cleanup required.
+
+        Leases must be explicitly released via DELETE FROM network_leases WHERE vm_id = ?
+        before VM deletion. This is because leases are acquired before VM row exists.
+        """
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -755,9 +770,15 @@ class TestForeignKeyConstraints:
                     "INSERT INTO network_leases (network_id, ipv4, vm_id) VALUES (?, ?, ?)",
                     ("net1", "10.0.0.2", "vm1"),
                 )
-                # Delete VM
+                # Delete VM - lease should NOT be cascade deleted (no FK on vm_id)
                 conn.execute("DELETE FROM vm_instances WHERE id = ?", ("vm1",))
-                # Verify lease was deleted
+                # Verify lease still exists (no cascade delete)
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM network_leases WHERE vm_id = ?", ("vm1",)
+                )
+                assert cursor.fetchone()[0] == 1
+                # Manual cleanup required
+                conn.execute("DELETE FROM network_leases WHERE vm_id = ?", ("vm1",))
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM network_leases WHERE vm_id = ?", ("vm1",)
                 )

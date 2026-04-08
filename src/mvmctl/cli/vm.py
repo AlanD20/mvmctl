@@ -112,34 +112,6 @@ class _ResolvedCloudInitResult:
     iso_path: Path | None
 
 
-@dataclass
-class _CreateInputs:
-    name: str
-    image: str | None
-    kernel: str | None
-    image_path: Path | None
-    kernel_path: Path | None
-    vcpus: int
-    mem: int
-    disk_size: str | None
-    ip: str | None
-    network_name: str | None
-    mac: str | None
-    ssh_key: str | None
-    user_data: Path | None
-    user: str
-    enable_pci: bool
-    no_console: bool
-    lsm_flags: str
-    enable_logging: bool
-    enable_metrics: bool
-    firecracker_bin: str
-    keep_cloud_init_iso: bool
-    cloud_init_mode: CloudInitMode
-    cloud_init_iso_path: Path | None
-    nocloud_net_port: int
-
-
 def _apply_import_config(
     import_config: Path,
     name: str,

@@ -236,8 +236,12 @@ class TestFKConstraintsCascade:
         assert db.get_lease(network.id, "172.35.0.10") is None
         assert db.get_lease(network.id, "172.35.0.11") is None
 
-    def test_delete_vm_cascades_to_leases(self, db: MVMDatabase) -> None:
-        """Verify deleting a VM auto-deletes its leases."""
+    def test_delete_vm_requires_manual_lease_cleanup(self, db: MVMDatabase) -> None:
+        """Verify deleting a VM does NOT auto-delete leases - manual cleanup required.
+
+        Leases must be explicitly released via db.release_vm_leases(vm_id)
+        before VM deletion because leases are acquired before VM row exists.
+        """
         network = make_network()
         image = make_image()
         kernel = make_kernel()
@@ -258,12 +262,16 @@ class TestFKConstraintsCascade:
         assert db.get_lease(network.id, "172.35.0.10") is not None
         assert db.get_lease(network.id, "172.35.0.11") is not None
 
-        # Delete the VM
-        db.delete_vm(vm.id)
+        # Manually release leases before VM deletion
+        db.release_vm_leases(vm.id)
 
-        # Verify leases are auto-deleted
+        # Verify leases are deleted
         assert db.get_lease(network.id, "172.35.0.10") is None
         assert db.get_lease(network.id, "172.35.0.11") is None
+
+        # Now delete the VM
+        db.delete_vm(vm.id)
+        assert db.get_vm(vm.id) is None
 
 
 class TestMultiTableWorkflows:
@@ -311,7 +319,7 @@ class TestMultiTableWorkflows:
         assert db.get_binary(binary.id) is not None
 
     def test_network_lease_workflow(self, db: MVMDatabase) -> None:
-        """Test network lease workflow: create network → acquire lease with VM."""
+        """Test network lease workflow: create network → acquire lease with VM → manual cleanup."""
         network = make_network()
         image = make_image()
         kernel = make_kernel()
@@ -340,9 +348,13 @@ class TestMultiTableWorkflows:
         assert len(leases) == 1
         assert leases[0].ipv4 == "172.35.0.10"
 
-        # Delete VM — lease should cascade delete
-        db.delete_vm(vm.id)
+        # Manual cleanup required - release leases before VM deletion
+        db.release_vm_leases(vm.id)
         assert db.get_lease(network.id, "172.35.0.10") is None
+
+        # Now delete VM
+        db.delete_vm(vm.id)
+        assert db.get_vm(vm.id) is None
 
     def test_image_default_tracking(self, db: MVMDatabase) -> None:
         """Test that only one image can be marked as default."""
@@ -457,9 +469,14 @@ class TestMultiTableWorkflows:
         leases = db.list_leases(network.id)
         assert len(leases) == 2
 
-        # Delete vm1 — only its lease should be deleted
-        db.delete_vm(vm1.id)
+        # Manual cleanup - release only vm1's lease before deletion
+        db.release_vm_leases(vm1.id)
         assert db.get_lease(network.id, "172.35.0.10") is None
+        assert db.get_lease(network.id, "172.35.0.11") is not None
+
+        # Now delete vm1 - vm2's lease remains intact
+        db.delete_vm(vm1.id)
+        assert db.get_vm(vm1.id) is None
         assert db.get_lease(network.id, "172.35.0.11") is not None
 
 

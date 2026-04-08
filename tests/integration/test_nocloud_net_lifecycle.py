@@ -26,6 +26,7 @@ def _make_vm(
     pid: int = 1234,
     network: str = "default",
     nocloud_net_port: int | None = None,
+    vm_id: str = "vm-abc123",
 ) -> VMInstance:
     """Create a sample VMInstance for testing."""
     from mvmctl.models.vm import VMConfig
@@ -33,6 +34,7 @@ def _make_vm(
     mode = CloudInitMode.NET if nocloud_net_port else CloudInitMode.INJECT
     return VMInstance(
         name=name,
+        id=vm_id,
         ipv4=ip,
         mac="02:FC:aa:bb:cc:dd",
         pid=pid,
@@ -508,6 +510,7 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.vms.NoCloudNetServerManager")
     @patch("mvmctl.api.vms.add_nocloud_input_rule")
     @patch("mvmctl.api.vms.remove_nocloud_input_rule")
+    @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
     @patch("mvmctl.api.network.get_network")
     @patch("mvmctl.api.network.allocate_network_ip")
     @patch("mvmctl.api.network.release_network_ip")
@@ -524,6 +527,7 @@ class TestNocloudNetFailureCleanup:
         mock_release_ip,
         mock_alloc_ip,
         mock_get_network,
+        mock_db_get_network,
         mock_remove_rule,
         mock_add_rule,
         mock_nocloud_mgr,
@@ -546,6 +550,7 @@ class TestNocloudNetFailureCleanup:
 
         # Mock network
         from mvmctl.models.network import NetworkConfig
+        from mvmctl.db.models import Network as DBNetwork
 
         mock_get_network.return_value = NetworkConfig(
             name="default",
@@ -554,6 +559,14 @@ class TestNocloudNetFailureCleanup:
             bridge="mvm-br0",
             nat_enabled=True,
             created_at="2024-01-01T00:00:00+00:00",
+        )
+        # Mock DB network with ID for cleanup
+        mock_db_get_network.return_value = DBNetwork(
+            id="net-id-123",
+            name="default",
+            subnet="10.20.0.0/24",
+            bridge="mvm-br0",
+            ipv4_gateway="10.20.0.1",
         )
         mock_alloc_ip.return_value = "10.20.0.2"
 
@@ -617,6 +630,7 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.vms.create_tap")
     @patch("mvmctl.api.vms.add_iptables_forward_rules")
     @patch("mvmctl.api.vms.bridge_exists")
+    @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
     @patch("mvmctl.api.network.get_network")
     @patch("mvmctl.api.network.allocate_network_ip")
     @patch("mvmctl.api.network.release_network_ip")
@@ -635,6 +649,7 @@ class TestNocloudNetFailureCleanup:
         mock_release_ip,
         mock_alloc_ip,
         mock_get_network,
+        mock_db_get_network,
         mock_bridge_exists,
         mock_add_iptables,
         mock_create_tap,
@@ -663,6 +678,7 @@ class TestNocloudNetFailureCleanup:
 
         # Mock network
         from mvmctl.models.network import NetworkConfig
+        from mvmctl.db.models import Network as DBNetwork
 
         mock_get_network.return_value = NetworkConfig(
             name="default",
@@ -671,6 +687,14 @@ class TestNocloudNetFailureCleanup:
             bridge="mvm-br0",
             nat_enabled=True,
             created_at="2024-01-01T00:00:00+00:00",
+        )
+        # Mock DB network with ID for cleanup
+        mock_db_get_network.return_value = DBNetwork(
+            id="net-id-123",
+            name="default",
+            subnet="10.20.0.0/24",
+            bridge="mvm-br0",
+            ipv4_gateway="10.20.0.1",
         )
         mock_alloc_ip.return_value = "10.20.0.2"
         mock_bridge_exists.return_value = True

@@ -82,12 +82,11 @@ CREATE TABLE network_leases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     network_id TEXT NOT NULL,
     ipv4 TEXT NOT NULL CHECK(ipv4 GLOB '[0-9]*.[0-9]*.[0-9]*.[0-9]*'),
-    vm_id TEXT NULL,
+    vm_id TEXT NULL, -- cannot create FK, but still references an active VM!
     leased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NULL,
     UNIQUE(network_id, ipv4),
-    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE,
-    FOREIGN KEY (vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE
+    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_leases_network ON network_leases(network_id);
 CREATE INDEX idx_leases_vm ON network_leases(vm_id);

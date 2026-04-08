@@ -739,7 +739,10 @@ def _cleanup_vm_creation_resources(
             logger.warning("Failed to cleanup TAP device during cleanup: %s", exc)
     if resources_created.get("network_ip"):
         try:
-            release_network_ip(net_config.name if net_config else DEFAULT_NETWORK_NAME, name)
+            from mvmctl.core.mvm_db import MVMDatabase
+
+            db_net = MVMDatabase().get_network_by_name(net_config.name) if net_config else None
+            release_network_ip(db_net.id, vm_id) if db_net and vm_id else None
         except (NetworkError, TypeError) as exc:
             logger.warning("Failed to release network IP during cleanup: %s", exc)
     if resources_created.get("console_relay") and relay_mgr is not None and vm_id is not None:
@@ -1029,7 +1032,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                     raise NetworkError(f"Invalid IP address: {exc}") from exc
                 guest_ip = ip
             else:
-                guest_ip = allocate_network_ip(network_name, name)
+                guest_ip = allocate_network_ip(network_name, vm_id)
                 resources_created["network_ip"] = True
 
             guest_mac = mac if mac else generate_mac()
@@ -1325,6 +1328,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
 def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     from mvmctl.api.host import check_privileges_interactive
     from mvmctl.api.network import get_network, release_network_ip
+    from mvmctl.core.mvm_db import MVMDatabase
 
     check_privileges_interactive("/usr/sbin/ip", f"remove VM '{name}'")
     manager = vm_manager or get_vm_manager()
@@ -1377,7 +1381,8 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     except NetworkError:
         pass
     try:
-        release_network_ip(net_name, name)
+        db_net = MVMDatabase().get_network_by_name(net_name) if net_config else None
+        release_network_ip(db_net.id, vm.id) if db_net and vm.id else None
     except NetworkError as exc:
         logger.warning("Failed to release network IP: %s", exc)
 

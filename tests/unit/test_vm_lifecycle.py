@@ -357,6 +357,7 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
 
 @patch("mvmctl.api.vms.get_vm_manager")
 @patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.vms.remove_iptables_forward_rules")
 @patch("mvmctl.api.vms.delete_tap")
@@ -374,13 +375,17 @@ def test_remove_vm_success(
     mock_del_tap,
     mock_rm_rules,
     mock_get_net,
+    mock_db_get_net,
     mock_graceful,
     mock_mgr,
 ):
     """remove_vm deletes everything correctly."""
+    from mvmctl.db.models import Network as DBNetwork
+
     mock_manager = MagicMock()
     vm = VMInstance(
         name="myvm",
+        id="vm-abc123",
         ipv4="10.20.0.5",
         pid=123,
         status=VMStatus.RUNNING,
@@ -394,6 +399,14 @@ def test_remove_vm_success(
     net_cfg.nat_enabled = True
     mock_get_net.return_value = net_cfg
 
+    mock_db_get_net.return_value = DBNetwork(
+        id="net-id-456",
+        name="default",
+        subnet="10.20.0.0/24",
+        bridge="mvm-default",
+        ipv4_gateway="10.20.0.1",
+    )
+
     mock_read_pid.return_value = 123
 
     mock_vm_dir_ret = MagicMock()
@@ -406,7 +419,7 @@ def test_remove_vm_success(
     _, rm_kwargs = mock_rm_rules.call_args
     assert rm_kwargs.get("bridge") == "mvm-default"
     mock_del_tap.assert_called_once()
-    mock_rel_ip.assert_called_once()
+    mock_rel_ip.assert_called_once_with("net-id-456", "vm-abc123")
     mock_manager.deregister.assert_called_once()
     mock_rmtree.assert_called_once_with(mock_vm_dir_ret)
 
@@ -462,6 +475,7 @@ def test_remove_vm_no_nat_skips_teardown(
 
 @patch("mvmctl.api.vms.get_vm_manager")
 @patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.vms.remove_iptables_forward_rules")
 @patch("mvmctl.api.vms.delete_tap")
@@ -479,12 +493,16 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
     mock_del_tap,
     mock_rm_rules,
     mock_get_net,
+    mock_db_get_net,
     mock_graceful,
     mock_mgr,
 ):
+    from mvmctl.db.models import Network as DBNetwork
+
     mock_manager = MagicMock()
     vm = VMInstance(
         name="shared",
+        id="vm-123",
         ipv4="10.20.0.7",
         pid=789,
         status=VMStatus.RUNNING,
@@ -498,6 +516,15 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
     net_cfg.nat_enabled = True
     mock_get_net.return_value = net_cfg
 
+    # Mock DB network with ID for release_network_ip call
+    mock_db_get_net.return_value = DBNetwork(
+        id="net-id-456",
+        name="default",
+        subnet="10.20.0.0/24",
+        bridge="mvm-default",
+        ipv4_gateway="10.20.0.1",
+    )
+
     mock_read_pid.return_value = 789
     mock_vm_dir_ret = MagicMock()
     mock_vm_dir_ret.exists.return_value = True
@@ -508,7 +535,7 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
     _, rm_kwargs = mock_rm_rules.call_args
     assert rm_kwargs.get("bridge") == "mvm-default"
     mock_del_tap.assert_called_once()
-    mock_rel_ip.assert_called_once_with("default", "shared")
+    mock_rel_ip.assert_called_once_with("net-id-456", "vm-123")
     mock_manager.deregister.assert_called_once()
 
 
@@ -2020,6 +2047,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
 @patch("mvmctl.api.vms.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
 @patch("mvmctl.api.vms.generate_mac")
@@ -2057,6 +2085,7 @@ def test_firewall_failure_stops_server_and_raises(
     mock_gen_mac,
     mock_alloc_ip,
     mock_get_net,
+    mock_db_get_net,
     mock_get_kernels,
     mock_get_images,
     mock_get_vm_dir,
@@ -2070,6 +2099,7 @@ def test_firewall_failure_stops_server_and_raises(
 ):
     """Test that firewall failure stops server and re-raises exception."""
     from mvmctl.api.vms import create_vm
+    from mvmctl.db.models import Network as DBNetwork
     from mvmctl.exceptions import NetworkError
 
     mock_manager = MagicMock()
@@ -2093,11 +2123,20 @@ def test_firewall_failure_stops_server_and_raises(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
+    mock_net.name = "default"
     mock_net.subnet = "10.20.0.0/24"
     mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
+
+    mock_db_get_net.return_value = DBNetwork(
+        id="net-id-123",
+        name="default",
+        subnet="10.20.0.0/24",
+        bridge="mvm-br0",
+        ipv4_gateway="10.20.0.1",
+    )
 
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
@@ -2524,6 +2563,7 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
 @patch("mvmctl.api.vms.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
 @patch("mvmctl.api.vms.generate_mac")
@@ -2559,6 +2599,7 @@ def test_direct_injection_cleanup_on_injection_failure(
     mock_gen_mac,
     mock_alloc_ip,
     mock_get_net,
+    mock_db_get_net,
     mock_get_kernels,
     mock_get_images,
     mock_get_vm_dir,
@@ -2567,6 +2608,7 @@ def test_direct_injection_cleanup_on_injection_failure(
     mock_secure_mkdir,
     tmp_path,
 ):
+    from mvmctl.db.models import Network as DBNetwork
     from mvmctl.exceptions import CloudInitError
 
     images_dir = tmp_path / "images"
@@ -2589,11 +2631,20 @@ def test_direct_injection_cleanup_on_injection_failure(
     mock_get_vm_mgr.return_value = mock_manager
 
     mock_net = MagicMock()
+    mock_net.name = "default"
     mock_net.subnet = "10.20.0.0/24"
     mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = True
     mock_get_net.return_value = mock_net
+
+    mock_db_get_net.return_value = DBNetwork(
+        id="net-id-123",
+        name="default",
+        subnet="10.20.0.0/24",
+        bridge="mvm-br0",
+        ipv4_gateway="10.20.0.1",
+    )
 
     mock_alloc_ip.return_value = "10.20.0.2"
     mock_gen_mac.return_value = "02:fc:aa:bb:cc:dd"
@@ -2630,7 +2681,11 @@ def test_direct_injection_cleanup_on_injection_failure(
         )
 
     mock_rmtree.assert_called_once_with(vm_dir, ignore_errors=True)
-    mock_release_ip.assert_called_once_with("default", vm_name)
+    # Verify release_network_ip was called with network ID and the generated VM ID
+    mock_release_ip.assert_called_once()
+    call_args = mock_release_ip.call_args[0]
+    assert call_args[0] == "net-id-123"  # network ID from DB
+    assert len(call_args[1]) == 16  # VM ID is 16-char hex
 
 
 # ============================================================================
@@ -2980,6 +3035,7 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
 @patch("mvmctl.api.vms.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
 @patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
 @patch("mvmctl.api.vms.generate_mac")
@@ -3005,6 +3061,7 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_gen_mac,
     mock_alloc_ip,
     mock_get_net,
+    mock_db_get_net,
     mock_get_kernels,
     mock_get_images,
     mock_get_vm_dir,
@@ -3015,6 +3072,7 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
 ):
     """If add_iptables_forward_rules() fails after create_tap(), ensure cleanup_tap() is called."""
     from mvmctl.api.vms import create_vm
+    from mvmctl.db.models import Network as DBNetwork
     from mvmctl.exceptions import NetworkError
 
     mock_manager = MagicMock()
@@ -3038,11 +3096,20 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_get_images.return_value = mock_img_dir
 
     mock_net = MagicMock()
+    mock_net.name = "default"
     mock_net.subnet = "10.20.0.0/24"
     mock_net.ipv4_gateway = "10.20.0.1"
     mock_net.bridge = "mvm-br0"
     mock_net.nat_enabled = False
     mock_get_net.return_value = mock_net
+
+    mock_db_get_net.return_value = DBNetwork(
+        id="net-id-123",
+        name="default",
+        subnet="10.20.0.0/24",
+        bridge="mvm-br0",
+        ipv4_gateway="10.20.0.1",
+    )
 
     mock_alloc_ip.return_value = "10.20.0.5"
     mock_gen_mac.return_value = "02:fc:11:22:33:44"
@@ -3087,6 +3154,7 @@ class TestRemoveVMNATOrdering:
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
     @patch("mvmctl.api.network.get_network")
     @patch("mvmctl.api.vms.graceful_shutdown")
     @patch("mvmctl.api.vms.cleanup_tap")
@@ -3111,6 +3179,7 @@ class TestRemoveVMNATOrdering:
         mock_cleanup_tap,
         mock_graceful_shutdown,
         mock_get_net_info,
+        mock_db_get_net,
         mock_get_vm_dir,
         mock_get_vm_mgr,
         mock_firewall_subprocess,
@@ -3122,6 +3191,7 @@ class TestRemoveVMNATOrdering:
         NAT rules, breaking connectivity for all remaining VMs on the bridge.
         """
         from mvmctl.api.vms import remove_vm
+        from mvmctl.db.models import Network as DBNetwork
         from mvmctl.models.vm import VMInstance, VMStatus
 
         # Create a mock VM
@@ -3152,6 +3222,15 @@ class TestRemoveVMNATOrdering:
         mock_get_net_info.return_value = mock_net_config
         mock_chain_exists.return_value = True
 
+        # Mock DB network for release_network_ip
+        mock_db_get_net.return_value = DBNetwork(
+            id="net-id-456",
+            name="default",
+            subnet="10.20.0.0/24",
+            bridge="mvm-default",
+            ipv4_gateway="10.20.0.1",
+        )
+
         # Call remove_vm
         remove_vm("testvm")
 
@@ -3176,6 +3255,7 @@ class TestRemoveVMNATOrdering:
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.api.vms.get_vm_manager")
     @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
     @patch("mvmctl.api.network.get_network")
     @patch("mvmctl.api.vms.graceful_shutdown")
     @patch("mvmctl.api.vms.cleanup_tap")
@@ -3200,12 +3280,14 @@ class TestRemoveVMNATOrdering:
         mock_cleanup_tap,
         mock_graceful_shutdown,
         mock_get_net_info,
+        mock_db_get_net,
         mock_get_vm_dir,
         mock_get_vm_mgr,
         mock_firewall_subprocess,
     ):
         """teardown_nat should be called with force=False to enable guard check."""
         from mvmctl.api.vms import remove_vm
+        from mvmctl.db.models import Network as DBNetwork
         from mvmctl.models.vm import VMInstance, VMStatus
 
         vm = VMInstance(
@@ -3233,6 +3315,15 @@ class TestRemoveVMNATOrdering:
         mock_net_config.bridge = "mvm-default"
         mock_get_net_info.return_value = mock_net_config
         mock_chain_exists.return_value = True
+
+        # Mock DB network for release_network_ip
+        mock_db_get_net.return_value = DBNetwork(
+            id="net-id-456",
+            name="default",
+            subnet="10.20.0.0/24",
+            bridge="mvm-default",
+            ipv4_gateway="10.20.0.1",
+        )
 
         remove_vm("testvm")
 

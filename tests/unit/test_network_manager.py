@@ -420,9 +420,9 @@ def test_release_network_ip(mock_cache_dir: Path):
 
     with patch.object(MVMDatabase, "get_network_by_name", return_value=db_net):
         with patch.object(MVMDatabase, "list_leases", return_value=[db_lease1, db_lease2]):
-            with patch.object(MVMDatabase, "release_lease") as mock_release:
-                release_network_ip("mynet", "vm1")
-                mock_release.assert_called_once_with("net-id-123", "10.20.1.2")
+            with patch.object(MVMDatabase, "release_vm_leases") as mock_release:
+                release_network_ip("net-id-123", "vm1")
+                mock_release.assert_called_once_with("vm1")
 
 
 @patch("mvmctl.api.network.get_default_interface")
