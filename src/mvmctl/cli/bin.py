@@ -1029,6 +1029,116 @@ def image_ls(
         _output_local_images(images, images_dir, json_output)
 
 
+def _validate_image_type_selector(
+    image_type: str | None,
+    image_selector: str,
+    images: list[Any],
+) -> None:
+    if image_type is None or image_selector == image_type:
+        return
+    if any(img.id == image_selector for img in images):
+        print_error("--type cannot be used when selector is an image ID")
+        raise typer.Exit(code=1)
+    print_error("image selector and --type must match when both are provided")
+    raise typer.Exit(code=1)
+
+
+def _find_existing_image_files(spec: Any, images_dir: Path) -> list[Path]:
+    compressed_extensions = list(COMPRESSION_EXTENSION_MAP.values())
+    existing = [
+        images_dir / f"{spec.id}{ext}"
+        for ext in compressed_extensions
+        if (images_dir / f"{spec.id}{ext}").exists()
+    ]
+    if existing:
+        return existing
+    all_meta = list_image_entries(get_cache_dir(), images_dir, include_missing=False)
+    db_entry = _find_image_by_os_slug(all_meta, spec.id)
+    if db_entry:
+        db_key, db_meta = db_entry
+        db_path = _resolve_image_file(images_dir, db_key, db_meta)
+        if db_path and db_path.exists():
+            return [db_path]
+    return []
+
+
+def _check_and_confirm_existing(
+    spec: Any, images_dir: Path, force: bool, set_default: bool
+) -> bool:
+    if force:
+        return True
+    existing = _find_existing_image_files(spec, images_dir)
+    if not existing:
+        return False
+    print_warning(f"Image '{spec.id}' already exists locally:")
+    for path in existing:
+        print_info(f"  {path}")
+    meta = _load_image_meta(spec.id)
+    if meta.get("pulled_at"):
+        print_info(f"    Pulled: {meta['pulled_at'][:19]}")
+    if not typer.confirm("Re-download anyway?", default=False):
+        print_info("Skipping download. Use --force to overwrite.")
+        if set_default:
+            try:
+                set_default_image_by_os_slug(get_cache_dir(), spec.id)
+            except KeyError:
+                pass
+            print_success(f"Default image set to: {spec.id}")
+        raise typer.Exit(code=0)
+    return True
+
+
+def _persist_image_result(result: Any, spec: Any, set_default: bool) -> None:
+    from datetime import datetime, timezone
+
+    timestamp = datetime.now(tz=timezone.utc).isoformat()
+    full_id = generate_full_hash_image(result.path, spec.id, timestamp)
+    short_id = shorten_hash(full_id, 12)
+
+    _save_image_meta(
+        full_id,
+        result.path,
+        {
+            "os_name": spec.name,
+            "os_slug": spec.id,
+            "full_hash": full_id,
+            "path": result.path.name,
+        },
+        fs_type=result.fs_type,
+        fs_uuid=result.fs_uuid,
+        compressed_size=result.compressed_size,
+        original_size=result.original_size,
+        compression_ratio=result.compression_ratio,
+        arch=spec.arch,
+    )
+    print_success(f"Image ready: {result.path}")
+    print_info(f"  ID: {short_id}")
+    if set_default:
+        set_default_image_by_os_slug(get_cache_dir(), spec.id)
+        print_success(f"Default image set to: {spec.id}")
+
+
+def _fetch_image_with_partition_retry(
+    spec: Any,
+    images_dir: Path,
+    force: bool,
+    no_prompt: bool,
+    skip_optimization: bool,
+) -> Any:
+    try:
+        return fetch_image(spec, images_dir, force, skip_optimization=skip_optimization)
+    except (RootPartitionDetectionError, TieDetectedError) as exc:
+        if no_prompt:
+            print_error(str(exc))
+            raise typer.Exit(code=1)
+        tied = exc.tied_partitions if isinstance(exc, TieDetectedError) else None
+        selected = _prompt_for_partition_selection(exc.partitions, tied_partitions=tied)
+        print_info(f"Using user-selected partition: {selected}")
+        return fetch_image(
+            spec, images_dir, force, partition=selected, skip_optimization=skip_optimization
+        )
+
+
 @image_app.command(name="fetch")
 def image_fetch(
     image_selector: str = typer.Argument(
@@ -1063,103 +1173,32 @@ def image_fetch(
     ),
 ) -> None:
     """Download an image by its ID. Run 'mvm image ls -r' to list available image IDs."""
-    out = out if out is not None else get_images_dir()
-    out.mkdir(parents=True, exist_ok=True)
-    config_path = get_assets_dir() / "images.yaml"
-    images = load_images_config(config_path)
+    # ── SETUP ──────────────────────────────────────────────────────────
+    images_dir = out if out is not None else get_images_dir()
+    images_dir.mkdir(parents=True, exist_ok=True)
+    images = load_images_config(get_assets_dir() / "images.yaml")
 
-    if image_type is not None and image_selector != image_type:
-        if any(img.id == image_selector for img in images):
-            print_error("--type cannot be used when selector is an image ID")
-            raise typer.Exit(code=1)
-        print_error("image selector and --type must match when both are provided")
-        raise typer.Exit(code=1)
+    # ── VALIDATE ───────────────────────────────────────────────────────
+    _validate_image_type_selector(image_type, image_selector, images)
 
-    effective_selector = image_type or image_selector
-
-    spec = _resolve_image_spec(images, effective_selector, version)
-
+    # ── RESOLVE ────────────────────────────────────────────────────────
+    spec = _resolve_image_spec(images, image_type or image_selector, version)
     spec.arch = arch if arch is not None else DEFAULT_IMAGE_ARCH
 
-    effective_force = force
-    if not effective_force:
-        compressed_extensions = list(COMPRESSION_EXTENSION_MAP.values())
-        existing_compressed = [
-            out / f"{spec.id}{ext}"
-            for ext in compressed_extensions
-            if (out / f"{spec.id}{ext}").exists()
-        ]
-        if not existing_compressed:
-            all_meta = list_image_entries(get_cache_dir(), out, include_missing=False)
-            db_entry = _find_image_by_os_slug(all_meta, spec.id)
-            if db_entry:
-                db_key, db_meta = db_entry
-                db_path = _resolve_image_file(out, db_key, db_meta)
-                if db_path and db_path.exists():
-                    existing_compressed = [db_path]
-        if existing_compressed:
-            print_warning(f"Image '{spec.id}' already exists locally:")
-            for path in existing_compressed:
-                print_info(f"  {path}")
-            meta = _load_image_meta(spec.id)
-            if meta.get("pulled_at"):
-                print_info(f"    Pulled: {meta['pulled_at'][:19]}")
-            if not typer.confirm("Re-download anyway?", default=False):
-                print_info("Skipping download. Use --force to overwrite.")
-                if set_default:
-                    try:
-                        set_default_image_by_os_slug(get_cache_dir(), spec.id)
-                    except KeyError:
-                        pass
-                    print_success(f"Default image set to: {spec.id}")
-                raise typer.Exit(code=0)
-            effective_force = True
+    # ── GUARD ──────────────────────────────────────────────────────────
+    effective_force = _check_and_confirm_existing(spec, images_dir, force, set_default)
 
-    result = _handle_partition_detection_retry(
-        fetch_image,
-        spec,
-        out,
-        effective_force,
-        no_prompt=no_prompt,
-        skip_optimization=skip_optimization,
+    # ── EXECUTE ────────────────────────────────────────────────────────
+    result = _fetch_image_with_partition_retry(
+        spec, images_dir, effective_force, no_prompt, skip_optimization
     )
-
-    if result:
-        from datetime import datetime, timezone
-
-        result_path = result.path
-        result_fs_type = result.fs_type
-        result_fs_uuid = result.fs_uuid
-
-        timestamp = datetime.now(tz=timezone.utc).isoformat()
-        full_id = generate_full_hash_image(result_path, spec.id, timestamp)
-        short_id = shorten_hash(full_id, 12)
-
-        _save_image_meta(
-            full_id,
-            result_path,
-            {
-                "os_name": spec.name,
-                "os_slug": spec.id,
-                "full_hash": full_id,
-                "path": result_path.name,
-            },
-            fs_type=result_fs_type,
-            fs_uuid=result_fs_uuid,
-            compressed_size=result.compressed_size,
-            original_size=result.original_size,
-            compression_ratio=result.compression_ratio,
-            arch=spec.arch,
-        )
-        print_success(f"Image ready: {result_path}")
-        print_info(f"  ID: {short_id}")
-        if set_default:
-            set_default_image_by_os_slug(get_cache_dir(), spec.id)
-            print_success(f"Default image set to: {spec.id}")
-        raise typer.Exit(code=0)
-    else:
+    if result is None:
         print_error(f"Failed to download image '{spec.id}'")
         raise typer.Exit(code=1)
+
+    # ── FINALIZE ───────────────────────────────────────────────────────
+    _persist_image_result(result, spec, set_default)
+    raise typer.Exit(code=0)
 
 
 @image_app.command(name="set-default")
