@@ -43,7 +43,7 @@ class TestCliClean:
     @patch("mvmctl.cli.host.get_cache_dir")
     @patch("mvmctl.cli.host.clean_host")
     def test_clean_success(self, mock_clean, mock_cache, mock_list_all, tmp_path):
-        from mvmctl.cli.host import app
+        from mvmctl.cli.host import host_app as app
 
         mock_cache.return_value = tmp_path
         mock_clean.return_value = ["Removed network 'default' (bridge: mvm-br0)"]
@@ -53,7 +53,7 @@ class TestCliClean:
 
     @patch("mvmctl.core.vm_manager.VMManager.list_all")
     def test_clean_refuses_running_vms(self, mock_list_all):
-        from mvmctl.cli.host import app
+        from mvmctl.cli.host import host_app as app
         from mvmctl.models.vm import VMStatus
 
         vm = MagicMock()
@@ -75,7 +75,7 @@ class TestCliReset:
     @patch("mvmctl.cli.host.get_cache_dir")
     @patch("mvmctl.cli.host.reset_host")
     def test_reset_success(self, mock_reset, mock_cache, mock_list_all, tmp_path):
-        from mvmctl.cli.host import app
+        from mvmctl.cli.host import host_app as app
 
         mock_cache.return_value = tmp_path
         mock_reset.return_value = ["Removed network 'default'"]
@@ -85,7 +85,7 @@ class TestCliReset:
 
     @patch("mvmctl.core.vm_manager.VMManager.list_all")
     def test_reset_refuses_running_vms(self, mock_list_all):
-        from mvmctl.cli.host import app
+        from mvmctl.cli.host import host_app as app
         from mvmctl.models.vm import VMStatus
 
         vm = MagicMock()

@@ -17,21 +17,21 @@ from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import get_assets_dir
 
-app = typer.Typer(
+config_app = typer.Typer(
     help="Configuration commands",
     rich_markup_mode=None,
     add_completion=False,
 )
 
 
-@app.callback(invoke_without_command=True)
+@config_app.callback(invoke_without_command=True)
 def config_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit()
 
 
-@app.command(name="show")
+@config_app.command(name="show")
 def config_show(
     section: str | None = typer.Option(None, "--section", help="Config section to show"),
     config_dir: Path = typer.Option(
@@ -50,7 +50,7 @@ def config_show(
         handle_mvm_error(e)
 
 
-@app.command(name="validate")
+@config_app.command(name="validate")
 def config_validate(
     config_dir: Path = typer.Option(
         None,
@@ -75,7 +75,7 @@ def config_validate(
         handle_mvm_error(e)
 
 
-@app.command(name="dump-vm")
+@config_app.command(name="dump-vm")
 def config_dump(
     name: str = typer.Option(..., "--name", help="VM name"),
 ) -> None:
@@ -91,7 +91,7 @@ def config_dump(
         raise typer.Exit(code=1)
 
 
-@app.command(name="get")
+@config_app.command(name="get")
 def config_get(
     key: str = typer.Argument(..., help="Config key (dot-notation, e.g. network_interface)"),
 ) -> None:
@@ -103,7 +103,7 @@ def config_get(
         typer.echo(f"{key} = {value}")
 
 
-@app.command(name="set")
+@config_app.command(name="set")
 def config_set(
     key: str = typer.Argument(..., help="Config key (dot-notation, e.g. network_interface)"),
     value: str = typer.Argument(..., help="Value to set"),

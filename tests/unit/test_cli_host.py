@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mvmctl.cli.host import app
+from mvmctl.cli.host import host_app as app
 from mvmctl.models.host import HostStateChange, HostState
 from mvmctl.exceptions import HostError
 

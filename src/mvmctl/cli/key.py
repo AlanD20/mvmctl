@@ -32,7 +32,7 @@ from mvmctl.utils.fs import get_keys_config_dir, is_file_missing
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import validate_entity_name
 
-app = typer.Typer(
+key_app = typer.Typer(
     help="SSH key management",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -40,14 +40,14 @@ app = typer.Typer(
 )
 
 
-@app.command(name="help", hidden=True)
+@key_app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the key command group."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
     raise typer.Exit()
 
 
-@app.command(name="ls")
+@key_app.command(name="ls")
 def key_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
@@ -89,7 +89,7 @@ def key_ls(
     )
 
 
-@app.command(
+@key_app.command(
     name="add", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
 def key_add(
@@ -151,7 +151,7 @@ def key_add(
         print_info(f"  Comment:     {info.comment}")
 
 
-@app.command(
+@key_app.command(
     name="create", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
 def key_create(
@@ -193,7 +193,7 @@ def key_create(
     print_info(f"  Fingerprint: {info.fingerprint}")
 
 
-@app.command(
+@key_app.command(
     name="remove",
     hidden=True,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
@@ -215,7 +215,7 @@ def key_remove(
     print_success(f"Key '{name}' removed from cache")
 
 
-@app.command(
+@key_app.command(
     name="rm",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
@@ -227,7 +227,7 @@ def key_rm(
     key_remove(ctx=ctx, name=name)
 
 
-@app.command(
+@key_app.command(
     name="export", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
 def key_export(
@@ -263,7 +263,7 @@ def key_export(
     print_info(f"  Public key:  {public_path}")
 
 
-@app.command(
+@key_app.command(
     name="inspect", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
 def key_inspect(
@@ -297,7 +297,7 @@ def key_inspect(
         print_info(f"  Public key path:  {info['public_key_path']}")
 
 
-@app.command(
+@key_app.command(
     name="set-default",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )

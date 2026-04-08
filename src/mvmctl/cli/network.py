@@ -35,7 +35,7 @@ from mvmctl.utils.validation import (
     validate_subnet,
 )
 
-app = typer.Typer(
+network_app = typer.Typer(
     help="Network management",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -43,14 +43,14 @@ app = typer.Typer(
 )
 
 
-@app.command(name="help", hidden=True)
+@network_app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the network command group."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
     raise typer.Exit()
 
 
-@app.command(name="ls")
+@network_app.command(name="ls")
 def network_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
@@ -103,7 +103,7 @@ def network_ls(
     )
 
 
-@app.command(
+@network_app.command(
     name="set-default", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
 def network_set_default(
@@ -171,7 +171,7 @@ def _print_create_error(error_msg: str, name: str) -> None:
         print_info("  (then log out and back in)")
 
 
-@app.command(
+@network_app.command(
     name="create", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
 def network_create(
@@ -241,7 +241,7 @@ def network_create(
         print_info(f"  NAT gateways: {', '.join(config.nat_gateways)}")
 
 
-@app.command(
+@network_app.command(
     name="remove",
     hidden=True,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
@@ -263,7 +263,7 @@ def network_remove(
     print_success(f"Network '{name}' removed")
 
 
-@app.command(
+@network_app.command(
     name="rm",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
@@ -275,7 +275,7 @@ def network_rm(
     network_remove(ctx=ctx, name=name)
 
 
-@app.command(
+@network_app.command(
     name="inspect", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
 def network_inspect(

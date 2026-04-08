@@ -19,14 +19,14 @@ from mvmctl.exceptions import BinaryError, HostError, MVMError
 from mvmctl.utils.console import print_info, print_success, print_warning
 from mvmctl.utils.fs import get_cache_dir
 
-app = typer.Typer(
+init_app = typer.Typer(
     help="Initialize mvm",
     rich_markup_mode=None,
     add_completion=False,
 )
 
 
-@app.command(name="help", hidden=True)
+@init_app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the init command."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
@@ -235,7 +235,7 @@ def _step_summary() -> None:
         print_warning("Host setup incomplete. Run 'mvm init' again.")
 
 
-@app.callback(invoke_without_command=True)
+@init_app.callback(invoke_without_command=True)
 def init_run(
     non_interactive: bool = typer.Option(
         False, "--non-interactive", help="Use defaults, skip prompts"

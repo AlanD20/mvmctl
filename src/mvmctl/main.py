@@ -115,19 +115,19 @@ class _LazyCommandSpec:
 
 
 _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
-    "vm": _LazyCommandSpec("mvmctl.cli.vm", "app", "VM lifecycle management"),
-    "console": _LazyCommandSpec("mvmctl.cli.console", "app", "VM console access"),
-    "host": _LazyCommandSpec("mvmctl.cli.host", "app", "Host configuration"),
-    "network": _LazyCommandSpec("mvmctl.cli.network", "app", "Network management"),
-    "key": _LazyCommandSpec("mvmctl.cli.key", "app", "SSH key management"),
-    "config": _LazyCommandSpec("mvmctl.cli.config", "app", "Configuration commands"),
-    "init": _LazyCommandSpec("mvmctl.cli.init", "app", "Initialize mvm"),
+    "vm": _LazyCommandSpec("mvmctl.cli.vm", "vm_app", "VM lifecycle management"),
+    "console": _LazyCommandSpec("mvmctl.cli.console", "console_app", "VM console access"),
+    "host": _LazyCommandSpec("mvmctl.cli.host", "host_app", "Host configuration"),
+    "network": _LazyCommandSpec("mvmctl.cli.network", "network_app", "Network management"),
+    "key": _LazyCommandSpec("mvmctl.cli.key", "key_app", "SSH key management"),
+    "config": _LazyCommandSpec("mvmctl.cli.config", "config_app", "Configuration commands"),
+    "init": _LazyCommandSpec("mvmctl.cli.init", "init_app", "Initialize mvm"),
     "kernel": _LazyCommandSpec("mvmctl.cli.kernel", "kernel_app", "Kernel management"),
     "image": _LazyCommandSpec("mvmctl.cli.image", "image_app", "Image management"),
     "bin": _LazyCommandSpec("mvmctl.cli.bin", "bin_app", "Binary management"),
-    "cache": _LazyCommandSpec("mvmctl.cli.cache", "app", "Cache management"),
-    "logs": _LazyCommandSpec("mvmctl.cli.logs", "app", "VM log management"),
-    "ssh": _LazyCommandSpec("mvmctl.cli.ssh", "app", "VM SSH access"),
+    "cache": _LazyCommandSpec("mvmctl.cli.cache", "cache_app", "Cache management"),
+    "logs": _LazyCommandSpec("mvmctl.cli.logs", "logs_app", "VM log management"),
+    "ssh": _LazyCommandSpec("mvmctl.cli.ssh", "ssh_app", "VM SSH access"),
 }
 
 _STATIC_COMMAND_HELP: dict[str, str] = {

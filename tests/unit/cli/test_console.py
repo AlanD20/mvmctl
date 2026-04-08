@@ -7,7 +7,7 @@ import typer
 import typer.main
 from click.testing import CliRunner
 
-from mvmctl.cli.console import _do_attach, _do_kill, _show_state, app
+from mvmctl.cli.console import _do_attach, _do_kill, _show_state, console_app as app
 from mvmctl.exceptions import MVMError, VMNotFoundError
 
 # Convert Typer app to Click command for CliRunner

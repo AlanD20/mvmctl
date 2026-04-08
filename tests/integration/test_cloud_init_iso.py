@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from mvmctl.cli.vm import app as vm_app
+from mvmctl.cli.vm import vm_app as vm_app
 from mvmctl.models.vm import VMInstance, VMStatus
 
 runner = CliRunner()

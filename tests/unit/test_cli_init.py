@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from mvmctl.cli.init import app
+from mvmctl.cli.init import init_app as app
 from mvmctl.core.binary_manager import BinaryVersion
 
 runner = CliRunner()

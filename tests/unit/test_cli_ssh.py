@@ -4,7 +4,7 @@ from pathlib import Path
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mvmctl.cli.ssh import _resolve_ssh_key_for_vm, app
+from mvmctl.cli.ssh import _resolve_ssh_key_for_vm, ssh_app as app
 from mvmctl.exceptions import MVMError
 
 runner = CliRunner()

@@ -7,7 +7,7 @@ from click.testing import CliRunner as ClickCliRunner
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mvmctl.cli.vm import app
+from mvmctl.cli.vm import vm_app as app
 from mvmctl.exceptions import MVMError
 from mvmctl.main import app as main_app
 from mvmctl.models.vm import VMInstance, VMStatus

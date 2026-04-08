@@ -28,7 +28,7 @@ from mvmctl.exceptions import MVMError, VMNotFoundError
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.error_handler import handle_mvm_error
 
-app = typer.Typer(
+console_app = typer.Typer(
     help="VM console access",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -40,7 +40,7 @@ def _resolve_vm(vm_id: Optional[str], name: Optional[str]) -> str:
     return resolve_vm_by_id_or_name(vm_id, name)
 
 
-@app.command()
+@console_app.command()
 def console_attach(
     vm_id: Optional[str] = typer.Argument(None, help="VM ID prefix or name"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name"),

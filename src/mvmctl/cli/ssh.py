@@ -13,7 +13,7 @@ from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.fs import get_keys_dir
 
-app = typer.Typer(
+ssh_app = typer.Typer(
     help="VM SSH access",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -59,7 +59,7 @@ def _resolve_ssh_key_for_vm(key: Path | None) -> Path | None:
     return None
 
 
-@app.command(name="ssh")
+@ssh_app.command(name="ssh")
 def ssh_connect(
     vm_id: str = typer.Argument(None, help="VM name, ID prefix, or IP address"),
     user: Optional[str] = typer.Option(

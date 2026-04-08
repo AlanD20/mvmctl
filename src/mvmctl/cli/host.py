@@ -58,7 +58,7 @@ def _format_change(change: HostStateChange) -> str:
     return f"{s}: {orig_display!r} → {v!r}"
 
 
-app = typer.Typer(
+host_app = typer.Typer(
     help="Host configuration",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -80,14 +80,14 @@ def _abort_if_vms_running(action: str) -> None:
         raise typer.Exit(code=1)
 
 
-@app.command(name="help", hidden=True)
+@host_app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the host command group."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
     raise typer.Exit()
 
 
-@app.command(name="init")
+@host_app.command(name="init")
 def host_init() -> None:
     """Apply host configuration changes. Idempotent.
 
@@ -164,7 +164,7 @@ def host_init() -> None:
     chown_to_real_user(get_cache_dir())
 
 
-@app.command(name="ls")
+@host_app.command(name="ls")
 def host_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
@@ -215,7 +215,7 @@ def host_ls(
     print_table(columns=["Check", "Status", "Detail"], rows=rows)
 
 
-@app.command(name="clean")
+@host_app.command(name="clean")
 def host_clean(
     force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
@@ -245,7 +245,7 @@ def host_clean(
     print_success("Host cleaned successfully.")
 
 
-@app.command(name="reset")
+@host_app.command(name="reset")
 def host_reset(
     force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
@@ -289,7 +289,7 @@ def host_reset(
     print_success("Host reset successfully.")
 
 
-@app.command(name="clean-ready-pool")
+@host_app.command(name="clean-ready-pool")
 def host_clean_ready_pool(
     force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:

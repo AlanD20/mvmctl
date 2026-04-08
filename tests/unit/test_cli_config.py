@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from mvmctl.cli.config import app
+from mvmctl.cli.config import config_app as app
 from mvmctl.models.config import SystemDefaultsConfig
 
 runner = CliRunner()

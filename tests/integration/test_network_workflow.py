@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from mvmctl.cli.network import app as network_app
+from mvmctl.cli.network import network_app as network_app
 from mvmctl.exceptions import NetworkError
 from mvmctl.models.network import NetworkConfig
 

@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from mvmctl.cli.cache import app
+from mvmctl.cli.cache import cache_app as app
 
 runner = CliRunner()
 

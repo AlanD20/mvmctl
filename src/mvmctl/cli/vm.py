@@ -56,7 +56,7 @@ from mvmctl.utils.validation import validate_entity_name
 USE_ISO_AUTO = "__use_iso_auto__"
 
 
-app = typer.Typer(
+vm_app = typer.Typer(
     help="VM lifecycle management",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -79,7 +79,7 @@ def _cloud_init_iso_callback(value: Union[str, bool, None]) -> Optional[Path]:
     return Path(value)  # type: ignore[arg-type]
 
 
-@app.command(name="help", hidden=True)
+@vm_app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the vm command group."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
@@ -397,7 +397,7 @@ def _build_output_config(
     print_info(f"VM config written to: {output_config}")
 
 
-@app.command(name="create")
+@vm_app.command(name="create")
 def vm_create(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     image: Optional[str] = typer.Option(
@@ -646,7 +646,7 @@ def vm_create(
         handle_mvm_error(e)
 
 
-@app.command(name="rm")
+@vm_app.command(name="rm")
 def vm_rm(
     ids: Optional[List[str]] = typer.Argument(None, help="VM ID prefixes to remove"),
     name: Optional[List[str]] = typer.Option(
@@ -693,7 +693,7 @@ def vm_rm(
         raise typer.Exit(code=result.exit_code)
 
 
-@app.command(name="ls")
+@vm_app.command(name="ls")
 def vm_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     all_vms: bool = typer.Option(False, "--all", "-a", help="Show all VMs including stopped"),
@@ -734,7 +734,7 @@ def vm_ls(
     )
 
 
-@app.command(name="ps")
+@vm_app.command(name="ps")
 def vm_ps(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     all_vms: bool = typer.Option(False, "--all", "-a", help="Show all VMs including stopped"),
@@ -743,7 +743,7 @@ def vm_ps(
     vm_ls(json_output=json_output, all_vms=all_vms)
 
 
-@app.command(name="snapshot")
+@vm_app.command(name="snapshot")
 def vm_snapshot(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     mem_out: Path = typer.Option(..., "--mem-out", help="Memory snapshot output path"),
@@ -758,7 +758,7 @@ def vm_snapshot(
         handle_mvm_error(exc)
 
 
-@app.command(name="load")
+@vm_app.command(name="load")
 def vm_load(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     mem_in: Path = typer.Option(..., "--mem-in", help="Memory snapshot input path"),
@@ -774,7 +774,7 @@ def vm_load(
         handle_mvm_error(exc)
 
 
-@app.command(name="pause")
+@vm_app.command(name="pause")
 def vm_pause(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
@@ -793,7 +793,7 @@ def vm_pause(
         handle_mvm_error(exc)
 
 
-@app.command(name="resume")
+@vm_app.command(name="resume")
 def vm_resume(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
@@ -812,7 +812,7 @@ def vm_resume(
         handle_mvm_error(exc)
 
 
-@app.command(name="stop")
+@vm_app.command(name="stop")
 def vm_stop(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
@@ -834,7 +834,7 @@ def vm_stop(
         handle_mvm_error(exc)
 
 
-@app.command(name="start")
+@vm_app.command(name="start")
 def vm_start(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
@@ -853,7 +853,7 @@ def vm_start(
         handle_mvm_error(exc)
 
 
-@app.command(name="reboot")
+@vm_app.command(name="reboot")
 def vm_reboot(
     selector: Optional[str] = typer.Argument(None, help="VM name or ID prefix"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
@@ -875,7 +875,7 @@ def vm_reboot(
         handle_mvm_error(exc)
 
 
-@app.command(name="inspect")
+@vm_app.command(name="inspect")
 def vm_inspect(
     selector: Optional[str] = typer.Argument(None, help="VM ID prefix or name"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="VM name or ID prefix"),
@@ -1036,7 +1036,7 @@ def _print_vm_details_tree(info: dict[str, Any]) -> None:
         print(line)
 
 
-@app.command(name="export")
+@vm_app.command(name="export")
 def vm_export(
     name: str = typer.Option(..., "--name", "-n", help="VM name to export"),
     output: Optional[Path] = typer.Option(

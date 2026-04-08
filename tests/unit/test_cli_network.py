@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from mvmctl.cli.network import app
+from mvmctl.cli.network import network_app as app
 from mvmctl.exceptions import MVMError, NetworkError
 from mvmctl.models.network import NetworkConfig
 

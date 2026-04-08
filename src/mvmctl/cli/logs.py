@@ -14,7 +14,7 @@ from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.validation import validate_entity_name
 
-app = typer.Typer(
+logs_app = typer.Typer(
     help="VM log management",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -22,7 +22,7 @@ app = typer.Typer(
 )
 
 
-@app.command()
+@logs_app.command()
 def logs_show(
     name: str = typer.Option(..., "--name", "-n", help="VM name"),
     follow: bool = typer.Option(None, "--follow", "-f", help="Follow log output"),

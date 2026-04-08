@@ -4,7 +4,7 @@
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mvmctl.cli.logs import app
+from mvmctl.cli.logs import logs_app as app
 from mvmctl.exceptions import MVMError
 
 runner = CliRunner()

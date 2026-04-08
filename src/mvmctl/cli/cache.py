@@ -7,7 +7,7 @@ import typer
 from mvmctl.api import cache as cache_api
 from mvmctl.utils.console import print_error, print_info, print_success, print_warning
 
-app = typer.Typer(
+cache_app = typer.Typer(
     help="Cache management",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -15,14 +15,14 @@ app = typer.Typer(
 )
 
 
-@app.command(name="help", hidden=True)
+@cache_app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the cache command group."""
     typer.echo(ctx.parent.get_help() if ctx.parent else "")
     raise typer.Exit()
 
 
-@app.command(name="init")
+@cache_app.command(name="init")
 def cache_init() -> None:
     """Initialize all cache resources."""
     try:
@@ -36,7 +36,7 @@ def cache_init() -> None:
         raise typer.Exit(code=1)
 
 
-@app.command(name="prune")
+@cache_app.command(name="prune")
 def cache_prune(
     resource: Optional[str] = typer.Argument(
         None, help="Resource to prune: vm, network, image, kernel, all"

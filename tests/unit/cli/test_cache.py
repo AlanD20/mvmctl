@@ -10,7 +10,7 @@ Test patterns follow the conventions from test_cli_vm.py and test_cli_asset.py.
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
-from mvmctl.cli.cache import app
+from mvmctl.cli.cache import cache_app as app
 
 runner = CliRunner()
 

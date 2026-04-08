@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from mvmctl.cli.logs import app as logs_app
-from mvmctl.cli.ssh import app as ssh_app
-from mvmctl.cli.vm import app as vm_app
+from mvmctl.cli.logs import logs_app as logs_app
+from mvmctl.cli.ssh import ssh_app as ssh_app
+from mvmctl.cli.vm import vm_app as vm_app
 from mvmctl.models.vm import VMInstance, VMStatus
 
 runner = CliRunner()

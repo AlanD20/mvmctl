@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from mvmctl.cli.key import app
+from mvmctl.cli.key import key_app as app
 from mvmctl.core.key_manager import KeyInfo
 from mvmctl.exceptions import MVMKeyError
 
