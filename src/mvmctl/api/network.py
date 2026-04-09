@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET, MVM_POSTROUTING_CHAIN
+from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET
 from mvmctl.core import host_setup
 from mvmctl.core import network as network_core
 from mvmctl.core.iptables_tracker import IPTablesTracker
@@ -68,13 +68,14 @@ def create_iptables_rule(
     tracker = tracker or IPTablesTracker()
 
     # Step 1: Create iptables rule via Core layer
+    network_name = rule.network_name or ""
     result = tracker.ensure_rule(
         table=rule.table_name,
         chain=rule.chain_name,
         rule_type=rule.rule_type,
         target=rule.target,
         network_id=rule.network_id,
-        network_name=rule.network_name,
+        network_name=network_name,
         protocol=rule.protocol,
         source=rule.source,
         destination=rule.destination,
@@ -455,8 +456,8 @@ def create_network(
     try:
         network_core.setup_bridge(config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet)
 
-        # Create tracked iptables rules for NAT
         if config.nat_enabled:
+            network_core.setup_mvm_chains()
             for gateway_iface in config.nat_gateways or [get_default_interface()]:
                 # Create MASQUERADE rule
                 masquerade_rule = IPTablesRule(
@@ -692,74 +693,123 @@ def ensure_default_network() -> NetworkConfig:
     Raises:
         NetworkError: If setup fails.
     """
-    from mvmctl.utils.network import _iptables_rule_exists
-
     config = get_network(DEFAULT_NETWORK_NAME)
 
     if config is not None:
-        bridge_missing = not bridge_exists(config.bridge)
-        chains_missing = not network_core.setup_mvm_chains()
+        return _ensure_existing_network(config)
 
-        nat_missing = False
-        if config.nat_enabled:
-            try:
-                nat_gateways = config.nat_gateways or [get_default_interface()]
-                # Check if at least one gateway has a MASQUERADE rule
-                for gateway_iface in nat_gateways:
-                    masquerade_check = [
-                        "iptables",
-                        "-t",
-                        "nat",
-                        "-C",
-                        MVM_POSTROUTING_CHAIN,
-                        "-s",
-                        config.subnet,
-                        "-o",
-                        gateway_iface,
-                        "-j",
-                        "MASQUERADE",
-                    ]
-                    if not _iptables_rule_exists(masquerade_check):
-                        nat_missing = True
-                        break
-            except Exception:
-                nat_missing = True
+    return _create_default_network()
 
-        if bridge_missing or chains_missing or nat_missing:
-            ipv4_gateway_subnet = f"{config.ipv4_gateway}/{config.subnet.split('/')[1]}"
-            try:
-                if bridge_missing:
-                    network_core.setup_bridge(
-                        config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet
-                    )
-                if config.nat_enabled:
-                    nat_gateways = config.nat_gateways or [get_default_interface()]
-                    network_core.setup_nat(
-                        config.bridge, nat_gateways=nat_gateways, subnet=config.subnet
-                    )
-                    if os.getuid() == 0:
-                        host_setup.save_iptables_rules()
-                db = MVMDatabase()
-                network = db.get_network_by_name(DEFAULT_NETWORK_NAME)
-                if network:
-                    db.update_network_bridge_active(network.id, True)
-                current_default = _get_default_network_entry_name()
-                if not should_preserve_current_default(current_default, DEFAULT_NETWORK_NAME):
-                    set_default_network(DEFAULT_NETWORK_NAME)
-            except NetworkError:
-                if bridge_missing:
-                    try:
-                        network_core.teardown_bridge(config.bridge)
-                    except NetworkError:
-                        pass
-                raise
-        else:
-            current_default = _get_default_network_entry_name()
-            if not should_preserve_current_default(current_default, DEFAULT_NETWORK_NAME):
-                set_default_network(DEFAULT_NETWORK_NAME)
+
+def _ensure_existing_network(config: NetworkConfig) -> NetworkConfig:
+    """Ensure an existing network has all resources materialized."""
+    db = MVMDatabase()
+    network = db.get_network_by_name(config.name)
+    if network is None:
+        raise NetworkError(f"Network '{config.name}' not found in database")
+
+    bridge_missing = not bridge_exists(config.bridge)
+    chains_missing = not network_core.setup_mvm_chains()
+    nat_missing = _check_nat_missing(config)
+
+    if not bridge_missing and not chains_missing and not nat_missing:
+        _ensure_default_is_set()
         return config
 
-    # Auto-detect internet-facing interface for NAT gateway
+    ipv4_gateway_subnet = f"{config.ipv4_gateway}/{config.subnet.split('/')[1]}"
+    try:
+        if bridge_missing:
+            network_core.setup_bridge(config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet)
+
+        if config.nat_enabled and nat_missing:
+            _sync_network_nat_rules(network.id, config)
+
+        db.update_network_bridge_active(network.id, True)
+        _ensure_default_is_set()
+
+        if os.getuid() == 0:
+            host_setup.save_iptables_rules()
+    except NetworkError:
+        if bridge_missing:
+            try:
+                network_core.teardown_bridge(config.bridge)
+            except NetworkError:
+                pass
+        raise
+
+    return config
+
+
+def _check_nat_missing(config: NetworkConfig) -> bool:
+    """Check if NAT rules are missing for a network."""
+    if not config.nat_enabled:
+        return False
+
+    db = MVMDatabase()
+    network = db.get_network_by_name(config.name)
+    if network is None:
+        return True
+
+    rules = db.get_iptables_rules_for_network(network.id, active_only=True)
+    if not rules:
+        return True
+
+    for rule in rules:
+        if rule.rule_type == IPTablesRuleType.MASQUERADE:
+            return False
+    return True
+
+
+def _sync_network_nat_rules(network_id: str, config: NetworkConfig) -> None:
+    """Sync NAT rules for a network using tracked rule functions."""
+    network_core.setup_mvm_chains()
+    db = MVMDatabase()
+    nat_gateways = config.nat_gateways or [get_default_interface()]
+
+    for gateway_iface in nat_gateways:
+        masquerade_rule = IPTablesRule(
+            table_name="nat",
+            chain_name="MVM-POSTROUTING",
+            rule_type=IPTablesRuleType.MASQUERADE,
+            target="MASQUERADE",
+            network_id=network_id,
+            network_name=config.name,
+            source=config.subnet,
+            out_interface=gateway_iface,
+        )
+        create_iptables_rule(masquerade_rule, db=db)
+
+        forward_in_rule = IPTablesRule(
+            table_name="filter",
+            chain_name="MVM-FORWARD",
+            rule_type=IPTablesRuleType.FORWARD_IN,
+            target="ACCEPT",
+            network_id=network_id,
+            network_name=config.name,
+            source=config.subnet,
+            in_interface=config.bridge,
+            out_interface=gateway_iface,
+        )
+        create_iptables_rule(forward_in_rule, db=db)
+
+        forward_out_rule = IPTablesRule(
+            table_name="filter",
+            chain_name="MVM-FORWARD",
+            rule_type=IPTablesRuleType.FORWARD_OUT,
+            target="ACCEPT",
+            network_id=network_id,
+            network_name=config.name,
+            destination=config.subnet,
+            in_interface=gateway_iface,
+            out_interface=config.bridge,
+        )
+        create_iptables_rule(forward_out_rule, db=db)
+
+    sync_iptables_rules(network_id, db=db)
+
+
+def _create_default_network() -> NetworkConfig:
+    """Create the default network with auto-detected interface."""
     default_iface = get_default_interface()
     if not default_iface:
         raise NetworkError(
@@ -769,12 +819,20 @@ def ensure_default_network() -> NetworkConfig:
         )
 
     config = create_network(
-        DEFAULT_NETWORK_NAME, subnet=DEFAULT_NETWORK_SUBNET, nat=True, nat_gateways=[default_iface]
+        DEFAULT_NETWORK_NAME,
+        subnet=DEFAULT_NETWORK_SUBNET,
+        nat=True,
+        nat_gateways=[default_iface],
     )
+    _ensure_default_is_set()
+    return config
+
+
+def _ensure_default_is_set() -> None:
+    """Ensure the default network is set as default if appropriate."""
     current_default = _get_default_network_entry_name()
     if not should_preserve_current_default(current_default, DEFAULT_NETWORK_NAME):
         set_default_network(DEFAULT_NETWORK_NAME)
-    return config
 
 
 def reconcile_networks() -> list[NetworkInspectInfo]:
@@ -943,10 +1001,6 @@ def sync_iptables_rules(
     # Get all active rules for this network from DB
     rules = db.get_iptables_rules_for_network(network_id, active_only=True)
 
-    # Populate network_name in rules (needed for comments)
-    for rule in rules:
-        rule.network_name = network_name
-
     synced_rules: list[IPTablesRule] = []
     failed_rules: list[tuple[IPTablesRule, Optional[str]]] = []
 
@@ -957,7 +1011,7 @@ def sync_iptables_rules(
             rule_type=rule.rule_type,
             target=rule.target,
             network_id=rule.network_id,
-            network_name=rule.network_name,
+            network_name=network_name,
             protocol=rule.protocol,
             source=rule.source,
             destination=rule.destination,

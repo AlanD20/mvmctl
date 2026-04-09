@@ -429,8 +429,13 @@ def test_release_network_ip(mock_cache_dir: Path):
 @patch("mvmctl.api.network.get_default_interface")
 @patch("mvmctl.api.network.create_network")
 @patch("mvmctl.api.network.set_default_network")
+@patch("mvmctl.api.network.create_iptables_rule")
 def test_ensure_default_network_creates_when_missing(
-    mock_set_default, mock_create_network, mock_get_default_iface, mock_cache_dir: Path
+    mock_create_iptables_rule,
+    mock_set_default,
+    mock_create_network,
+    mock_get_default_iface,
+    mock_cache_dir: Path,
 ):
     """Test ensure_default_network creates network when missing."""
     mock_get_default_iface.return_value = "wlo1"
@@ -475,11 +480,18 @@ def test_create_network_does_not_mark_default_network_created_in_sqlite(
     assert state is None or bool(state.default_network_created) is False
 
 
+@patch("mvmctl.api.network.sync_iptables_rules")
 @patch("mvmctl.api.network.bridge_exists", return_value=True)
 @patch("mvmctl.api.network.network_core.setup_nat")
 @patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=True)
+@patch("mvmctl.api.network.create_iptables_rule")
 def test_ensure_default_network_returns_existing(
-    mock_setup_chains, mock_setup_nat, mock_bridge_exists, mock_cache_dir: Path
+    mock_create_iptables_rule,
+    mock_setup_chains,
+    mock_setup_nat,
+    mock_bridge_exists,
+    mock_sync_rules,
+    mock_cache_dir: Path,
 ):
     """Test ensure_default_network returns existing network."""
     db_net = DBNetwork(
@@ -512,9 +524,11 @@ def test_ensure_default_network_creates_default_network_metadata(
     )
 
     with (
+        patch("mvmctl.api.network.sync_iptables_rules"),
         patch("mvmctl.api.network.bridge_exists", return_value=True),
         patch("mvmctl.api.network.network_core.setup_nat"),
         patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=True),
+        patch("mvmctl.api.network.create_iptables_rule"),
         patch.object(MVMDatabase, "get_network_by_name", return_value=db_net),
         patch.object(MVMDatabase, "get_default_network", return_value=db_net),
         patch("mvmctl.api.metadata.get_default_network_entry") as mock_get_default,
@@ -544,9 +558,11 @@ def test_ensure_default_network_sets_default_when_none_exists(mock_cache_dir: Pa
     )
 
     with (
+        patch("mvmctl.api.network.sync_iptables_rules"),
         patch("mvmctl.api.network.bridge_exists", return_value=True),
         patch("mvmctl.api.network.network_core.setup_nat"),
         patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=True),
+        patch("mvmctl.api.network.create_iptables_rule"),
         patch.object(MVMDatabase, "get_network_by_name", return_value=db_net),
         patch.object(MVMDatabase, "get_default_network", return_value=db_net),
         patch.object(MVMDatabase, "set_default_network"),
@@ -587,9 +603,11 @@ def test_ensure_default_network_preserves_existing_other_default(mock_cache_dir:
     )
 
     with (
+        patch("mvmctl.api.network.sync_iptables_rules"),
         patch("mvmctl.api.network.bridge_exists", return_value=True),
         patch("mvmctl.api.network.network_core.setup_nat"),
         patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=True),
+        patch("mvmctl.api.network.create_iptables_rule"),
         patch.object(MVMDatabase, "get_network_by_name", return_value=default_net),
         patch.object(MVMDatabase, "get_default_network", return_value=custom_net),
         patch("mvmctl.api.metadata.get_default_network_entry") as mock_get_default,
@@ -608,17 +626,21 @@ def test_ensure_default_network_preserves_existing_other_default(mock_cache_dir:
         assert default_entry.name == "custom"
 
 
+@patch("mvmctl.api.network.sync_iptables_rules")
 @patch("mvmctl.api.network.bridge_exists", return_value=False)
 @patch("mvmctl.api.network.network_core.setup_bridge")
 @patch("mvmctl.api.network.network_core.setup_nat")
 @patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=True)
 @patch("mvmctl.api.network.get_default_interface", return_value="eth0")
+@patch("mvmctl.api.network.create_iptables_rule")
 def test_ensure_default_network_recreates_missing_bridge(
+    mock_create_iptables_rule,
     mock_get_iface,
     mock_setup_chains,
     mock_setup_nat,
     mock_setup_bridge,
     mock_bridge_exists,
+    mock_sync_rules,
     mock_cache_dir: Path,
 ):
     """When metadata exists but bridge is missing, setup_bridge should be called."""
@@ -640,22 +662,25 @@ def test_ensure_default_network_recreates_missing_bridge(
     assert config is not None
     assert config.name == "default"
     mock_setup_bridge.assert_called_once_with("mvm-default", ipv4_gateway_subnet="172.35.0.1/24")
-    mock_setup_nat.assert_called_once_with(
-        "mvm-default", nat_gateways=["eth0"], subnet="172.35.0.0/24"
-    )
+    # New implementation calls create_iptables_rule instead of setup_nat
+    assert mock_create_iptables_rule.call_count >= 3  # MASQUERADE + FORWARD_IN + FORWARD_OUT
 
 
+@patch("mvmctl.api.network.sync_iptables_rules")
 @patch("mvmctl.api.network.bridge_exists", return_value=True)
 @patch("mvmctl.api.network.network_core.setup_bridge")
 @patch("mvmctl.api.network.network_core.setup_nat")
 @patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=False)
 @patch("mvmctl.api.network.get_default_interface", return_value="eth0")
+@patch("mvmctl.api.network.create_iptables_rule")
 def test_ensure_default_network_recreates_missing_chains(
+    mock_create_iptables_rule,
     mock_get_iface,
     mock_setup_chains,
     mock_setup_nat,
     mock_setup_bridge,
     mock_bridge_exists,
+    mock_sync_rules,
     mock_cache_dir: Path,
 ):
     """When bridge exists but chains were just created, NAT should be set up."""
@@ -677,22 +702,25 @@ def test_ensure_default_network_recreates_missing_chains(
     assert config is not None
     assert config.name == "default"
     mock_setup_bridge.assert_not_called()
-    mock_setup_nat.assert_called_once_with(
-        "mvm-default", nat_gateways=["eth0"], subnet="172.35.0.0/24"
-    )
+    # New implementation calls create_iptables_rule instead of setup_nat
+    assert mock_create_iptables_rule.call_count >= 3  # MASQUERADE + FORWARD_IN + FORWARD_OUT
 
 
+@patch("mvmctl.api.network.sync_iptables_rules")
 @patch("mvmctl.api.network.bridge_exists", return_value=True)
 @patch("mvmctl.api.network.network_core.setup_bridge")
 @patch("mvmctl.api.network.network_core.setup_nat")
 @patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=True)
 @patch("mvmctl.utils.network._iptables_rule_exists", return_value=True)
+@patch("mvmctl.api.network.create_iptables_rule")
 def test_ensure_default_network_idempotent_when_all_exists(
+    mock_create_iptables_rule,
     mock_rule_exists,
     mock_setup_chains,
     mock_setup_nat,
     mock_setup_bridge,
     mock_bridge_exists,
+    mock_sync_rules,
     mock_cache_dir: Path,
 ):
     """When both metadata and resources exist, no setup functions should be called."""
