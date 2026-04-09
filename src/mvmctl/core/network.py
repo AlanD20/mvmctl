@@ -27,6 +27,84 @@ from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 logger = logging.getLogger(__name__)
 
 
+def detect_iptables_backend_conflict() -> tuple[bool, str]:
+    """Detect mixed iptables backend conflict.
+
+    Returns:
+        (has_conflict: bool, diagnosis: str)
+        diagnosis explains what was found
+    """
+    import subprocess
+
+    from mvmctl.utils.process import privileged_cmd
+
+    # 1. Get iptables backend
+    result = subprocess.run(
+        ["iptables", "--version"],
+        capture_output=True,
+        text=True,
+    )
+    current_backend = "nft" if "nf_tables" in result.stderr else "legacy"
+
+    # 2. Check if legacy has ACTIVE rules (non-zero packet counters)
+    legacy_active = False
+    try:
+        legacy_result = subprocess.run(
+            privileged_cmd(["iptables-legacy", "-L", "-n", "-v"]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if legacy_result.returncode == 0:
+            # Parse packet counters from output
+            # Format: "   pkts bytes target     prot opt in     out     source               destination"
+            for line in legacy_result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        pkts = int(parts[0])
+                        if pkts > 0:
+                            legacy_active = True
+                            break
+                    except ValueError:
+                        continue
+    except Exception:
+        pass
+
+    # 3. Check if nft has ACTIVE rules (non-zero packet counters)
+    nft_active = False
+    try:
+        nft_result = subprocess.run(
+            privileged_cmd(["iptables", "-L", "-n", "-v"]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if nft_result.returncode == 0:
+            for line in nft_result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        pkts = int(parts[0])
+                        if pkts > 0:
+                            nft_active = True
+                            break
+                    except ValueError:
+                        continue
+    except Exception:
+        pass
+
+    # Conflict: both backends have active rules
+    has_conflict = legacy_active and nft_active
+
+    diagnosis = (
+        f"iptables backend: {current_backend}, "
+        f"legacy active: {legacy_active}, "
+        f"nft active: {nft_active}"
+    )
+    return has_conflict, diagnosis
+
+
 def _run_ip_batch(commands: list[str]) -> None:
     batch = "\n".join(commands) + "\n"
     subprocess.run(

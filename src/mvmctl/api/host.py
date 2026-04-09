@@ -112,6 +112,22 @@ def init_host(cache_dir: Path | None = None) -> list[HostStateChange]:
     if not check_kvm_access():
         raise HostError("/dev/kvm is not accessible — check permissions or load KVM modules")
 
+    # Check for iptables backend conflict (after privilege check, before any system modifications)
+    from mvmctl.core.network import detect_iptables_backend_conflict
+
+    has_conflict, diagnosis = detect_iptables_backend_conflict()
+    if has_conflict:
+        raise HostError(
+            "Mixed iptables backend detected. VM networking may not work correctly.\n"
+            "See troubleshooting: docs/TROUBLESHOOTING.md#mixed-iptables-backend\n"
+            f"Diagnosis: {diagnosis}\n\n"
+            "Remediation:\n"
+            "  1. Quick fix (clears orphaned legacy rules): sudo iptables-legacy -F\n"
+            "  2. Reboot host (clears both backends cleanly)\n"
+            "  3. Configure Docker to use same backend: edit /etc/docker/daemon.json\n\n"
+            "Then re-run: mvm host init"
+        )
+
     missing = check_required_binaries()
     if missing:
         raise HostError(f"Missing required binaries: {', '.join(missing)}")

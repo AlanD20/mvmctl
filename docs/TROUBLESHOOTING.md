@@ -17,6 +17,37 @@ groups | grep kvm
 
 ---
 
+## Mixed iptables Backend
+
+**Symptom:** VM has valid IP and gateway. ICMP (ping) works. TCP (curl/wget) times out.
+
+**Detection:**
+```bash
+# Check which backend iptables uses
+iptables --version
+
+# Check if iptables-legacy has active rules (pkts > 0)
+sudo iptables-legacy -L -n -v
+```
+
+**Cause:** Docker and mvmctl use different iptables backends. Rules go to different places.
+
+**Fix:**
+```bash
+# Option 1: Clear orphaned legacy rules (quick fix)
+sudo iptables-legacy -F
+
+# Option 2: Reboot host (clears both backends cleanly)
+sudo reboot
+
+# Option 3: Configure Docker to use same backend as mvmctl
+# Edit /etc/docker/daemon.json and restart Docker
+```
+
+Then re-run: `mvm host init`
+
+---
+
 ## Bridge mvm-default not found / No such device
 
 **Problem:** Network bridge doesn't exist when creating a VM.
