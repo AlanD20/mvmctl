@@ -33,6 +33,7 @@ from mvmctl.db.models import (
     NetworkLease,
     VMInstance,
 )
+from mvmctl.exceptions import DatabaseError
 from mvmctl.utils.fs import get_mvm_db_path
 
 
@@ -84,6 +85,13 @@ class MVMDatabase:
             yield conn
         finally:
             conn.close()
+
+    def _ensure_schema_exists(self) -> None:
+        try:
+            with self._connect() as conn:
+                conn.execute("SELECT 1 FROM vm_instances LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            raise DatabaseError("Database not migrated. Run 'mvm init' first.") from None
 
     def migrate(self) -> int:
         """Run pending database migrations.
@@ -445,6 +453,7 @@ class MVMDatabase:
 
     def list_vms(self) -> list[VMInstance]:
         """Return all VM records."""
+        self._ensure_schema_exists()
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM vm_instances ORDER BY created_at").fetchall()
         return [VMInstance(**dict(row)) for row in rows]

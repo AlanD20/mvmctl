@@ -220,7 +220,10 @@ def host_clean(
     force: bool = typer.Option(False, "--force", help="Skip confirmation"),
 ) -> None:
     """Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl or group."""
-    _abort_if_vms_running("clean")
+    try:
+        _abort_if_vms_running("clean")
+    except MVMError as e:
+        handle_mvm_error(e)
 
     if not force:
         print_warning(

@@ -33,6 +33,22 @@ class ConfigError(MVMError):
     """Configuration loading or validation failure."""
 
 
+class DatabaseError(MVMError):
+    """Database operation failure.
+
+    Common messages:
+    - Database not migrated. Run 'mvm init' first.
+    - no such table: {table_name}
+    """
+
+    def __init__(self, message: str = "Database operation failed") -> None:
+        self.message = message
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return self.message
+
+
 class SocketNotFoundError(FirecrackerError):
     """Unix socket for VM API not found."""
 
