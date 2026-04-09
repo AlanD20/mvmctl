@@ -452,6 +452,30 @@ def set_default_binary_entry(cache_dir: Path, version: str) -> None:
                 break
 
 
+def remove_binary_entry(cache_dir: Path, binary_name: str, version: str) -> None:
+    """Remove binary entry from database and filesystem.
+
+    Args:
+        cache_dir: Cache directory path
+        binary_name: Binary name (firecracker or jailer)
+        version: Binary version to remove
+    """
+    from mvmctl.core.mvm_db import MVMDatabase
+
+    db = MVMDatabase()
+    bin_dir = cache_dir / "bin"
+
+    db.delete_binary_by_name_and_version(binary_name, version)
+
+    binary_path = bin_dir / binary_name / version
+    if binary_path.exists():
+        binary_path.unlink()
+
+    parent_dir = bin_dir / binary_name
+    if parent_dir.exists() and not any(parent_dir.iterdir()):
+        parent_dir.rmdir()
+
+
 # =============================================================================
 # Network metadata
 # =============================================================================

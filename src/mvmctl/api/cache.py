@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, SUPPORTED_IMAGE_EXTENSIONS
+from mvmctl.models.binary import BinaryItem
 from mvmctl.models.image import ImageItem
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkConfig, NetworkLease
@@ -29,6 +30,13 @@ def get_default_kernel_entry(cache_dir: Path) -> KernelItem | None:
     from mvmctl.api import metadata as metadata_api
 
     return metadata_api.get_default_kernel_entry(cache_dir)
+
+
+def get_default_binary_entry() -> BinaryItem | None:
+    """Get default binary entry from metadata API."""
+    from mvmctl.api import metadata as metadata_api
+
+    return metadata_api.get_default_binary_entry()
 
 
 def get_network_leases(network_name: str) -> list[NetworkLease]:
@@ -179,12 +187,12 @@ def prune_vms(
     return removed
 
 
-def prune_networks(dry_run: bool = False, include_all: bool = False) -> list[str]:
+def prune_networks(dry_run: bool = False, include_protected: bool = False) -> list[str]:
     """Prune unused networks.
 
     Args:
         dry_run: If True, only report what would be removed.
-        include_all: If True, remove all networks including default and referenced.
+        include_protected: If True, remove all networks including protected and referenced networks.
 
     Returns:
         List of network names that were removed.
@@ -197,7 +205,7 @@ def prune_networks(dry_run: bool = False, include_all: bool = False) -> list[str
 
     removed: list[str] = []
     for network in all_networks:
-        if not include_all:
+        if not include_protected:
             if network.name == DEFAULT_NETWORK_NAME:
                 continue
             if network.name in referenced_networks:
@@ -218,12 +226,12 @@ def prune_networks(dry_run: bool = False, include_all: bool = False) -> list[str
     return removed
 
 
-def prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]:
+def prune_images(dry_run: bool = False, include_protected: bool = False) -> list[str]:
     """Prune unused images.
 
     Args:
         dry_run: If True, only report what would be removed.
-        include_all: If True, remove all images including default and referenced.
+        include_protected: If True, remove all images including protected and referenced images.
 
     Returns:
         List of image IDs that were removed.
@@ -242,7 +250,7 @@ def prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]:
 
     removed: list[str] = []
     for image_id, meta in all_images.items():
-        if not include_all:
+        if not include_protected:
             if image_id == default_id:
                 continue
 
@@ -280,12 +288,12 @@ def prune_images(dry_run: bool = False, include_all: bool = False) -> list[str]:
     return removed
 
 
-def prune_kernels(dry_run: bool = False, include_all: bool = False) -> list[str]:
+def prune_kernels(dry_run: bool = False, include_protected: bool = False) -> list[str]:
     """Prune unused kernels.
 
     Args:
         dry_run: If True, only report what would be removed.
-        include_all: If True, remove all kernels including default and referenced.
+        include_protected: If True, remove all kernels including protected and referenced kernels.
 
     Returns:
         List of kernel IDs that were removed.
@@ -305,7 +313,7 @@ def prune_kernels(dry_run: bool = False, include_all: bool = False) -> list[str]
     removed: list[str] = []
     for kernel_id, meta in all_kernels.items():
         path = str(meta.get("path", ""))
-        if not include_all:
+        if not include_protected:
             if kernel_id == default_id:
                 continue
             if path:
@@ -333,6 +341,7 @@ def prune_all(
     include_stopped: bool = False,
     include_running: bool = False,
     dry_run: bool = False,
+    include_protected: bool = False,
 ) -> dict[str, list[str] | bool]:
     """Prune all cache resources.
 
@@ -343,20 +352,86 @@ def prune_all(
         include_stopped: Include stopped VMs in pruning.
         include_running: Include running VMs in pruning (use with caution).
         dry_run: If True, only report what would be removed.
+        include_protected: If True, remove protected resources (networks/images/kernels).
 
     Returns:
         Dictionary with results per resource type:
         - "vms": list of removed VM names
         - "networks": list of removed network names
         - "images": list of removed image IDs
-        - "kernels": list of removed kernel IDs
+        - "kernels": list of kernel IDs that were removed.
     """
     from mvmctl.api.host import check_privileges_interactive
 
     check_privileges_interactive("/usr/sbin/ip", "prune all cache resources")
+
+    appliance_pruned = _prune_appliance(dry_run)
+
     return {
         "vms": prune_vms(include_stopped, include_running, dry_run),
-        "networks": prune_networks(dry_run),
-        "images": prune_images(dry_run),
-        "kernels": prune_kernels(dry_run),
+        "networks": prune_networks(dry_run, include_protected),
+        "images": prune_images(dry_run, include_protected),
+        "kernels": prune_kernels(dry_run, include_protected),
+        "binaries": prune_binaries(dry_run, include_protected),
+        "appliance": appliance_pruned,
     }
+
+
+def _prune_appliance(dry_run: bool = False) -> bool:
+    """Remove the libguestfs appliance folder.
+
+    Args:
+        dry_run: If True, only report what would be removed.
+
+    Returns:
+        True if appliance folder was removed or would be removed.
+    """
+    from mvmctl.utils.fs import get_cache_dir
+
+    appliance_dir = get_cache_dir() / "appliance"
+    if appliance_dir.exists():
+        if not dry_run:
+            import shutil
+
+            shutil.rmtree(appliance_dir, ignore_errors=True)
+        return True
+    return False
+
+
+def prune_binaries(dry_run: bool = False, include_protected: bool = False) -> list[str]:
+    """Prune unused binaries.
+
+    Args:
+        dry_run: If True, only report what would be removed.
+        include_protected: If True, remove all binaries including protected ones.
+
+    Returns:
+        List of binary identifiers (name:version) that were removed.
+    """
+    from mvmctl.core.metadata import list_binary_entries, remove_binary_entry
+    from mvmctl.utils.fs import get_cache_dir
+
+    cache_dir = get_cache_dir()
+    all_binaries = list_binary_entries(cache_dir)
+
+    default_binary = get_default_binary_entry()
+    default_version = default_binary.version if default_binary else None
+
+    removed: list[str] = []
+    for binary_name, meta in all_binaries.items():
+        version = meta.get("version", "")
+
+        if not include_protected:
+            if version == default_version:
+                continue
+
+        if not dry_run:
+            try:
+                remove_binary_entry(cache_dir, binary_name, version)
+                removed.append(f"{binary_name}:{version}")
+            except Exception as e:
+                logger.warning(f"Failed to remove binary {binary_name}:{version}: {e}")
+        else:
+            removed.append(f"{binary_name}:{version}")
+
+    return removed
