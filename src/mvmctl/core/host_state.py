@@ -95,6 +95,10 @@ def _save_state(db: MVMDatabase, changes: list[HostStateChange]) -> None:
     init_timestamp = datetime.now(timezone.utc).isoformat()
 
     for idx, change in enumerate(changes):
+        # Skip noop entries - they represent no actual change and have no rollback action
+        if change.mechanism == "noop":
+            continue
+
         db_change = DBHostStateChange(
             id=None,
             session_id=session_id,
