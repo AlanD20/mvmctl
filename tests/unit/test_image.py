@@ -45,7 +45,6 @@ def test_load_images_config_valid(tmp_path: Path):
                 "source": "https://example.com/ubuntu.qcow2",
                 "format": "qcow2",
                 "convert_to": "ext4",
-                "minimum_rootfs_size": 4096,
                 "sha256": "abc123",
             },
             {
@@ -66,11 +65,9 @@ def test_load_images_config_valid(tmp_path: Path):
     assert result[0].id == "ubuntu-24.04"
     assert result[0].name == "Ubuntu 24.04"
     assert result[0].sha256 == "abc123"
-    assert result[0].minimum_rootfs_size == 4096
     # Second image uses defaults for missing optional fields
     assert result[1].id == "alpine"
     assert result[1].name == "alpine"  # defaults to id
-    assert result[1].minimum_rootfs_size == 2048  # default
     assert result[1].sha256 is None
 
 
@@ -108,7 +105,6 @@ def test_load_images_config_alpine(tmp_path: Path):
                 "source": "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/aws_alpine-3.21.4-x86_64-bios-cloudinit-r0.vhd",
                 "format": "vhd",
                 "convert_to": "ext4",
-                "minimum_rootfs_size": 256,
                 "sha256": None,
                 "sha256_url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/aws_alpine-3.21.4-x86_64-bios-cloudinit-r0.vhd.sha512",
             },
@@ -125,7 +121,6 @@ def test_load_images_config_alpine(tmp_path: Path):
     assert result[0].version == "3.21"
     assert result[0].format == "vhd"
     assert result[0].convert_to == "ext4"
-    assert result[0].minimum_rootfs_size == 256
 
 
 def _mock_urlopen_response(data: bytes, content_length: str | None = None):
@@ -421,7 +416,7 @@ def test_fetch_image_already_exists(tmp_path: Path):
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=4096,
+        sha256="a" * 64,
     )
 
     # Pre-create the compressed file (final output after processing)
@@ -452,7 +447,6 @@ def test_fetch_image_qcow2(
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=4096,
         sha256="a" * 64,
     )
 
@@ -963,7 +957,6 @@ def test_fetch_image_tar_rootfs(
         source="https://example.com/alpine.tar.gz",
         format="tar-rootfs",
         convert_to="ext4",
-        minimum_rootfs_size=1024,
         sha256="a" * 64,
     )
 
@@ -993,7 +986,6 @@ def test_fetch_image_tar_rootfs_failure(
         source="https://example.com/alpine.tar.gz",
         format="tar-rootfs",
         convert_to="ext4",
-        minimum_rootfs_size=1024,
         sha256="a" * 64,
     )
 
@@ -1027,7 +1019,6 @@ def test_fetch_image_force_re_download(
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=4096,
         sha256="a" * 64,
     )
 
@@ -1073,7 +1064,6 @@ def test_fetch_image_download_failure(
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=4096,
         sha256="a" * 64,
     )
 
@@ -1100,7 +1090,6 @@ def test_fetch_image_raw_format(
         source="https://example.com/image.raw",
         format="raw",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256="a" * 64,
     )
 
@@ -1121,14 +1110,13 @@ def test_fetch_image_unknown_format(
     tmp_path: Path,
 ):
     spec = ImageSpec(
-        id="unknown",
+        id="custom-image",
         image_type="test",
         version="test",
-        name="Unknown Format",
-        source="https://example.com/image.xyz",
-        format="xyz",
+        name="Custom Image",
+        source="https://example.com/image.raw",
+        format="raw",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256="a" * 64,
     )
 
@@ -1155,7 +1143,6 @@ def test_fetch_image_qcow2_convert_fails(
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=4096,
         sha256="a" * 64,
     )
 
@@ -1187,7 +1174,6 @@ def test_fetch_image_qcow2_extract_fails(
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=4096,
         sha256="a" * 64,
     )
 
@@ -1216,7 +1202,6 @@ def test_fetch_image_raw_extract_fails(
         source="https://example.com/image.raw",
         format="raw",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256="a" * 64,
     )
 
@@ -1246,7 +1231,6 @@ def test_fetch_image_sha256_null_skips_verification(
         source="https://example.com/image.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256=None,
         sha256_url="https://example.com/image.sha256",
     )
@@ -1553,7 +1537,6 @@ def test_resolve_source_template_success(
         source="",
         format="squashfs",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         list_url_template="http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
         source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
@@ -1592,7 +1575,6 @@ def test_resolve_source_template_uses_default_version(
         source="",
         format="squashfs",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         list_url_template="http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
         source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
@@ -1619,7 +1601,6 @@ def test_resolve_source_template_network_error(
         source="",
         format="squashfs",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         list_url_template="http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
         source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
@@ -1659,7 +1640,6 @@ def test_resolve_source_template_no_matching_keys(
         source="",
         format="squashfs",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         list_url_template="http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2",
         source_base="https://s3.amazonaws.com/spec.ccfc.min",
     )
@@ -1692,7 +1672,6 @@ def test_fetch_image_sha256_url_ignored_when_sha256_null(
         source="https://example.com/image.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256=None,
         sha256_url="https://example.com/image.qcow2.sha256",
     )
@@ -1731,7 +1710,6 @@ def test_fetch_image_uses_templated_sha256_url(
         source="https://example.com/image.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256=None,
         sha256_url="https://example.com/{image_type}/{version}.sha256",
     )
@@ -1766,7 +1744,6 @@ def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
         source="https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu_version}.squashfs",
         format="squashfs",
         convert_to="ext4",
-        minimum_rootfs_size=1024,
         sha256=None,
         sha256_url=None,
     )
@@ -1812,7 +1789,6 @@ def test_fetch_image_ubuntu_fc_resolves_source(
         source="https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-{ubuntu_version}.squashfs",
         format="squashfs",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256="a" * 64,
     )
 
@@ -1862,7 +1838,6 @@ def test_import_image_already_exists_no_force(tmp_path: Path):
         output_dir=output_dir,
         format="raw",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     with pytest.raises(ImageError, match="already exists"):
@@ -1880,7 +1855,6 @@ def test_import_image_source_not_found(tmp_path: Path):
         output_dir=output_dir,
         format="raw",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     with pytest.raises(ImageError, match="Source file not found"):
@@ -1902,7 +1876,6 @@ def test_import_image_raw_format(mock_copy: MagicMock, tmp_path: Path):
         output_dir=output_dir,
         format="raw",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     result = import_image(spec, output_dir)
@@ -1931,7 +1904,6 @@ def test_import_image_qcow2_format(
         output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     mock_convert.return_value = True
@@ -1965,7 +1937,6 @@ def test_import_image_qcow2_cleans_up_raw(
         output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     mock_convert.return_value = True
@@ -1995,7 +1966,6 @@ def test_import_image_qcow2_convert_fails(
         output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     mock_convert.side_effect = ImageError("qemu-img failed")
@@ -2020,7 +1990,6 @@ def test_import_image_tar_rootfs_format(mock_create: MagicMock, tmp_path: Path):
         output_dir=output_dir,
         format="tar-rootfs",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     mock_create.return_value = True
@@ -2045,7 +2014,6 @@ def test_import_image_unsupported_format(tmp_path: Path):
         output_dir=output_dir,
         format="xyz",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     with pytest.raises(ImageError, match="Unsupported import format"):
@@ -2079,7 +2047,6 @@ def test_import_image_force_overwrite(
         output_dir=output_dir,
         format="raw",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     mock_shrink.return_value = (final_path, 1024, 512)
@@ -2178,7 +2145,6 @@ def test_fetch_image_squashfs_format(
         source="https://example.com/image.squashfs",
         format="squashfs",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256="a" * 64,
     )
 
@@ -2242,7 +2208,6 @@ def test_import_image_qcow2_uses_tempfile_context_manager(
         output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     mock_convert.return_value = True
@@ -2283,7 +2248,6 @@ def test_import_image_qcow2_cleans_up_on_exception(
         output_dir=output_dir,
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
     )
 
     mock_convert.return_value = True
@@ -2611,7 +2575,6 @@ def test_fetch_image_cleans_stale_download_on_force(
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=4096,
         sha256="a" * 64,
     )
 
@@ -2651,7 +2614,6 @@ def test_fetch_image_validates_after_download(
         source="https://example.com/alpine.tar.gz",
         format="tar-rootfs",
         convert_to="ext4",
-        minimum_rootfs_size=1024,
         sha256="a" * 64,
     )
 
@@ -2690,7 +2652,6 @@ def test_fetch_image_validates_before_handler(
         source="https://example.com/alpine.tar.gz",
         format="tar-rootfs",
         convert_to="ext4",
-        minimum_rootfs_size=1024,
         sha256="a" * 64,
     )
 
@@ -2728,7 +2689,6 @@ def test_fetch_image_cleans_download_on_handler_failure(
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=4096,
         sha256="a" * 64,
     )
 
@@ -2761,11 +2721,10 @@ def test_fetch_image_cleans_download_on_unknown_format(
         id="unknown",
         image_type="test",
         version="test",
-        name="Unknown",
+        name="Unknown Format",
         source="https://example.com/image.xyz",
         format="xyz",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256="a" * 64,
     )
 
@@ -2799,7 +2758,6 @@ def test_fetch_image_no_stale_cleanup_without_force(
         source="https://example.com/alpine.tar.gz",
         format="tar-rootfs",
         convert_to="ext4",
-        minimum_rootfs_size=1024,
         sha256="a" * 64,
     )
 
@@ -2853,7 +2811,6 @@ def test_fetch_image_tar_validation_failure_cleans_up(
         source="https://example.com/alpine.tar.gz",
         format="tar-rootfs",
         convert_to="ext4",
-        minimum_rootfs_size=1024,
         sha256="a" * 64,
     )
 
@@ -2889,7 +2846,6 @@ def test_fetch_image_squashfs_validation_failure_cleans_up(
         source="https://example.com/ubuntu.squashfs",
         format="squashfs",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256="a" * 64,
     )
 
@@ -2936,9 +2892,6 @@ def test_ubuntu_minimal_image_metadata():
     assert minimal["name"] == "Ubuntu 24.04 Minimal"
     assert minimal["format"] == "tar-rootfs"
     assert minimal["convert_to"] == "ext4"
-    assert minimal["minimum_rootfs_size"] == 512, (
-        f"Expected minimum_rootfs_size=512, got {minimal['minimum_rootfs_size']}"
-    )
 
 
 def test_shrink_image_with_guestfs_performs_ubuntu_cleanup(tmp_path: Path, mocker: MockerFixture):

@@ -176,7 +176,6 @@ def _prompt_missing_assets(
                     source=f"https://cloud-images.ubuntu.com/{identifier}/current/{identifier}-server-cloudimg-{qualifier}.img",
                     format="qcow2",
                     convert_to="ext4",
-                    minimum_rootfs_size=2048,  # 2GB default for cloud images
                     sha256="",
                     sha256_url="",
                 )

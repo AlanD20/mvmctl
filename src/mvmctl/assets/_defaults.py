@@ -113,6 +113,7 @@ DEFAULTS: dict[str, object] = {
         },
         "shrink_safety_margin": 1.01,
         "ratio_min": 1.0,
+        "runtime_buffer_mb": 160,  # Buffer in MB added to shrunk size for boot overhead
     },
     "host": {
         "system_dirs": {

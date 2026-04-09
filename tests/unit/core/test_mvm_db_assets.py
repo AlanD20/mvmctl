@@ -45,6 +45,7 @@ class TestImageOperations:
             arch="x86_64",
             os_name="Ubuntu",
             fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
 
@@ -66,6 +67,7 @@ class TestImageOperations:
             os_slug="alpine-3.21",
             path="/cache/images/alpine-3.21.ext4",
             arch="x86_64",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
 
@@ -81,6 +83,7 @@ class TestImageOperations:
             path="/cache/images/debian-12.ext4",
             arch="x86_64",
             os_name="Debian",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image1)
 
@@ -91,6 +94,7 @@ class TestImageOperations:
             arch="x86_64",
             os_name="Debian 12",  # Updated
             fs_type="ext4",  # New field
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image2)
 
@@ -106,6 +110,7 @@ class TestImageOperations:
             os_slug="fedora-40",
             path="/cache/images/fedora-40.ext4",
             arch="x86_64",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
         assert db.get_image("d" * 64) is not None
@@ -132,6 +137,7 @@ class TestImageOperations:
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
             created_at="2026-04-01T10:00:00Z",
+            minimum_rootfs_size_mb=2048,
         )
         image2 = Image(
             id="f" * 64,
@@ -139,6 +145,7 @@ class TestImageOperations:
             path="/cache/images/alpine-3.21.ext4",
             arch="x86_64",
             created_at="2026-04-02T10:00:00Z",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image1)
         db.upsert_image(image2)
@@ -155,6 +162,7 @@ class TestImageOperations:
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
 
@@ -169,12 +177,14 @@ class TestImageOperations:
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            minimum_rootfs_size_mb=2048,
         )
         image2 = Image(
             id="abc111" + "d" * 58,
             os_slug="alpine-3.21",
             path="/cache/images/alpine-3.21.ext4",
             arch="x86_64",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image1)
         db.upsert_image(image2)
@@ -189,6 +199,7 @@ class TestImageOperations:
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
 
@@ -203,6 +214,7 @@ class TestImageOperations:
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
             is_default=False,
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
 
@@ -221,6 +233,7 @@ class TestImageOperations:
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
             is_default=True,
+            minimum_rootfs_size_mb=2048,
         )
         image2 = Image(
             id="i" * 64,
@@ -228,6 +241,7 @@ class TestImageOperations:
             path="/cache/images/alpine-3.21.ext4",
             arch="x86_64",
             is_default=False,
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image1)
         db.upsert_image(image2)
@@ -248,6 +262,7 @@ class TestImageOperations:
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
 
@@ -837,6 +852,7 @@ class TestEdgeCases:
             is_default=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
 
@@ -917,6 +933,7 @@ class TestEdgeCases:
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
             is_default=True,
+            minimum_rootfs_size_mb=2048,
         )
         image2 = Image(
             id="5" * 64,
@@ -924,6 +941,7 @@ class TestEdgeCases:
             path="/cache/images/alpine-3.21.ext4",
             arch="x86_64",
             is_default=False,
+            minimum_rootfs_size_mb=2048,
         )
         image3 = Image(
             id="6" * 64,
@@ -931,6 +949,7 @@ class TestEdgeCases:
             path="/cache/images/debian-12.ext4",
             arch="x86_64",
             is_default=False,
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image1)
         db.upsert_image(image2)
@@ -985,6 +1004,7 @@ class TestEdgeCases:
             os_slug="ubuntu-24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            minimum_rootfs_size_mb=2048,
         )
         db.upsert_image(image)
 

@@ -87,7 +87,6 @@ _FAKE_IMAGES = [
         source="https://example.com/ubuntu.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256=None,
     ),
     ImageSpec(
@@ -99,7 +98,6 @@ _FAKE_IMAGES = [
         source="https://example.com/debian.qcow2",
         format="qcow2",
         convert_to="ext4",
-        minimum_rootfs_size=2048,
         sha256=None,
     ),
 ]
@@ -756,7 +754,6 @@ def test_image_fetch_by_type_and_version(
             source="https://example.com/ubuntu-22.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
             sha256=None,
         ),
         ImageSpec(
@@ -768,7 +765,6 @@ def test_image_fetch_by_type_and_version(
             source="https://example.com/ubuntu-24.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
             sha256=None,
         ),
     ]
@@ -800,7 +796,6 @@ def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
             source="https://example.com/ubuntu-22.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
             sha256=None,
         ),
         ImageSpec(
@@ -812,7 +807,6 @@ def test_image_fetch_type_ambiguous_requires_version(mock_config: MagicMock):
             source="https://example.com/ubuntu-24.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
             sha256=None,
         ),
     ]
@@ -841,7 +835,6 @@ def test_image_fetch_partition_retry_success(
             source="https://example.com/ubuntu-24.04.qcow2",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
             sha256=None,
         )
     ]
@@ -1014,7 +1007,6 @@ def test_resolve_image_spec_exact_id_match():
             source="",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
         ),
         ImageSpec(
             id="ubuntu-22.04",
@@ -1025,7 +1017,6 @@ def test_resolve_image_spec_exact_id_match():
             source="",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
         ),
     ]
     result = resolve_image_spec(images, "ubuntu-24.04", None)
@@ -1045,7 +1036,6 @@ def test_resolve_image_spec_type_single_match():
             source="",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
         ),
     ]
     result = resolve_image_spec(images, "debian", None)
@@ -1065,7 +1055,6 @@ def test_resolve_image_spec_type_with_version():
             source="",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
         ),
         ImageSpec(
             id="ubuntu-24.04",
@@ -1076,7 +1065,6 @@ def test_resolve_image_spec_type_with_version():
             source="",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
         ),
     ]
     result = resolve_image_spec(images, "ubuntu", "22.04")
@@ -1107,7 +1095,6 @@ def test_resolve_image_spec_type_ambiguous_no_version_exits():
             source="",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
         ),
         ImageSpec(
             id="ubuntu-24.04",
@@ -1118,7 +1105,6 @@ def test_resolve_image_spec_type_ambiguous_no_version_exits():
             source="",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
         ),
     ]
     with pytest.raises(ImageError):
@@ -1181,6 +1167,7 @@ def _write_image_meta(cache_dir: Path, full_hash: str, path: str, **extra: objec
             original_size=extra.get("original_size"),
             compression_ratio=extra.get("compression_ratio"),
             compressed_format=extra.get("compressed_format"),
+            minimum_rootfs_size_mb=extra.get("minimum_rootfs_size_mb", 2048),
             pulled_at=extra.get("pulled_at", "2026-01-01T00:00:00+00:00"),
             is_default=bool(extra.get("is_default", False)),
             created_at=extra.get("created_at"),
@@ -1543,7 +1530,6 @@ def test_image_fetch_confirms_existing_image(mock_config, mock_fetch, tmp_path):
             source="https://example.com/ubuntu.qcow2",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=2048,
             sha256="abc" * 21 + "a",
         )
     ]
@@ -2131,7 +2117,6 @@ def test_image_ls_size_various_units(tmp_path: Path, mocker):
             source="https://example.com/small.qcow2",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=1,
             sha256=None,
         ),
         ImageSpec(
@@ -2143,7 +2128,6 @@ def test_image_ls_size_various_units(tmp_path: Path, mocker):
             source="https://example.com/medium.qcow2",
             format="qcow2",
             convert_to="ext4",
-            minimum_rootfs_size=100,
             sha256=None,
         ),
     ]

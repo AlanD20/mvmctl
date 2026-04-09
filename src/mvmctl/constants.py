@@ -385,6 +385,9 @@ IMAGE_IMPORT_FORMAT_MAP: Final[dict[str, str]] = _require_str_dict(
     ("image", "defaults", "import_format_map")
 )
 
+# Image runtime buffer for dynamic minimum rootfs size calculation
+CONST_RUNTIME_BUFFER_MB: Final[int] = _require_int(("image", "runtime_buffer_mb"))
+
 # VM log defaults
 DEFAULT_VM_LOG_TYPE: Final[str] = _resolve_with_config_override(
     "DEFAULT_VM_LOG_TYPE", _require_str(("vm", "logging", "type"))
@@ -574,6 +577,7 @@ def _resolve_version() -> str:
 CONST_BUFFER_SIZE_BYTES: Final[int] = 1024
 CONST_SECTOR_SIZE_BYTES: Final[int] = 512
 CONST_MEBIBYTE_BYTES: Final[int] = 1024 * 1024
+CONST_MEGABYTE_BYTES: Final[int] = 1_000_000  # MB (megabyte), not MiB (mebibyte)
 CONST_KIBIBYTE_BYTES: Final[int] = 1024
 
 # Image processing constants

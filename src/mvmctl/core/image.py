@@ -16,10 +16,12 @@ from mvmctl.constants import (
     COMPRESSION_EXTENSION_MAP,
     CONST_GUESTFS_OS_RELEASE_PATH,
     CONST_MEBIBYTE_BYTES,
+    CONST_MEGABYTE_BYTES,
     CONST_MIN_ROOTFS_SIZE_MIB,
     CONST_PERCENT,
     CONST_RATIO_MIN,
     CONST_ROOTFS_HEADROOM_FACTOR,
+    CONST_RUNTIME_BUFFER_MB,
     CONST_SECTOR_SIZE_BYTES,
     CONST_SHRINK_SAFETY_MARGIN,
     DEFAULT_IMAGE_IMPORT_SIZE_MIB,
@@ -49,6 +51,7 @@ class ImageImportResult:
     compressed_size: int | None = None
     original_size: int | None = None
     shrunk_size: int | None = None
+    minimum_rootfs_size_mb: int | None = None
     compression_ratio: float | None = None
 
 
@@ -1179,7 +1182,14 @@ def fetch_image(
         logger.info("Image already exists: %s", existing_compressed)
         fs_type = detect_filesystem_type(existing_compressed)
         fs_uuid = get_filesystem_uuid(existing_compressed)
-        return ImageImportResult(path=existing_compressed, fs_type=fs_type, fs_uuid=fs_uuid)
+        existing_size = existing_compressed.stat().st_size
+        minimum_rootfs_size_mb = existing_size // CONST_MEGABYTE_BYTES
+        return ImageImportResult(
+            path=existing_compressed,
+            fs_type=fs_type,
+            fs_uuid=fs_uuid,
+            minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+        )
 
     if force:
         for ext in compressed_extensions:
@@ -1239,7 +1249,7 @@ def fetch_image(
                 download_path.unlink(missing_ok=True)
                 raise ImageError(f"Unknown format: {spec.format}")
             actual_path = handler(
-                download_path, final_path, spec.minimum_rootfs_size, partition, None
+                download_path, final_path, DEFAULT_IMAGE_IMPORT_SIZE_MIB, partition, None
             )
         else:
             if existing_uncompressed is None:
@@ -1259,7 +1269,14 @@ def fetch_image(
         # Skip optimization if requested
         if skip_optimization:
             logger.info("Skipping optimization (shrink and compression)")
-            return ImageImportResult(path=actual_path, fs_type=fs_type, fs_uuid=fs_uuid)
+            actual_size = actual_path.stat().st_size
+            minimum_rootfs_size_mb = actual_size // CONST_MEGABYTE_BYTES
+            return ImageImportResult(
+                path=actual_path,
+                fs_type=fs_type,
+                fs_uuid=fs_uuid,
+                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+            )
 
         # Shrink before compression
         if actual_path.exists():
@@ -1282,6 +1299,9 @@ def fetch_image(
                 pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
             )
 
+            minimum_rootfs_size_mb = (
+                post_shrink_size // CONST_MEGABYTE_BYTES
+            ) + CONST_RUNTIME_BUFFER_MB
             return ImageImportResult(
                 path=compressed_path_out,
                 fs_type=fs_type,
@@ -1289,10 +1309,18 @@ def fetch_image(
                 compressed_size=compressed_size,
                 original_size=pre_shrink_size,
                 shrunk_size=post_shrink_size,
+                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
                 compression_ratio=compression_ratio,
             )
 
-        return ImageImportResult(path=actual_path, fs_type=fs_type, fs_uuid=fs_uuid)
+        actual_size = actual_path.stat().st_size
+        minimum_rootfs_size_mb = actual_size // CONST_MEGABYTE_BYTES
+        return ImageImportResult(
+            path=actual_path,
+            fs_type=fs_type,
+            fs_uuid=fs_uuid,
+            minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+        )
     except Exception:
         # Cleanup download on any failure
         download_path.unlink(missing_ok=True)
@@ -1335,7 +1363,6 @@ def load_images_config(config_path: Path) -> list[ImageSpec]:
                 source=img["source"],
                 format=img["format"],
                 convert_to=img["convert_to"],
-                minimum_rootfs_size=img.get("minimum_rootfs_size", DEFAULT_IMAGE_IMPORT_SIZE_MIB),
                 sha256=img.get("sha256"),
                 sha256_url=img.get("sha256_url"),
                 list_url_template=img.get("list_url_template"),
@@ -1425,6 +1452,9 @@ def import_image(
                     pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
                 )
 
+                minimum_rootfs_size_mb = (
+                    post_shrink_size // CONST_MEGABYTE_BYTES
+                ) + CONST_RUNTIME_BUFFER_MB
                 return ImageImportResult(
                     path=compressed_path,
                     fs_type=fs_type,
@@ -1432,10 +1462,18 @@ def import_image(
                     compressed_size=compressed_size,
                     original_size=pre_shrink_size,
                     shrunk_size=post_shrink_size,
+                    minimum_rootfs_size_mb=minimum_rootfs_size_mb,
                     compression_ratio=compression_ratio,
                 )
 
-            return ImageImportResult(path=destination_path, fs_type=fs_type, fs_uuid=fs_uuid)
+            destination_size = destination_path.stat().st_size
+            minimum_rootfs_size_mb = destination_size // CONST_MEGABYTE_BYTES
+            return ImageImportResult(
+                path=destination_path,
+                fs_type=fs_type,
+                fs_uuid=fs_uuid,
+                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+            )
 
     elif spec.format == "raw":
         shutil.copy2(spec.source_path, final_path)
@@ -1456,6 +1494,9 @@ def import_image(
                 pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
             )
 
+            minimum_rootfs_size_mb = (
+                post_shrink_size // CONST_MEGABYTE_BYTES
+            ) + CONST_RUNTIME_BUFFER_MB
             return ImageImportResult(
                 path=compressed_path,
                 fs_type=fs_type,
@@ -1463,14 +1504,22 @@ def import_image(
                 compressed_size=compressed_size,
                 original_size=pre_shrink_size,
                 shrunk_size=post_shrink_size,
+                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
                 compression_ratio=compression_ratio,
             )
 
-        return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
+        final_size = final_path.stat().st_size
+        minimum_rootfs_size_mb = final_size // CONST_MEGABYTE_BYTES
+        return ImageImportResult(
+            path=final_path,
+            fs_type=fs_type,
+            fs_uuid=fs_uuid,
+            minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+        )
 
     elif spec.format == "tar-rootfs":
         create_ext4_from_tar(
-            spec.source_path, final_path, minimum_rootfs_mib=spec.minimum_rootfs_size
+            spec.source_path, final_path, minimum_rootfs_mib=DEFAULT_IMAGE_IMPORT_SIZE_MIB
         )
 
         # Detect filesystem type and UUID for tar-rootfs (always ext4)
@@ -1489,6 +1538,9 @@ def import_image(
                 pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
             )
 
+            minimum_rootfs_size_mb = (
+                post_shrink_size // CONST_MEGABYTE_BYTES
+            ) + CONST_RUNTIME_BUFFER_MB
             return ImageImportResult(
                 path=compressed_path,
                 fs_type=fs_type,
@@ -1496,10 +1548,18 @@ def import_image(
                 compressed_size=compressed_size,
                 original_size=pre_shrink_size,
                 shrunk_size=post_shrink_size,
+                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
                 compression_ratio=compression_ratio,
             )
 
-        return ImageImportResult(path=final_path, fs_type=fs_type, fs_uuid=fs_uuid)
+        final_size = final_path.stat().st_size
+        minimum_rootfs_size_mb = final_size // CONST_MEGABYTE_BYTES
+        return ImageImportResult(
+            path=final_path,
+            fs_type=fs_type,
+            fs_uuid=fs_uuid,
+            minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+        )
 
     else:
         raise ImageError(f"Unsupported import format: {spec.format}")

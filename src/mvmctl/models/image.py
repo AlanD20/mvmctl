@@ -28,6 +28,7 @@ class ImageItem:
     is_default: bool = False
     created_at: str | None = None
     updated_at: str | None = None
+    minimum_rootfs_size_mb: int | None = None
 
     @classmethod
     def from_db(cls, record: "DBImage") -> "ImageItem":
@@ -47,6 +48,7 @@ class ImageItem:
             is_default=record.is_default,
             created_at=record.created_at,
             updated_at=record.updated_at,
+            minimum_rootfs_size_mb=record.minimum_rootfs_size_mb,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -65,6 +67,7 @@ class ImageItem:
             "is_default": 1 if self.is_default else 0,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "minimum_rootfs_size_mb": self.minimum_rootfs_size_mb,
         }
 
 
@@ -77,7 +80,6 @@ class ImageSpec:
     source: str
     format: str  # noqa: N816
     convert_to: str
-    minimum_rootfs_size: int
     arch: str = field(default_factory=platform.machine)
     sha256: str | None = None
     sha256_url: str | None = None
@@ -95,7 +97,6 @@ class ImageImportInput:
     output_dir: Path
     format: str  # noqa: N816  # "qcow2", "raw", "tar-rootfs"
     convert_to: str = "ext4"
-    minimum_rootfs_size: int = field(default=2048)
     disabled_detectors: list[str] = field(default_factory=list)
     force: bool = False
     partition: int | None = None

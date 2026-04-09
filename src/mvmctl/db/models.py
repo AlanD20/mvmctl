@@ -33,6 +33,7 @@ class Image:
     original_size: Optional[int] = None
     compression_ratio: Optional[float] = None
     compressed_format: Optional[str] = None
+    minimum_rootfs_size_mb: int | None = None  # NEW: HARD REQUIREMENT for VM creation
     pulled_at: Optional[str] = None
     is_default: bool = False
     created_at: Optional[str] = None

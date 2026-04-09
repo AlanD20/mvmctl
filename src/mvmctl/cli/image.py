@@ -708,7 +708,6 @@ def image_import(
         help="Image format: qcow2, raw, tar-rootfs, or auto",
     ),
     convert_to: str = typer.Option(None, "--convert-to", help="Target filesystem format"),
-    size_mib: int = typer.Option(None, "--size-mib", help="Size in MiB for tar-rootfs import"),
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing"),
     set_default: bool = typer.Option(False, "--set-default", help="Set as default after import"),
     images_dir: Optional[Path] = typer.Option(None, "--images-dir", help="Output directory"),
@@ -774,7 +773,6 @@ def image_import(
         output_dir=images_dir,
         format=str(resolved_format),
         convert_to=convert_to,
-        minimum_rootfs_size=size_mib,
         disabled_detectors=disabled_detectors,
         force=force,
     )

@@ -8,7 +8,6 @@ images:
     source: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64-root.tar.xz
     format: tar-rootfs
     convert_to: ext4
-    minimum_rootfs_size: 1152
     sha256: null
     sha256_url: https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
 
@@ -16,7 +15,6 @@ images:
     name: Ubuntu 24.04 Minimal
     format: tar-rootfs
     convert_to: ext4
-    minimum_rootfs_size: 512
     source: https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz
     sha256_url: https://cloud-images.ubuntu.com/minimal/releases/noble/RELEASE/SHA256SUMS
 
@@ -27,7 +25,6 @@ images:
     source: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64-root.tar.xz
     format: tar-rootfs
     convert_to: ext4
-    minimum_rootfs_size: 1152
     sha256: null
     sha256_url: https://cloud-images.ubuntu.com/jammy/current/SHA256SUMS
 
@@ -38,7 +35,6 @@ images:
     source: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
     format: qcow2
     convert_to: btrfs
-    minimum_rootfs_size: 1280
     sha256: null
     sha256_url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256
 
@@ -49,7 +45,6 @@ images:
     source: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
     format: qcow2
     convert_to: ext4
-    minimum_rootfs_size: 1024
     sha256: null
     sha256_url: https://cloud.debian.org/images/cloud/bookworm/latest/SHA256SUMS
 
@@ -62,7 +57,6 @@ images:
     source_base: "https://s3.amazonaws.com/spec.ccfc.min"
     format: squashfs
     convert_to: ext4
-    minimum_rootfs_size: 640
     sha256: null
     sha256_url: null
 
@@ -73,6 +67,5 @@ images:
     source: https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/aws_alpine-3.21.4-x86_64-bios-cloudinit-r0.vhd
     format: vhd
     convert_to: ext4
-    minimum_rootfs_size: 256
     sha256: null
     sha256_url: https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/aws_alpine-3.21.4-x86_64-bios-cloudinit-r0.vhd.sha512

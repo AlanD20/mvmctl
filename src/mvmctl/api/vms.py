@@ -22,6 +22,7 @@ from mvmctl.constants import (
     CONST_FILE_PERMS_PUBLIC_KEY,
     CONST_FILE_PERMS_SHADOW,
     CONST_FILE_PERMS_SUDOERS,
+    CONST_MEGABYTE_BYTES,
     CONST_ROOT_GID,
     CONST_ROOT_UID,
     CONST_SHADOW_DAYS_SINCE_EPOCH,
@@ -1047,6 +1048,34 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             guest_mac = mac if mac else generate_mac()
             tap_name = generate_tap_name(network_name, name)
             bridge = net_config.bridge
+
+            db = MVMDatabase()
+            image_entry = None
+            if resolved_image_hash:
+                image_entry = db.get_image(resolved_image_hash)
+            elif image:
+                image_entry = db.get_image_by_os_slug(image)
+
+            if image_entry is None or image_entry.minimum_rootfs_size_mb is None:
+                image_id = image or resolved_image_hash or str(resolved_image_path)
+                os_slug = image_entry.os_slug if image_entry else image or "unknown"
+                raise VMCreateError(
+                    f"Image {image_id} is missing minimum_rootfs_size_mb. "
+                    f"This image was created with an older version. "
+                    f"Re-import the image: mvm image fetch {os_slug} --force"
+                )
+
+            min_size_mb = image_entry.minimum_rootfs_size_mb
+
+            if disk_size is not None:
+                requested_bytes = parse_disk_size(disk_size)
+                min_required_bytes = min_size_mb * CONST_MEGABYTE_BYTES
+                if requested_bytes < min_required_bytes:
+                    raise VMCreateError(
+                        f"Requested disk size ({disk_size}) is smaller than "
+                        f"minimum required ({min_size_mb} MB). "
+                        f"Use a larger size or choose a different image."
+                    )
 
             if resolved_image_path.suffix == ".zst":
                 rootfs_ext = resolved_image_path.suffixes[-2]
