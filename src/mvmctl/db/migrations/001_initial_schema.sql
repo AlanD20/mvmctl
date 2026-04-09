@@ -167,5 +167,59 @@ CREATE INDEX idx_host_changes_session ON host_state_changes(session_id);
 CREATE INDEX idx_host_changes_setting ON host_state_changes(setting);
 CREATE INDEX idx_host_changes_reverted ON host_state_changes(reverted);
 
+-- IPTABLES_RULES: Tracks every iptables rule created by mvmctl
+-- Enables reliable cleanup and synchronization
+CREATE TABLE iptables_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    
+    -- Rule Location
+    table_name TEXT NOT NULL CHECK(table_name IN ('nat', 'filter')),
+    chain_name TEXT NOT NULL CHECK(chain_name LIKE 'MVM-%'),  -- Only MVM-* chains
+    
+    -- Rule Parameters (explicit columns for precise matching)
+    rule_type TEXT NOT NULL CHECK(rule_type IN ('masquerade', 'forward_in', 'forward_out', 'nocloud_input')),
+    protocol TEXT CHECK(protocol IN ('tcp', 'udp', 'icmp', 'all')),  -- NULL = any protocol
+    source TEXT,                        -- Source CIDR or IP (e.g., '10.0.0.0/24', '0.0.0.0/0')
+    destination TEXT,                   -- Dest CIDR or IP
+    in_interface TEXT,                  -- Input interface (-i), e.g., 'mvm-default'
+    out_interface TEXT,                 -- Output interface (-o), e.g., 'eth0'
+    target TEXT NOT NULL,               -- 'MASQUERADE', 'ACCEPT', 'DROP'
+    sport INTEGER,                      -- Source port (optional)
+    dport INTEGER,                      -- Destination port (optional)
+    
+    -- Resource Reference (rules always belong to a network)
+    network_id TEXT NOT NULL,           -- FK to networks (CASCADE delete)
+    
+    -- Identification & Debugging
+    comment_tag TEXT,                   -- Full comment: 'mvm:{rule_type}:{network_name}:{context}'
+    command_string TEXT,                -- Full command for debugging
+    
+    -- Lifecycle
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_verified_at TIMESTAMP,         -- When last confirmed in iptables
+    is_active INTEGER DEFAULT 1 CHECK(is_active IN (0, 1)),
+    
+    -- Constraints
+    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
+);
+
+-- Indexes for efficient queries
+CREATE INDEX idx_iptables_rules_network ON iptables_rules(network_id);
+CREATE INDEX idx_iptables_rules_chain ON iptables_rules(table_name, chain_name);
+CREATE INDEX idx_iptables_rules_type ON iptables_rules(rule_type);
+CREATE INDEX idx_iptables_rules_active ON iptables_rules(is_active) WHERE is_active = 1;
+CREATE INDEX idx_iptables_rules_interfaces ON iptables_rules(in_interface, out_interface) 
+    WHERE in_interface IS NOT NULL OR out_interface IS NOT NULL;
+CREATE INDEX idx_iptables_rules_network_type ON iptables_rules(network_id, rule_type);
+
+-- Prevent duplicate active rules for same network+spec combination
+CREATE UNIQUE INDEX idx_iptables_rules_unique_active 
+    ON iptables_rules(network_id, rule_type, table_name, chain_name, 
+                      COALESCE(protocol, ''), COALESCE(source, ''), 
+                      COALESCE(destination, ''), COALESCE(in_interface, ''), 
+                      COALESCE(out_interface, ''), target, 
+                      COALESCE(sport, -1), COALESCE(dport, -1))
+    WHERE is_active = 1;
+
 -- Set schema version
 PRAGMA user_version = 1;

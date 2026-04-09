@@ -15,7 +15,56 @@ Notes:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
+
+
+class IPTablesRuleType(str, Enum):
+    """Classification of iptables rules."""
+
+    MASQUERADE = "masquerade"  # NAT MASQUERADE in MVM-POSTROUTING
+    FORWARD_IN = "forward_in"  # Bridge -> TAP in MVM-FORWARD
+    FORWARD_OUT = "forward_out"  # TAP -> Bridge in MVM-FORWARD
+    NOCLOUD_INPUT = "nocloud_input"  # INPUT rules in MVM-NOCLOUD-INPUT
+
+
+@dataclass
+class IPTablesRule:
+    """Represents a tracked iptables rule with explicit parameter storage.
+
+    All rule parameters are stored as separate columns for:
+    - Precise matching during sync operations
+    - Querying by specific parameters (e.g., "all rules for interface X")
+    - Reconstructing iptables commands without parsing
+    """
+
+    table_name: str
+    chain_name: str
+    rule_type: IPTablesRuleType
+    target: str
+    network_id: str
+    network_name: (
+        str  # For human-readable comments (not stored in DB, looked up from networks table)
+    )
+
+    # Rule parameters (all optional at DB level, validated in code)
+    id: Optional[int] = None
+    protocol: Optional[str] = None
+    source: Optional[str] = None
+    destination: Optional[str] = None
+    in_interface: Optional[str] = None
+    out_interface: Optional[str] = None
+    sport: Optional[int] = None
+    dport: Optional[int] = None
+
+    # Metadata
+    comment_tag: Optional[str] = None
+    command_string: Optional[str] = None
+
+    # Lifecycle
+    created_at: Optional[str] = None
+    last_verified_at: Optional[str] = None
+    is_active: bool = True
 
 
 @dataclass

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET, MVM_POSTROUTING_CHAIN
 from mvmctl.core import host_setup
 from mvmctl.core import network as network_core
+from mvmctl.core.iptables_tracker import IPTablesTracker
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.network_manager import (
     build_network_config,
@@ -22,6 +24,7 @@ from mvmctl.core.network_manager import (
     validate_bridge_not_conflicting,
     validate_no_subnet_overlap,
 )
+from mvmctl.db.models import IPTablesRule, IPTablesRuleType
 from mvmctl.db.models import Network as DBNetwork
 from mvmctl.exceptions import NetworkError
 from mvmctl.models import NetworkConfig, NetworkInspectInfo, NetworkItem, NetworkLease
@@ -35,6 +38,120 @@ from mvmctl.utils.network import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def create_iptables_rule(
+    rule: IPTablesRule,
+    db: Optional[MVMDatabase] = None,
+    tracker: Optional[IPTablesTracker] = None,
+) -> IPTablesRule:
+    """Atomically create an iptables rule and store it in the database.
+
+    This is the STANDARD way to create iptables rules. All rules are tracked by default.
+    The function ensures atomicity:
+    - Step 1: Create iptables rule on host
+    - Step 2: Write rule record to database
+    - If DB write fails, automatically roll back the iptables rule
+
+    Args:
+        rule: The IPTablesRule dataclass with all parameters set (id can be None)
+        db: Optional MVMDatabase instance (creates new if None)
+        tracker: Optional IPTablesTracker instance (creates new if None)
+
+    Returns:
+        The stored IPTablesRule with id and timestamps populated
+
+    Raises:
+        NetworkError: If either iptables creation or DB write fails
+    """
+    db = db or MVMDatabase()
+    tracker = tracker or IPTablesTracker()
+
+    # Step 1: Create iptables rule via Core layer
+    result = tracker.ensure_rule(
+        table=rule.table_name,
+        chain=rule.chain_name,
+        rule_type=rule.rule_type,
+        target=rule.target,
+        network_id=rule.network_id,
+        network_name=rule.network_name,
+        protocol=rule.protocol,
+        source=rule.source,
+        destination=rule.destination,
+        in_interface=rule.in_interface,
+        out_interface=rule.out_interface,
+        sport=rule.sport,
+        dport=rule.dport,
+    )
+
+    if not result.success:
+        raise NetworkError(f"Failed to create iptables rule: {result.error_message}")
+
+    if result.rule is None:
+        raise NetworkError("Rule creation succeeded but no rule data returned")
+
+    # Step 2: Write to database (API layer responsibility)
+    try:
+        stored_rule = db.record_iptables_rule(result.rule)
+    except Exception as e:
+        # Rollback: Delete the iptables rule we just created
+        rollback_result = tracker.remove_rule(result.rule)
+        if not rollback_result.success:
+            logger.warning(
+                "Failed to rollback iptables rule after DB error: %s", rollback_result.error_message
+            )
+        raise NetworkError(f"Failed to store rule in database: {e}") from e
+
+    return stored_rule
+
+
+def remove_iptables_rule(
+    rule: IPTablesRule,
+    db: Optional[MVMDatabase] = None,
+    tracker: Optional[IPTablesTracker] = None,
+) -> None:
+    """Atomically remove an iptables rule and mark it deleted in the database.
+
+    This is the STANDARD way to remove iptables rules.
+    The function ensures atomicity:
+    - Step 1: Remove iptables rule from host
+    - Step 2: Mark rule as deleted (is_active=0) in database
+    - If iptables removal fails, DB is not updated
+
+    Args:
+        rule: The IPTablesRule to remove (must have id set)
+        db: Optional MVMDatabase instance (creates new if None)
+        tracker: Optional IPTablesTracker instance (creates new if None)
+
+    Raises:
+        NetworkError: If iptables removal fails
+        ValueError: If rule.id is not set
+    """
+    db = db or MVMDatabase()
+    tracker = tracker or IPTablesTracker()
+
+    if rule.id is None:
+        raise ValueError("Cannot remove rule without id (not stored in DB)")
+
+    # Step 1: Remove iptables rule via Core layer
+    result = tracker.remove_rule(rule)
+
+    if not result.success:
+        raise NetworkError(f"Failed to remove iptables rule: {result.error_message}")
+
+    if result.rule is None:
+        raise NetworkError("Rule removal succeeded but no rule data returned")
+
+    # Step 2: Mark as deleted in database (soft delete)
+    try:
+        db.mark_iptables_rule_deleted(rule.id)
+    except Exception as e:
+        # Log but don't rollback - iptables rule is already removed
+        logger.warning(
+            "Removed iptables rule but failed to update DB: %s. "
+            "Rule may appear orphaned until next sync.",
+            e,
+        )
 
 
 def _db_network_to_config(db_network: DBNetwork) -> NetworkConfig:
@@ -315,12 +432,69 @@ def create_network(
 
     # Setup bridge and NAT
     ipv4_gateway_subnet = f"{config.ipv4_gateway}/{config.subnet.split('/')[1]}"
+    db = MVMDatabase()
     try:
         network_core.setup_bridge(config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet)
+
+        # Create tracked iptables rules for NAT
         if config.nat_enabled:
-            network_core.setup_nat(
-                config.bridge, nat_gateways=config.nat_gateways, subnet=config.subnet
+            network_id = generate_full_hash_network(
+                name, config.subnet, datetime.now(tz=timezone.utc).isoformat()
             )
+            for gateway_iface in config.nat_gateways or [get_default_interface()]:
+                # Create MASQUERADE rule
+                masquerade_rule = IPTablesRule(
+                    table_name="nat",
+                    chain_name="MVM-POSTROUTING",
+                    rule_type=IPTablesRuleType.MASQUERADE,
+                    target="MASQUERADE",
+                    network_id=network_id,
+                    network_name=name,
+                    source=config.subnet,
+                    out_interface=gateway_iface,
+                )
+                create_iptables_rule(masquerade_rule, db=db)
+
+                # Create FORWARD IN rule (bridge -> gateway)
+                forward_in_rule = IPTablesRule(
+                    table_name="filter",
+                    chain_name="MVM-FORWARD",
+                    rule_type=IPTablesRuleType.FORWARD_IN,
+                    target="ACCEPT",
+                    network_id=network_id,
+                    network_name=name,
+                    source=config.subnet,
+                    in_interface=config.bridge,
+                    out_interface=gateway_iface,
+                )
+                create_iptables_rule(forward_in_rule, db=db)
+
+                # Create FORWARD OUT rule (gateway -> bridge)
+                forward_out_rule = IPTablesRule(
+                    table_name="filter",
+                    chain_name="MVM-FORWARD",
+                    rule_type=IPTablesRuleType.FORWARD_OUT,
+                    target="ACCEPT",
+                    network_id=network_id,
+                    network_name=name,
+                    destination=config.subnet,
+                    in_interface=gateway_iface,
+                    out_interface=config.bridge,
+                )
+                create_iptables_rule(forward_out_rule, db=db)
+
+            # Sync rules to host (replaces _ensure_iptables_rule pattern)
+            try:
+                sync_iptables_rules(network_id, db=db)
+            except NetworkError as e:
+                # Cleanup on failure - delete the network (CASCADE removes rules)
+                db.delete_network(network_id)
+                try:
+                    network_core.teardown_bridge(config.bridge)
+                except NetworkError as teardown_error:
+                    logger.warning("Rollback: failed to tear down bridge: %s", teardown_error)
+                raise NetworkError(f"Failed to sync iptables rules to host: {e}") from e
+
     except NetworkError:
         # Rollback on failure
         try:
@@ -330,9 +504,6 @@ def create_network(
         raise
 
     # Persist to database
-    from datetime import datetime, timezone
-
-    db = MVMDatabase()
     created_at = datetime.now(tz=timezone.utc).isoformat()
     db_network = DBNetwork(
         id=generate_full_hash_network(name, config.subnet, created_at),
@@ -403,20 +574,35 @@ def remove_network(name: str) -> None:
         )
 
     # Teardown host resources
+    db = MVMDatabase()
+    network = db.get_network_by_name(name)
+    if network is None:
+        raise NetworkError(f"Network '{name}' not found in database")
+
+    # Remove tracked iptables rules
+    rules = db.get_iptables_rules_for_network(network.id, active_only=True)
+    cleanup_errors = []
+
+    for rule in rules:
+        try:
+            remove_iptables_rule(rule, db=db)
+        except NetworkError as e:
+            cleanup_errors.append(str(e))
+
+    # Also teardown bridge via core functions (for non-tracked legacy)
     try:
         if config.nat_enabled:
             network_core.teardown_nat(bridge=config.bridge, force=True, subnet=config.subnet)
         network_core.teardown_bridge(config.bridge)
     except NetworkError as e:
-        logger.warning("Partial teardown for network '%s': %s", name, e)
+        cleanup_errors.append(str(e))
 
-    db = MVMDatabase()
-    network = db.get_network_by_name(name)
-    if network:
-        db.delete_network(network.id)
+    # Delete network (CASCADE will delete remaining rule records from DB)
+    db.delete_network(network.id)
 
-    if os.getuid() == 0:
-        host_setup.save_iptables_rules()
+    if cleanup_errors:
+        logger.warning("Partial cleanup for network '%s': %s", name, "; ".join(cleanup_errors))
+
     if os.getuid() == 0:
         host_setup.save_iptables_rules()
 
@@ -711,3 +897,82 @@ def restore_networks() -> list[str]:
             db.update_network_bridge_active(network.id, True)
 
     return status
+
+
+def sync_iptables_rules(
+    network_id: str,
+    db: Optional[MVMDatabase] = None,
+    tracker: Optional[IPTablesTracker] = None,
+) -> list[IPTablesRule]:
+    """Sync iptables rules from database to host.
+
+    This function:
+    1. Reads all active rules for the network from DB
+    2. Ensures each rule exists on the host (creates if missing)
+    3. Returns list of verified rules
+
+    Used by:
+    - Automatic sync processes (called periodically)
+    - mvm network sync command (via IPTablesSynchronizer)
+    - Network creation to ensure rules are in sync
+
+    Args:
+        network_id: The network ID to sync rules for
+        db: Optional MVMDatabase instance
+        tracker: Optional IPTablesTracker instance
+
+    Returns:
+        List of IPTablesRule objects that were synced (all active rules for network)
+
+    Raises:
+        NetworkError: If any rule creation fails
+    """
+    db = db or MVMDatabase()
+    tracker = tracker or IPTablesTracker()
+
+    # Get network name for human-readable comments
+    network = db.get_network(network_id)
+    if not network:
+        raise NetworkError(f"Network {network_id} not found")
+    network_name = network.name
+
+    # Get all active rules for this network from DB
+    rules = db.get_iptables_rules_for_network(network_id, active_only=True)
+
+    # Populate network_name in rules (needed for comments)
+    for rule in rules:
+        rule.network_name = network_name
+
+    synced_rules: list[IPTablesRule] = []
+    failed_rules: list[tuple[IPTablesRule, Optional[str]]] = []
+
+    for rule in rules:
+        result = tracker.ensure_rule(
+            table=rule.table_name,
+            chain=rule.chain_name,
+            rule_type=rule.rule_type,
+            target=rule.target,
+            network_id=rule.network_id,
+            network_name=rule.network_name,
+            protocol=rule.protocol,
+            source=rule.source,
+            destination=rule.destination,
+            in_interface=rule.in_interface,
+            out_interface=rule.out_interface,
+            sport=rule.sport,
+            dport=rule.dport,
+        )
+
+        if result.success:
+            synced_rules.append(rule)
+            # Update verification timestamp
+            if rule.id:
+                db.update_iptables_rule_verified(rule.id)
+        else:
+            failed_rules.append((rule, result.error_message))
+
+    if failed_rules:
+        error_details = "; ".join([f"{r.rule_type}: {e}" for r, e in failed_rules])
+        raise NetworkError(f"Failed to sync {len(failed_rules)} rules: {error_details}")
+
+    return synced_rules

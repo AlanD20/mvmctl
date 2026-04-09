@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generator, Optional
 
@@ -25,6 +26,8 @@ from mvmctl.db.models import (
     HostState,
     HostStateChange,
     Image,
+    IPTablesRule,
+    IPTablesRuleType,
     Kernel,
     Network,
     NetworkLease,
@@ -870,3 +873,119 @@ class MVMDatabase:
             if change.id is not None:
                 self.mark_change_reverted(change.id, reverted_at)
         return list(reversed(changes))
+
+    # -------------------------------------------------------------------------
+    # iptables_rules
+    # -------------------------------------------------------------------------
+
+    def record_iptables_rule(self, rule: IPTablesRule) -> IPTablesRule:
+        """Insert a new iptables rule record.
+
+        Returns the rule with the generated id populated.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO iptables_rules (
+                    table_name, chain_name, rule_type, protocol, source, destination,
+                    in_interface, out_interface, target, sport, dport,
+                    network_id, comment_tag, command_string, created_at, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    rule.table_name,
+                    rule.chain_name,
+                    rule.rule_type.value,
+                    rule.protocol,
+                    rule.source,
+                    rule.destination,
+                    rule.in_interface,
+                    rule.out_interface,
+                    rule.target,
+                    rule.sport,
+                    rule.dport,
+                    rule.network_id,
+                    rule.comment_tag,
+                    rule.command_string,
+                    rule.created_at or datetime.now(tz=timezone.utc).isoformat(),
+                    int(rule.is_active),
+                ),
+            )
+            rule.id = cursor.lastrowid
+        return rule
+
+    def get_iptables_rules_for_network(
+        self, network_id: str, active_only: bool = True
+    ) -> list[IPTablesRule]:
+        """Get all iptables rules for a specific network."""
+        with self._connect() as conn:
+            if active_only:
+                rows = conn.execute(
+                    "SELECT * FROM iptables_rules WHERE network_id = ? AND is_active = 1",
+                    (network_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM iptables_rules WHERE network_id = ?",
+                    (network_id,),
+                ).fetchall()
+        return [self._row_to_iptables_rule(row) for row in rows]
+
+    def get_iptables_rules_for_chain(
+        self, table_name: str, chain_name: str, active_only: bool = True
+    ) -> list[IPTablesRule]:
+        """Get all rules for a specific chain."""
+        with self._connect() as conn:
+            if active_only:
+                rows = conn.execute(
+                    """SELECT * FROM iptables_rules 
+                       WHERE table_name = ? AND chain_name = ? AND is_active = 1""",
+                    (table_name, chain_name),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM iptables_rules 
+                       WHERE table_name = ? AND chain_name = ?""",
+                    (table_name, chain_name),
+                ).fetchall()
+        return [self._row_to_iptables_rule(row) for row in rows]
+
+    def update_iptables_rule_verified(self, rule_id: int) -> None:
+        """Update the last_verified_at timestamp for a rule."""
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE iptables_rules 
+                   SET last_verified_at = CURRENT_TIMESTAMP 
+                   WHERE id = ?""",
+                (rule_id,),
+            )
+
+    def mark_iptables_rule_deleted(self, rule_id: int) -> None:
+        """Soft delete a rule (mark is_active=0)."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE iptables_rules SET is_active = 0 WHERE id = ?",
+                (rule_id,),
+            )
+
+    def delete_iptables_rules_for_network(self, network_id: str) -> int:
+        """Delete all iptables rules for a network (hard delete).
+
+        Note: CASCADE delete on networks table also handles this.
+        Returns number of rows deleted.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM iptables_rules WHERE network_id = ?",
+                (network_id,),
+            )
+        return cursor.rowcount
+
+    def _row_to_iptables_rule(self, row: sqlite3.Row) -> IPTablesRule:
+        """Convert DB row to IPTablesRule dataclass."""
+        row_dict = dict(row)
+        # Convert rule_type string to enum
+        row_dict["rule_type"] = IPTablesRuleType(row_dict["rule_type"])
+        # Convert is_active int to bool
+        row_dict["is_active"] = bool(row_dict["is_active"])
+        return IPTablesRule(**row_dict)

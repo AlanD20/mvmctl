@@ -10,6 +10,8 @@ from .models import (
     HostState,
     HostStateChange,
     Image,
+    IPTablesRule,
+    IPTablesRuleType,
     Kernel,
     Network,
     NetworkLease,
@@ -26,4 +28,6 @@ __all__ = [
     "VMInstance",
     "HostState",
     "HostStateChange",
+    "IPTablesRule",
+    "IPTablesRuleType",
 ]
