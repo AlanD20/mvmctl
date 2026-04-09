@@ -31,7 +31,6 @@ from mvmctl.core.host_setup import (
 from mvmctl.core.host_state import (
     HostState,
     HostStateChange,
-    _save_state,
     _state_file,
 )
 from mvmctl.core.host_state import (
@@ -212,7 +211,6 @@ def init_host(cache_dir: Path | None = None) -> list[HostStateChange]:
         changes.append(iptables_change)
 
     db = MVMDatabase()
-    _save_state(db, changes)
     _persist_host_state_to_db(db, changes)
 
     chown_to_real_user(cache_dir)
