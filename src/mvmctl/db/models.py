@@ -43,9 +43,7 @@ class IPTablesRule:
     rule_type: IPTablesRuleType
     target: str
     network_id: str
-    network_name: (
-        str  # For human-readable comments (not stored in DB, looked up from networks table)
-    )
+    network_name: Optional[str] = None  # Not stored in DB; populated by caller from networks table
 
     # Rule parameters (all optional at DB level, validated in code)
     id: Optional[int] = None
