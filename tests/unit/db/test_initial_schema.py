@@ -63,10 +63,10 @@ class TestMigrationExecution:
 
 
 class TestTableCreation:
-    """Test that all 9 schema tables are created (db_migrations created by runner)."""
+    """Test that all 10 schema tables are created (db_migrations created by runner)."""
 
     def test_all_tables_exist(self, runner: MigrationRunner, db_path: Path) -> None:
-        """Verify all 9 schema tables plus db_migrations are created."""
+        """Verify all 10 schema tables plus db_migrations are created."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
@@ -85,6 +85,7 @@ class TestTableCreation:
             "host_state",
             "host_state_changes",
             "db_migrations",
+            "iptables_rules",
         }
         assert tables == expected_tables
 
@@ -108,6 +109,7 @@ class TestTableCreation:
             "original_size": "INTEGER",
             "compression_ratio": "REAL",
             "compressed_format": "TEXT",
+            "minimum_rootfs_size_mb": "INTEGER",
             "pulled_at": "TIMESTAMP",
             "is_default": "INTEGER",
             "created_at": "TIMESTAMP",
@@ -416,14 +418,14 @@ class TestUniqueConstraints:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert first image
                 conn.execute(
-                    "INSERT INTO images (id, os_slug, path, arch) VALUES (?, ?, ?, ?)",
-                    ("id1", "ubuntu-24.04", "/path/to/image1", "x86_64"),
+                    "INSERT INTO images (id, os_slug, path, arch, minimum_rootfs_size_mb) VALUES (?, ?, ?, ?, ?)",
+                    ("id1", "ubuntu-24.04", "/path/to/image1", "x86_64", 1024),
                 )
                 # Try to insert duplicate os_slug
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO images (id, os_slug, path, arch) VALUES (?, ?, ?, ?)",
-                        ("id2", "ubuntu-24.04", "/path/to/image2", "x86_64"),
+                        "INSERT INTO images (id, os_slug, path, arch, minimum_rootfs_size_mb) VALUES (?, ?, ?, ?, ?)",
+                        ("id2", "ubuntu-24.04", "/path/to/image2", "x86_64", 1024),
                     )
 
     def test_networks_name_unique(self, runner: MigrationRunner, db_path: Path) -> None:
@@ -828,8 +830,8 @@ class TestDataIntegrity:
                 conn.execute("PRAGMA foreign_keys = ON")
                 # Insert image
                 conn.execute(
-                    "INSERT INTO images (id, os_slug, path, arch) VALUES (?, ?, ?, ?)",
-                    ("img1", "ubuntu-24.04", "/path/to/image", "x86_64"),
+                    "INSERT INTO images (id, os_slug, path, arch, minimum_rootfs_size_mb) VALUES (?, ?, ?, ?, ?)",
+                    ("img1", "ubuntu-24.04", "/path/to/image", "x86_64", 1024),
                 )
                 # Retrieve image
                 cursor = conn.execute("SELECT os_slug, path FROM images WHERE id = ?", ("img1",))

@@ -552,9 +552,7 @@ class TestCachePruneAll:
 
         prune_all(include_stopped=True, include_running=True, dry_run=True)
 
-        # Verify flags passed to VM prune (positional args)
         mock_prune_vms.assert_called_once_with(True, True, True)
-        # Verify dry_run passed to other prunes (positional args)
-        mock_prune_networks.assert_called_once_with(True)
-        mock_prune_images.assert_called_once_with(True)
-        mock_prune_kernels.assert_called_once_with(True)
+        mock_prune_networks.assert_called_once_with(True, False)
+        mock_prune_images.assert_called_once_with(True, False)
+        mock_prune_kernels.assert_called_once_with(True, False)

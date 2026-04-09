@@ -5,8 +5,45 @@ and MVM_CACHE_DIR to tmp_path for all tests. These fixtures build on that.
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _seed_test_image_for_all_integration_tests(tmp_path: Path):
+    """Auto-seed test image with minimum_rootfs_size_mb for all integration tests.
+
+    This prevents VMCreateError from being raised due to missing minimum_rootfs_size_mb.
+    """
+    from tests.helpers.paths import make_test_paths
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.db.models import Image
+
+    paths = make_test_paths(tmp_path)
+    cache_dir = paths.cache
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create fake image file
+    images_dir = cache_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
+
+    db = MVMDatabase()
+    db.upsert_image(
+        Image(
+            id="b" * 64,
+            os_slug="ubuntu-24.04",
+            arch="x86_64",
+            path="ubuntu-24.04.ext4",
+            os_name="Ubuntu 24.04",
+            minimum_rootfs_size_mb=2048,
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+    )
+
+    yield
 
 
 @pytest.fixture
@@ -61,6 +98,7 @@ def seed_test_assets(tmp_path: Path) -> Path:
             arch="x86_64",
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
+            minimum_rootfs_size_mb=2048,
             created_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
         )

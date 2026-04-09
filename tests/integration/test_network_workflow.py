@@ -251,8 +251,9 @@ class TestNetworkWithSubprocessMocking:
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.core.network.subprocess.run")
     @patch("mvmctl.api.host.check_privileges_interactive")
+    @patch("mvmctl.api.network.get_default_interface", return_value="eth0")
     def test_network_create_with_bridge_setup(
-        self, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
+        self, mock_get_iface, mock_check_priv, mock_run, mock_require_group, mock_cache_dir
     ):
         """Test network creation with mocked bridge setup commands."""
         from mvmctl.api.network import create_network, get_network
@@ -262,7 +263,7 @@ class TestNetworkWithSubprocessMocking:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("mvmctl.core.network_manager.validate_no_subnet_overlap"):
-            with patch("mvmctl.api.vms.setup_nat"):
+            with patch("mvmctl.api.network.sync_iptables_rules"):
                 result = create_network("subprocess-net", subnet="10.77.0.0/24")
 
         assert result.name == "subprocess-net"

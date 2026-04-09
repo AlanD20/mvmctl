@@ -104,6 +104,7 @@ class TestFullNocloudNetLifecycle:
         mock_check_priv,
         mock_require_group,
         tmp_path,
+        seed_test_assets,
     ):
         """Test creating a VM with nocloud-net mode, verify setup, then remove and verify cleanup."""
         # Setup mocks
@@ -161,6 +162,7 @@ class TestFullNocloudNetLifecycle:
                     VMCreateInput(
                         name="nocloud-test-vm",
                         image_path=image_path,
+                        image_hash="b" * 64,  # Match the seeded test image
                         kernel="vmlinux",
                         vcpus=2,
                         mem=2048,
@@ -639,8 +641,10 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.vms._resolve_kernel_path")
     @patch("mvmctl.api.vms._write_pid_file")
     @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
     def test_failure_cleanup_on_firecracker_error(
         self,
+        mock_db_get_image,
         mock_get_vm_dir,
         mock_write_pid,
         mock_resolve_kernel,
@@ -663,6 +667,8 @@ class TestNocloudNetFailureCleanup:
         tmp_path,
     ):
         """Test that server is stopped when Firecracker fails to start."""
+        from mvmctl.db.models import Image
+
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
         mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -675,6 +681,15 @@ class TestNocloudNetFailureCleanup:
 
         mock_resolve_image.return_value = image_path
         mock_resolve_kernel.return_value = kernel_path
+
+        # Mock image entry with minimum_rootfs_size_mb to pass validation
+        mock_db_get_image.return_value = Image(
+            id="a" * 64,
+            os_slug="ubuntu-24.04",
+            path=str(image_path),
+            arch="x86_64",
+            minimum_rootfs_size_mb=2048,
+        )
 
         # Mock network
         from mvmctl.models.network import NetworkConfig

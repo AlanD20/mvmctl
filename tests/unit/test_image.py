@@ -453,11 +453,16 @@ def test_fetch_image_qcow2(
     expected_output = tmp_path / "ubuntu-24.04.ext4"
     mock_download.return_value = True
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
+
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
+    mock_extract.side_effect = create_file_and_return
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     mock_download.assert_called_once()
     mock_convert.assert_called_once()
     mock_extract.assert_called_once()
@@ -962,11 +967,16 @@ def test_fetch_image_tar_rootfs(
 
     expected_output = tmp_path / "alpine.ext4"
     mock_download.return_value = True
-    mock_create.return_value = True
+
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return True
+
+    mock_create.side_effect = create_file_and_return
 
     result = fetch_image(spec, tmp_path)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     mock_download.assert_called_once()
     mock_create.assert_called_once()
 
@@ -1095,11 +1105,16 @@ def test_fetch_image_raw_format(
 
     expected_output = tmp_path / "custom-image.ext4"
     mock_download.return_value = True
-    mock_extract.return_value = expected_output
+
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
+    mock_extract.side_effect = create_file_and_return
 
     result = fetch_image(spec, tmp_path)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     mock_download.assert_called_once()
     mock_extract.assert_called_once()
 
@@ -1237,11 +1252,16 @@ def test_fetch_image_sha256_null_skips_verification(
     expected_output = tmp_path / "test-image.ext4"
     mock_download.return_value = True
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
+
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
+    mock_extract.side_effect = create_file_and_return
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     mock_download.assert_called_once()
     call_kwargs = mock_download.call_args.kwargs
     assert call_kwargs["expected_sha256"] is None
@@ -1678,11 +1698,16 @@ def test_fetch_image_sha256_url_ignored_when_sha256_null(
     expected_output = tmp_path / "test-image.ext4"
     mock_download.return_value = True
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
+
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
+    mock_extract.side_effect = create_file_and_return
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     mock_download.assert_called_once()
     call_kwargs = mock_download.call_args.kwargs
     assert call_kwargs["expected_sha256"] is None
@@ -1716,11 +1741,16 @@ def test_fetch_image_uses_templated_sha256_url(
     expected_output = tmp_path / "test-image.ext4"
     mock_download.return_value = True
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
+
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
+    mock_extract.side_effect = create_file_and_return
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     called_sha_url = mock_fetch_sha.call_args.args[0]
     assert called_sha_url == "https://example.com/ubuntu/24.04.sha256"
     assert mock_download.call_args.kwargs["expected_sha256"] == ("cafebabe" * 8)
@@ -1755,14 +1785,16 @@ def test_fetch_image_ubuntu_fc_sha256_null_skips_checksum(
     mock_resolve.return_value = resolved_url
     mock_download.return_value = True
 
+    def create_file_handler(d, f, s, p=None, dd=None):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s, p=None, dd=None: (
-        expected_output
-    )
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = create_file_handler
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
-        assert result.path == expected_output
+        assert result.path == expected_output.with_suffix(".ext4.zst")
         call_kwargs = mock_download.call_args.kwargs
         assert call_kwargs["expected_sha256"] is None
         assert call_kwargs["allow_missing_checksum"] is True
@@ -1800,15 +1832,16 @@ def test_fetch_image_ubuntu_fc_resolves_source(
     mock_resolve.return_value = resolved_url
     mock_download.return_value = True
 
-    # Patch _FORMAT_HANDLERS to return our mock handler
+    def create_file_handler(d, f, s, p=None, dd=None):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s, p=None, dd=None: (
-        expected_output
-    )
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = create_file_handler
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
-        assert result.path == expected_output
+        assert result.path == expected_output.with_suffix(".ext4.zst")
         mock_resolve.assert_called_once()
         mock_download.assert_called_once()
         call_args = mock_download.call_args
@@ -1868,6 +1901,12 @@ def test_import_image_raw_format(mock_copy: MagicMock, tmp_path: Path):
     source.write_text("raw image data")
 
     output_dir = tmp_path / "images"
+    expected_output = output_dir / "my-image.ext4"
+
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+
+    mock_copy.side_effect = create_file_and_return
 
     spec = ImageImportInput(
         id="my-image",
@@ -1880,7 +1919,7 @@ def test_import_image_raw_format(mock_copy: MagicMock, tmp_path: Path):
 
     result = import_image(spec, output_dir)
 
-    assert result.path == output_dir / "my-image.ext4"
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     mock_copy.assert_called_once()
 
 
@@ -1895,7 +1934,19 @@ def test_import_image_qcow2_format(
     source.write_text("qcow2 data")
 
     output_dir = tmp_path / "images"
+    output_dir.mkdir(parents=True, exist_ok=True)
     expected_output = output_dir / "my-image.img"
+
+    def create_file_and_return(raw_path, extracted_path, **kwargs):
+        extracted_path.write_bytes(b"test image data")
+        return extracted_path
+
+    mock_extract.side_effect = create_file_and_return
+
+    def move_and_create(src, dst):
+        Path(dst).write_bytes(Path(src).read_bytes())
+
+    mock_move.side_effect = move_and_create
 
     spec = ImageImportInput(
         id="my-image",
@@ -1907,11 +1958,10 @@ def test_import_image_qcow2_format(
     )
 
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
 
     result = import_image(spec, output_dir)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".img.zst")
     mock_convert.assert_called_once()
     mock_extract.assert_called_once()
     mock_move.assert_called_once()
@@ -1928,7 +1978,19 @@ def test_import_image_qcow2_cleans_up_raw(
     source.write_text("qcow2 data")
 
     output_dir = tmp_path / "images"
+    output_dir.mkdir(parents=True, exist_ok=True)
     expected_output = output_dir / "my-image.img"
+
+    def create_file_and_return(raw_path, extracted_path, **kwargs):
+        extracted_path.write_bytes(b"test image data")
+        return extracted_path
+
+    mock_extract.side_effect = create_file_and_return
+
+    def move_and_create(src, dst):
+        Path(dst).write_bytes(Path(src).read_bytes())
+
+    mock_move.side_effect = move_and_create
 
     spec = ImageImportInput(
         id="my-image",
@@ -1940,11 +2002,10 @@ def test_import_image_qcow2_cleans_up_raw(
     )
 
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
 
     result = import_image(spec, output_dir)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".img.zst")
     mock_move.assert_called_once()
 
 
@@ -1983,6 +2044,12 @@ def test_import_image_tar_rootfs_format(mock_create: MagicMock, tmp_path: Path):
     output_dir = tmp_path / "images"
     expected_output = output_dir / "my-image.ext4"
 
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return True
+
+    mock_create.side_effect = create_file_and_return
+
     spec = ImageImportInput(
         id="my-image",
         name="My Image",
@@ -1992,11 +2059,9 @@ def test_import_image_tar_rootfs_format(mock_create: MagicMock, tmp_path: Path):
         convert_to="ext4",
     )
 
-    mock_create.return_value = True
-
     result = import_image(spec, output_dir)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     mock_create.assert_called_once()
 
 
@@ -2151,14 +2216,16 @@ def test_fetch_image_squashfs_format(
     expected_output = tmp_path / "test-squashfs.ext4"
     mock_download.return_value = True
 
+    def create_file_handler(d, f, s, p=None, dd=None):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
     original_handlers = mvmctl.core.image._FORMAT_HANDLERS.copy()
-    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = lambda d, f, s, p=None, dd=None: (
-        expected_output
-    )
+    mvmctl.core.image._FORMAT_HANDLERS["squashfs"] = create_file_handler
 
     try:
         result = fetch_image(spec, tmp_path, force=True)
-        assert result.path == expected_output
+        assert result.path == expected_output.with_suffix(".ext4.zst")
         mock_download.assert_called_once()
     finally:
         mvmctl.core.image._FORMAT_HANDLERS.clear()
@@ -2199,7 +2266,19 @@ def test_import_image_qcow2_uses_tempfile_context_manager(
     source.write_text("qcow2 data")
 
     output_dir = tmp_path / "images"
+    output_dir.mkdir(parents=True, exist_ok=True)
     expected_output = output_dir / "my-image.img"
+
+    def create_file_and_return(raw_path, extracted_path, **kwargs):
+        extracted_path.write_bytes(b"test image data")
+        return extracted_path
+
+    mock_extract.side_effect = create_file_and_return
+
+    def move_and_create(src, dst):
+        Path(dst).write_bytes(Path(src).read_bytes())
+
+    mock_move.side_effect = move_and_create
 
     spec = ImageImportInput(
         id="my-image",
@@ -2211,9 +2290,7 @@ def test_import_image_qcow2_uses_tempfile_context_manager(
     )
 
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
 
-    # Track if temp directory was used
     temp_dirs_created = []
     original_mkdtemp = tempfile.mkdtemp
 
@@ -2225,8 +2302,7 @@ def test_import_image_qcow2_uses_tempfile_context_manager(
     with patch.object(tempfile, "mkdtemp", side_effect=tracking_mkdtemp):
         result = import_image(spec, output_dir)
 
-    assert result.path == expected_output
-    # Verify temp directory was created and cleaned up
+    assert result.path == expected_output.with_suffix(".img.zst")
     assert len(temp_dirs_created) > 0
 
 
@@ -2585,11 +2661,16 @@ def test_fetch_image_cleans_stale_download_on_force(
     expected_output = tmp_path / "ubuntu-24.04.ext4"
     mock_download.return_value = True
     mock_convert.return_value = True
-    mock_extract.return_value = expected_output
+
+    def create_file_and_return(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
+    mock_extract.side_effect = create_file_and_return
 
     result = fetch_image(spec, tmp_path, force=True)
 
-    assert result.path == expected_output
+    assert result.path == expected_output.with_suffix(".ext4.zst")
     # Verify stale file was removed before download
     mock_download.assert_called_once()
     # Verify the .download file is cleaned up after success
@@ -2620,18 +2701,17 @@ def test_fetch_image_validates_after_download(
     expected_output = tmp_path / "alpine.ext4"
     mock_download.return_value = True
 
-    # Mock handler
+    def create_file_handler(*args, **kwargs):
+        expected_output.write_bytes(b"test image data")
+        return expected_output
+
     with patch("mvmctl.core.image._FORMAT_HANDLERS") as mock_handlers:
-        mock_handler = MagicMock(return_value=expected_output)
-        mock_handlers.get.return_value = mock_handler
+        mock_handlers.get.return_value = create_file_handler
 
         result = fetch_image(spec, tmp_path)
 
-        assert result.path == expected_output
-        # Validation should be called after download
+        assert result.path == expected_output.with_suffix(".ext4.zst")
         mock_validate.assert_called_once()
-        # Handler should be called after validation
-        mock_handler.assert_called_once()
 
 
 @patch("mvmctl.core.image._validate_downloaded_file")

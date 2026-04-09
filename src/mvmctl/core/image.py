@@ -1313,14 +1313,7 @@ def fetch_image(
                 compression_ratio=compression_ratio,
             )
 
-        actual_size = actual_path.stat().st_size
-        minimum_rootfs_size_mb = actual_size // CONST_MEGABYTE_BYTES
-        return ImageImportResult(
-            path=actual_path,
-            fs_type=fs_type,
-            fs_uuid=fs_uuid,
-            minimum_rootfs_size_mb=minimum_rootfs_size_mb,
-        )
+        raise ImageError(f"Image processing failed: output file not created at {actual_path}")
     except Exception:
         # Cleanup download on any failure
         download_path.unlink(missing_ok=True)
@@ -1466,14 +1459,7 @@ def import_image(
                     compression_ratio=compression_ratio,
                 )
 
-            destination_size = destination_path.stat().st_size
-            minimum_rootfs_size_mb = destination_size // CONST_MEGABYTE_BYTES
-            return ImageImportResult(
-                path=destination_path,
-                fs_type=fs_type,
-                fs_uuid=fs_uuid,
-                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
-            )
+            raise ImageError(f"Image import failed: output file not created at {destination_path}")
 
     elif spec.format == "raw":
         shutil.copy2(spec.source_path, final_path)
@@ -1508,14 +1494,7 @@ def import_image(
                 compression_ratio=compression_ratio,
             )
 
-        final_size = final_path.stat().st_size
-        minimum_rootfs_size_mb = final_size // CONST_MEGABYTE_BYTES
-        return ImageImportResult(
-            path=final_path,
-            fs_type=fs_type,
-            fs_uuid=fs_uuid,
-            minimum_rootfs_size_mb=minimum_rootfs_size_mb,
-        )
+        raise ImageError(f"Image import failed: output file not created at {final_path}")
 
     elif spec.format == "tar-rootfs":
         create_ext4_from_tar(
@@ -1552,14 +1531,7 @@ def import_image(
                 compression_ratio=compression_ratio,
             )
 
-        final_size = final_path.stat().st_size
-        minimum_rootfs_size_mb = final_size // CONST_MEGABYTE_BYTES
-        return ImageImportResult(
-            path=final_path,
-            fs_type=fs_type,
-            fs_uuid=fs_uuid,
-            minimum_rootfs_size_mb=minimum_rootfs_size_mb,
-        )
+        raise ImageError(f"Image import failed: output file not created at {final_path}")
 
     else:
         raise ImageError(f"Unsupported import format: {spec.format}")

@@ -75,9 +75,6 @@ def network_ls(
         typer.echo(json.dumps(data, indent=2))
         return
 
-    if not networks:
-        print_info("No networks found. Create one with: mvm network create <name>")
-
     rows = []
     for n in networks:
         is_bridge_missing = not is_bridge_alive(n.bridge)

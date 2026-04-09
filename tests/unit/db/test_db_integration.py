@@ -46,6 +46,7 @@ def make_image(image_id: str = IMAGE_ID) -> Image:
         os_slug="test-image",
         path="/cache/images/test.img",
         arch="x86_64",
+        minimum_rootfs_size_mb=1024,
     )
 
 
@@ -483,8 +484,8 @@ class TestMultiTableWorkflows:
 class TestSchemaIntegrity:
     """Test schema-level constraints (10+ tests)."""
 
-    def test_all_nine_tables_exist_after_migration(self, db: MVMDatabase) -> None:
-        """Verify all 9 tables exist after migration."""
+    def test_all_ten_tables_exist_after_migration(self, db: MVMDatabase) -> None:
+        """Verify all 10 tables exist after migration."""
         with db._connect() as conn:
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -501,6 +502,7 @@ class TestSchemaIntegrity:
             "host_state",
             "host_state_changes",
             "db_migrations",
+            "iptables_rules",
         }
         assert tables == expected_tables
 

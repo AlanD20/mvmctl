@@ -102,11 +102,13 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_core_success(
     mock_setup_nat,
     mock_open,
+    mock_db_class,
     mock_bridge_exists,
     mock_write_pid,
     mock_popen,
@@ -129,6 +131,22 @@ def test_create_vm_core_success(
     mock_inject_cloud_init,
 ):
     """Test core create_vm() runs through successfully and registers VM with nocloud-net (default)."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/image.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    # Configure the mock instance that will be returned when MVMDatabase() is called
+    mock_instance = MagicMock()
+    mock_instance.get_image.return_value = test_image
+    mock_instance.get_image_by_os_slug.return_value = test_image
+    mock_db_class.return_value = mock_instance
+
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
@@ -170,6 +188,7 @@ def test_create_vm_core_success(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/image.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -231,11 +250,13 @@ def test_create_vm_core_success(
 @patch("mvmctl.api.vms.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
+@patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_inject_mode_is_default(
     mock_setup_nat,
     mock_open,
+    mock_db_class,
     mock_resolve_fs_type,
     mock_resolve_fs_uuid,
     mock_bridge_exists,
@@ -260,6 +281,19 @@ def test_create_vm_inject_mode_is_default(
     mock_inject_cloud_init,
 ):
     """Test that INJECT cloud_init_mode is the default."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_class.return_value.get_image.return_value = test_image
+    mock_db_class.return_value.get_image_by_os_slug.return_value = test_image
+
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
@@ -301,6 +335,7 @@ def test_create_vm_inject_mode_is_default(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -797,6 +832,7 @@ def _seed_image(full_hash: str, filename: str, **extra) -> None:
             arch=str(extra.get("arch", "x86_64")),
             fs_type=extra.get("fs_type"),
             fs_uuid=extra.get("fs_uuid"),
+            minimum_rootfs_size_mb=extra.get("minimum_rootfs_size_mb", 2048),
             pulled_at=extra.get("pulled_at"),
             created_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
             updated_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
@@ -1041,11 +1077,13 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 @patch("mvmctl.api.vms.subprocess.Popen")
 @patch("mvmctl.api.vms._write_pid_file")
 @patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("mvmctl.api.vms.setup_nat")
 def test_create_vm_uses_cached_image_path_not_copy(
     mock_setup_nat,
     mock_open,
+    mock_db_class,
     mock_bridge_exists,
     mock_write_pid,
     mock_popen,
@@ -1068,6 +1106,19 @@ def test_create_vm_uses_cached_image_path_not_copy(
     mock_add_firewall_rule,
     mock_copy2,
 ):
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_class.return_value.get_image.return_value = test_image
+    mock_db_class.return_value.get_image_by_os_slug.return_value = test_image
+
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
@@ -1120,6 +1171,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -1147,6 +1199,8 @@ def test_create_vm_uses_cached_image_path_not_copy(
     assert vm_config_arg.rootfs_path.parent == mock_vm_dir
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.grow_rootfs_with_guestfs")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.add_nocloud_input_rule")
@@ -1196,8 +1250,23 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     mock_add_firewall_rule,
     mock_copy2,
     mock_grow_rootfs,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """Verify --disk-size only resizes the VM-local copy, not the cached image."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
@@ -1250,6 +1319,7 @@ def test_create_vm_disk_size_resizes_local_copy_only(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -1291,6 +1361,7 @@ def test_create_vm_disk_size_resizes_local_copy_only(
 @patch("mvmctl.api.vms.generate_mac")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
+@patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
 @patch("mvmctl.api.vms.ConfigGenerator")
@@ -1304,6 +1375,7 @@ def test_create_vm_disk_size_resizes_local_copy_only(
 def test_create_vm_cleanup_removes_local_rootfs_on_failure(
     mock_setup_nat,
     mock_open,
+    mock_db_class,
     mock_bridge_exists,
     mock_write_pid,
     mock_popen,
@@ -1328,6 +1400,19 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
     mock_cleanup,
 ):
     """Verify VM-local rootfs is cleaned up if VM creation fails after copy."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_class.return_value.get_image.return_value = test_image
+    mock_db_class.return_value.get_image_by_os_slug.return_value = test_image
+
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
@@ -1383,6 +1468,7 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
             input=VMCreateInput(
                 name="myvm",
                 image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                image_hash="a" * 64,
                 vcpus=2,
                 mem=256,
                 network_name="default",
@@ -1413,6 +1499,8 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
 # ============================================================================
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.add_nocloud_input_rule")
 @patch("mvmctl.api.vms.NoCloudNetServerManager")
@@ -1460,12 +1548,40 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
     mock_net_mgr,
     mock_add_firewall_rule,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """Test that create_vm persists VM config with VM-local rootfs_path in VMInstance.
 
     This verifies the fix for ensuring persisted VM state/metadata explicitly
     points to the VM-local rootfs path after the rootfs-copy restoration.
     """
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
     mock_get_vm_mgr.return_value = mock_manager
@@ -1518,6 +1634,7 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -1554,6 +1671,8 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
 # ============================================================================
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.subprocess.run")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
@@ -1601,8 +1720,23 @@ def test_create_vm_nocloud_net_starts_server(
     mock_setup_chain,
     mock_subprocess_run,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """Test that NoCloudNetServerManager.start_server() is called when cloud_init_mode=NO_CLOUD_NET."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     from mvmctl.api.vms import create_vm
 
     mock_manager = MagicMock()
@@ -1647,6 +1781,7 @@ def test_create_vm_nocloud_net_starts_server(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -1669,6 +1804,8 @@ def test_create_vm_nocloud_net_starts_server(
     assert isinstance(vm, VMInstance)
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.core.network.get_default_interface")
 @patch("mvmctl.api.vms.subprocess.run")
@@ -1722,8 +1859,23 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_subprocess_run,
     mock_get_default_interface,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """Test that nocloud server is stopped when Firecracker fails to start."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     from mvmctl.api.vms import create_vm
 
     mock_manager = MagicMock()
@@ -1775,6 +1927,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
             input=VMCreateInput(
                 name="myvm",
                 image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                image_hash="a" * 64,
                 vcpus=2,
                 mem=256,
                 network_name="default",
@@ -1794,6 +1947,8 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_net_mgr.return_value.stop_server.assert_called_once()
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.subprocess.run")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
@@ -1841,8 +1996,23 @@ def test_create_vm_nocloud_net_success_sets_port(
     mock_setup_chain,
     mock_subprocess_run,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """Test that VMInstance.nocloud_net_port is set correctly when NO_CLOUD_NET mode succeeds."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     from mvmctl.api.vms import create_vm
 
     mock_manager = MagicMock()
@@ -1891,6 +2061,7 @@ def test_create_vm_nocloud_net_success_sets_port(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -1915,6 +2086,8 @@ def test_create_vm_nocloud_net_success_sets_port(
 # ============================================================================
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.subprocess.run")
 @patch("mvmctl.api.vms.add_nocloud_input_rule")
@@ -1964,8 +2137,23 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     mock_add_firewall_rule,
     mock_subprocess_run,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """Test that add_nocloud_input_rule() is called when NO_CLOUD_NET mode succeeds."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     from mvmctl.api.vms import create_vm
 
     mock_manager = MagicMock()
@@ -2014,6 +2202,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -2062,6 +2251,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
 @patch("mvmctl.api.vms.setup_nat")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
+@patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("mvmctl.api.vms.cleanup_tap")
 @patch("mvmctl.api.network.release_network_ip")
 @patch("mvmctl.api.vms.shutil.rmtree")
@@ -2071,6 +2261,7 @@ def test_firewall_failure_stops_server_and_raises(
     mock_rmtree,
     mock_rel_ip,
     mock_cleanup_tap,
+    mock_db_class,
     mock_resolve_fs_type,
     mock_resolve_fs_uuid,
     mock_setup_nat,
@@ -2099,8 +2290,20 @@ def test_firewall_failure_stops_server_and_raises(
 ):
     """Test that firewall failure stops server and re-raises exception."""
     from mvmctl.api.vms import create_vm
+    from mvmctl.db.models import Image
     from mvmctl.db.models import Network as DBNetwork
     from mvmctl.exceptions import NetworkError
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_class.return_value.get_image.return_value = test_image
+    mock_db_class.return_value.get_image_by_os_slug.return_value = test_image
 
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
@@ -2160,6 +2363,7 @@ def test_firewall_failure_stops_server_and_raises(
             input=VMCreateInput(
                 name="myvm",
                 image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                image_hash="a" * 64,
                 vcpus=2,
                 mem=256,
                 network_name="default",
@@ -2190,6 +2394,8 @@ def test_firewall_failure_stops_server_and_raises(
 # ============================================================================
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.subprocess.run")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
@@ -2237,8 +2443,23 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     mock_setup_chain,
     mock_subprocess_run,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """Test that create_vm returns immediately without blocking when mode=NO_CLOUD_NET."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     from mvmctl.api.vms import create_vm
     from mvmctl.models import CloudInitMode
 
@@ -2288,6 +2509,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -2308,6 +2530,8 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     assert vm.nocloud_net_port == test_port
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.subprocess.run")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
@@ -2355,8 +2579,23 @@ def test_create_vm_starts_nocloud_server(
     mock_setup_chain,
     mock_subprocess_run,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """Test that create_vm starts nocloud-net server when mode=NO_CLOUD_NET."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     from mvmctl.api.vms import create_vm
     from mvmctl.models import CloudInitMode
 
@@ -2406,6 +2645,7 @@ def test_create_vm_starts_nocloud_server(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -2429,6 +2669,8 @@ def test_create_vm_starts_nocloud_server(
     mock_net_mgr.return_value.start_server.assert_called_once()
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms._secure_mkdir_vm")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
 @patch("mvmctl.api.vms.get_vm_manager")
@@ -2472,6 +2714,8 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
     mock_get_vm_mgr,
     mock_setup_chain,
     mock_secure_mkdir,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
     tmp_path,
 ):
     images_dir = tmp_path / "images"
@@ -2524,6 +2768,7 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
             input=VMCreateInput(
                 name=vm_name,
                 image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                image_hash="a" * 64,
                 vcpus=2,
                 mem=256,
                 network_name="default",
@@ -2557,6 +2802,8 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
     )
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms._secure_mkdir_vm")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
 @patch("mvmctl.api.vms.get_vm_manager")
@@ -2606,6 +2853,8 @@ def test_direct_injection_cleanup_on_injection_failure(
     mock_get_vm_mgr,
     mock_setup_chain,
     mock_secure_mkdir,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
     tmp_path,
 ):
     from mvmctl.db.models import Network as DBNetwork
@@ -2665,6 +2914,7 @@ def test_direct_injection_cleanup_on_injection_failure(
             input=VMCreateInput(
                 name=vm_name,
                 image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                image_hash="a" * 64,
                 vcpus=2,
                 mem=256,
                 network_name="default",
@@ -2693,6 +2943,8 @@ def test_direct_injection_cleanup_on_injection_failure(
 # ============================================================================
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.add_nocloud_input_rule")
 @patch("mvmctl.api.vms.NoCloudNetServerManager")
@@ -2742,10 +2994,51 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     mock_net_mgr,
     mock_add_firewall_rule,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
     tmp_path,
     monkeypatch,
 ):
     """create_vm without ssh_key reads default keys from registry and passes list to write_cloud_init."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     keys_dir = tmp_path / "cache" / "keys"
     keys_dir.mkdir(parents=True)
     (keys_dir / "mykey.pub").write_text("ssh-rsa AAAA key1")
@@ -2788,6 +3081,7 @@ def test_create_vm_without_ssh_key_injects_default_keys(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -2811,6 +3105,8 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     assert "ssh-ed25519 AAAC key2" in injected_key
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.add_nocloud_input_rule")
 @patch("mvmctl.api.vms.NoCloudNetServerManager")
@@ -2860,8 +3156,23 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     mock_net_mgr,
     mock_add_firewall_rule,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """When --ssh-key is explicitly passed, resolve_ssh_key is called (not default key lookup)."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     mock_resolve_ssh_key.return_value = "ssh-rsa AAAA explicit-key"
 
     mock_manager = MagicMock()
@@ -2898,6 +3209,7 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -2920,6 +3232,8 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     assert config_arg.ssh_pub_key == "ssh-rsa AAAA explicit-key"
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.add_nocloud_input_rule")
 @patch("mvmctl.api.vms.NoCloudNetServerManager")
@@ -2971,8 +3285,23 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_net_mgr,
     mock_add_firewall_rule,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """With no defaults and no --ssh-key, falls back to resolve_ssh_key(None) (auto-detect)."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     mock_get_default_keys.return_value = []
     mock_resolve_ssh_key.return_value = None
 
@@ -3010,6 +3339,7 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
         input=VMCreateInput(
             name="myvm",
             image_path=Path("/path/to/ubuntu-22.04.ext4"),
+            image_hash="a" * 64,
             vcpus=2,
             mem=256,
             network_name="default",
@@ -3028,6 +3358,8 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_resolve_ssh_key.assert_called_once_with(None)
 
 
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
+@patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.subprocess.run")
 @patch("mvmctl.api.vms.setup_nocloud_input_chain")
@@ -3069,8 +3401,23 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_setup_chain,
     mock_subprocess_run,
     mock_copy2,
+    mock_db_get_image_by_os_slug,
+    mock_db_get_image,
 ):
     """If add_iptables_forward_rules() fails after create_tap(), ensure cleanup_tap() is called."""
+    from mvmctl.db.models import Image
+
+    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    test_image = Image(
+        id="a" * 64,
+        os_slug="ubuntu-22.04",
+        path="/path/to/ubuntu-22.04.ext4",
+        arch="x86_64",
+        minimum_rootfs_size_mb=2048,
+    )
+    mock_db_get_image.return_value = test_image
+    mock_db_get_image_by_os_slug.return_value = test_image
+
     from mvmctl.api.vms import create_vm
     from mvmctl.db.models import Network as DBNetwork
     from mvmctl.exceptions import NetworkError
@@ -3123,6 +3470,7 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
             input=VMCreateInput(
                 name="myvm",
                 image_path=Path("/path/to/ubuntu-22.04.ext4"),
+                image_hash="a" * 64,
                 vcpus=2,
                 mem=256,
                 network_name="default",

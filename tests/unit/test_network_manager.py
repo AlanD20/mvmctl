@@ -205,22 +205,23 @@ def test_get_network_leases_empty():
         assert leases == []
 
 
-@patch("mvmctl.api.network.network_core.setup_nat")
+@patch("mvmctl.api.network.sync_iptables_rules")
 @patch("mvmctl.api.network.network_core.setup_bridge")
 @patch("mvmctl.utils.network.list_network_interfaces", return_value=["eth0"])
 def test_create_network_success(
-    mock_interfaces, mock_setup_bridge, mock_setup_nat, mock_cache_dir: Path
+    mock_interfaces, mock_setup_bridge, mock_sync_rules, mock_cache_dir: Path
 ):
     """Test creating a network successfully."""
     with patch.object(MVMDatabase, "get_network_by_name", return_value=None):
         with patch.object(MVMDatabase, "upsert_network"):
-            config = create_network(name="mynet", subnet="10.20.0.0/24")
-            assert config.name == "mynet"
-            assert config.subnet == "10.20.0.0/24"
-            assert config.ipv4_gateway == "10.20.0.1"
+            with patch.object(MVMDatabase, "delete_network"):
+                with patch.object(MVMDatabase, "record_iptables_rule"):
+                    config = create_network(name="mynet", subnet="10.20.0.0/24")
+                    assert config.name == "mynet"
+                    assert config.subnet == "10.20.0.0/24"
+                    assert config.ipv4_gateway == "10.20.0.1"
 
     mock_setup_bridge.assert_called_once_with("mvm-mynet", ipv4_gateway_subnet="10.20.0.1/24")
-    mock_setup_nat.assert_called_once_with("mvm-mynet", nat_gateways=[], subnet="10.20.0.0/24")
 
 
 def test_create_network_already_exists():
@@ -459,10 +460,12 @@ def test_create_network_does_not_mark_default_network_created_in_sqlite(
 
     with (
         patch("mvmctl.api.network.network_core.setup_bridge"),
-        patch("mvmctl.api.network.network_core.setup_nat"),
+        patch("mvmctl.api.network.sync_iptables_rules"),
         patch("mvmctl.utils.network.list_network_interfaces", return_value=["eth0"]),
         patch.object(MVMDatabase, "get_network_by_name", return_value=None),
         patch.object(MVMDatabase, "upsert_network"),
+        patch.object(MVMDatabase, "delete_network"),
+        patch.object(MVMDatabase, "record_iptables_rule"),
     ):
         config = create_network(name="default", subnet="10.20.0.0/24")
 

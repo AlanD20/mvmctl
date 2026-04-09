@@ -141,7 +141,9 @@ def test_prune_all_privilege_check(
 @patch("mvmctl.api.cache.list_networks")
 @patch("mvmctl.core.metadata.list_image_entries")
 @patch("mvmctl.core.metadata.list_kernel_entries")
+@patch("mvmctl.core.metadata.list_binary_entries")
 def test_prune_all_passes_flags(
+    mock_list_binaries,
     mock_list_kernels,
     mock_list_images,
     mock_list_networks,
@@ -154,8 +156,17 @@ def test_prune_all_passes_flags(
     mock_list_networks.return_value = []
     mock_list_images.return_value = {}
     mock_list_kernels.return_value = {}
+    mock_list_binaries.return_value = {}
 
     result = cache_api.prune_all(include_stopped=True, include_running=True)
 
     # Result should be empty since no VMs/networks/images/kernels to prune
-    assert result == {"vms": [], "networks": [], "images": [], "kernels": []}
+    # appliance is a bool (False when no appliance dir exists), binaries is a list
+    assert result == {
+        "vms": [],
+        "networks": [],
+        "images": [],
+        "kernels": [],
+        "appliance": False,
+        "binaries": [],
+    }

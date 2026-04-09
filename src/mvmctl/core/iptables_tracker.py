@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
 from mvmctl.db.models import IPTablesRule, IPTablesRuleType
 from mvmctl.utils.process import privileged_cmd
 
@@ -48,7 +49,7 @@ class IPTablesTracker:
     """
 
     COMMENT_PREFIX = "mvm"
-    MAX_COMMENT_LEN = 240  # Below xt_comment 256 limit
+    MAX_COMMENT_LEN = CONST_IPTABLES_MAX_COMMENT_LEN
 
     class RuleAction(str, Enum):
         """iptables action types for command building."""

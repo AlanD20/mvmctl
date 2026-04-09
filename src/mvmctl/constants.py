@@ -573,6 +573,9 @@ def _resolve_version() -> str:
 # Hardcoded numeric constants extracted from core layer
 # ---------------------------------------------------------------------------
 
+# iptables constants
+CONST_IPTABLES_MAX_COMMENT_LEN: Final[int] = 240  # Below xt_comment 256 limit
+
 # Buffer sizes (in bytes)
 CONST_BUFFER_SIZE_BYTES: Final[int] = 1024
 CONST_SECTOR_SIZE_BYTES: Final[int] = 512

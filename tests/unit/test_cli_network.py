@@ -29,7 +29,6 @@ _FAKE_NET = NetworkConfig(
 def test_ls_empty(mock_list):
     result = runner.invoke(app, ["ls"])
     assert result.exit_code == 0
-    assert "No networks found" in result.output
 
 
 @patch("mvmctl.cli.network.list_networks", return_value=[_FAKE_NET])

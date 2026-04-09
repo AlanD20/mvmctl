@@ -113,6 +113,7 @@ class TestImageMetadata:
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
             fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
         )
 
         entry = get_image_entry(cache_dir, "img123")
@@ -125,9 +126,21 @@ class TestImageMetadata:
         cache_dir = make_test_paths(tmp_path).cache
 
         update_image_entry(
-            cache_dir, "img1", os_slug="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
+            cache_dir,
+            "img1",
+            os_slug="ubuntu-24.04",
+            os_name="Ubuntu",
+            fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
         )
-        update_image_entry(cache_dir, "img2", os_slug="debian-12", os_name="Debian", fs_type="ext4")
+        update_image_entry(
+            cache_dir,
+            "img2",
+            os_slug="debian-12",
+            os_name="Debian",
+            fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
+        )
 
         entries = list_image_entries(cache_dir)
         assert len(entries) == 2
@@ -138,7 +151,13 @@ class TestImageMetadata:
         """Test removing an image entry."""
         cache_dir = make_test_paths(tmp_path).cache
 
-        update_image_entry(cache_dir, "img1", os_name="Ubuntu", fs_type="ext4")
+        update_image_entry(
+            cache_dir,
+            "img1",
+            os_name="Ubuntu",
+            fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
+        )
         remove_image_entry(cache_dir, "img1")
 
         entry = get_image_entry(cache_dir, "img1")
@@ -154,6 +173,7 @@ class TestImageMetadata:
             os_slug="ubuntu-24.04",
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
+            minimum_rootfs_size_mb=2048,
         )
         set_default_image_entry(cache_dir, "img1")
 
@@ -171,6 +191,7 @@ class TestImageMetadata:
             os_slug="ubuntu-24.04",
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
+            minimum_rootfs_size_mb=2048,
         )
         set_default_image_by_os_slug(cache_dir, "ubuntu-24.04")
 
@@ -182,13 +203,28 @@ class TestImageMetadata:
         cache_dir = make_test_paths(tmp_path).cache
 
         update_image_entry(
-            cache_dir, "abc123", os_slug="ubuntu-24.04", os_name="Ubuntu", fs_type="ext4"
+            cache_dir,
+            "abc123",
+            os_slug="ubuntu-24.04",
+            os_name="Ubuntu",
+            fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
         )
         update_image_entry(
-            cache_dir, "abc456", os_slug="debian-12", os_name="Debian", fs_type="ext4"
+            cache_dir,
+            "abc456",
+            os_slug="debian-12",
+            os_name="Debian",
+            fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
         )
         update_image_entry(
-            cache_dir, "def789", os_slug="fedora-40", os_name="Fedora", fs_type="ext4"
+            cache_dir,
+            "def789",
+            os_slug="fedora-40",
+            os_name="Fedora",
+            fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
         )
 
         matches = find_images_by_id_prefix(cache_dir, "abc")
@@ -201,7 +237,13 @@ class TestImageMetadata:
         """Test finding a single image by ID prefix."""
         cache_dir = make_test_paths(tmp_path).cache
 
-        update_image_entry(cache_dir, "abc123", os_name="Ubuntu", fs_type="ext4")
+        update_image_entry(
+            cache_dir,
+            "abc123",
+            os_name="Ubuntu",
+            fs_type="ext4",
+            minimum_rootfs_size_mb=2048,
+        )
 
         from mvmctl.core.metadata import find_image_by_id_prefix
 
@@ -375,8 +417,20 @@ class TestOrphanedEntryCleanup:
         valid_image.write_bytes(b"ext4 data")
 
         # Add entries - one with matching file, one orphaned
-        update_image_entry(cache_dir, "valid123", os_slug="ubuntu-24.04", path="ubuntu.ext4")
-        update_image_entry(cache_dir, "orphan456", os_slug="debian-12", path="missing.ext4")
+        update_image_entry(
+            cache_dir,
+            "valid123",
+            os_slug="ubuntu-24.04",
+            path="ubuntu.ext4",
+            minimum_rootfs_size_mb=2048,
+        )
+        update_image_entry(
+            cache_dir,
+            "orphan456",
+            os_slug="debian-12",
+            path="missing.ext4",
+            minimum_rootfs_size_mb=2048,
+        )
 
         # List with validation
         entries = list_image_entries(cache_dir, images_dir)
@@ -402,6 +456,7 @@ class TestDualWriteCompatibility:
             path="alpine-3.21.ext4",
             os_name="Alpine Linux",
             is_default=0,
+            minimum_rootfs_size_mb=2048,
         )
 
         row = db.get_image(image_id)

@@ -433,14 +433,30 @@ def create_network(
     # Setup bridge and NAT
     ipv4_gateway_subnet = f"{config.ipv4_gateway}/{config.subnet.split('/')[1]}"
     db = MVMDatabase()
+
+    # Generate network_id and persist network BEFORE creating iptables rules
+    # (iptables_rules table has FK constraint to networks table)
+    created_at = datetime.now(tz=timezone.utc).isoformat()
+    network_id = generate_full_hash_network(name, config.subnet, created_at)
+    db_network = DBNetwork(
+        id=network_id,
+        name=config.name,
+        subnet=config.subnet,
+        bridge=config.bridge,
+        ipv4_gateway=config.ipv4_gateway,
+        bridge_active=True,
+        nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
+        nat_enabled=config.nat_enabled,
+        is_default=False,
+        created_at=created_at,
+    )
+    db.upsert_network(db_network)
+
     try:
         network_core.setup_bridge(config.bridge, ipv4_gateway_subnet=ipv4_gateway_subnet)
 
         # Create tracked iptables rules for NAT
         if config.nat_enabled:
-            network_id = generate_full_hash_network(
-                name, config.subnet, datetime.now(tz=timezone.utc).isoformat()
-            )
             for gateway_iface in config.nat_gateways or [get_default_interface()]:
                 # Create MASQUERADE rule
                 masquerade_rule = IPTablesRule(
@@ -496,28 +512,16 @@ def create_network(
                 raise NetworkError(f"Failed to sync iptables rules to host: {e}") from e
 
     except NetworkError:
-        # Rollback on failure
+        # Rollback on failure - delete the network (CASCADE removes rules)
+        try:
+            db.delete_network(network_id)
+        except Exception as db_error:
+            logger.warning("Rollback: failed to delete network from database: %s", db_error)
         try:
             network_core.teardown_bridge(config.bridge)
         except NetworkError as e:
             logger.warning("Rollback: failed to tear down bridge: %s", e)
         raise
-
-    # Persist to database
-    created_at = datetime.now(tz=timezone.utc).isoformat()
-    db_network = DBNetwork(
-        id=generate_full_hash_network(name, config.subnet, created_at),
-        name=config.name,
-        subnet=config.subnet,
-        bridge=config.bridge,
-        ipv4_gateway=config.ipv4_gateway,
-        bridge_active=True,
-        nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
-        nat_enabled=config.nat_enabled,
-        is_default=False,
-        created_at=created_at,
-    )
-    db.upsert_network(db_network)
 
     # Persist iptables rules if root
     if os.getuid() == 0:
