@@ -54,11 +54,11 @@ def mock_cache_dir(tmp_path: Path) -> Path:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     kernels_dir = cache_dir / "kernels"
-    kernels_dir.mkdir(parents=True)
+    kernels_dir.mkdir(parents=True, exist_ok=True)
     (kernels_dir / "vmlinux").write_text("fake kernel")
 
     images_dir = cache_dir / "images"
-    images_dir.mkdir(parents=True)
+    images_dir.mkdir(parents=True, exist_ok=True)
     (images_dir / "ubuntu-24.04.ext4").write_text("fake image")
 
     return cache_dir

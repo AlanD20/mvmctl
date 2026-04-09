@@ -40,8 +40,10 @@ class TestConsoleWorkflow:
     @patch("mvmctl.api.vms.ConsoleRelayManager")
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
     @patch("shutil.which")
+    @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
     def test_create_vm_with_console_starts_relay(
         self,
+        mock_db_get_image,
         mock_which,
         mock_relay_popen,
         mock_console_mgr,
@@ -73,6 +75,7 @@ class TestConsoleWorkflow:
         tmp_path: Path,
     ):
         from mvmctl.api.vms import create_vm
+        from mvmctl.db.models import Image
 
         # Setup mock for subprocess.run to return success
         mock_run_result = MagicMock()
@@ -177,12 +180,22 @@ class TestConsoleWorkflow:
         print(f"cloud_init.write_cloud_init: {cloud_init.write_cloud_init}")
         print(f"Is mock: {cloud_init.write_cloud_init is mock_write_ci}")
 
+        # Mock image entry with minimum_rootfs_size_mb to pass validation
+        mock_db_get_image.return_value = Image(
+            id="b" * 64,
+            os_slug="test-image",
+            path="/tmp/test-image.ext4",
+            arch="x86_64",
+            minimum_rootfs_size_mb=2048,
+        )
+
         from mvmctl.models import CloudInitMode
 
         vm = create_vm(
             VMCreateInput(
                 name="testvm",
                 image_path=Path("/tmp/test-image.ext4"),
+                image_hash="test-image",
                 vcpus=2,
                 mem=256,
                 network_name="default",
@@ -233,8 +246,10 @@ class TestConsoleWorkflow:
     @patch("mvmctl.api.vms.add_nocloud_input_rule")
     @patch("mvmctl.api.vms.NoCloudNetServerManager")
     @patch("shutil.which")
+    @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
     def test_create_vm_without_console_skips_relay(
         self,
+        mock_db_get_image,
         mock_which,
         mock_nocloud_mgr,
         mock_add_nocloud_rule,
@@ -263,6 +278,7 @@ class TestConsoleWorkflow:
         tmp_path: Path,
     ):
         from mvmctl.api.vms import create_vm
+        from mvmctl.db.models import Image
 
         # Setup mock for subprocess.run to return success
         mock_run_result = MagicMock()
@@ -330,12 +346,22 @@ class TestConsoleWorkflow:
         mock_nocloud_instance.get_server_pid.return_value = 9999
         mock_nocloud_mgr.return_value = mock_nocloud_instance
 
+        # Mock image entry with minimum_rootfs_size_mb to pass validation
+        mock_db_get_image.return_value = Image(
+            id="b" * 64,
+            os_slug="test-image",
+            path="/tmp/test-image.ext4",
+            arch="x86_64",
+            minimum_rootfs_size_mb=2048,
+        )
+
         from mvmctl.models import CloudInitMode
 
         vm = create_vm(
             VMCreateInput(
                 name="testvm",
                 image_path=Path("/tmp/test-image.ext4"),
+                image_hash="test-image",
                 vcpus=2,
                 mem=256,
                 network_name="default",

@@ -43,11 +43,21 @@ def isolate_config_and_cache(request, tmp_path: Path, monkeypatch: pytest.Monkey
 def _isolate_iptables_rules(request, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate iptables rules for unit/integration tests.
 
+    Flushes MVM-specific iptables chains before each test to prevent
+    test rules from leaking into the host system.
+
     Skipped for system tests (marked with @pytest.mark.system).
     """
     # Skip isolation for system tests
     if request.node.get_closest_marker("system"):
         return
+
+    # Flush MVM-specific iptables chains (ignore errors if chains don't exist)
+    subprocess.run(
+        ["iptables", "-t", "nat", "-F", "MVM-POSTROUTING"], capture_output=True, check=False
+    )
+    subprocess.run(["iptables", "-F", "MVM-FORWARD"], capture_output=True, check=False)
+    subprocess.run(["iptables", "-F", "MVM-NOCLOUD-INPUT"], capture_output=True, check=False)
 
     fake_rules = str(tmp_path / "iptables" / "rules.v4")
     monkeypatch.setattr("mvmctl.core.host_setup.IPTABLES_RULES_V4", fake_rules, raising=False)

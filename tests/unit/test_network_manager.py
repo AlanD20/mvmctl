@@ -205,11 +205,18 @@ def test_get_network_leases_empty():
         assert leases == []
 
 
+@patch("mvmctl.api.network.create_iptables_rule")
+@patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=True)
 @patch("mvmctl.api.network.sync_iptables_rules")
 @patch("mvmctl.api.network.network_core.setup_bridge")
 @patch("mvmctl.utils.network.list_network_interfaces", return_value=["eth0"])
 def test_create_network_success(
-    mock_interfaces, mock_setup_bridge, mock_sync_rules, mock_cache_dir: Path
+    mock_interfaces,
+    mock_setup_bridge,
+    mock_sync_rules,
+    mock_setup_chains,
+    mock_create_iptables_rule,
+    mock_cache_dir: Path,
 ):
     """Test creating a network successfully."""
     with patch.object(MVMDatabase, "get_network_by_name", return_value=None):
@@ -465,6 +472,8 @@ def test_create_network_does_not_mark_default_network_created_in_sqlite(
 
     with (
         patch("mvmctl.api.network.network_core.setup_bridge"),
+        patch("mvmctl.api.network.network_core.setup_mvm_chains", return_value=True),
+        patch("mvmctl.api.network.create_iptables_rule"),
         patch("mvmctl.api.network.sync_iptables_rules"),
         patch("mvmctl.utils.network.list_network_interfaces", return_value=["eth0"]),
         patch.object(MVMDatabase, "get_network_by_name", return_value=None),
@@ -767,6 +776,36 @@ def test_validate_subnet_no_overlap():
 
     # Should not raise on non-overlapping
     validate_no_subnet_overlap("10.20.1.0/24", existing_networks)
+
+
+def test_validate_subnet_conflict_identical():
+    """Test that identical subnet conflict is detected."""
+    net1 = DBNetwork(
+        id="a" * 64,
+        name="mynet",
+        subnet="10.20.0.0/24",
+        bridge="mvm-mynet",
+        ipv4_gateway="10.20.0.1",
+    )
+    net2 = DBNetwork(
+        id="b" * 64,
+        name="default",
+        subnet="10.20.0.0/24",
+        bridge="mvm-default",
+        ipv4_gateway="10.20.0.1",
+    )
+
+    with patch.object(MVMDatabase, "list_networks", return_value=[net1, net2]):
+        existing_networks = list_networks()
+
+    # Should raise error when trying to create a network with identical subnet
+    with pytest.raises(NetworkError, match="overlaps with network") as exc_info:
+        validate_no_subnet_overlap("10.20.0.0/24", existing_networks)
+
+    # Error message should identify which network has the conflict
+    error_msg = str(exc_info.value)
+    assert "mynet" in error_msg or "default" in error_msg
+    assert "10.20.0.0/24" in error_msg
 
 
 class TestSetDefaultNetwork:

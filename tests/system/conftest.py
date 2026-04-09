@@ -20,6 +20,31 @@ import pytest
 # ============================================================================
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_system_test_iptables(request) -> None:
+    """Pre-clean iptables for system tests to ensure clean state.
+
+    System tests run real iptables commands and skip the root conftest
+    _isolate_iptables_rules fixture. This ensures no stale rules exist
+    before each system test runs.
+    """
+    if not request.node.get_closest_marker("system"):
+        return
+
+    # Pre-test cleanup: Flush all MVM chains (ignore errors if chains don't exist)
+    subprocess.run(
+        ["sudo", "iptables", "-t", "nat", "-F", "MVM-POSTROUTING"],
+        capture_output=True,
+        check=False,
+    )
+    subprocess.run(["sudo", "iptables", "-F", "MVM-FORWARD"], capture_output=True, check=False)
+    subprocess.run(
+        ["sudo", "iptables", "-F", "MVM-NOCLOUD-INPUT"],
+        capture_output=True,
+        check=False,
+    )
+
+
 @pytest.fixture(scope="session")
 def mvm_binary() -> str:
     """Resolve MVM binary path from env var or default."""

@@ -854,7 +854,7 @@ def teardown_nat(
     if subnet is None:
         subnet = _detect_subnet_for_bridge(effective_bridge)
 
-    comment = f"mvm-nat:{effective_bridge}"
+    comment = f"mvm-nat:{effective_bridge}:{internet_iface}"
 
     # Build MASQUERADE deletion rule - use source filtering if subnet known
     masquerade_del_args: list[str] = [
