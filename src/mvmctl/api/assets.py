@@ -243,22 +243,23 @@ def list_binaries() -> list[BinaryEntry]:
     binary_meta = list_binary_entries(cache_dir)
 
     result: list[BinaryEntry] = []
-    for name, entry in binary_meta.items():
-        binary_path = entry.get("binary_path", "")
-        full_version = entry.get("full_version", "")
-        version = full_version.lstrip("v") if full_version else ""
-        is_default = entry.get("is_default") == 1
-        file_exists = Path(binary_path).exists() if binary_path else False
+    for name, entries in binary_meta.items():
+        for entry in entries:
+            binary_path = entry.get("binary_path", "")
+            full_version = entry.get("full_version", "")
+            version = full_version.lstrip("v") if full_version else ""
+            is_default = entry.get("is_default") == 1
+            file_exists = Path(binary_path).exists() if binary_path else False
 
-        result.append(
-            BinaryEntry(
-                version=version,
-                full_version=full_version,
-                binary_path=binary_path,
-                is_default=is_default,
-                file_exists=file_exists,
+            result.append(
+                BinaryEntry(
+                    version=version,
+                    full_version=full_version,
+                    binary_path=binary_path,
+                    is_default=is_default,
+                    file_exists=file_exists,
+                )
             )
-        )
 
     result.sort(key=lambda b: b.version, reverse=True)
     return result

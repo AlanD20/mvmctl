@@ -418,20 +418,21 @@ def prune_binaries(dry_run: bool = False, include_protected: bool = False) -> li
     default_version = default_binary.version if default_binary else None
 
     removed: list[str] = []
-    for binary_name, meta in all_binaries.items():
-        version = meta.get("version", "")
+    for binary_name, binaries_list in all_binaries.items():
+        for meta in binaries_list:
+            version = meta.get("package_version", "")
 
-        if not include_protected:
-            if version == default_version:
-                continue
+            if not include_protected:
+                if version == default_version:
+                    continue
 
-        if not dry_run:
-            try:
-                remove_binary_entry(cache_dir, binary_name, version)
+            if not dry_run:
+                try:
+                    remove_binary_entry(cache_dir, binary_name, version)
+                    removed.append(f"{binary_name}:{version}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove binary {binary_name}:{version}: {e}")
+            else:
                 removed.append(f"{binary_name}:{version}")
-            except Exception as e:
-                logger.warning(f"Failed to remove binary {binary_name}:{version}: {e}")
-        else:
-            removed.append(f"{binary_name}:{version}")
 
     return removed

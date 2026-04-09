@@ -77,7 +77,7 @@ def list_image_entries(
     return _list_image_entries(cache_dir, images_dir, include_missing=include_missing)
 
 
-def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
+def list_binary_entries(cache_dir: Path) -> dict[str, list[dict[str, Any]]]:
     """Return all binary entries dict keyed by binary name.
 
     Args:

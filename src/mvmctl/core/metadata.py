@@ -413,16 +413,18 @@ def get_binary_entry(cache_dir: Path, version: str) -> dict[str, Any]:
     return {}
 
 
-def list_binary_entries(cache_dir: Path) -> dict[str, dict[str, Any]]:
+def list_binary_entries(cache_dir: Path) -> dict[str, list[dict[str, Any]]]:
     """Return all binary entries dict keyed by binary name."""
     db = MVMDatabase()
     binaries = db.list_binaries()
 
     # Group by name, only return if we have both firecracker and jailer
-    result: dict[str, dict[str, Any]] = {}
+    result: dict[str, list[dict[str, Any]]] = {}
     for binary in binaries:
         if binary.name in _BINARY_METADATA_NAMES:
-            result[binary.name] = BinaryItem.from_db(binary).to_dict()
+            if binary.name not in result:
+                result[binary.name] = []
+            result[binary.name].append(BinaryItem.from_db(binary).to_dict())
 
     return result
 
@@ -468,7 +470,8 @@ def remove_binary_entry(cache_dir: Path, binary_name: str, version: str) -> None
 
     db.delete_binary_by_name_and_version(binary_name, version)
 
-    binary_path = bin_dir / binary_name / version
+    normalized_version = version.lstrip("v")
+    binary_path = bin_dir / f"{binary_name}-v{normalized_version}"
     if binary_path.exists():
         binary_path.unlink()
 

@@ -2224,9 +2224,12 @@ def export_vm_config(name: str) -> "VMExportConfig":
 
         cache_dir = get_cache_dir()
         all_binaries = list_binary_entries(cache_dir)
-        for bin_name, meta in all_binaries.items():
-            if meta.get("is_default"):
-                binary_version = meta.get("version")
+        for bin_name, entries in all_binaries.items():
+            for meta in entries:
+                if meta.get("is_default"):
+                    binary_version = meta.get("version")
+                    break
+            if binary_version:
                 break
     except Exception:
         pass
