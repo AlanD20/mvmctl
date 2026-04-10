@@ -62,7 +62,7 @@ def test_vmconfig_requires_explicit_values():
 
 def test_vmconfig_validation_vcpu_out_of_range():
     """vCPU count must be 1-32."""
-    with pytest.raises(ValueError, match="vcpu_count must be between 0.25 and 64"):
+    with pytest.raises(ValueError, match="vcpu_count must be between 1 and 32"):
         VMConfig(
             name="test",
             vcpu_count=0,
@@ -78,10 +78,10 @@ def test_vmconfig_validation_vcpu_out_of_range():
             cloud_init_mode=CloudInitMode.INJECT,
         )
 
-    with pytest.raises(ValueError, match="vcpu_count must be between 0.25 and 64"):
+    with pytest.raises(ValueError, match="vcpu_count must be between 1 and 32"):
         VMConfig(
             name="test",
-            vcpu_count=65,
+            vcpu_count=35,
             mem_size_mib=1024,
             kernel_path=Path("/vmlinux"),
             rootfs_path=Path("/rootfs.ext4"),

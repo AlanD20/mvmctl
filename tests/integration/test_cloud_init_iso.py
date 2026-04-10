@@ -198,17 +198,16 @@ class TestCloudInitISOCreation:
                 "keep-iso-vm",
                 "--image",
                 "abc123",
-                "--keep-cloud-init-iso",
+                "--skip-cleanup",
             ],
         )
         assert result.exit_code == 0
         assert "keep-iso-vm" in result.output
         mock_create_vm.assert_called_once()
 
-        # Verify keep flag was passed
         call_kwargs = mock_create_vm.call_args.kwargs
         assert call_kwargs["input"].name == "keep-iso-vm"
-        assert call_kwargs["input"].keep_cloud_init_iso is True
+        assert call_kwargs["input"].skip_cleanup is True
 
 
 class TestCloudInitISOSubprocessMocking:

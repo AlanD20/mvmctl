@@ -49,7 +49,7 @@ class VMConfig:
 
     # Required fields (CLI/API layer resolves these)
     name: str
-    vcpu_count: float
+    vcpu_count: int
     mem_size_mib: int
     enable_api_socket: bool
     enable_pci: bool
@@ -73,9 +73,9 @@ class VMConfig:
 
     def __post_init__(self) -> None:
         """Validate that vCPU count and memory size are within acceptable bounds."""
-        if not 0.25 <= self.vcpu_count <= 64:
+        if not 1 <= self.vcpu_count <= 32:
             raise ValueError(
-                f"vcpu_count must be between 0.25 and 64 (inclusive), got {self.vcpu_count}"
+                f"vcpu_count must be between 1 and 32 (inclusive), got {self.vcpu_count}"
             )
         if not 128 <= self.mem_size_mib <= 65536:
             raise ValueError(
@@ -369,3 +369,4 @@ class VMCreateInput:
     image_fs_type: str | None = None
     image_hash: str | None = None
     binary_id: str | None = None
+    skip_cleanup: bool = False

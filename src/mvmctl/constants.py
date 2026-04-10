@@ -297,8 +297,8 @@ ISO_BINARIES: Final[list[str]] = _require_str_list(("host", "iso_binaries"))
 # ---------------------------------------------------------------------------
 
 
-DEFAULT_VM_VCPU_COUNT: Final[float] = _resolve_with_config_override(
-    "DEFAULT_VM_VCPU_COUNT", _require_float(("vm_defaults", "vcpu_count"))
+DEFAULT_VM_VCPU_COUNT: Final[int] = _resolve_with_config_override(
+    "DEFAULT_VM_VCPU_COUNT", _require_int(("vm_defaults", "vcpu_count"))
 )
 DEFAULT_VM_MEM_MIB: Final[int] = _resolve_with_config_override(
     "DEFAULT_VM_MEM_MIB", _require_int(("vm_defaults", "mem_size_mib"))
@@ -629,8 +629,8 @@ CONST_MIN_BINARY_SIZE_BYTES: Final[int] = 512
 # VM resource limits
 CONST_VM_MEM_MIN_MIB: Final[int] = 128
 CONST_VM_MEM_MAX_MIB: Final[int] = 65536
-CONST_VM_VCPU_MIN: Final[float] = 0.25
-CONST_VM_VCPU_MAX: Final[int] = 256
+CONST_VM_VCPU_MIN: Final[int] = 1
+CONST_VM_VCPU_MAX: Final[int] = 32
 CONST_IP_RANGE_SIZE: Final[int] = 256
 CONST_SIGNAL_EXIT_CODE_BASE: Final[int] = 128
 

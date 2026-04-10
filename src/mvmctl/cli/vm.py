@@ -479,10 +479,10 @@ def vm_create(
         envvar="MVM_FIRECRACKER_BIN",
         help="Path to firecracker binary (default: active version from mvm bin use)",
     ),
-    keep_cloud_init_iso: bool = typer.Option(
+    skip_cleanup: bool = typer.Option(
         False,
-        "--keep-cloud-init-iso",
-        help="Keep cloud-init ISO file after VM starts (for debugging)",
+        "--skip-cleanup",
+        help="Skip cleanup if VM creation fails; keeps cloud-init ISO and partial resources (for debugging)",
     ),
     output_config: Optional[Path] = typer.Option(
         None,
@@ -614,8 +614,9 @@ def vm_create(
             user_data=user_data,
             cloud_init_mode=cloud_init_result.mode,
             cloud_init_iso_path=cloud_init_result.iso_path,
-            keep_cloud_init_iso=keep_cloud_init_iso,
+            keep_cloud_init_iso=skip_cleanup,
             nocloud_net_port=nocloud_net_port if nocloud_net_port is not None else 0,
+            skip_cleanup=skip_cleanup,
         )
         vm = create_vm(input=input_data)
         print_success(f"VM '{name}' started (PID {vm.pid})")

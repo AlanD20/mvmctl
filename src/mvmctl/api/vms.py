@@ -24,6 +24,7 @@ from mvmctl.constants import (
     CONST_FILE_PERMS_SHADOW,
     CONST_FILE_PERMS_SUDOERS,
     CONST_MEGABYTE_BYTES,
+    CONST_POLL_STEP_SECONDS,
     CONST_ROOT_GID,
     CONST_ROOT_UID,
     CONST_SHADOW_DAYS_SINCE_EPOCH,
@@ -34,6 +35,8 @@ from mvmctl.constants import (
     CONST_VM_MEM_MAX_MIB,
     CONST_VM_MEM_MIN_MIB,
     CONST_VM_START_WAIT_S,
+    CONST_VM_VCPU_MAX,
+    CONST_VM_VCPU_MIN,
     DEFAULT_BRIDGE_NAME,
     DEFAULT_CLOUD_INIT_DIRNAME,
     DEFAULT_CLOUD_INIT_ISO_NAME,
@@ -116,7 +119,7 @@ from mvmctl.models import (
 )
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.services.nocloud_server import NoCloudNetServerManager
-from mvmctl.utils.fs import get_cache_dir, get_kernels_dir, get_vm_dir_by_hash
+from mvmctl.utils.fs import get_kernels_dir, get_vm_dir_by_hash
 from mvmctl.utils.full_hash import generate_vm_id
 from mvmctl.utils.network import (
     bridge_exists,
@@ -745,6 +748,22 @@ def _ensure_resolv_conf(rootfs_path: Path) -> None:
         logger.debug("Failed to ensure resolv.conf: %s", exc)
 
 
+def _persist_failed_vm(
+    vm_instance: VMInstance,
+    binary_id: str | None,
+    manager: VMManager | None,
+) -> None:
+    if manager is None:
+        logger.warning("Failed to persist failed VM: manager is None")
+        return
+    vm_instance.status = VMStatus.ERROR
+    try:
+        manager.register(vm_instance, binary_id)
+        logger.info("Persisted failed VM '%s' to database for later cleanup", vm_instance.name)
+    except Exception as exc:
+        logger.warning("Failed to persist failed VM '%s': %s", vm_instance.name, exc)
+
+
 def _cleanup_vm_creation_resources(
     resources_created: dict[str, bool],
     vm_dir: Path | None,
@@ -843,6 +862,23 @@ def _resolve_default_public_keys(ssh_key: str | None) -> list[str] | str | None:
     return resolve_ssh_key(None)
 
 
+def _resolve_image_hash_from_path(image_path: Path, image_hash: str | None) -> str | None:
+    if image_hash is not None:
+        return image_hash
+    if image_path.suffix != ".zst":
+        return None
+
+    from mvmctl.core.metadata import list_image_entries
+    from mvmctl.utils.fs import get_cache_dir
+
+    cache_dir = get_cache_dir()
+    all_entries = list_image_entries(cache_dir)
+    for img_id, meta in all_entries.items():
+        if meta.get("path") == image_path.name:
+            return img_id
+    return image_path.stem
+
+
 def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMInstance:
     """Create a new VM from the provided input configuration.
 
@@ -874,7 +910,6 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
         get_network,
     )
     from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
-    from mvmctl.core.metadata import list_image_entries
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.core.rootfs_injector import inject_cloud_init
     from mvmctl.utils.disk_size import parse_disk_size
@@ -940,31 +975,13 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
         resolved_image_path = image_path
         resolved_image_fs_uuid = image_fs_uuid or (_resolve_image_fs_uuid(image) if image else None)
         resolved_image_fs_type = image_fs_type or (_resolve_image_fs_type(image) if image else None)
-        resolved_image_hash: str | None = image_hash
-        if resolved_image_hash is None and resolved_image_path.suffix == ".zst":
-            cache_dir = get_cache_dir()
-            all_entries = list_image_entries(cache_dir)
-            for img_id, meta in all_entries.items():
-                if meta.get("path") == resolved_image_path.name:
-                    resolved_image_hash = img_id
-                    break
-            if resolved_image_hash is None:
-                resolved_image_hash = resolved_image_path.stem
     else:
         assert image is not None
         resolved_image_path = resolve_image_multi_strategy(image)
         resolved_image_fs_uuid = image_fs_uuid or _resolve_image_fs_uuid(image)
         resolved_image_fs_type = image_fs_type or _resolve_image_fs_type(image)
-        resolved_image_hash = image_hash
-        if resolved_image_hash is None and resolved_image_path.suffix == ".zst":
-            cache_dir = get_cache_dir()
-            all_entries = list_image_entries(cache_dir)
-            for img_id, meta in all_entries.items():
-                if meta.get("path") == resolved_image_path.name:
-                    resolved_image_hash = img_id
-                    break
-            if resolved_image_hash is None:
-                resolved_image_hash = resolved_image_path.stem
+
+    resolved_image_hash = _resolve_image_hash_from_path(resolved_image_path, image_hash)
 
     vm_dir: Path | None = None
     resources_created = {
@@ -986,9 +1003,10 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
     log_fp: Any = None
     console_fp: Any = None
     vm_id: str | None = None
+    vm_instance: VMInstance | None = None
+    manager: VMManager | None = None
 
-    def _sigterm_cleanup_handler(signum: int, frame: Any) -> None:
-        _ = frame
+    def _cleanup() -> None:
         _cleanup_vm_creation_resources(
             resources_created,
             vm_dir,
@@ -1005,6 +1023,10 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             log_fp,
             console_fp,
         )
+
+    def _sigterm_cleanup_handler(signum: int, frame: Any) -> None:
+        _ = frame
+        _cleanup()
         raise SystemExit(CONST_SIGNAL_EXIT_CODE_BASE + signum)
 
     old_handler = signal.signal(signal.SIGTERM, _sigterm_cleanup_handler)
@@ -1016,8 +1038,10 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 raise MVMError(
                     f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
                 )
-            if not (1 <= vcpus <= 32):
-                raise MVMError(f"Invalid vcpus={vcpus}: must be between 1 and 32")
+            if not (CONST_VM_VCPU_MIN <= vcpus <= CONST_VM_VCPU_MAX):
+                raise MVMError(
+                    f"Invalid vcpus={vcpus}: must be between {CONST_VM_VCPU_MIN} and {CONST_VM_VCPU_MAX}"
+                )
             if not (CONST_VM_MEM_MIN_MIB <= mem <= CONST_VM_MEM_MAX_MIB):
                 raise MVMError(f"Invalid mem_size_mib={mem}: must be between 128 and 65536")
 
@@ -1175,13 +1199,18 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 write_cloud_init(cloud_init_write_config)
 
                 if effective_mode == CloudInitMode.ISO:
-                    if cloud_init_iso_path is None:
-                        raise MVMError(
-                            "cloud_init_iso_path required when cloud_init_mode is CUSTOM"
-                        )
-                    if not cloud_init_iso_path.exists():
-                        raise MVMError(f"Custom cloud-init ISO not found: {cloud_init_iso_path}")
-                    cloud_init_iso = cloud_init_iso_path
+                    if cloud_init_iso_path is not None:
+                        if not cloud_init_iso_path.exists():
+                            raise MVMError(
+                                f"Custom cloud-init ISO not found: {cloud_init_iso_path}"
+                            )
+                        cloud_init_iso = cloud_init_iso_path
+                    else:
+                        cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
+                        try:
+                            create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
+                        except CloudInitError as exc:
+                            raise MVMError(f"Failed to create cloud-init ISO: {exc}") from exc
                 elif effective_mode == CloudInitMode.NET:
                     net_manager = NoCloudNetServerManager()
                     url, port = net_manager.start_server(
@@ -1202,12 +1231,6 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                         inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
                     except Exception as exc:
                         raise CloudInitError(f"Direct injection failed: {exc}") from exc
-                elif effective_mode in (CloudInitMode.INJECT, CloudInitMode.ISO):
-                    cloud_init_iso = vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
-                    try:
-                        create_cloud_init_iso(cloud_init_dir, cloud_init_iso)
-                    except CloudInitError as exc:
-                        raise MVMError(f"Failed to create cloud-init ISO: {exc}") from exc
 
             socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
             subnet_mask = subnet_mask_from_subnet(net_config.subnet)
@@ -1311,6 +1334,13 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                     start_new_session=True,
                 )
 
+            time.sleep(CONST_POLL_STEP_SECONDS)
+            poll_result = proc.poll()
+            if poll_result is not None and isinstance(poll_result, int):
+                raise VMCreateError(
+                    f"Firecracker process exited immediately with code {poll_result}"
+                )
+
             if enable_console and pty_slave_fd is not None:
                 try:
                     os.close(pty_slave_fd)
@@ -1355,58 +1385,22 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
 
             return vm_instance
         except (VMCreateError, NetworkError, CloudInitError, MVMError):
-            _cleanup_vm_creation_resources(
-                resources_created,
-                vm_dir,
-                net_manager,
-                relay_mgr,
-                net_config,
-                name,
-                vm_id,
-                guest_ip,
-                nocloud_net_port,
-                tap_name,
-                pty_master_fd,
-                pty_slave_fd,
-                log_fp,
-                console_fp,
-            )
+            if input.skip_cleanup and vm_instance is not None:
+                _persist_failed_vm(vm_instance, binary_id, manager)
+            elif not input.skip_cleanup:
+                _cleanup()
             raise
         except FileNotFoundError as exc:
-            _cleanup_vm_creation_resources(
-                resources_created,
-                vm_dir,
-                net_manager,
-                relay_mgr,
-                net_config,
-                name,
-                vm_id,
-                guest_ip,
-                nocloud_net_port,
-                tap_name,
-                pty_master_fd,
-                pty_slave_fd,
-                log_fp,
-                console_fp,
-            )
+            if input.skip_cleanup and vm_instance is not None:
+                _persist_failed_vm(vm_instance, binary_id, manager)
+            elif not input.skip_cleanup:
+                _cleanup()
             raise MVMError(f"Firecracker binary not found: {firecracker_bin}") from exc
         except Exception as exc:
-            _cleanup_vm_creation_resources(
-                resources_created,
-                vm_dir,
-                net_manager,
-                relay_mgr,
-                net_config,
-                name,
-                vm_id,
-                guest_ip,
-                nocloud_net_port,
-                tap_name,
-                pty_master_fd,
-                pty_slave_fd,
-                log_fp,
-                console_fp,
-            )
+            if input.skip_cleanup and vm_instance is not None:
+                _persist_failed_vm(vm_instance, binary_id, manager)
+            elif not input.skip_cleanup:
+                _cleanup()
             raise VMCreateError(f"Failed to create VM: {exc}") from exc
     finally:
         signal.signal(signal.SIGTERM, old_handler)
