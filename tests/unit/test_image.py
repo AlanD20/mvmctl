@@ -3017,7 +3017,7 @@ def test_shrink_image_with_guestfs_performs_ubuntu_cleanup(tmp_path: Path, mocke
     # Patch optimized_guestfs at the source location (utils.guestfs)
     mocker.patch("mvmctl.utils.guestfs.optimized_guestfs")
     with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_og:
-        mock_og.return_value.__enter__.return_value = mock_g
+        mock_og.return_value.__enter__.return_value._g = mock_g
         mock_og.return_value.__exit__.return_value = False
 
         image_path = tmp_path / "test.img"
@@ -3048,7 +3048,7 @@ def test_shrink_image_with_guestfs_performs_zeroing_ext4(tmp_path: Path, mocker:
 
     mocker.patch("mvmctl.utils.guestfs.optimized_guestfs")
     with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_og:
-        mock_og.return_value.__enter__.return_value = mock_g
+        mock_og.return_value.__enter__.return_value._g = mock_g
         mock_og.return_value.__exit__.return_value = False
 
         image_path = tmp_path / "test.ext4"
@@ -3076,7 +3076,7 @@ def test_shrink_image_with_guestfs_performs_zeroing_btrfs(tmp_path: Path, mocker
 
     mocker.patch("mvmctl.utils.guestfs.optimized_guestfs")
     with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_og:
-        mock_og.return_value.__enter__.return_value = mock_g
+        mock_og.return_value.__enter__.return_value._g = mock_g
         mock_og.return_value.__exit__.return_value = False
 
         image_path = tmp_path / "test.btrfs"
@@ -3105,7 +3105,7 @@ def test_shrink_image_with_guestfs_btrfs_resize_still_works(tmp_path: Path, mock
 
     mocker.patch("mvmctl.utils.guestfs.optimized_guestfs")
     with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_og:
-        mock_og.return_value.__enter__.return_value = mock_g
+        mock_og.return_value.__enter__.return_value._g = mock_g
         mock_og.return_value.__exit__.return_value = False
 
         image_path = tmp_path / "test.btrfs"

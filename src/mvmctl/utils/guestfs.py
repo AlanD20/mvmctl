@@ -27,9 +27,6 @@ class OptimizedGuestfs:
         # Disable QEMU file locking — prevents stale lock issues from crashed
         # guestfs sessions on shared images (ready pool, etc.)
         os.environ["QEMU_LOCKING"] = "off"
-        # Disable QEMU file locking — prevents stale lock issues from crashed
-        # guestfs sessions on shared images (ready pool, etc.)
-        os.environ["QEMU_LOCKING"] = "off"
 
     def _restore_environment(self) -> None:
         for key, value in self._orig_env.items():
@@ -65,20 +62,27 @@ class OptimizedGuestfs:
         return g
 
     def __enter__(self) -> "OptimizedGuestfs":
-        self._setup_environment()
-        try:
-            self._g = self._create_handle()
-            self._g.launch()
-            return self
-        except Exception as e:
-            self._restore_environment()
-            raise MVMError(f"Failed to launch guestfs: {e}") from e
+        import time
 
-    def __getattr__(self, name: str) -> Any:
-        """Proxy unknown attributes to the underlying guestfs handle."""
-        if self._g is None:
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-        return getattr(self._g, name)
+        self._setup_environment()
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                self._g = self._create_handle()
+                self._g.launch()
+                return self
+            except Exception as e:
+                last_error = e
+                if self._g is not None:
+                    try:
+                        self._g.close()
+                    except Exception:
+                        pass
+                    self._g = None
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+        self._restore_environment()
+        raise MVMError(f"Failed to launch guestfs: {last_error}") from last_error
 
     def mount_rootfs(self) -> str:
         """Mount the root filesystem and return the root device."""
@@ -133,14 +137,18 @@ class OptimizedGuestfs:
                     self._g.shutdown()
                 except Exception:
                     pass
+                try:
+                    self._g.close()
+                except Exception:
+                    pass
         finally:
             self._restore_environment()
 
 
 @contextmanager
 def optimized_guestfs(disk_path: Path, readonly: bool = False) -> Any:
-    with OptimizedGuestfs(disk_path, readonly) as g:
-        yield g
+    with OptimizedGuestfs(disk_path, readonly) as og:
+        yield og
 
 
 def check_libguestfs() -> bool:
@@ -181,8 +189,9 @@ def extract_partition_with_guestfs(
         return None
 
     try:
-        with optimized_guestfs(raw_path, readonly=True) as g:
-            partitions = g.list_partitions()
+        og = OptimizedGuestfs(raw_path, readonly=True)
+        with og as og:
+            partitions = og._g.list_partitions()
             if not partitions:
                 logger.debug("No partitions found in image")
                 return None
@@ -193,12 +202,12 @@ def extract_partition_with_guestfs(
                     return None
                 root_device = partitions[partition - 1]
             else:
-                root_device = g.find_largest_linux_fs(partitions)
+                root_device = og.find_largest_linux_fs(partitions)
                 if root_device is None:
                     root_device = partitions[0]
 
-            fs_size = g.get_fs_size(root_device)
-            g.copy_device_to_file(root_device, str(output_path))
+            fs_size = og.get_fs_size(root_device)
+            og._g.copy_device_to_file(root_device, str(output_path))
 
             if fs_size > 0:
                 final_size = int(fs_size * CONST_SHRINK_SAFETY_MARGIN)

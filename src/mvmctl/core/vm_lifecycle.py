@@ -34,16 +34,16 @@ def grow_rootfs_with_guestfs(image_path: Path, target_size_bytes: int) -> None:
             file_handle.truncate(target_size_bytes)
 
         with optimized_guestfs(image_path, readonly=False) as guestfs_handle:
-            partitions = guestfs_handle.list_partitions()
+            partitions = guestfs_handle._g.list_partitions()
             root_device = partitions[0] if partitions else "/dev/sda"
-            fs_type = guestfs_handle.vfs_type(root_device)
+            fs_type = guestfs_handle._g.vfs_type(root_device)
 
             if fs_type in ("ext2", "ext3", "ext4"):
-                guestfs_handle.resize2fs(root_device)
+                guestfs_handle._g.resize2fs(root_device)
             elif fs_type == "btrfs":
-                guestfs_handle.mount(root_device, "/")
-                guestfs_handle.btrfs_filesystem_resize("/", target_size_bytes)
-                guestfs_handle.umount(root_device)
+                guestfs_handle._g.mount(root_device, "/")
+                guestfs_handle._g.btrfs_filesystem_resize("/", target_size_bytes)
+                guestfs_handle._g.umount(root_device)
             else:
                 logger.warning("Cannot resize %s filesystem", fs_type)
 

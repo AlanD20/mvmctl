@@ -108,17 +108,17 @@ def inject_cloud_init(rootfs_path: str, cloud_init_dir: str) -> None:
 
     with optimized_guestfs(Path(rootfs_path), readonly=False) as g:
         # Detect and mount root partition
-        root_device = _detect_root_partition(g, rootfs_path)
+        root_device = _detect_root_partition(g._g, rootfs_path)
         try:
-            g.mount(root_device, "/")
+            g._g.mount(root_device, "/")
         except Exception as e:
             raise GuestfsMountError(f"Failed to mount {root_device}: {e}")
 
         # Write cloud-init files
-        _write_cloud_init_files(g, cloud_init_dir)
+        _write_cloud_init_files(g._g, cloud_init_dir)
 
         # Explicit umount before shutdown (required when autosync is disabled)
         try:
-            g.umount("/")
+            g._g.umount("/")
         except Exception:
             pass  # Already unmounted or not mounted

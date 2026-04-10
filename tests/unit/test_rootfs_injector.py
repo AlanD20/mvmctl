@@ -198,7 +198,9 @@ class TestInjectCloudInit:
 
         with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
             with patch("mvmctl.core.rootfs_injector.optimized_guestfs") as mock_ctx:
-                mock_ctx.return_value.__enter__ = Mock(return_value=mock_g)
+                mock_og = Mock()
+                mock_og._g = mock_g
+                mock_ctx.return_value.__enter__ = Mock(return_value=mock_og)
                 mock_ctx.return_value.__exit__ = Mock(return_value=False)
                 inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
 
@@ -224,7 +226,9 @@ class TestInjectCloudInit:
 
         with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
             with patch("mvmctl.core.rootfs_injector.optimized_guestfs") as mock_ctx:
-                mock_ctx.return_value.__enter__ = Mock(return_value=mock_g)
+                mock_og = Mock()
+                mock_og._g = mock_g
+                mock_ctx.return_value.__enter__ = Mock(return_value=mock_og)
                 mock_ctx.return_value.__exit__ = Mock(return_value=False)
                 with pytest.raises(GuestfsMountError, match="Failed to mount"):
                     inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
@@ -249,7 +253,9 @@ class TestFilesystemTypes:
 
         with patch("mvmctl.core.rootfs_injector.check_libguestfs", return_value=True):
             with patch("mvmctl.core.rootfs_injector.optimized_guestfs") as mock_ctx:
-                mock_ctx.return_value.__enter__ = Mock(return_value=mock_g)
+                mock_og = Mock()
+                mock_og._g = mock_g
+                mock_ctx.return_value.__enter__ = Mock(return_value=mock_og)
                 mock_ctx.return_value.__exit__ = Mock(return_value=False)
                 inject_cloud_init(str(rootfs_path), str(cloud_init_dir))
 

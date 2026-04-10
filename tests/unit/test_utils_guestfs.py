@@ -215,32 +215,40 @@ class TestExtractPartitionWithGuestfs:
         output_path.write_bytes(b"\x00" * 4096)
 
         with patch("mvmctl.utils.guestfs.check_libguestfs", return_value=True):
-            with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_ctx:
+            with patch("mvmctl.utils.guestfs.OptimizedGuestfs") as mock_og_class:
                 mock_og = MagicMock()
+                mock_g = MagicMock()
+                mock_g.list_partitions.return_value = ["/dev/sda1"]
+                mock_og.__enter__ = MagicMock(return_value=mock_og)
+                mock_og.__exit__ = MagicMock(return_value=None)
+                mock_og._g = mock_g
                 mock_og.list_partitions.return_value = ["/dev/sda1"]
                 mock_og.get_fs_size.return_value = 1000 * 4096
                 mock_og.copy_device_to_file.return_value = None
-                mock_ctx.return_value.__enter__ = MagicMock(return_value=mock_og)
-                mock_ctx.return_value.__exit__ = MagicMock(return_value=None)
+                mock_og_class.return_value = mock_og
                 result = extract_partition_with_guestfs(
                     tmp_path / "disk.raw", output_path, partition=1
                 )
         assert result == output_path
-        mock_og.copy_device_to_file.assert_called_once()
+        mock_g.copy_device_to_file.assert_called_once()
 
     def test_auto_detect_partition(self, tmp_path: Path) -> None:
         output_path = tmp_path / "output.raw"
         output_path.write_bytes(b"\x00" * 4096)
 
         with patch("mvmctl.utils.guestfs.check_libguestfs", return_value=True):
-            with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_ctx:
+            with patch("mvmctl.utils.guestfs.OptimizedGuestfs") as mock_og_class:
                 mock_og = MagicMock()
+                mock_g = MagicMock()
+                mock_g.list_partitions.return_value = ["/dev/sda1", "/dev/sda2"]
+                mock_og.__enter__ = MagicMock(return_value=mock_og)
+                mock_og.__exit__ = MagicMock(return_value=None)
+                mock_og._g = mock_g
                 mock_og.list_partitions.return_value = ["/dev/sda1", "/dev/sda2"]
                 mock_og.find_largest_linux_fs.return_value = "/dev/sda2"
                 mock_og.get_fs_size.return_value = 500 * 4096
                 mock_og.copy_device_to_file.return_value = None
-                mock_ctx.return_value.__enter__ = MagicMock(return_value=mock_og)
-                mock_ctx.return_value.__exit__ = MagicMock(return_value=None)
+                mock_og_class.return_value = mock_og
                 result = extract_partition_with_guestfs(tmp_path / "disk.raw", output_path)
         assert result == output_path
 

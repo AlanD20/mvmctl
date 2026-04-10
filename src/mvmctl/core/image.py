@@ -136,39 +136,39 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
     try:
         with optimized_guestfs(image_path, readonly=False) as g:
             # Detect root device (usually /dev/sda1 or first partition)
-            partitions = g.list_partitions()
+            partitions = g._g.list_partitions()
             root_device = partitions[0] if partitions else "/dev/sda"
 
-            fs_type = g.vfs_type(root_device)
+            fs_type = g._g.vfs_type(root_device)
 
             if fs_type in ("ext2", "ext3", "ext4"):
                 # For ext: mount, check, resize to minimum
-                g.mount(root_device, "/")
+                g._g.mount(root_device, "/")
 
                 # Phase A: Pre-shrink cleanup - detect OS and clean up
-                _deblob_image(g)
+                _deblob_image(g._g)
 
-                g.mount(root_device, "/")
-                g.zero_free_space(root_device)
-                g.umount(root_device)
+                g._g.mount(root_device, "/")
+                g._g.zero_free_space(root_device)
+                g._g.umount(root_device)
 
                 # Phase C: Shrink - run e2fsck and resize
-                g.e2fsck(root_device, correct=True)
-                g.umount(root_device)
-                g.resize2fs_size(root_device, 0)
+                g._g.e2fsck(root_device, correct=True)
+                g._g.umount(root_device)
+                g._g.resize2fs_size(root_device, 0)
             elif fs_type == "btrfs":
-                g.mount(root_device, "/")
+                g._g.mount(root_device, "/")
 
                 # Phase A: Pre-shrink cleanup - detect OS and clean up
-                _deblob_image(g)
+                _deblob_image(g._g)
 
                 # Phase B: For btrfs, use fstrim to discard unused blocks
-                g.sh("fstrim -av / 2>/dev/null || true")
-                g.btrfs_filesystem_sync("/")
+                g._g.sh("fstrim -av / 2>/dev/null || true")
+                g._g.btrfs_filesystem_sync("/")
 
                 # Phase C: Shrink - existing btrfs_filesystem_resize preserved
-                g.btrfs_filesystem_resize("/", 0)  # 0 = minimum
-                g.umount(root_device)
+                g._g.btrfs_filesystem_resize("/", 0)  # 0 = minimum
+                g._g.umount(root_device)
             else:
                 if fs_type:
                     logger.debug(
@@ -181,7 +181,7 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
                 return image_path, original_size, original_size
 
             # Get new device size
-            new_size = g.blockdev_getsize64(root_device)
+            new_size = g._g.blockdev_getsize64(root_device)
 
         # Truncate file to new size + small buffer (1% safety margin)
         final_size = int(new_size * CONST_SHRINK_SAFETY_MARGIN)
