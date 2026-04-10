@@ -8,6 +8,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.error import URLError
 
 import zstandard as zstd
@@ -57,6 +58,50 @@ class ImageImportResult:
 _SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
 
 
+def _deblob_image(g: Any) -> None:
+    """Run OS-specific and common cleanup commands inside a mounted guestfs image.
+
+    This helper detects the OS type via /etc/os-release and runs appropriate
+    cleanup commands to reduce image size before shrinking.
+
+    Args:
+        g: Guestfs handle with a mounted root filesystem at "/"
+
+    Note:
+        Cleanup is best-effort; exceptions are logged but not raised.
+    """
+    try:
+        os_release = g.cat(CONST_GUESTFS_OS_RELEASE_PATH) or ""
+        os_id = os_release.lower()
+
+        if "ubuntu" in os_id or "debian" in os_id:
+            # Ubuntu/Debian cleanup
+            g.sh("apt-get clean")
+            g.sh("rm -rf /var/lib/apt/lists/*")
+            g.sh("rm -rf /var/cache/debconf/*")
+        elif "arch" in os_id or "manjaro" in os_id:
+            # Arch cleanup
+            g.sh("pacman -Sc --noconfirm || true")
+            g.sh("rm -rf /var/cache/pacman/pkg/*")
+        elif "fedora" in os_id or "rhel" in os_id or "centos" in os_id:
+            # Fedora/RHEL cleanup
+            g.sh("dnf clean all || yum clean all || true")
+            g.sh("rm -rf /var/cache/dnf/* /var/cache/yum/*")
+        elif "alpine" in os_id:
+            # Alpine cleanup
+            g.sh("rm -rf /var/cache/apk/*")
+
+        # Common cleanup for all OSes
+        g.sh("rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*")
+        g.sh("rm -rf /var/log/*.log /var/log/*.gz /var/log/journal/*")
+        g.sh("rm -rf /tmp/*")
+        g.sh("find /var/log -type f -delete 2>/dev/null || true")
+        g.sh("sync")
+    except Exception as e:
+        # Log but don't fail - cleanup is best-effort
+        logger.debug(f"Cleanup phase encountered issue (non-fatal): {e}")
+
+
 def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
     """Shrink an image to its minimum size using libguestfs.
 
@@ -101,36 +146,7 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
                 g.mount(root_device, "/")
 
                 # Phase A: Pre-shrink cleanup - detect OS and clean up
-                try:
-                    os_release = g.cat(CONST_GUESTFS_OS_RELEASE_PATH) or ""
-                    os_id = os_release.lower()
-
-                    if "ubuntu" in os_id or "debian" in os_id:
-                        # Ubuntu/Debian cleanup
-                        g.sh("apt-get clean")
-                        g.sh("rm -rf /var/lib/apt/lists/*")
-                        g.sh("rm -rf /var/cache/debconf/*")
-                    elif "arch" in os_id or "manjaro" in os_id:
-                        # Arch cleanup
-                        g.sh("pacman -Sc --noconfirm || true")
-                        g.sh("rm -rf /var/cache/pacman/pkg/*")
-                    elif "fedora" in os_id or "rhel" in os_id or "centos" in os_id:
-                        # Fedora/RHEL cleanup
-                        g.sh("dnf clean all || yum clean all || true")
-                        g.sh("rm -rf /var/cache/dnf/* /var/cache/yum/*")
-                    elif "alpine" in os_id:
-                        # Alpine cleanup
-                        g.sh("rm -rf /var/cache/apk/*")
-
-                    # Common cleanup for all OSes
-                    g.sh("rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*")
-                    g.sh("rm -rf /var/log/*.log /var/log/*.gz /var/log/journal/*")
-                    g.sh("rm -rf /tmp/*")
-                    g.sh("find /var/log -type f -delete 2>/dev/null || true")
-                    g.sh("sync")
-                except Exception as e:
-                    # Log but don't fail - cleanup is best-effort
-                    logger.debug(f"Cleanup phase encountered issue (non-fatal): {e}")
+                _deblob_image(g)
 
                 g.mount(root_device, "/")
                 g.zero_free_space(root_device)
@@ -144,36 +160,7 @@ def shrink_image_with_guestfs(image_path: Path) -> tuple[Path, int, int]:
                 g.mount(root_device, "/")
 
                 # Phase A: Pre-shrink cleanup - detect OS and clean up
-                try:
-                    os_release = g.cat(CONST_GUESTFS_OS_RELEASE_PATH) or ""
-                    os_id = os_release.lower()
-
-                    if "ubuntu" in os_id or "debian" in os_id:
-                        # Ubuntu/Debian cleanup
-                        g.sh("apt-get clean")
-                        g.sh("rm -rf /var/lib/apt/lists/*")
-                        g.sh("rm -rf /var/cache/debconf/*")
-                    elif "arch" in os_id or "manjaro" in os_id:
-                        # Arch cleanup
-                        g.sh("pacman -Sc --noconfirm || true")
-                        g.sh("rm -rf /var/cache/pacman/pkg/*")
-                    elif "fedora" in os_id or "rhel" in os_id or "centos" in os_id:
-                        # Fedora/RHEL cleanup
-                        g.sh("dnf clean all || yum clean all || true")
-                        g.sh("rm -rf /var/cache/dnf/* /var/cache/yum/*")
-                    elif "alpine" in os_id:
-                        # Alpine cleanup
-                        g.sh("rm -rf /var/cache/apk/*")
-
-                    # Common cleanup for all OSes
-                    g.sh("rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*")
-                    g.sh("rm -rf /var/log/*.log /var/log/*.gz /var/log/journal/*")
-                    g.sh("rm -rf /tmp/*")
-                    g.sh("find /var/log -type f -delete 2>/dev/null || true")
-                    g.sh("sync")
-                except Exception as e:
-                    # Log but don't fail - cleanup is best-effort
-                    logger.debug(f"Cleanup phase encountered issue (non-fatal): {e}")
+                _deblob_image(g)
 
                 # Phase B: For btrfs, use fstrim to discard unused blocks
                 g.sh("fstrim -av / 2>/dev/null || true")
@@ -1265,7 +1252,7 @@ def fetch_image(
             logger.info("Resuming from downloaded file: %s", download_path)
 
         if not resume_from_existing:
-            logger.info('Preparing & optimizing image...')
+            logger.info("Preparing & optimizing image...")
             handler = _FORMAT_HANDLERS.get(spec.format)
             if handler is None:
                 download_path.unlink(missing_ok=True)

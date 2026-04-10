@@ -9,8 +9,8 @@ DEFAULTS: dict[str, object] = {
         },
     },
     "vm_defaults": {
-        "vcpu_count": 2,
-        "mem_size_mib": 2048,
+        "vcpu_count": 0.5,
+        "mem_size_mib": 512,
         "ssh_user": "root",
         "root_fs_type": "ext4",
         "network_interface": "eth0",

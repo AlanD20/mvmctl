@@ -619,7 +619,8 @@ def vm_create(
         )
         vm = create_vm(input=input_data)
         print_success(f"VM '{name}' started (PID {vm.pid})")
-        print_info(f"  SSH ready in ~30-60s: mvm vm ssh --name {name}")
+        print_info(f"  Console ready: mvm vm console {name}")
+        print_info(f"  SSH ready in ~15-30s: mvm vm ssh {name}")
         print_info(f"  Logs: mvm vm logs --name {name} --type os --follow")
     except MVMError as e:
         handle_mvm_error(e)

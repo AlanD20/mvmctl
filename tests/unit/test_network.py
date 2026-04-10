@@ -65,7 +65,7 @@ def test_bridge_exists_false():
 def test_generate_mac_format():
     """generate_mac should return a MAC address matching the expected 02:FC:xx:xx:xx:xx format."""
     mac = generate_mac()
-    pattern = r"^02:FC:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$"
+    pattern = r"^02:FC:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}$"
     assert re.match(pattern, mac), f"MAC {mac!r} does not match expected format"
 
 

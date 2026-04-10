@@ -5,6 +5,7 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
+from mvmctl.constants import CONST_VM_VCPU_MIN
 from mvmctl.models.config import SystemDefaultsConfig
 
 _config_cache: dict[Path, SystemDefaultsConfig] = {}
@@ -89,8 +90,8 @@ def validate_config(config: SystemDefaultsConfig) -> list[str]:
     """Validate config and return list of error messages."""
     errors = []
 
-    if config.vcpu_count < 1:
-        errors.append("vcpu_count: Must be at least 1")
+    if config.vcpu_count < CONST_VM_VCPU_MIN:
+        errors.append(f"vcpu_count: Must be at least {CONST_VM_VCPU_MIN}")
 
     if config.mem_size_mib < 64:
         errors.append("mem_size_mib: Must be at least 64 MiB")

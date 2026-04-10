@@ -1026,10 +1026,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
 
             net_config = get_network(network_name)
             if net_config is None:
-                if network_name == DEFAULT_NETWORK_NAME:
-                    net_config = ensure_default_network()
-                else:
-                    raise NetworkError(f"Network '{network_name}' not found")
+                raise NetworkError(f"Network '{network_name}' not found")
 
             if ip:
                 try:

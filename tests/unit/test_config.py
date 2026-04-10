@@ -119,7 +119,7 @@ def test_validate_config_invalid_vcpu(vcpu_count: int) -> None:
 
     vcpu_errors = [e for e in errors if "vcpu_count" in e]
     assert len(vcpu_errors) == 1
-    assert "Must be at least 1" in vcpu_errors[0]
+    assert "Must be at least 0.25" in vcpu_errors[0]
 
 
 @pytest.mark.parametrize("mem_size_mib", [32, 63, 0])

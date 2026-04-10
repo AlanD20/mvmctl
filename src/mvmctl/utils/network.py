@@ -40,7 +40,7 @@ def bridge_name_for(network_name: str) -> str:
 def generate_mac() -> str:
     rand_bytes = secrets.token_bytes(4)
     suffix = ":".join(f"{b:02x}" for b in rand_bytes)
-    return f"{DEFAULT_GUEST_MAC_PREFIX}:{suffix}"
+    return f"{DEFAULT_GUEST_MAC_PREFIX}:{suffix}".upper()
 
 
 def generate_tap_name(network_name: str, vm_name: str) -> str:
