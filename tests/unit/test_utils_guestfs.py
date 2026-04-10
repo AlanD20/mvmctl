@@ -8,8 +8,6 @@ import pytest
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.guestfs import (
     OptimizedGuestfs,
-    _find_largest_linux_fs,
-    _get_fs_size,
     check_libguestfs,
     extract_partition_with_guestfs,
     optimized_guestfs,
@@ -115,7 +113,7 @@ class TestOptimizedGuestfs:
 
         mock_setup.assert_called_once()
         mock_g.launch.assert_called_once()
-        assert result is mock_g
+        assert result is og
 
     def test_enter_launch_failure_restores_env(self, tmp_path: Path) -> None:
         with patch.object(OptimizedGuestfs, "_setup_environment"):
@@ -156,11 +154,11 @@ class TestOptimizedGuestfsContextManager:
     """Tests for optimized_guestfs context manager function."""
 
     def test_yields_guestfs_handle(self, tmp_path: Path) -> None:
-        mock_g = MagicMock()
-        with patch.object(OptimizedGuestfs, "__enter__", return_value=mock_g):
+        og = OptimizedGuestfs(tmp_path / "disk.raw")
+        with patch.object(OptimizedGuestfs, "__enter__", return_value=og):
             with patch.object(OptimizedGuestfs, "__exit__", return_value=None):
                 with optimized_guestfs(tmp_path / "disk.raw") as g:
-                    assert g is mock_g
+                    assert g is og
 
 
 class TestCheckLibguestfs:
@@ -212,31 +210,36 @@ class TestExtractPartitionWithGuestfs:
     def test_returns_path_on_success(self, tmp_path: Path) -> None:
         mock_g = MagicMock()
         mock_g.list_partitions.return_value = ["/dev/sda1"]
-        mock_g.statvfs.return_value = {"fs_blocks": 1000, "fs_bsize": 4096}
+        mock_g.copy_device_to_file.return_value = None
         output_path = tmp_path / "output.raw"
         output_path.write_bytes(b"\x00" * 4096)
 
         with patch("mvmctl.utils.guestfs.check_libguestfs", return_value=True):
             with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_ctx:
-                mock_ctx.return_value.__enter__ = MagicMock(return_value=mock_g)
+                mock_og = MagicMock()
+                mock_og.list_partitions.return_value = ["/dev/sda1"]
+                mock_og.get_fs_size.return_value = 1000 * 4096
+                mock_og.copy_device_to_file.return_value = None
+                mock_ctx.return_value.__enter__ = MagicMock(return_value=mock_og)
                 mock_ctx.return_value.__exit__ = MagicMock(return_value=None)
                 result = extract_partition_with_guestfs(
                     tmp_path / "disk.raw", output_path, partition=1
                 )
         assert result == output_path
-        mock_g.copy_device_to_file.assert_called_once()
+        mock_og.copy_device_to_file.assert_called_once()
 
     def test_auto_detect_partition(self, tmp_path: Path) -> None:
-        mock_g = MagicMock()
-        mock_g.list_partitions.return_value = ["/dev/sda1", "/dev/sda2"]
-        mock_g.vfs_type.return_value = "ext4"
-        mock_g.statvfs.return_value = {"fs_blocks": 500, "fs_bsize": 4096}
         output_path = tmp_path / "output.raw"
         output_path.write_bytes(b"\x00" * 4096)
 
         with patch("mvmctl.utils.guestfs.check_libguestfs", return_value=True):
             with patch("mvmctl.utils.guestfs.optimized_guestfs") as mock_ctx:
-                mock_ctx.return_value.__enter__ = MagicMock(return_value=mock_g)
+                mock_og = MagicMock()
+                mock_og.list_partitions.return_value = ["/dev/sda1", "/dev/sda2"]
+                mock_og.find_largest_linux_fs.return_value = "/dev/sda2"
+                mock_og.get_fs_size.return_value = 500 * 4096
+                mock_og.copy_device_to_file.return_value = None
+                mock_ctx.return_value.__enter__ = MagicMock(return_value=mock_og)
                 mock_ctx.return_value.__exit__ = MagicMock(return_value=None)
                 result = extract_partition_with_guestfs(tmp_path / "disk.raw", output_path)
         assert result == output_path
@@ -254,15 +257,15 @@ class TestExtractPartitionWithGuestfs:
 
 
 class TestFindLargestLinuxFs:
-    """Tests for _find_largest_linux_fs function."""
+    """Tests for OptimizedGuestfs.find_largest_linux_fs method."""
 
     def test_returns_none_for_empty_partitions(self) -> None:
-        mock_g = MagicMock()
-        result = _find_largest_linux_fs(mock_g, [])
+        og = OptimizedGuestfs(Path("disk.raw"))
+        og._g = MagicMock()
+        result = og.find_largest_linux_fs([])
         assert result is None
 
     def test_returns_largest_ext4(self) -> None:
-        mock_g = MagicMock()
         sizes = {"/dev/sda1": 1000, "/dev/sda2": 2000}
         mounted: list[str] = []
 
@@ -274,36 +277,41 @@ class TestFindLargestLinuxFs:
             dev = mounted[0] if mounted else "/dev/sda1"
             return {"fs_blocks": sizes.get(dev, 0), "fs_bsize": 4096}
 
-        mock_g.vfs_type.return_value = "ext4"
-        mock_g.mount = mount
-        mock_g.statvfs = statvfs
+        og = OptimizedGuestfs(Path("disk.raw"))
+        og._g = MagicMock()
+        og._g.vfs_type.return_value = "ext4"
+        og._g.mount = mount
+        og._g.statvfs = statvfs
 
-        result = _find_largest_linux_fs(mock_g, ["/dev/sda1", "/dev/sda2"])
+        result = og.find_largest_linux_fs(["/dev/sda1", "/dev/sda2"])
         assert result == "/dev/sda2"
 
     def test_skips_non_linux_fs(self) -> None:
-        mock_g = MagicMock()
-        mock_g.vfs_type.return_value = "ntfs"
+        og = OptimizedGuestfs(Path("disk.raw"))
+        og._g = MagicMock()
+        og._g.vfs_type.return_value = "ntfs"
 
-        result = _find_largest_linux_fs(mock_g, ["/dev/sda1"])
+        result = og.find_largest_linux_fs(["/dev/sda1"])
         assert result is None
 
     def test_handles_exception_on_partition(self) -> None:
-        mock_g = MagicMock()
-        mock_g.vfs_type.side_effect = RuntimeError("read error")
+        og = OptimizedGuestfs(Path("disk.raw"))
+        og._g = MagicMock()
+        og._g.vfs_type.side_effect = RuntimeError("read error")
 
-        result = _find_largest_linux_fs(mock_g, ["/dev/sda1"])
+        result = og.find_largest_linux_fs(["/dev/sda1"])
         assert result is None
 
 
 class TestGetFsSize:
-    """Tests for _get_fs_size function."""
+    """Tests for OptimizedGuestfs.get_fs_size method."""
 
     def test_returns_size(self) -> None:
-        mock_g = MagicMock()
-        mock_g.statvfs.return_value = {"fs_blocks": 2000, "fs_bsize": 4096}
+        og = OptimizedGuestfs(Path("disk.raw"))
+        og._g = MagicMock()
+        og._g.statvfs.return_value = {"fs_blocks": 2000, "fs_bsize": 4096}
 
-        result = _get_fs_size(mock_g, "/dev/sda1")
+        result = og.get_fs_size("/dev/sda1")
         assert result == 2000 * 4096
-        mock_g.mount.assert_called_once_with("/dev/sda1", "/")
-        mock_g.umount.assert_called_once_with("/dev/sda1")
+        og._g.mount.assert_called_once_with("/dev/sda1", "/")
+        og._g.umount.assert_called_once_with("/dev/sda1")

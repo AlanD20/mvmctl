@@ -64,15 +64,67 @@ class OptimizedGuestfs:
 
         return g
 
-    def __enter__(self) -> Any:
+    def __enter__(self) -> "OptimizedGuestfs":
         self._setup_environment()
         try:
             self._g = self._create_handle()
             self._g.launch()
-            return self._g
+            return self
         except Exception as e:
             self._restore_environment()
             raise MVMError(f"Failed to launch guestfs: {e}") from e
+
+    def __getattr__(self, name: str) -> Any:
+        """Proxy unknown attributes to the underlying guestfs handle."""
+        if self._g is None:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        return getattr(self._g, name)
+
+    def mount_rootfs(self) -> str:
+        """Mount the root filesystem and return the root device."""
+        filesystems: dict[str, str] = self._g.list_filesystems()
+        root_device: str | None = None
+        for candidate in ["/dev/sda", "/dev/vda", "/dev/sda1", "/dev/vda1"]:
+            if candidate in filesystems:
+                root_device = candidate
+                break
+        if root_device is None and filesystems:
+            root_device = str(list(filesystems.keys())[0])
+        if root_device is None:
+            raise MVMError(f"No filesystem found in {self.disk_path}")
+        self._g.mount(root_device, "/")
+        return root_device
+
+    def find_largest_linux_fs(self, partitions: list[str]) -> str | None:
+        """Find the largest Linux filesystem among partitions."""
+        max_size = 0
+        root_device = None
+        for dev in partitions:
+            try:
+                fs_type = self._g.vfs_type(dev)
+                if fs_type in ("ext2", "ext3", "ext4", "btrfs", "xfs"):
+                    self._g.mount(dev, "/")
+                    try:
+                        stat = self._g.statvfs("/")
+                        size = stat.get("fs_blocks", 0) * stat.get("fs_bsize", 4096)
+                        if size > max_size:
+                            max_size = size
+                            root_device = dev
+                    finally:
+                        self._g.umount(dev)
+            except Exception:
+                continue
+        return root_device
+
+    def get_fs_size(self, device: str) -> int:
+        """Get the size of a filesystem."""
+        self._g.mount(device, "/")
+        try:
+            stat = self._g.statvfs("/")
+            size = stat.get("fs_blocks", 0) * stat.get("fs_bsize", 4096)
+            return int(size)
+        finally:
+            self._g.umount(device)
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         try:
@@ -141,11 +193,11 @@ def extract_partition_with_guestfs(
                     return None
                 root_device = partitions[partition - 1]
             else:
-                root_device = _find_largest_linux_fs(g, partitions)
+                root_device = g.find_largest_linux_fs(partitions)
                 if root_device is None:
                     root_device = partitions[0]
 
-            fs_size = _get_fs_size(g, root_device)
+            fs_size = g.get_fs_size(root_device)
             g.copy_device_to_file(root_device, str(output_path))
 
             if fs_size > 0:
@@ -159,34 +211,3 @@ def extract_partition_with_guestfs(
     except Exception as e:
         logger.debug("Guestfs extraction failed: %s", e)
         return None
-
-
-def _find_largest_linux_fs(g: Any, partitions: list[str]) -> str | None:
-    max_size = 0
-    root_device = None
-    for dev in partitions:
-        try:
-            fs_type = g.vfs_type(dev)
-            if fs_type in ("ext2", "ext3", "ext4", "btrfs", "xfs"):
-                g.mount(dev, "/")
-                try:
-                    stat = g.statvfs("/")
-                    size = stat.get("fs_blocks", 0) * stat.get("fs_bsize", 4096)
-                    if size > max_size:
-                        max_size = size
-                        root_device = dev
-                finally:
-                    g.umount(dev)
-        except Exception:
-            continue
-    return root_device
-
-
-def _get_fs_size(g: Any, device: str) -> int:
-    g.mount(device, "/")
-    try:
-        stat = g.statvfs("/")
-        size = stat.get("fs_blocks", 0) * stat.get("fs_bsize", 4096)
-        return int(size)
-    finally:
-        g.umount(device)

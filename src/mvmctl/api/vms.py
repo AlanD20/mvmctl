@@ -748,6 +748,164 @@ def _ensure_resolv_conf(rootfs_path: Path) -> None:
         logger.debug("Failed to ensure resolv.conf: %s", exc)
 
 
+def _setup_offline_mode(
+    rootfs_path: Path,
+    hostname: str,
+    ssh_pub_key: list[str] | str | None,
+    user: str,
+) -> None:
+    """Single guestfs VM startup for offline mode: SSH keys + DNS injection."""
+    from mvmctl.utils.guestfs import check_libguestfs, optimized_guestfs
+
+    if not check_libguestfs():
+        raise VMCreateError("libguestfs required for offline mode setup")
+
+    keys: list[str] = [ssh_pub_key] if isinstance(ssh_pub_key, str) else (ssh_pub_key or [])
+    has_keys = bool(keys)
+
+    if not has_keys:
+        _ensure_resolv_conf(rootfs_path)
+        return
+
+    with optimized_guestfs(rootfs_path, readonly=False) as guestfs_handle:
+        filesystems: dict[str, str] = guestfs_handle.list_filesystems()
+        root_device: str | None = None
+        for candidate in ["/dev/sda", "/dev/vda", "/dev/sda1", "/dev/vda1"]:
+            if candidate in filesystems:
+                root_device = candidate
+                break
+        if root_device is None and filesystems:
+            root_device = str(list(filesystems.keys())[0])
+        if root_device is None:
+            raise VMCreateError(f"No filesystem found in {rootfs_path}")
+
+        guestfs_handle.mount(root_device, "/")
+        try:
+            if has_keys:
+                ssh_home_dir = "/root" if user == "root" else f"/home/{user}"
+                _ensure_user_exists(guestfs_handle, user, rootfs_path)
+                _enforce_ssh_key_auth(guestfs_handle, rootfs_path, user)
+                _generate_ssh_host_keys(guestfs_handle, rootfs_path)
+
+                if not guestfs_handle.exists("/root"):
+                    guestfs_handle.mkdir_p("/root")
+                    guestfs_handle.chmod(CONST_DIR_PERMS_CACHE, "/root")
+                    guestfs_handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, "/root")
+
+                guestfs_handle.mkdir_p(f"{ssh_home_dir}/.ssh")
+                guestfs_handle.chmod(CONST_DIR_PERMS_CACHE, f"{ssh_home_dir}/.ssh")
+                guestfs_handle.chown(CONST_ROOT_UID, CONST_ROOT_GID, f"{ssh_home_dir}/.ssh")
+                guestfs_handle.sync()
+
+                existing_keys = ""
+                auth_keys_path = f"{ssh_home_dir}/.ssh/authorized_keys"
+                if guestfs_handle.exists(auth_keys_path):
+                    existing_keys = guestfs_handle.read_file(auth_keys_path)
+                    if isinstance(existing_keys, bytes):
+                        existing_keys = existing_keys.decode("utf-8", errors="replace")
+
+                existing_set = (
+                    set(existing_keys.strip().split("\n")) if existing_keys.strip() else set()
+                )
+                new_keys = [key for key in keys if key.strip() and key.strip() not in existing_set]
+                if new_keys:
+                    combined = existing_keys
+                    if combined and not combined.endswith("\n"):
+                        combined += "\n"
+                    combined += "\n".join(new_keys) + "\n"
+                    guestfs_handle.write(auth_keys_path, combined)
+                    guestfs_handle.chmod(CONST_FILE_PERMS_PRIVATE_KEY, auth_keys_path)
+                    guestfs_handle.sync()
+
+                guestfs_handle.mkdir_p("/etc/cloud/cloud.cfg.d")
+                guestfs_handle.write(
+                    "/etc/cloud/cloud.cfg.d/99-disable-datasources.cfg",
+                    "datasource_list: [None]\n",
+                )
+                guestfs_handle.mkdir_p("/etc/systemd/system/snapd.seeded.service.d")
+                guestfs_handle.write(
+                    "/etc/systemd/system/snapd.seeded.service.d/override.conf",
+                    "[Service]\nExecStart=\nExecStart=/bin/true\n",
+                )
+                guestfs_handle.mkdir_p("/etc/systemd/system/systemd-networkd-wait-online.service.d")
+                guestfs_handle.write(
+                    "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf",
+                    "[Unit]\nConditionPathExists=/dev/null\n",
+                )
+                for service_name in [
+                    "cloud-init.service",
+                    "cloud-init-local.service",
+                    "cloud-config.service",
+                    "cloud-final.service",
+                ]:
+                    guestfs_handle.mkdir_p(f"/etc/systemd/system/{service_name}.d")
+                    guestfs_handle.write(
+                        f"/etc/systemd/system/{service_name}.d/override.conf",
+                        "[Unit]\nConditionPathExists=/dev/null\n",
+                    )
+
+                _detect_init_system_and_enable_ssh(guestfs_handle, rootfs_path)
+                guestfs_handle.mkdir_p("/etc/systemd/system")
+                guestfs_handle.write(
+                    "/etc/systemd/system/first-boot-ssh-installer.service",
+                    "[Unit]\nDescription=First-boot SSH installer\nAfter=network.target\n"
+                    "ConditionFirstBoot=yes\n\n[Service]\nType=oneshot\n"
+                    "ExecStart=/bin/bash -c '\n"
+                    "if ! command -v sshd >/dev/null 2>&1 && ! command -v ssh >/dev/null 2>&1; then\n"
+                    "  if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm openssh 2>/dev/null || true;\n"
+                    "  elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y openssh-server 2>/dev/null || true;\n"
+                    "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh 2>/dev/null || true; fi;\n"
+                    "fi\n"
+                    "if command -v systemctl >/dev/null 2>&1; then\n"
+                    "  systemctl enable --now sshd 2>/dev/null || systemctl enable --now ssh 2>/dev/null || true;\n"
+                    "elif [ -f /sbin/openrc ]; then\n"
+                    "  rc-update add sshd default 2>/dev/null || rc-update add ssh default 2>/dev/null || true;\n"
+                    "  rc-service sshd start 2>/dev/null || rc-service ssh start 2>/dev/null || true;\n"
+                    "fi\n"
+                    "systemctl disable first-boot-ssh-installer.service 2>/dev/null || true\n'\n"
+                    "RemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n",
+                )
+                guestfs_handle.chmod(
+                    CONST_FILE_PERMS_PUBLIC_KEY,
+                    "/etc/systemd/system/first-boot-ssh-installer.service",
+                )
+                guestfs_handle.mkdir_p("/etc/systemd/system/multi-user.target.wants")
+                guestfs_handle.ln_s(
+                    "/etc/systemd/system/first-boot-ssh-installer.service",
+                    "/etc/systemd/system/multi-user.target.wants/first-boot-ssh-installer.service",
+                )
+                logger.info("Created first-boot SSH installer for %s", rootfs_path.name)
+
+            resolv_path = "/etc/resolv.conf"
+            needs_dns = True
+
+            if guestfs_handle.exists(resolv_path):
+                existing_content = guestfs_handle.read_file(resolv_path)
+                if isinstance(existing_content, bytes):
+                    existing_content = existing_content.decode("utf-8", errors="replace")
+                stripped = existing_content.strip()
+                if stripped and "nameserver" in stripped.lower():
+                    needs_dns = False
+
+            if needs_dns:
+                dns_content = f"nameserver {CONST_DEFAULT_NAMESERVER}\n"
+                guestfs_handle.write(resolv_path, dns_content)
+                logger.debug(
+                    "Injected default DNS (%s) into %s",
+                    CONST_DEFAULT_NAMESERVER,
+                    rootfs_path.name,
+                )
+
+            # override hostname
+            guestfs_handle.write("/etc/hostname", hostname)
+            guestfs_handle.sync()
+        finally:
+            try:
+                guestfs_handle.umount("/")
+            except Exception:
+                pass
+
+
 def _persist_failed_vm(
     vm_instance: VMInstance,
     binary_id: str | None,
@@ -1170,10 +1328,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             disabled_ssh_pub_key: list[str] | str | None = None
             if effective_mode == CloudInitMode.OFF:
                 disabled_ssh_pub_key = _resolve_default_public_keys(ssh_key)
-            if effective_mode == CloudInitMode.OFF and disabled_ssh_pub_key is not None:
-                _inject_ssh_keys_for_disabled_mode(rootfs_path, disabled_ssh_pub_key, vm_dir, user)
-            if effective_mode == CloudInitMode.OFF:
-                _ensure_resolv_conf(rootfs_path)
+                _setup_offline_mode(rootfs_path, name, disabled_ssh_pub_key, user)
 
             cloud_init_iso: Path | None = None
             extra_drives: list[DriveConfig] = []
