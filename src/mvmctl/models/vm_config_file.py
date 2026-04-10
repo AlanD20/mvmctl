@@ -37,7 +37,7 @@ def _omit_none(obj: Any) -> Any:
 class VMExportComputeConfig:
     """Compute resources (vcpus, memory)."""
 
-    vcpus: int | None = None
+    vcpus: float | None = None
     mem: int | None = None
 
 

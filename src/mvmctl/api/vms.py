@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from mvmctl.constants import (
+    CONST_DEFAULT_NAMESERVER,
     CONST_DEFAULT_USER_GID,
     CONST_DEFAULT_USER_UID,
     CONST_DIR_PERMS_CACHE,
@@ -694,6 +695,56 @@ def _inject_ssh_keys_for_disabled_mode(
         raise VMCreateError(f"Failed to inject SSH keys: {exc}") from exc
 
 
+def _ensure_resolv_conf(rootfs_path: Path) -> None:
+    from mvmctl.utils.guestfs import check_libguestfs, optimized_guestfs
+
+    if not check_libguestfs():
+        return
+
+    try:
+        with optimized_guestfs(rootfs_path, readonly=False) as guestfs_handle:
+            filesystems: dict[str, str] = guestfs_handle.list_filesystems()
+            root_device: str | None = None
+            for candidate in ["/dev/sda", "/dev/vda", "/dev/sda1", "/dev/vda1"]:
+                if candidate in filesystems:
+                    root_device = candidate
+                    break
+            if root_device is None and filesystems:
+                root_device = str(list(filesystems.keys())[0])
+            if root_device is None:
+                return
+
+            guestfs_handle.mount(root_device, "/")
+            try:
+                resolv_path = "/etc/resolv.conf"
+                needs_dns = True
+
+                if guestfs_handle.exists(resolv_path):
+                    existing_content = guestfs_handle.read_file(resolv_path)
+                    if isinstance(existing_content, bytes):
+                        existing_content = existing_content.decode("utf-8", errors="replace")
+                    stripped = existing_content.strip()
+                    if stripped and "nameserver" in stripped.lower():
+                        needs_dns = False
+
+                if needs_dns:
+                    dns_content = f"nameserver {CONST_DEFAULT_NAMESERVER}\n"
+                    guestfs_handle.write(resolv_path, dns_content)
+                    logger.debug(
+                        "Injected default DNS (%s) into %s",
+                        CONST_DEFAULT_NAMESERVER,
+                        rootfs_path.name,
+                    )
+                guestfs_handle.sync()
+            finally:
+                try:
+                    guestfs_handle.umount("/")
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.debug("Failed to ensure resolv.conf: %s", exc)
+
+
 def _cleanup_vm_creation_resources(
     resources_created: dict[str, bool],
     vm_dir: Path | None,
@@ -820,7 +871,6 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
     )
     from mvmctl.api.network import (
         allocate_network_ip,
-        ensure_default_network,
         get_network,
     )
     from mvmctl.core.cloud_init import create_cloud_init_iso, write_cloud_init
@@ -1098,6 +1148,8 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 disabled_ssh_pub_key = _resolve_default_public_keys(ssh_key)
             if effective_mode == CloudInitMode.OFF and disabled_ssh_pub_key is not None:
                 _inject_ssh_keys_for_disabled_mode(rootfs_path, disabled_ssh_pub_key, vm_dir, user)
+            if effective_mode == CloudInitMode.OFF:
+                _ensure_resolv_conf(rootfs_path)
 
             cloud_init_iso: Path | None = None
             extra_drives: list[DriveConfig] = []

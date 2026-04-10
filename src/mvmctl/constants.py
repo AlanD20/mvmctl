@@ -634,6 +634,9 @@ CONST_VM_VCPU_MAX: Final[int] = 256
 CONST_IP_RANGE_SIZE: Final[int] = 256
 CONST_SIGNAL_EXIT_CODE_BASE: Final[int] = 128
 
+# Network constants
+CONST_DEFAULT_NAMESERVER: Final[str] = "1.1.1.1"  # Cloudflare DNS
+
 # Time constants (in seconds)
 CONST_SECONDS_PER_HOUR: Final[int] = 3600
 CONST_SECONDS_PER_DAY: Final[int] = 86400
