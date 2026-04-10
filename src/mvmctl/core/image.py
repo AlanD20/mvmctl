@@ -24,7 +24,6 @@ from mvmctl.constants import (
     CONST_RUNTIME_BUFFER_MB,
     CONST_SECTOR_SIZE_BYTES,
     CONST_SHRINK_SAFETY_MARGIN,
-    DEFAULT_IMAGE_IMPORT_SIZE_MIB,
     HTTP_TIMEOUT_SHA256_FETCH_S,
     HTTP_USER_AGENT,
 )
@@ -600,6 +599,23 @@ def detect_filesystem_type(image_path: Path) -> str | None:
         return None
 
 
+def _calculate_minimum_image_size_mb(content_bytes: int) -> int:
+    """Calculate minimum image size in MiB based on actual content bytes.
+
+    Uses decimal MB (1,000,000 bytes) for calculation with headroom factor,
+    then converts to MiB for filesystem operations.
+
+    Args:
+        content_bytes: Actual content size in bytes
+
+    Returns:
+        Minimum image size in MiB (binary units for filesystem operations)
+    """
+    content_mb_decimal = content_bytes / CONST_MEGABYTE_BYTES
+    calculated_mb = int(content_mb_decimal * CONST_ROOTFS_HEADROOM_FACTOR)
+    return max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mb)
+
+
 _COPY_CHUNK_SIZE = CONST_MEBIBYTE_BYTES  # 1 MiB
 
 
@@ -838,7 +854,7 @@ def create_ext4_from_tar(
 def _handle_qcow2(
     download_path: Path,
     final_path: Path,
-    minimum_rootfs_size: int,
+    minimum_rootfs_size: int | str,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
@@ -879,7 +895,7 @@ def _handle_tar_rootfs(
 def _handle_raw(
     download_path: Path,
     final_path: Path,
-    minimum_rootfs_size: int,
+    minimum_rootfs_size: int | str,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
@@ -979,7 +995,7 @@ def _fetch_sha256_from_url(sha256_url: str, source_filename: str | None = None) 
 def _handle_vhd(
     download_path: Path,
     final_path: Path,
-    minimum_rootfs_size: int,
+    minimum_rootfs_size: int | str,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
@@ -1016,7 +1032,7 @@ def _handle_vhd(
 def _handle_squashfs(
     download_path: Path,
     final_path: Path,
-    minimum_rootfs_size: int,
+    minimum_rootfs_size: int | str,
     partition: int | None = None,
     disabled_detectors: list[str] | None = None,
 ) -> Path:
@@ -1039,17 +1055,20 @@ def _handle_squashfs(
             raise ImageError("mkfs.ext4 not found. Install e2fsprogs package.")
 
         try:
-            du = subprocess.run(
-                ["du", "-s", "--block-size=1M", str(extract_dir)],
+            du_result = subprocess.run(
+                ["du", "-sb", str(extract_dir)],
                 capture_output=True,
                 text=True,
                 check=True,
             )
-            content_mb = int(du.stdout.split()[0])
+            content_bytes = int(du_result.stdout.split()[0])
         except (subprocess.CalledProcessError, ValueError, IndexError):
-            content_mb = 0
+            content_bytes = 0
 
-        image_size_mb = content_mb + minimum_rootfs_size
+        if minimum_rootfs_size == "dynamic":
+            image_size_mb = _calculate_minimum_image_size_mb(content_bytes)
+        else:
+            image_size_mb = int(minimum_rootfs_size)
 
         try:
             subprocess.run(
@@ -1075,7 +1094,9 @@ def _handle_squashfs(
     return final_path
 
 
-_FORMAT_HANDLERS: dict[str, Callable[[Path, Path, int, int | None, list[str] | None], Path]] = {
+_FORMAT_HANDLERS: dict[
+    str, Callable[[Path, Path, int | str, int | None, list[str] | None], Path]
+] = {
     "qcow2": _handle_qcow2,
     "tar-rootfs": _handle_tar_rootfs,
     "raw": _handle_raw,
@@ -1230,7 +1251,7 @@ def fetch_image(
             download_with_progress(
                 source,
                 download_path,
-                title=f"Downloading image {spec.id}",
+                title=f"Downloading image: '{spec.id}'",
                 expected_sha256=resolved_sha256,
                 timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
                 allow_missing_checksum=resolved_sha256 is None,
@@ -1244,13 +1265,12 @@ def fetch_image(
             logger.info("Resuming from downloaded file: %s", download_path)
 
         if not resume_from_existing:
+            logger.info('Preparing & optimizing image...')
             handler = _FORMAT_HANDLERS.get(spec.format)
             if handler is None:
                 download_path.unlink(missing_ok=True)
                 raise ImageError(f"Unknown format: {spec.format}")
-            actual_path = handler(
-                download_path, final_path, DEFAULT_IMAGE_IMPORT_SIZE_MIB, partition, None
-            )
+            actual_path = handler(download_path, final_path, "dynamic", partition, None)
         else:
             if existing_uncompressed is None:
                 raise ImageError("Resume failed: existing image file not found")
@@ -1497,9 +1517,7 @@ def import_image(
         raise ImageError(f"Image import failed: output file not created at {final_path}")
 
     elif spec.format == "tar-rootfs":
-        create_ext4_from_tar(
-            spec.source_path, final_path, minimum_rootfs_mib=DEFAULT_IMAGE_IMPORT_SIZE_MIB
-        )
+        create_ext4_from_tar(spec.source_path, final_path, minimum_rootfs_mib="dynamic")
 
         # Detect filesystem type and UUID for tar-rootfs (always ext4)
         fs_type = detect_filesystem_type(final_path)

@@ -53,12 +53,13 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = """
+    -n auto
     --cov=src/mvmctl
     --cov-branch
     --cov-report=term-missing
     --cov-fail-under=80
     --ignore=tests/system
-"""
+    """
 markers = [
     "real_mvm_group_check: test uses real _require_mvm_group_membership (not mocked)",
     "system: real hardware integration test — requires KVM, mvm group",

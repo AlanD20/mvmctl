@@ -12,6 +12,7 @@ from pytest_mock import MockerFixture
 
 import mvmctl.core.image
 from mvmctl.core.image import (
+    _calculate_minimum_image_size_mb,
     _copy_bytes,
     _fetch_sha256_from_url,
     _handle_qcow2,
@@ -30,6 +31,34 @@ from mvmctl.core.image import (
 )
 from mvmctl.exceptions import ChecksumMismatchError, ConfigError, ImageError, MVMError
 from mvmctl.models.image import ImageImportInput, ImageSpec
+
+# ---------------------------------------------------------------------------
+# _calculate_minimum_image_size_mb
+# ---------------------------------------------------------------------------
+
+
+def test_calculate_minimum_image_size_mb_small_content():
+    """Test that small content returns at least CONST_MIN_ROOTFS_SIZE_MIB."""
+    small_content = 1_000_000  # 1 MB
+    result = _calculate_minimum_image_size_mb(small_content)
+    assert result >= 128  # CONST_MIN_ROOTFS_SIZE_MIB
+
+
+def test_calculate_minimum_image_size_mb_large_content():
+    """Test that large content is calculated with headroom factor."""
+    large_content = 1_000_000_000  # 1 GB
+    result = _calculate_minimum_image_size_mb(large_content)
+    expected = int(1000 * 1.25)  # 1000 MB * 1.25 headroom
+    assert result == expected
+
+
+def test_calculate_minimum_image_size_mb_uses_decimal_mb():
+    """Test that calculation uses decimal MB (1,000,000) not MiB."""
+    content = 500_000_000  # 500 MB in decimal
+    result = _calculate_minimum_image_size_mb(content)
+    expected = int(500 * 1.25)  # 500 * 1.25 = 625
+    assert result == expected
+
 
 # ---------------------------------------------------------------------------
 # load_images_config
@@ -1447,7 +1476,7 @@ def test_handle_squashfs_uses_size_mib(mock_which: MagicMock, mock_run: MagicMoc
     _handle_squashfs(download_path, final_path, 2048)
 
     truncate_call = next(call for call in mock_run.call_args_list if call[0][0][0] == "truncate")
-    assert "2560M" in truncate_call[0][0]
+    assert "2048M" in truncate_call[0][0]
 
 
 @patch("mvmctl.core.image.subprocess.run")
