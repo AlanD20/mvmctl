@@ -155,10 +155,10 @@ To execute the `mvmctl` CLI with proper group privileges, use:
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Stack:** Python 3.13, Click (root), Typer (sub-apps), Rich, uv
 **Entry:** `mvm` console script → `main.py:LazyMVMGroup` (NOT a Typer root app)
-**Generated:** 2026-04-04
-**Commit:** a706a67
+**Generated:** 2026-04-10
+**Commit:** 5cd5126
 **Branch:** main
-**Files:** 96 Python source, 69 test files
+**Files:** 110 Python source, 109 test files
 
 ## STRUCTURE
 

@@ -48,7 +48,9 @@ core/vm_lifecycle.py
 - `start_relay(vm_name, pty_master_fd, vm_dir)` → spawns `process.py`, returns `(socket_path, pid)`
 - `stop_relay(vm_name, vm_hash)` → sends SIGTERM, cleans up PID/socket files
 - `kill_relay(vm_name, vm_hash)` → SIGTERM → wait → SIGKILL
+- `get_relay_pid(vm_name, vm_hash)` → returns PID from file or None
 - `is_relay_running(vm_name, vm_hash)` → checks PID file + process alive
+- `get_socket_path(vm_name, vm_hash)` → returns path to Unix socket
 - `cleanup_orphans()` → scans `$MVM_CACHE_DIR/vms/*/console.pid`, kills stale processes
 
 **Process:** `console_relay/process.py`
@@ -67,6 +69,9 @@ core/vm_lifecycle.py
 **Manager:** `nocloud_server/manager.py:NoCloudNetServerManager`
 - `start_server(vm_name, cloud_init_dir, gateway_ip, vm_hash, preferred_port)` → auto-allocates port 8000–9000, returns `(url, port)`
 - `stop_server(vm_name, vm_hash)` → sends SIGTERM, cleans up PID file
+- `get_server(vm_name, vm_hash)` → returns server details if running
+- `get_server_pid(vm_name, vm_hash)` → returns PID from file or None
+- `is_server_running(vm_name, vm_hash)` → checks PID file + process alive
 - Port allocation: `socket.bind((gateway_ip, port))` tests availability before spawning
 - `cleanup_orphans()` → cross-references `$MVM_CACHE_DIR/vms/*/nocloud-server.pid` with running VMs
 

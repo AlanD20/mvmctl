@@ -16,7 +16,8 @@ tests/integration/
 ├── test_network_workflow.py       # Network create/inspect/remove
 ├── test_nocloud_net_lifecycle.py  # Nocloud-net HTTP server lifecycle
 ├── test_cloud_init_iso.py         # Cloud-init ISO generation
-└── test_console_integration.py    # Console/pty-over-vsock integration
+├── test_console_integration.py    # Console/pty-over-vsock integration
+└── test_vm_direct_injection.py    # Direct cloud-init injection workflow
 ```
 
 ## TEST SCOPE
@@ -69,6 +70,11 @@ Integration tests differ from unit tests:
 - VM serial console access
 - Console relay service integration
 
+### test_vm_direct_injection.py
+- Direct cloud-init injection workflow
+- Tests seeding metadata and user-data directly into rootfs
+- Bypasses NoCloud network server or ISO mounting
+
 ## CONVENTIONS
 
 ### subprocess Handling
@@ -120,7 +126,7 @@ uv run pytest tests/integration/ -x -v
 
 ## NOTES
 
-- **7 test files**: Covering host, VM, network, nocloud-net, cloud-init, console, smoke tests
+- **9 test files**: Covering host, VM, network, nocloud-net, cloud-init, console, smoke, and direct injection tests
 - Tests are more coarse-grained than unit tests
 - Some tests may require root for network operations (marked accordingly)
 - Uses same mocking infrastructure as unit tests (see parent `tests/conftest.py`)

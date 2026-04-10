@@ -1,6 +1,6 @@
 # tests/layer_compliance/ — Architectural Compliance Tests
 
-**Scope:** AST-based enforcement of architecture rules; all 5 tests run in CI
+**Scope:** AST-based enforcement of architecture rules; all 6 tests run in CI
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Rule:** Tests here use AST parsing or subprocess isolation — NOT runtime imports — to avoid side effects
 **Parent:** See `tests/AGENTS.md` for fixtures and mocking patterns
@@ -9,11 +9,12 @@
 
 ```
 tests/layer_compliance/
-├── test_imports.py       # 199 lines — CLI→API→Core import boundary enforcement
-├── test_constants.py     # 652 lines — constants.py single-source-of-truth validation
-├── test_privilege.py     # 238 lines — API privilege check presence verification
-├── test_startup_time.py  # 182 lines — <200ms cold-start enforcement
-└── test_cleanup.py       # 156 lines — pytest temp directory cleanup behavior
+├── test_imports.py       # CLI→API→Core import boundary enforcement
+├── test_constants.py     # constants.py single-source-of-truth validation
+├── test_privilege.py     # API privilege check presence verification
+├── test_startup_time.py  # <200ms cold-start enforcement
+├── test_cleanup.py       # Pytest temp directory cleanup behavior
+└── test_constants_new.py # Additional constants validation
 ```
 
 ## TEST FILES
@@ -88,7 +89,7 @@ CLI modules (`cli/`) are excluded from per-module parametrization — they are l
 
 ### `test_cleanup.py` — Pytest Temp Dir Cleanup
 
-Verifies that `tests/conftest.py:pytest_sessionfinish` hook exists and only targets `pytest-*` directories under `tempfile.gettempdir()`. Not an architectural boundary test — prevents accidental temp dir accumulation.
+Verifies that `tests/conftest.py:pytest_sessionfinish` hook exists and only targets `pytest-*` directories under `tempfile.gettempdir()`. Prevents accidental temp dir accumulation.
 
 ## ANTI-PATTERNS
 
@@ -108,13 +109,10 @@ uv run pytest tests/layer_compliance/ -v
 # Run single file
 uv run pytest tests/layer_compliance/test_imports.py -v
 uv run pytest tests/layer_compliance/test_startup_time.py -v  # slow — spawns subprocesses
-
-# Check startup time for a specific module
-python -c "import time; start=time.perf_counter(); import mvmctl.core.firecracker; print(f'{(time.perf_counter()-start)*1000:.1f}ms')"
 ```
 
 ## NOTES
 
+- **6 test files**: Covering imports, constants, privileges, startup time, and cleanup behavior
 - All tests are **AST-based or subprocess-isolated** — they do NOT import `mvmctl.*` at collection time (except `test_constants.py` which imports `mvmctl.constants` for functional validation)
-- `test_startup_time.py` is the slowest — parametrized over all non-CLI modules; expect 10-30s total
 - Layer compliance failures in CI indicate real architectural regressions — never skip or xfail without documented justification

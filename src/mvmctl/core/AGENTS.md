@@ -26,9 +26,11 @@ All other core modules MUST NOT import, instantiate, or use `MVMDatabase`. They 
 |------|--------|-------|
 | `core/vm_manager.py` | MUST NOT use DB | Receives VM state from API |
 | `core/vm_lifecycle.py` | MUST NOT use DB | Receives image/kernel paths from API |
+| `core/vm_process.py` | MUST NOT use DB | Receives VM config/process data from API |
 | `core/vm_monitor.py` | MUST NOT use DB | Receives VM data from API |
 | `core/network.py` | MUST NOT use DB | Receives network config from API |
 | `core/network_manager.py` | MUST NOT use DB | Receives network defaults from API |
+| `core/iptables_tracker.py` | MUST NOT use DB | Receives rule data from API |
 | `core/host.py` | MUST NOT use DB | Receives host state from API |
 | `core/host_setup.py` | MUST NOT use DB | Receives setup config from API |
 | `core/host_privilege.py` | MUST NOT use DB | Receives privilege config from API |
@@ -45,10 +47,7 @@ All other core modules MUST NOT import, instantiate, or use `MVMDatabase`. They 
 | `core/ssh.py` | MUST NOT use DB | Receives SSH config from API |
 | `core/key_manager.py` | MUST NOT use DB | Receives key paths from API |
 | `core/cloud_init.py` | MUST NOT use DB | Receives cloud-init config from API |
-| `core/cloud_init_status.py` | MUST NOT use DB | Receives status config from API |
 | `core/console.py` | MUST NOT use DB | Receives console config from API |
-| `core/download_engine.py` | MUST NOT use DB | Receives download config from API |
-| `core/partition_detection.py` | MUST NOT use DB | Receives detection params from API |
 | `core/rootfs_injector.py` | MUST NOT use DB | Receives injection config from API |
 | `core/logs.py` | MUST NOT use DB | Receives log paths from API |
 | `core/config.py` | MUST NOT use DB | Receives config data from API |
@@ -134,36 +133,36 @@ def create_vm(name: str, image: Path) -> VMInstance:
 
 ```
 src/mvmctl/core/
-├── vm_lifecycle.py      # VM create/start/stop/remove (1782 lines)
-├── vm_manager.py        # VM registry; state.json keyed by full 16-char hash (285 lines)
-├── vm_monitor.py        # VM reconciliation; detects/cleans orphaned VMs
-├── network.py           # Low-level: bridge, TAP, NAT, iptables (1339 lines)
-├── network_manager.py   # Named networks with IP lease tracking (890 lines)
-├── host.py              # Host orchestration: clean/prune/reset (219 lines)
-├── host_setup.py        # Host init: KVM, sysctl, binary checks (403 lines)
-├── host_privilege.py    # Group/sudoers management; check_privileges() (331 lines)
-├── host_state.py        # Host state snapshots for rollback (232 lines)
-├── image.py             # Image download, QCOW2→raw conversion, partition extract (1739 lines)
-├── kernel.py            # Kernel fetch (FC CI S3) + build-from-source pipeline (1338 lines)
-├── binary_manager.py    # Firecracker/jailer version management (436 lines)
-├── mvm_db.py            # SQLite ORM — MVMDatabase class; canonical DB interface (868 lines)
-├── metadata.py          # SQLite-backed metadata helpers for images/kernels/binaries (559 lines)
-├── config_state.py      # config.json persistence + SQLite-backed default accessors (264 lines)
-├── config_gen.py        # Generates Firecracker boot JSON (319 lines)
-├── firecracker.py       # HTTP API client for live VM control (298 lines)
-├── firewall.py          # iptables nocloud input chain management for cloud-init security
-├── ssh.py               # SSH command building + key resolution (211 lines)
-├── key_manager.py       # SSH key import/create/registry (557 lines)
-├── cloud_init.py        # cloud-init ISO creation (178 lines)
-├── cloud_init_status.py # Cloud-init boot status polling/wait logic
-├── console.py           # Console relay connection management (connect/disconnect/read/write)
-├── download_engine.py   # Unified download engine with temp staging, resume, retry
-├── cache_manager.py     # Cache init/prune for VMs, images, kernels, networks
-├── partition_detection.py # Root partition detection with weighted heuristics
-├── rootfs_injector.py   # Inject cloud-init into rootfs via libguestfs
-├── logs.py              # VM log retrieval (149 lines)
-├── config.py            # YAML config loading (210 lines)
-└── user_config.py       # User-specific config get/set (85 lines)
+├── image.py              # Image download, QCOW2→raw conversion (1657 lines)
+├── network.py            # Low-level: bridge, TAP, NAT, iptables (1358 lines)
+├── kernel.py             # Kernel fetch + build-from-source pipeline (1176 lines)
+├── mvm_db.py             # SQLite ORM — MVMDatabase class (1000 lines)
+├── metadata.py           # SQLite-backed metadata helpers (586 lines)
+├── key_manager.py        # SSH key import/create/registry (557 lines)
+├── network_manager.py    # Named networks with IP lease tracking (437 lines)
+├── binary_manager.py     # Firecracker/jailer version management (338 lines)
+├── host_privilege.py     # Group/sudoers management (331 lines)
+├── host_setup.py         # Host init: KVM, sysctl, binary checks (328 lines)
+├── config_gen.py         # Generates Firecracker boot JSON (323 lines)
+├── firecracker.py        # HTTP API client for live VM control (299 lines)
+├── firewall.py           # iptables nocloud input chain management (284 lines)
+├── vm_manager.py         # VM registry; state.json keyed by hash (260 lines)
+├── cloud_init.py         # cloud-init ISO creation (257 lines)
+├── iptables_tracker.py   # Idempotent iptables rule management (234 lines)
+├── host_state.py         # Host state snapshots for rollback (229 lines)
+├── config_state.py       # config.json persistence (192 lines)
+├── ssh.py                # SSH command building + key resolution (176 lines)
+├── vm_process.py         # Firecracker process spawn/management (164 lines)
+├── logs.py               # VM log retrieval (153 lines)
+├── vm_monitor.py         # VM reconciliation; orphaned VM cleanup (143 lines)
+├── console.py            # Console relay connection management (137 lines)
+├── config.py             # YAML config loading (125 lines)
+├── rootfs_injector.py    # Inject cloud-init into rootfs via libguestfs (124 lines)
+├── cache_manager.py      # Cache init/prune (87 lines)
+├── user_config.py        # User-specific config get/set (85 lines)
+├── vm_lifecycle.py       # VM lifecycle orchestration (63 lines)
+├── host.py               # Host orchestration: clean/prune/reset (12 lines)
+└── __init__.py           # Package init (3 lines)
 ```
 
 ## WHERE TO LOOK
@@ -171,28 +170,28 @@ src/mvmctl/core/
 | Task | Module | Key entry point |
 |------|--------|-----------------|
 | Create VM | `vm_lifecycle.py` | `create_vm()` |
-| Resolve image by ID/hash | `vm_lifecycle.py` | `_resolve_image_path()` |
+| Resolve image by ID/hash | `api/vms.py` | `_resolve_image_path()` |
 | Remove VM | `vm_lifecycle.py` | `remove_vm()` |
+| Firecracker process spawn | `vm_process.py` | `spawn_firecracker()` |
+| Graceful VM shutdown | `vm_process.py` | `graceful_shutdown()` |
 | VM registry (CRUD) | `vm_manager.py` | `VMManager` class |
 | Orphaned VM cleanup | `vm_monitor.py` | reconciliation helpers |
 | Bridge/TAP/NAT | `network.py` | `setup_bridge()`, `create_tap()`, `setup_nat()` |
-| iptables chains | `network.py` | `setup_mvm_chains()`, `teardown_mvm_chains()` |
+| iptables rule management | `iptables_tracker.py` | `IPTablesTracker.ensure_rule()` |
 | Named networks | `network_manager.py` | `create_network()`, `ensure_default_network()` |
 | Host init | `host_setup.py` | `init_host()` |
 | Privilege check | `host_privilege.py` | `check_privileges(binary_path)` |
 | Image download/convert | `image.py` | `fetch_image()`, `import_image()` |
 | Kernel fetch/build | `kernel.py` | `download_firecracker_kernel()`, `build_kernel_pipeline()` |
 | Firecracker binary | `binary_manager.py` | `fetch_binary()`, `set_active_version()`, `get_binary_path()` |
-| Binary default lookup | `mvm_db.py` | `db.get_default_binary("firecracker")` — SQLite is canonical; do NOT read `firecracker` symlink |
+| Binary default lookup | `mvm_db.py` | `db.get_default_binary("firecracker")` — SQLite is canonical |
 | Asset metadata helpers | `metadata.py` | `find_images_by_id_prefix()`, `update_kernel_entry()` |
 | SQLite ORM (canonical) | `mvm_db.py` | `MVMDatabase` class — single source for all DB queries |
 | Firecracker HTTP API | `firecracker.py` | `FirecrackerClient` |
 | iptables nocloud rules | `firewall.py` | nocloud input chain management |
 | Console relay | `console.py` | `connect()`, `disconnect()`, `read()`, `write()` |
-| Cloud-init status | `cloud_init_status.py` | status polling, wait-for-done |
-| Download (resumable) | `download_engine.py` | `DownloadEngine` |
+| Cloud-init status | `cloud_init.py` | status polling, wait-for-done |
 | Cache prune | `cache_manager.py` | `prune_cache()`, `init_cache()` |
-| Partition detection | `partition_detection.py` | heuristic root partition detection |
 | Cloud-init inject | `rootfs_injector.py` | inject via libguestfs |
 | Config dataclass | `config.py` | `MVMConfig`, `load_config()` |
 

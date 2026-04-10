@@ -4,7 +4,7 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Coverage Gate:** 80% branch coverage (`pyproject.toml --cov-fail-under=80`)
 **Rule:** Tests must NEVER require root, KVM, or real network stack (except system tests)
-**Files:** 69 test files — 54 unit + 7 integration + 8 system + 4 layer_compliance
+**Files:** 109 test files — 91 unit + 8 integration + 5 system + 5 layer_compliance
 
 ## STRUCTURE
 
@@ -17,16 +17,16 @@ tests/
 │   ├── conftest.py          # Shared fixtures: VM/network/key fixtures, subprocess mocks
 │   ├── test_cli_*.py        # CLI layer tests (CliRunner, no subprocess)
 │   ├── test_api_*.py        # API layer tests
-│   ├── core/                # Core layer tests (22 files)
-│   ├── db/                  # DB/migration tests (5 files)
+│   ├── core/                # Core layer tests (45 files)
+│   ├── db/                  # DB/migration tests (8 files)
 │   ├── services/            # Service tests (console_relay, nocloud_server)
 │   └── test_*.py            # Root-level unit tests
 ├── integration/
 │   ├── conftest.py          # Integration-specific fixtures
-│   └── test_*.py            # Multi-module workflow tests (7 files)
+│   └── test_*.py            # Multi-module workflow tests (8 files)
 ├── system/
 │   ├── conftest.py          # Real hardware fixtures; _restore_real_dirs override
-│   └── test_*.py            # Black-box CLI tests via subprocess (8 files)
+│   └── test_*.py            # Black-box CLI tests via subprocess (5 files)
 └── layer_compliance/
     ├── test_imports.py      # Enforces import boundaries (cli→api→core only)
     ├── test_constants.py    # Ensures constants.py is single source of truth

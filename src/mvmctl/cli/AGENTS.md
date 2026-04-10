@@ -43,18 +43,21 @@ image path, kernel path, firecracker binary path, network config
 
 ```
 src/mvmctl/cli/
-├── vm.py          # VM subcommands: create, rm, ls, ps, ssh, logs, prune, snapshot, load (1020 lines)
-├── bin.py         # kernel/image/bin subcommands — THREE Typer apps in one file (1548 lines)
-├── init.py        # Guided onboarding wizard: mvm init (437 lines)
-├── host.py        # Host subcommands: init, ls, clean, reset
-├── network.py     # Network subcommands: create, rm, ls, inspect
-├── key.py         # SSH key subcommands: add, create, ls, rm, inspect
-├── config.py      # Config subcommands: get, set, show, validate, dump-vm
-├── console.py     # VM console access via PTY-over-vsock
-├── cache.py       # Cache management: init, prune
-├── ssh.py         # VM SSH helper commands
-├── logs.py        # VM log viewing: --follow, --lines, --type
-└── _helpers.py    # Internal: check_name_arg() guard for positional name args
+├── vm.py          # VM subcommands: create, rm, ls, ps, ssh, logs, prune, snapshot, load (1038 lines)
+├── image.py       # Image subcommands: ls, fetch, set-default, rm, import (810 lines)
+├── host.py        # Host subcommands: init, ls, clean, reset (328 lines)
+├── key.py         # SSH key subcommands: add, create, ls, rm, inspect (333 lines)
+├── network.py     # Network subcommands: create, rm, ls, inspect (324 lines)
+├── init.py        # Guided onboarding wizard: mvm init (273 lines)
+├── kernel.py      # Kernel subcommands: ls, fetch, set-default, rm (253 lines)
+├── cache.py       # Cache management: init, prune (232 lines)
+├── console.py     # VM console access via PTY-over-vsock (179 lines)
+├── bin.py         # Binary subcommands: ls, fetch, set-default, rm (165 lines)
+├── config.py      # Config subcommands: get, set, show, validate, dump-vm (116 lines)
+├── _helpers.py    # Internal: check_name_arg() guard for positional name args (146 lines)
+├── ssh.py         # VM SSH helper commands (87 lines)
+├── logs.py        # VM log viewing: --follow, --lines, --type (53 lines)
+└── __init__.py    # CLI package exports (15 lines)
 ```
 
 ## SUBCOMMAND WIRING
@@ -70,9 +73,9 @@ _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
     "key":     _LazyCommandSpec("mvmctl.cli.key",     "app",        "SSH key management"),
     "config":  _LazyCommandSpec("mvmctl.cli.config",  "app",        "Configuration commands"),
     "init":    _LazyCommandSpec("mvmctl.cli.init",    "app",        "Initialize mvm"),
-    "kernel":  _LazyCommandSpec("mvmctl.cli.bin",     "kernel_app", "Kernel management"),
-    "image":   _LazyCommandSpec("mvmctl.cli.bin",     "image_app",  "Image management"),
-    "bin":     _LazyCommandSpec("mvmctl.cli.bin",     "bin_app",    "Binary management"),
+    "kernel":  _LazyCommandSpec("mvmctl.cli.kernel",   "app",        "Kernel management"),
+    "image":   _LazyCommandSpec("mvmctl.cli.image",    "app",        "Image management"),
+    "bin":     _LazyCommandSpec("mvmctl.cli.bin",      "app",        "Binary management"),
     "cache":   _LazyCommandSpec("mvmctl.cli.cache",   "app",        "Cache management"),
     "logs":    _LazyCommandSpec("mvmctl.cli.logs",    "app",        "VM log management"),
     "ssh":     _LazyCommandSpec("mvmctl.cli.ssh",     "app",        "VM SSH access"),
@@ -221,15 +224,20 @@ effective_ids = list(ids) if ids else []
 ids: List[str] = typer.Argument([], help="IDs to remove")  # Typer fails
 ```
 
-## BIN.PY — THREE APPS IN ONE FILE
+## IMAGE, KERNEL, BIN — SEPARATE STANDALONE APPS
 
-Single file (`cli/bin.py`) exports three separate `typer.Typer()` instances:
+Asset management is split into three separate modules, each exporting its own `typer.Typer()` app:
 
-| App | Attribute | Commands |
-|-----|-----------|----------|
-| `kernel_app` | `kernel_ls`, `kernel_fetch`, `kernel_set_default`, `kernel_rm` | `--type firecracker\|official`, `--name`, `--clean-build` for fetch |
-| `image_app` | `image_ls`, `image_fetch`, `image_set_default`, `image_rm`, `image_import` | Hash-based ID; `_find_meta_for_internal_id()` for YAML lookup |
-| `bin_app` | `bin_ls`, `bin_fetch`, `bin_set_default`, `bin_rm` | SHA256 verified against GitHub releases |
+| Module | App | Commands |
+|--------|-----|----------|
+| `cli/kernel.py` | `app` | `ls`, `fetch`, `set-default`, `rm` |
+| `cli/image.py` | `app` | `ls`, `fetch`, `set-default`, `rm`, `import` |
+| `cli/bin.py` | `app` | `ls`, `fetch`, `set-default`, `rm` |
+
+**Common Features:**
+- All use hash-based IDs (64-char SHA256, 6-char prefix in CLI)
+- All support `--type` and `--name` filtering
+- All verify downloads against checksums
 
 **Shared function:** `clear_assets()` — removes all cached `bin/`, `kernels/`, `images/` dirs.
 
@@ -310,5 +318,5 @@ def create(
 
 ## KNOWN VIOLATIONS
 
-- `bin.py` — imports `mvmctl.core.metadata` directly (bypasses `api/`)
+- `bin.py`, `image.py`, `kernel.py` — import `mvmctl.core.metadata` directly (bypasses `api/`)
 - `init.py` — imports `mvmctl.core.config_state` directly (bypasses `api/`)

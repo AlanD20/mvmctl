@@ -36,20 +36,20 @@
 ```
 src/mvmctl/db/
 ├── __init__.py              # Package marker
-├── models.py                # ORM dataclasses: Image, Kernel, Binary, VM, Network, HostState, etc.
+├── models.py                # ORM dataclasses: IPTablesRule, Image, Kernel, Binary, Network, NetworkLease, VMInstance, HostState, HostStateChange
 └── migrations/
     ├── __init__.py          # Package marker
-    ├── 001_initial_schema.sql  # Full schema: binaries, images, kernels, networks, host_state, etc.
-    └── runner.py            # Migration runner: apply missing migrations, record in db_migrations
+    ├── 001_initial_schema.sql  # Full schema: 9 tables + db_migrations tracking
+    └── runner.py            # Migration runner: applies migrations, tracks via PRAGMA user_version
 ```
 
 ## WHERE TO LOOK
 
 | Task | Module | Key entry point |
 |------|--------|-----------------|
-| Schema definitions | `migrations/001_initial_schema.sql` | CREATE TABLE statements |
+| Schema definitions | `migrations/001_initial_schema.sql` | 10 CREATE TABLE statements |
 | Run migrations | `migrations/runner.py` | `MigrationRunner(db_path).migrate()` |
-| ORM dataclasses | `models.py` | `Binary`, `Image`, `Kernel`, `Network`, `HostState`, `HostStateChange`, `DBMigration` |
+| ORM dataclasses | `models.py` | `IPTablesRule`, `Image`, `Kernel`, `Binary`, `Network`, `NetworkLease`, `VMInstance`, `HostState`, `HostStateChange` |
 
 ## SCHEMA OVERVIEW
 
@@ -57,20 +57,37 @@ src/mvmctl/db/
 | Table | Purpose |
 |-------|---------|
 | `binaries` | Binary entries (firecracker, jailer) with `name`, `version`, `path`, `is_default` |
-| `images` | Image entries with hash, os_slug, internal_id, path, `is_default` |
+| `images` | Image entries with hash, os_slug, path, arch, `is_default`, `minimum_rootfs_size_mb` |
 | `kernels` | Kernel entries with version, path, `is_default` |
-| `networks` | Named network configs with subnet, gateway, interface, `is_default` |
-| `host_state` | Host state snapshots for rollback |
-| `host_state_changes` | Individual changes within a host state snapshot |
+| `networks` | Named network configs with subnet, gateway, bridge, `is_default` |
+| `network_leases` | IP lease records with network_id, ipv4, vm_id, expiry |
+| `vm_instances` | VM runtime state with all config, PIDs, sockets, status |
+| `host_state` | Host initialization state (singleton id=1) |
+| `host_state_changes` | Host config changes for rollback tracking |
+| `iptables_rules` | Tracked iptables rules with parameters, network_id, lifecycle |
 | `db_migrations` | Migration tracking: version, name, applied_at |
 
 ### Key Constraints
-- `images(os_slug)` — UNIQUE; `is_default` is a plain column (no partial index)
+- `images(os_slug)` — UNIQUE
 - `networks(name)` — UNIQUE
-- `network_leases(network_id, ipv4)` — UNIQUE composite; FK → `networks(id)` + FK → `vm_instances(id)`
+- `network_leases(network_id, ipv4)` — UNIQUE composite
 - `vm_instances(name)` — UNIQUE
+- `host_state(id=1)` — Singleton enforced in code
+- `host_state_changes(session_id, change_order)` — UNIQUE composite
+- `iptables_rules` — Complex unique index on active rules
 - `db_migrations(version)` — UNIQUE
 - Foreign keys enabled via `PRAGMA foreign_keys = ON`
+
+## KNOWN EXCEPTIONS
+
+These are intentional deviations from the layer architecture:
+
+| File | Deviation | Reason |
+|------|-----------|--------|
+| `cli/bin.py` | Imports `core/metadata` directly | Asset management needs direct metadata access for bulk operations |
+| `core/mvm_db.py` | Implements `MVMDatabase` class | Core module that provides DB access methods (used by API) |
+| `core/metadata.py` | Imports `mvmctl.db` for asset registration | Discovers and registers assets in DB during downloads |
+| `models/*.py` | Import ORM dataclasses from `mvmctl.db.models` | Domain models extend/reuse DB dataclasses for consistency |
 
 ## CONVENTIONS
 
@@ -160,11 +177,12 @@ The `firecracker` symlink in `bin/` is a **side-effect** of `set_active_version(
 ### Verification Checklist
 
 Before submitting changes:
-- [ ] **NO CLI code imports from `mvmctl.core.mvm_db`**
-- [ ] **NO Core code imports from `mvmctl.core.mvm_db`** (unless registering discovered assets)
-- [ ] **ONLY API layer creates `MVMDatabase()` instances**
-- [ ] All database queries happen in API layer functions
+- [ ] **NO CLI code imports from `mvmctl.db` or `mvmctl.core.mvm_db`** (except known exceptions)
+- [ ] **NO Core code imports from `mvmctl.db`** (except `mvm_db.py` and `metadata.py` for asset registration)
+- [ ] **ONLY API layer creates `MVMDatabase()` instances** (except core/mvm_db.py)
+- [ ] All database queries happen in API layer functions (or core/mvm_db.py methods called by API)
 - [ ] API never passes `None` to Core for required DB-backed parameters
+- [ ] Models layer may import DB dataclasses for consistency but should not query DB
 
 ### Enforcement
 

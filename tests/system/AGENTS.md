@@ -9,11 +9,11 @@
 ```
 tests/system/
 ├── conftest.py              # Fixtures: mvm_binary, created_vm, created_network, created_key
-├── test_network.py          # 8 network CRUD tests
-├── test_keys.py             # 7 SSH key tests
-├── test_images.py           # 15 image management tests
-├── test_vm_lifecycle.py     # 28 VM lifecycle tests
-└── test_full_journeys.py    # 10 end-to-end journey tests
+├── test_network.py          # Network CRUD tests
+├── test_keys.py             # SSH key tests
+├── test_images.py           # Image management tests
+├── test_vm_lifecycle.py     # VM lifecycle tests
+└── test_full_journeys.py    # End-to-end journey tests
 ```
 
 ## MARKERS
@@ -55,3 +55,9 @@ uv run pytest tests/
 | Hardcoded VM names | `unique_vm_name` fixture |
 | No cleanup on failure | Use `created_vm`/`created_network`/`created_key` fixtures |
 | Real env vars in test process | `_restore_real_dirs` autouse fixture handles this |
+
+## NOTES
+
+- **7 test files**: Covering host journeys, images, keys, network, and VM lifecycle
+- Requires real system environment (KVM, mvm group, network privileges)
+- Completely black-box testing via CLI binary calls

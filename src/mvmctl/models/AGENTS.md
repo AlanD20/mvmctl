@@ -8,13 +8,13 @@
 
 | Suffix | Meaning | Examples |
 |--------|---------|----------|
-| `Input` | API creation/update input — what you pass to create something | `VMCreateInput`, `ImageFetchInput`, `ImageImportInput`, `NetworkCreateInput` |
+| `Input` | API creation/update input — what you pass to create something | `VMCreateInput`, `ImageFetchInput`, `ImageImportInput`, `NetworkCreateInput`, `KeyInput` |
 | `Item` | Persisted DB record | `ImageItem`, `KernelItem`, `BinaryItem`, `NetworkItem` |
 | `Spec` | YAML source definition (remote or local) | `ImageSpec`, `KernelSpec` |
-| `Config` | Runtime configuration (not persisted as a DB row) | `VMConfig`, `CloudInitConfig`, `NetworkConfig`, `SystemDefaultsConfig` |
+| `Config` | Runtime configuration (not persisted as a DB row) | `VMConfig`, `CloudInitConfig`, `NetworkConfig`, `SystemDefaultsConfig`, `VMExportConfig` |
 | `Instance` | Active/runtime entity | `VMInstance` |
 | `State` | Snapshot of current state | `HostState` |
-| `Result` | Operation output (synthetic, not stored) | `KernelFetchResult` |
+| `Result` | Operation output (synthetic, not stored) | `KernelFetchResult`, `CacheResult` |
 | `*Mode` / `*Status` | StrEnum for constrained string values | `VMStatus`, `CloudInitMode`, `CloudInitStatus` |
 
 **Legacy names to NEVER use:** `*Record` (use `*Item`), `ImageImportSpec` (use `ImageImportInput`)
@@ -48,15 +48,20 @@
 ```
 src/mvmctl/models/
 ├── __init__.py       # Exports: VMStatus, VMConfig, VMInstance, ImageSpec, KernelSpec,
-│                     #          CloudInitConfig, CloudInitMode, CloudInitStatus
-├── vm.py             # VMStatus (StrEnum), VMConfig, VMInstance
+│                     #          CloudInitConfig, CloudInitMode, CloudInitStatus, VMCreateInput,
+│                     #          ImageItem, KernelItem, BinaryItem, NetworkItem
+├── vm.py             # VMStatus (StrEnum), VMConfig, VMInstance, VMCreateInput
 ├── image.py          # ImageSpec, ImageImportInput, ImageItem
 ├── kernel.py         # KernelSpec, KernelItem
 ├── cloud_init.py     # CloudInitMode, CloudInitStatus, CloudInitConfig
-├── network.py        # NetworkLease, NetworkConfig, NetworkItem
+├── network.py        # NetworkLease, NetworkConfig, NetworkItem, NetworkCreateInput
 ├── host.py           # HostStateChange, HostState
 ├── binary.py         # BinaryItem
-└── vm_config_file.py # VMCreateConfigFile — JSON config file schema
+├── config.py         # SystemDefaultsConfig
+├── key.py            # KeyInput
+├── firecracker.py    # Firecracker API types
+├── cache.py          # CacheResult
+└── vm_config_file.py # VMCreateConfigFile — JSON config file schema (VMExportConfig)
 ```
 
 ## DEFAULT VALUE POLICY
@@ -110,13 +115,13 @@ Values: `STARTING`, `RUNNING`, `PAUSED`, `STOPPING`, `STOPPED`, `CRASHED`, `ERRO
 (Replaced the old `VMState` with 3 values — do NOT use `VMState`)
 
 ### VMConfig — `vm.py`
-Fields: `name`, `vm_id`, `vcpu_count`, `mem_size_mib`, `kernel_path`, `rootfs_path`, `boot_args`, `root_uuid`, `root_fs_type`, `enable_api_socket`, `enable_pci`, `lsm_flags`, `extra_drives`, `enable_logging`, `enable_metrics`, `enable_console`, `cloud_init_mode` (CloudInitMode), `cloud_init_iso_path`, `keep_cloud_init_iso`, `nocloud_net_url`
-
-**`__post_init__` validation:** vCPU 1–32; mem 128–65536 MiB — the only behavioral logic on a model.
-Methods: `to_dict()`, `from_dict()`
+Fields: `name`, `vm_id`, `vcpu_count`, `mem_size_mib`, `kernel_path`, `rootfs_path`, `boot_args`, `root_uuid`, `root_fs_type`, `enable_api_socket`, `enable_pci`, `lsm_flags`, `extra_drives` (list[Drive]), `enable_logging`, `enable_metrics`, `enable_console`, `cloud_init_mode` (CloudInitMode), `cloud_init_iso_path`, `keep_cloud_init_iso`, `nocloud_net_url`
 
 ### VMInstance — `vm.py`
-Fields: `name`, `id` (16-char hex), `pid`, `api_socket_path`, `console_socket_path`, `ipv4`, `mac`, `network_name`, `tap_device`, `ipv4_gateway`, `subnet_mask`, `created_at`, `status` (VMStatus), `config` (VMConfig), `exit_code`, `nocloud_net_port`, `nocloud_server_pid`, `console_relay_pid`, `rootfs_suffix`, `kernel_id`, `image_id`
+Fields: `name`, `id` (16-char hex), `pid`, `api_socket_path`, `console_socket_path`, `ipv4`, `mac`, `network_name`, `tap_device`, `ipv4_gateway`, `subnet_mask`, `created_at`, `status` (VMStatus), `config` (VMConfig), `exit_code`, `nocloud_net_port`, `nocloud_server_pid`, `console_relay_pid`, `rootfs_suffix`, `kernel_id`, `image_id`, `metadata` (dict)
+
+### VMCreateInput — `vm.py`
+Fields: `name`, `image`, `kernel_id`, `vcpu_count`, `mem`, `ssh_key`, `boot_args`, `root_fs_type`, `enable_api_socket`, `enable_pci`, `enable_console`, `cloud_init_mode`, `cloud_init_iso`, `keep_iso`, `nocloud_net_url`, `extra_drives`, `enable_logging`, `enable_metrics`
 
 ### CloudInitMode (StrEnum) — `cloud_init.py`
 Values: `INJECT` ("inject"), `NET` ("net"), `OFF` ("off"), `ISO` ("iso")
@@ -131,47 +136,46 @@ Fields: `mode` (CloudInitMode), `iso_path` (Path|None), `keep_iso` (bool), `nocl
 Methods: `to_dict()`, `from_dict()`
 
 ### ImageSpec — `image.py`
-Fields: `id`, `name`, `source` (URL), `format`, `convert_to`, `minimum_rootfs_size`, `sha256`, `sha256_url`
-Used for YAML-defined images in `images.yaml`.
+Fields: `id`, `name`, `source` (URL), `format`, `convert_to`, `minimum_rootfs_size`, `sha256`, `sha256_url`, `arch`
 
 ### ImageImportInput — `image.py`
-Fields: `id`, `name`, `source_path` (local), `format`, `convert_to`, `minimum_rootfs_size`
-**Not in `models/__init__.__all__`** — import directly from `mvmctl.models.image`.
+Fields: `id`, `name`, `source_path` (local), `format`, `convert_to`, `minimum_rootfs_size`, `arch`
 
 ### KernelSpec — `kernel.py`
-Fields: `id`, `name`, `source` (URL), `version`, `arch`
-Used for YAML-defined kernels in `kernels.yaml`.
+Fields: `id`, `name`, `source` (URL), `version`, `arch`, `sha256`
 
 ### KernelItem — `kernel.py`
-Fields: `id`, `name`, `version`, `path`, `arch`, `fs_type`, `is_default`, `created_at`, `updated_at`
-Methods: `from_db(record)`, `to_dict()`
+Fields: `id`, `name`, `version`, `path`, `arch`, `fs_type`, `is_default`, `created_at`, `updated_at`, `sha256`
 
 ### ImageItem — `image.py`
-Fields: `id`, `os_slug`, `path`, `os_name`, `fs_type`, `fs_uuid`, `arch`, `is_default`, `created_at`, `updated_at`
-Methods: `from_db(record)`, `to_dict()`
+Fields: `id`, `os_slug`, `path`, `os_name`, `fs_type`, `fs_uuid`, `arch`, `is_default`, `created_at`, `updated_at`, `sha256`
 
 ### NetworkLease — `network.py`
-Fields: `vm_id`, `ipv4`
+Fields: `vm_id`, `ipv4`, `mac`, `leased_at`
 
 ### NetworkConfig — `network.py`
 Fields: `name`, `subnet`, `ipv4_gateway`, `bridge`, `nat_enabled`, `nat_gateways`, `created_at`, `is_default`
 
 ### NetworkItem — `network.py`
 Fields: `id`, `name`, `subnet`, `bridge`, `ipv4_gateway`, `bridge_active`, `nat_gateways`, `nat_enabled`, `is_default`, `created_at`, `updated_at`
-Methods: `from_db(record)`, `to_dict()`
+
+### NetworkCreateInput — `network.py`
+Fields: `name`, `subnet`, `bridge`, `nat_enabled`, `nat_gateways`
 
 ### HostStateChange — `host.py`
-Fields: `setting`, `original_value`, `applied_value`, `mechanism`
+Fields: `setting`, `original_value`, `applied_value`, `mechanism`, `timestamp`
 
 ### HostState — `host.py`
-Fields: `init_timestamp`, `changes` (list[HostStateChange])
+Fields: `init_timestamp`, `changes` (list[HostStateChange]), `version`
 
 ### BinaryItem — `binary.py`
 Fields: `id`, `name`, `version`, `path`, `full_version`, `ci_version`, `is_default`, `created_at`, `updated_at`
-Methods: `from_db(record)`, `to_dict()`
 
-### VMCreateConfigFile — `vm_config_file.py`
-Fields: all `mvm vm create` options + `firecracker_config` (embedded Firecracker boot JSON)
+### SystemDefaultsConfig — `config.py`
+Fields: `vcpu_count`, `mem_size_mib`, `ssh_user`, `boot_args`, `lsm_flags`, `disk_size_gb`, `enable_api_socket`, `enable_pci`, `enable_console`, `cloud_init_mode`, `network_name`, `image_id`, `kernel_id`, `firecracker_version`
+
+### VMExportConfig — `vm_config_file.py`
+Fields: `version`, `metadata`, `config` (VMConfig), `image` (ImageItem), `kernel` (KernelItem), `binary` (BinaryItem), `network` (NetworkItem), `cloud_init` (CloudInitConfig)
 Methods: `from_dict()`, `from_json_file()`, `to_json_file()`, `to_dict()`
 **Not in `models/__init__.__all__`** — imported by `api/vm_config.py` directly.
 

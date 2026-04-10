@@ -1,8 +1,34 @@
 # mvmctl/api/ — Public API Layer
 
-**Scope:** Stable Python API boundary between CLI and core
-**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
+**Scope:** Stable Python API boundary between CLI and core  
+**Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.  
 **Role:** Add privilege checks; query database for defaults; delegate to `core/`; export with `__all__`
+
+---
+
+## STRUCTURE
+
+```
+src/mvmctl/api/
+├── __init__.py       # Package exports (lazy imports)
+├── vms.py           # VM lifecycle: create, remove, list, ssh, logs, cleanup (2,279 lines)
+├── network.py       # Network management: create, remove, IP allocation, iptables (1,036 lines)
+├── kernel.py        # Kernel fetch/build orchestration (640 lines)
+├── assets.py        # Binary/asset management (491 lines)
+├── image.py         # Image fetch/import orchestration (478 lines)
+├── cache.py         # Cache pruning operations (438 lines)
+├── host.py          # Host init/reset/clean/prune (549 lines)
+├── vm_config.py     # VM config file handling (328 lines)
+├── metadata.py      # Metadata query wrappers (209 lines)
+├── network_sync.py  # iptables rule synchronization (201 lines)
+├── keys.py          # SSH key management (161 lines)
+├── config.py        # Config with DB resolution (129 lines)
+└── init.py          # Database initialization (21 lines)
+```
+
+**Total: 6,973 lines across 14 modules**
+
+---
 
 ## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
 
@@ -25,115 +51,278 @@
 **API MUST:**
 - **Query `MVMDatabase`** to resolve `None` for DB-backed params before calling core
 - **Call `check_privileges()`** before any privileged operation
-- **Call `_prompt_missing_assets()`** when DB-backed assets are not found
 - **Pass ALL params explicitly to core** — **NEVER pass `None` to Core for required params**
 - **NOT use `DEFAULT_*` constants** for DB-backed defaults — CLI sends pre-resolved values for those
 
 **DB-backed params API resolves** (when CLI passes `None`):
-- `image` → `db.get_default_image()` or `db.get_image_by_os_slug(slug)` → `Path`
-- `kernel` → `db.get_default_kernel()` or lookup by version/arch/type → `Path | None`
-- `binary` → `db.get_default_binary("firecracker")` → `Path`
-- `network` → `db.get_default_network()` or `db.get_network_by_name(name)` → `NetworkConfig`
-
-**Network special case**: If network not found by name but subnet hint available → auto-create (no prompt needed).
+- `image` → `db.get_default_image()` or `db.get_image_by_os_slug(slug)` → Image record
+- `kernel` → `db.get_default_kernel()` or lookup by version/arch/type → Kernel record
+- `binary` → `db.get_default_binary("firecracker")` → Binary record
+- `network` → `db.get_default_network()` or `db.get_network_by_name(name)` → NetworkConfig
 
 **Violation = CI failure.** Enforced by `tests/layer_compliance/test_imports.py` and `tests/layer_compliance/test_privilege.py`.
 
-## STRUCTURE
+---
+
+## ORCHESTRATION ARCHITECTURE (The Burger Analogy)
+
+Think of the system as a burger:
 
 ```
-src/mvmctl/api/
-├── vms.py       # VM operations: create, remove, list, get, ssh, logs, cleanup
-├── assets.py    # Image/kernel/binary operations (391 lines)
-├── host.py      # Host init/reset/status/clean + default_cache_dir()
-├── network.py   # Network create/remove/list/inspect
-├── keys.py      # SSH key add/create/list/remove
-├── config.py    # Config get/set/dump
-├── vm_config.py # VM config file load/merge/save
-├── cache.py     # Cache management API
-├── init.py      # Init/onboarding API
-└── metadata.py  # Metadata query API
+user input → CLI (validate, apply constants defaults)
+               ↓
+           API Layer (the "bun" — orchestrates everything)
+           ├── calls core/network.py (setup network)
+           ├── calls core/vm_lifecycle.py (start VM)
+           ├── calls core/metadata.py (store metadata)
+           ├── calls core/cloud_init.py (write cloud-init)
+           └── returns result to CLI
+               ↑
+           Core Modules (isolated "ingredients")
+           Each module does ONE thing, receives explicit inputs,
+           does NOT import from other core/ modules.
 ```
 
-## ORCHESTRATION PATTERN (API is the Bun)
+**Key principle**: Core modules are **ISOLATED**. They do not call each other. The **API layer is the ONLY entity** that calls multiple core modules and sequences them together.
 
-The API layer is the **SOLE orchestrator** of core modules. It sequences multiple core function calls together to implement complete workflows:
+### Orchestration Patterns
+
+#### 1. Full Orchestration (vms.create_vm, network.create_network)
 
 ```python
 # api/vms.py — orchestration example
-from mvmctl.core.network_manager import ensure_default_network
-from mvmctl.core.vm_lifecycle import create_vm as _core_create_vm
-from mvmctl.core.metadata import register_vm_metadata
-from mvmctl.core.cloud_init import write_cloud_init
-from mvmctl.core.host_privilege import check_privileges
-
-def create_vm(name: str, image: str, ...) -> VMInstance:
-    check_privileges("/usr/sbin/ip")           # ← privilege check HERE
+def create_vm(input: VMCreateInput, ...) -> VMInstance:
+    # 1. Privilege check (API responsibility)
+    check_privileges_interactive("/usr/sbin/ip", f"create VM '{name}'")
     
-    # Sequence core modules (isolated ingredients)
-    ensure_default_network()                   # ← core/network_manager
-    vm = _core_create_vm(name, image, ...)     # ← core/vm_lifecycle
-    register_vm_metadata(vm)                   # ← core/metadata (API's job to persist)
-    write_cloud_init(vm)                       # ← core/cloud_init
+    # 2. DB resolution for defaults (API responsibility)
+    if image is None and image_path is None:
+        db = MVMDatabase()
+        default_image = db.get_default_image()
+        ...
     
-    return vm  # ← return to CLI for formatting
-
-__all__ = ["create_vm", "remove_vm", ...]
+    # 3. Sequence core modules (isolated ingredients)
+    net_config = get_network(network_name)           # api/network
+    resolved_image_path = resolve_image_multi_strategy(image)  # api/assets
+    
+    # 4. Core operations (no cross-core imports)
+    setup_nocloud_input_chain()                      # core/firewall
+    create_tap(tap_name, bridge=bridge)              # core/network
+    
+    # 5. Metadata persistence (API responsibility)
+    manager.register(vm_instance, binary_id)         # core/vm_manager
+    
+    return vm_instance
 ```
 
-**Key behaviors:**
-- API calls multiple core modules in sequence — this is the **ONLY place** where cross-core orchestration happens
-- Core modules are **ISOLATED** — they do NOT import from each other
-- API handles metadata persistence (calling `core/metadata.py`) — this is API's responsibility, not Core's
-- Only ops that touch network/host call `check_privileges()` — not all API functions do
-- Return core's return value directly; never reformat output
-- `api/vms.py`: only `cleanup_vms` calls `check_privileges`; `create_vm`, `remove_vm` do NOT
-- `api/vm_config.py` has no `__all__` and is not re-exported from `api/__init__.py`
-
-## DELEGATION PATTERN
+#### 2. Simple Delegation (keys, config)
 
 ```python
-# api/network.py — privilege-checked example
-from mvmctl.core.network_manager import create_network as _core_create_network
-from mvmctl.core.host_privilege import check_privileges
-
-def create_network(name: str, ...) -> NetworkConfig:
-    check_privileges("/usr/sbin/ip")       # ← privilege check HERE, not in CLI
-    return _core_create_network(name, ...)
-
-__all__ = ["create_network", "remove_network", ...]
+# api/keys.py — delegation example
+def add_key(name: str, pub_key_path: str | Path, ...) -> KeyInfo:
+    # Validation at API layer
+    if not path_obj.exists():
+        raise MVMKeyError(f"File not found: {pub_key_path}")
+    
+    # Direct delegation to core
+    result = _core_add_key(name, pub_key_path, overwrite)
+    
+    # Audit logging (API responsibility)
+    log_audit("key.add", f"name={result.name}")
+    
+    return result
 ```
+
+#### 3. Atomic DB + System Operations (network iptables)
+
+```python
+# api/network.py — atomic operation example
+def create_iptables_rule(rule: IPTablesRule, ...) -> IPTablesRule:
+    # Step 1: Create iptables rule via Core
+    result = tracker.ensure_rule(...)
+    
+    # Step 2: Write to database (API responsibility)
+    try:
+        stored_rule = db.record_iptables_rule(result.rule)
+    except Exception as e:
+        # Rollback: Delete the iptables rule
+        rollback_result = tracker.remove_rule(result.rule)
+        raise NetworkError(f"Failed to store rule: {e}")
+    
+    return stored_rule
+```
+
+---
 
 ## API → CORE MAPPING
 
-| API function | Core module | Notes |
-|---|---|---|
-| `vms.create_vm()` | `vm_lifecycle.create_vm()` | direct (no privilege check) |
-| `vms.list_vms()` | `vm_manager.VMManager.list_all()` | filters by `include_stopped` |
-| `vms.remove_vm()` | `vm_lifecycle.remove_vm()` | direct |
-| `vms.ssh_vm()` | `ssh.connect_to_vm()` | direct |
-| `assets.fetch_image()` | `image.fetch_image()` | direct pass-through |
-| `assets.fetch_binary()` | `binary_manager.fetch_binary()` | direct |
-| `assets.build_kernel_pipeline()` | `kernel.build_kernel_pipeline()` | direct |
-| `vms.cleanup_vms()` | `vm_manager.VMManager` + `vm_lifecycle` | ONLY vm op with privilege check |
-| `network.create_network()` | `network_manager.create_network()` | adds privilege check |
-| `network.remove_network()` | `network_manager.remove_network()` | adds privilege check |
-| `network.ensure_default_network()` | `network_manager.ensure_default_network()` | direct |
-| `host.init_host()` | `host_setup.init_host()` | adds privilege check |
-| `vm_config.load_vm_config_file()` | `models/vm_config_file.py` | deserialization only |
-| `vm_config.merge_cli_overrides()` | `models/vm_config_file.py` | merges CLI flags into config |
+### VM Operations (vms.py)
 
-## VM CONFIG FILE (vm_config.py)
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| `create_vm()` | vm_lifecycle, network, cloud_init, firewall, metadata | **Orchestration** |
+| `remove_vm()` | vm_process, network, firewall, mvm_db | **Orchestration** |
+| `start_vm()`, `stop_vm()`, `pause_vm()`, `resume_vm()` | vm_process, vm_manager, firecracker | **Delegation** |
+| `snapshot_vm()`, `load_snapshot()` | firecracker | **Direct** |
+| `ssh_vm()` | ssh | **Direct** |
+| `get_logs()` | logs | **Direct** |
+| `cleanup_vms()` | vm_manager, network, firewall | **Orchestration** |
+| `list_vms()`, `get_vm()` | vm_manager, vm_monitor | **Delegation** |
+| `inspect_vm()`, `export_vm_config()` | vm_manager, metadata | **Orchestration** |
 
-`--output-config` and `--import-config` flags in `mvm vm create` are handled here:
+### Network Operations (network.py)
 
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| `create_network()`, `remove_network()` | network, network_manager, mvm_db | **Orchestration** |
+| `ensure_default_network()`, `restore_networks()` | network, network_manager | **Orchestration** |
+| `list_networks()`, `get_network()` | mvm_db | **DB query** |
+| `allocate_network_ip()`, `release_network_ip()` | network_manager, mvm_db | **Delegation + DB** |
+| `create_iptables_rule()`, `remove_iptables_rule()` | iptables_tracker, mvm_db | **Atomic operation** |
+| `sync_iptables_rules()` | iptables_tracker, mvm_db | **Synchronization** |
+
+### Asset Operations (assets.py)
+
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| `fetch_binary()` | binary_manager, metadata, mvm_db | **Orchestration** |
+| `register_binary()`, `ensure_default_binary()` | metadata, mvm_db | **DB operations** |
+| `get_binary_path()`, `list_local_versions()` | binary_manager, mvm_db | **DB + Core** |
+| `set_active_version()`, `remove_version()` | binary_manager, mvm_db | **Orchestration** |
+| `resolve_image_*()` | metadata | **Delegation** |
+
+### Image Operations (image.py)
+
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| `fetch_image_and_register()`, `import_image_and_register()` | image, metadata | **Orchestration** |
+| `register_fetched_image()` | metadata | **Delegation** |
+| `set_default_image()`, `remove_image()` | metadata | **Delegation** |
+
+### Kernel Operations (kernel.py)
+
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| `fetch_kernel()` | kernel | **Orchestration** |
+| `register_fetched_kernel()` | metadata, kernel | **Orchestration** |
+| `list_kernels()`, `set_default_kernel()` | kernel, metadata | **Delegation** |
+| `resolve_kernel_path()`, `remove_kernel()` | metadata, vm_manager | **Delegation** |
+
+### Host Operations (host.py)
+
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| `init_host()` | host_setup, host_privilege, network, mvm_db | **Orchestration** |
+| `restore_host()`, `clean_host()`, `reset_host()`, `prune_host()` | host_state, network, mvm_db | **Orchestration** |
+| `get_host_state()` | host_state, mvm_db | **Delegation** |
+
+### Key Operations (keys.py)
+
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| All functions | key_manager | **Delegation** (with validation) |
+
+### Config Operations (config.py)
+
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| `get_firecracker_config()`, `get_defaults_config()` | config_state, mvm_db | **DB + Delegation** |
+| `set_defaults_value()` | config_state, mvm_db | **DB update + Delegation** |
+| Other functions | config, user_config | **Direct pass-through** |
+
+### Cache Operations (cache.py)
+
+| API Function | Pattern |
+|--------------|---------|
+| `prune_vms()`, `prune_networks()`, `prune_images()`, `prune_kernels()` | **Orchestration** |
+| `prune_all()` | **Master orchestration** |
+
+### Metadata Operations (metadata.py)
+
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| All functions | metadata, mvm_db | **Delegation / DB query** |
+
+### Network Sync Operations (network_sync.py)
+
+| API Function | Core Module(s) | Pattern |
+|--------------|----------------|---------|
+| `IPTablesSynchronizer.sync_network()` | iptables_tracker, mvm_db, network | **Orchestration** |
+| `IPTablesSynchronizer.sync_all_networks()` | mvm_db | **DB query + loop** |
+
+---
+
+## PRIVILEGE CHECKS
+
+Only these API functions call `check_privileges_interactive()`:
+
+| Module | Functions |
+|--------|-----------|
+| `vms.py` | `create_vm()`, `remove_vm()`, `cleanup_vms()` |
+| `network.py` | `create_network()`, `remove_network()` |
+| `host.py` | `init_host()`, `restore_host()`, `clean_host()`, `reset_host()`, `prune_host()` |
+| `cache.py` | `prune_vms()`, `prune_networks()`, `prune_all()` |
+
+**Pattern:**
 ```python
-base = load_vm_config_file(Path("myvm.json"))
-merged = merge_cli_overrides(base, name="override-name", vcpus=4)
-save_vm_config_file(config, Path("out.json"))
+from mvmctl.api.host import check_privileges_interactive
+check_privileges_interactive("/usr/sbin/ip", "operation description")
 ```
 
-The config file JSON includes a `firecracker_config` key with the Firecracker boot JSON embedded.
+---
+
+## DEFAULT VALUE POLICY
+
+The **API layer MUST NOT have default values in function parameters**. All API functions must receive explicit values from the CLI layer.
+
+### Database Query Responsibility (CRITICAL RULE)
+
+**The API layer is EXCLUSIVELY and SOLELY responsible for all database queries.**
+
+| Layer | Database Access Policy |
+|-------|----------------------|
+| **CLI** | **NO database queries** — passes `None` or explicit values |
+| **API** | **MUST query database** when CLI passes `None` for DB-backed values |
+| **Core** | **NO database queries** — receives explicit values from API |
+
+### Example: Correct API-to-Core Data Flow
+
+**Step 1: CLI passes None (correct)**
+```python
+# cli/vm.py (CORRECT)
+def create(
+    image: Optional[str] = typer.Option(None, "--image"),
+    kernel: Optional[str] = typer.Option(None, "--kernel"),
+):
+    # image/kernel are DB-backed — pass None to API for resolution
+    create_vm(image=image, kernel=kernel, ...)
+```
+
+**Step 2: API queries DB and passes explicit values (correct)**
+```python
+# api/vms.py (CORRECT)
+def create_vm(image: Optional[str] = None, ...) -> VMInstance:
+    db = MVMDatabase()
+    
+    # Resolve DB-backed defaults
+    if image is None:
+        image_entry = db.get_default_image()
+        image = image_entry.os_slug  # ✅ Now explicit
+    
+    # Pass EXPLICIT values to Core
+    return _core_create_vm(image=image, ...)
+```
+
+**Step 3: Core receives explicit values (correct)**
+```python
+# core/vm_lifecycle.py (CORRECT)
+def create_vm(image: str, ...) -> VMInstance:
+    # NO database queries — values are explicit
+    # Just execute business logic
+    ...
+```
+
+---
 
 ## ANTI-PATTERNS
 
@@ -143,211 +332,29 @@ The config file JSON includes a `firecracker_config` key with the Firecracker bo
 | Business logic beyond privilege + delegation | Move to `core/` |
 | Skip `__all__` | Always declare public surface |
 | Import from `cli/` | One-way dependency: `cli` → `api` → `core` |
-| **Default values in function parameters** | API receives explicit values from CLI; never use `def func(arg=DEFAULT_VALUE)` |
+| **Default values in function parameters** | API receives explicit values from CLI |
+| Core module importing another core module | API orchestrates; core stays isolated |
 
-## DEFAULT VALUE POLICY
+---
 
-The **API layer MUST NOT have default values in function parameters**. All API functions must receive explicit values from the CLI layer. 
-
-### Database Query Responsibility (CRITICAL RULE)
-
-**The API layer is EXCLUSIVELY and SOLELY responsible for all database queries.** No exceptions:
-
-| Layer | Database Access Policy | Violation Consequence |
-|-------|----------------------|----------------------|
-| **CLI** | **NO database queries** — passes `None` or explicit values | Architectural breach — CLI is a client, not a data resolver |
-| **API** | **MUST query database** when CLI passes `None` for DB-backed values | API owns the database boundary exclusively |
-| **Core** | **NO database queries** — receives explicit values from API | Core operates on explicit inputs only |
-
-### Database-Backed Defaults Resolution Flow
-
-When a default value lives in the database (e.g., default image, kernel, binary, network), the correct flow is:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLI Layer                                │
-│  1. Parse typer option with default=None                        │
-│  2. Pass None to API if user didn't specify                     │
-│  3. NO database queries — ever                                  │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         API Layer                                │
-│  1. Receive None from CLI                                       │
-│  2. Query MVMDatabase to resolve default                      │
-│  3. Pass EXPLICIT value to Core (never None for required)     │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         Core Layer                               │
-│  1. Receive explicit value from API                             │
-│  2. Execute business logic                                       │
-│  3. NO database queries — ever                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Example: Correct API-to-Core Data Flow
-
-**Step 1: CLI passes None (correct)**
-```python
-# cli/vm.py (CORRECT)
-@app.command()
-def create(
-    image: Optional[str] = typer.Option(None, "--image"),
-    kernel: Optional[str] = typer.Option(None, "--kernel"),
-    vcpus: Optional[int] = typer.Option(None, "--vcpus"),  # Constants-backed
-):
-    # vcpus resolved from constants in CLI, passed explicitly
-    defaults = _get_vm_defaults()
-    effective_vcpus = vcpus if vcpus is not None else defaults.vcpu_count
-    
-    # image/kernel are DB-backed — pass None to API for resolution
-    create_vm(
-        image=image,      # ✅ Passes None directly — API will resolve
-        kernel=kernel,    # ✅ Passes None directly — API will resolve
-        vcpus=effective_vcpus,  # ✅ Already resolved from constants
-    )
-```
-
-**Step 2: API queries DB and passes explicit values (correct)**
-```python
-# api/vms.py (CORRECT)
-from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.core.host_privilege import check_privileges
-
-def create_vm(
-    image: Optional[str] = None,
-    kernel: Optional[str] = None,
-    vcpus: int = None,  # ✅ Required param — must receive explicit value
-    ...
-) -> VMInstance:
-    db = MVMDatabase()
-    
-    # Resolve DB-backed defaults
-    if image is None:
-        image_entry = db.get_default_image()
-        if image_entry is None:
-            raise ImageError("No default image set. Run: mvm image fetch <os>")
-        image = image_entry[0]  # ✅ Now explicit
-    
-    if kernel is None:
-        kernel_entry = db.get_default_kernel()
-        kernel = kernel_entry[0] if kernel_entry else None  # ✅ Now explicit (or None if optional)
-    
-    # vcpus is required — must NOT be None when reaching Core
-    if vcpus is None:
-        raise ValueError("vcpus must be provided")  # ✅ API validates required params
-    
-    # Privilege check before privileged operation
-    check_privileges(binary_path)  # ✅ API does privilege check
-    
-    # Pass EXPLICIT values to Core — never None for required params
-    return _core_create_vm(
-        image=image,      # ✅ Explicit Path
-        kernel=kernel,    # ✅ Explicit Path | None (if optional)
-        vcpus=vcpus,      # ✅ Explicit int
-        ...
-    )
-```
-
-**Step 3: Core receives explicit values (correct)**
-```python
-# core/vm_lifecycle.py (CORRECT)
-def create_vm(
-    image: Path,        # ✅ Explicit Path — NOT Optional
-    kernel: Optional[Path],  # ✅ Explicit Path | None (if optional)
-    vcpus: int,         # ✅ Explicit int — NOT Optional
-    ...
-) -> VMInstance:
-    # NO database queries — values are explicit
-    # NO default resolution — API already resolved
-    # Just execute business logic with provided values
-    ...
-```
-
-### Example: INCORRECT Patterns (DO NOT USE)
-
-**INCORRECT — CLI resolves database default:**
-```python
-# cli/vm.py (WRONG)
-def _resolve_default_image() -> str | None:
-    from mvmctl.api.metadata import get_default_image_entry
-    entry = get_default_image_entry()  # ❌ CLI should NOT trigger DB queries
-    return entry[0] if entry else None
-
-@app.command()
-def create(image: Optional[str] = typer.Option(None, "--image")):
-    effective = image or _resolve_default_image()  # ❌ CLI resolving DB default
-    create_vm(image=effective)  # Passes resolved value
-```
-
-**INCORRECT — API passes None to Core for required param:**
-```python
-# api/vms.py (WRONG)
-def create_vm(image: Optional[str] = None, ...) -> VMInstance:
-    # ❌ Forgetting to resolve image before passing to Core
-    check_privileges(...)
-    return _core_create_vm(image=image, ...)  # ❌ Passing None to Core!
-
-# core/vm_lifecycle.py receives None and fails or behaves unexpectedly
-```
-
-**INCORRECT — Core queries database:**
-```python
-# core/vm_manager.py (WRONG)
-def list_all():
-    db = MVMDatabase()  # ❌ Core should NOT instantiate MVMDatabase
-    vms = db.list_vms()   # ❌ Core should NOT query DB
-    ...
-```
-
-### What Each Layer Must Do
-
-**The CLI layer is responsible for:**
-1. Using `None` as typer option defaults for DB-backed values
-2. Resolving `DEFAULT_*` constants for constants-backed values
-3. Passing user-provided values OR `None` to API
-4. **NEVER querying the database**
-
-**The API layer is responsible for:**
-1. **Querying the database** when CLI passes `None` for DB-backed values (image, kernel, binary, network)
-2. Adding `check_privileges()` before privileged operations
-3. **Passing explicit values to Core** — **NEVER pass `None` to Core for required parameters**
-4. Validating that required parameters are resolved before calling Core
-
-**The Core layer receives:**
-1. **Explicit values from API** — **never `None` for required parameters**
-2. **No database queries** — Core has no DB access except through `mvm_db.py` interface
-3. Pure business logic execution on explicit inputs
-
-### Why This Matters
-
-API functions should never receive fallback defaults because:
-- It violates the layer boundary (CLI passes `None`, API resolves from DB)
-- It creates hidden behavior that bypasses user configuration
-- It makes testing harder by introducing implicit state
-- It duplicates default logic that should be centralized in API layer
-
-**SQLite (`$MVM_CACHE_DIR/mvmdb.db`) is the canonical source of truth** for all binary/kernel/image/network defaults. The API layer is the **ONLY** layer that should query SQLite.
-
-### Verification Checklist
+## VERIFICATION CHECKLIST
 
 Before submitting any API change:
-- [ ] **NO default values in API function parameters** (e.g., `def func(arg=DEFAULT)` is forbidden)
+- [ ] **NO default values in API function parameters**
 - [ ] API functions accept `Optional[T]` for DB-backed defaults
-- [ ] When CLI passes `None`, API queries database via `mvmctl.core.mvm_db.MVMDatabase`
+- [ ] When CLI passes `None`, API queries database via `MVMDatabase`
 - [ ] **API never passes `None` to Core for required parameters**
-- [ ] API adds `check_privileges()` before privileged operations
+- [ ] API adds `check_privileges_interactive()` before privileged operations
 - [ ] All database queries happen in API layer, never in CLI or Core
+- [ ] All core modules remain isolated (no cross-core imports)
 
 ### Enforcement
 
 CI checks will reject PRs containing:
 - Default values in API function parameters
-- CLI code that queries the database (even via API wrappers)
-- Core code that queries the database (except `mvm_db.py`)
+- CLI code that queries the database
+- Core code that queries the database (except `mvm_db.py` interface)
 - API functions that pass `None` to Core for required parameters
+- Core modules that import from other core modules
 
 **NO EXCEPTIONS. NO WORKAROUNDS. NO DISCUSSION.**
