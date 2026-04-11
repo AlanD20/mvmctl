@@ -753,6 +753,14 @@ class MVMDatabase:
             ).fetchall()
         return [NetworkLease(**dict(row)) for row in rows]
 
+    def list_leases_for_vm(self, network_id: str, vm_id: str) -> list[NetworkLease]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM network_leases WHERE network_id = ? AND vm_id = ? ORDER BY leased_at",
+                (network_id, vm_id),
+            ).fetchall()
+        return [NetworkLease(**dict(row)) for row in rows]
+
     def acquire_lease(
         self, network_id: str, ipv4: str, vm_id: Optional[str] = None
     ) -> NetworkLease:
