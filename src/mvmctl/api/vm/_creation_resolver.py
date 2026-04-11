@@ -79,8 +79,8 @@ class VMCreationResolver:
 
     def _resolve_image(self, input: VMCreateInput) -> tuple[Path, str, str | None, str | None]:
         """Resolve image to path, ID, fs_uuid, and fs_type."""
+        from mvmctl.api._internal._resolvers._image_resolver import resolve_image_multi_strategy
         from mvmctl.api.assets import resolve_image_fs_type, resolve_image_fs_uuid
-        from mvmctl.api.vms import resolve_image_multi_strategy
 
         if input.image_path is not None:
             image_path = input.image_path
