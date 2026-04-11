@@ -396,12 +396,11 @@ def _detect_init_system_and_enable_ssh(guestfs_handle: Any, rootfs_path: Path) -
                     break
 
             if ssh_service_path:
+                service_name = ssh_service_path.split("/")[-1]
+                target = f"/etc/systemd/system/multi-user.target.wants/{service_name}"
                 guestfs_handle.mkdir_p("/etc/systemd/system/multi-user.target.wants")
-                guestfs_handle.ln_s(
-                    ssh_service_path,
-                    "/etc/systemd/system/multi-user.target.wants/"
-                    f"{ssh_service_path.split('/')[-1]}",
-                )
+                if not guestfs_handle.exists(target):
+                    guestfs_handle.ln_s(ssh_service_path, target)
                 logger.info("Enabled SSH service (systemd) for %s", rootfs_path.name)
                 return True
             logger.warning("SSH service unit not found in %s", rootfs_path.name)
@@ -410,11 +409,13 @@ def _detect_init_system_and_enable_ssh(guestfs_handle: Any, rootfs_path: Path) -
         if init_system == "openrc":
             guestfs_handle.mkdir_p("/etc/runlevels/default")
             if guestfs_handle.exists("/etc/init.d/sshd"):
-                guestfs_handle.ln_s("/etc/init.d/sshd", "/etc/runlevels/default/sshd")
+                if not guestfs_handle.exists("/etc/runlevels/default/sshd"):
+                    guestfs_handle.ln_s("/etc/init.d/sshd", "/etc/runlevels/default/sshd")
                 logger.info("Enabled SSH service (OpenRC) for %s", rootfs_path.name)
                 return True
             if guestfs_handle.exists("/etc/init.d/ssh"):
-                guestfs_handle.ln_s("/etc/init.d/ssh", "/etc/runlevels/default/ssh")
+                if not guestfs_handle.exists("/etc/runlevels/default/ssh"):
+                    guestfs_handle.ln_s("/etc/init.d/ssh", "/etc/runlevels/default/ssh")
                 logger.info("Enabled SSH service (OpenRC) for %s", rootfs_path.name)
                 return True
             logger.warning("SSH init script not found for OpenRC in %s", rootfs_path.name)
@@ -423,7 +424,9 @@ def _detect_init_system_and_enable_ssh(guestfs_handle: Any, rootfs_path: Path) -
         if guestfs_handle.exists("/etc/init.d/ssh"):
             for level in ["2", "3", "4", "5"]:
                 guestfs_handle.mkdir_p(f"/etc/rc{level}.d")
-                guestfs_handle.ln_s("../init.d/ssh", f"/etc/rc{level}.d/S02ssh")
+                link_path = f"/etc/rc{level}.d/S02ssh"
+                if not guestfs_handle.exists(link_path):
+                    guestfs_handle.ln_s("../init.d/ssh", link_path)
             logger.info("Enabled SSH service (sysvinit) for %s", rootfs_path.name)
             return True
 
@@ -747,6 +750,31 @@ def _setup_rootfs_with_guestfs(
 
             # override hostname
             guestfs_handle._g.write("/etc/hostname", hostname)
+
+            # update /etc/hosts for proper hostname resolution
+            hosts_content = ""
+            if guestfs_handle._g.exists("/etc/hosts"):
+                hosts_content = guestfs_handle._g.read_file("/etc/hosts")
+                if isinstance(hosts_content, bytes):
+                    hosts_content = hosts_content.decode("utf-8", errors="replace")
+
+            lines = hosts_content.splitlines() if hosts_content else []
+            new_lines = []
+            found_host_entry = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("#") or not stripped:
+                    new_lines.append(line)
+                elif stripped.startswith("127.0.1.1"):
+                    new_lines.append(f"127.0.1.1\t{hostname}")
+                    found_host_entry = True
+                else:
+                    new_lines.append(line)
+
+            if not found_host_entry:
+                new_lines.append(f"127.0.1.1\t{hostname}")
+
+            guestfs_handle._g.write("/etc/hosts", "\n".join(new_lines) + "\n")
             guestfs_handle._g.sync()
         finally:
             try:
