@@ -6,6 +6,8 @@ import logging
 import os
 import shutil
 import signal
+import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,6 +16,7 @@ from mvmctl.constants import (
     CONST_SIGNAL_EXIT_CODE_BASE,
     DEFAULT_FC_EXITCODE_FILENAME,
 )
+from mvmctl.core.network import teardown_nat
 from mvmctl.exceptions import NetworkError
 
 if TYPE_CHECKING:
@@ -322,4 +325,4 @@ class VMBulkCleanupContext:
             pass
 
 
-__all__ = ["VMRemovalContext", "VMBulkCleanupContext"]
+__all__ = ["VMRemovalContext", "VMBulkCleanupContext", "teardown_nat", "time", "subprocess"]

@@ -22,13 +22,17 @@ from mvmctl.api.vm._data import (
 
 # Delegation functions (stop, pause, resume, ssh, logs, console, etc.)
 from mvmctl.api.vm._delegates import (
+    _pause_process,
+    _resume_process,
     attach_console,
     check_escape_sequence,
     connect_to_relay,
+    connect_to_vm,
     disconnect_from_relay,
     get_console_state,
     get_logs,
     get_vm,
+    graceful_shutdown,
     kill_console,
     load_snapshot,
     pause_vm,
@@ -36,6 +40,7 @@ from mvmctl.api.vm._delegates import (
     reboot_vm,
     resume_vm,
     send_console_input,
+    show_logs,
     snapshot_vm,
     ssh_vm,
     start_vm,
@@ -50,6 +55,9 @@ from mvmctl.api.vm._registry import (
     remove_vm,
 )
 
+# Removal helpers (exported for test patching)
+from mvmctl.api.vm._removal import subprocess, teardown_nat, time
+
 # Resolution wrappers (image/kernel path resolution)
 from mvmctl.api.vm._resolve import (
     resolve_image_id_path,
@@ -61,8 +69,14 @@ from mvmctl.api.vm._resolve import (
     resolve_vm_selector,
 )
 
+# Re-export FirecrackerClient for test patching backward compatibility
+from mvmctl.core.firecracker import FirecrackerClient
+
 # Re-export VMManager for backward compatibility
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
+
+# Re-export _write_pid_file for test patching backward compatibility
+from mvmctl.core.vm_process import _write_pid_file
 
 __all__ = [
     # Registry operations
@@ -90,6 +104,15 @@ __all__ = [
     "disconnect_from_relay",
     "read_console_output",
     "send_console_input",
+    # Exported for test patching
+    "graceful_shutdown",
+    "show_logs",
+    "connect_to_vm",
+    "_pause_process",
+    "_resume_process",
+    "teardown_nat",
+    "subprocess",
+    "time",
     # Data gathering functions
     "list_vms",
     "inspect_vm",
@@ -109,4 +132,7 @@ __all__ = [
     # VMManager exports
     "VMManager",
     "get_vm_manager",
+    "FirecrackerClient",
+    # Internal exports for test patching
+    "_write_pid_file",
 ]

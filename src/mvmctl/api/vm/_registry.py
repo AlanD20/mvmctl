@@ -44,7 +44,7 @@ from mvmctl.core.network import (
     setup_nat,
 )
 from mvmctl.core.vm_lifecycle import _secure_mkdir_vm
-from mvmctl.core.vm_manager import VMManager, get_vm_manager
+from mvmctl.core.vm_manager import VMManager
 from mvmctl.exceptions import (
     CloudInitError,
     MVMError,
@@ -103,7 +103,9 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 f"Invalid MAC address format: {resolved.mac!r}. Expected format: XX:XX:XX:XX:XX:XX"
             )
 
-    manager = vm_manager or get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = vm_manager or mvmctl.api.vm.get_vm_manager()
     if manager.count_vms() >= MAX_VMS:
         raise MVMError(
             f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
@@ -489,7 +491,9 @@ def remove_vm(
 
     check_privileges_interactive("/usr/sbin/ip", f"remove VM '{name}'")
 
-    manager = vm_manager or get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = vm_manager or mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
@@ -553,7 +557,9 @@ def cleanup_vms(
 
     check_privileges_interactive("/usr/sbin/ip", "cleanup VMs")
 
-    manager = vm_manager or get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = vm_manager or mvmctl.api.vm.get_vm_manager()
     vms = manager.list_all()
 
     targets = vms if all_vms else [v for v in vms if v.status != VMStatus.RUNNING]

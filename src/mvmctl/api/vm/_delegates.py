@@ -22,7 +22,7 @@ from mvmctl.core.console import (
 from mvmctl.core.firecracker import FirecrackerClient, get_vm_socket_path
 from mvmctl.core.logs import show_logs
 from mvmctl.core.ssh import connect_to_vm
-from mvmctl.core.vm_manager import VMManager, get_vm_manager
+from mvmctl.core.vm_manager import VMManager
 from mvmctl.core.vm_process import (
     graceful_shutdown,
 )
@@ -39,6 +39,7 @@ from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_vm_dir_by_hash
 
 __all__ = [
+    # Core delegation functions
     "stop_vm",
     "pause_vm",
     "resume_vm",
@@ -59,6 +60,12 @@ __all__ = [
     "disconnect_from_relay",
     "read_console_output",
     "send_console_input",
+    # Exported for test patching
+    "graceful_shutdown",
+    "show_logs",
+    "connect_to_vm",
+    "_pause_process",
+    "_resume_process",
 ]
 
 
@@ -73,7 +80,9 @@ def stop_vm(name: str, force: bool = False) -> None:
         VMNotFoundError: If VM not found
         MVMError: If VM is not running or stop fails
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
@@ -81,7 +90,7 @@ def stop_vm(name: str, force: bool = False) -> None:
         raise MVMError(f"VM '{name}' is not running (current state: {vm.status.value})")
     manager.update_status(name, VMStatus.STOPPING)
     try:
-        graceful_shutdown(vm.pid, vm.api_socket_path, force=force)
+        mvmctl.api.vm.graceful_shutdown(vm.pid, vm.api_socket_path, force=force)
         manager.update_status(name, VMStatus.STOPPED)
     except Exception as exc:
         manager.update_status(name, VMStatus.ERROR)
@@ -96,9 +105,11 @@ def pause_vm(name: str) -> None:
 
     Raises:
         VMNotFoundError: If VM not found
-        MVMError: If VM is not running or has no API socket
+        MVMError: If VM is not running
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
@@ -122,9 +133,11 @@ def resume_vm(name: str) -> None:
 
     Raises:
         VMNotFoundError: If VM not found
-        MVMError: If VM is not paused or has no API socket
+        MVMError: If VM is not paused
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
@@ -161,7 +174,9 @@ def ssh_vm(
         VMNotFoundError: If VM not found
         MVMError: If VM has no IP address
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if vm is None:
         raise VMNotFoundError(f"VM '{name}' not found")
@@ -196,7 +211,9 @@ def get_logs(
     Returns:
         List of log lines
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     vm_hash = vm.id if vm is not None else name
     return show_logs(
@@ -220,7 +237,9 @@ def attach_console(name: str) -> ConsoleInfo:
         VMNotFoundError: If the VM is not found.
         MVMError: If no console relay is running for the VM.
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if vm is None:
         raise VMNotFoundError(f"VM '{name}' not found")
@@ -246,7 +265,9 @@ def kill_console(name: str) -> bool:
     Raises:
         VMNotFoundError: If VM not found
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if vm is None:
         raise VMNotFoundError(f"VM '{name}' not found")
@@ -268,7 +289,9 @@ def get_console_state(name: str) -> ConsoleState:
     Raises:
         VMNotFoundError: If the VM is not found.
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if vm is None:
         raise VMNotFoundError(f"VM '{name}' not found")
@@ -284,7 +307,9 @@ def get_console_state(name: str) -> ConsoleState:
 
 def get_vm(name: str, vm_manager: VMManager | None = None) -> VMInstance | None:
     """Return the VMInstance for the given name, or None if not found."""
-    manager = vm_manager or get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = vm_manager or mvmctl.api.vm.get_vm_manager()
     return manager.get(name)
 
 
@@ -321,6 +346,7 @@ def start_vm(name: str) -> None:
     import subprocess
     import time
 
+    import mvmctl.api.vm
     from mvmctl.constants import (
         DEFAULT_FC_API_SOCKET_FILENAME,
         DEFAULT_FC_CONFIG_FILENAME,
@@ -332,7 +358,7 @@ def start_vm(name: str) -> None:
     from mvmctl.core.vm_process import _write_pid_file
     from mvmctl.models import VMStatus
 
-    manager = get_vm_manager()
+    manager = mvmctl.api.vm.get_vm_manager()
     vm = manager.get(name)
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")

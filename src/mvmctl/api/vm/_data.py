@@ -17,7 +17,7 @@ from mvmctl.constants import (
     DEFAULT_FC_LOG_FILENAME,
 )
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.core.vm_manager import VMManager, get_vm_manager
+from mvmctl.core.vm_manager import VMManager
 from mvmctl.core.vm_monitor import reconcile_vm
 from mvmctl.exceptions import MVMError, VMNotFoundError
 from mvmctl.models import VMInstance, VMStatus
@@ -63,7 +63,9 @@ def resolve_vm_targets(
     Returns:
         ResolveVMTargetsResult with resolved targets, error messages, and exit code.
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
     targets: list[VMInstance] = []
     errors: list[str] = []
 
@@ -106,7 +108,9 @@ def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) 
     Reconciles live VM state from process status and Firecracker API
     before returning the list.
     """
-    manager = vm_manager or get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = vm_manager or mvmctl.api.vm.get_vm_manager()
     all_vms = manager.list_all()
 
     # Reconcile live state for VMs that might have changed
@@ -135,7 +139,9 @@ def inspect_vm(name: str) -> VMInspectInfo:
         VMNotFoundError: If the VM is not found.
         MVMError: If multiple VMs match the name.
     """
-    manager = get_vm_manager()
+    import mvmctl.api.vm
+
+    manager = mvmctl.api.vm.get_vm_manager()
 
     # Try ID prefix first
     matches = manager.find_by_id_prefix(name)
@@ -373,6 +379,7 @@ def export_vm_config(name: str) -> "VMExportConfig":
     Raises:
         VMNotFoundError: If VM not found
     """
+    import mvmctl.api.vm
     from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
     from mvmctl.core.metadata import list_image_entries, list_kernel_entries
     from mvmctl.models.vm_config_file import (
@@ -387,7 +394,7 @@ def export_vm_config(name: str) -> "VMExportConfig":
     )
     from mvmctl.utils.fs import get_cache_dir
 
-    manager = get_vm_manager()
+    manager = mvmctl.api.vm.get_vm_manager()
 
     # Try ID prefix first
     matches = manager.find_by_id_prefix(name)
