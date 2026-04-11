@@ -5,6 +5,8 @@ from __future__ import annotations
 import random
 from typing import Final
 
+from mvmctl.constants import CONST_BYTE_MAX
+
 # MAC address prefix for mvm VMs
 MAC_PREFIX: Final[str] = "52:54:00:7f"
 
@@ -20,7 +22,7 @@ def generate_mac_address() -> str:
     Returns:
         MAC address string in format XX:XX:XX:XX:XX:XX
     """
-    suffix = ":".join(f"{random.randint(0, 255):02x}" for _ in range(3))
+    suffix = ":".join(f"{random.randint(0, CONST_BYTE_MAX):02x}" for _ in range(3))
     return f"{MAC_PREFIX}:{suffix}"
 
 
@@ -37,5 +39,5 @@ def generate_tap_device_name(net_name: str, vm_name: str) -> str:
     """
     net_prefix = net_name[:3].lower()
     vm_prefix = vm_name[:3].lower()
-    rnd = f"{random.randint(0, 255):02x}"
+    rnd = f"{random.randint(0, CONST_BYTE_MAX):02x}"
     return f"tap-{net_prefix}-{vm_prefix}-{rnd}"

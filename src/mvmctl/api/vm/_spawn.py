@@ -137,7 +137,8 @@ def spawn_firecracker_vm(
 
         return proc.pid, socket_path, console_relay_pid
 
-    except Exception:
+    except Exception as exc:
+        logger.error("Failed to start Firecracker VM: %s", exc)
         if log_fp is not None:
             try:
                 log_fp.close()

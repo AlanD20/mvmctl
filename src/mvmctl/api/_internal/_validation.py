@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from mvmctl.constants import CONST_VM_NAME_MAX_LENGTH
+
 __all__ = [
     "validate_mac",
     "validate_vm_name",
@@ -40,7 +42,7 @@ def validate_vm_name(name: str) -> None:
     """
     from mvmctl.exceptions import VMCreateError
 
-    if not name or len(name) > 255:
+    if not name or len(name) > CONST_VM_NAME_MAX_LENGTH:
         raise VMCreateError(f"Invalid name: {name!r}")
     if not re.match(r"^[a-zA-Z0-9_-]+$", name):
         raise VMCreateError(f"Invalid name format: {name!r}")

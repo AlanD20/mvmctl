@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -57,6 +55,14 @@ class GuestfsProvisioner:
         user: str,
         ssh_pub_key: list[str] | str | None,
     ):
+        """Initialize the GuestfsProvisioner.
+
+        Args:
+            rootfs_path: Path to the root filesystem image.
+            hostname: Hostname to set for the VM.
+            user: Username to create/configure in the VM.
+            ssh_pub_key: SSH public key(s) to configure for the user.
+        """
         self._rootfs_path = rootfs_path
         self._hostname = hostname
         self._user = user
@@ -110,9 +116,9 @@ class GuestfsProvisioner:
             try:
                 if has_keys:
                     ssh_home_dir = "/root" if self._user == "root" else f"/home/{self._user}"
-                    self._ensure_user_exists(guestfs_handle._g)
-                    self._enforce_ssh_key_auth(guestfs_handle._g)
-                    self._generate_ssh_host_keys(guestfs_handle._g)
+                    self.ensure_user(guestfs_handle._g)
+                    self.configure_ssh_keys(guestfs_handle._g)
+                    self.generate_host_keys(guestfs_handle._g)
 
                     if not guestfs_handle._g.exists("/root"):
                         guestfs_handle._g.mkdir_p("/root")
@@ -175,7 +181,7 @@ class GuestfsProvisioner:
                     ]:
                         guestfs_handle._g.ln_sf("/dev/null", f"/etc/systemd/system/{service_name}")
 
-                    self._detect_init_system_and_enable_ssh(guestfs_handle._g)
+                    self.enable_ssh(guestfs_handle._g)
                     guestfs_handle._g.mkdir_p("/etc/systemd/system")
                     guestfs_handle._g.write(
                         "/etc/systemd/system/first-boot-ssh-installer.service",
@@ -262,7 +268,7 @@ class GuestfsProvisioner:
                 except Exception:
                     pass
 
-    def _detect_init_system_and_enable_ssh(self, guestfs_handle: Any) -> bool:
+    def enable_ssh(self, guestfs_handle: Any) -> bool:
         """Detect init system and enable SSH service."""
         init_system = "unknown"
 
@@ -336,7 +342,7 @@ class GuestfsProvisioner:
             logger.error("Failed to enable SSH for %s: %s", self._rootfs_path.name, exc)
             return False
 
-    def _enforce_ssh_key_auth(self, guestfs_handle: Any) -> None:
+    def configure_ssh_keys(self, guestfs_handle: Any) -> None:
         """Configure SSH key authentication in guest."""
         try:
             if not guestfs_handle.exists("/etc/ssh/sshd_config"):
@@ -368,7 +374,7 @@ class GuestfsProvisioner:
         except Exception as exc:
             logger.warning("Failed to configure sshd: %s", exc)
 
-    def _ensure_user_exists(self, guestfs_handle: Any) -> None:
+    def ensure_user(self, guestfs_handle: Any) -> None:
         """Create user in guest with sudoers."""
         if self._user == "root":
             return
@@ -419,7 +425,7 @@ class GuestfsProvisioner:
         except Exception as exc:
             logger.warning("Failed to create user '%s': %s", self._user, exc)
 
-    def _generate_ssh_host_keys(self, guestfs_handle: Any) -> None:
+    def generate_host_keys(self, guestfs_handle: Any) -> None:
         """Set up SSH host key generation service."""
         try:
             key_types = ["ssh_host_rsa_key", "ssh_host_ecdsa_key", "ssh_host_ed25519_key"]
@@ -521,6 +527,7 @@ class CloudInitProvisioner:
             return CloudInitProvisionResult()
 
     def _provision_off(self) -> CloudInitProvisionResult:
+        """Provision with cloud-init disabled."""
         return CloudInitProvisionResult()
 
     def _provision_net(
@@ -534,6 +541,7 @@ class CloudInitProvisioner:
         vm_id: str,
         nocloud_net_port: int | None,
     ) -> CloudInitProvisionResult:
+        """Provision using nocloud-net mode with HTTP server."""
         import ipaddress
 
         from mvmctl.core.cloud_init import write_cloud_init
@@ -584,6 +592,7 @@ class CloudInitProvisioner:
         cloud_init_iso_path: Path | None,
         keep_cloud_init_iso: bool,
     ) -> CloudInitProvisionResult:
+        """Provision using ISO mode with cloud-init ISO image."""
         import ipaddress
 
         from mvmctl.constants import DEFAULT_CLOUD_INIT_ISO_NAME
@@ -632,6 +641,7 @@ class CloudInitProvisioner:
         user_data: Path | None,
         net_config: NetworkConfig,
     ) -> CloudInitProvisionResult:
+        """Provision using inject mode with direct rootfs injection."""
         import ipaddress
 
         from mvmctl.core.cloud_init import write_cloud_init
@@ -704,96 +714,24 @@ class VMCreationContext:
         return self.resources_created.get(resource, False)
 
     def cleanup(self) -> None:
-        """Clean up all created resources. Called by _registry.py on error."""
-        from mvmctl.api.network import release_network_ip
-        from mvmctl.core.firewall import remove_nocloud_input_rule
-        from mvmctl.core.mvm_db import MVMDatabase
-        from mvmctl.core.vm_process import cleanup_tap
-        from mvmctl.exceptions import NetworkError
+        """Clean up all created resources. Delegates to _registry.py.
 
-        if self.log_fp is not None:
-            try:
-                self.log_fp.close()
-            except OSError as exc:
-                logger.warning("Failed to close log file during cleanup: %s", exc)
+        VMCreationContext is a pure state tracker. Actual cleanup orchestration
+        lives in _registry.py to maintain clean layer separation.
+        """
+        from mvmctl.api.vm._registry import _perform_creation_cleanup
 
-        if self.console_fp is not None:
-            try:
-                self.console_fp.close()
-            except OSError as exc:
-                logger.warning("Failed to close console file during cleanup: %s", exc)
-
-        if (
-            self.was_created("nocloud_server")
-            and self.net_manager is not None
-            and self.resolved.vm_id
-        ):
-            try:
-                self.net_manager.stop_server(self.resolved.name, self.resolved.vm_id)
-            except Exception as exc:
-                logger.warning("Failed to stop nocloud server during cleanup: %s", exc)
-
-        if self.was_created("firewall_rule") and self.guest_ip:
-            try:
-                remove_nocloud_input_rule(self.guest_ip, self.resolved.name, self.nocloud_net_port)
-            except NetworkError as exc:
-                logger.warning("Failed to remove firewall rule during cleanup: %s", exc)
-
-        if self.was_created("tap") and self.tap_name:
-            from mvmctl.api.network import get_network
-
-            net_config = get_network(self.resolved.network_name)
-            try:
-                cleanup_tap(self.tap_name, bridge=net_config.bridge if net_config else None)
-            except NetworkError as exc:
-                logger.warning("Failed to cleanup TAP device during cleanup: %s", exc)
-
-        if self.was_created("network_ip"):
-            try:
-                db_net = MVMDatabase().get_network_by_name(self.resolved.network_name)
-                if db_net and self.resolved.vm_id:
-                    release_network_ip(db_net.id, self.resolved.vm_id)
-            except (NetworkError, TypeError) as exc:
-                logger.warning("Failed to release network IP during cleanup: %s", exc)
-
-        if self.was_created("console_relay") and self.relay_mgr is not None and self.resolved.vm_id:
-            try:
-                self.relay_mgr.stop_relay(self.resolved.name, self.resolved.vm_id)
-            except Exception as exc:
-                logger.warning("Failed to stop console relay during cleanup: %s", exc)
-
-        if self.pty_slave_fd is not None:
-            try:
-                os.close(self.pty_slave_fd)
-            except OSError:
-                pass
-
-        if self.pty_master_fd is not None:
-            try:
-                os.close(self.pty_master_fd)
-            except OSError:
-                pass
-
-        if self.was_created("vm_dir") and self.vm_dir and self.vm_dir.exists():
-            try:
-                shutil.rmtree(self.vm_dir, ignore_errors=True)
-            except OSError as exc:
-                logger.warning("Failed to remove VM directory during cleanup: %s", exc)
+        _perform_creation_cleanup(self)
 
     def persist_failed_vm(self, instance: Any, manager: Any | None) -> None:
-        """Persist failed VM to DB. Called when skip_cleanup=True."""
-        from mvmctl.models.vm import VMStatus
+        """Persist failed VM to DB. Delegates to _registry.py.
 
-        if manager is None:
-            logger.warning("Failed to persist failed VM: manager is None")
-            return
+        VMCreationContext is a pure state tracker. Actual persistence orchestration
+        lives in _registry.py to maintain clean layer separation.
+        """
+        from mvmctl.api.vm._registry import _persist_failed_vm
 
-        instance.status = VMStatus.ERROR
-        try:
-            manager.register(instance)
-            logger.info("Persisted failed VM '%s' to database for later cleanup", instance.name)
-        except Exception as exc:
-            logger.warning("Failed to persist failed VM '%s': %s", instance.name, exc)
+        _persist_failed_vm(instance, manager)
 
 
 __all__ = [

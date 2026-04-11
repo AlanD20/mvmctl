@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,11 +24,12 @@ class VMCreationResolver:
     """Resolve all DB-backed defaults using a single DB instance."""
 
     def __init__(self) -> None:
+        """Initialize the resolver with database and sub-resolvers."""
         self._db = MVMDatabase()
         self._network_resolver = NetworkResolver()
         self._binary_resolver = BinaryResolver()
 
-    def resolve(self, input: VMCreateInput) -> ResolvedVMInputs:
+    def resolve(self, input: VMCreateInput, vm_id: str) -> ResolvedVMInputs:
         """Resolve all inputs to explicit values."""
         name = input.name
         vcpus = input.vcpus
@@ -43,7 +45,7 @@ class VMCreationResolver:
 
         return ResolvedVMInputs(
             name=name,
-            vm_id="",
+            vm_id=vm_id,
             vcpus=vcpus,
             mem=mem,
             user=user,
@@ -57,6 +59,15 @@ class VMCreationResolver:
             binary_id=binary_id,
             kernel_args=kernel_args,
             cloud_init_mode=input.cloud_init_mode,
+            enable_api_socket=input.enable_api_socket,
+            enable_pci=input.enable_pci,
+            enable_console=input.enable_console,
+            enable_logging=input.enable_logging,
+            enable_metrics=input.enable_metrics,
+            lsm_flags=input.lsm_flags,
+            keep_cloud_init_iso=input.keep_cloud_init_iso,
+            nocloud_net_port=input.nocloud_net_port,
+            skip_cleanup=input.skip_cleanup,
             image_fs_uuid=image_fs_uuid,
             image_fs_type=image_fs_type,
             image_hash=image_hash,
@@ -65,16 +76,7 @@ class VMCreationResolver:
             ssh_key=input.ssh_key,
             user_data=input.user_data,
             disk_size=input.disk_size,
-            enable_api_socket=input.enable_api_socket,
-            enable_pci=input.enable_pci,
-            enable_console=input.enable_console,
-            enable_logging=input.enable_logging,
-            enable_metrics=input.enable_metrics,
-            lsm_flags=input.lsm_flags,
             cloud_init_iso_path=input.cloud_init_iso_path,
-            keep_cloud_init_iso=input.keep_cloud_init_iso,
-            nocloud_net_port=input.nocloud_net_port,
-            skip_cleanup=input.skip_cleanup,
         )
 
     def _resolve_image(self, input: VMCreateInput) -> tuple[Path, str, str | None, str | None]:
@@ -207,78 +209,43 @@ class VMCreationResolver:
         return args
 
 
+@dataclass(frozen=True)
 class ResolvedVMInputs:
     """Immutable resolved inputs - output of VMCreationResolver."""
 
-    def __init__(
-        self,
-        name: str,
-        vm_id: str,
-        vcpus: int,
-        mem: int,
-        user: str,
-        network_name: str,
-        network_id: str,
-        image_path: Path,
-        kernel_path: Path,
-        firecracker_bin: str,
-        image_id: str,
-        kernel_id: str,
-        binary_id: str,
-        kernel_args: str,
-        cloud_init_mode: Any,
-        image_fs_uuid: str | None = None,
-        image_fs_type: str | None = None,
-        image_hash: str | None = None,
-        mac: str | None = None,
-        ip: str | None = None,
-        ssh_key: str | None = None,
-        user_data: Path | None = None,
-        disk_size: str | None = None,
-        enable_api_socket: bool = False,
-        enable_pci: bool = False,
-        enable_console: bool = False,
-        enable_logging: bool = False,
-        enable_metrics: bool = False,
-        lsm_flags: str = "",
-        cloud_init_iso_path: Path | None = None,
-        keep_cloud_init_iso: bool = False,
-        nocloud_net_port: int = 0,
-        skip_cleanup: bool = False,
-    ):
-        self.name = name
-        self.vm_id = vm_id
-        self.vcpus = vcpus
-        self.mem = mem
-        self.user = user
-        self.network_name = network_name
-        self.network_id = network_id
-        self.image_path = image_path
-        self.kernel_path = kernel_path
-        self.firecracker_bin = firecracker_bin
-        self.image_id = image_id
-        self.kernel_id = kernel_id
-        self.binary_id = binary_id
-        self.kernel_args = kernel_args
-        self.cloud_init_mode = cloud_init_mode
-        self.image_fs_uuid = image_fs_uuid
-        self.image_fs_type = image_fs_type
-        self.image_hash = image_hash
-        self.mac = mac
-        self.ip = ip
-        self.ssh_key = ssh_key
-        self.user_data = user_data
-        self.disk_size = disk_size
-        self.enable_api_socket = enable_api_socket
-        self.enable_pci = enable_pci
-        self.enable_console = enable_console
-        self.enable_logging = enable_logging
-        self.enable_metrics = enable_metrics
-        self.lsm_flags = lsm_flags
-        self.cloud_init_iso_path = cloud_init_iso_path
-        self.keep_cloud_init_iso = keep_cloud_init_iso
-        self.nocloud_net_port = nocloud_net_port
-        self.skip_cleanup = skip_cleanup
+    name: str
+    vm_id: str
+    vcpus: int
+    mem: int
+    user: str
+    network_name: str
+    network_id: str
+    image_path: Path
+    kernel_path: Path
+    firecracker_bin: str
+    image_id: str
+    kernel_id: str
+    binary_id: str
+    kernel_args: str
+    cloud_init_mode: Any
+    enable_api_socket: bool
+    enable_pci: bool
+    enable_console: bool
+    enable_logging: bool
+    enable_metrics: bool
+    lsm_flags: str
+    keep_cloud_init_iso: bool
+    nocloud_net_port: int
+    skip_cleanup: bool
+    image_fs_uuid: str | None = None
+    image_fs_type: str | None = None
+    image_hash: str | None = None
+    mac: str | None = None
+    ip: str | None = None
+    ssh_key: str | None = None
+    user_data: Path | None = None
+    disk_size: str | None = None
+    cloud_init_iso_path: Path | None = None
 
 
 __all__ = ["VMCreationResolver", "ResolvedVMInputs"]

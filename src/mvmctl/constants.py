@@ -579,6 +579,7 @@ CONST_IPTABLES_MAX_COMMENT_LEN: Final[int] = 240  # Below xt_comment 256 limit
 # Buffer sizes (in bytes)
 CONST_BUFFER_SIZE_BYTES: Final[int] = 1024
 CONST_SECTOR_SIZE_BYTES: Final[int] = 512
+CONST_BYTE_MAX: Final[int] = 255
 
 # Binary units (IEC standard: KiB, MiB, GiB) - used for disk/memory sizing
 CONST_KIBIBYTE_BYTES: Final[int] = 1024
@@ -672,6 +673,7 @@ CONST_CONSOLE_SOCKET_TIMEOUT_S: Final[float] = 5.0
 CONST_CONSOLE_BUFFER_SIZE: Final[int] = 4096
 CONST_CONSOLE_RECONNECT_DELAY_S: Final[float] = 0.5
 CONST_VM_START_WAIT_S: Final[float] = 0.5  # Brief wait after starting VM process
+CONST_VM_NAME_MAX_LENGTH: Final[int] = 255  # Linux hostname max length
 CONST_CONSOLE_KILL_TIMEOUT_S: Final[float] = 5.0
 CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
 MAX_VMS: Final[int] = _require_int(("vm", "limits", "max_vms"))

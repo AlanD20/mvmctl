@@ -6,6 +6,7 @@ like inspect, export, status checking, and listing.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from mvmctl.models import VMInspectInfo
     from mvmctl.models.vm_config_file import VMExportConfig
 
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "inspect_vm",
@@ -161,7 +163,15 @@ def inspect_vm(name: str) -> VMInspectInfo:
 def _resolve_asset_names(
     image_id: str | None, kernel_id: str | None
 ) -> tuple[str | None, str | None]:
-    """Resolve friendly names for image and kernel IDs from database."""
+    """Resolve friendly names for image and kernel IDs from database.
+
+    Args:
+        image_id: The image ID to resolve.
+        kernel_id: The kernel ID to resolve.
+
+    Returns:
+        Tuple of (image_name, kernel_name) with friendly names or IDs as fallback.
+    """
     from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
     from mvmctl.utils.fs import get_cache_dir
 
@@ -174,7 +184,8 @@ def _resolve_asset_names(
             if matches:
                 _, meta = matches[0]
                 image_name = meta.get("os_slug") or image_id
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to resolve image name for %r: %s", image_id, exc)
             image_name = image_id
     if kernel_id:
         try:
@@ -182,7 +193,8 @@ def _resolve_asset_names(
             if matches:
                 _, meta = matches[0]
                 kernel_name = meta.get("version") or kernel_id
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to resolve kernel name for %r: %s", kernel_id, exc)
             kernel_name = kernel_id
 
     return image_name, kernel_name
@@ -213,7 +225,14 @@ def _resolve_rootfs_path(vm: VMInstance, vm_dir: Path) -> tuple[Path | None, str
 
 
 def _gather_vm_details(vm: VMInstance) -> VMInspectInfo:
-    """Gather comprehensive VM details."""
+    """Gather comprehensive VM details.
+
+    Args:
+        vm: The VM instance to gather details for.
+
+    Returns:
+        VMInspectInfo containing comprehensive VM details.
+    """
     from mvmctl.models import VMInspectInfo
 
     vm_dir = get_vm_dir_by_hash(vm.id)
@@ -309,6 +328,12 @@ def _get_exit_code_from_sources(vm: VMInstance) -> int | None:
     Sources checked in order:
     1. firecracker.exitcode file in VM directory
     2. firecracker.log for exit code patterns
+
+    Args:
+        vm: The VM instance to get exit code for.
+
+    Returns:
+        Exit code if found, None otherwise.
     """
     if not vm.id:
         return None
@@ -426,7 +451,8 @@ def export_vm_config(name: str) -> "VMExportConfig":
                 _, meta = image_matches[0]
                 image_os_slug = meta.get("os_slug", "")
                 image_arch = meta.get("arch", "")
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to resolve image os_slug for %r: %s", vm.image_id, exc)
             pass
 
         # Fallback: search all entries by matching the image_id
@@ -438,7 +464,10 @@ def export_vm_config(name: str) -> "VMExportConfig":
                         image_os_slug = meta.get("os_slug", "")
                         image_arch = meta.get("arch", "")
                         break
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "Failed to resolve image os_slug from entries for %r: %s", vm.image_id, exc
+                )
                 pass
 
     # Resolve kernel version from metadata
@@ -454,7 +483,8 @@ def export_vm_config(name: str) -> "VMExportConfig":
                 kernel_version = meta.get("version")
                 kernel_arch = meta.get("arch")
                 kernel_type = meta.get("type")
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to resolve kernel version for %r: %s", vm.kernel_id, exc)
             pass
 
         # Fallback: search all entries
@@ -467,7 +497,10 @@ def export_vm_config(name: str) -> "VMExportConfig":
                         kernel_arch = meta.get("arch")
                         kernel_type = meta.get("type")
                         break
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "Failed to resolve kernel version from entries for %r: %s", vm.kernel_id, exc
+                )
                 pass
 
     # Resolve binary version from metadata
@@ -484,7 +517,8 @@ def export_vm_config(name: str) -> "VMExportConfig":
                     break
             if binary_version:
                 break
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to resolve binary version: %s", exc)
         pass
 
     # Build network config - get network name from network_id

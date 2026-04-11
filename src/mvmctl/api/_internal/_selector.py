@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "resolve_vm_selector",
@@ -60,8 +63,8 @@ def resolve_vm_selector(selector: str) -> str:
         vm = manager.get(selector)
         if vm is not None:
             return vm.name
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("VM lookup by name failed for %r: %s", selector, exc)
 
     # Try ID prefix match
     prefix_matches = manager.find_by_id_prefix(selector)

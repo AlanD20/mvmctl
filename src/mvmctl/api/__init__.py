@@ -6,8 +6,8 @@ automation without going through the CLI.
 
 Example::
 
-    from mvmctl.api import keys, host, vms, network, assets
+    from mvmctl.api import keys, host, vm, network, assets
 """
 
 # Lazy imports - do not eagerly load all modules to maintain fast startup time
-__all__ = ["assets", "host", "keys", "metadata", "network", "vms"]
+__all__ = ["assets", "host", "keys", "metadata", "network", "vm"]

@@ -185,7 +185,7 @@ class TestImportWhitelist:
             ("mvmctl.exceptions.MVMError", False),
             ("mvmctl.constants", False),
             ("mvmctl.constants.DEFAULT_VM_MEM_MIB", False),
-            ("mvmctl.api.vms", False),
+            ("mvmctl.api.vm", False),
             ("mvmctl.api.host", False),
             ("mvmctl.utils.console", False),
         ],

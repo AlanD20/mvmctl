@@ -1,4 +1,4 @@
-"""Tests for API layer console functions in api/vms.py."""
+"""Tests for API layer console functions in api/vm.py."""
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.api import vms
+from mvmctl.api import vm
 from mvmctl.exceptions import MVMError, VMNotFoundError
 from mvmctl.models.vm import ConsoleInfo, ConsoleState, VMInstance, VMStatus
 
@@ -35,8 +35,8 @@ def _make_test_vm(name: str, status: VMStatus) -> VMInstance:
 class TestAttachConsole:
     """Tests for attach_console function."""
 
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_attach_console_success(self, mock_get_manager, mock_console_mgr_cls):
         """attach_console returns socket_path when VM exists and relay is running."""
         # Setup mock VM manager
@@ -53,7 +53,7 @@ class TestAttachConsole:
         mock_mgr.get_socket_path.return_value = mock_socket_path
 
         # Call function
-        result = vms.attach_console("testvm")
+        result = vm.attach_console("testvm")
 
         # Assertions
         assert result.vm_name == "testvm"
@@ -62,8 +62,8 @@ class TestAttachConsole:
         mock_mgr.is_relay_running.assert_called_once_with("testvm", "testvm001abc1234")
         mock_mgr.get_socket_path.assert_called_once_with("testvm001abc1234")
 
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_attach_console_vm_not_found(self, mock_get_manager, mock_console_mgr_cls):
         """attach_console raises VMNotFoundError when VM does not exist."""
         mock_manager = MagicMock()
@@ -71,12 +71,12 @@ class TestAttachConsole:
         mock_get_manager.return_value = mock_manager
 
         with pytest.raises(VMNotFoundError) as exc_info:
-            vms.attach_console("nonexistent")
+            vm.attach_console("nonexistent")
 
         assert "nonexistent" in str(exc_info.value)
 
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_attach_console_relay_not_running(self, mock_get_manager, mock_console_mgr_cls):
         """attach_console raises MVMError when no relay is running."""
         mock_manager = MagicMock()
@@ -89,7 +89,7 @@ class TestAttachConsole:
         mock_mgr.is_relay_running.return_value = False
 
         with pytest.raises(MVMError) as exc_info:
-            vms.attach_console("testvm")
+            vm.attach_console("testvm")
 
         assert "No console relay running" in str(exc_info.value)
 
@@ -97,8 +97,8 @@ class TestAttachConsole:
 class TestKillConsole:
     """Tests for kill_console function."""
 
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_kill_console_success(self, mock_get_manager, mock_console_mgr_cls):
         """kill_console returns True when VM exists and relay is killed."""
         mock_manager = MagicMock()
@@ -110,14 +110,14 @@ class TestKillConsole:
         mock_console_mgr_cls.return_value = mock_mgr
         mock_mgr.kill_relay.return_value = True
 
-        result = vms.kill_console("testvm")
+        result = vm.kill_console("testvm")
 
         assert result is True
         mock_manager.get.assert_called_once_with("testvm")
         mock_mgr.kill_relay.assert_called_once_with("testvm", "testvm001abc1234")
 
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_kill_console_no_relay_running(self, mock_get_manager, mock_console_mgr_cls):
         """kill_console returns False when VM exists but no relay is running."""
         mock_manager = MagicMock()
@@ -129,13 +129,13 @@ class TestKillConsole:
         mock_console_mgr_cls.return_value = mock_mgr
         mock_mgr.kill_relay.return_value = False
 
-        result = vms.kill_console("testvm")
+        result = vm.kill_console("testvm")
 
         assert result is False
         mock_mgr.kill_relay.assert_called_once_with("testvm", "testvm001abc1234")
 
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_kill_console_vm_not_found(self, mock_get_manager, mock_console_mgr_cls):
         """kill_console raises VMNotFoundError when VM does not exist."""
         mock_manager = MagicMock()
@@ -143,7 +143,7 @@ class TestKillConsole:
         mock_get_manager.return_value = mock_manager
 
         with pytest.raises(VMNotFoundError) as exc_info:
-            vms.kill_console("nonexistent")
+            vm.kill_console("nonexistent")
 
         assert "nonexistent" in str(exc_info.value)
 
@@ -151,8 +151,8 @@ class TestKillConsole:
 class TestGetConsoleState:
     """Tests for get_console_state function."""
 
-    @patch("mvmctl.api.vms._get_console_state")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates._get_console_state")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_get_console_state_relay_running(self, mock_get_manager, mock_core_get_state):
         """get_console_state returns state when VM exists and relay is running."""
         mock_manager = MagicMock()
@@ -166,7 +166,7 @@ class TestGetConsoleState:
             "socket_path": "/tmp/mvm-testvm/console.sock",
         }
 
-        result = vms.get_console_state("testvm")
+        result = vm.get_console_state("testvm")
 
         assert result.running is True
         assert result.pid == 12345
@@ -174,8 +174,8 @@ class TestGetConsoleState:
         mock_manager.get.assert_called_once_with("testvm")
         mock_core_get_state.assert_called_once_with("testvm", "testvm001abc1234")
 
-    @patch("mvmctl.api.vms._get_console_state")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates._get_console_state")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_get_console_state_relay_not_running(self, mock_get_manager, mock_core_get_state):
         """get_console_state returns state when VM exists but relay is not running."""
         mock_manager = MagicMock()
@@ -189,15 +189,15 @@ class TestGetConsoleState:
             "socket_path": "/tmp/mvm-testvm/console.sock",
         }
 
-        result = vms.get_console_state("testvm")
+        result = vm.get_console_state("testvm")
 
         assert result.running is False
         assert result.pid is None
         mock_manager.get.assert_called_once_with("testvm")
         mock_core_get_state.assert_called_once_with("testvm", "testvm001abc1234")
 
-    @patch("mvmctl.api.vms._get_console_state")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._delegates._get_console_state")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_get_console_state_vm_not_found(self, mock_get_manager, mock_core_get_state):
         """get_console_state raises VMNotFoundError when VM does not exist."""
         mock_manager = MagicMock()
@@ -205,7 +205,7 @@ class TestGetConsoleState:
         mock_get_manager.return_value = mock_manager
 
         with pytest.raises(VMNotFoundError) as exc_info:
-            vms.get_console_state("nonexistent")
+            vm.get_console_state("nonexistent")
 
         assert "nonexistent" in str(exc_info.value)
         mock_core_get_state.assert_not_called()
@@ -215,29 +215,29 @@ class TestReExports:
     """Tests to verify core console functions are properly re-exported."""
 
     def test_api_exports_check_escape_sequence(self):
-        """check_escape_sequence should be exported from api.vms."""
-        assert hasattr(vms, "check_escape_sequence")
-        assert vms.check_escape_sequence is not None
+        """check_escape_sequence should be exported from api.vm."""
+        assert hasattr(vm, "check_escape_sequence")
+        assert vm.check_escape_sequence is not None
 
     def test_api_exports_connect_to_relay(self):
-        """connect_to_relay should be exported from api.vms."""
-        assert hasattr(vms, "connect_to_relay")
-        assert vms.connect_to_relay is not None
+        """connect_to_relay should be exported from api.vm."""
+        assert hasattr(vm, "connect_to_relay")
+        assert vm.connect_to_relay is not None
 
     def test_api_exports_disconnect_from_relay(self):
-        """disconnect_from_relay should be exported from api.vms."""
-        assert hasattr(vms, "disconnect_from_relay")
-        assert vms.disconnect_from_relay is not None
+        """disconnect_from_relay should be exported from api.vm."""
+        assert hasattr(vm, "disconnect_from_relay")
+        assert vm.disconnect_from_relay is not None
 
     def test_api_exports_read_console_output(self):
-        """read_console_output should be exported from api.vms."""
-        assert hasattr(vms, "read_console_output")
-        assert vms.read_console_output is not None
+        """read_console_output should be exported from api.vm."""
+        assert hasattr(vm, "read_console_output")
+        assert vm.read_console_output is not None
 
     def test_api_exports_send_console_input(self):
-        """send_console_input should be exported from api.vms."""
-        assert hasattr(vms, "send_console_input")
-        assert vms.send_console_input is not None
+        """send_console_input should be exported from api.vm."""
+        assert hasattr(vm, "send_console_input")
+        assert vm.send_console_input is not None
 
     def test_api_all_includes_console_functions(self):
         """All console functions should be in __all__."""
@@ -252,7 +252,7 @@ class TestReExports:
             "send_console_input",
         ]
         for func_name in expected_exports:
-            assert func_name in vms.__all__, f"{func_name} should be in __all__"
+            assert func_name in vm.__all__, f"{func_name} should be in __all__"
 
     def test_re_exports_are_correct_functions(self):
         """Verify re-exported functions are the actual core functions."""
@@ -272,8 +272,8 @@ class TestReExports:
             send_console_input as core_send,
         )
 
-        assert vms.check_escape_sequence is core_check_escape
-        assert vms.connect_to_relay is core_connect
-        assert vms.disconnect_from_relay is core_disconnect
-        assert vms.read_console_output is core_read
-        assert vms.send_console_input is core_send
+        assert vm.check_escape_sequence is core_check_escape
+        assert vm.connect_to_relay is core_connect
+        assert vm.disconnect_from_relay is core_disconnect
+        assert vm.read_console_output is core_read
+        assert vm.send_console_input is core_send

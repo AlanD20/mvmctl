@@ -55,8 +55,8 @@ from mvmctl.api.vm._registry import (
     remove_vm,
 )
 
-# Removal helpers (exported for test patching)
-from mvmctl.api.vm._removal import subprocess, teardown_nat, time
+# Removal context classes (pure state trackers)
+from mvmctl.api.vm._removal import VMBulkCleanupContext, VMRemovalContext
 
 # Resolution wrappers (image/kernel path resolution)
 from mvmctl.api.vm._resolve import (
@@ -77,6 +77,9 @@ from mvmctl.core.vm_manager import VMManager, get_vm_manager
 
 # Re-export _write_pid_file for test patching backward compatibility
 from mvmctl.core.vm_process import _write_pid_file
+
+# Re-export ConsoleRelayManager for test patching backward compatibility
+from mvmctl.services.console_relay import ConsoleRelayManager
 
 __all__ = [
     # Registry operations
@@ -110,9 +113,9 @@ __all__ = [
     "connect_to_vm",
     "_pause_process",
     "_resume_process",
-    "teardown_nat",
-    "subprocess",
-    "time",
+    # Removal context classes
+    "VMRemovalContext",
+    "VMBulkCleanupContext",
     # Data gathering functions
     "list_vms",
     "inspect_vm",
@@ -135,4 +138,5 @@ __all__ = [
     "FirecrackerClient",
     # Internal exports for test patching
     "_write_pid_file",
+    "ConsoleRelayManager",
 ]

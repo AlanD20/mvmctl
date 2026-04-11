@@ -95,7 +95,7 @@ class TestReconcileVM:
         sample_vm.status = VMStatus.RUNNING
 
         with patch("os.kill", return_value=None):
-            mock_client_class = mocker.patch("mvmctl.api.vms.FirecrackerClient")
+            mock_client_class = mocker.patch("mvmctl.api.vm.FirecrackerClient")
             mock_client = MagicMock()
             mock_client.describe_instance.return_value = {"state": "Running"}
             mock_client_class.return_value.__enter__.return_value = mock_client
@@ -116,7 +116,7 @@ class TestReconcileVM:
         sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", side_effect=PermissionError("Permission denied")):
-            mock_client_class = mocker.patch("mvmctl.api.vms.FirecrackerClient")
+            mock_client_class = mocker.patch("mvmctl.api.vm.FirecrackerClient")
             mock_client = MagicMock()
             mock_client.describe_instance.return_value = {"state": "Running"}
             mock_client_class.return_value.__enter__.return_value = mock_client
@@ -162,7 +162,7 @@ class TestReconcileVM:
         sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", return_value=None):
-            mock_client_class = mocker.patch("mvmctl.api.vms.FirecrackerClient")
+            mock_client_class = mocker.patch("mvmctl.api.vm.FirecrackerClient")
             mock_client_class.side_effect = FirecrackerError("Connection failed")
 
             result = reconcile_vm(sample_vm, mock_manager)
@@ -193,7 +193,7 @@ class TestReconcileVM:
         sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", return_value=None):
-            mock_client_class = mocker.patch("mvmctl.api.vms.FirecrackerClient")
+            mock_client_class = mocker.patch("mvmctl.api.vm.FirecrackerClient")
             mock_client = MagicMock()
             mock_client.describe_instance.return_value = {"state": "UnknownState"}
             mock_client_class.return_value.__enter__.return_value = mock_client
@@ -210,7 +210,7 @@ class TestReconcileVM:
         sample_vm.status = VMStatus.STARTING
 
         with patch("os.kill", return_value=None):
-            mock_client_class = mocker.patch("mvmctl.api.vms.FirecrackerClient")
+            mock_client_class = mocker.patch("mvmctl.api.vm.FirecrackerClient")
             mock_client = MagicMock()
             mock_client.describe_instance.return_value = None
             mock_client_class.return_value.__enter__.return_value = mock_client

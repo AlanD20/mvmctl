@@ -30,7 +30,7 @@ uv sync
 Then import:
 
 ```python
-from mvmctl.api import vms, network, assets, keys, host, cache
+from mvmctl.api import vm, network, assets, keys, host, cache
 ```
 
 ---
@@ -421,7 +421,7 @@ except MVMError as e:
 
 ## Function Reference
 
-### `mvmctl.api.vms`
+### `mvmctl.api.vm`
 
 #### `create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMInstance`
 
@@ -440,7 +440,7 @@ process, and registers the VM.
 
 **Example:**
 ```python
-from mvmctl.api import vms
+from mvmctl.api import vm
 from mvmctl.models.vm import VMCreateInput, CloudInitMode
 
 input = VMCreateInput(
@@ -460,7 +460,7 @@ input = VMCreateInput(
     network_name="default",
     cloud_init_mode=CloudInitMode.INJECT,
 )
-instance = vms.create_vm(input)
+instance = vm.create_vm(input)
 print(f"VM started: PID={instance.pid}, IP={instance.ip}")
 ```
 
@@ -1106,7 +1106,7 @@ Prerequisites:
 
 from pathlib import Path
 
-from mvmctl.api import assets, host, keys, network, vms
+from mvmctl.api import assets, host, keys, network, vm
 from mvmctl.exceptions import MVMError
 from mvmctl.models.vm import VMCreateInput, CloudInitMode
 
@@ -1166,7 +1166,7 @@ def main() -> None:
     print(f"VM started: {instance.name} — PID={instance.pid}, IP={instance.ip}")
 
     # 7. List VMs
-    all_vms = vms.list_vms()
+    all_vms = vm.list_vms()
     print(f"\nRegistered VMs ({len(all_vms)}):")
     for vm in all_vms:
         print(f"  {vm.name:20s}  {vm.status.value:10s}  {vm.ip}")

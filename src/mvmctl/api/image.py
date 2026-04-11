@@ -330,7 +330,7 @@ def register_fetched_image(result: Any, spec: Any) -> str:
         "fs_type": result.fs_type
         if result.fs_type
         else (result.path.suffix.lstrip(".") if result.path.suffix else "ext4"),
-        "compressed_format": "zst", # For now i's hard-coded
+        "compressed_format": "zst",  # For now i's hard-coded
         "original_size": result.original_size,
         "minimum_rootfs_size_mib": result.minimum_rootfs_size_mib,
     }

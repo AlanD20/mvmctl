@@ -57,14 +57,24 @@ class TestVMCreationResolver:
 
     def test_resolve_basic_fields(self, resolver, basic_input):
         """Test resolve preserves basic input fields."""
-        with patch.object(resolver, "_resolve_image", return_value=(Path("/img"), "img-123", None, None)):
-            with patch.object(resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")):
-                with patch.object(resolver, "_resolve_network", return_value=("default", "net-123")):
+        with patch.object(
+            resolver, "_resolve_image", return_value=(Path("/img"), "img-123", None, None)
+        ):
+            with patch.object(
+                resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")
+            ):
+                with patch.object(
+                    resolver, "_resolve_network", return_value=("default", "net-123")
+                ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
-                        with patch("mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="hash123"):
-                            result = resolver.resolve(basic_input)
+                        with patch(
+                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            return_value="hash123",
+                        ):
+                            result = resolver.resolve(basic_input, vm_id="vm-abc123")
 
         assert result.name == "test-vm"
+        assert result.vm_id == "vm-abc123"
         assert result.vcpus == 2
         assert result.mem == 512
         assert result.user == "testuser"
@@ -82,7 +92,9 @@ class TestVMCreationResolver:
 
         with patch("mvmctl.api.assets.resolve_image_fs_uuid", return_value="uuid-123"):
             with patch("mvmctl.api.assets.resolve_image_fs_type", return_value="ext4"):
-                with patch("mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="hash123"):
+                with patch(
+                    "mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="hash123"
+                ):
                     with patch.object(resolver._db, "get_image") as mock_get_image:
                         mock_image_entry = MagicMock()
                         mock_image_entry.id = "img-123"
@@ -102,7 +114,10 @@ class TestVMCreationResolver:
 
         with patch("mvmctl.api.assets.resolve_image_fs_uuid", return_value=None):
             with patch("mvmctl.api.assets.resolve_image_fs_type", return_value=None):
-                with patch("mvmctl.api._internal._resolvers._image_resolver.resolve_image_hash", return_value=None):
+                with patch(
+                    "mvmctl.api._internal._resolvers._image_resolver.resolve_image_hash",
+                    return_value=None,
+                ):
                     with patch.object(resolver._db, "get_image", return_value=None):
                         with patch.object(resolver._db, "get_image_by_os_slug", return_value=None):
                             path, img_id, fs_uuid, fs_type = resolver._resolve_image(basic_input)
@@ -121,16 +136,24 @@ class TestVMCreationResolver:
         mock_default_image.os_slug = "ubuntu-24.04"
 
         with patch.object(resolver._db, "get_default_image", return_value=mock_default_image):
-            with patch("mvmctl.api._internal._resolvers._image_resolver.resolve_image_multi_strategy", return_value=Path("/img/ubuntu.ext4")):
+            with patch(
+                "mvmctl.api._internal._resolvers._image_resolver.resolve_image_multi_strategy",
+                return_value=Path("/img/ubuntu.ext4"),
+            ):
                 with patch("mvmctl.api.assets.resolve_image_fs_uuid", return_value="uuid-123"):
                     with patch("mvmctl.api.assets.resolve_image_fs_type", return_value="ext4"):
-                        with patch("mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="hash123"):
+                        with patch(
+                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            return_value="hash123",
+                        ):
                             with patch.object(resolver._db, "get_image") as mock_get_image:
                                 mock_image_entry = MagicMock()
                                 mock_image_entry.id = "img-123"
                                 mock_get_image.return_value = mock_image_entry
 
-                                path, img_id, fs_uuid, fs_type = resolver._resolve_image(basic_input)
+                                path, img_id, fs_uuid, fs_type = resolver._resolve_image(
+                                    basic_input
+                                )
 
         assert path == Path("/img/ubuntu.ext4")
         assert img_id == "img-123"
@@ -149,10 +172,16 @@ class TestVMCreationResolver:
         basic_input.image = "ubuntu-24.04"
         basic_input.image_path = None
 
-        with patch("mvmctl.api._internal._resolvers._image_resolver.resolve_image_multi_strategy", return_value=Path("/img/ubuntu.ext4")):
+        with patch(
+            "mvmctl.api._internal._resolvers._image_resolver.resolve_image_multi_strategy",
+            return_value=Path("/img/ubuntu.ext4"),
+        ):
             with patch("mvmctl.api.assets.resolve_image_fs_uuid", return_value="uuid-123"):
                 with patch("mvmctl.api.assets.resolve_image_fs_type", return_value="ext4"):
-                    with patch("mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="hash123"):
+                    with patch(
+                        "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                        return_value="hash123",
+                    ):
                         with patch.object(resolver._db, "get_image") as mock_get_image:
                             mock_image_entry = MagicMock()
                             mock_image_entry.id = "img-123"
@@ -216,7 +245,9 @@ class TestVMCreationResolver:
 
         with patch.object(resolver._db, "get_default_kernel", return_value=None):
             with patch.dict("os.environ", {"MVM_KERNEL": "/env/vmlinux"}):
-                with patch("mvmctl.core.kernel.resolve_kernel_path", return_value=Path("/env/vmlinux")):
+                with patch(
+                    "mvmctl.core.kernel.resolve_kernel_path", return_value=Path("/env/vmlinux")
+                ):
                     path, kern_id = resolver._resolve_kernel(basic_input)
 
         assert path == Path("/env/vmlinux")
@@ -356,12 +387,21 @@ class TestVMCreationResolver:
         basic_input.nocloud_net_port = 8080
         basic_input.skip_cleanup = True
 
-        with patch.object(resolver, "_resolve_image", return_value=(Path("/img"), "img-123", "uuid", "ext4")):
-            with patch.object(resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")):
-                with patch.object(resolver, "_resolve_network", return_value=("default", "net-123")):
+        with patch.object(
+            resolver, "_resolve_image", return_value=(Path("/img"), "img-123", "uuid", "ext4")
+        ):
+            with patch.object(
+                resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")
+            ):
+                with patch.object(
+                    resolver, "_resolve_network", return_value=("default", "net-123")
+                ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
-                        with patch("mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="hash123"):
-                            result = resolver.resolve(basic_input)
+                        with patch(
+                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            return_value="hash123",
+                        ):
+                            result = resolver.resolve(basic_input, vm_id="vm-abc123")
 
         assert result.mac == "02:FC:00:11:22:33"
         assert result.ip == "10.20.0.5"
@@ -374,24 +414,42 @@ class TestVMCreationResolver:
 
     def test_resolve_sets_image_fs_fields(self, resolver, basic_input):
         """Test resolve sets image filesystem fields from resolution."""
-        with patch.object(resolver, "_resolve_image", return_value=(Path("/img"), "img-123", "fs-uuid", "ext4")):
-            with patch.object(resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")):
-                with patch.object(resolver, "_resolve_network", return_value=("default", "net-123")):
+        with patch.object(
+            resolver, "_resolve_image", return_value=(Path("/img"), "img-123", "fs-uuid", "ext4")
+        ):
+            with patch.object(
+                resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")
+            ):
+                with patch.object(
+                    resolver, "_resolve_network", return_value=("default", "net-123")
+                ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
-                        with patch("mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="hash123"):
-                            result = resolver.resolve(basic_input)
+                        with patch(
+                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            return_value="hash123",
+                        ):
+                            result = resolver.resolve(basic_input, vm_id="vm-abc123")
 
         assert result.image_fs_uuid == "fs-uuid"
         assert result.image_fs_type == "ext4"
 
     def test_resolve_sets_image_hash(self, resolver, basic_input):
         """Test resolve sets image_hash from resolution."""
-        with patch.object(resolver, "_resolve_image", return_value=(Path("/img"), "img-123", None, None)):
-            with patch.object(resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")):
-                with patch.object(resolver, "_resolve_network", return_value=("default", "net-123")):
+        with patch.object(
+            resolver, "_resolve_image", return_value=(Path("/img"), "img-123", None, None)
+        ):
+            with patch.object(
+                resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")
+            ):
+                with patch.object(
+                    resolver, "_resolve_network", return_value=("default", "net-123")
+                ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
-                        with patch("mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="abc123hash"):
-                            result = resolver.resolve(basic_input)
+                        with patch(
+                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            return_value="abc123hash",
+                        ):
+                            result = resolver.resolve(basic_input, vm_id="vm-abc123")
 
         # Note: image_hash comes from _resolve_image return value (3rd element is fs_uuid, 4th is fs_type)
         # The actual image_hash is set via resolve_image_hash call inside _resolve_image
@@ -402,25 +460,43 @@ class TestVMCreationResolver:
         """Test resolve preserves cloud_init_mode."""
         basic_input.cloud_init_mode = CloudInitMode.NET
 
-        with patch.object(resolver, "_resolve_image", return_value=(Path("/img"), "img-123", None, None)):
-            with patch.object(resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")):
-                with patch.object(resolver, "_resolve_network", return_value=("default", "net-123")):
+        with patch.object(
+            resolver, "_resolve_image", return_value=(Path("/img"), "img-123", None, None)
+        ):
+            with patch.object(
+                resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")
+            ):
+                with patch.object(
+                    resolver, "_resolve_network", return_value=("default", "net-123")
+                ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
-                        with patch("mvmctl.api._internal._resolvers._image_resolver.resolve_image_hash", return_value="hash"):
-                            result = resolver.resolve(basic_input)
+                        with patch(
+                            "mvmctl.api._internal._resolvers._image_resolver.resolve_image_hash",
+                            return_value="hash",
+                        ):
+                            result = resolver.resolve(basic_input, vm_id="vm-abc123")
 
         assert result.cloud_init_mode == CloudInitMode.NET
 
-    def test_resolve_sets_vm_id_empty(self, resolver, basic_input):
-        """Test resolve sets vm_id to empty string (to be generated later)."""
-        with patch.object(resolver, "_resolve_image", return_value=(Path("/img"), "img-123", None, None)):
-            with patch.object(resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")):
-                with patch.object(resolver, "_resolve_network", return_value=("default", "net-123")):
+    def test_resolve_sets_vm_id_from_parameter(self, resolver, basic_input):
+        """Test resolve sets vm_id from the provided parameter."""
+        with patch.object(
+            resolver, "_resolve_image", return_value=(Path("/img"), "img-123", None, None)
+        ):
+            with patch.object(
+                resolver, "_resolve_kernel", return_value=(Path("/kern"), "kern-123")
+            ):
+                with patch.object(
+                    resolver, "_resolve_network", return_value=("default", "net-123")
+                ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
-                        with patch("mvmctl.api._internal._resolvers._image_resolver.resolve_image_hash", return_value="hash"):
-                            result = resolver.resolve(basic_input)
+                        with patch(
+                            "mvmctl.api._internal._resolvers._image_resolver.resolve_image_hash",
+                            return_value="hash",
+                        ):
+                            result = resolver.resolve(basic_input, vm_id="generated-vm-id-123")
 
-        assert result.vm_id == ""
+        assert result.vm_id == "generated-vm-id-123"
 
 
 # =============================================================================
@@ -449,6 +525,15 @@ class TestResolvedVMInputs:
             binary_id="bin-123",
             kernel_args="console=ttyS0",
             cloud_init_mode=CloudInitMode.INJECT,
+            enable_api_socket=True,
+            enable_pci=False,
+            enable_console=True,
+            enable_logging=False,
+            enable_metrics=False,
+            lsm_flags="",
+            keep_cloud_init_iso=False,
+            nocloud_net_port=0,
+            skip_cleanup=False,
         )
 
         assert result.name == "test-vm"
@@ -485,6 +570,15 @@ class TestResolvedVMInputs:
             binary_id="bin-123",
             kernel_args="console=ttyS0",
             cloud_init_mode=CloudInitMode.INJECT,
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_console=False,
+            enable_logging=False,
+            enable_metrics=False,
+            lsm_flags="",
+            keep_cloud_init_iso=False,
+            nocloud_net_port=0,
+            skip_cleanup=False,
         )
 
         assert result.image_fs_uuid is None
@@ -495,16 +589,7 @@ class TestResolvedVMInputs:
         assert result.ssh_key is None
         assert result.user_data is None
         assert result.disk_size is None
-        assert result.enable_api_socket is False
-        assert result.enable_pci is False
-        assert result.enable_console is False
-        assert result.enable_logging is False
-        assert result.enable_metrics is False
-        assert result.lsm_flags == ""
         assert result.cloud_init_iso_path is None
-        assert result.keep_cloud_init_iso is False
-        assert result.nocloud_net_port == 0
-        assert result.skip_cleanup is False
 
     def test_init_all_fields(self):
         """Test ResolvedVMInputs with all fields set."""

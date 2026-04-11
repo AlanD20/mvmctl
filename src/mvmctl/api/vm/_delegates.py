@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mvmctl.constants import DEFAULT_FIRECRACKER_BIN_NAME, DEFAULT_SNAPSHOT_RESUME
+from mvmctl.constants import (
+    CONST_VM_START_WAIT_S,
+    DEFAULT_FIRECRACKER_BIN_NAME,
+    DEFAULT_SNAPSHOT_RESUME,
+)
 from mvmctl.core.console import (
     check_escape_sequence,
     connect_to_relay,
@@ -414,7 +418,7 @@ def start_vm(name: str) -> None:
         vm.api_socket_path = socket_path
         vm.status = VMStatus.RUNNING
         manager.register(vm)
-        time.sleep(0.5)
+        time.sleep(CONST_VM_START_WAIT_S)
     except Exception as exc:
         try:
             log_fp.close()

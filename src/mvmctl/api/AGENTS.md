@@ -11,7 +11,18 @@
 ```
 src/mvmctl/api/
 ├── __init__.py       # Package exports (lazy imports)
-├── vms.py           # VM lifecycle: create, remove, list, ssh, logs, cleanup (2,279 lines)
+├── vm/              # VM lifecycle package: create, remove, list, ssh, logs, cleanup
+│   ├── __init__.py  # Package exports
+│   ├── create.py    # VM creation orchestration
+│   ├── remove.py    # VM removal orchestration
+│   ├── lifecycle.py # Start, stop, pause, resume, reboot
+│   ├── console.py   # Console attachment and relay management
+│   ├── ssh.py       # SSH connection handling
+│   ├── logs.py      # Log retrieval
+│   ├── snapshot.py  # Snapshot creation and loading
+│   ├── inspect.py   # VM inspection and config export
+│   ├── list.py      # VM listing
+│   └── cleanup.py   # VM cleanup operations
 ├── network.py       # Network management: create, remove, IP allocation, iptables (1,036 lines)
 ├── kernel.py        # Kernel fetch/build orchestration (640 lines)
 ├── assets.py        # Binary/asset management (491 lines)
@@ -90,7 +101,7 @@ user input → CLI (validate, apply constants defaults)
 #### 1. Full Orchestration (vms.create_vm, network.create_network)
 
 ```python
-# api/vms.py — orchestration example
+# api/vm/ package — orchestration example
 def create_vm(input: VMCreateInput, ...) -> VMInstance:
     # 1. Privilege check (API responsibility)
     check_privileges_interactive("/usr/sbin/ip", f"create VM '{name}'")
@@ -156,7 +167,7 @@ def create_iptables_rule(rule: IPTablesRule, ...) -> IPTablesRule:
 
 ## API → CORE MAPPING
 
-### VM Operations (vms.py)
+### VM Operations (vm/ package)
 
 | API Function | Core Module(s) | Pattern |
 |--------------|----------------|---------|
@@ -258,7 +269,7 @@ Only these API functions call `check_privileges_interactive()`:
 
 | Module | Functions |
 |--------|-----------|
-| `vms.py` | `create_vm()`, `remove_vm()`, `cleanup_vms()` |
+| `vm/` | `create_vm()`, `remove_vm()`, `cleanup_vms()` |
 | `network.py` | `create_network()`, `remove_network()` |
 | `host.py` | `init_host()`, `restore_host()`, `clean_host()`, `reset_host()`, `prune_host()` |
 | `cache.py` | `prune_vms()`, `prune_networks()`, `prune_all()` |
@@ -300,7 +311,7 @@ def create(
 
 **Step 2: API queries DB and passes explicit values (correct)**
 ```python
-# api/vms.py (CORRECT)
+# api/vm/ package (CORRECT)
 def create_vm(image: Optional[str] = None, ...) -> VMInstance:
     db = MVMDatabase()
     
