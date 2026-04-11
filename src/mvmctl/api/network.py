@@ -24,7 +24,13 @@ from mvmctl.core.network_manager import (
     validate_bridge_not_conflicting,
     validate_no_subnet_overlap,
 )
-from mvmctl.db.models import IPTablesRule, IPTablesRuleType
+from mvmctl.db.models import (
+    IPTablesPort,
+    IPTablesProtocol,
+    IPTablesRule,
+    IPTablesRuleType,
+    IPTablesWildcard,
+)
 from mvmctl.db.models import Network as DBNetwork
 from mvmctl.exceptions import NetworkError
 from mvmctl.models import NetworkConfig, NetworkInspectInfo, NetworkItem, NetworkLease
@@ -467,8 +473,13 @@ def create_network(
                     target="MASQUERADE",
                     network_id=network_id,
                     network_name=name,
+                    protocol=IPTablesProtocol.ALL,
                     source=config.subnet,
+                    destination=IPTablesWildcard.ANY_CIDR,
+                    in_interface=IPTablesWildcard.ANY_INTERFACE,
                     out_interface=gateway_iface,
+                    sport=IPTablesPort.ANY,
+                    dport=IPTablesPort.ANY,
                 )
                 create_iptables_rule(masquerade_rule, db=db)
 
@@ -480,9 +491,13 @@ def create_network(
                     target="ACCEPT",
                     network_id=network_id,
                     network_name=name,
+                    protocol=IPTablesProtocol.ALL,
                     source=config.subnet,
+                    destination=IPTablesWildcard.ANY_CIDR,
                     in_interface=config.bridge,
                     out_interface=gateway_iface,
+                    sport=IPTablesPort.ANY,
+                    dport=IPTablesPort.ANY,
                 )
                 create_iptables_rule(forward_in_rule, db=db)
 
@@ -494,9 +509,13 @@ def create_network(
                     target="ACCEPT",
                     network_id=network_id,
                     network_name=name,
+                    protocol=IPTablesProtocol.ALL,
+                    source=IPTablesWildcard.ANY_CIDR,
                     destination=config.subnet,
                     in_interface=gateway_iface,
                     out_interface=config.bridge,
+                    sport=IPTablesPort.ANY,
+                    dport=IPTablesPort.ANY,
                 )
                 create_iptables_rule(forward_out_rule, db=db)
 
@@ -774,8 +793,13 @@ def _sync_network_nat_rules(network_id: str, config: NetworkConfig) -> None:
             target="MASQUERADE",
             network_id=network_id,
             network_name=config.name,
+            protocol=IPTablesProtocol.ALL,
             source=config.subnet,
+            destination=IPTablesWildcard.ANY_CIDR,
+            in_interface=IPTablesWildcard.ANY_INTERFACE,
             out_interface=gateway_iface,
+            sport=IPTablesPort.ANY,
+            dport=IPTablesPort.ANY,
         )
         create_iptables_rule(masquerade_rule, db=db)
 
@@ -786,9 +810,13 @@ def _sync_network_nat_rules(network_id: str, config: NetworkConfig) -> None:
             target="ACCEPT",
             network_id=network_id,
             network_name=config.name,
+            protocol=IPTablesProtocol.ALL,
             source=config.subnet,
+            destination=IPTablesWildcard.ANY_CIDR,
             in_interface=config.bridge,
             out_interface=gateway_iface,
+            sport=IPTablesPort.ANY,
+            dport=IPTablesPort.ANY,
         )
         create_iptables_rule(forward_in_rule, db=db)
 
@@ -799,9 +827,13 @@ def _sync_network_nat_rules(network_id: str, config: NetworkConfig) -> None:
             target="ACCEPT",
             network_id=network_id,
             network_name=config.name,
+            protocol=IPTablesProtocol.ALL,
+            source=IPTablesWildcard.ANY_CIDR,
             destination=config.subnet,
             in_interface=gateway_iface,
             out_interface=config.bridge,
+            sport=IPTablesPort.ANY,
+            dport=IPTablesPort.ANY,
         )
         create_iptables_rule(forward_out_rule, db=db)
 

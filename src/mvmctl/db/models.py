@@ -22,10 +22,32 @@ from typing import Optional
 class IPTablesRuleType(str, Enum):
     """Classification of iptables rules."""
 
-    MASQUERADE = "masquerade"  # NAT MASQUERADE in MVM-POSTROUTING
-    FORWARD_IN = "forward_in"  # Bridge -> TAP in MVM-FORWARD
-    FORWARD_OUT = "forward_out"  # TAP -> Bridge in MVM-FORWARD
-    NOCLOUD_INPUT = "nocloud_input"  # INPUT rules in MVM-NOCLOUD-INPUT
+    MASQUERADE = "masquerade"
+    FORWARD_IN = "forward_in"
+    FORWARD_OUT = "forward_out"
+    NOCLOUD_INPUT = "nocloud_input"
+
+
+class IPTablesProtocol(str, Enum):
+    """Valid protocol values for iptables rules."""
+
+    TCP = "tcp"
+    UDP = "udp"
+    ICMP = "icmp"
+    ALL = "all"
+
+
+class IPTablesWildcard(str, Enum):
+    """Special values for iptables rule wildcards."""
+
+    ANY_CIDR = "0.0.0.0/0"
+    ANY_INTERFACE = "*"
+
+
+class IPTablesPort(int, Enum):
+    """Special port values for iptables rules."""
+
+    ANY = 0
 
 
 @dataclass
@@ -43,23 +65,19 @@ class IPTablesRule:
     rule_type: IPTablesRuleType
     target: str
     network_id: str
-    network_name: Optional[str] = None  # Not stored in DB; populated by caller from networks table
+    protocol: IPTablesProtocol
+    source: str
+    destination: str
 
-    # Rule parameters (all optional at DB level, validated in code)
+    in_interface: str
+    out_interface: str
+    sport: int
+    dport: int
+
+    network_name: Optional[str] = None
     id: Optional[int] = None
-    protocol: Optional[str] = None
-    source: Optional[str] = None
-    destination: Optional[str] = None
-    in_interface: Optional[str] = None
-    out_interface: Optional[str] = None
-    sport: Optional[int] = None
-    dport: Optional[int] = None
-
-    # Metadata
     comment_tag: Optional[str] = None
     command_string: Optional[str] = None
-
-    # Lifecycle
     created_at: Optional[str] = None
     last_verified_at: Optional[str] = None
     is_active: bool = True

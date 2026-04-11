@@ -17,7 +17,13 @@ from enum import Enum
 from typing import Optional
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
-from mvmctl.db.models import IPTablesRule, IPTablesRuleType
+from mvmctl.db.models import (
+    IPTablesPort,
+    IPTablesProtocol,
+    IPTablesRule,
+    IPTablesRuleType,
+    IPTablesWildcard,
+)
 from mvmctl.utils.process import privileged_cmd
 
 
@@ -98,14 +104,14 @@ class IPTablesTracker:
             rule_type=rule_type,
             target=target,
             network_id=network_id,
+            protocol=IPTablesProtocol(protocol) if protocol else IPTablesProtocol.ALL,
+            source=source if source else IPTablesWildcard.ANY_CIDR,
+            destination=destination if destination else IPTablesWildcard.ANY_CIDR,
+            in_interface=in_interface if in_interface else IPTablesWildcard.ANY_INTERFACE,
+            out_interface=out_interface if out_interface else IPTablesWildcard.ANY_INTERFACE,
+            sport=sport if sport else IPTablesPort.ANY,
+            dport=dport if dport else IPTablesPort.ANY,
             network_name=network_name,
-            protocol=protocol,
-            source=source,
-            destination=destination,
-            in_interface=in_interface,
-            out_interface=out_interface,
-            sport=sport,
-            dport=dport,
             comment_tag=comment,
         )
 
@@ -190,25 +196,26 @@ class IPTablesTracker:
         """Build iptables command arguments from rule specification."""
         args = ["iptables", "-t", rule.table_name, action.value, rule.chain_name]
 
-        if rule.protocol:
-            args.extend(["-p", rule.protocol])
+        # Only add -p flag if protocol is not ALL (wildcard)
+        if rule.protocol != IPTablesProtocol.ALL:
+            args.extend(["-p", rule.protocol.value])
 
-        if rule.source:
+        if rule.source != IPTablesWildcard.ANY_CIDR:
             args.extend(["-s", rule.source])
 
-        if rule.destination:
+        if rule.destination != IPTablesWildcard.ANY_CIDR:
             args.extend(["-d", rule.destination])
 
-        if rule.in_interface:
+        if rule.in_interface != IPTablesWildcard.ANY_INTERFACE:
             args.extend(["-i", rule.in_interface])
 
-        if rule.out_interface:
+        if rule.out_interface != IPTablesWildcard.ANY_INTERFACE:
             args.extend(["-o", rule.out_interface])
 
-        if rule.sport:
+        if rule.sport != IPTablesPort.ANY:
             args.extend(["--sport", str(rule.sport)])
 
-        if rule.dport:
+        if rule.dport != IPTablesPort.ANY:
             args.extend(["--dport", str(rule.dport)])
 
         args.extend(["-j", rule.target])

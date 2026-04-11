@@ -178,9 +178,9 @@ CREATE TABLE iptables_rules (
     
     -- Rule Parameters (explicit columns for precise matching)
     rule_type TEXT NOT NULL CHECK(rule_type IN ('masquerade', 'forward_in', 'forward_out', 'nocloud_input')),
-    protocol TEXT CHECK(protocol IN ('tcp', 'udp', 'icmp', 'all')),  -- NULL = any protocol
-    source TEXT,                        -- Source CIDR or IP (e.g., '10.0.0.0/24', '0.0.0.0/0')
-    destination TEXT,                   -- Dest CIDR or IP
+    protocol TEXT CHECK(protocol IN ('tcp', 'udp', 'icmp', 'all')),  -- Default: 'all'
+    source TEXT,                        -- Default: '0.0.0.0/0' (any source)
+    destination TEXT,                   -- Default: '0.0.0.0/0' (any destination)
     in_interface TEXT,                  -- Input interface (-i), e.g., 'mvm-default'
     out_interface TEXT,                 -- Output interface (-o), e.g., 'eth0'
     target TEXT NOT NULL,               -- 'MASQUERADE', 'ACCEPT', 'DROP'

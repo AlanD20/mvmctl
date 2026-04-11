@@ -26,6 +26,7 @@ from mvmctl.db.models import (
     HostState,
     HostStateChange,
     Image,
+    IPTablesProtocol,
     IPTablesRule,
     IPTablesRuleType,
     Kernel,
@@ -905,7 +906,7 @@ class MVMDatabase:
                     rule.table_name,
                     rule.chain_name,
                     rule.rule_type.value,
-                    rule.protocol,
+                    rule.protocol.value,
                     rule.source,
                     rule.destination,
                     rule.in_interface,
@@ -993,8 +994,7 @@ class MVMDatabase:
     def _row_to_iptables_rule(self, row: sqlite3.Row) -> IPTablesRule:
         """Convert DB row to IPTablesRule dataclass."""
         row_dict = dict(row)
-        # Convert rule_type string to enum
         row_dict["rule_type"] = IPTablesRuleType(row_dict["rule_type"])
-        # Convert is_active int to bool
+        row_dict["protocol"] = IPTablesProtocol(row_dict["protocol"])
         row_dict["is_active"] = bool(row_dict["is_active"])
         return IPTablesRule(**row_dict)
