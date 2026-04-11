@@ -48,6 +48,7 @@ from mvmctl.utils.console import (
     print_success,
     print_table,
 )
+from mvmctl.utils.disk_size import format_bytes_human_readable
 from mvmctl.utils.error_handler import handle_mvm_error
 from mvmctl.utils.time import human_readable_time
 from mvmctl.utils.validation import validate_entity_name
@@ -404,7 +405,7 @@ def vm_create(
         None,
         "--disk-size",
         "-s",
-        help="Rootfs disk size (e.g., 512M, 1G, 2.5GB). Default from config.",
+        help="Rootfs disk size in MiB/GiB (e.g., 512M=512MiB, 1G=1GiB). Default from config.",
     ),
     ip: Optional[str] = typer.Option(None, "--ip", help="Guest IP (auto-assigned if omitted)"),
     network_name: Optional[str] = typer.Option(
@@ -914,8 +915,7 @@ def _print_vm_details(info: VMInspectInfo) -> None:
     if rootfs_path:
         try:
             rootfs_size = Path(rootfs_path).stat().st_size
-            disk_size_gb = rootfs_size / (1024**3)
-            disk_size_str = f"{disk_size_gb:.1f}G"
+            disk_size_str = format_bytes_human_readable(rootfs_size)
         except (OSError, ValueError):
             pass
 
@@ -981,8 +981,7 @@ def _print_vm_details_tree(info: VMInspectInfo) -> None:
     if rootfs_path:
         try:
             rootfs_size = Path(rootfs_path).stat().st_size
-            disk_size_gb = rootfs_size / (1024**3)
-            disk_size_str = f"{disk_size_gb:.1f}G"
+            disk_size_str = format_bytes_human_readable(rootfs_size)
         except (OSError, ValueError):
             pass
 

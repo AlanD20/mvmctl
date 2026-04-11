@@ -147,7 +147,7 @@ class MVMDatabase:
                 INSERT INTO images (
                     id, os_slug, os_name, arch, path, fs_type, fs_uuid,
                     compressed_size, original_size, compression_ratio,
-                    compressed_format, minimum_rootfs_size_mb, pulled_at, is_default, created_at, updated_at
+                    compressed_format, minimum_rootfs_size_mib, pulled_at, is_default, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     os_slug = excluded.os_slug,
@@ -160,7 +160,7 @@ class MVMDatabase:
                     original_size = excluded.original_size,
                     compression_ratio = excluded.compression_ratio,
                     compressed_format = excluded.compressed_format,
-                    minimum_rootfs_size_mb = excluded.minimum_rootfs_size_mb,
+                    minimum_rootfs_size_mib = excluded.minimum_rootfs_size_mib,
                     pulled_at = excluded.pulled_at,
                     is_default = excluded.is_default,
                     updated_at = CURRENT_TIMESTAMP
@@ -177,7 +177,7 @@ class MVMDatabase:
                     image.original_size,
                     image.compression_ratio,
                     image.compressed_format,
-                    image.minimum_rootfs_size_mb,
+                    image.minimum_rootfs_size_mib,
                     image.pulled_at,
                     int(image.is_default),
                     image.created_at,

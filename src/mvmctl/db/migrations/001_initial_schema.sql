@@ -17,7 +17,7 @@ CREATE TABLE images (
     original_size INTEGER,
     compression_ratio REAL,
     compressed_format TEXT,
-    minimum_rootfs_size_mb INTEGER NOT NULL,
+    minimum_rootfs_size_mib INTEGER NOT NULL,
     pulled_at TIMESTAMP,
     is_default INTEGER DEFAULT 0,  -- Boolean: 0 or 1
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

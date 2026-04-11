@@ -127,6 +127,8 @@ def _print_image_details(info: dict[str, Any], found_path: Path | None) -> None:
     print_key_value("ID", info.get("id", "-"))
     print_key_value("Name", info.get("name", "-"))
     print_key_value("OS Slug", os_slug)
+    print_key_value("Arch", info.get("arch", "-"))
+    print_key_value("Default", info.get("is_default", "-"))
     print_key_value("Pulled", format_timestamp(info.get("pulled_at")))
 
     print_section_header("STORAGE")
@@ -141,6 +143,9 @@ def _print_image_details(info: dict[str, Any], found_path: Path | None) -> None:
     print_key_value("Compressed", info.get("compressed_size", "-"))
     print_key_value("Ratio", info.get("compression_ratio", "-"))
 
+    print_section_header("VM REQUIREMENTS")
+    print_key_value("Minimum Disk", info.get("minimum_rootfs_size", "-"))
+
 
 def _print_image_details_tree(info: dict[str, Any], found_path: Path | None) -> None:
     os_slug = info.get("os_slug", "-")
@@ -151,7 +156,9 @@ def _print_image_details_tree(info: dict[str, Any], found_path: Path | None) -> 
     tree_lines = [
         f"├── ID:          {info.get('id', '-')}",
         f"├── Name:        {info.get('name', '-')}",
-        f"├── OS Slug: {os_slug}",
+        f"├── OS Slug:     {os_slug}",
+        f"├── Arch:        {info.get('arch', '-')}",
+        f"├── Default:     {info.get('is_default', '-')}",
         f"├── Pulled:      {info.get('pulled_at', '-')}",
     ]
 
@@ -161,11 +168,14 @@ def _print_image_details_tree(info: dict[str, Any], found_path: Path | None) -> 
     tree_lines.append(f"│   ├── FS UUID:   {info.get('fs_uuid', '-')}")
     tree_lines.append(f"│   └── File Size: {info.get('file_size', '-')}")
 
-    tree_lines.append("└── Compression")
-    tree_lines.append(f"    ├── Format:    {info.get('compressed_format', '-')}")
-    tree_lines.append(f"    ├── Original:  {info.get('original_size', '-')}")
-    tree_lines.append(f"    ├── Compressed: {info.get('compressed_size', '-')}")
-    tree_lines.append(f"    └── Ratio:     {info.get('compression_ratio', '-')}")
+    tree_lines.append("├── Compression")
+    tree_lines.append(f"│   ├── Format:    {info.get('compressed_format', '-')}")
+    tree_lines.append(f"│   ├── Original:  {info.get('original_size', '-')}")
+    tree_lines.append(f"│   ├── Compressed: {info.get('compressed_size', '-')}")
+    tree_lines.append(f"│   └── Ratio:     {info.get('compression_ratio', '-')}")
+
+    tree_lines.append("└── VM Requirements")
+    tree_lines.append(f"    └── Minimum Disk: {info.get('minimum_rootfs_size', '-')}")
 
     for line in tree_lines:
         print(line)
@@ -648,12 +658,14 @@ def image_inspect(
     compressed_size = meta.get("compressed_size")
     compression_ratio = meta.get("compression_ratio")
     compressed_format = meta.get("compressed_format", "-")
+    minimum_rootfs_size_mib = meta.get("minimum_rootfs_size_mib")
 
     original_size_str = format_bytes_human_readable(int(original_size)) if original_size else "-"
     compressed_size_str = (
         format_bytes_human_readable(int(compressed_size)) if compressed_size else "-"
     )
     ratio_str = f"{float(compression_ratio):.2f}x" if compression_ratio else "-"
+    minimum_size_str = f"{minimum_rootfs_size_mib} MiB" if minimum_rootfs_size_mib else "-"
 
     file_size_str = "-"
     if found_path and found_path.exists():
@@ -663,19 +675,28 @@ def image_inspect(
         except OSError:
             pass
 
+    is_default = bool(meta.get("is_default", 0))
+    created_at = meta.get("created_at")
+    updated_at = meta.get("updated_at")
+
     info = {
         "id": full_id,
         "name": str(meta.get("os_name", "-")),
         "os_slug": str(meta.get("os_slug", "-")),
+        "arch": str(meta.get("arch", "-")),
         "filename": filename or "-",
         "fs_type": str(meta.get("fs_type", "-")),
         "fs_uuid": str(meta.get("fs_uuid", "-")),
         "pulled_at": pulled_str,
+        "created_at": format_timestamp(created_at) if created_at else "-",
+        "updated_at": format_timestamp(updated_at) if updated_at else "-",
         "original_size": original_size_str,
         "compressed_size": compressed_size_str,
         "compression_ratio": ratio_str,
         "compressed_format": str(compressed_format),
         "file_size": file_size_str,
+        "minimum_rootfs_size": minimum_size_str,
+        "is_default": "Yes" if is_default else "No",
         "missing": is_missing,
     }
 
@@ -833,10 +854,10 @@ def image_warm(
 
     try:
         warmed_path = warm_image_for_ready_pool(image_id)
-        size_mb = warmed_path.stat().st_size / (1024 * 1024)
+        size_str = format_bytes_human_readable(warmed_path.stat().st_size)
         print_success(f"Image warmed successfully: {image_id}")
         print_info(f"  Path: {warmed_path}")
-        print_info(f"  Size: {size_mb:.1f} MB")
+        print_info(f"  Size: {size_str}")
         print_info("  Ready for fast VM creation!")
     except ImageError as e:
         print_error(str(e))

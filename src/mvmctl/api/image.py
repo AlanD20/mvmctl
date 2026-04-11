@@ -330,8 +330,8 @@ def register_fetched_image(result: Any, spec: Any) -> str:
         fields["original_size"] = result.original_size
     if result.compression_ratio is not None:
         fields["compression_ratio"] = result.compression_ratio
-    if result.minimum_rootfs_size_mb is not None:
-        fields["minimum_rootfs_size_mb"] = result.minimum_rootfs_size_mb
+    if result.minimum_rootfs_size_mib is not None:
+        fields["minimum_rootfs_size_mib"] = result.minimum_rootfs_size_mib
     if hasattr(spec, "arch") and spec.arch:
         fields["arch"] = spec.arch
 

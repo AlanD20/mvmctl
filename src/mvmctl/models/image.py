@@ -28,7 +28,7 @@ class ImageItem:
     is_default: bool = False
     created_at: str | None = None
     updated_at: str | None = None
-    minimum_rootfs_size_mb: int | None = None
+    minimum_rootfs_size_mib: int | None = None
 
     @classmethod
     def from_db(cls, record: "DBImage") -> "ImageItem":
@@ -48,7 +48,7 @@ class ImageItem:
             is_default=record.is_default,
             created_at=record.created_at,
             updated_at=record.updated_at,
-            minimum_rootfs_size_mb=record.minimum_rootfs_size_mb,
+            minimum_rootfs_size_mib=record.minimum_rootfs_size_mib,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -67,7 +67,7 @@ class ImageItem:
             "is_default": 1 if self.is_default else 0,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "minimum_rootfs_size_mb": self.minimum_rootfs_size_mb,
+            "minimum_rootfs_size_mib": self.minimum_rootfs_size_mib,
         }
 
 

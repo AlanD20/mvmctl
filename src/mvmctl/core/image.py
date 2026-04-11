@@ -17,7 +17,6 @@ from mvmctl.constants import (
     COMPRESSION_EXTENSION_MAP,
     CONST_GUESTFS_OS_RELEASE_PATH,
     CONST_MEBIBYTE_BYTES,
-    CONST_MEGABYTE_BYTES,
     CONST_MIN_ROOTFS_SIZE_MIB,
     CONST_PERCENT,
     CONST_RATIO_MIN,
@@ -51,7 +50,7 @@ class ImageImportResult:
     compressed_size: int | None = None
     original_size: int | None = None
     shrunk_size: int | None = None
-    minimum_rootfs_size_mb: int | None = None
+    minimum_rootfs_size_mib: int | None = None
     compression_ratio: float | None = None
 
 
@@ -598,7 +597,7 @@ def _calculate_minimum_image_size_mb(content_bytes: int) -> int:
     Returns:
         Minimum image size in MiB (binary units for filesystem operations)
     """
-    content_mb_decimal = content_bytes / CONST_MEGABYTE_BYTES
+    content_mb_decimal = content_bytes / CONST_MEBIBYTE_BYTES
     calculated_mb = int(content_mb_decimal * CONST_ROOTFS_HEADROOM_FACTOR)
     return max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mb)
 
@@ -1191,12 +1190,12 @@ def fetch_image(
         fs_type = detect_filesystem_type(existing_compressed)
         fs_uuid = get_filesystem_uuid(existing_compressed)
         existing_size = existing_compressed.stat().st_size
-        minimum_rootfs_size_mb = existing_size // CONST_MEGABYTE_BYTES
+        minimum_rootfs_size_mib = existing_size // CONST_MEBIBYTE_BYTES
         return ImageImportResult(
             path=existing_compressed,
             fs_type=fs_type,
             fs_uuid=fs_uuid,
-            minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+            minimum_rootfs_size_mib=minimum_rootfs_size_mib,
         )
 
     if force:
@@ -1277,12 +1276,12 @@ def fetch_image(
         if skip_optimization:
             logger.info("Skipping optimization (shrink and compression)")
             actual_size = actual_path.stat().st_size
-            minimum_rootfs_size_mb = actual_size // CONST_MEGABYTE_BYTES
+            minimum_rootfs_size_mib = actual_size // CONST_MEBIBYTE_BYTES
             return ImageImportResult(
                 path=actual_path,
                 fs_type=fs_type,
                 fs_uuid=fs_uuid,
-                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+                minimum_rootfs_size_mib=minimum_rootfs_size_mib,
             )
 
         # Shrink before compression
@@ -1306,8 +1305,8 @@ def fetch_image(
                 pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
             )
 
-            minimum_rootfs_size_mb = (
-                post_shrink_size // CONST_MEGABYTE_BYTES
+            minimum_rootfs_size_mib = (
+                post_shrink_size // CONST_MEBIBYTE_BYTES
             ) + CONST_RUNTIME_BUFFER_MB
             return ImageImportResult(
                 path=compressed_path_out,
@@ -1316,7 +1315,7 @@ def fetch_image(
                 compressed_size=compressed_size,
                 original_size=pre_shrink_size,
                 shrunk_size=post_shrink_size,
-                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+                minimum_rootfs_size_mib=minimum_rootfs_size_mib,
                 compression_ratio=compression_ratio,
             )
 
@@ -1452,8 +1451,8 @@ def import_image(
                     pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
                 )
 
-                minimum_rootfs_size_mb = (
-                    post_shrink_size // CONST_MEGABYTE_BYTES
+                minimum_rootfs_size_mib = (
+                    post_shrink_size // CONST_MEBIBYTE_BYTES
                 ) + CONST_RUNTIME_BUFFER_MB
                 return ImageImportResult(
                     path=compressed_path,
@@ -1462,7 +1461,7 @@ def import_image(
                     compressed_size=compressed_size,
                     original_size=pre_shrink_size,
                     shrunk_size=post_shrink_size,
-                    minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+                    minimum_rootfs_size_mib=minimum_rootfs_size_mib,
                     compression_ratio=compression_ratio,
                 )
 
@@ -1487,8 +1486,8 @@ def import_image(
                 pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
             )
 
-            minimum_rootfs_size_mb = (
-                post_shrink_size // CONST_MEGABYTE_BYTES
+            minimum_rootfs_size_mib = (
+                post_shrink_size // CONST_MEBIBYTE_BYTES
             ) + CONST_RUNTIME_BUFFER_MB
             return ImageImportResult(
                 path=compressed_path,
@@ -1497,7 +1496,7 @@ def import_image(
                 compressed_size=compressed_size,
                 original_size=pre_shrink_size,
                 shrunk_size=post_shrink_size,
-                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+                minimum_rootfs_size_mib=minimum_rootfs_size_mib,
                 compression_ratio=compression_ratio,
             )
 
@@ -1522,8 +1521,8 @@ def import_image(
                 pre_shrink_size / compressed_size if compressed_size > 0 else CONST_RATIO_MIN
             )
 
-            minimum_rootfs_size_mb = (
-                post_shrink_size // CONST_MEGABYTE_BYTES
+            minimum_rootfs_size_mib = (
+                post_shrink_size // CONST_MEBIBYTE_BYTES
             ) + CONST_RUNTIME_BUFFER_MB
             return ImageImportResult(
                 path=compressed_path,
@@ -1532,7 +1531,7 @@ def import_image(
                 compressed_size=compressed_size,
                 original_size=pre_shrink_size,
                 shrunk_size=post_shrink_size,
-                minimum_rootfs_size_mb=minimum_rootfs_size_mb,
+                minimum_rootfs_size_mib=minimum_rootfs_size_mib,
                 compression_ratio=compression_ratio,
             )
 

@@ -1,11 +1,21 @@
-"""Disk size parsing utilities."""
+"""Disk size parsing utilities.
+
+Uses IEC binary units (KiB, MiB, GiB) where:
+- K/KB = KiB = 1024 bytes
+- M/MB = MiB = 1024² bytes
+- G/GB = GiB = 1024³ bytes
+- T/TB = TiB = 1024⁴ bytes
+
+Note: The CLI accepts "M"/"MB" but treats both as MiB (binary),
+which is the industry standard for disk and memory sizing.
+"""
 
 import re
 from typing import Final
 
 from mvmctl.exceptions import MVMError
 
-# Size multipliers (binary, per industry standard)
+# Size multipliers (IEC binary units: KiB, MiB, GiB, TiB)
 _SIZE_MULTIPLIERS: Final[dict[str, int]] = {
     "B": 1,
     "K": 1024,

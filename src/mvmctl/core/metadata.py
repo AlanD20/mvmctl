@@ -166,7 +166,7 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
         original_size=fields.get("original_size"),
         compression_ratio=fields.get("compression_ratio"),
         compressed_format=fields.get("compressed_format"),
-        minimum_rootfs_size_mb=fields.get("minimum_rootfs_size_mb"),
+        minimum_rootfs_size_mib=fields.get("minimum_rootfs_size_mib"),
         pulled_at=fields.get("pulled_at"),
         is_default=fields.get("is_default", 0) == 1,
         created_at=created_at,

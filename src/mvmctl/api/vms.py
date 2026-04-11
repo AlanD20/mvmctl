@@ -23,7 +23,7 @@ from mvmctl.constants import (
     CONST_FILE_PERMS_PUBLIC_KEY,
     CONST_FILE_PERMS_SHADOW,
     CONST_FILE_PERMS_SUDOERS,
-    CONST_MEGABYTE_BYTES,
+    CONST_MEBIBYTE_BYTES,
     CONST_POLL_STEP_SECONDS,
     CONST_ROOT_GID,
     CONST_ROOT_UID,
@@ -652,14 +652,14 @@ def _setup_rootfs_with_guestfs(
                 # KILL CLOUD-INIT: Multi-layer approach for reliability on Ubuntu 24.04
                 # Layer 1: Create cloud-init.disabled sentinel file (cloud-init checks this first)
                 guestfs_handle._g.write("/etc/cloud/cloud-init.disabled", "disabled by mvmctl\n")
-                
+
                 # Layer 2: Disable snapd seeding (can trigger cloud-init on Ubuntu)
                 guestfs_handle._g.mkdir_p("/etc/systemd/system/snapd.seeded.service.d")
                 guestfs_handle._g.write(
                     "/etc/systemd/system/snapd.seeded.service.d/override.conf",
                     "[Service]\nExecStart=\nExecStart=/bin/true\n",
                 )
-                
+
                 # Layer 3: Disable systemd-networkd-wait-online (causes boot delays)
                 guestfs_handle._g.mkdir_p(
                     "/etc/systemd/system/systemd-networkd-wait-online.service.d"
@@ -668,7 +668,7 @@ def _setup_rootfs_with_guestfs(
                     "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf",
                     "[Unit]\nConditionPathExists=/nonexistent-disabled-by-mvm\n",
                 )
-                
+
                 # Layer 4: Mask cloud-init services (symlink to /dev/null prevents execution)
                 # This is the most reliable method - systemd will skip masked services entirely
                 for service_name in [
@@ -1129,24 +1129,24 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             elif image:
                 image_entry = db.get_image_by_os_slug(image)
 
-            if image_entry is None or image_entry.minimum_rootfs_size_mb is None:
+            if image_entry is None or image_entry.minimum_rootfs_size_mib is None:
                 image_id = image or resolved_image_hash or str(resolved_image_path)
                 os_slug = image_entry.os_slug if image_entry else image or "unknown"
                 raise VMCreateError(
-                    f"Image {image_id} is missing minimum_rootfs_size_mb. "
+                    f"Image {image_id} is missing minimum_rootfs_size_mib. "
                     f"This image was created with an older version. "
                     f"Re-import the image: mvm image fetch {os_slug} --force"
                 )
 
-            min_size_mb = image_entry.minimum_rootfs_size_mb
+            min_size_mb = image_entry.minimum_rootfs_size_mib
 
             if disk_size is not None:
                 requested_bytes = parse_disk_size(disk_size)
-                min_required_bytes = min_size_mb * CONST_MEGABYTE_BYTES
+                min_required_bytes = min_size_mb * CONST_MEBIBYTE_BYTES
                 if requested_bytes < min_required_bytes:
                     raise VMCreateError(
                         f"Requested disk size ({disk_size}) is smaller than "
-                        f"minimum required ({min_size_mb} MB). "
+                        f"minimum required ({min_size_mb} MiB). "
                         f"Use a larger size or choose a different image."
                     )
 
