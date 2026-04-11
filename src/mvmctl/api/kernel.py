@@ -8,6 +8,8 @@ return types.
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -155,6 +157,50 @@ def download_firecracker_kernel(
     )
 
 
+def _check_build_dependencies() -> list[str]:
+    required_commands = ["git", "curl", "make", "gcc", "flex", "bison", "bc", "pahole", "ld"]
+    missing_deps: list[str] = []
+
+    for cmd in required_commands:
+        if shutil.which(cmd) is None:
+            missing_deps.append(cmd)
+
+    library_checks = [
+        ("libelf", "libelf"),
+        ("openssl", "libssl-dev"),
+    ]
+
+    for pkg_name, display_name in library_checks:
+        try:
+            result = subprocess.run(
+                ["pkg-config", "--exists", pkg_name],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                missing_deps.append(display_name)
+        except FileNotFoundError:
+            missing_deps.append(display_name)
+
+    if missing_deps:
+        missing_str = ", ".join(sorted(missing_deps))
+        msg = (
+            f"Missing kernel build dependencies: {missing_str}\n"
+            "\n"
+            "Install on Ubuntu/Debian:\n"
+            "  sudo apt update\n"
+            "  sudo apt install -y build-essential libncurses-dev bison flex\n"
+            "  sudo apt install -y libssl-dev libelf-dev bc curl git dwarves\n"
+            "\n"
+            "Install on Arch Linux:\n"
+            "  sudo pacman -S base-devel ncurses bison flex\n"
+            "  sudo pacman -S openssl bc curl git pahole\n"
+        )
+        raise KernelError(msg)
+
+    return []
+
+
 def _build_official_kernel(
     spec: KernelSpec,
     arch: str,
@@ -187,6 +233,8 @@ def _build_official_kernel(
     effective_output_path = output_path or (
         output_dir / f"{output_name or spec.output_name}-{spec.version}-{arch}"
     )
+
+    _check_build_dependencies()
 
     build_result = _core_build(
         version=spec.version,
@@ -256,6 +304,11 @@ def register_fetched_kernel(
         result.version,
         result.arch,
     )
+
+    if not result.version:
+        raise KernelError(f"Kernel {kernel_name}: version is required")
+    if not result.arch:
+        raise KernelError(f"Kernel {kernel_name}: arch is required")
 
     parsed = parse_kernel_filename(kernel_name)
     cache_dir = get_cache_dir()

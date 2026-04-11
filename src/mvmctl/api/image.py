@@ -30,6 +30,7 @@ from mvmctl.models.image import ImageImportInput
 from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.full_hash import generate_full_hash_image, shorten_hash
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
+from mvmctl.utils.validation import validate_fs_type, validate_fs_uuid
 
 if TYPE_CHECKING:
     from mvmctl.core.image import ImageImportResult
@@ -310,6 +311,16 @@ def register_fetched_image(result: Any, spec: Any) -> str:
 
     full_id = generate_full_hash_image(result.path, spec.id, timestamp)
 
+    if result.original_size is None:
+        raise ImageError(f"Image {spec.id}: original_size is required")
+    if result.minimum_rootfs_size_mib is None:
+        raise ImageError(f"Image {spec.id}: minimum_rootfs_size_mib is required")
+
+    if result.fs_uuid:
+        validate_fs_uuid(result.fs_uuid, "fs_uuid")
+    if result.fs_type:
+        validate_fs_type(result.fs_type, "fs_type")
+
     fields: dict[str, object] = {
         "pulled_at": timestamp,
         "os_name": spec.name,
@@ -318,20 +329,18 @@ def register_fetched_image(result: Any, spec: Any) -> str:
         "path": result.path.name,
         "fs_type": result.fs_type
         if result.fs_type
-        else (result.path.suffix.lstrip(".") if result.path.suffix else "unknown"),
-        "compressed_format": "zst",
+        else (result.path.suffix.lstrip(".") if result.path.suffix else "ext4"),
+        "compressed_format": "zst", # For now i's hard-coded
+        "original_size": result.original_size,
+        "minimum_rootfs_size_mib": result.minimum_rootfs_size_mib,
     }
 
     if result.fs_uuid:
         fields["fs_uuid"] = result.fs_uuid
     if result.compressed_size is not None:
         fields["compressed_size"] = result.compressed_size
-    if result.original_size is not None:
-        fields["original_size"] = result.original_size
     if result.compression_ratio is not None:
         fields["compression_ratio"] = result.compression_ratio
-    if result.minimum_rootfs_size_mib is not None:
-        fields["minimum_rootfs_size_mib"] = result.minimum_rootfs_size_mib
     if hasattr(spec, "arch") and spec.arch:
         fields["arch"] = spec.arch
 

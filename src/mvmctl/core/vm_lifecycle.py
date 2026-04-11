@@ -17,8 +17,6 @@ def grow_rootfs_with_guestfs(image_path: Path, target_size_bytes: int) -> None:
 
     try:
         current_size = image_path.stat().st_size
-        if not isinstance(current_size, int):
-            return
     except (OSError, AttributeError):
         return
 

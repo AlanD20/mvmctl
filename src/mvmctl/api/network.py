@@ -452,10 +452,11 @@ def create_network(
         bridge=config.bridge,
         ipv4_gateway=config.ipv4_gateway,
         bridge_active=True,
-        nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
         nat_enabled=config.nat_enabled,
         is_default=False,
         created_at=created_at,
+        updated_at=created_at,
+        nat_gateways=",".join(config.nat_gateways) if config.nat_gateways else None,
     )
     db.upsert_network(db_network)
 
@@ -480,6 +481,7 @@ def create_network(
                     out_interface=gateway_iface,
                     sport=IPTablesPort.ANY,
                     dport=IPTablesPort.ANY,
+                    is_active=True,
                 )
                 create_iptables_rule(masquerade_rule, db=db)
 
@@ -498,6 +500,7 @@ def create_network(
                     out_interface=gateway_iface,
                     sport=IPTablesPort.ANY,
                     dport=IPTablesPort.ANY,
+                    is_active=True,
                 )
                 create_iptables_rule(forward_in_rule, db=db)
 
@@ -516,6 +519,7 @@ def create_network(
                     out_interface=config.bridge,
                     sport=IPTablesPort.ANY,
                     dport=IPTablesPort.ANY,
+                    is_active=True,
                 )
                 create_iptables_rule(forward_out_rule, db=db)
 
@@ -800,6 +804,7 @@ def _sync_network_nat_rules(network_id: str, config: NetworkConfig) -> None:
             out_interface=gateway_iface,
             sport=IPTablesPort.ANY,
             dport=IPTablesPort.ANY,
+            is_active=True,
         )
         create_iptables_rule(masquerade_rule, db=db)
 
@@ -817,6 +822,7 @@ def _sync_network_nat_rules(network_id: str, config: NetworkConfig) -> None:
             out_interface=gateway_iface,
             sport=IPTablesPort.ANY,
             dport=IPTablesPort.ANY,
+            is_active=True,
         )
         create_iptables_rule(forward_in_rule, db=db)
 
@@ -834,6 +840,7 @@ def _sync_network_nat_rules(network_id: str, config: NetworkConfig) -> None:
             out_interface=config.bridge,
             sport=IPTablesPort.ANY,
             dport=IPTablesPort.ANY,
+            is_active=True,
         )
         create_iptables_rule(forward_out_rule, db=db)
 

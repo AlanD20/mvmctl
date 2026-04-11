@@ -35,20 +35,26 @@ def update_kernel_entry(cache_dir: Path, kernel_name: str, **fields: Any) -> Non
     """Upsert kernel entry in database."""
     db = MVMDatabase()
 
-    # Build Kernel model from fields
+    # Build Kernel model from fields - API layer validates required fields
     kernel_id = fields.get("full_hash", kernel_name)
-    path = fields.get("path", "")
+    path = fields["path"]
     created_at = fields.get("created_at") or _now_utc()
     updated_at = fields.get("last_modified") or created_at
 
+    name = fields.get("name") or fields.get("base_name") or kernel_id
+    version = fields["version"]  # Required - validated by API
+    arch = fields["arch"]
+    base_name = fields.get("base_name") or name
+    kernel_type = fields["type"]
+
     kernel = Kernel(
         id=kernel_id,
-        name=fields.get("name", path),
-        version=fields.get("version", ""),
-        arch=fields.get("arch", "x86_64"),
+        name=name,
+        base_name=base_name,
+        version=version,
+        arch=arch,
+        type=kernel_type,
         path=path,
-        base_name=fields.get("base_name"),
-        type=fields.get("type"),
         is_default=fields.get("is_default", 0) == 1,
         created_at=created_at,
         updated_at=updated_at,
@@ -154,23 +160,30 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
     created_at = fields.get("created_at") or _now_utc()
     updated_at = fields.get("updated_at") or created_at
 
+    os_slug = fields["os_slug"]  # Required - validated by API
+    path = fields["path"]  # Required - validated by API
+    arch = fields["arch"]
+    minimum_rootfs_size = fields["minimum_rootfs_size_mib"]  # Required
+    original_size = fields["original_size"]  # Required
+    fs_uuid = fields['fs_uuid']
+
     image = Image(
         id=image_id,
-        os_slug=fields.get("os_slug") or fields.get("internal_id", ""),
-        path=fields.get("path", ""),
-        os_name=fields.get("os_name"),
-        arch=str(fields.get("arch") or ""),
-        fs_type=fields.get("fs_type"),
-        fs_uuid=fields.get("fs_uuid"),
-        compressed_size=fields.get("compressed_size"),
-        original_size=fields.get("original_size"),
-        compression_ratio=fields.get("compression_ratio"),
-        compressed_format=fields.get("compressed_format"),
-        minimum_rootfs_size_mib=fields.get("minimum_rootfs_size_mib"),
-        pulled_at=fields.get("pulled_at"),
+        os_slug=os_slug,
+        os_name=fields.get("os_name") or os_slug,
+        arch=str(arch),
+        path=path,
+        fs_type=fields.get("fs_type") or "ext4",
+        fs_uuid=fields.fs_uuid,
+        minimum_rootfs_size_mib=minimum_rootfs_size,
+        original_size=original_size,
         is_default=fields.get("is_default", 0) == 1,
         created_at=created_at,
         updated_at=updated_at,
+        compressed_size=fields.get("compressed_size"),
+        compression_ratio=fields.get("compression_ratio"),
+        compressed_format=fields.get("compressed_format"),
+        pulled_at=fields.get("pulled_at"),
     )
     db.upsert_image(image)
 

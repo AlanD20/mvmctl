@@ -571,10 +571,7 @@ def test_build_kernel_vmlinux_not_found(tmp_path: Path):
 
 
 @patch("mvmctl.core.metadata.update_kernel_entry")
-@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
-def test_build_kernel_pipeline_cached(
-    mock_update_kernel_entry: MagicMock, mock_check_deps: MagicMock, tmp_path: Path
-):
+def test_build_kernel_pipeline_cached(mock_update_kernel_entry: MagicMock, tmp_path: Path):
     output_path = tmp_path / "vmlinux"
     output_path.write_bytes(b"cached-kernel")
 
@@ -597,12 +594,10 @@ def test_build_kernel_pipeline_cached(
 @patch("mvmctl.core.kernel.extract_kernel_tarball")
 @patch("mvmctl.core.kernel.download_with_progress")
 @patch("mvmctl.core.metadata.update_kernel_entry")
-@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 @patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value="fakechecksum256fake")
 def test_build_kernel_pipeline_ignores_cache_when_disabled(
     mock_fetch_sha256_url: MagicMock,
     mock_update_kernel_entry: MagicMock,
-    mock_check_deps: MagicMock,
     mock_download: MagicMock,
     mock_extract: MagicMock,
     mock_configure: MagicMock,
@@ -648,10 +643,7 @@ def test_build_kernel_pipeline_ignores_cache_when_disabled(
 
 
 @patch("mvmctl.core.metadata.update_kernel_entry")
-@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
-def test_build_kernel_pipeline_download_fails(
-    mock_update_kernel_entry: MagicMock, mock_check_deps, tmp_path: Path
-):
+def test_build_kernel_pipeline_download_fails(mock_update_kernel_entry: MagicMock, tmp_path: Path):
     output_path = tmp_path / "vmlinux"
     build_dir = tmp_path / "build"
     build_dir.mkdir()
@@ -671,10 +663,8 @@ def test_build_kernel_pipeline_download_fails(
 
 @patch("mvmctl.core.kernel.fetch_kernel_sha256_from_url", return_value=None)
 @patch("mvmctl.core.metadata.update_kernel_entry")
-@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_requires_checksum(
     mock_update_kernel_entry: MagicMock,
-    mock_check_deps: MagicMock,
     mock_fetch_sha256_url: MagicMock,
     tmp_path: Path,
 ):
@@ -713,9 +703,7 @@ def test_build_kernel_pipeline_requires_checksum(
 @patch("mvmctl.core.kernel.download_with_progress")
 @patch("mvmctl.core.metadata.update_kernel_entry")
 @patch("mvmctl.utils.full_hash.generate_full_hash_kernel", return_value="a" * 64)
-@patch("mvmctl.core.kernel.check_build_dependencies", return_value=[])
 def test_build_kernel_pipeline_full_success(
-    mock_check_deps: MagicMock,
     mock_full_hash: MagicMock,
     mock_update_kernel_entry: MagicMock,
     mock_download: MagicMock,
@@ -1753,56 +1741,51 @@ class TestCheckBuildDependencies:
 
         return MagicMock(side_effect=run_side_effect)
 
-    @patch("mvmctl.core.kernel.shutil.which")
-    @patch("mvmctl.core.kernel.subprocess.run")
+    @patch("mvmctl.api.kernel.shutil.which")
+    @patch("mvmctl.api.kernel.subprocess.run")
     def test_check_build_dependencies_all_present(
         self, mock_subprocess: MagicMock, mock_which: MagicMock
     ) -> None:
-        """Test that check_build_dependencies succeeds when all deps are present."""
-        from mvmctl.core.kernel import check_build_dependencies
+        from mvmctl.api.kernel import _check_build_dependencies
 
         mock_which.return_value = "/usr/bin/test"
         mock_subprocess.return_value = MagicMock(returncode=0)
 
-        # Should return empty list (no missing deps) or succeed without raising
-        result = check_build_dependencies()
+        result = _check_build_dependencies()
         assert result == [] or result is None
 
-    @patch("mvmctl.core.kernel.shutil.which")
-    @patch("mvmctl.core.kernel.subprocess.run")
+    @patch("mvmctl.api.kernel.shutil.which")
+    @patch("mvmctl.api.kernel.subprocess.run")
     def test_check_build_dependencies_missing_flex(
         self, mock_subprocess: MagicMock, mock_which: MagicMock
     ) -> None:
-        """Test that missing flex raises KernelError with install instructions."""
-        from mvmctl.core.kernel import check_build_dependencies
+        from mvmctl.api.kernel import _check_build_dependencies
 
         mock_which.side_effect = self._make_which_mock(missing_commands=["flex"])
         mock_subprocess.return_value = MagicMock(returncode=0)
 
         with pytest.raises(KernelError, match="flex"):
-            check_build_dependencies()
+            _check_build_dependencies()
 
-    @patch("mvmctl.core.kernel.shutil.which")
-    @patch("mvmctl.core.kernel.subprocess.run")
+    @patch("mvmctl.api.kernel.shutil.which")
+    @patch("mvmctl.api.kernel.subprocess.run")
     def test_check_build_dependencies_missing_bison(
         self, mock_subprocess: MagicMock, mock_which: MagicMock
     ) -> None:
-        """Test that missing bison raises KernelError with install instructions."""
-        from mvmctl.core.kernel import check_build_dependencies
+        from mvmctl.api.kernel import _check_build_dependencies
 
         mock_which.side_effect = self._make_which_mock(missing_commands=["bison"])
         mock_subprocess.return_value = MagicMock(returncode=0)
 
         with pytest.raises(KernelError, match="bison"):
-            check_build_dependencies()
+            _check_build_dependencies()
 
-    @patch("mvmctl.core.kernel.shutil.which")
-    @patch("mvmctl.core.kernel.subprocess.run")
+    @patch("mvmctl.api.kernel.shutil.which")
+    @patch("mvmctl.api.kernel.subprocess.run")
     def test_check_build_dependencies_missing_libelf(
         self, mock_subprocess: MagicMock, mock_which: MagicMock
     ) -> None:
-        """Test that missing libelf raises KernelError with install instructions."""
-        from mvmctl.core.kernel import check_build_dependencies
+        from mvmctl.api.kernel import _check_build_dependencies
 
         mock_which.return_value = "/usr/bin/test"
         mock_subprocess.side_effect = self._make_subprocess_mock(
@@ -1810,15 +1793,14 @@ class TestCheckBuildDependencies:
         )
 
         with pytest.raises(KernelError, match="libelf"):
-            check_build_dependencies()
+            _check_build_dependencies()
 
-    @patch("mvmctl.core.kernel.shutil.which")
-    @patch("mvmctl.core.kernel.subprocess.run")
+    @patch("mvmctl.api.kernel.shutil.which")
+    @patch("mvmctl.api.kernel.subprocess.run")
     def test_check_build_dependencies_missing_libssl(
         self, mock_subprocess: MagicMock, mock_which: MagicMock
     ) -> None:
-        """Test that missing openssl/libssl raises KernelError with install instructions."""
-        from mvmctl.core.kernel import check_build_dependencies
+        from mvmctl.api.kernel import _check_build_dependencies
 
         mock_which.return_value = "/usr/bin/test"
         mock_subprocess.side_effect = self._make_subprocess_mock(
@@ -1826,21 +1808,20 @@ class TestCheckBuildDependencies:
         )
 
         with pytest.raises(KernelError, match="libssl"):
-            check_build_dependencies()
+            _check_build_dependencies()
 
-    @patch("mvmctl.core.kernel.shutil.which")
-    @patch("mvmctl.core.kernel.subprocess.run")
+    @patch("mvmctl.api.kernel.shutil.which")
+    @patch("mvmctl.api.kernel.subprocess.run")
     def test_check_build_dependencies_missing_ld(
         self, mock_subprocess: MagicMock, mock_which: MagicMock
     ) -> None:
-        """Test that missing ld raises KernelError with build-essential install instructions."""
-        from mvmctl.core.kernel import check_build_dependencies
+        from mvmctl.api.kernel import _check_build_dependencies
 
         mock_which.side_effect = self._make_which_mock(missing_commands=["ld"])
         mock_subprocess.return_value = MagicMock(returncode=0)
 
         with pytest.raises(KernelError, match="build-essential"):
-            check_build_dependencies()
+            _check_build_dependencies()
 
 
 # ---------------------------------------------------------------------------

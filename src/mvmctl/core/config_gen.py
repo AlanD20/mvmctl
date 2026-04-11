@@ -316,7 +316,6 @@ class ConfigGenerator:
         ]
 
     def write_to_file(self, path: Path) -> None:
-        self.validate()
         config = self.generate()
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:

@@ -127,7 +127,12 @@ from mvmctl.utils.network import (
     generate_tap_name,
     subnet_mask_from_subnet,
 )
-from mvmctl.utils.validation import validate_entity_name, validate_fs_type, validate_fs_uuid
+from mvmctl.utils.validation import (
+    validate_boot_arg_component,
+    validate_entity_name,
+    validate_fs_type,
+    validate_fs_uuid,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1276,6 +1281,23 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             )
 
             config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
+
+            if vm_config.boot_args:
+                for component in vm_config.boot_args.split():
+                    validate_boot_arg_component(component, "boot_args")
+            if vm_config.root_uuid:
+                validate_fs_uuid(vm_config.root_uuid, "root_uuid")
+            if vm_config.root_fs_type:
+                validate_fs_type(vm_config.root_fs_type, "root_fs_type")
+            if vm_instance.ipv4:
+                validate_boot_arg_component(vm_instance.ipv4, "guest_ip")
+            if vm_instance.ipv4_gateway:
+                validate_boot_arg_component(vm_instance.ipv4_gateway, "ipv4_gateway")
+            if vm_instance.subnet_mask:
+                validate_boot_arg_component(vm_instance.subnet_mask, "subnet_mask")
+            if vm_config.lsm_flags:
+                validate_boot_arg_component(vm_config.lsm_flags, "lsm_flags")
+
             ConfigGenerator(vm_config, vm_instance, vm_dir).write_to_file(config_file)
 
             console_socket_path: Path | None = None

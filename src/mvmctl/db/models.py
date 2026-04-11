@@ -1,15 +1,8 @@
 """Dataclass models for the mvmctl SQLite database.
 
-Each dataclass maps 1:1 to a database table. Fields use Python-native types.
+Each dataclass maps 1:1 to a database table. Fields match SQL schema constraints.
 
-Notes:
-    - Timestamps are stored as ISO-format strings in SQLite.
-    - BOOLEAN columns (SQLite INTEGER 0/1) map to Python bool.
-    - Optional fields default to None and map to nullable columns.
-    - Primary keys for most tables are 64-character SHA256 hashes.
-    - Exceptions: binary_defaults (name TEXT PK), network_leases (AUTOINCREMENT),
-      host_state (singleton id=1), host_state_changes (AUTOINCREMENT),
-      db_migrations (AUTOINCREMENT).
+NOT NULL fields are required (no Optional), nullable fields use Optional.
 """
 
 from __future__ import annotations
@@ -20,8 +13,6 @@ from typing import Optional
 
 
 class IPTablesRuleType(str, Enum):
-    """Classification of iptables rules."""
-
     MASQUERADE = "masquerade"
     FORWARD_IN = "forward_in"
     FORWARD_OUT = "forward_out"
@@ -29,8 +20,6 @@ class IPTablesRuleType(str, Enum):
 
 
 class IPTablesProtocol(str, Enum):
-    """Valid protocol values for iptables rules."""
-
     TCP = "tcp"
     UDP = "udp"
     ICMP = "icmp"
@@ -38,28 +27,16 @@ class IPTablesProtocol(str, Enum):
 
 
 class IPTablesWildcard(str, Enum):
-    """Special values for iptables rule wildcards."""
-
     ANY_CIDR = "0.0.0.0/0"
     ANY_INTERFACE = "*"
 
 
 class IPTablesPort(int, Enum):
-    """Special port values for iptables rules."""
-
     ANY = 0
 
 
 @dataclass
 class IPTablesRule:
-    """Represents a tracked iptables rule with explicit parameter storage.
-
-    All rule parameters are stored as separate columns for:
-    - Precise matching during sync operations
-    - Querying by specific parameters (e.g., "all rules for interface X")
-    - Reconstructing iptables commands without parsing
-    """
-
     table_name: str
     chain_name: str
     rule_type: IPTablesRuleType
@@ -68,11 +45,11 @@ class IPTablesRule:
     protocol: IPTablesProtocol
     source: str
     destination: str
-
     in_interface: str
     out_interface: str
     sport: int
     dport: int
+    is_active: bool
 
     network_name: Optional[str] = None
     id: Optional[int] = None
@@ -80,168 +57,143 @@ class IPTablesRule:
     command_string: Optional[str] = None
     created_at: Optional[str] = None
     last_verified_at: Optional[str] = None
-    is_active: bool = True
 
 
 @dataclass
 class Image:
-    """OS image metadata — maps to the images table."""
-
-    id: str  # 64-char SHA256 hash (primary key)
-    os_slug: str  # e.g., "alpine-3.21" (from JSON internal_id)
-    path: str  # Full filesystem path (from JSON filename)
+    id: str
+    os_slug: str
+    os_name: str
     arch: str
-    os_name: Optional[str] = None
-    fs_type: Optional[str] = None
-    fs_uuid: Optional[str] = None
+    path: str
+    fs_type: str
+    fs_uuid: str
+    minimum_rootfs_size_mib: int
+    original_size: int
+    is_default: bool
+    created_at: str
+    updated_at: str
+
     compressed_size: Optional[int] = None
-    original_size: Optional[int] = None
     compression_ratio: Optional[float] = None
     compressed_format: Optional[str] = None
-    minimum_rootfs_size_mib: int | None = None  # NEW: HARD REQUIREMENT for VM creation
     pulled_at: Optional[str] = None
-    is_default: bool = False
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
 
 
 @dataclass
 class Kernel:
-    """Firecracker kernel metadata — maps to the kernels table."""
-
-    id: str  # 64-char SHA256 hash (primary key)
+    id: str
     name: str
+    base_name: str
     version: str
     arch: str
-    path: str  # Full filesystem path (from JSON filename)
-    base_name: Optional[str] = None
-    type: Optional[str] = None
-    is_default: bool = False
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None  # Maps from JSON last_modified
+    type: str
+    path: str
+    is_default: bool
+    created_at: str
+    updated_at: str
 
 
 @dataclass
 class Binary:
-    """Firecracker binary metadata — maps to the binaries table."""
-
-    id: str  # 64-char SHA256 hash (primary key)
-    name: str  # "firecracker" or "jailer"
-    version: str  # Maps from JSON package_version
+    id: str
+    name: str
+    version: str
+    full_version: str
+    ci_version: str
     path: str
-    full_version: Optional[str] = None
-    ci_version: Optional[str] = None
-    is_default: bool = False
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    is_default: bool
+    created_at: str
+    updated_at: str
 
 
 @dataclass
 class Network:
-    """Named network definition — maps to the networks table."""
-
-    id: str  # 64-char SHA256 hash (primary key)
+    id: str
     name: str
-    subnet: str  # CIDR notation (maps from JSON cidr)
+    subnet: str
     bridge: str
-    ipv4_gateway: str  # Maps from JSON gateway
-    bridge_active: bool = False
-    nat_gateways: Optional[str] = None  # Comma-separated interface names
-    nat_enabled: bool = False
-    is_default: bool = False
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    ipv4_gateway: str
+    bridge_active: bool
+    nat_enabled: bool
+    is_default: bool
+    created_at: str
+    updated_at: str
+
+    nat_gateways: Optional[str] = None
 
 
 @dataclass
 class NetworkLease:
-    """IP lease record — maps to the network_leases table.
+    network_id: str
+    ipv4: str
+    leased_at: str
 
-    Primary key is INTEGER AUTOINCREMENT (id), not a hash.
-    expires_at is NULL by default: leases are valid for VM's entire lifecycle.
-    """
-
-    network_id: str  # FK to networks(id)
-    ipv4: str  # Maps from JSON ip
-    id: Optional[int] = None  # AUTOINCREMENT (None before insert)
-    vm_id: Optional[str] = None  # FK to vm_states(id), maps from JSON vm_name
-    leased_at: Optional[str] = None
-    expires_at: Optional[str] = None  # NULL = no expiry
+    id: Optional[int] = None
+    vm_id: Optional[str] = None
+    expires_at: Optional[str] = None
 
 
 @dataclass
 class VMInstance:
-    """VM runtime state — maps to the vm_instances table."""
-
-    id: str  # 64-char SHA256 hash (primary key)
+    id: str
     name: str
-    status: str  # Validated in code, no CHECK constraint
-    pid: Optional[int] = None
-    ipv4: Optional[str] = None  # Maps from JSON ip
-    mac: Optional[str] = None
-    network_id: Optional[str] = None  # FK, maps from JSON network_name
-    tap_device: Optional[str] = None
-    image_id: Optional[str] = None  # FK to images(id)
-    kernel_id: Optional[str] = None  # FK to kernels(id)
-    binary_id: Optional[str] = None  # FK to binaries(id)
-    api_socket_path: Optional[str] = None  # Maps from JSON socket_path
+    status: str
+    pid: int
+    ipv4: str
+    mac: str
+    network_id: str
+    tap_device: str
+    image_id: str
+    kernel_id: str
+    binary_id: str
+    config_path: str
+    cloud_init_mode: str
+    vcpu_count: int
+    mem_size_mib: int
+    disk_size_mib: int
+    rootfs_path: str
+    rootfs_suffix: str
+    enable_api_socket: bool
+    enable_pci: bool
+    enable_logging: bool
+    enable_metrics: bool
+    enable_console: bool
+    created_at: str
+    updated_at: str
+
+    api_socket_path: Optional[str] = None
     console_socket_path: Optional[str] = None
-    config_path: Optional[str] = None
-    cloud_init_mode: Optional[str] = None  # Validated in code
     nocloud_net_port: Optional[int] = None
     nocloud_server_pid: Optional[int] = None
     console_relay_pid: Optional[int] = None
     exit_code: Optional[int] = None
-    vcpu_count: Optional[int] = None
-    mem_size_mib: Optional[int] = None
-    disk_size_mib: Optional[int] = None
-    rootfs_path: Optional[str] = None
-    rootfs_suffix: Optional[str] = None
-    enable_api_socket: Optional[bool] = None
-    enable_pci: Optional[bool] = None
     lsm_flags: Optional[str] = None
-    enable_logging: Optional[bool] = None
-    enable_metrics: Optional[bool] = None
-    enable_console: Optional[bool] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
 
 
 @dataclass
 class HostState:
-    """Host initialization state (singleton) — maps to the host_state table.
-
-    There is always exactly one row with id=1. The application enforces
-    this invariant (no CHECK constraint in the schema).
-    """
-
-    id: int  # Always 1 (singleton)
-    initialized: bool = False
-    mvm_group_created: bool = False
-    sudoers_configured: bool = False
-    default_network_created: bool = False
-    initialized_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    id: int
+    initialized: bool
+    mvm_group_created: bool
+    sudoers_configured: bool
+    default_network_created: bool
+    initialized_at: str
+    updated_at: str
 
 
 @dataclass
 class HostStateChange:
-    """Host configuration change record — maps to the host_state_changes table.
-
-    Tracks every change made during ``mvm host init``.
-    Changes are reverted in reverse order (LIFO) during ``mvm host reset``.
-    Primary key is INTEGER AUTOINCREMENT.
-    """
-
     session_id: str
     init_timestamp: str
     setting: str
     mechanism: str
     applied_value: str
     change_order: int
-    id: Optional[int] = None  # AUTOINCREMENT (None before insert)
+    reverted: bool
+    created_at: str
+
+    id: Optional[int] = None
     original_value: Optional[str] = None
-    reverted: bool = False
     reverted_at: Optional[str] = None
     revert_mechanism: Optional[str] = None
-    created_at: Optional[str] = None

@@ -111,6 +111,7 @@ class IPTablesTracker:
             out_interface=out_interface if out_interface else IPTablesWildcard.ANY_INTERFACE,
             sport=sport if sport else IPTablesPort.ANY,
             dport=dport if dport else IPTablesPort.ANY,
+            is_active=True,
             network_name=network_name,
             comment_tag=comment,
         )

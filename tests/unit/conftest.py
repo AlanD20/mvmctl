@@ -273,5 +273,5 @@ def _mock_kernel_build_dependencies(request):
         yield None
         return
 
-    with patch("mvmctl.core.kernel.check_build_dependencies", return_value=[]):
+    with patch("mvmctl.api.kernel._check_build_dependencies", return_value=[]):
         yield
