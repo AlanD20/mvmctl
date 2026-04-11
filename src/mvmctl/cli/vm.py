@@ -621,7 +621,10 @@ def vm_create(
         vm = create_vm(input=input_data)
         print_success(f"VM '{name}' started (PID {vm.pid})")
         print_info(f"  Console ready: mvm vm console {name}")
-        print_info(f"  SSH ready in ~15-30s: mvm vm ssh {name}")
+        if cloud_init_result.mode == CloudInitMode.OFF:
+            print_info(f"  SSH ready in ~1-3s: mvm vm ssh {name}")
+        else:
+            print_info(f"  SSH ready after cloud-init setup: mvm vm ssh {name}")
         print_info(f"  Logs: mvm vm logs --name {name} --type os --follow")
     except MVMError as e:
         handle_mvm_error(e)
