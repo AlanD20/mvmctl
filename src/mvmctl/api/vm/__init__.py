@@ -1,27 +1,31 @@
 """VM API module - public surface.
 
 This module re-exports all VM-related API functions from the submodules:
-- _delegates.py: Simple delegation functions (stop, pause, resume, ssh, etc.)
-- _data.py: Data gathering functions (inspect, export, list, etc.)
-- _resolve.py: Resolution wrappers (image/kernel path resolution)
-- _registry.py: VM registry operations (create, remove, cleanup)
+- _lifecycle.py: Simple delegation functions (stop, pause, resume, ssh, etc.)
+- _query.py: Data gathering functions (inspect, export, list, etc.)
+- _asset_resolution.py: Resolution wrappers (image/kernel path resolution)
+- _orchestration.py: VM orchestration operations (create, remove, cleanup)
+- _resolver.py: VM creation resolver
 """
 
 from __future__ import annotations
 
-# Data gathering functions (inspect, export, list, status, etc.)
-from mvmctl.api.vm._data import (
-    ResolveVMTargetsResult,
-    compute_vm_is_missing,
-    export_vm_config,
-    get_vm_status_with_exit_code,
-    inspect_vm,
-    list_vms,
-    resolve_vm_targets,
+# Resolution wrappers (image/kernel path resolution)
+from mvmctl.api.vm._asset_resolution import (
+    resolve_image_id_path,
+    resolve_image_multi_strategy,
+    resolve_image_path,
+    resolve_kernel_id_path,
+    resolve_kernel_multi_strategy,
+    resolve_kernel_path,
+    resolve_vm_selector,
 )
 
+# Exception handling helpers
+from mvmctl.api.vm._exceptions import handle_creation_error
+
 # Delegation functions (stop, pause, resume, ssh, logs, console, etc.)
-from mvmctl.api.vm._delegates import (
+from mvmctl.api.vm._lifecycle import (
     _pause_process,
     _resume_process,
     attach_console,
@@ -48,26 +52,26 @@ from mvmctl.api.vm._delegates import (
     vm_cache_dir,
 )
 
-# Registry operations (create, remove, cleanup)
-from mvmctl.api.vm._registry import (
+# Orchestration operations (create, remove, cleanup)
+from mvmctl.api.vm._orchestration import (
     cleanup_vms,
     create_vm,
     remove_vm,
 )
 
+# Data gathering functions (inspect, export, list, status, etc.)
+from mvmctl.api.vm._query import (
+    ResolveVMInstancesResult,
+    compute_vm_is_missing,
+    export_vm_config,
+    get_vm_status_with_exit_code,
+    inspect_vm,
+    list_vms,
+    resolve_vm_target_instances,
+)
+
 # Removal context classes (pure state trackers)
 from mvmctl.api.vm._removal import VMBulkCleanupContext, VMRemovalContext
-
-# Resolution wrappers (image/kernel path resolution)
-from mvmctl.api.vm._resolve import (
-    resolve_image_id_path,
-    resolve_image_multi_strategy,
-    resolve_image_path,
-    resolve_kernel_id_path,
-    resolve_kernel_multi_strategy,
-    resolve_kernel_path,
-    resolve_vm_selector,
-)
 
 # Re-export FirecrackerClient for test patching backward compatibility
 from mvmctl.core.firecracker import FirecrackerClient
@@ -82,7 +86,9 @@ from mvmctl.core.vm_process import _write_pid_file
 from mvmctl.services.console_relay import ConsoleRelayManager
 
 __all__ = [
-    # Registry operations
+    # Exception handling
+    "handle_creation_error",
+    # Orchestration operations
     "create_vm",
     "remove_vm",
     "cleanup_vms",
@@ -122,8 +128,8 @@ __all__ = [
     "export_vm_config",
     "get_vm_status_with_exit_code",
     "compute_vm_is_missing",
-    "resolve_vm_targets",
-    "ResolveVMTargetsResult",
+    "resolve_vm_target_instances",
+    "ResolveVMInstancesResult",
     # Resolution wrappers
     "resolve_image_path",
     "resolve_kernel_path",

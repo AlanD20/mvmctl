@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from mvmctl.api._internal._resolvers._binary_resolver import BinaryResolver
-from mvmctl.api._internal._resolvers._image_resolver import resolve_image_hash
-from mvmctl.api._internal._resolvers._network_resolver import NetworkResolver
+from mvmctl.api._internal._resolvers import (
+    BinaryResolver,
+    ImageResolver,
+    NetworkResolver,
+)
 from mvmctl.constants import DEFAULT_NETWORK_NAME
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import AssetNotFoundError, VMCreateError
@@ -20,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class VMCreationResolver:
+class VMInputResolver:
     """Resolve all DB-backed defaults using a single DB instance."""
 
     def __init__(self) -> None:
@@ -28,8 +30,9 @@ class VMCreationResolver:
         self._db = MVMDatabase()
         self._network_resolver = NetworkResolver()
         self._binary_resolver = BinaryResolver()
+        self._image_resolver = ImageResolver()
 
-    def resolve(self, input: VMCreateInput, vm_id: str) -> ResolvedVMInputs:
+    def resolve(self, input: VMCreateInput, vm_id: str) -> VMResolvedDependencies:
         """Resolve all inputs to explicit values."""
         name = input.name
         vcpus = input.vcpus
@@ -40,10 +43,9 @@ class VMCreationResolver:
         kernel_path, kernel_id = self._resolve_kernel(input)
         network_name, network_id = self._resolve_network(input)
         binary_path, binary_id = self._resolve_binary(input)
-        image_hash = resolve_image_hash(image_path, input.image_hash)
         kernel_args = self._build_kernel_args(input, image_fs_uuid)
 
-        return ResolvedVMInputs(
+        return VMResolvedDependencies(
             name=name,
             vm_id=vm_id,
             vcpus=vcpus,
@@ -70,7 +72,7 @@ class VMCreationResolver:
             skip_cleanup=input.skip_cleanup,
             image_fs_uuid=image_fs_uuid,
             image_fs_type=image_fs_type,
-            image_hash=image_hash,
+            image_hash=image_id,
             mac=input.mac,
             ip=input.ip,
             ssh_key=input.ssh_key,
@@ -81,7 +83,6 @@ class VMCreationResolver:
 
     def _resolve_image(self, input: VMCreateInput) -> tuple[Path, str, str | None, str | None]:
         """Resolve image to path, ID, fs_uuid, and fs_type."""
-        from mvmctl.api._internal._resolvers._image_resolver import resolve_image_multi_strategy
         from mvmctl.api.assets import resolve_image_fs_type, resolve_image_fs_uuid
 
         if input.image_path is not None:
@@ -92,6 +93,7 @@ class VMCreationResolver:
             fs_type = input.image_fs_type or (
                 resolve_image_fs_type(input.image) if input.image else None
             )
+            image_id = str(image_path)
         else:
             image_name = input.image
             if image_name is None:
@@ -104,21 +106,11 @@ class VMCreationResolver:
                     )
                 image_name = default_image.os_slug
 
-            image_path = resolve_image_multi_strategy(image_name)
+            image_item = self._image_resolver.resolve(image_name)
+            image_path = Path(image_item.path)
             fs_uuid = input.image_fs_uuid or resolve_image_fs_uuid(image_name)
             fs_type = input.image_fs_type or resolve_image_fs_type(image_name)
-
-        image_entry = None
-        image_hash = resolve_image_hash(image_path, input.image_hash)
-        if image_hash:
-            image_entry = self._db.get_image(image_hash)
-        elif input.image:
-            image_entry = self._db.get_image_by_os_slug(input.image)
-
-        if image_entry is None:
-            image_id = image_hash or str(image_path)
-        else:
-            image_id = image_entry.id
+            image_id = image_item.id
 
         return image_path, image_id, fs_uuid, fs_type
 
@@ -210,8 +202,8 @@ class VMCreationResolver:
 
 
 @dataclass(frozen=True)
-class ResolvedVMInputs:
-    """Immutable resolved inputs - output of VMCreationResolver."""
+class VMResolvedDependencies:
+    """Immutable resolved inputs - output of VMInputResolver."""
 
     name: str
     vm_id: str
@@ -248,4 +240,4 @@ class ResolvedVMInputs:
     cloud_init_iso_path: Path | None = None
 
 
-__all__ = ["VMCreationResolver", "ResolvedVMInputs"]
+__all__ = ["VMInputResolver", "VMResolvedDependencies"]

@@ -9,14 +9,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.api._internal._resolvers._key_resolver import resolve_default_public_keys
+from mvmctl.api._internal._resolvers import KeyResolver
 from mvmctl.api.vm._creation import (
     CloudInitProvisioner,
     GuestfsProvisioner,
     VMCreationContext,
 )
-from mvmctl.api.vm._creation_resolver import VMCreationResolver
 from mvmctl.api.vm._removal import VMBulkCleanupContext, VMRemovalContext
+from mvmctl.api.vm._resolver import VMInputResolver
 from mvmctl.api.vm._spawn import spawn_firecracker_vm
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
@@ -58,6 +58,8 @@ from mvmctl.utils.audit import log_audit
 from mvmctl.utils.disk_size import parse_disk_size
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
 from mvmctl.utils.network import generate_tap_name
+from mvmctl.utils.signals import SigtermContext
+from mvmctl.utils.validation import validate_mac
 
 if TYPE_CHECKING:
     from mvmctl.models.network import NetworkConfig
@@ -94,17 +96,11 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
     check_privileges_interactive("/usr/sbin/ip", f"create VM '{input.name}'")
 
     vm_id = _generate_vm_id(input.name)
-    resolver = VMCreationResolver()
+    resolver = VMInputResolver()
     resolved = resolver.resolve(input, vm_id=vm_id)
 
-    import re
-
     if resolved.mac is not None:
-        mac_re = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
-        if not mac_re.match(resolved.mac):
-            raise MVMError(
-                f"Invalid MAC address format: {resolved.mac!r}. Expected format: XX:XX:XX:XX:XX:XX"
-            )
+        validate_mac(resolved.mac)
 
     import mvmctl.api.vm
 
@@ -212,7 +208,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
     target_size = parse_disk_size(resolved.disk_size) if resolved.disk_size is not None else None
 
     if resolved.cloud_init_mode == CloudInitMode.OFF:
-        ssh_keys = resolve_default_public_keys(resolved.ssh_key)
+        ssh_keys = KeyResolver().resolve(resolved.ssh_key) if resolved.ssh_key else None
         provisioner = GuestfsProvisioner(
             rootfs_path=vm_rootfs_path,
             hostname=input.name,
@@ -230,7 +226,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
         provisioner.provision(target_size_bytes=target_size)
 
     if resolved.cloud_init_mode != CloudInitMode.OFF:
-        ssh_pub_key = resolve_default_public_keys(resolved.ssh_key)
+        ssh_pub_key = KeyResolver().resolve(resolved.ssh_key) if resolved.ssh_key else None
         cloud_init_provisioner = CloudInitProvisioner()
         ctx.cloud_init_result = cloud_init_provisioner.provision(
             mode=resolved.cloud_init_mode,
@@ -396,9 +392,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
     except NetworkError as exc:
         raise NetworkError(f"Network setup failed: {exc}") from exc
 
-    old_handler = signal.signal(signal.SIGTERM, lambda signum, frame: _sigterm_handler(ctx, signum))
-
-    try:
+    with SigtermContext(lambda: _perform_creation_cleanup(ctx)):
         try:
             pid, api_socket, console_relay_pid = spawn_firecracker_vm(ctx, resolved, config_file)
 
@@ -442,8 +436,6 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             else:
                 _perform_creation_cleanup(ctx)
             raise VMCreateError(f"Failed to create VM: {exc}") from exc
-    finally:
-        signal.signal(signal.SIGTERM, old_handler)
 
 
 def _generate_vm_id(name: str) -> str:
@@ -455,14 +447,6 @@ def _generate_vm_id(name: str) -> str:
     hash_input = f"{name}:{timestamp}"
     full_hash = hashlib.sha256(hash_input.encode()).hexdigest()
     return full_hash[:16]
-
-
-def _sigterm_handler(ctx: VMCreationContext, signum: int) -> None:
-    """Handle SIGTERM during VM creation."""
-    _perform_creation_cleanup(ctx)
-    from mvmctl.constants import CONST_SIGNAL_EXIT_CODE_BASE
-
-    raise SystemExit(CONST_SIGNAL_EXIT_CODE_BASE + signum)
 
 
 def _perform_creation_cleanup(ctx: VMCreationContext) -> None:
@@ -615,8 +599,8 @@ def _perform_removal_cleanup(
     """Perform all cleanup steps for VM removal using _firewall.py."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    from mvmctl.api._internal._firewall import FirewallManager, NocloudManager
     from mvmctl.api.network import release_network_ip
+    from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.core.network import delete_tap
     from mvmctl.services.console_relay import ConsoleRelayManager
@@ -677,7 +661,7 @@ def _perform_removal_deregister(
     fast: bool = False,
 ) -> None:
     """Deregister VM from DB and remove directory."""
-    from mvmctl.api._internal._firewall import NocloudManager
+    from mvmctl.api.vm._firewall import NocloudManager
 
     manager.deregister(vm.id)
 
@@ -762,8 +746,8 @@ def _perform_bulk_cleanup(
     cache_dir: Path,
 ) -> None:
     """Perform bulk cleanup of multiple VMs using _firewall.py."""
-    from mvmctl.api._internal._firewall import FirewallManager, NocloudManager
     from mvmctl.api.network import get_network
+    from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.core.network import delete_tap
     from mvmctl.utils.fs import get_vm_dir_by_hash

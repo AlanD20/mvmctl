@@ -19,14 +19,14 @@ from mvmctl.exceptions import VMCreateError
 
 if TYPE_CHECKING:
     from mvmctl.api.vm._creation import VMCreationContext
-    from mvmctl.api.vm._creation_resolver import ResolvedVMInputs
+    from mvmctl.api.vm._resolver import VMResolvedDependencies
 
 logger = logging.getLogger(__name__)
 
 
 def spawn_firecracker_vm(
     ctx: VMCreationContext,
-    resolved: ResolvedVMInputs,
+    resolved: VMResolvedDependencies,
     config_file: Path,
 ) -> tuple[int, Path | None, int | None]:
     """Spawn firecracker process and return PID, socket path, and console relay PID.

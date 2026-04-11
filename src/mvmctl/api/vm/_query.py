@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mvmctl.api._internal._resolvers import VMResolver
 from mvmctl.constants import (
     DEFAULT_FC_EXITCODE_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
@@ -20,7 +21,7 @@ from mvmctl.constants import (
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.vm_manager import VMManager
 from mvmctl.core.vm_monitor import reconcile_vm
-from mvmctl.exceptions import MVMError, VMNotFoundError
+from mvmctl.exceptions import VMNotFoundError
 from mvmctl.models import VMInstance, VMStatus
 from mvmctl.utils.fs import get_vm_dir_by_hash, is_file_missing
 from mvmctl.utils.process import is_process_running
@@ -37,22 +38,22 @@ __all__ = [
     "get_vm_status_with_exit_code",
     "compute_vm_is_missing",
     "list_vms",
-    "ResolveVMTargetsResult",
-    "resolve_vm_targets",
+    "ResolveVMInstancesResult",
+    "resolve_vm_target_instances",
 ]
 
 
 @dataclass
-class ResolveVMTargetsResult:
+class ResolveVMInstancesResult:
     targets: list[VMInstance]
     errors: list[str]
     exit_code: int
 
 
-def resolve_vm_targets(
+def resolve_vm_target_instances(
     ids: list[str],
     names: list[str],
-) -> ResolveVMTargetsResult:
+) -> ResolveVMInstancesResult:
     """Resolve multiple VM ID prefixes and names to VMInstance objects.
 
     Collects all errors rather than failing on the first, then deduplicates
@@ -63,45 +64,16 @@ def resolve_vm_targets(
         names: List of VM names.
 
     Returns:
-        ResolveVMTargetsResult with resolved targets, error messages, and exit code.
+        ResolveVMInstancesResult with resolved targets, error messages, and exit code.
     """
-    import mvmctl.api.vm
-
-    manager = mvmctl.api.vm.get_vm_manager()
-    targets: list[VMInstance] = []
-    errors: list[str] = []
-
-    for prefix in ids:
-        matches = manager.find_by_id_prefix(prefix)
-        if len(matches) == 0:
-            errors.append(f"No VM found with ID prefix '{prefix}'")
-        elif len(matches) > 1:
-            errors.append(f"Multiple VMs match ID prefix '{prefix}' — use a longer prefix or name")
-        else:
-            targets.append(matches[0])
-
-    for n in names:
-        matches = manager.get_by_name(n)
-        if len(matches) == 0:
-            errors.append(f"No VM found with name '{n}'")
-        elif len(matches) > 1:
-            errors.append(
-                f"Multiple VMs match name '{n}'. Use ID instead of name, or remove VMs individually."
-            )
-        else:
-            targets.append(matches[0])
-
-    # Deduplicate by ID
-    seen: set[str] = set()
-    unique: list[VMInstance] = []
-    for vm in targets:
-        if vm.id not in seen:
-            seen.add(vm.id)
-            unique.append(vm)
-    targets = unique
-
-    exit_code = 1 if errors and not targets else 0
-    return ResolveVMTargetsResult(targets=targets, errors=errors, exit_code=exit_code)
+    resolver = VMResolver()
+    identifiers = ids + names
+    result = resolver.resolve_many(identifiers)
+    return ResolveVMInstancesResult(
+        targets=result.items,  # type: ignore[arg-type]
+        errors=result.errors,
+        exit_code=result.exit_code,
+    )
 
 
 def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) -> list[VMInstance]:
@@ -139,25 +111,22 @@ def inspect_vm(name: str) -> VMInspectInfo:
 
     Raises:
         VMNotFoundError: If the VM is not found.
-        MVMError: If multiple VMs match the name.
     """
-    import mvmctl.api.vm
-
-    manager = mvmctl.api.vm.get_vm_manager()
+    resolver = VMResolver()
 
     # Try ID prefix first
-    matches = manager.find_by_id_prefix(name)
-    if len(matches) == 1:
-        return _gather_vm_details(matches[0])
+    try:
+        vm = resolver.by_id(name)
+        return _gather_vm_details(vm)
+    except VMNotFoundError:
+        pass
 
     # Fall back to name lookup
-    name_matches = manager.get_by_name(name)
-    if len(name_matches) == 1:
-        return _gather_vm_details(name_matches[0])
-    elif len(name_matches) > 1:
-        raise MVMError(f"Multiple VMs match name '{name}' — use ID prefix")
-
-    raise VMNotFoundError(f"VM '{name}' not found")
+    try:
+        vm = resolver.by_name(name)
+        return _gather_vm_details(vm)
+    except VMNotFoundError:
+        raise VMNotFoundError(f"VM '{name}' not found")
 
 
 def _resolve_asset_names(
@@ -404,7 +373,6 @@ def export_vm_config(name: str) -> "VMExportConfig":
     Raises:
         VMNotFoundError: If VM not found
     """
-    import mvmctl.api.vm
     from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
     from mvmctl.core.metadata import list_image_entries, list_kernel_entries
     from mvmctl.models.vm_config_file import (
@@ -419,20 +387,16 @@ def export_vm_config(name: str) -> "VMExportConfig":
     )
     from mvmctl.utils.fs import get_cache_dir
 
-    manager = mvmctl.api.vm.get_vm_manager()
+    resolver = VMResolver()
 
     # Try ID prefix first
-    matches = manager.find_by_id_prefix(name)
-    if len(matches) == 1:
-        vm = matches[0]
-    else:
+    try:
+        vm = resolver.by_id(name)
+    except VMNotFoundError:
         # Fall back to name lookup
-        name_matches = manager.get_by_name(name)
-        if len(name_matches) == 1:
-            vm = name_matches[0]
-        elif len(name_matches) > 1:
-            raise MVMError(f"Multiple VMs match name '{name}' — use ID prefix")
-        else:
+        try:
+            vm = resolver.by_name(name)
+        except VMNotFoundError:
             raise VMNotFoundError(f"VM '{name}' not found")
 
     if vm.config is None:

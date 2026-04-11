@@ -689,7 +689,7 @@ class VMCreationContext:
     Core call sequencing stays in _registry.py (the orchestrator).
     """
 
-    resolved: Any  # ResolvedVMInputs
+    resolved: Any  # VMResolvedDependencies
 
     vm_dir: Path | None = None
     tap_name: str = ""
@@ -719,7 +719,7 @@ class VMCreationContext:
         VMCreationContext is a pure state tracker. Actual cleanup orchestration
         lives in _registry.py to maintain clean layer separation.
         """
-        from mvmctl.api.vm._registry import _perform_creation_cleanup
+        from mvmctl.api.vm._orchestration import _perform_creation_cleanup
 
         _perform_creation_cleanup(self)
 
@@ -729,7 +729,7 @@ class VMCreationContext:
         VMCreationContext is a pure state tracker. Actual persistence orchestration
         lives in _registry.py to maintain clean layer separation.
         """
-        from mvmctl.api.vm._registry import _persist_failed_vm
+        from mvmctl.api.vm._orchestration import _persist_failed_vm
 
         _persist_failed_vm(instance, manager)
 
