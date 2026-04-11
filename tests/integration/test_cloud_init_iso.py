@@ -23,17 +23,27 @@ def _make_vm(
     ip: str = "10.20.0.2",
     pid: int = 1234,
     network: str = "default",
+    id: str = "vm-test-001",
 ) -> VMInstance:
     """Create a sample VMInstance for testing."""
+    created_at = datetime(2026, 1, 1, 12, 0, 0)
     return VMInstance(
         name=name,
+        id=id,
         ipv4=ip,
         mac="02:FC:aa:bb:cc:dd",
         pid=pid,
         status=status,
-        created_at=datetime(2026, 1, 1, 12, 0, 0),
-        network_name=network,
+        created_at=created_at,
+        updated_at=created_at,
+        network_id=network,
+        tap_device="mvm-tap0",
         api_socket_path=Path(f"/tmp/mvm/{name}.sock"),
+        rootfs_suffix=".ext4",
+        kernel_id="kern-test-001",
+        image_id="img-test-001",
+        binary_id="bin-test-001",
+        disk_size_mib=1024,
     )
 
 

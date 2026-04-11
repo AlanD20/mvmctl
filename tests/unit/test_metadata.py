@@ -60,8 +60,24 @@ class TestKernelMetadata:
         """Test listing all kernel entries."""
         cache_dir = make_test_paths(tmp_path).cache
 
-        update_kernel_entry(cache_dir, "kernel1", name="vmlinux-1", version="6.1.0")
-        update_kernel_entry(cache_dir, "kernel2", name="vmlinux-2", version="6.2.0")
+        update_kernel_entry(
+            cache_dir,
+            "kernel1",
+            name="vmlinux-1",
+            version="6.1.0",
+            path="vmlinux-1",
+            arch="x86_64",
+            type="official",
+        )
+        update_kernel_entry(
+            cache_dir,
+            "kernel2",
+            name="vmlinux-2",
+            version="6.2.0",
+            path="vmlinux-2",
+            arch="x86_64",
+            type="official",
+        )
 
         entries = list_kernel_entries(cache_dir)
         assert len(entries) == 2
@@ -72,7 +88,15 @@ class TestKernelMetadata:
         """Test removing a kernel entry."""
         cache_dir = make_test_paths(tmp_path).cache
 
-        update_kernel_entry(cache_dir, "kernel1", name="vmlinux-1", version="6.1.0")
+        update_kernel_entry(
+            cache_dir,
+            "kernel1",
+            name="vmlinux-1",
+            version="6.1.0",
+            path="vmlinux-1",
+            arch="x86_64",
+            type="official",
+        )
         remove_kernel_entry(cache_dir, "kernel1")
 
         entry = get_kernel_entry(cache_dir, "kernel1")
@@ -83,7 +107,13 @@ class TestKernelMetadata:
         cache_dir = make_test_paths(tmp_path).cache
 
         update_kernel_entry(
-            cache_dir, "kernel1", name="vmlinux-1", version="6.1.0", path="vmlinux-1"
+            cache_dir,
+            "kernel1",
+            name="vmlinux-1",
+            version="6.1.0",
+            path="vmlinux-1",
+            arch="x86_64",
+            type="official",
         )
         set_default_kernel_by_filename(cache_dir, "vmlinux-1")
 
@@ -113,7 +143,10 @@ class TestImageMetadata:
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
+            arch="x86_64",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
 
         entry = get_image_entry(cache_dir, "img123")
@@ -131,7 +164,11 @@ class TestImageMetadata:
             os_slug="ubuntu-24.04",
             os_name="Ubuntu",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
+            arch="x86_64",
+            path="ubuntu-24.04.ext4",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
         update_image_entry(
             cache_dir,
@@ -139,7 +176,11 @@ class TestImageMetadata:
             os_slug="debian-12",
             os_name="Debian",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
+            arch="x86_64",
+            path="debian-12.ext4",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="def456",
         )
 
         entries = list_image_entries(cache_dir)
@@ -154,9 +195,14 @@ class TestImageMetadata:
         update_image_entry(
             cache_dir,
             "img1",
+            os_slug="ubuntu-24.04",
             os_name="Ubuntu",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
+            arch="x86_64",
+            path="ubuntu-24.04.ext4",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
         remove_image_entry(cache_dir, "img1")
 
@@ -173,7 +219,11 @@ class TestImageMetadata:
             os_slug="ubuntu-24.04",
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
-            minimum_rootfs_size_mb=2048,
+            fs_type="ext4",
+            arch="x86_64",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
         set_default_image_entry(cache_dir, "img1")
 
@@ -191,7 +241,11 @@ class TestImageMetadata:
             os_slug="ubuntu-24.04",
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
-            minimum_rootfs_size_mb=2048,
+            fs_type="ext4",
+            arch="x86_64",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
         set_default_image_by_os_slug(cache_dir, "ubuntu-24.04")
 
@@ -208,7 +262,11 @@ class TestImageMetadata:
             os_slug="ubuntu-24.04",
             os_name="Ubuntu",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
+            arch="x86_64",
+            path="ubuntu-24.04.ext4",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
         update_image_entry(
             cache_dir,
@@ -216,7 +274,11 @@ class TestImageMetadata:
             os_slug="debian-12",
             os_name="Debian",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
+            arch="x86_64",
+            path="debian-12.ext4",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="def456",
         )
         update_image_entry(
             cache_dir,
@@ -224,7 +286,11 @@ class TestImageMetadata:
             os_slug="fedora-40",
             os_name="Fedora",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
+            arch="x86_64",
+            path="fedora-40.ext4",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="ghi789",
         )
 
         matches = find_images_by_id_prefix(cache_dir, "abc")
@@ -240,9 +306,14 @@ class TestImageMetadata:
         update_image_entry(
             cache_dir,
             "abc123",
+            os_slug="ubuntu-24.04",
             os_name="Ubuntu",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
+            arch="x86_64",
+            path="ubuntu-24.04.ext4",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
 
         from mvmctl.core.metadata import find_image_by_id_prefix
@@ -367,7 +438,11 @@ class TestNetworkMetadata:
             subnet="172.35.0.0/24",
             ipv4_gateway="172.35.0.1",
             bridge="mvm-default",
+            bridge_active=True,
             nat_enabled=True,
+            is_default=True,
+            created_at="2024-01-01T00:00:00",
+            updated_at="2024-01-01T00:00:00",
         )
         db.upsert_network(network)
         db.set_default_network("net-default-123")
@@ -392,8 +467,24 @@ class TestOrphanedEntryCleanup:
         valid_kernel.write_bytes(b"\x7fELF")
 
         # Add entries - one with matching file, one orphaned
-        update_kernel_entry(cache_dir, "valid123", name="vmlinux", path="vmlinux")
-        update_kernel_entry(cache_dir, "orphan456", name="missing", path="missing")
+        update_kernel_entry(
+            cache_dir,
+            "valid123",
+            name="vmlinux",
+            path="vmlinux",
+            version="6.1.0",
+            arch="x86_64",
+            type="official",
+        )
+        update_kernel_entry(
+            cache_dir,
+            "orphan456",
+            name="missing",
+            path="missing",
+            version="6.1.0",
+            arch="x86_64",
+            type="official",
+        )
 
         # List with validation
         entries = list_kernel_entries(cache_dir, kernels_dir)
@@ -422,14 +513,24 @@ class TestOrphanedEntryCleanup:
             "valid123",
             os_slug="ubuntu-24.04",
             path="ubuntu.ext4",
-            minimum_rootfs_size_mb=2048,
+            os_name="Ubuntu",
+            fs_type="ext4",
+            arch="x86_64",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
         update_image_entry(
             cache_dir,
             "orphan456",
             os_slug="debian-12",
             path="missing.ext4",
-            minimum_rootfs_size_mb=2048,
+            os_name="Debian",
+            fs_type="ext4",
+            arch="x86_64",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="def456",
         )
 
         # List with validation
@@ -452,11 +553,15 @@ class TestDualWriteCompatibility:
         update_image_entry(
             cache_dir,
             image_id,
-            internal_id="alpine-3.21",
+            os_slug="alpine-3.21",
             path="alpine-3.21.ext4",
             os_name="Alpine Linux",
+            fs_type="ext4",
+            arch="x86_64",
             is_default=0,
-            minimum_rootfs_size_mb=2048,
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            fs_uuid="abc123",
         )
 
         row = db.get_image(image_id)
@@ -475,6 +580,7 @@ class TestDualWriteCompatibility:
             cache_dir,
             kernel_id,
             name="vmlinux-6.1",
+            base_name="vmlinux-6.1",
             version="6.1.102",
             arch="x86_64",
             path="vmlinux-6.1",

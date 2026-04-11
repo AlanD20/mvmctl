@@ -31,6 +31,8 @@ def make_change(session_id: str = "sess1", order: int = 1) -> HostStateChange:
         mechanism="ip link add",
         applied_value="mvm-default",
         change_order=order,
+        reverted=False,
+        created_at="2024-01-01T00:00:00+00:00",
     )
 
 
@@ -61,7 +63,7 @@ class TestHostState:
         assert state.mvm_group_created == False  # noqa: E712
         assert state.sudoers_configured == False  # noqa: E712
         assert state.default_network_created == False  # noqa: E712
-        assert state.initialized_at is None
+        assert state.initialized_at is not None
         assert state.updated_at is not None
 
     def test_initialize_host_state_is_idempotent(self, db: MVMDatabase) -> None:
@@ -144,7 +146,7 @@ class TestHostState:
         assert state.mvm_group_created == False  # noqa: E712
         assert state.sudoers_configured == False  # noqa: E712
         assert state.default_network_created == False  # noqa: E712
-        assert state.initialized_at is None
+        assert state.initialized_at is not None
         assert state.updated_at is not None
 
 
@@ -176,8 +178,9 @@ class TestHostStateChanges:
             mechanism="iptables -t nat -A POSTROUTING",
             applied_value="MASQUERADE",
             change_order=2,
-            original_value="none",
             reverted=True,
+            created_at="2024-01-01T00:00:00+00:00",
+            original_value="none",
             reverted_at="2026-04-02T01:00:00",
             revert_mechanism="iptables -t nat -D POSTROUTING",
         )

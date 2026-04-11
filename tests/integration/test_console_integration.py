@@ -180,13 +180,20 @@ class TestConsoleWorkflow:
         print(f"cloud_init.write_cloud_init: {cloud_init.write_cloud_init}")
         print(f"Is mock: {cloud_init.write_cloud_init is mock_write_ci}")
 
-        # Mock image entry with minimum_rootfs_size_mb to pass validation
+        # Mock image entry with minimum_rootfs_size_mib to pass validation
         mock_db_get_image.return_value = Image(
             id="b" * 64,
             os_slug="test-image",
+            os_name="Test Image",
             path="/tmp/test-image.ext4",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789abc",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            is_default=False,
+            created_at="2024-01-01T00:00:00+00:00",
+            updated_at="2024-01-01T00:00:00+00:00",
         )
 
         from mvmctl.models import CloudInitMode
@@ -346,13 +353,20 @@ class TestConsoleWorkflow:
         mock_nocloud_instance.get_server_pid.return_value = 9999
         mock_nocloud_mgr.return_value = mock_nocloud_instance
 
-        # Mock image entry with minimum_rootfs_size_mb to pass validation
+        # Mock image entry with minimum_rootfs_size_mib to pass validation
         mock_db_get_image.return_value = Image(
             id="b" * 64,
             os_slug="test-image",
+            os_name="Test Image",
             path="/tmp/test-image.ext4",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789abc",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            is_default=False,
+            created_at="2024-01-01T00:00:00+00:00",
+            updated_at="2024-01-01T00:00:00+00:00",
         )
 
         from mvmctl.models import CloudInitMode

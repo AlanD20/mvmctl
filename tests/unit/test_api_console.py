@@ -1,5 +1,6 @@
 """Tests for API layer console functions in api/vms.py."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +9,27 @@ import pytest
 from mvmctl.api import vms
 from mvmctl.exceptions import MVMError, VMNotFoundError
 from mvmctl.models.vm import ConsoleInfo, ConsoleState, VMInstance, VMStatus
+
+
+def _make_test_vm(name: str, status: VMStatus) -> VMInstance:
+    """Create a VMInstance with all required fields for testing."""
+    return VMInstance(
+        name=name,
+        id="testvm001abc1234",
+        pid=1234,
+        ipv4="10.20.0.2",
+        mac="02:FC:aa:bb:cc:dd",
+        network_id="net-test-001",
+        tap_device="mvm-tap0",
+        created_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        status=status,
+        rootfs_suffix=".ext4",
+        kernel_id="kern-test-001",
+        image_id="img-test-001",
+        binary_id="bin-test-001",
+        disk_size_mib=1024,
+    )
 
 
 class TestAttachConsole:
@@ -19,7 +41,7 @@ class TestAttachConsole:
         """attach_console returns socket_path when VM exists and relay is running."""
         # Setup mock VM manager
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
+        mock_vm = _make_test_vm("testvm", VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -37,8 +59,8 @@ class TestAttachConsole:
         assert result.vm_name == "testvm"
         assert result.socket_path == mock_socket_path
         mock_manager.get.assert_called_once_with("testvm")
-        mock_mgr.is_relay_running.assert_called_once_with("testvm", None)
-        mock_mgr.get_socket_path.assert_called_once_with("testvm")
+        mock_mgr.is_relay_running.assert_called_once_with("testvm", "testvm001abc1234")
+        mock_mgr.get_socket_path.assert_called_once_with("testvm001abc1234")
 
     @patch("mvmctl.api.vms.ConsoleRelayManager")
     @patch("mvmctl.api.vms.get_vm_manager")
@@ -58,7 +80,7 @@ class TestAttachConsole:
     def test_attach_console_relay_not_running(self, mock_get_manager, mock_console_mgr_cls):
         """attach_console raises MVMError when no relay is running."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
+        mock_vm = _make_test_vm("testvm", VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -80,7 +102,7 @@ class TestKillConsole:
     def test_kill_console_success(self, mock_get_manager, mock_console_mgr_cls):
         """kill_console returns True when VM exists and relay is killed."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
+        mock_vm = _make_test_vm("testvm", VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -92,14 +114,14 @@ class TestKillConsole:
 
         assert result is True
         mock_manager.get.assert_called_once_with("testvm")
-        mock_mgr.kill_relay.assert_called_once_with("testvm", None)
+        mock_mgr.kill_relay.assert_called_once_with("testvm", "testvm001abc1234")
 
     @patch("mvmctl.api.vms.ConsoleRelayManager")
     @patch("mvmctl.api.vms.get_vm_manager")
     def test_kill_console_no_relay_running(self, mock_get_manager, mock_console_mgr_cls):
         """kill_console returns False when VM exists but no relay is running."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
+        mock_vm = _make_test_vm("testvm", VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -110,6 +132,7 @@ class TestKillConsole:
         result = vms.kill_console("testvm")
 
         assert result is False
+        mock_mgr.kill_relay.assert_called_once_with("testvm", "testvm001abc1234")
 
     @patch("mvmctl.api.vms.ConsoleRelayManager")
     @patch("mvmctl.api.vms.get_vm_manager")
@@ -133,7 +156,7 @@ class TestGetConsoleState:
     def test_get_console_state_relay_running(self, mock_get_manager, mock_core_get_state):
         """get_console_state returns state when VM exists and relay is running."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMStatus.RUNNING)
+        mock_vm = _make_test_vm("testvm", VMStatus.RUNNING)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -149,14 +172,14 @@ class TestGetConsoleState:
         assert result.pid == 12345
         assert result.socket_path == "/tmp/mvm-testvm/console.sock"
         mock_manager.get.assert_called_once_with("testvm")
-        mock_core_get_state.assert_called_once_with("testvm", None)
+        mock_core_get_state.assert_called_once_with("testvm", "testvm001abc1234")
 
     @patch("mvmctl.api.vms._get_console_state")
     @patch("mvmctl.api.vms.get_vm_manager")
     def test_get_console_state_relay_not_running(self, mock_get_manager, mock_core_get_state):
         """get_console_state returns state when VM exists but relay is not running."""
         mock_manager = MagicMock()
-        mock_vm = VMInstance(name="testvm", status=VMStatus.STOPPED)
+        mock_vm = _make_test_vm("testvm", VMStatus.STOPPED)
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
@@ -170,6 +193,8 @@ class TestGetConsoleState:
 
         assert result.running is False
         assert result.pid is None
+        mock_manager.get.assert_called_once_with("testvm")
+        mock_core_get_state.assert_called_once_with("testvm", "testvm001abc1234")
 
     @patch("mvmctl.api.vms._get_console_state")
     @patch("mvmctl.api.vms.get_vm_manager")

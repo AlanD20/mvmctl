@@ -40,20 +40,29 @@ def _make_vm(
         pid=pid,
         status=status,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
-        network_name=network,
+        updated_at=datetime(2026, 1, 1, 12, 0, 0),
+        network_id=network,
+        tap_device="mvm-tap0",
         api_socket_path=Path(f"/tmp/mvm/{name}.sock"),
+        config_path=None,
         config=VMConfig(
             name=name,
             vcpu_count=2,
             mem_size_mib=512,
+            disk_size_mib=1024,
+            lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
             enable_api_socket=True,
             enable_pci=False,
-            lsm_flags="landlock,lockdown,yama,integrity,selinux,bpf",
             enable_logging=True,
             enable_metrics=False,
             enable_console=True,
             cloud_init_mode=mode,
         ),
+        rootfs_suffix=".ext4",
+        kernel_id="kern-test-001",
+        image_id="img-test-001",
+        binary_id="bin-test-001",
+        disk_size_mib=1024,
         nocloud_net_port=nocloud_net_port,
     )
 
@@ -107,12 +116,13 @@ class TestFullNocloudNetLifecycle:
         seed_test_assets,
     ):
         """Test creating a VM with nocloud-net mode, verify setup, then remove and verify cleanup."""
-        # Setup mocks
+        from mvmctl.core.mvm_db import MVMDatabase
+        from mvmctl.db.models import Binary, Network
+
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
         mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        # Create fake image and kernel files
         image_path = tmp_path / "ubuntu-24.04.ext4"
         image_path.write_text("fake image")
         kernel_path = tmp_path / "vmlinux"
@@ -120,6 +130,35 @@ class TestFullNocloudNetLifecycle:
 
         mock_resolve_kernel.return_value = kernel_path
         mock_resolve_image.return_value = image_path
+
+        db = MVMDatabase()
+        db.upsert_binary(
+            Binary(
+                id="c" * 64,
+                name="firecracker",
+                version="1.15.0",
+                full_version="v1.15.0",
+                ci_version="1.15.0",
+                path="/usr/local/bin/firecracker",
+                is_default=True,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        db.upsert_network(
+            Network(
+                id="d" * 64,
+                name="default",
+                subnet="10.20.0.0/24",
+                bridge="mvm-br0",
+                ipv4_gateway="10.20.0.1",
+                bridge_active=True,
+                nat_enabled=True,
+                is_default=False,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
 
         # Mock network
         from mvmctl.models.network import NetworkConfig
@@ -144,13 +183,13 @@ class TestFullNocloudNetLifecycle:
         # Mock subprocess for firecracker
         mock_proc = MagicMock()
         mock_proc.pid = 12345
+        mock_proc.communicate.return_value = ("", "")
         mock_popen.return_value = mock_proc
 
-        # Setup vm_dir to return a path (directory will be created by create_vm)
+        # Setup vm_dir mock to return a proper Path
         vm_dir = tmp_path / "vms" / "nocloud-test-vm"
         mock_get_vm_dir.return_value = vm_dir
 
-        # Create VM
         from mvmctl.api.vms import create_vm
         from mvmctl.core.vm_manager import VMManager
 
@@ -233,14 +272,16 @@ class TestFullNocloudNetLifecycle:
         mock_check_priv,
         mock_require_group,
         tmp_path,
+        seed_test_assets,
     ):
         """Test that nocloud-net VM removal stops server and removes firewall rule."""
-        # Setup mocks
+        from mvmctl.core.mvm_db import MVMDatabase
+        from mvmctl.db.models import Binary, Network
+
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
         mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        # Create fake image and kernel files
         image_path = tmp_path / "ubuntu-24.04.ext4"
         image_path.write_text("fake image")
         kernel_path = tmp_path / "vmlinux"
@@ -248,6 +289,35 @@ class TestFullNocloudNetLifecycle:
 
         mock_resolve_kernel.return_value = kernel_path
         mock_resolve_image.return_value = image_path
+
+        db = MVMDatabase()
+        db.upsert_binary(
+            Binary(
+                id="c" * 64,
+                name="firecracker",
+                version="1.15.0",
+                full_version="v1.15.0",
+                ci_version="1.15.0",
+                path="/usr/local/bin/firecracker",
+                is_default=True,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        db.upsert_network(
+            Network(
+                id="d" * 64,
+                name="default",
+                subnet="10.20.0.0/24",
+                bridge="mvm-br0",
+                ipv4_gateway="10.20.0.1",
+                bridge_active=True,
+                nat_enabled=True,
+                is_default=False,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
 
         # Mock network
         from mvmctl.models.network import NetworkConfig
@@ -334,6 +404,7 @@ class TestMultipleVMsDifferentPorts:
     @patch("mvmctl.api.host.check_privileges_interactive")
     @patch("mvmctl.api.vms.NoCloudNetServerManager")
     @patch("mvmctl.api.vms.add_nocloud_input_rule")
+    @patch("mvmctl.api.vms.remove_nocloud_input_rule")
     @patch("mvmctl.api.vms.subprocess.Popen")
     @patch("mvmctl.api.vms.resolve_image_multi_strategy")
     @patch("mvmctl.api.vms._resolve_kernel_path")
@@ -342,17 +413,21 @@ class TestMultipleVMsDifferentPorts:
         mock_resolve_kernel,
         mock_resolve_image,
         mock_popen,
+        mock_remove_rule,
         mock_add_rule,
         mock_nocloud_mgr,
         mock_check_priv,
         mock_require_group,
         tmp_path,
+        seed_test_assets,
     ):
         """Test that two VMs with nocloud-net mode get different ports."""
+        from mvmctl.core.mvm_db import MVMDatabase
+        from mvmctl.db.models import Binary, Network
+
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
 
-        # Create fake image and kernel files
         image_path = tmp_path / "ubuntu-24.04.ext4"
         image_path.write_text("fake image")
         kernel_path = tmp_path / "vmlinux"
@@ -360,6 +435,36 @@ class TestMultipleVMsDifferentPorts:
 
         mock_resolve_image.return_value = image_path
         mock_resolve_kernel.return_value = kernel_path
+
+        db = MVMDatabase()
+        db.upsert_binary(
+            Binary(
+                id="c" * 64,
+                name="firecracker",
+                version="1.15.0",
+                full_version="v1.15.0",
+                ci_version="1.15.0",
+                path="/usr/local/bin/firecracker",
+                is_default=True,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+
+        db.upsert_network(
+            Network(
+                id="d" * 64,
+                name="default",
+                subnet="10.20.0.0/24",
+                bridge="mvm-br0",
+                ipv4_gateway="10.20.0.1",
+                bridge_active=True,
+                nat_enabled=True,
+                is_default=False,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
 
         # Create two separate mock managers to return different ports
         mock_mgr1 = MagicMock()
@@ -376,6 +481,7 @@ class TestMultipleVMsDifferentPorts:
         # Mock subprocess for firecracker
         mock_proc = MagicMock()
         mock_proc.pid = 12345
+        mock_proc.communicate.return_value = ("", "")
         mock_popen.return_value = mock_proc
 
         from mvmctl.api.vms import create_vm
@@ -383,75 +489,77 @@ class TestMultipleVMsDifferentPorts:
 
         vm_mgr = VMManager(tmp_path / "vms")
 
-        with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
-            with patch("mvmctl.api.network.get_network") as mock_get_net:
-                with patch(
-                    "mvmctl.api.network.allocate_network_ip",
-                    side_effect=["10.20.0.2", "10.20.0.3"],
-                ):
-                    with patch("mvmctl.api.vms.bridge_exists", return_value=True):
-                        with patch("mvmctl.api.vms.create_tap"):
-                            with patch("mvmctl.api.vms.add_iptables_forward_rules"):
-                                with patch("mvmctl.api.vms.setup_nat"):
-                                    with patch("mvmctl.api.vms._write_pid_file"):
-                                        with patch("mvmctl.api.vms.setup_nocloud_input_chain"):
-                                            with patch(
-                                                "mvmctl.api.vms.get_vm_dir_by_hash"
-                                            ) as mock_get_vm_dir:
-                                                vm_dir1 = tmp_path / "vms" / "vm1"
-                                                vm_dir2 = tmp_path / "vms" / "vm2"
-                                                mock_get_vm_dir.side_effect = [vm_dir1, vm_dir2]
+        with patch("mvmctl.api.vms.subprocess.run") as mock_subprocess_run:
+            mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
+                with patch("mvmctl.api.network.get_network") as mock_get_net:
+                    with patch(
+                        "mvmctl.api.network.allocate_network_ip",
+                        side_effect=["10.20.0.2", "10.20.0.3"],
+                    ):
+                        with patch("mvmctl.api.vms.bridge_exists", return_value=True):
+                            with patch("mvmctl.api.vms.create_tap"):
+                                with patch("mvmctl.api.vms.add_iptables_forward_rules"):
+                                    with patch("mvmctl.api.vms.setup_nat"):
+                                        with patch("mvmctl.api.vms._write_pid_file"):
+                                            with patch("mvmctl.api.vms.setup_nocloud_input_chain"):
+                                                with patch(
+                                                    "mvmctl.api.vms.get_vm_dir_by_hash"
+                                                ) as mock_get_vm_dir:
+                                                    vm_dir1 = tmp_path / "vms" / "vm1"
+                                                    vm_dir2 = tmp_path / "vms" / "vm2"
+                                                    mock_get_vm_dir.side_effect = [vm_dir1, vm_dir2]
 
-                                                mock_get_net.return_value = NetworkConfig(
-                                                    name="default",
-                                                    subnet="10.20.0.0/24",
-                                                    ipv4_gateway="10.20.0.1",
-                                                    bridge="mvm-br0",
-                                                    nat_enabled=True,
-                                                    created_at="2024-01-01T00:00:00+00:00",
-                                                )
+                                                    mock_get_net.return_value = NetworkConfig(
+                                                        name="default",
+                                                        subnet="10.20.0.0/24",
+                                                        ipv4_gateway="10.20.0.1",
+                                                        bridge="mvm-br0",
+                                                        nat_enabled=True,
+                                                        created_at="2024-01-01T00:00:00+00:00",
+                                                    )
 
-                                                vm1 = create_vm(
-                                                    VMCreateInput(
-                                                        name="vm1",
-                                                        image="ubuntu-24.04",
-                                                        kernel="vmlinux",
-                                                        vcpus=2,
-                                                        mem=256,
-                                                        network_name="default",
-                                                        user="root",
-                                                        enable_api_socket=False,
-                                                        enable_pci=False,
-                                                        enable_console=False,
-                                                        firecracker_bin="firecracker",
-                                                        lsm_flags="",
-                                                        enable_logging=False,
-                                                        enable_metrics=False,
-                                                        cloud_init_mode=CloudInitMode.NET,
-                                                    ),
-                                                    vm_manager=vm_mgr,
-                                                )
+                                                    vm1 = create_vm(
+                                                        VMCreateInput(
+                                                            name="vm1",
+                                                            image="ubuntu-24.04",
+                                                            kernel="vmlinux",
+                                                            vcpus=2,
+                                                            mem=256,
+                                                            network_name="default",
+                                                            user="root",
+                                                            enable_api_socket=False,
+                                                            enable_pci=False,
+                                                            enable_console=False,
+                                                            firecracker_bin="firecracker",
+                                                            lsm_flags="",
+                                                            enable_logging=False,
+                                                            enable_metrics=False,
+                                                            cloud_init_mode=CloudInitMode.NET,
+                                                        ),
+                                                        vm_manager=vm_mgr,
+                                                    )
 
-                                                vm2 = create_vm(
-                                                    VMCreateInput(
-                                                        name="vm2",
-                                                        image="ubuntu-24.04",
-                                                        kernel="vmlinux",
-                                                        vcpus=2,
-                                                        mem=256,
-                                                        network_name="default",
-                                                        user="root",
-                                                        enable_api_socket=False,
-                                                        enable_pci=False,
-                                                        enable_console=False,
-                                                        firecracker_bin="firecracker",
-                                                        lsm_flags="",
-                                                        enable_logging=False,
-                                                        enable_metrics=False,
-                                                        cloud_init_mode=CloudInitMode.NET,
-                                                    ),
-                                                    vm_manager=vm_mgr,
-                                                )
+                                                    vm2 = create_vm(
+                                                        VMCreateInput(
+                                                            name="vm2",
+                                                            image="ubuntu-24.04",
+                                                            kernel="vmlinux",
+                                                            vcpus=2,
+                                                            mem=256,
+                                                            network_name="default",
+                                                            user="root",
+                                                            enable_api_socket=False,
+                                                            enable_pci=False,
+                                                            enable_console=False,
+                                                            firecracker_bin="firecracker",
+                                                            lsm_flags="",
+                                                            enable_logging=False,
+                                                            enable_metrics=False,
+                                                            cloud_init_mode=CloudInitMode.NET,
+                                                        ),
+                                                        vm_manager=vm_mgr,
+                                                    )
 
         # Verify different ports were allocated
         assert vm1.nocloud_net_port == 8001
@@ -569,6 +677,11 @@ class TestNocloudNetFailureCleanup:
             subnet="10.20.0.0/24",
             bridge="mvm-br0",
             ipv4_gateway="10.20.0.1",
+            bridge_active=True,
+            nat_enabled=True,
+            is_default=False,
+            created_at="2024-01-01T00:00:00+00:00",
+            updated_at="2024-01-01T00:00:00+00:00",
         )
         mock_alloc_ip.return_value = "10.20.0.2"
 
@@ -682,13 +795,20 @@ class TestNocloudNetFailureCleanup:
         mock_resolve_image.return_value = image_path
         mock_resolve_kernel.return_value = kernel_path
 
-        # Mock image entry with minimum_rootfs_size_mb to pass validation
+        # Mock image entry with minimum_rootfs_size_mib to pass validation
         mock_db_get_image.return_value = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
+            os_name="Ubuntu 24.04",
             path=str(image_path),
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789abc",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            is_default=False,
+            created_at="2024-01-01T00:00:00+00:00",
+            updated_at="2024-01-01T00:00:00+00:00",
         )
 
         # Mock network
@@ -710,6 +830,11 @@ class TestNocloudNetFailureCleanup:
             subnet="10.20.0.0/24",
             bridge="mvm-br0",
             ipv4_gateway="10.20.0.1",
+            bridge_active=True,
+            nat_enabled=True,
+            is_default=False,
+            created_at="2024-01-01T00:00:00+00:00",
+            updated_at="2024-01-01T00:00:00+00:00",
         )
         mock_alloc_ip.return_value = "10.20.0.2"
         mock_bridge_exists.return_value = True
@@ -770,24 +895,31 @@ class TestVMWithoutNocloudNet:
     @patch("mvmctl.api.vms.NoCloudNetServerManager")
     @patch("mvmctl.api.vms.add_nocloud_input_rule")
     @patch("mvmctl.api.vms.subprocess.Popen")
+    @patch("mvmctl.api.vms.subprocess.run")
     @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
     @patch("mvmctl.api.vms.resolve_image_multi_strategy")
     @patch("mvmctl.api.vms._resolve_kernel_path")
+    @patch("mvmctl.api.vms._setup_rootfs_with_guestfs")
     def test_vm_with_disabled_mode_no_nocloud(
         self,
+        mock_setup_guestfs,
         mock_resolve_kernel,
         mock_resolve_image,
         mock_create_iso,
+        mock_subprocess_run,
         mock_popen,
         mock_add_rule,
         mock_nocloud_mgr,
         mock_check_priv,
         mock_require_group,
         tmp_path,
+        seed_test_assets,
     ):
         """Test that DISABLED mode VM doesn't start nocloud-net server."""
         mock_check_priv.return_value = None
         mock_require_group.return_value = None
+        mock_setup_guestfs.return_value = None
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Create fake image and kernel files
         image_path = tmp_path / "ubuntu-24.04.ext4"
@@ -809,50 +941,51 @@ class TestVMWithoutNocloudNet:
 
         vm_mgr = VMManager(tmp_path / "vms")
 
-        with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
-            with patch("mvmctl.api.network.get_network") as mock_get_net:
-                with patch("mvmctl.api.network.allocate_network_ip", return_value="10.20.0.2"):
-                    with patch("mvmctl.api.vms.bridge_exists", return_value=True):
-                        with patch("mvmctl.api.vms.create_tap"):
-                            with patch("mvmctl.api.vms.add_iptables_forward_rules"):
-                                with patch("mvmctl.api.vms.setup_nat"):
-                                    with patch("mvmctl.api.vms._write_pid_file"):
-                                        with patch("mvmctl.api.vms.setup_nocloud_input_chain"):
-                                            with patch(
-                                                "mvmctl.api.vms.get_vm_dir_by_hash"
-                                            ) as mock_get_vm_dir:
-                                                vm_dir = tmp_path / "vms" / "disabled-mode-vm"
-                                                mock_get_vm_dir.return_value = vm_dir
+        with patch.object(vm_mgr, "register", return_value=None):
+            with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
+                with patch("mvmctl.api.network.get_network") as mock_get_net:
+                    with patch("mvmctl.api.network.allocate_network_ip", return_value="10.20.0.2"):
+                        with patch("mvmctl.api.vms.bridge_exists", return_value=True):
+                            with patch("mvmctl.api.vms.create_tap"):
+                                with patch("mvmctl.api.vms.add_iptables_forward_rules"):
+                                    with patch("mvmctl.api.vms.setup_nat"):
+                                        with patch("mvmctl.api.vms._write_pid_file"):
+                                            with patch("mvmctl.api.vms.setup_nocloud_input_chain"):
+                                                with patch(
+                                                    "mvmctl.api.vms.get_vm_dir_by_hash"
+                                                ) as mock_get_vm_dir:
+                                                    vm_dir = tmp_path / "vms" / "disabled-mode-vm"
+                                                    mock_get_vm_dir.return_value = vm_dir
 
-                                                mock_get_net.return_value = NetworkConfig(
-                                                    name="default",
-                                                    subnet="10.20.0.0/24",
-                                                    ipv4_gateway="10.20.0.1",
-                                                    bridge="mvm-br0",
-                                                    nat_enabled=True,
-                                                    created_at="2024-01-01T00:00:00+00:00",
-                                                )
+                                                    mock_get_net.return_value = NetworkConfig(
+                                                        name="default",
+                                                        subnet="10.20.0.0/24",
+                                                        ipv4_gateway="10.20.0.1",
+                                                        bridge="mvm-br0",
+                                                        nat_enabled=True,
+                                                        created_at="2024-01-01T00:00:00+00:00",
+                                                    )
 
-                                                vm = create_vm(
-                                                    VMCreateInput(
-                                                        name="disabled-mode-vm",
-                                                        image="ubuntu-24.04",
-                                                        kernel="vmlinux",
-                                                        vcpus=2,
-                                                        mem=256,
-                                                        network_name="default",
-                                                        user="root",
-                                                        enable_api_socket=False,
-                                                        enable_pci=False,
-                                                        enable_console=False,
-                                                        firecracker_bin="firecracker",
-                                                        lsm_flags="",
-                                                        enable_logging=False,
-                                                        enable_metrics=False,
-                                                        cloud_init_mode=CloudInitMode.OFF,
-                                                    ),
-                                                    vm_manager=vm_mgr,
-                                                )
+                                                    vm = create_vm(
+                                                        VMCreateInput(
+                                                            name="disabled-mode-vm",
+                                                            image="ubuntu-24.04",
+                                                            kernel="vmlinux",
+                                                            vcpus=2,
+                                                            mem=256,
+                                                            network_name="default",
+                                                            user="root",
+                                                            enable_api_socket=False,
+                                                            enable_pci=False,
+                                                            enable_console=False,
+                                                            firecracker_bin="firecracker",
+                                                            lsm_flags="",
+                                                            enable_logging=False,
+                                                            enable_metrics=False,
+                                                            cloud_init_mode=CloudInitMode.OFF,
+                                                        ),
+                                                        vm_manager=vm_mgr,
+                                                    )
 
         # Verify nocloud-net server was NOT started
         mock_nocloud_mgr.assert_not_called()

@@ -24,6 +24,14 @@ def _make_vm(name: str, status: VMStatus = VMStatus.RUNNING, ip: str = "10.20.0.
         pid=1234,
         status=status,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
+        updated_at=datetime(2026, 1, 1, 12, 0, 0),
+        network_id="default",
+        tap_device="mvm-def-aaa-123",
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
 
 
@@ -91,6 +99,14 @@ def test_rm_multiple_vms_same_name_errors(mocker: MockerFixture):
         pid=2345,
         status=VMStatus.STOPPED,
         created_at=datetime(2026, 1, 1, 12, 0, 0),
+        updated_at=datetime(2026, 1, 1, 12, 0, 0),
+        network_id="default",
+        tap_device="mvm-def-aaa-123",
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
 
     mock_manager = mocker.MagicMock()

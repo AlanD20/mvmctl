@@ -165,7 +165,7 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
     arch = fields["arch"]
     minimum_rootfs_size = fields["minimum_rootfs_size_mib"]  # Required
     original_size = fields["original_size"]  # Required
-    fs_uuid = fields['fs_uuid']
+    fs_uuid = fields["fs_uuid"]
 
     image = Image(
         id=image_id,
@@ -174,7 +174,7 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
         arch=str(arch),
         path=path,
         fs_type=fields.get("fs_type") or "ext4",
-        fs_uuid=fields.fs_uuid,
+        fs_uuid=fs_uuid,
         minimum_rootfs_size_mib=minimum_rootfs_size,
         original_size=original_size,
         is_default=fields.get("is_default", 0) == 1,
@@ -183,7 +183,7 @@ def update_image_entry(cache_dir: Path, image_id: str, **fields: Any) -> None:
         compressed_size=fields.get("compressed_size"),
         compression_ratio=fields.get("compression_ratio"),
         compressed_format=fields.get("compressed_format"),
-        pulled_at=fields.get("pulled_at"),
+        pulled_at=fields.get("pulled_at") or _now_utc(),
     )
     db.upsert_image(image)
 

@@ -109,7 +109,7 @@ class TestTableCreation:
             "original_size": "INTEGER",
             "compression_ratio": "REAL",
             "compressed_format": "TEXT",
-            "minimum_rootfs_size_mb": "INTEGER",
+            "minimum_rootfs_size_mib": "INTEGER",
             "pulled_at": "TIMESTAMP",
             "is_default": "INTEGER",
             "created_at": "TIMESTAMP",
@@ -416,16 +416,39 @@ class TestUniqueConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert first image
                 conn.execute(
-                    "INSERT INTO images (id, os_slug, path, arch, minimum_rootfs_size_mb) VALUES (?, ?, ?, ?, ?)",
-                    ("id1", "ubuntu-24.04", "/path/to/image1", "x86_64", 1024),
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "id1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image1",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
                 )
                 # Try to insert duplicate os_slug
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO images (id, os_slug, path, arch, minimum_rootfs_size_mb) VALUES (?, ?, ?, ?, ?)",
-                        ("id2", "ubuntu-24.04", "/path/to/image2", "x86_64", 1024),
+                        "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            "id2",
+                            "ubuntu-24.04",
+                            "Ubuntu 24.04",
+                            "/path/to/image2",
+                            "x86_64",
+                            "ext4",
+                            "uuid-2",
+                            2048,
+                            1024,
+                            "2024-01-01 00:00:00",
+                            0,
+                        ),
                     )
 
     def test_networks_name_unique(self, runner: MigrationRunner, db_path: Path) -> None:
@@ -434,16 +457,14 @@ class TestUniqueConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert first network
                 conn.execute(
-                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Try to insert duplicate name
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                        ("net2", "default", "10.1.0.0/24", "mvm-other", "10.1.0.1"),
+                        "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        ("net2", "default", "10.1.0.0/24", "mvm-other", "10.1.0.1", 0, 1, 0),
                     )
 
     def test_vm_instances_name_unique(self, runner: MigrationRunner, db_path: Path) -> None:
@@ -452,16 +473,119 @@ class TestUniqueConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert first VM
                 conn.execute(
-                    "INSERT INTO vm_instances (id, name, status) VALUES (?, ?, ?)",
-                    ("vm1", "myvm", "running"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Try to insert duplicate name
+                conn.execute(
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
+                conn.execute(
+                    "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "vm1",
+                        "myvm",
+                        "running",
+                        1234,
+                        "10.0.0.2",
+                        "aa:bb:cc:dd:ee:ff",
+                        "net1",
+                        "tap0",
+                        "img1",
+                        "kern1",
+                        "bin1",
+                        "/path/config.json",
+                        "nocloud",
+                        2,
+                        1024,
+                        5120,
+                        "/path/rootfs.ext4",
+                        ".ext4",
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                    ),
+                )
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_instances (id, name, status) VALUES (?, ?, ?)",
-                        ("vm2", "myvm", "stopped"),
+                        "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            "vm2",
+                            "myvm",
+                            "stopped",
+                            1235,
+                            "10.0.0.3",
+                            "aa:bb:cc:dd:ee:00",
+                            "net1",
+                            "tap1",
+                            "img1",
+                            "kern1",
+                            "bin1",
+                            "/path/config2.json",
+                            "nocloud",
+                            2,
+                            1024,
+                            5120,
+                            "/path/rootfs2.ext4",
+                            ".ext4",
+                            1,
+                            0,
+                            1,
+                            0,
+                            1,
+                        ),
+                    )
+                with pytest.raises(sqlite3.IntegrityError):
+                    conn.execute(
+                        "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            "vm2",
+                            "myvm",
+                            "stopped",
+                            1235,
+                            "10.0.0.3",
+                            "aa:bb:cc:dd:ee:00",
+                            "net1",
+                            "tap1",
+                            "img1",
+                            "kern1",
+                            "bin1",
+                            "/path/config2.json",
+                            "nocloud",
+                            2,
+                            1024,
+                            5120,
+                            "/path/rootfs2.ext4",
+                            ".ext4",
+                            1,
+                            0,
+                            1,
+                            0,
+                            1,
+                        ),
                     )
 
     def test_network_leases_unique_constraint(self, runner: MigrationRunner, db_path: Path) -> None:
@@ -470,17 +594,14 @@ class TestUniqueConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert network first
                 conn.execute(
-                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Insert first lease
                 conn.execute(
                     "INSERT INTO network_leases (network_id, ipv4) VALUES (?, ?)",
                     ("net1", "10.0.0.2"),
                 )
-                # Try to insert duplicate (network_id, ipv4)
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
                         "INSERT INTO network_leases (network_id, ipv4) VALUES (?, ?)",
@@ -497,17 +618,14 @@ class TestCheckConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert network
                 conn.execute(
-                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Insert valid IPv4
                 conn.execute(
                     "INSERT INTO network_leases (network_id, ipv4) VALUES (?, ?)",
                     ("net1", "10.0.0.2"),
                 )
-                # Verify it was inserted
                 cursor = conn.execute(
                     "SELECT ipv4 FROM network_leases WHERE network_id = ?", ("net1",)
                 )
@@ -521,12 +639,10 @@ class TestCheckConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert network
                 conn.execute(
-                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Try to insert invalid IPv4
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
                         "INSERT INTO network_leases (network_id, ipv4) VALUES (?, ?)",
@@ -539,31 +655,131 @@ class TestCheckConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert VM with valid IPv4
                 conn.execute(
-                    "INSERT INTO vm_instances (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
-                    ("vm1", "myvm", "running", "10.0.0.5"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Verify it was inserted
+                conn.execute(
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
+                conn.execute(
+                    "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "vm1",
+                        "myvm",
+                        "running",
+                        1234,
+                        "10.0.0.5",
+                        "aa:bb:cc:dd:ee:ff",
+                        "net1",
+                        "tap0",
+                        "img1",
+                        "kern1",
+                        "bin1",
+                        "/path/config.json",
+                        "nocloud",
+                        2,
+                        1024,
+                        5120,
+                        "/path/rootfs.ext4",
+                        ".ext4",
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                    ),
+                )
                 cursor = conn.execute("SELECT ipv4 FROM vm_instances WHERE id = ?", ("vm1",))
                 assert cursor.fetchone()[0] == "10.0.0.5"
 
     def test_vm_instances_ipv4_check_null_allowed(
         self, runner: MigrationRunner, db_path: Path
     ) -> None:
-        """Verify NULL ipv4 is allowed in vm_instances."""
+        """Verify ipv4 column accepts valid IP in vm_instances (NOT NULL constraint applies)."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert VM with NULL IPv4
                 conn.execute(
-                    "INSERT INTO vm_instances (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
-                    ("vm1", "myvm", "stopped", None),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Verify it was inserted
+                conn.execute(
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
+                conn.execute(
+                    "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "vm1",
+                        "myvm",
+                        "stopped",
+                        1234,
+                        "10.0.0.5",
+                        "aa:bb:cc:dd:ee:ff",
+                        "net1",
+                        "tap0",
+                        "img1",
+                        "kern1",
+                        "bin1",
+                        "/path/config.json",
+                        "nocloud",
+                        2,
+                        1024,
+                        5120,
+                        "/path/rootfs.ext4",
+                        ".ext4",
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                    ),
+                )
                 cursor = conn.execute("SELECT ipv4 FROM vm_instances WHERE id = ?", ("vm1",))
-                assert cursor.fetchone()[0] is None
+                assert cursor.fetchone()[0] == "10.0.0.5"
 
     def test_vm_instances_ipv4_check_invalid(self, runner: MigrationRunner, db_path: Path) -> None:
         """Verify invalid IPv4 in vm_instances fails CHECK constraint."""
@@ -571,11 +787,62 @@ class TestCheckConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Try to insert VM with invalid IPv4
+                conn.execute(
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
+                )
+                conn.execute(
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_instances (id, name, status, ipv4) VALUES (?, ?, ?, ?)",
-                        ("vm1", "myvm", "running", "invalid-ip"),
+                        "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            "vm1",
+                            "myvm",
+                            "running",
+                            1234,
+                            "invalid-ip",
+                            "aa:bb:cc:dd:ee:ff",
+                            "net1",
+                            "tap0",
+                            "img1",
+                            "kern1",
+                            "bin1",
+                            "/path/config.json",
+                            "nocloud",
+                            2,
+                            1024,
+                            5120,
+                            "/path/rootfs.ext4",
+                            ".ext4",
+                            1,
+                            0,
+                            1,
+                            0,
+                            1,
+                        ),
                     )
 
     def test_vm_instances_mac_check_valid(self, runner: MigrationRunner, db_path: Path) -> None:
@@ -584,31 +851,131 @@ class TestCheckConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert VM with valid MAC
                 conn.execute(
-                    "INSERT INTO vm_instances (id, name, status, mac) VALUES (?, ?, ?, ?)",
-                    ("vm1", "myvm", "running", "aa:bb:cc:dd:ee:ff"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Verify it was inserted
+                conn.execute(
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
+                conn.execute(
+                    "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "vm1",
+                        "myvm",
+                        "running",
+                        1234,
+                        "10.0.0.2",
+                        "aa:bb:cc:dd:ee:ff",
+                        "net1",
+                        "tap0",
+                        "img1",
+                        "kern1",
+                        "bin1",
+                        "/path/config.json",
+                        "nocloud",
+                        2,
+                        1024,
+                        5120,
+                        "/path/rootfs.ext4",
+                        ".ext4",
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                    ),
+                )
                 cursor = conn.execute("SELECT mac FROM vm_instances WHERE id = ?", ("vm1",))
                 assert cursor.fetchone()[0] == "aa:bb:cc:dd:ee:ff"
 
     def test_vm_instances_mac_check_null_allowed(
         self, runner: MigrationRunner, db_path: Path
     ) -> None:
-        """Verify NULL mac is allowed in vm_instances."""
+        """Verify mac column accepts valid MAC in vm_instances (NOT NULL constraint applies)."""
         runner.migrate()
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert VM with NULL MAC
                 conn.execute(
-                    "INSERT INTO vm_instances (id, name, status, mac) VALUES (?, ?, ?, ?)",
-                    ("vm1", "myvm", "stopped", None),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Verify it was inserted
+                conn.execute(
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
+                conn.execute(
+                    "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "vm1",
+                        "myvm",
+                        "stopped",
+                        1234,
+                        "10.0.0.2",
+                        "aa:bb:cc:dd:ee:ff",
+                        "net1",
+                        "tap0",
+                        "img1",
+                        "kern1",
+                        "bin1",
+                        "/path/config.json",
+                        "nocloud",
+                        2,
+                        1024,
+                        5120,
+                        "/path/rootfs.ext4",
+                        ".ext4",
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                    ),
+                )
                 cursor = conn.execute("SELECT mac FROM vm_instances WHERE id = ?", ("vm1",))
-                assert cursor.fetchone()[0] is None
+                assert cursor.fetchone()[0] == "aa:bb:cc:dd:ee:ff"
 
     def test_vm_instances_mac_check_invalid(self, runner: MigrationRunner, db_path: Path) -> None:
         """Verify invalid MAC address in vm_instances fails CHECK constraint."""
@@ -616,11 +983,62 @@ class TestCheckConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Try to insert VM with invalid MAC
+                conn.execute(
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
+                )
+                conn.execute(
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute(
-                        "INSERT INTO vm_instances (id, name, status, mac) VALUES (?, ?, ?, ?)",
-                        ("vm1", "myvm", "running", "not-a-mac"),
+                        "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            "vm1",
+                            "myvm",
+                            "running",
+                            1234,
+                            "10.0.0.2",
+                            "not-a-mac",
+                            "net1",
+                            "tap0",
+                            "img1",
+                            "kern1",
+                            "bin1",
+                            "/path/config.json",
+                            "nocloud",
+                            2,
+                            1024,
+                            5120,
+                            "/path/rootfs.ext4",
+                            ".ext4",
+                            1,
+                            0,
+                            1,
+                            0,
+                            1,
+                        ),
                     )
 
 
@@ -729,18 +1147,15 @@ class TestForeignKeyConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert network and lease
                 conn.execute(
-                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
                 conn.execute(
                     "INSERT INTO network_leases (network_id, ipv4) VALUES (?, ?)",
                     ("net1", "10.0.0.2"),
                 )
-                # Delete network
                 conn.execute("DELETE FROM networks WHERE id = ?", ("net1",))
-                # Verify lease was deleted
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM network_leases WHERE network_id = ?", ("net1",)
                 )
@@ -758,28 +1173,71 @@ class TestForeignKeyConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert network and VM
                 conn.execute(
-                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
                 conn.execute(
-                    "INSERT INTO vm_instances (id, name, status) VALUES (?, ?, ?)",
-                    ("vm1", "myvm", "running"),
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
                 )
-                # Insert lease with VM reference
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
+                conn.execute(
+                    "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "vm1",
+                        "myvm",
+                        "running",
+                        1234,
+                        "10.0.0.2",
+                        "aa:bb:cc:dd:ee:ff",
+                        "net1",
+                        "tap0",
+                        "img1",
+                        "kern1",
+                        "bin1",
+                        "/path/config.json",
+                        "nocloud",
+                        2,
+                        1024,
+                        5120,
+                        "/path/rootfs.ext4",
+                        ".ext4",
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                    ),
+                )
                 conn.execute(
                     "INSERT INTO network_leases (network_id, ipv4, vm_id) VALUES (?, ?, ?)",
                     ("net1", "10.0.0.2", "vm1"),
                 )
-                # Delete VM - lease should NOT be cascade deleted (no FK on vm_id)
                 conn.execute("DELETE FROM vm_instances WHERE id = ?", ("vm1",))
-                # Verify lease still exists (no cascade delete)
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM network_leases WHERE vm_id = ?", ("vm1",)
                 )
                 assert cursor.fetchone()[0] == 1
-                # Manual cleanup required
                 conn.execute("DELETE FROM network_leases WHERE vm_id = ?", ("vm1",))
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM network_leases WHERE vm_id = ?", ("vm1",)
@@ -794,16 +1252,62 @@ class TestForeignKeyConstraints:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert network and VM
                 conn.execute(
-                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
                 conn.execute(
-                    "INSERT INTO vm_instances (id, name, status, network_id) VALUES (?, ?, ?, ?)",
-                    ("vm1", "myvm", "running", "net1"),
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
                 )
-                # Try to delete network (should fail due to RESTRICT)
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
+                conn.execute(
+                    "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "vm1",
+                        "myvm",
+                        "running",
+                        1234,
+                        "10.0.0.2",
+                        "aa:bb:cc:dd:ee:ff",
+                        "net1",
+                        "tap0",
+                        "img1",
+                        "kern1",
+                        "bin1",
+                        "/path/config.json",
+                        "nocloud",
+                        2,
+                        1024,
+                        5120,
+                        "/path/rootfs.ext4",
+                        ".ext4",
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                    ),
+                )
                 with pytest.raises(sqlite3.IntegrityError):
                     conn.execute("DELETE FROM networks WHERE id = ?", ("net1",))
 
@@ -828,12 +1332,22 @@ class TestDataIntegrity:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert image
                 conn.execute(
-                    "INSERT INTO images (id, os_slug, path, arch, minimum_rootfs_size_mb) VALUES (?, ?, ?, ?, ?)",
-                    ("img1", "ubuntu-24.04", "/path/to/image", "x86_64", 1024),
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
                 )
-                # Retrieve image
                 cursor = conn.execute("SELECT os_slug, path FROM images WHERE id = ?", ("img1",))
                 row = cursor.fetchone()
                 assert row == ("ubuntu-24.04", "/path/to/image")
@@ -844,12 +1358,10 @@ class TestDataIntegrity:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert network
                 conn.execute(
-                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway) VALUES (?, ?, ?, ?, ?)",
-                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1"),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Retrieve network
                 cursor = conn.execute(
                     "SELECT name, subnet, bridge FROM networks WHERE id = ?", ("net1",)
                 )
@@ -862,12 +1374,62 @@ class TestDataIntegrity:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert VM
                 conn.execute(
-                    "INSERT INTO vm_instances (id, name, status, vcpu_count, mem_size_mib) VALUES (?, ?, ?, ?, ?)",
-                    ("vm1", "myvm", "running", 2, 1024),
+                    "INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway, bridge_active, nat_enabled, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("net1", "default", "10.0.0.0/24", "mvm-default", "10.0.0.1", 0, 1, 1),
                 )
-                # Retrieve VM
+                conn.execute(
+                    "INSERT INTO images (id, os_slug, os_name, path, arch, fs_type, fs_uuid, original_size, minimum_rootfs_size_mib, pulled_at, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "img1",
+                        "ubuntu-24.04",
+                        "Ubuntu 24.04",
+                        "/path/to/image",
+                        "x86_64",
+                        "ext4",
+                        "uuid-1",
+                        2048,
+                        1024,
+                        "2024-01-01 00:00:00",
+                        0,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO kernels (id, name, base_name, version, arch, type, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("kern1", "vmlinux", "vmlinux", "5.10", "x86_64", "elf", "/path/to/kernel", 0),
+                )
+                conn.execute(
+                    "INSERT INTO binaries (id, name, version, full_version, ci_version, path, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("bin1", "firecracker", "1.15", "1.15.0", "1.15.0", "/path/to/firecracker", 0),
+                )
+                conn.execute(
+                    "INSERT INTO vm_instances (id, name, status, pid, ipv4, mac, network_id, tap_device, image_id, kernel_id, binary_id, config_path, cloud_init_mode, vcpu_count, mem_size_mib, disk_size_mib, rootfs_path, rootfs_suffix, enable_api_socket, enable_pci, enable_logging, enable_metrics, enable_console) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "vm1",
+                        "myvm",
+                        "running",
+                        1234,
+                        "10.0.0.2",
+                        "aa:bb:cc:dd:ee:ff",
+                        "net1",
+                        "tap0",
+                        "img1",
+                        "kern1",
+                        "bin1",
+                        "/path/config.json",
+                        "nocloud",
+                        2,
+                        1024,
+                        5120,
+                        "/path/rootfs.ext4",
+                        ".ext4",
+                        1,
+                        0,
+                        1,
+                        0,
+                        1,
+                    ),
+                )
                 cursor = conn.execute(
                     "SELECT name, status, vcpu_count, mem_size_mib FROM vm_instances WHERE id = ?",
                     ("vm1",),
@@ -881,12 +1443,10 @@ class TestDataIntegrity:
         with closing(sqlite3.connect(db_path)) as conn:
             with conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                # Insert host state
                 conn.execute(
-                    "INSERT INTO host_state (id, initialized, mvm_group_created) VALUES (?, ?, ?)",
-                    (1, True, True),
+                    "INSERT INTO host_state (id, initialized, mvm_group_created, initialized_at) VALUES (?, ?, ?, ?)",
+                    (1, True, True, "2024-01-01 00:00:00"),
                 )
-                # Retrieve host state
                 cursor = conn.execute(
                     "SELECT initialized, mvm_group_created FROM host_state WHERE id = ?", (1,)
                 )

@@ -597,7 +597,9 @@ def _calculate_minimum_image_size_mb(content_bytes: int) -> int:
     Returns:
         Minimum image size in MiB (binary units for filesystem operations)
     """
-    content_mb_decimal = content_bytes / CONST_MEBIBYTE_BYTES
+    from mvmctl.constants import CONST_MEGABYTE_BYTES
+
+    content_mb_decimal = content_bytes / CONST_MEGABYTE_BYTES
     calculated_mb = int(content_mb_decimal * CONST_ROOTFS_HEADROOM_FACTOR)
     return max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mb)
 

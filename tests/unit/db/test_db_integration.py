@@ -44,9 +44,17 @@ def make_image(image_id: str = IMAGE_ID) -> Image:
     return Image(
         id=image_id,
         os_slug="test-image",
+        os_name="Test Image",
         path="/cache/images/test.img",
         arch="x86_64",
-        minimum_rootfs_size_mb=1024,
+        fs_type="ext4",
+        fs_uuid="12345678-1234-1234-1234-123456789abc",
+        minimum_rootfs_size_mib=1024,
+        original_size=2048,
+        is_default=False,
+        created_at="2026-04-01T00:00:00Z",
+        updated_at="2026-04-01T00:00:00Z",
+        pulled_at="2026-04-01T00:00:00Z",
     )
 
 
@@ -55,9 +63,14 @@ def make_kernel(kernel_id: str = KERNEL_ID) -> Kernel:
     return Kernel(
         id=kernel_id,
         name="vmlinux-test",
+        base_name="vmlinux",
         version="6.1.0",
         arch="x86_64",
+        type="elf",
         path="/cache/kernels/vmlinux",
+        is_default=False,
+        created_at="2026-04-01T00:00:00Z",
+        updated_at="2026-04-01T00:00:00Z",
     )
 
 
@@ -67,7 +80,12 @@ def make_binary(binary_id: str = BINARY_ID) -> Binary:
         id=binary_id,
         name="firecracker",
         version="1.15.0",
+        full_version="v1.15.0",
+        ci_version="1.15.0",
         path="/cache/bin/fc",
+        is_default=False,
+        created_at="2026-04-01T00:00:00Z",
+        updated_at="2026-04-01T00:00:00Z",
     )
 
 
@@ -79,6 +97,11 @@ def make_network(network_id: str = NETWORK_ID) -> Network:
         subnet="172.35.0.0/24",
         bridge="mvm-default",
         ipv4_gateway="172.35.0.1",
+        bridge_active=False,
+        nat_enabled=True,
+        is_default=False,
+        created_at="2026-04-01T00:00:00Z",
+        updated_at="2026-04-01T00:00:00Z",
     )
 
 
@@ -90,15 +113,33 @@ def make_vm(
     network_id: str = NETWORK_ID,
     name: str = "testvm",
 ) -> VMInstance:
-    """Create a test VMState."""
+    """Create a test VMInstance."""
     return VMInstance(
         id=vm_id,
         name=name,
         status="STOPPED",
+        pid=0,
+        ipv4="0.0.0.0",
+        mac="00:00:00:00:00:00",
+        network_id=network_id,
+        tap_device="",
         image_id=image_id,
         kernel_id=kernel_id,
         binary_id=binary_id,
-        network_id=network_id,
+        config_path="",
+        cloud_init_mode="nocloud-net",
+        vcpu_count=2,
+        mem_size_mib=512,
+        disk_size_mib=1024,
+        rootfs_path="",
+        rootfs_suffix="ext4",
+        enable_api_socket=False,
+        enable_pci=False,
+        enable_logging=True,
+        enable_metrics=False,
+        enable_console=True,
+        created_at="2026-04-01T00:00:00Z",
+        updated_at="2026-04-01T00:00:00Z",
     )
 
 
@@ -599,14 +640,14 @@ class TestSchemaIntegrity:
         with pytest.raises(sqlite3.IntegrityError):
             db.upsert_vm(vm)
 
-    def test_vm_states_ipv4_check_constraint_allows_null(self, db: MVMDatabase) -> None:
-        """Verify vm_states.ipv4 CHECK constraint allows NULL."""
+    def test_vm_states_ipv4_check_constraint_allows_valid_ip(self, db: MVMDatabase) -> None:
+        """Verify vm_states.ipv4 CHECK constraint allows valid IP."""
         network = make_network()
         image = make_image()
         kernel = make_kernel()
         binary = make_binary()
         vm = make_vm()
-        vm.ipv4 = None  # NULL is allowed
+        vm.ipv4 = "192.168.1.100"  # Valid IP
 
         db.upsert_network(network)
         db.upsert_image(image)
@@ -637,14 +678,14 @@ class TestSchemaIntegrity:
         with pytest.raises(sqlite3.IntegrityError):
             db.upsert_vm(vm)
 
-    def test_vm_states_mac_check_constraint_allows_null(self, db: MVMDatabase) -> None:
-        """Verify vm_states.mac CHECK constraint allows NULL."""
+    def test_vm_states_mac_check_constraint_allows_valid_mac(self, db: MVMDatabase) -> None:
+        """Verify vm_states.mac CHECK constraint allows valid MAC."""
         network = make_network()
         image = make_image()
         kernel = make_kernel()
         binary = make_binary()
         vm = make_vm()
-        vm.mac = None  # NULL is allowed
+        vm.mac = "aa:bb:cc:dd:ee:ff"  # Valid MAC
 
         db.upsert_network(network)
         db.upsert_image(image)
@@ -666,6 +707,8 @@ class TestSchemaIntegrity:
             mechanism="test_mechanism",
             applied_value="value1",
             change_order=1,
+            reverted=False,
+            created_at="2024-01-01T00:00:00Z",
         )
         change2 = HostStateChange(
             session_id="session-1",
@@ -674,6 +717,8 @@ class TestSchemaIntegrity:
             mechanism="test_mechanism_2",
             applied_value="value2",
             change_order=1,  # Same change_order as change1
+            reverted=False,
+            created_at="2024-01-01T00:00:00Z",
         )
 
         db.add_host_change(change1)

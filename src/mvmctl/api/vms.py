@@ -757,7 +757,6 @@ def _setup_rootfs_with_guestfs(
 
 def _persist_failed_vm(
     vm_instance: VMInstance,
-    binary_id: str | None,
     manager: VMManager | None,
 ) -> None:
     if manager is None:
@@ -765,7 +764,7 @@ def _persist_failed_vm(
         return
     vm_instance.status = VMStatus.ERROR
     try:
-        manager.register(vm_instance, binary_id)
+        manager.register(vm_instance)
         logger.info("Persisted failed VM '%s' to database for later cleanup", vm_instance.name)
     except Exception as exc:
         logger.warning("Failed to persist failed VM '%s': %s", vm_instance.name, exc)
@@ -1109,6 +1108,10 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             if net_config is None:
                 raise NetworkError(f"Network '{network_name}' not found")
 
+            db = MVMDatabase()
+            db_net = db.get_network_by_name(network_name)
+            network_id = db_net.id if db_net else ""
+
             if ip:
                 try:
                     ip_net = ipaddress_module.IPv4Network(net_config.subnet, strict=False)
@@ -1242,11 +1245,21 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
 
             socket_path = vm_dir / DEFAULT_FC_API_SOCKET_FILENAME if enable_api_socket else None
             subnet_mask = subnet_mask_from_subnet(net_config.subnet)
+
+            # Calculate disk_size_mib for VMInstance
+            disk_size_mib = (
+                (requested_bytes // CONST_MEBIBYTE_BYTES) if disk_size is not None else min_size_mb
+            )
+
+            # Define config_file path before VMInstance creation
+            config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
+
             vm_config = VMConfig(
                 name=name,
                 vm_id=vm_id,
                 vcpu_count=vcpus,
                 mem_size_mib=mem,
+                disk_size_mib=disk_size_mib,
                 kernel_path=kernel_path_resolved,
                 rootfs_path=rootfs_path,
                 root_uuid=resolved_image_fs_uuid,
@@ -1263,24 +1276,55 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 nocloud_net_url=nocloud_net_url,
                 extra_drives=extra_drives,
             )
+            now = datetime.now(tz=timezone.utc)
+
+            db = MVMDatabase()
+
+            if image_entry is not None:
+                resolved_image_id = image_entry.id
+            else:
+                resolved_image_id = resolved_image_hash or str(resolved_image_path)
+
+            kernel_entry = None
+            if kernel:
+                kernel_entry = db.get_kernel_by_name(kernel)
+            if kernel_entry is None:
+                kernel_entry = db.get_default_kernel()
+            if kernel_entry is not None:
+                resolved_kernel_id = kernel_entry.id
+            else:
+                resolved_kernel_id = str(kernel_path_resolved)
+
+            if binary_id is None:
+                binary_entry = db.get_default_binary("firecracker")
+                if binary_entry is not None:
+                    resolved_binary_id = binary_entry.id
+                else:
+                    resolved_binary_id = ""
+            else:
+                resolved_binary_id = binary_id
+
             vm_instance = VMInstance(
                 name=name,
                 id=vm_id,
+                pid=0,
                 ipv4=guest_ip,
                 mac=guest_mac,
-                network_name=network_name,
+                network_id=network_id,
                 tap_device=tap_name,
                 ipv4_gateway=net_config.ipv4_gateway,
                 subnet_mask=subnet_mask,
-                created_at=datetime.now(tz=timezone.utc),
+                created_at=now,
+                updated_at=now,
                 status=VMStatus.RUNNING,
                 config=vm_config,
+                config_path=config_file,
                 rootfs_suffix=rootfs_ext,
-                kernel_id=str(kernel_path_resolved),
-                image_id=str(resolved_image_path),
+                kernel_id=resolved_kernel_id,
+                image_id=resolved_image_id,
+                binary_id=resolved_binary_id,
+                disk_size_mib=disk_size_mib,
             )
-
-            config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
 
             if vm_config.boot_args:
                 for component in vm_config.boot_args.split():
@@ -1402,7 +1446,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             vm_instance.nocloud_server_pid = nocloud_server_pid
             vm_instance.console_relay_pid = console_relay_pid
             vm_instance.console_socket_path = console_socket_path
-            manager.register(vm_instance, binary_id)
+            manager.register(vm_instance)
 
             from mvmctl.utils.audit import log_audit
 
@@ -1411,19 +1455,19 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             return vm_instance
         except (VMCreateError, NetworkError, CloudInitError, MVMError):
             if input.skip_cleanup and vm_instance is not None:
-                _persist_failed_vm(vm_instance, binary_id, manager)
+                _persist_failed_vm(vm_instance, manager)
             elif not input.skip_cleanup:
                 _cleanup()
             raise
         except FileNotFoundError as exc:
             if input.skip_cleanup and vm_instance is not None:
-                _persist_failed_vm(vm_instance, binary_id, manager)
+                _persist_failed_vm(vm_instance, manager)
             elif not input.skip_cleanup:
                 _cleanup()
             raise MVMError(f"Firecracker binary not found: {firecracker_bin}") from exc
         except Exception as exc:
             if input.skip_cleanup and vm_instance is not None:
-                _persist_failed_vm(vm_instance, binary_id, manager)
+                _persist_failed_vm(vm_instance, manager)
             elif not input.skip_cleanup:
                 _cleanup()
             raise VMCreateError(f"Failed to create VM: {exc}") from exc
@@ -1445,7 +1489,9 @@ def remove_vm(
         raise VMNotFoundError(f"VM '{name}' not found")
 
     vm_dir = get_vm_dir_by_hash(vm.id)
-    net_name = vm.network_name or DEFAULT_NETWORK_NAME
+    # Get network name from network_id
+    db_net = MVMDatabase().get_network(vm.network_id) if vm.network_id else None
+    net_name = db_net.name if db_net else DEFAULT_NETWORK_NAME
     tap_name = vm.tap_device or generate_tap_name(net_name, name)
     net_config = get_network(net_name)
     bridge = net_config.bridge if net_config else DEFAULT_BRIDGE_NAME
@@ -1687,7 +1733,7 @@ def start_vm(name: str) -> None:
         vm.pid = proc.pid
         vm.api_socket_path = socket_path
         vm.status = VMStatus.RUNNING
-        manager.register(vm, binary_id)
+        manager.register(vm)
         time.sleep(CONST_VM_START_WAIT_S)
     except Exception as exc:
         try:
@@ -1799,6 +1845,7 @@ def cleanup_vms(
     """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules."""
     from mvmctl.api.host import check_privileges_interactive
     from mvmctl.api.network import get_network
+    from mvmctl.core.mvm_db import MVMDatabase
 
     check_privileges_interactive("/usr/sbin/ip", "cleanup VMs")
     import logging
@@ -1850,7 +1897,10 @@ def cleanup_vms(
                 pass
 
         if tap_name:
-            net_config = get_network(v.network_name or "")
+            # Get network name from network_id
+            db_net = MVMDatabase().get_network(v.network_id) if v.network_id else None
+            net_name = db_net.name if db_net else ""
+            net_config = get_network(net_name)
             bridge = net_config.bridge if net_config else ""
             remove_iptables_forward_rules(tap_name, bridge=bridge)
             try:
@@ -2024,6 +2074,7 @@ def _resolve_asset_names(
 
 def _gather_vm_details(vm: VMInstance) -> VMInspectInfo:
     """Gather comprehensive VM details."""
+    from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.utils.fs import get_vm_dir_by_hash
 
     vm_dir = get_vm_dir_by_hash(vm.id)
@@ -2033,6 +2084,10 @@ def _gather_vm_details(vm: VMInstance) -> VMInspectInfo:
     config_path = vm_dir / "firecracker.json"
 
     image_name, kernel_name = _resolve_asset_names(vm.image_id, vm.kernel_id)
+
+    # Get network name from network_id
+    db_net = MVMDatabase().get_network(vm.network_id) if vm.network_id else None
+    network_name = db_net.name if db_net else None
 
     nocloud_net = None
     if vm.nocloud_net_port:
@@ -2056,7 +2111,7 @@ def _gather_vm_details(vm: VMInstance) -> VMInspectInfo:
         pid=vm.pid,
         ip=vm.ipv4,
         mac=vm.mac,
-        network_name=vm.network_name,
+        network_name=network_name,
         tap_device=vm.tap_device,
         cloud_init_mode=vm.config.cloud_init_mode.value if vm.config else "inject",
         image_id=vm.image_id,

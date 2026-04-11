@@ -35,6 +35,7 @@ class VMConfig:
         vm_id: Pre-generated unique VM ID (16-char hex string).
         vcpu_count: Number of vCPUs to allocate (1-32).
         mem_size_mib: Memory in MiB (128-65536).
+        disk_size_mib: Disk size in MiB for the VM root filesystem.
         kernel_path: Path to vmlinux kernel image.
         rootfs_path: Path to root filesystem ext4 image.
         boot_args: Override kernel boot arguments (uses defaults if None).
@@ -51,6 +52,7 @@ class VMConfig:
     name: str
     vcpu_count: int
     mem_size_mib: int
+    disk_size_mib: int
     enable_api_socket: bool
     enable_pci: bool
     lsm_flags: str
@@ -147,6 +149,7 @@ class VMConfig:
             vm_id=data.get("vm_id", ""),
             vcpu_count=data["vcpu_count"],  # Required - no default
             mem_size_mib=data["mem_size_mib"],  # Required - no default
+            disk_size_mib=data["disk_size_mib"],  # Required - no default
             kernel_path=Path(data["kernel_path"]) if data.get("kernel_path") else None,
             rootfs_path=Path(data["rootfs_path"]) if data.get("rootfs_path") else None,
             boot_args=data.get("boot_args"),
@@ -220,45 +223,59 @@ class VMInstance:
     Attributes:
         name: VM name (matches VMConfig.name).
         id: Full 16-char hex string (unique identifier).
-        pid: PID of the running firecracker process (None if stopped).
-        socket_path: Path to Firecracker API socket (if enabled).
+        pid: PID of the running firecracker process.
+        api_socket_path: Path to Firecracker API socket (if enabled).
         ipv4: Assigned guest IP address.
         mac: Assigned guest MAC address.
-        network_name: Name of the attached named network (if any).
+        network_id: ID of the attached named network.
         tap_device: TAP device name for this VM's network interface.
         ipv4_gateway: Host-side gateway IP for the guest (runtime network info).
         subnet_mask: Subnet mask for the guest network (runtime network info).
         created_at: Creation timestamp (UTC).
+        updated_at: Last update timestamp (UTC).
         status: Current lifecycle state.
         config: Original VM configuration used to launch this instance.
+        config_path: Path to the VM configuration file.
         nocloud_net_port: HTTP port for nocloud-net datasource server (if enabled).
         nocloud_server_pid: PID of the running nocloud-net HTTP server process (None if stopped).
+        console_relay_pid: PID of the running console relay process (None if stopped).
+        console_socket_path: Path to the console socket (if enabled).
+        exit_code: Exit code of the firecracker process (if stopped).
         rootfs_suffix: File extension suffix of the rootfs image (e.g., '.ext4', '.btrfs').
-        kernel_id: Path or hash ID of the kernel used by this VM (for asset removal protection).
-        image_id: Path or hash ID of the image used by this VM (for asset removal protection).
+        kernel_id: Hash ID of the kernel used by this VM (for asset removal protection).
+        image_id: Hash ID of the image used by this VM (for asset removal protection).
+        binary_id: Hash ID of the firecracker binary used by this VM.
+        disk_size_mib: Disk size in MiB for the VM root filesystem.
     """
 
+    # Required fields (no defaults)
     name: str
-    id: str = ""
-    pid: int | None = None
+    id: str
+    pid: int
+    ipv4: str
+    mac: str
+    network_id: str
+    tap_device: str
+    created_at: datetime
+    updated_at: datetime
+    status: VMStatus
+    rootfs_suffix: str
+    kernel_id: str
+    image_id: str
+    binary_id: str
+    disk_size_mib: int
+
+    # Optional fields
     api_socket_path: Path | None = None
-    ipv4: str | None = None
-    mac: str | None = None
-    network_name: str | None = None
-    tap_device: str | None = None
     ipv4_gateway: str | None = None
     subnet_mask: str | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    status: VMStatus = VMStatus.STOPPED
     config: VMConfig | None = None
+    config_path: Path | None = None
     nocloud_net_port: int | None = None
     nocloud_server_pid: int | None = None
     console_relay_pid: int | None = None
     console_socket_path: Path | None = None
     exit_code: int | None = None
-    rootfs_suffix: str = ".ext4"
-    kernel_id: str | None = None
-    image_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize VMInstance to a dictionary."""
@@ -269,13 +286,15 @@ class VMInstance:
             "api_socket_path": (str(self.api_socket_path) if self.api_socket_path else None),
             "ipv4": self.ipv4,
             "mac": self.mac,
-            "network_name": self.network_name,
+            "network_id": self.network_id,
             "tap_device": self.tap_device,
             "ipv4_gateway": self.ipv4_gateway,
             "subnet_mask": self.subnet_mask,
             "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
             "status": self.status.value,
             "config": self.config.to_dict() if self.config else None,
+            "config_path": str(self.config_path) if self.config_path else None,
             "nocloud_net_port": self.nocloud_net_port,
             "nocloud_server_pid": self.nocloud_server_pid,
             "console_relay_pid": self.console_relay_pid,
@@ -286,6 +305,8 @@ class VMInstance:
             "rootfs_suffix": self.rootfs_suffix,
             "kernel_id": self.kernel_id,
             "image_id": self.image_id,
+            "binary_id": self.binary_id,
+            "disk_size_mib": self.disk_size_mib,
         }
 
     @classmethod
@@ -302,22 +323,36 @@ class VMInstance:
             except ValueError:
                 pass
 
+        updated_at = datetime.now(tz=timezone.utc)
+        if data.get("updated_at"):
+            try:
+                updated_at = datetime.fromisoformat(data["updated_at"])
+            except ValueError:
+                pass
+
         return cls(
             name=data.get("name", ""),
             id=data.get("id", ""),
-            pid=data.get("pid"),
+            pid=data.get("pid", 0),
+            ipv4=data.get("ipv4", ""),
+            mac=data.get("mac", ""),
+            network_id=data.get("network_id", ""),
+            tap_device=data.get("tap_device", ""),
+            created_at=created_at,
+            updated_at=updated_at,
+            status=VMStatus(data["status"]) if data.get("status") else VMStatus.STOPPED,
+            rootfs_suffix=data.get("rootfs_suffix", ""),
+            kernel_id=data.get("kernel_id", ""),
+            image_id=data.get("image_id", ""),
+            binary_id=data.get("binary_id", ""),
+            disk_size_mib=data.get("disk_size_mib", 0),
             api_socket_path=(
                 Path(data["api_socket_path"]) if data.get("api_socket_path") else None
             ),
-            ipv4=data.get("ipv4"),
-            mac=data.get("mac"),
-            network_name=data.get("network_name"),
-            tap_device=data.get("tap_device"),
             ipv4_gateway=data.get("ipv4_gateway"),
             subnet_mask=data.get("subnet_mask"),
-            created_at=created_at,
-            status=VMStatus(data["status"]) if data.get("status") else VMStatus.STOPPED,
             config=config,
+            config_path=Path(data["config_path"]) if data.get("config_path") else None,
             nocloud_net_port=data.get("nocloud_net_port"),
             nocloud_server_pid=data.get("nocloud_server_pid"),
             console_relay_pid=data.get("console_relay_pid"),
@@ -325,9 +360,6 @@ class VMInstance:
                 Path(data["console_socket_path"]) if data.get("console_socket_path") else None
             ),
             exit_code=data.get("exit_code"),
-            rootfs_suffix=data.get("rootfs_suffix", ""),
-            kernel_id=data.get("kernel_id"),
-            image_id=data.get("image_id"),
         )
 
 

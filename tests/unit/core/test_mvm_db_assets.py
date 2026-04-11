@@ -41,12 +41,18 @@ class TestImageOperations:
         image = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
-            arch="x86_64",
             os_name="Ubuntu",
+            arch="x86_64",
+            path="/cache/images/ubuntu-24.04.ext4",
             fs_type="ext4",
-            minimum_rootfs_size_mb=2048,
-        )
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image)
 
         retrieved = db.get_image("a" * 64)
@@ -65,10 +71,18 @@ class TestImageOperations:
         image = Image(
             id="b" * 64,
             os_slug="alpine-3.21",
-            path="/cache/images/alpine-3.21.ext4",
+            os_name="TestOS",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/alpine-3.21.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image)
 
         retrieved = db.get_image("b" * 64)
@@ -80,22 +94,35 @@ class TestImageOperations:
         image1 = Image(
             id="c" * 64,
             os_slug="debian-12",
-            path="/cache/images/debian-12.ext4",
-            arch="x86_64",
             os_name="Debian",
-            minimum_rootfs_size_mb=2048,
-        )
+            arch="x86_64",
+            path="/cache/images/debian-12.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image1)
 
         image2 = Image(
             id="c" * 64,
             os_slug="debian-12",
-            path="/cache/images/debian-12.ext4",
+            os_name="Debian 12",  # Updated,
             arch="x86_64",
-            os_name="Debian 12",  # Updated
-            fs_type="ext4",  # New field
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/debian-12.ext4",
+            fs_type="ext4",  # New field,
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image2)
 
         retrieved = db.get_image("c" * 64)
@@ -108,10 +135,18 @@ class TestImageOperations:
         image = Image(
             id="d" * 64,
             os_slug="fedora-40",
-            path="/cache/images/fedora-40.ext4",
+            os_name="TestOS",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/fedora-40.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image)
         assert db.get_image("d" * 64) is not None
 
@@ -134,19 +169,33 @@ class TestImageOperations:
         image1 = Image(
             id="e" * 64,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
             created_at="2026-04-01T10:00:00Z",
-            minimum_rootfs_size_mb=2048,
-        )
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         image2 = Image(
             id="f" * 64,
             os_slug="alpine-3.21",
-            path="/cache/images/alpine-3.21.ext4",
+            os_name="TestOS",
             arch="x86_64",
+            path="/cache/images/alpine-3.21.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
             created_at="2026-04-02T10:00:00Z",
-            minimum_rootfs_size_mb=2048,
-        )
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image1)
         db.upsert_image(image2)
 
@@ -160,10 +209,18 @@ class TestImageOperations:
         image = Image(
             id="abc123" + "d" * 58,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image)
 
         results = db.find_images_by_prefix("abc123")
@@ -175,17 +232,33 @@ class TestImageOperations:
         image1 = Image(
             id="abc000" + "d" * 58,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         image2 = Image(
             id="abc111" + "d" * 58,
             os_slug="alpine-3.21",
-            path="/cache/images/alpine-3.21.ext4",
+            os_name="TestOS",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/alpine-3.21.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image1)
         db.upsert_image(image2)
 
@@ -197,10 +270,18 @@ class TestImageOperations:
         image = Image(
             id="xyz" + "a" * 61,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image)
 
         results = db.find_images_by_prefix("abc")
@@ -211,11 +292,18 @@ class TestImageOperations:
         image = Image(
             id="g" * 64,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
             is_default=False,
-            minimum_rootfs_size_mb=2048,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image)
 
         db.set_default_image("g" * 64)
@@ -230,19 +318,33 @@ class TestImageOperations:
         image1 = Image(
             id="h" * 64,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
             is_default=True,
-            minimum_rootfs_size_mb=2048,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         image2 = Image(
             id="i" * 64,
             os_slug="alpine-3.21",
-            path="/cache/images/alpine-3.21.ext4",
+            os_name="TestOS",
             arch="x86_64",
+            path="/cache/images/alpine-3.21.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
             is_default=False,
-            minimum_rootfs_size_mb=2048,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image1)
         db.upsert_image(image2)
 
@@ -260,10 +362,18 @@ class TestImageOperations:
         image = Image(
             id="j" * 64,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image)
 
         db.set_default_image("j" * 64)
@@ -282,10 +392,15 @@ class TestKernelOperations:
         kernel = Kernel(
             id="k" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel)
 
         retrieved = db.get_kernel("k" * 64)
@@ -304,10 +419,15 @@ class TestKernelOperations:
         kernel = Kernel(
             id="l" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="6.1.0",
             arch="aarch64",
+            type="linux",
             path="/cache/kernels/vmlinux-6.1.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel)
 
         retrieved = db.get_kernel("l" * 64)
@@ -320,22 +440,29 @@ class TestKernelOperations:
         kernel1 = Kernel(
             id="m" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
-            base_name="vmlinux-base",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel1)
 
         kernel2 = Kernel(
             id="m" * 64,
             name="vmlinux",
+            base_name="vmlinux-base-updated",
             version="5.10.0",
             arch="x86_64",
-            path="/cache/kernels/vmlinux-5.10.0",
-            base_name="vmlinux-base-updated",
             type="linux",
-        )
+            path="/cache/kernels/vmlinux-5.10.0",
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel2)
 
         retrieved = db.get_kernel("m" * 64)
@@ -348,10 +475,15 @@ class TestKernelOperations:
         kernel = Kernel(
             id="n" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel)
         assert db.get_kernel("n" * 64) is not None
 
@@ -373,19 +505,27 @@ class TestKernelOperations:
         kernel1 = Kernel(
             id="o" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
+            is_default=False,
             created_at="2026-04-01T10:00:00Z",
-        )
+            updated_at="2026-04-01T10:00:00Z",
+                )
         kernel2 = Kernel(
             id="p" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="6.1.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-6.1.0",
+            is_default=False,
             created_at="2026-04-02T10:00:00Z",
-        )
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel1)
         db.upsert_kernel(kernel2)
 
@@ -399,10 +539,15 @@ class TestKernelOperations:
         kernel = Kernel(
             id="def456" + "d" * 58,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel)
 
         results = db.find_kernels_by_prefix("def456")
@@ -414,17 +559,27 @@ class TestKernelOperations:
         kernel1 = Kernel(
             id="def000" + "d" * 58,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         kernel2 = Kernel(
             id="def111" + "d" * 58,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="6.1.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-6.1.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel1)
         db.upsert_kernel(kernel2)
 
@@ -436,10 +591,15 @@ class TestKernelOperations:
         kernel = Kernel(
             id="xyz" + "a" * 61,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel)
 
         results = db.find_kernels_by_prefix("def")
@@ -450,11 +610,15 @@ class TestKernelOperations:
         kernel = Kernel(
             id="q" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
             is_default=False,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel)
 
         db.set_default_kernel("q" * 64)
@@ -469,19 +633,27 @@ class TestKernelOperations:
         kernel1 = Kernel(
             id="r" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
             is_default=True,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         kernel2 = Kernel(
             id="s" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="6.1.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-6.1.0",
             is_default=False,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel1)
         db.upsert_kernel(kernel2)
 
@@ -499,10 +671,15 @@ class TestKernelOperations:
         kernel = Kernel(
             id="t" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel)
 
         db.set_default_kernel("t" * 64)
@@ -522,8 +699,13 @@ class TestBinaryOperations:
             id="u" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
 
         retrieved = db.get_binary("u" * 64)
@@ -543,8 +725,13 @@ class TestBinaryOperations:
             id="v" * 64,
             name="jailer",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/jailer-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
 
         retrieved = db.get_binary("v" * 64)
@@ -557,18 +744,26 @@ class TestBinaryOperations:
             id="w" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary1)
 
         binary2 = Binary(
             id="w" * 64,
             name="firecracker",
             version="1.15.0",
-            path="/cache/bin/firecracker-v1.15.0",
             full_version="v1.15.0",
             ci_version="v1.15",
-        )
+            path="/cache/bin/firecracker-v1.15.0",
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary2)
 
         retrieved = db.get_binary("w" * 64)
@@ -582,8 +777,13 @@ class TestBinaryOperations:
             id="x" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
         assert db.get_binary("x" * 64) is not None
 
@@ -606,16 +806,24 @@ class TestBinaryOperations:
             id="y" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
+            is_default=False,
             created_at="2026-04-01T10:00:00Z",
-        )
+            updated_at="2026-04-01T10:00:00Z",
+                )
         binary2 = Binary(
             id="z" * 64,
             name="jailer",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/jailer-v1.15.0",
+            is_default=False,
             created_at="2026-04-02T10:00:00Z",
-        )
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary1)
         db.upsert_binary(binary2)
 
@@ -630,8 +838,13 @@ class TestBinaryOperations:
             id="ghi789" + "d" * 58,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
 
         results = db.find_binaries_by_prefix("ghi789")
@@ -644,14 +857,24 @@ class TestBinaryOperations:
             id="ghi000" + "d" * 58,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         binary2 = Binary(
             id="ghi111" + "d" * 58,
             name="jailer",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/jailer-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary1)
         db.upsert_binary(binary2)
 
@@ -664,8 +887,13 @@ class TestBinaryOperations:
             id="xyz" + "a" * 61,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
 
         results = db.find_binaries_by_prefix("ghi")
@@ -681,9 +909,13 @@ class TestBinaryDefaultOperations:
             id="u" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
             is_default=True,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
 
         retrieved = db.get_default_binary("firecracker")
@@ -703,9 +935,13 @@ class TestBinaryDefaultOperations:
             id="u" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
             is_default=False,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
 
         db.set_default_binary("firecracker", "1.15.0", "/cache/bin/firecracker-v1.15.0")
@@ -720,16 +956,24 @@ class TestBinaryDefaultOperations:
             id="u" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
             is_default=True,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         binary2 = Binary(
             id="v" * 64,
             name="firecracker",
             version="1.16.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.16.0",
             is_default=False,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary1)
         db.upsert_binary(binary2)
 
@@ -748,16 +992,24 @@ class TestBinaryDefaultOperations:
             id="u" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
             is_default=True,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         jailer_binary = Binary(
             id="v" * 64,
             name="jailer",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/jailer-v1.15.0",
             is_default=True,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(fc_binary)
         db.upsert_binary(jailer_binary)
 
@@ -765,9 +1017,13 @@ class TestBinaryDefaultOperations:
             id="w" * 64,
             name="firecracker",
             version="1.16.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.16.0",
             is_default=False,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(fc_binary2)
         db.set_default_binary("firecracker", "1.16.0", "/cache/bin/firecracker-v1.16.0")
 
@@ -784,18 +1040,26 @@ class TestBinaryDefaultOperations:
             id="u" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
             is_default=True,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
 
         binary_updated = Binary(
             id="u" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
             is_default=False,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary_updated)
 
         retrieved = db.get_binary("u" * 64)
@@ -839,11 +1103,12 @@ class TestEdgeCases:
         image = Image(
             id="1" * 64,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
-            arch="x86_64",
             os_name="Ubuntu",
+            arch="x86_64",
+            path="/cache/images/ubuntu-24.04.ext4",
             fs_type="ext4",
             fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
             compressed_size=1024000,
             original_size=2048000,
             compression_ratio=0.5,
@@ -852,8 +1117,7 @@ class TestEdgeCases:
             is_default=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
-            minimum_rootfs_size_mb=2048,
-        )
+                )
         db.upsert_image(image)
 
         retrieved = db.get_image("1" * 64)
@@ -874,15 +1138,15 @@ class TestEdgeCases:
         kernel = Kernel(
             id="2" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
-            path="/cache/kernels/vmlinux-5.10.0",
-            base_name="vmlinux-base",
             type="linux",
+            path="/cache/kernels/vmlinux-5.10.0",
             is_default=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
-        )
+                )
         db.upsert_kernel(kernel)
 
         retrieved = db.get_kernel("2" * 64)
@@ -898,13 +1162,13 @@ class TestEdgeCases:
             id="3" * 64,
             name="firecracker",
             version="1.15.0",
-            path="/cache/bin/firecracker-v1.15.0",
             full_version="v1.15.0",
             ci_version="v1.15",
+            path="/cache/bin/firecracker-v1.15.0",
             is_default=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
-        )
+                )
         db.upsert_binary(binary)
 
         retrieved = db.get_binary("3" * 64)
@@ -930,27 +1194,48 @@ class TestEdgeCases:
         image1 = Image(
             id="4" * 64,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
             is_default=True,
-            minimum_rootfs_size_mb=2048,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         image2 = Image(
             id="5" * 64,
             os_slug="alpine-3.21",
-            path="/cache/images/alpine-3.21.ext4",
+            os_name="TestOS",
             arch="x86_64",
+            path="/cache/images/alpine-3.21.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
             is_default=False,
-            minimum_rootfs_size_mb=2048,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         image3 = Image(
             id="6" * 64,
             os_slug="debian-12",
-            path="/cache/images/debian-12.ext4",
+            os_name="TestOS",
             arch="x86_64",
+            path="/cache/images/debian-12.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
             is_default=False,
-            minimum_rootfs_size_mb=2048,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image1)
         db.upsert_image(image2)
         db.upsert_image(image3)
@@ -975,16 +1260,24 @@ class TestEdgeCases:
             id="4" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
             is_default=True,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         binary2 = Binary(
             id="5" * 64,
             name="firecracker",
             version="1.16.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.16.0",
             is_default=False,
-        )
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary1)
         db.upsert_binary(binary2)
 
@@ -1002,10 +1295,18 @@ class TestEdgeCases:
         image = Image(
             id="ABC123" + "d" * 58,
             os_slug="ubuntu-24.04",
-            path="/cache/images/ubuntu-24.04.ext4",
+            os_name="TestOS",
             arch="x86_64",
-            minimum_rootfs_size_mb=2048,
-        )
+            path="/cache/images/ubuntu-24.04.ext4",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=2048000,
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+            pulled_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_image(image)
 
         # SQLite LIKE is case-insensitive by default
@@ -1023,10 +1324,15 @@ class TestKernelByName:
         kernel = Kernel(
             id="n" * 64,
             name="vmlinux-5.10",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_kernel(kernel)
         result = db.get_kernel_by_name("vmlinux-5.10")
         assert result is not None
@@ -1043,8 +1349,13 @@ class TestDeleteBinaryByNameAndVersion:
             id="dv" * 32,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.15.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
         assert db.get_binary("dv" * 32) is not None
         db.delete_binary_by_name_and_version("firecracker", "1.15.0")
@@ -1055,8 +1366,13 @@ class TestDeleteBinaryByNameAndVersion:
             id="pv" * 32,
             name="firecracker",
             version="1.16.0",
+            full_version="v1.0.0",
+            ci_version="v1.0",
             path="/cache/bin/firecracker-v1.16.0",
-        )
+            is_default=False,
+            created_at="2026-04-01T10:00:00Z",
+            updated_at="2026-04-01T10:00:00Z",
+                )
         db.upsert_binary(binary)
         db.delete_binary_by_name_and_version("firecracker", "v1.16.0")
         assert db.get_binary("pv" * 32) is None

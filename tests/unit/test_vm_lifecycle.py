@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -133,13 +134,20 @@ def test_create_vm_core_success(
     """Test core create_vm() runs through successfully and registers VM with nocloud-net (default)."""
     from mvmctl.db.models import Image
 
-    # Mock image entry with minimum_rootfs_size_mb to pass validation
+    # Mock image entry with minimum_rootfs_size_mib to pass validation
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/image.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/image.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     # Configure the mock instance that will be returned when MVMDatabase() is called
     mock_instance = MagicMock()
@@ -287,9 +295,16 @@ def test_create_vm_inject_mode_is_default(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_class.return_value.get_image.return_value = test_image
     mock_db_class.return_value.get_image_by_os_slug.return_value = test_image
@@ -424,7 +439,16 @@ def test_remove_vm_success(
         ipv4="10.20.0.5",
         pid=123,
         status=VMStatus.RUNNING,
-        network_name="default",
+        network_id="default",
+        mac="02:FC:00:00:00:01",
+        tap_device="mvm-def-vm1-abc",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
     mock_manager.get.return_value = vm
     mock_mgr.return_value = mock_manager
@@ -440,6 +464,11 @@ def test_remove_vm_success(
         subnet="10.20.0.0/24",
         bridge="mvm-default",
         ipv4_gateway="10.20.0.1",
+        bridge_active=True,
+        nat_enabled=True,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
 
     mock_read_pid.return_value = 123
@@ -484,10 +513,20 @@ def test_remove_vm_no_nat_skips_teardown(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="vm2",
+        id="vm2" + "b" * 60,
         ipv4="10.20.0.6",
         pid=456,
         status=VMStatus.RUNNING,
-        network_name="isolated",
+        network_id="isolated",
+        mac="02:FC:00:00:00:02",
+        tap_device="mvm-iso-vm2-abc",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
     mock_manager.get.return_value = vm
     mock_mgr.return_value = mock_manager
@@ -541,7 +580,16 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
         ipv4="10.20.0.7",
         pid=789,
         status=VMStatus.RUNNING,
-        network_name="default",
+        network_id="default",
+        mac="02:FC:00:00:00:03",
+        tap_device="mvm-def-shr-123",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
     mock_manager.get.return_value = vm
     mock_mgr.return_value = mock_manager
@@ -558,6 +606,11 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
         subnet="10.20.0.0/24",
         bridge="mvm-default",
         ipv4_gateway="10.20.0.1",
+        bridge_active=True,
+        nat_enabled=True,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
 
     mock_read_pid.return_value = 789
@@ -609,10 +662,20 @@ def test_remove_vm_stops_nocloud_server(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="nocloud-vm",
+        id="nocloud" + "x" * 56,
         ipv4="10.20.0.10",
         pid=999,
         status=VMStatus.RUNNING,
-        network_name="default",
+        network_id="default",
+        mac="02:FC:00:00:00:04",
+        tap_device="mvm-def-ncv-abc",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
         nocloud_net_port=8080,
     )
     mock_manager.get.return_value = vm
@@ -661,10 +724,20 @@ def test_remove_vm_removes_firewall_rule(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="fw-test",
+        id="fwtest" + "x" * 56,
         ipv4="10.20.0.15",
         pid=777,
         status=VMStatus.RUNNING,
-        network_name="default",
+        network_id="default",
+        mac="02:FC:00:00:00:05",
+        tap_device="mvm-def-fwt-abc",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
         nocloud_net_port=9090,
     )
     mock_manager.get.return_value = vm
@@ -712,10 +785,20 @@ def test_remove_vm_cleanup_is_idempotent(
     mock_manager = MagicMock()
     vm = VMInstance(
         name="idempotent-vm",
+        id="idemp" + "x" * 58,
         ipv4="10.20.0.20",
         pid=555,
         status=VMStatus.RUNNING,
-        network_name="default",
+        network_id="default",
+        mac="02:FC:00:00:00:06",
+        tap_device="mvm-def-idv-abc",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
         nocloud_net_port=7070,
     )
     mock_manager.get.return_value = vm
@@ -827,13 +910,15 @@ def _seed_image(full_hash: str, filename: str, **extra) -> None:
         Image(
             id=full_hash,
             os_slug=extra.get("os_slug", ""),
-            os_name=extra.get("os_name"),
+            os_name=extra.get("os_name", "Test Image"),
             path=filename,
             arch=str(extra.get("arch", "x86_64")),
-            fs_type=extra.get("fs_type"),
-            fs_uuid=extra.get("fs_uuid"),
-            minimum_rootfs_size_mb=extra.get("minimum_rootfs_size_mb", 2048),
-            pulled_at=extra.get("pulled_at"),
+            fs_type=extra.get("fs_type", "ext4"),
+            fs_uuid=extra.get("fs_uuid", "550e8400-e29b-41d4-a716-446655440000"),
+            minimum_rootfs_size_mib=extra.get("minimum_rootfs_size_mib", 2048),
+            original_size=extra.get("original_size", 5368709120),
+            is_default=extra.get("is_default", False),
+            pulled_at=extra.get("pulled_at", "2026-01-01T00:00:00+00:00"),
             created_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
             updated_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
         )
@@ -851,9 +936,10 @@ def _seed_kernel(full_hash: str, filename: str, **extra) -> None:
             name=extra.get("name", filename),
             path=filename,
             version=extra.get("version", ""),
-            base_name=extra.get("base_name"),
-            type=extra.get("type"),
+            base_name=extra.get("base_name", ""),
+            type=extra.get("type", ""),
             arch=extra.get("arch", "x86_64"),
+            is_default=extra.get("is_default", False),
             created_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
             updated_at=extra.get("created_at", "2026-01-01T00:00:00+00:00"),
         )
@@ -884,14 +970,15 @@ def test_resolve_image_fs_uuid_by_short_hash(tmp_path):
     assert result == "11111111-2222-3333-4444-555555555555"
 
 
-def test_resolve_image_fs_uuid_missing_returns_none(tmp_path):
+def test_resolve_image_fs_uuid_with_default_value(tmp_path):
+    """_resolve_image_fs_uuid returns the fs_uuid from metadata."""
     from mvmctl.api.assets import resolve_image_fs_uuid as _resolve_image_fs_uuid
 
     full_hash = "b" * 64
-    _seed_image(full_hash, "ubuntu-24.04.ext4")
+    _seed_image(full_hash, "ubuntu-24.04.ext4", fs_uuid="22222222-3333-4444-5555-666666666666")
 
     result = _resolve_image_fs_uuid(full_hash[:6])
-    assert result is None
+    assert result == "22222222-3333-4444-5555-666666666666"
 
 
 def test_resolve_image_fs_type_by_short_hash(tmp_path):
@@ -903,13 +990,13 @@ def test_resolve_image_fs_type_by_short_hash(tmp_path):
     assert result == "ext4"
 
 
-def test_resolve_image_fs_type_missing_returns_none(tmp_path):
-    """_resolve_image_fs_type returns None when fs_type is not in metadata."""
+def test_resolve_image_fs_type_with_default_value(tmp_path):
+    """_resolve_image_fs_type returns the fs_type from metadata."""
     full_hash = "d" * 64
-    _seed_image(full_hash, "ubuntu-24.04.ext4")
+    _seed_image(full_hash, "ubuntu-24.04.ext4", fs_type="btrfs")
 
     result = _resolve_image_fs_type(full_hash[:6])
-    assert result is None
+    assert result == "btrfs"
 
 
 def test_resolve_image_path_not_found(tmp_path):
@@ -1112,9 +1199,16 @@ def test_create_vm_uses_cached_image_path_not_copy(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_class.return_value.get_image.return_value = test_image
     mock_db_class.return_value.get_image_by_os_slug.return_value = test_image
@@ -1201,7 +1295,7 @@ def test_create_vm_uses_cached_image_path_not_copy(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.grow_rootfs_with_guestfs")
+@patch("mvmctl.api.vms._setup_rootfs_with_guestfs")
 @patch("mvmctl.api.vms.shutil.copy2")
 @patch("mvmctl.api.vms.add_nocloud_input_rule")
 @patch("mvmctl.api.vms.NoCloudNetServerManager")
@@ -1260,9 +1354,16 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -1406,9 +1507,16 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_class.return_value.get_image.return_value = test_image
     mock_db_class.return_value.get_image_by_os_slug.return_value = test_image
@@ -1562,9 +1670,16 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -1575,9 +1690,16 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -1730,9 +1852,16 @@ def test_create_vm_nocloud_net_starts_server(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -1869,9 +1998,16 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -2006,9 +2142,16 @@ def test_create_vm_nocloud_net_success_sets_port(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -2147,9 +2290,16 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -2298,9 +2448,16 @@ def test_firewall_failure_stops_server_and_raises(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_class.return_value.get_image.return_value = test_image
     mock_db_class.return_value.get_image_by_os_slug.return_value = test_image
@@ -2339,6 +2496,11 @@ def test_firewall_failure_stops_server_and_raises(
         subnet="10.20.0.0/24",
         bridge="mvm-br0",
         ipv4_gateway="10.20.0.1",
+        bridge_active=True,
+        nat_enabled=True,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -2453,9 +2615,16 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -2589,9 +2758,16 @@ def test_create_vm_starts_nocloud_server(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -2893,6 +3069,11 @@ def test_direct_injection_cleanup_on_injection_failure(
         subnet="10.20.0.0/24",
         bridge="mvm-br0",
         ipv4_gateway="10.20.0.1",
+        bridge_active=True,
+        nat_enabled=True,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
 
     mock_alloc_ip.return_value = "10.20.0.2"
@@ -3006,9 +3187,16 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -3019,9 +3207,16 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -3032,9 +3227,16 @@ def test_create_vm_without_ssh_key_injects_default_keys(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -3166,9 +3368,16 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -3295,9 +3504,16 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -3411,9 +3627,16 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     test_image = Image(
         id="a" * 64,
         os_slug="ubuntu-22.04",
-        path="/path/to/ubuntu-22.04.ext4",
+        os_name="Ubuntu 22.04",
         arch="x86_64",
-        minimum_rootfs_size_mb=2048,
+        path="/path/to/ubuntu-22.04.ext4",
+        fs_type="ext4",
+        fs_uuid="550e8400-e29b-41d4-a716-446655440000",
+        minimum_rootfs_size_mib=2048,
+        original_size=5368709120,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
@@ -3456,6 +3679,11 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
         subnet="10.20.0.0/24",
         bridge="mvm-br0",
         ipv4_gateway="10.20.0.1",
+        bridge_active=True,
+        nat_enabled=True,
+        is_default=False,
+        created_at="2024-01-01T00:00:00+00:00",
+        updated_at="2024-01-01T00:00:00+00:00",
     )
 
     mock_alloc_ip.return_value = "10.20.0.5"
@@ -3551,13 +3779,21 @@ class TestRemoveVMNATOrdering:
             pid=1234,
             status=VMStatus.STOPPED,
             tap_device="mvm-def-tes-123",
-            network_name="default",
+            network_id="default",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            rootfs_suffix=".ext4",
+            kernel_id="k" * 64,
+            image_id="i" * 64,
+            binary_id="b" * 64,
+            disk_size_mib=2048,
         )
 
         # Setup mocks
         mock_manager = MagicMock()
         mock_manager.get_by_id_prefix.return_value = []
         mock_manager.get_by_name.return_value = [vm]
+        mock_manager.get.return_value = vm
         mock_get_vm_mgr.return_value = mock_manager
 
         mock_vm_dir = MagicMock()
@@ -3577,6 +3813,11 @@ class TestRemoveVMNATOrdering:
             subnet="10.20.0.0/24",
             bridge="mvm-default",
             ipv4_gateway="10.20.0.1",
+            bridge_active=True,
+            nat_enabled=True,
+            is_default=False,
+            created_at="2024-01-01T00:00:00+00:00",
+            updated_at="2024-01-01T00:00:00+00:00",
         )
 
         # Call remove_vm
@@ -3646,12 +3887,20 @@ class TestRemoveVMNATOrdering:
             pid=1234,
             status=VMStatus.STOPPED,
             tap_device="mvm-def-tes-123",
-            network_name="default",
+            network_id="default",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            rootfs_suffix=".ext4",
+            kernel_id="k" * 64,
+            image_id="i" * 64,
+            binary_id="b" * 64,
+            disk_size_mib=2048,
         )
 
         mock_manager = MagicMock()
         mock_manager.get_by_id_prefix.return_value = []
         mock_manager.get_by_name.return_value = [vm]
+        mock_manager.get.return_value = vm
         mock_get_vm_mgr.return_value = mock_manager
 
         mock_vm_dir = MagicMock()
@@ -3671,6 +3920,11 @@ class TestRemoveVMNATOrdering:
             subnet="10.20.0.0/24",
             bridge="mvm-default",
             ipv4_gateway="10.20.0.1",
+            bridge_active=True,
+            nat_enabled=True,
+            is_default=False,
+            created_at="2024-01-01T00:00:00+00:00",
+            updated_at="2024-01-01T00:00:00+00:00",
         )
 
         remove_vm("testvm")

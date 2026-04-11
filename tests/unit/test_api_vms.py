@@ -23,12 +23,48 @@ from mvmctl.exceptions import MVMError, VMNotFoundError
 from mvmctl.models.vm import VMInstance, VMStatus
 
 
+@patch("mvmctl.core.vm_monitor.reconcile_vm")
 @patch("mvmctl.api.vms.get_vm_manager")
-def test_list_vms(mock_get_manager):
+def test_list_vms(mock_get_manager, mock_reconcile):
     """list_vms retrieves VMs from manager."""
+    # Mock reconcile_vm to return the original status without changing it
+    mock_reconcile.side_effect = lambda vm, manager: vm.status
+
     mock_manager = MagicMock()
-    vm1 = VMInstance(name="vm1", status=VMStatus.RUNNING)
-    vm2 = VMInstance(name="vm2", status=VMStatus.STOPPED)
+    vm1 = VMInstance(
+        name="vm1",
+        id="vm1" + "a" * 60,
+        status=VMStatus.RUNNING,
+        pid=1234,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_id="default",
+        tap_device="mvm-def-vm1-abc",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
+    )
+    vm2 = VMInstance(
+        name="vm2",
+        id="vm2" + "b" * 60,
+        status=VMStatus.STOPPED,
+        pid=5678,
+        ipv4="10.0.0.3",
+        mac="02:FC:00:00:00:02",
+        network_id="default",
+        tap_device="mvm-def-vm2-abc",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
+    )
     mock_manager.list_all.return_value = [vm1, vm2]
     mock_get_manager.return_value = mock_manager
 
@@ -51,7 +87,23 @@ def test_get_vm(mock_get_manager):
 def test_vm_cache_dir(mock_get_vm_dir_by_hash):
     """vm_cache_dir returns the vm path using hash-based lookup."""
     mock_get_vm_dir_by_hash.return_value = Path("/tmp/vms/abc123")
-    vm = VMInstance(name="testvm", id="abc123" + "x" * 58, status=VMStatus.STOPPED)
+    vm = VMInstance(
+        name="testvm",
+        id="abc123" + "x" * 58,
+        status=VMStatus.STOPPED,
+        pid=0,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_id="default",
+        tap_device="mvm-def-abc-123",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
+    )
     assert vm_cache_dir(vm) == Path("/tmp/vms/abc123")
     mock_get_vm_dir_by_hash.assert_called_once_with(vm.id)
 
@@ -62,7 +114,23 @@ def test_ssh_vm(mock_get_manager, mock_connect):
     """ssh_vm looks up VM and forwards to connect_to_vm with IP."""
     mock_connect.return_value = 0
     mock_manager = MagicMock()
-    mock_vm = VMInstance(name="vm1", ipv4="10.0.0.5", status=VMStatus.RUNNING)
+    mock_vm = VMInstance(
+        name="vm1",
+        id="vm1" + "a" * 60,
+        ipv4="10.0.0.5",
+        status=VMStatus.RUNNING,
+        pid=1234,
+        mac="02:FC:00:00:00:01",
+        network_id="default",
+        tap_device="mvm-def-vm1-abc",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
+    )
     mock_manager.get.return_value = mock_vm
     mock_get_manager.return_value = mock_manager
 
@@ -116,15 +184,34 @@ def test_cleanup_vms(
         id="vm1" + "a" * 60,  # Full 64-char hash
         status=VMStatus.STOPPED,
         pid=123,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_id="default",
         tap_device="mvm-def-vm1-abc",
-        network_name="default",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
     vm2 = VMInstance(
         name="vm2",
         id="vm2" + "b" * 60,
         status=VMStatus.RUNNING,
         pid=456,
+        ipv4="10.0.0.3",
+        mac="02:FC:00:00:00:02",
+        network_id="default",
         tap_device="mvm-def-vm2-xyz",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
     mock_manager.list_all.return_value = [vm1, vm2]
     mock_get_manager.return_value = mock_manager
@@ -183,8 +270,17 @@ def test_cleanup_vms_removes_hash_based_dir(
         id=vm_id,
         status=VMStatus.STOPPED,
         pid=123,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_id="default",
         tap_device="mvm-def-vm1-abc",
-        network_name="default",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
     mock_manager.list_all.return_value = [vm1]
     mock_get_manager.return_value = mock_manager
@@ -237,8 +333,17 @@ def test_cleanup_vms_handles_missing_vm_id(
         id="",  # Empty ID simulates missing hash
         status=VMStatus.STOPPED,
         pid=123,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_id="default",
         tap_device="mvm-def-vm1-abc",
-        network_name="default",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
     mock_manager.list_all.return_value = [vm1]
     mock_get_manager.return_value = mock_manager
@@ -264,9 +369,15 @@ def test_inspect_vm_by_id_prefix(mocker: MockerFixture):
         ipv4="10.0.0.2",
         mac="02:FC:00:00:00:01",
         status=VMStatus.RUNNING,
-        network_name="default",
+        network_id="default",
         tap_device="mvm-def-abc-123",
         created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
 
     mock_mgr = mocker.MagicMock()
@@ -288,8 +399,18 @@ def test_inspect_vm_by_name(mocker: MockerFixture):
         name="myvm",
         id="def456" + "y" * 10,
         pid=5678,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
         status=VMStatus.RUNNING,
+        network_id="default",
+        tap_device="mvm-def-abc-123",
         created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
 
     mock_mgr = mocker.MagicMock()
@@ -309,10 +430,38 @@ def test_inspect_vm_ambiguous(mocker: MockerFixture):
     mock_mgr.get_by_id_prefix.return_value = None
     mock_mgr.get_by_name.return_value = [
         VMInstance(
-            name="myvm", id="abc123" + "x" * 10, status=VMStatus.RUNNING, created_at=datetime.now()
+            name="myvm",
+            id="abc123" + "x" * 10,
+            status=VMStatus.RUNNING,
+            pid=1234,
+            ipv4="10.0.0.2",
+            mac="02:FC:00:00:00:01",
+            network_id="default",
+            tap_device="mvm-def-abc-123",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            rootfs_suffix=".ext4",
+            kernel_id="k" * 64,
+            image_id="i" * 64,
+            binary_id="b" * 64,
+            disk_size_mib=2048,
         ),
         VMInstance(
-            name="myvm", id="def456" + "y" * 10, status=VMStatus.RUNNING, created_at=datetime.now()
+            name="myvm",
+            id="def456" + "y" * 10,
+            status=VMStatus.RUNNING,
+            pid=5678,
+            ipv4="10.0.0.3",
+            mac="02:FC:00:00:00:02",
+            network_id="default",
+            tap_device="mvm-def-abc-456",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            rootfs_suffix=".ext4",
+            kernel_id="k" * 64,
+            image_id="i" * 64,
+            binary_id="b" * 64,
+            disk_size_mib=2048,
         ),
     ]
     mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
@@ -352,6 +501,18 @@ def test_resolve_rootfs_path_from_config(mocker: MockerFixture, tmp_path: Path):
         name="test-vm",
         id="abc123" + "x" * 58,
         status=VMStatus.RUNNING,
+        pid=1234,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_id="default",
+        tap_device="mvm-def-abc-123",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
         config=vm_config,
     )
 
@@ -372,8 +533,19 @@ def test_resolve_rootfs_path_local_fallback(mocker: MockerFixture, tmp_path: Pat
         name="test-vm",
         id="abc123" + "x" * 58,
         status=VMStatus.RUNNING,
-        config=None,
+        pid=1234,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_id="default",
+        tap_device="mvm-def-abc-123",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
         rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
+        config=None,
     )
 
     vm_dir = tmp_path / "vm_dir"
@@ -395,6 +567,18 @@ def test_resolve_rootfs_path_none_when_missing(mocker: MockerFixture, tmp_path: 
         name="test-vm",
         id="abc123" + "x" * 58,
         status=VMStatus.RUNNING,
+        pid=1234,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
+        network_id="default",
+        tap_device="mvm-def-abc-123",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
         config=None,
     )
 
@@ -413,9 +597,18 @@ def test_inspect_vm_rootfs_source_field(mocker: MockerFixture, tmp_path: Path):
         name="test-vm",
         id="abc123" + "x" * 58,
         pid=1234,
+        ipv4="10.0.0.2",
+        mac="02:FC:00:00:00:01",
         status=VMStatus.RUNNING,
+        network_id="default",
+        tap_device="mvm-def-abc-123",
         created_at=datetime.now(),
+        updated_at=datetime.now(),
         rootfs_suffix=".ext4",
+        kernel_id="k" * 64,
+        image_id="i" * 64,
+        binary_id="b" * 64,
+        disk_size_mib=2048,
     )
 
     mock_mgr = mocker.MagicMock()

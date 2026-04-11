@@ -57,7 +57,7 @@ src/mvmctl/db/
 | Table | Purpose |
 |-------|---------|
 | `binaries` | Binary entries (firecracker, jailer) with `name`, `version`, `path`, `is_default` |
-| `images` | Image entries with hash, os_slug, path, arch, `is_default`, `minimum_rootfs_size_mb` |
+| `images` | Image entries with hash, os_slug, path, arch, `is_default`, `minimum_rootfs_size_mib` |
 | `kernels` | Kernel entries with version, path, `is_default` |
 | `networks` | Named network configs with subnet, gateway, bridge, `is_default` |
 | `network_leases` | IP lease records with network_id, ipv4, vm_id, expiry |

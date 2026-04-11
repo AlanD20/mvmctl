@@ -12,9 +12,9 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _seed_test_image_for_all_integration_tests(tmp_path: Path):
-    """Auto-seed test image with minimum_rootfs_size_mb for all integration tests.
+    """Auto-seed test image with minimum_rootfs_size_mib for all integration tests.
 
-    This prevents VMCreateError from being raised due to missing minimum_rootfs_size_mb.
+    This prevents VMCreateError from being raised due to missing minimum_rootfs_size_mib.
     """
     from tests.helpers.paths import make_test_paths
     from mvmctl.core.mvm_db import MVMDatabase
@@ -37,7 +37,12 @@ def _seed_test_image_for_all_integration_tests(tmp_path: Path):
             arch="x86_64",
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
-            minimum_rootfs_size_mb=2048,
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789abc",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            is_default=False,
+            pulled_at="2026-01-01T00:00:00+00:00",
             created_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
         )
@@ -80,12 +85,13 @@ def seed_test_assets(tmp_path: Path) -> Path:
     db.upsert_kernel(
         Kernel(
             id="a" * 64,
-            name="vmlinux-test",
+            name="vmlinux",
             version="6.1.0",
             arch="x86_64",
             path="vmlinux",
             base_name="vmlinux",
             type="official",
+            is_default=False,
             created_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
         )
@@ -98,7 +104,12 @@ def seed_test_assets(tmp_path: Path) -> Path:
             arch="x86_64",
             path="ubuntu-24.04.ext4",
             os_name="Ubuntu 24.04",
-            minimum_rootfs_size_mb=2048,
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789abc",
+            minimum_rootfs_size_mib=2048,
+            original_size=2147483648,
+            is_default=False,
+            pulled_at="2026-01-01T00:00:00+00:00",
             created_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
         )

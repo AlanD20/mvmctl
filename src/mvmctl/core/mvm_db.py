@@ -470,10 +470,11 @@ class MVMDatabase:
                     console_socket_path, config_path, cloud_init_mode,
                     nocloud_net_port, nocloud_server_pid, console_relay_pid,
                     exit_code, vcpu_count, mem_size_mib, disk_size_mib,
-                    rootfs_path, rootfs_suffix, created_at, updated_at
+                    rootfs_path, rootfs_suffix, enable_api_socket, enable_pci,
+                    enable_logging, enable_metrics, enable_console, created_at, updated_at
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
@@ -499,6 +500,11 @@ class MVMDatabase:
                     disk_size_mib = excluded.disk_size_mib,
                     rootfs_path = excluded.rootfs_path,
                     rootfs_suffix = excluded.rootfs_suffix,
+                    enable_api_socket = excluded.enable_api_socket,
+                    enable_pci = excluded.enable_pci,
+                    enable_logging = excluded.enable_logging,
+                    enable_metrics = excluded.enable_metrics,
+                    enable_console = excluded.enable_console,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -526,6 +532,11 @@ class MVMDatabase:
                     vm.disk_size_mib,
                     vm.rootfs_path,
                     vm.rootfs_suffix,
+                    vm.enable_api_socket,
+                    vm.enable_pci,
+                    vm.enable_logging,
+                    vm.enable_metrics,
+                    vm.enable_console,
                     vm.created_at,
                     vm.updated_at,
                 ),
@@ -728,8 +739,9 @@ class MVMDatabase:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT OR IGNORE INTO host_state (id, initialized, updated_at)
-                VALUES (1, 0, CURRENT_TIMESTAMP)
+                INSERT OR IGNORE INTO host_state 
+                (id, initialized, mvm_group_created, sudoers_configured, default_network_created, initialized_at, updated_at)
+                VALUES (1, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """
             )
         host_state = self.get_host_state()
@@ -775,7 +787,7 @@ class MVMDatabase:
             )
 
     def reset_host_state(self) -> None:
-        """Reset all host state flags to False/None (for mvm host reset)."""
+        """Reset all host state flags to False (for mvm host reset)."""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -784,7 +796,6 @@ class MVMDatabase:
                     mvm_group_created = 0,
                     sudoers_configured = 0,
                     default_network_created = 0,
-                    initialized_at = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = 1
                 """

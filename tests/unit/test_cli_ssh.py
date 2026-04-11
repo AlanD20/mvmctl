@@ -169,9 +169,26 @@ def test_ssh_with_ip_flag(mocker):
 
 
 def test_ssh_vm_id_matches_single_prefix(mocker):
+    from datetime import datetime, timezone
     from mvmctl.models.vm import VMInstance, VMStatus
 
-    mock_vm = VMInstance(name="prefixed-vm", id="abc123def456abcd", status=VMStatus.RUNNING)
+    mock_vm = VMInstance(
+        name="prefixed-vm",
+        id="abc123def456abcd",
+        status=VMStatus.RUNNING,
+        pid=1234,
+        ipv4="10.0.0.2",
+        mac="aa:bb:cc:dd:ee:ff",
+        network_id="default",
+        tap_device="mvm-def-pre-001",
+        created_at=datetime.now(tz=timezone.utc),
+        updated_at=datetime.now(tz=timezone.utc),
+        rootfs_suffix=".ext4",
+        kernel_id="kernel123",
+        image_id="image123",
+        binary_id="binary123",
+        disk_size_mib=2048,
+    )
     mock_manager = mocker.MagicMock()
     mock_manager.find_by_id_prefix.return_value = [mock_vm]
     mocker.patch("mvmctl.cli._helpers.get_vm_manager", return_value=mock_manager)
@@ -184,10 +201,44 @@ def test_ssh_vm_id_matches_single_prefix(mocker):
 
 
 def test_ssh_vm_id_ambiguous_prefix(mocker):
+    from datetime import datetime, timezone
     from mvmctl.models.vm import VMInstance, VMStatus
 
-    vm1 = VMInstance(name="vm1", id="abc123def456abcd", status=VMStatus.RUNNING)
-    vm2 = VMInstance(name="vm2", id="abc123ffff00ffff", status=VMStatus.RUNNING)
+    now = datetime.now(tz=timezone.utc)
+    vm1 = VMInstance(
+        name="vm1",
+        id="abc123def456abcd",
+        status=VMStatus.RUNNING,
+        pid=1234,
+        ipv4="10.0.0.2",
+        mac="aa:bb:cc:dd:ee:01",
+        network_id="default",
+        tap_device="mvm-def-vm1-001",
+        created_at=now,
+        updated_at=now,
+        rootfs_suffix=".ext4",
+        kernel_id="kernel123",
+        image_id="image123",
+        binary_id="binary123",
+        disk_size_mib=2048,
+    )
+    vm2 = VMInstance(
+        name="vm2",
+        id="abc123ffff00ffff",
+        status=VMStatus.RUNNING,
+        pid=1235,
+        ipv4="10.0.0.3",
+        mac="aa:bb:cc:dd:ee:02",
+        network_id="default",
+        tap_device="mvm-def-vm2-002",
+        created_at=now,
+        updated_at=now,
+        rootfs_suffix=".ext4",
+        kernel_id="kernel123",
+        image_id="image456",
+        binary_id="binary123",
+        disk_size_mib=2048,
+    )
     mock_manager = mocker.MagicMock()
     mock_manager.find_by_id_prefix.return_value = [vm1, vm2]
     mocker.patch("mvmctl.cli._helpers.get_vm_manager", return_value=mock_manager)

@@ -5,8 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from mvmctl.constants import (
+    CONST_MEBIBYTE_BYTES,
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
+    DEFAULT_VM_DISK_SIZE,
     DEFAULT_VM_ENABLE_API_SOCKET,
     DEFAULT_VM_ENABLE_CONSOLE,
     DEFAULT_VM_ENABLE_LOGGING,
@@ -82,12 +84,19 @@ def build_vm_config_file(
     effective_pci = enable_pci if enable_pci is not None else DEFAULT_VM_ENABLE_PCI
     effective_bin = firecracker_bin if firecracker_bin is not None else DEFAULT_FIRECRACKER_BIN_NAME
 
-    from mvmctl.models.vm import VMInstance
+    from datetime import datetime, timezone
+
+    from mvmctl.models.vm import VMInstance, VMStatus
+    from mvmctl.utils.disk_size import parse_disk_size
+
+    disk_size_bytes = parse_disk_size(DEFAULT_VM_DISK_SIZE)
+    disk_size_mib = disk_size_bytes // CONST_MEBIBYTE_BYTES
 
     vm_config_kwargs: dict[str, Any] = {
         "name": name,
         "vcpu_count": effective_vcpus,
         "mem_size_mib": effective_mem,
+        "disk_size_mib": disk_size_mib,
         "enable_api_socket": effective_api_socket,
         "enable_pci": effective_pci,
         "lsm_flags": DEFAULT_VM_LSM_FLAGS,
@@ -101,11 +110,24 @@ def build_vm_config_file(
     if rootfs_path is not None:
         vm_config_kwargs["rootfs_path"] = rootfs_path
 
+    # Create VMInstance with all required fields for config generation validation
+    now = datetime.now(tz=timezone.utc)
     vm_instance = VMInstance(
         name=name,
-        ipv4=ip,
-        mac=mac,
-        tap_device=tap_device,
+        id="0000000000000000",  # Placeholder ID for config export
+        pid=0,  # Placeholder PID for config export
+        ipv4=ip if ip is not None else "",
+        mac=mac if mac is not None else "",
+        network_id="",  # Placeholder for config export
+        tap_device=tap_device if tap_device is not None else "",
+        created_at=now,
+        updated_at=now,
+        status=VMStatus.STOPPED,
+        rootfs_suffix=".ext4",  # Default suffix for config export
+        kernel_id="",  # Placeholder for config export
+        image_id="",  # Placeholder for config export
+        binary_id="",  # Placeholder for config export
+        disk_size_mib=0,  # Placeholder for config export
         ipv4_gateway=ipv4_gateway,
         subnet_mask=subnet_mask,
     )

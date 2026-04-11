@@ -154,14 +154,14 @@ class VMInstance:
     disk_size_mib: int
     rootfs_path: str
     rootfs_suffix: str
+    created_at: str
+    updated_at: str
+
     enable_api_socket: bool
     enable_pci: bool
     enable_logging: bool
     enable_metrics: bool
     enable_console: bool
-    created_at: str
-    updated_at: str
-
     api_socket_path: Optional[str] = None
     console_socket_path: Optional[str] = None
     nocloud_net_port: Optional[int] = None

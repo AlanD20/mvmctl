@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -57,6 +58,7 @@ def _seed_image_db(cache_dir: Path, image_id: str = "test-image") -> None:
 
     db = MVMDatabase(cache_dir / "mvmdb.db")
     db.migrate()
+    now = datetime.now(timezone.utc).isoformat()
     image_entry = Image(
         id=image_id,
         os_slug="test-os",
@@ -64,15 +66,16 @@ def _seed_image_db(cache_dir: Path, image_id: str = "test-image") -> None:
         path=f"images/{image_id}.ext4",
         arch="x86_64",
         fs_type="ext4",
-        fs_uuid=None,
+        fs_uuid="test-uuid-1234",
+        minimum_rootfs_size_mib=2048,
+        original_size=1024,
         compressed_size=None,
-        original_size=None,
         compression_ratio=None,
         compressed_format=None,
-        pulled_at=None,
+        pulled_at=now,
         is_default=False,
-        created_at=datetime.now(timezone.utc).isoformat(),
-        updated_at=datetime.now(timezone.utc).isoformat(),
+        created_at=now,
+        updated_at=now,
     )
     db.upsert_image(image_entry)
 
@@ -608,20 +611,39 @@ def test_kernel_fetch_with_jobs(
 
 def _write_kernel_meta(cache_dir: Path, full_hash: str, path: str, **extra: object) -> None:
     """Seed a kernel entry in the SQLite database."""
+    from datetime import datetime, timezone
+
     db = MVMDatabase()
     db.migrate()
+    now = datetime.now(timezone.utc).isoformat()
+
+    base_name_val = extra.get("base_name")
+    base_name = str(base_name_val) if base_name_val is not None else path
+
+    type_val = extra.get("type")
+    kernel_type = str(type_val) if type_val is not None else "firecracker"
+
+    is_default_val: Any = extra.get("is_default", False)
+    is_default = bool(is_default_val)
+
+    created_at_val = extra.get("created_at")
+    created_at = str(created_at_val) if created_at_val is not None else now
+
+    updated_at_val = extra.get("updated_at")
+    updated_at = str(updated_at_val) if updated_at_val is not None else now
+
     db.upsert_kernel(
         Kernel(
             id=full_hash,
             name=path,
+            base_name=base_name,
             version=str(extra.get("version", "6.1.9")),
             arch=str(extra.get("arch", "x86_64")),
             path=path,
-            base_name=extra.get("base_name"),
-            type=extra.get("type", "firecracker"),
-            is_default=bool(extra.get("is_default", False)),
-            created_at=extra.get("created_at"),
-            updated_at=extra.get("updated_at", "2026-01-01T12:00:00+00:00"),
+            type=kernel_type,
+            is_default=is_default,
+            created_at=created_at,
+            updated_at=updated_at,
         )
     )
 
@@ -1152,26 +1174,67 @@ def test_image_fetch_detects_existing_via_db(
 
 def _write_image_meta(cache_dir: Path, full_hash: str, path: str, **extra: object) -> None:
     """Seed an image entry in the SQLite database."""
+    from datetime import datetime, timezone
+    from typing import Optional
+
     db = MVMDatabase()
     db.migrate()
+    now = datetime.now(timezone.utc).isoformat()
+
+    os_slug_val = extra.get("os_slug")
+    os_slug = str(os_slug_val) if os_slug_val is not None else full_hash
+
+    minimum_rootfs_size_mib_val: Any = extra.get("minimum_rootfs_size_mib", 2048)
+    minimum_rootfs_size_mib = int(minimum_rootfs_size_mib_val)
+
+    original_size_val: Any = extra.get("original_size", 1024)
+    original_size = int(original_size_val)
+
+    compressed_size_raw: Any = extra.get("compressed_size")
+    compressed_size: Optional[int] = (
+        int(compressed_size_raw) if compressed_size_raw is not None else None
+    )
+
+    compression_ratio_raw: Any = extra.get("compression_ratio")
+    compression_ratio: Optional[float] = (
+        float(compression_ratio_raw) if compression_ratio_raw is not None else None
+    )
+
+    compressed_format_raw = extra.get("compressed_format")
+    compressed_format: Optional[str] = (
+        str(compressed_format_raw) if compressed_format_raw is not None else None
+    )
+
+    pulled_at_raw = extra.get("pulled_at")
+    pulled_at: Optional[str] = str(pulled_at_raw) if pulled_at_raw is not None else now
+
+    is_default_val: Any = extra.get("is_default", False)
+    is_default = bool(is_default_val)
+
+    created_at_raw = extra.get("created_at")
+    created_at = str(created_at_raw) if created_at_raw is not None else now
+
+    updated_at_raw = extra.get("updated_at")
+    updated_at = str(updated_at_raw) if updated_at_raw is not None else now
+
     db.upsert_image(
         Image(
             id=full_hash,
-            os_slug=str(extra.get("os_slug")) if extra.get("os_slug") else full_hash,
+            os_slug=os_slug,
+            os_name=str(extra.get("os_name", "Test OS")),
             path=path,
             arch=str(extra.get("arch", "x86_64")),
-            os_name=extra.get("os_name"),
-            fs_type=extra.get("fs_type", "ext4"),
-            fs_uuid=extra.get("fs_uuid"),
-            compressed_size=extra.get("compressed_size"),
-            original_size=extra.get("original_size"),
-            compression_ratio=extra.get("compression_ratio"),
-            compressed_format=extra.get("compressed_format"),
-            minimum_rootfs_size_mb=extra.get("minimum_rootfs_size_mb", 2048),
-            pulled_at=extra.get("pulled_at", "2026-01-01T00:00:00+00:00"),
-            is_default=bool(extra.get("is_default", False)),
-            created_at=extra.get("created_at"),
-            updated_at=extra.get("updated_at", "2026-01-01T00:00:00+00:00"),
+            fs_type=str(extra.get("fs_type", "ext4")),
+            fs_uuid=str(extra.get("fs_uuid", "test-uuid-1234")),
+            minimum_rootfs_size_mib=minimum_rootfs_size_mib,
+            original_size=original_size,
+            compressed_size=compressed_size,
+            compression_ratio=compression_ratio,
+            compressed_format=compressed_format,
+            pulled_at=pulled_at,
+            is_default=is_default,
+            created_at=created_at,
+            updated_at=updated_at,
         )
     )
 
@@ -1186,8 +1249,11 @@ def _seed_binary_db(
     is_default: bool = True,
 ) -> None:
     """Seed a binary entry in the SQLite database."""
+    from datetime import datetime, timezone
+
     db = MVMDatabase()
     db.migrate()
+    now = datetime.now(timezone.utc).isoformat()
     db.upsert_binary(
         Binary(
             id=hashlib.sha256(f"{name}:{version}".encode()).hexdigest(),
@@ -1197,6 +1263,8 @@ def _seed_binary_db(
             full_version=full_version,
             ci_version=ci_version,
             is_default=is_default,
+            created_at=now,
+            updated_at=now,
         )
     )
 

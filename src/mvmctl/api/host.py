@@ -286,6 +286,8 @@ def _persist_host_state_to_db(db: MVMDatabase, changes: list[HostStateChange]) -
                     original_value=change.original_value,
                     applied_value=change.applied_value,
                     change_order=order,
+                    reverted=False,
+                    created_at=now,
                 )
             )
 

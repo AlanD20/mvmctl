@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -61,11 +61,20 @@ def sample_vm() -> VMInstance:
     """Return a sample VMInstance for use in tests."""
     return VMInstance(
         name="test-vm",
+        id="testvm001abc1234",
         ipv4="10.20.0.2",
         mac="02:FC:aa:bb:cc:dd",
         pid=1234,
         status=VMStatus.RUNNING,
-        created_at=datetime(2026, 1, 1, 12, 0, 0),
+        created_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        network_id="net-test-001",
+        tap_device="mvm-tap0",
+        rootfs_suffix=".ext4",
+        kernel_id="kern-test-001",
+        image_id="img-test-001",
+        binary_id="bin-test-001",
+        disk_size_mib=1024,
     )
 
 
@@ -74,11 +83,20 @@ def stopped_vm() -> VMInstance:
     """Return a stopped VMInstance for use in tests."""
     return VMInstance(
         name="stopped-vm",
+        id="stoppedvm01abc23",
         ipv4="10.20.0.3",
         mac="02:FC:11:22:33:44",
-        pid=None,
+        pid=0,
         status=VMStatus.STOPPED,
-        created_at=datetime(2026, 1, 1, 12, 0, 0),
+        created_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        network_id="net-test-001",
+        tap_device="mvm-tap0",
+        rootfs_suffix=".ext4",
+        kernel_id="kern-test-001",
+        image_id="img-test-001",
+        binary_id="bin-test-001",
+        disk_size_mib=1024,
     )
 
 
@@ -97,6 +115,7 @@ def make_test_vmconfig():
         name: str = "test-vm",
         vcpu_count: int = 2,
         mem_size_mib: int = 512,
+        disk_size_mib: int = 1024,
         kernel_path: Path | None = None,
         rootfs_path: Path | None = None,
         enable_api_socket: bool = True,
@@ -118,6 +137,7 @@ def make_test_vmconfig():
             name=name,
             vcpu_count=vcpu_count,
             mem_size_mib=mem_size_mib,
+            disk_size_mib=disk_size_mib,
             kernel_path=kernel_path,
             rootfs_path=rootfs_path,
             enable_api_socket=enable_api_socket,
@@ -159,13 +179,21 @@ def running_vm(make_test_vmconfig) -> VMInstance:
     """VM in running state with all required config fields."""
     return VMInstance(
         name="running-vm",
+        id="runningvm001abc5",
         ipv4="10.20.0.5",
         mac="02:FC:aa:bb:cc:01",
         pid=5678,
         status=VMStatus.RUNNING,
-        created_at=datetime(2026, 1, 15, 8, 30, 0),
+        created_at=datetime(2026, 1, 15, 8, 30, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 15, 8, 30, 0, tzinfo=timezone.utc),
         api_socket_path=Path("/tmp/running-vm.sock"),
-        network_name="default",
+        network_id="default",
+        tap_device="mvm-tap0",
+        rootfs_suffix=".ext4",
+        kernel_id="kern-test-001",
+        image_id="img-test-001",
+        binary_id="bin-test-001",
+        disk_size_mib=4096,
         config=make_test_vmconfig(name="running-vm", vcpu_count=4, mem_size_mib=4096),
     )
 
@@ -175,11 +203,20 @@ def error_vm() -> VMInstance:
     """VM in error state."""
     return VMInstance(
         name="error-vm",
+        id="errorvm001abc123",
         ipv4="10.20.0.6",
         mac="02:FC:aa:bb:cc:02",
-        pid=None,
+        pid=0,
         status=VMStatus.ERROR,
-        created_at=datetime(2026, 1, 15, 9, 0, 0),
+        created_at=datetime(2026, 1, 15, 9, 0, 0, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 15, 9, 0, 0, tzinfo=timezone.utc),
+        network_id="net-test-001",
+        tap_device="mvm-tap0",
+        rootfs_suffix=".ext4",
+        kernel_id="kern-test-001",
+        image_id="img-test-001",
+        binary_id="bin-test-001",
+        disk_size_mib=1024,
     )
 
 

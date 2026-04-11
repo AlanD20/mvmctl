@@ -40,6 +40,7 @@ def _seed_binary(
     ci_version: str | None = None,
 ) -> None:
     import hashlib
+    from datetime import datetime, timezone
 
     from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.db.models import Binary
@@ -47,6 +48,7 @@ def _seed_binary(
     db = MVMDatabase()
     db.migrate()
 
+    now = datetime.now(timezone.utc).isoformat()
     norm_version = version.removeprefix("v")
     computed_ci = ci_version or (
         "v" + ".".join(norm_version.split(".")[:2]) if "." in norm_version else f"v{norm_version}"
@@ -61,6 +63,8 @@ def _seed_binary(
         ci_version=computed_ci,
         path=fc_path,
         is_default=True,
+        created_at=now,
+        updated_at=now,
     )
     db.upsert_binary(fc_binary)
     db.set_default_binary("firecracker", norm_version, fc_path)
@@ -75,6 +79,8 @@ def _seed_binary(
             ci_version=computed_ci,
             path=jl_path,
             is_default=True,
+            created_at=now,
+            updated_at=now,
         )
         db.upsert_binary(jl_binary)
         db.set_default_binary("jailer", norm_version, jl_path)

@@ -22,8 +22,16 @@ class TestImage:
         image = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
+            os_name="Ubuntu 24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=4096,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert image.id == "a" * 64
         assert image.os_slug == "ubuntu-24.04"
@@ -34,18 +42,34 @@ class TestImage:
         image = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
+            os_name="Ubuntu 24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=4096,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
-        assert image.os_name is None
+        assert image.compressed_size is None
 
-    def test_image_is_default_defaults_to_false(self) -> None:
-        """Image is_default defaults to False."""
+    def test_image_is_default_field(self) -> None:
+        """Image is_default field works correctly."""
         image = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
+            os_name="Ubuntu 24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=4096,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert image.is_default is False
 
@@ -54,13 +78,14 @@ class TestImage:
         image = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
+            os_name="Ubuntu",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
-            os_name="Ubuntu",
             fs_type="ext4",
             fs_uuid="12345678-1234-1234-1234-123456789012",
-            compressed_size=1024000,
+            minimum_rootfs_size_mib=2048,
             original_size=2048000,
+            compressed_size=1024000,
             compression_ratio=0.5,
             compressed_format="gzip",
             pulled_at="2026-04-02T10:00:00Z",
@@ -77,14 +102,30 @@ class TestImage:
         image1 = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
+            os_name="Ubuntu 24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=4096,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         image2 = Image(
             id="a" * 64,
             os_slug="ubuntu-24.04",
+            os_name="Ubuntu 24.04",
             path="/cache/images/ubuntu-24.04.ext4",
             arch="x86_64",
+            fs_type="ext4",
+            fs_uuid="12345678-1234-1234-1234-123456789012",
+            minimum_rootfs_size_mib=2048,
+            original_size=4096,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert image1 == image2
 
@@ -97,9 +138,14 @@ class TestKernel:
         kernel = Kernel(
             id="b" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert kernel.id == "b" * 64
         assert kernel.name == "vmlinux"
@@ -107,28 +153,38 @@ class TestKernel:
         assert kernel.arch == "x86_64"
         assert kernel.path == "/cache/kernels/vmlinux-5.10.0"
 
-    def test_kernel_optional_fields_default_to_none(self) -> None:
-        """Kernel optional fields default to None."""
+    def test_kernel_fields(self) -> None:
+        """Kernel fields are set correctly."""
         kernel = Kernel(
             id="b" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
-        assert kernel.base_name is None
-        assert kernel.type is None
-        assert kernel.created_at is None
-        assert kernel.updated_at is None
+        assert kernel.base_name == "vmlinux-base"
+        assert kernel.type == "linux"
+        assert kernel.created_at == "2026-04-02T10:00:00Z"
+        assert kernel.updated_at == "2026-04-02T10:00:00Z"
 
-    def test_kernel_is_default_defaults_to_false(self) -> None:
-        """Kernel is_default defaults to False."""
+    def test_kernel_is_default_field(self) -> None:
+        """Kernel is_default field works correctly."""
         kernel = Kernel(
             id="b" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert kernel.is_default is False
 
@@ -137,11 +193,11 @@ class TestKernel:
         kernel = Kernel(
             id="b" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
-            path="/cache/kernels/vmlinux-5.10.0",
-            base_name="vmlinux-base",
             type="linux",
+            path="/cache/kernels/vmlinux-5.10.0",
             is_default=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
@@ -155,16 +211,26 @@ class TestKernel:
         kernel1 = Kernel(
             id="b" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         kernel2 = Kernel(
             id="b" * 64,
             name="vmlinux",
+            base_name="vmlinux-base",
             version="5.10.0",
             arch="x86_64",
+            type="linux",
             path="/cache/kernels/vmlinux-5.10.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert kernel1 == kernel2
 
@@ -178,25 +244,35 @@ class TestBinary:
             id="c" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.15.0",
+            ci_version="1.15.0-ci",
             path="/cache/bin/firecracker-1.15.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert binary.id == "c" * 64
         assert binary.name == "firecracker"
         assert binary.version == "1.15.0"
         assert binary.path == "/cache/bin/firecracker-1.15.0"
 
-    def test_binary_optional_fields_default_to_none(self) -> None:
-        """Binary optional fields default to None."""
+    def test_binary_fields(self) -> None:
+        """Binary fields are set correctly."""
         binary = Binary(
             id="c" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.15.0",
+            ci_version="1.15.0-ci",
             path="/cache/bin/firecracker-1.15.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
-        assert binary.full_version is None
-        assert binary.ci_version is None
-        assert binary.created_at is None
-        assert binary.updated_at is None
+        assert binary.full_version == "v1.15.0"
+        assert binary.ci_version == "1.15.0-ci"
+        assert binary.created_at == "2026-04-02T10:00:00Z"
+        assert binary.updated_at == "2026-04-02T10:00:00Z"
 
     def test_binary_with_all_fields(self) -> None:
         """Binary can be instantiated with all fields."""
@@ -204,14 +280,16 @@ class TestBinary:
             id="c" * 64,
             name="firecracker",
             version="1.15.0",
-            path="/cache/bin/firecracker-1.15.0",
             full_version="v1.15.0",
             ci_version="1.15.0-ci",
+            path="/cache/bin/firecracker-1.15.0",
+            is_default=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
         )
         assert binary.full_version == "v1.15.0"
         assert binary.ci_version == "1.15.0-ci"
+        assert binary.is_default is True
 
     def test_binary_equality(self) -> None:
         """Binaries with same fields are equal."""
@@ -219,23 +297,38 @@ class TestBinary:
             id="c" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.15.0",
+            ci_version="1.15.0-ci",
             path="/cache/bin/firecracker-1.15.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         binary2 = Binary(
             id="c" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.15.0",
+            ci_version="1.15.0-ci",
             path="/cache/bin/firecracker-1.15.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert binary1 == binary2
 
-    def test_binary_is_default_defaults_to_false(self) -> None:
-        """Binary is_default defaults to False."""
+    def test_binary_is_default_field(self) -> None:
+        """Binary is_default field works correctly."""
         binary = Binary(
             id="c" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.15.0",
+            ci_version="1.15.0-ci",
             path="/cache/bin/firecracker-1.15.0",
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert binary.is_default is False
 
@@ -245,8 +338,12 @@ class TestBinary:
             id="c" * 64,
             name="firecracker",
             version="1.15.0",
+            full_version="v1.15.0",
+            ci_version="1.15.0-ci",
             path="/cache/bin/firecracker-1.15.0",
             is_default=True,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert binary.is_default is True
 
@@ -256,9 +353,9 @@ class TestBinary:
             id="c" * 64,
             name="firecracker",
             version="1.15.0",
-            path="/cache/bin/firecracker-1.15.0",
             full_version="v1.15.0",
             ci_version="1.15.0-ci",
+            path="/cache/bin/firecracker-1.15.0",
             is_default=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
@@ -279,6 +376,11 @@ class TestNetwork:
             subnet="192.168.1.0/24",
             bridge="mvm-default",
             ipv4_gateway="192.168.1.1",
+            bridge_active=False,
+            nat_enabled=False,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert network.id == "d" * 64
         assert network.name == "default"
@@ -286,31 +388,39 @@ class TestNetwork:
         assert network.bridge == "mvm-default"
         assert network.ipv4_gateway == "192.168.1.1"
 
-    def test_network_boolean_fields_default_to_false(self) -> None:
-        """Network boolean fields default to False."""
+    def test_network_boolean_fields(self) -> None:
+        """Network boolean fields work correctly."""
         network = Network(
             id="d" * 64,
             name="default",
             subnet="192.168.1.0/24",
             bridge="mvm-default",
             ipv4_gateway="192.168.1.1",
+            bridge_active=False,
+            nat_enabled=False,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert network.bridge_active is False
         assert network.nat_enabled is False
         assert network.is_default is False
 
-    def test_network_optional_fields_default_to_none(self) -> None:
-        """Network optional fields default to None."""
+    def test_network_optional_fields(self) -> None:
+        """Network optional fields work correctly."""
         network = Network(
             id="d" * 64,
             name="default",
             subnet="192.168.1.0/24",
             bridge="mvm-default",
             ipv4_gateway="192.168.1.1",
+            bridge_active=False,
+            nat_enabled=False,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert network.nat_gateways is None
-        assert network.created_at is None
-        assert network.updated_at is None
 
     def test_network_with_all_fields(self) -> None:
         """Network can be instantiated with all fields."""
@@ -340,6 +450,11 @@ class TestNetwork:
             subnet="192.168.1.0/24",
             bridge="mvm-default",
             ipv4_gateway="192.168.1.1",
+            bridge_active=False,
+            nat_enabled=False,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         network2 = Network(
             id="d" * 64,
@@ -347,6 +462,11 @@ class TestNetwork:
             subnet="192.168.1.0/24",
             bridge="mvm-default",
             ipv4_gateway="192.168.1.1",
+            bridge_active=False,
+            nat_enabled=False,
+            is_default=False,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert network1 == network2
 
@@ -359,6 +479,7 @@ class TestNetworkLease:
         lease = NetworkLease(
             network_id="d" * 64,
             ipv4="192.168.1.10",
+            leased_at="2026-04-02T10:00:00Z",
         )
         assert lease.network_id == "d" * 64
         assert lease.ipv4 == "192.168.1.10"
@@ -368,10 +489,10 @@ class TestNetworkLease:
         lease = NetworkLease(
             network_id="d" * 64,
             ipv4="192.168.1.10",
+            leased_at="2026-04-02T10:00:00Z",
         )
         assert lease.id is None
         assert lease.vm_id is None
-        assert lease.leased_at is None
         assert lease.expires_at is None
 
     def test_network_lease_with_all_fields(self) -> None:
@@ -379,9 +500,9 @@ class TestNetworkLease:
         lease = NetworkLease(
             network_id="d" * 64,
             ipv4="192.168.1.10",
+            leased_at="2026-04-02T10:00:00Z",
             id=1,
             vm_id="e" * 64,
-            leased_at="2026-04-02T10:00:00Z",
             expires_at="2026-04-03T10:00:00Z",
         )
         assert lease.id == 1
@@ -394,10 +515,12 @@ class TestNetworkLease:
         lease1 = NetworkLease(
             network_id="d" * 64,
             ipv4="192.168.1.10",
+            leased_at="2026-04-02T10:00:00Z",
         )
         lease2 = NetworkLease(
             network_id="d" * 64,
             ipv4="192.168.1.10",
+            leased_at="2026-04-02T10:00:00Z",
         )
         assert lease1 == lease2
 
@@ -411,6 +534,28 @@ class TestVMInstance:
             id="e" * 64,
             name="myvm",
             status="RUNNING",
+            pid=1234,
+            ipv4="192.168.1.10",
+            mac="52:54:00:12:34:56",
+            network_id="d" * 64,
+            tap_device="mvm-def-mvm-tap",
+            image_id="a" * 64,
+            kernel_id="b" * 64,
+            binary_id="c" * 64,
+            config_path="/tmp/firecracker.json",
+            cloud_init_mode="inject",
+            vcpu_count=2,
+            mem_size_mib=512,
+            disk_size_mib=10240,
+            rootfs_path="/cache/vms/myvm/rootfs.ext4",
+            rootfs_suffix=".ext4",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_logging=False,
+            enable_metrics=False,
+            enable_console=True,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert vm_state.id == "e" * 64
         assert vm_state.name == "myvm"
@@ -422,30 +567,35 @@ class TestVMInstance:
             id="e" * 64,
             name="myvm",
             status="RUNNING",
+            pid=1234,
+            ipv4="192.168.1.10",
+            mac="52:54:00:12:34:56",
+            network_id="d" * 64,
+            tap_device="mvm-def-mvm-tap",
+            image_id="a" * 64,
+            kernel_id="b" * 64,
+            binary_id="c" * 64,
+            config_path="/tmp/firecracker.json",
+            cloud_init_mode="inject",
+            vcpu_count=2,
+            mem_size_mib=512,
+            disk_size_mib=10240,
+            rootfs_path="/cache/vms/myvm/rootfs.ext4",
+            rootfs_suffix=".ext4",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_logging=False,
+            enable_metrics=False,
+            enable_console=True,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
-        assert vm_state.pid is None
-        assert vm_state.ipv4 is None
-        assert vm_state.mac is None
-        assert vm_state.network_id is None
-        assert vm_state.tap_device is None
-        assert vm_state.image_id is None
-        assert vm_state.kernel_id is None
-        assert vm_state.binary_id is None
         assert vm_state.api_socket_path is None
         assert vm_state.console_socket_path is None
-        assert vm_state.config_path is None
-        assert vm_state.cloud_init_mode is None
         assert vm_state.nocloud_net_port is None
         assert vm_state.nocloud_server_pid is None
         assert vm_state.console_relay_pid is None
         assert vm_state.exit_code is None
-        assert vm_state.vcpu_count is None
-        assert vm_state.mem_size_mib is None
-        assert vm_state.disk_size_mib is None
-        assert vm_state.rootfs_path is None
-        assert vm_state.rootfs_suffix is None
-        assert vm_state.created_at is None
-        assert vm_state.updated_at is None
 
     def test_vm_state_with_all_fields(self) -> None:
         """VMState can be instantiated with all fields."""
@@ -474,6 +624,11 @@ class TestVMInstance:
             disk_size_mib=10240,
             rootfs_path="/cache/vms/myvm/rootfs.ext4",
             rootfs_suffix=".ext4",
+            enable_api_socket=True,
+            enable_pci=False,
+            enable_logging=True,
+            enable_metrics=False,
+            enable_console=True,
             created_at="2026-04-02T10:00:00Z",
             updated_at="2026-04-02T10:00:00Z",
         )
@@ -488,11 +643,55 @@ class TestVMInstance:
             id="e" * 64,
             name="myvm",
             status="RUNNING",
+            pid=1234,
+            ipv4="192.168.1.10",
+            mac="52:54:00:12:34:56",
+            network_id="d" * 64,
+            tap_device="mvm-def-mvm-tap",
+            image_id="a" * 64,
+            kernel_id="b" * 64,
+            binary_id="c" * 64,
+            config_path="/tmp/firecracker.json",
+            cloud_init_mode="inject",
+            vcpu_count=2,
+            mem_size_mib=512,
+            disk_size_mib=10240,
+            rootfs_path="/cache/vms/myvm/rootfs.ext4",
+            rootfs_suffix=".ext4",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_logging=False,
+            enable_metrics=False,
+            enable_console=True,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         vm_state2 = VMInstance(
             id="e" * 64,
             name="myvm",
             status="RUNNING",
+            pid=1234,
+            ipv4="192.168.1.10",
+            mac="52:54:00:12:34:56",
+            network_id="d" * 64,
+            tap_device="mvm-def-mvm-tap",
+            image_id="a" * 64,
+            kernel_id="b" * 64,
+            binary_id="c" * 64,
+            config_path="/tmp/firecracker.json",
+            cloud_init_mode="inject",
+            vcpu_count=2,
+            mem_size_mib=512,
+            disk_size_mib=10240,
+            rootfs_path="/cache/vms/myvm/rootfs.ext4",
+            rootfs_suffix=".ext4",
+            enable_api_socket=False,
+            enable_pci=False,
+            enable_logging=False,
+            enable_metrics=False,
+            enable_console=True,
+            created_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
         )
         assert vm_state1 == vm_state2
 
@@ -502,22 +701,46 @@ class TestHostState:
 
     def test_host_state_instantiation_required_fields_only(self) -> None:
         """HostState can be instantiated with required fields only."""
-        host_state = HostState(id=1)
+        host_state = HostState(
+            id=1,
+            initialized=False,
+            mvm_group_created=False,
+            sudoers_configured=False,
+            default_network_created=False,
+            initialized_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
+        )
         assert host_state.id == 1
 
-    def test_host_state_boolean_fields_default_to_false(self) -> None:
-        """HostState boolean fields default to False."""
-        host_state = HostState(id=1)
+    def test_host_state_boolean_fields(self) -> None:
+        """HostState boolean fields work correctly."""
+        host_state = HostState(
+            id=1,
+            initialized=False,
+            mvm_group_created=False,
+            sudoers_configured=False,
+            default_network_created=False,
+            initialized_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
+        )
         assert host_state.initialized is False
         assert host_state.mvm_group_created is False
         assert host_state.sudoers_configured is False
         assert host_state.default_network_created is False
 
-    def test_host_state_optional_fields_default_to_none(self) -> None:
-        """HostState optional fields default to None."""
-        host_state = HostState(id=1)
-        assert host_state.initialized_at is None
-        assert host_state.updated_at is None
+    def test_host_state_timestamps(self) -> None:
+        """HostState timestamp fields work correctly."""
+        host_state = HostState(
+            id=1,
+            initialized=True,
+            mvm_group_created=True,
+            sudoers_configured=True,
+            default_network_created=True,
+            initialized_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T11:00:00Z",
+        )
+        assert host_state.initialized_at == "2026-04-02T10:00:00Z"
+        assert host_state.updated_at == "2026-04-02T11:00:00Z"
 
     def test_host_state_with_all_fields(self) -> None:
         """HostState can be instantiated with all fields."""
@@ -537,8 +760,24 @@ class TestHostState:
 
     def test_host_state_equality(self) -> None:
         """HostStates with same fields are equal."""
-        host_state1 = HostState(id=1)
-        host_state2 = HostState(id=1)
+        host_state1 = HostState(
+            id=1,
+            initialized=False,
+            mvm_group_created=False,
+            sudoers_configured=False,
+            default_network_created=False,
+            initialized_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
+        )
+        host_state2 = HostState(
+            id=1,
+            initialized=False,
+            mvm_group_created=False,
+            sudoers_configured=False,
+            default_network_created=False,
+            initialized_at="2026-04-02T10:00:00Z",
+            updated_at="2026-04-02T10:00:00Z",
+        )
         assert host_state1 == host_state2
 
 
@@ -554,6 +793,8 @@ class TestHostStateChange:
             mechanism="groupadd",
             applied_value="mvm",
             change_order=1,
+            reverted=False,
+            created_at="2026-04-02T10:00:00Z",
         )
         assert change.session_id == "session-123"
         assert change.init_timestamp == "2026-04-02T10:00:00Z"
@@ -571,15 +812,16 @@ class TestHostStateChange:
             mechanism="groupadd",
             applied_value="mvm",
             change_order=1,
+            reverted=False,
+            created_at="2026-04-02T10:00:00Z",
         )
         assert change.id is None
         assert change.original_value is None
         assert change.reverted_at is None
         assert change.revert_mechanism is None
-        assert change.created_at is None
 
-    def test_host_state_change_reverted_defaults_to_false(self) -> None:
-        """HostStateChange reverted defaults to False."""
+    def test_host_state_change_reverted_field(self) -> None:
+        """HostStateChange reverted field works correctly."""
         change = HostStateChange(
             session_id="session-123",
             init_timestamp="2026-04-02T10:00:00Z",
@@ -587,6 +829,8 @@ class TestHostStateChange:
             mechanism="groupadd",
             applied_value="mvm",
             change_order=1,
+            reverted=False,
+            created_at="2026-04-02T10:00:00Z",
         )
         assert change.reverted is False
 
@@ -599,12 +843,12 @@ class TestHostStateChange:
             mechanism="groupadd",
             applied_value="mvm",
             change_order=1,
+            reverted=True,
+            created_at="2026-04-02T10:00:00Z",
             id=1,
             original_value=None,
-            reverted=True,
             reverted_at="2026-04-02T11:00:00Z",
             revert_mechanism="groupdel",
-            created_at="2026-04-02T10:00:00Z",
         )
         assert change.id == 1
         assert change.reverted is True
@@ -620,6 +864,8 @@ class TestHostStateChange:
             mechanism="groupadd",
             applied_value="mvm",
             change_order=1,
+            reverted=False,
+            created_at="2026-04-02T10:00:00Z",
         )
         change2 = HostStateChange(
             session_id="session-123",
@@ -628,5 +874,7 @@ class TestHostStateChange:
             mechanism="groupadd",
             applied_value="mvm",
             change_order=1,
+            reverted=False,
+            created_at="2026-04-02T10:00:00Z",
         )
         assert change1 == change2
