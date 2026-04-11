@@ -72,24 +72,24 @@ class TestFullNocloudNetLifecycle:
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
-    @patch("mvmctl.api.vms.add_nocloud_input_rule")
-    @patch("mvmctl.api.vms.remove_nocloud_input_rule")
-    @patch("mvmctl.api.vms.subprocess.Popen")
-    @patch("mvmctl.api.vms.subprocess.run")
-    @patch("mvmctl.api.vms.create_tap")
-    @patch("mvmctl.api.vms.add_iptables_forward_rules")
-    @patch("mvmctl.api.vms.remove_iptables_forward_rules")
-    @patch("mvmctl.api.vms.delete_tap")
-    @patch("mvmctl.api.vms.bridge_exists")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.add_nocloud_input_rule")
+    @patch("mvmctl.api.vm.remove_nocloud_input_rule")
+    @patch("mvmctl.api.vm.subprocess.Popen")
+    @patch("mvmctl.api.vm.subprocess.run")
+    @patch("mvmctl.api.vm.create_tap")
+    @patch("mvmctl.api.vm.add_iptables_forward_rules")
+    @patch("mvmctl.api.vm.remove_iptables_forward_rules")
+    @patch("mvmctl.api.vm.delete_tap")
+    @patch("mvmctl.api.vm.bridge_exists")
     @patch("mvmctl.api.network.get_network")
     @patch("mvmctl.api.network.allocate_network_ip")
     @patch("mvmctl.api.network.release_network_ip")
-    @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vms._resolve_kernel_path")
-    @patch("mvmctl.api.vms._write_pid_file")
-    @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.api.vm.setup_nocloud_input_chain")
+    @patch("mvmctl.api.vm.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._write_pid_file")
+    @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     def test_full_nocloud_net_lifecycle(
         self,
         mock_get_vm_dir,
@@ -190,13 +190,13 @@ class TestFullNocloudNetLifecycle:
         vm_dir = tmp_path / "vms" / "nocloud-test-vm"
         mock_get_vm_dir.return_value = vm_dir
 
-        from mvmctl.api.vms import create_vm
+        from mvmctl.api.vm import create_vm
         from mvmctl.core.vm_manager import VMManager
 
         vm_mgr = VMManager(tmp_path / "vms")
 
-        with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
-            with patch("mvmctl.api.vms.setup_nat"):
+        with patch("mvmctl.api.vm.get_vm_manager", return_value=vm_mgr):
+            with patch("mvmctl.api.vm.setup_nat"):
                 vm = create_vm(
                     VMCreateInput(
                         name="nocloud-test-vm",
@@ -231,24 +231,24 @@ class TestFullNocloudNetLifecycle:
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
-    @patch("mvmctl.api.vms.add_nocloud_input_rule")
-    @patch("mvmctl.api.vms.remove_nocloud_input_rule")
-    @patch("mvmctl.api.vms.subprocess.Popen")
-    @patch("mvmctl.api.vms.subprocess.run")
-    @patch("mvmctl.api.vms.create_tap")
-    @patch("mvmctl.api.vms.add_iptables_forward_rules")
-    @patch("mvmctl.api.vms.remove_iptables_forward_rules")
-    @patch("mvmctl.api.vms.delete_tap")
-    @patch("mvmctl.api.vms.bridge_exists")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.add_nocloud_input_rule")
+    @patch("mvmctl.api.vm.remove_nocloud_input_rule")
+    @patch("mvmctl.api.vm.subprocess.Popen")
+    @patch("mvmctl.api.vm.subprocess.run")
+    @patch("mvmctl.api.vm.create_tap")
+    @patch("mvmctl.api.vm.add_iptables_forward_rules")
+    @patch("mvmctl.api.vm.remove_iptables_forward_rules")
+    @patch("mvmctl.api.vm.delete_tap")
+    @patch("mvmctl.api.vm.bridge_exists")
     @patch("mvmctl.api.network.get_network")
     @patch("mvmctl.api.network.allocate_network_ip")
     @patch("mvmctl.api.network.release_network_ip")
-    @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vms._resolve_kernel_path")
-    @patch("mvmctl.api.vms._write_pid_file")
-    @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.api.vm.setup_nocloud_input_chain")
+    @patch("mvmctl.api.vm.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._write_pid_file")
+    @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     def test_nocloud_net_remove_cleanup(
         self,
         mock_get_vm_dir,
@@ -349,13 +349,13 @@ class TestFullNocloudNetLifecycle:
         mock_get_vm_dir.return_value = vm_dir
 
         # Create and remove VM
-        from mvmctl.api.vms import create_vm, remove_vm
+        from mvmctl.api.vm import create_vm, remove_vm
         from mvmctl.core.vm_manager import VMManager
 
         vm_mgr = VMManager(tmp_path / "vms")
 
-        with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
-            with patch("mvmctl.api.vms.setup_nat"):
+        with patch("mvmctl.api.vm.get_vm_manager", return_value=vm_mgr):
+            with patch("mvmctl.api.vm.setup_nat"):
                 # Create VM
                 create_vm(
                     VMCreateInput(
@@ -402,12 +402,12 @@ class TestMultipleVMsDifferentPorts:
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
-    @patch("mvmctl.api.vms.add_nocloud_input_rule")
-    @patch("mvmctl.api.vms.remove_nocloud_input_rule")
-    @patch("mvmctl.api.vms.subprocess.Popen")
-    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vms._resolve_kernel_path")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.add_nocloud_input_rule")
+    @patch("mvmctl.api.vm.remove_nocloud_input_rule")
+    @patch("mvmctl.api.vm.subprocess.Popen")
+    @patch("mvmctl.api.vm.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vm._resolve_kernel_path")
     def test_multiple_vms_different_ports(
         self,
         mock_resolve_kernel,
@@ -484,27 +484,27 @@ class TestMultipleVMsDifferentPorts:
         mock_proc.communicate.return_value = ("", "")
         mock_popen.return_value = mock_proc
 
-        from mvmctl.api.vms import create_vm
+        from mvmctl.api.vm import create_vm
         from mvmctl.core.vm_manager import VMManager
 
         vm_mgr = VMManager(tmp_path / "vms")
 
-        with patch("mvmctl.api.vms.subprocess.run") as mock_subprocess_run:
+        with patch("mvmctl.api.vm.subprocess.run") as mock_subprocess_run:
             mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
+            with patch("mvmctl.api.vm.get_vm_manager", return_value=vm_mgr):
                 with patch("mvmctl.api.network.get_network") as mock_get_net:
                     with patch(
                         "mvmctl.api.network.allocate_network_ip",
                         side_effect=["10.20.0.2", "10.20.0.3"],
                     ):
-                        with patch("mvmctl.api.vms.bridge_exists", return_value=True):
-                            with patch("mvmctl.api.vms.create_tap"):
-                                with patch("mvmctl.api.vms.add_iptables_forward_rules"):
-                                    with patch("mvmctl.api.vms.setup_nat"):
-                                        with patch("mvmctl.api.vms._write_pid_file"):
-                                            with patch("mvmctl.api.vms.setup_nocloud_input_chain"):
+                        with patch("mvmctl.api.vm.bridge_exists", return_value=True):
+                            with patch("mvmctl.api.vm.create_tap"):
+                                with patch("mvmctl.api.vm.add_iptables_forward_rules"):
+                                    with patch("mvmctl.api.vm.setup_nat"):
+                                        with patch("mvmctl.api.vm._write_pid_file"):
+                                            with patch("mvmctl.api.vm.setup_nocloud_input_chain"):
                                                 with patch(
-                                                    "mvmctl.api.vms.get_vm_dir_by_hash"
+                                                    "mvmctl.api.vm.get_vm_dir_by_hash"
                                                 ) as mock_get_vm_dir:
                                                     vm_dir1 = tmp_path / "vms" / "vm1"
                                                     vm_dir2 = tmp_path / "vms" / "vm2"
@@ -617,17 +617,17 @@ class TestNocloudNetFailureCleanup:
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
-    @patch("mvmctl.api.vms.add_nocloud_input_rule")
-    @patch("mvmctl.api.vms.remove_nocloud_input_rule")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.add_nocloud_input_rule")
+    @patch("mvmctl.api.vm.remove_nocloud_input_rule")
     @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
     @patch("mvmctl.api.network.get_network")
     @patch("mvmctl.api.network.allocate_network_ip")
     @patch("mvmctl.api.network.release_network_ip")
-    @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vms._resolve_kernel_path")
-    @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.api.vm.setup_nocloud_input_chain")
+    @patch("mvmctl.api.vm.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     def test_failure_cleanup_on_firewall_error(
         self,
         mock_get_vm_dir,
@@ -700,13 +700,13 @@ class TestNocloudNetFailureCleanup:
         vm_dir = tmp_path / "vms" / "failing-vm"
         mock_get_vm_dir.return_value = vm_dir
 
-        from mvmctl.api.vms import create_vm
+        from mvmctl.api.vm import create_vm
         from mvmctl.core.vm_manager import VMManager
         from mvmctl.models import CloudInitMode
 
         vm_mgr = VMManager(tmp_path / "vms")
 
-        with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
+        with patch("mvmctl.api.vm.get_vm_manager", return_value=vm_mgr):
             with pytest.raises(NetworkError):
                 create_vm(
                     VMCreateInput(
@@ -737,23 +737,23 @@ class TestNocloudNetFailureCleanup:
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.api.vms.subprocess.run")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
-    @patch("mvmctl.api.vms.add_nocloud_input_rule")
-    @patch("mvmctl.api.vms.remove_nocloud_input_rule")
-    @patch("mvmctl.api.vms.subprocess.Popen")
-    @patch("mvmctl.api.vms.create_tap")
-    @patch("mvmctl.api.vms.add_iptables_forward_rules")
-    @patch("mvmctl.api.vms.bridge_exists")
+    @patch("mvmctl.api.vm.subprocess.run")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.add_nocloud_input_rule")
+    @patch("mvmctl.api.vm.remove_nocloud_input_rule")
+    @patch("mvmctl.api.vm.subprocess.Popen")
+    @patch("mvmctl.api.vm.create_tap")
+    @patch("mvmctl.api.vm.add_iptables_forward_rules")
+    @patch("mvmctl.api.vm.bridge_exists")
     @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
     @patch("mvmctl.api.network.get_network")
     @patch("mvmctl.api.network.allocate_network_ip")
     @patch("mvmctl.api.network.release_network_ip")
-    @patch("mvmctl.api.vms.setup_nocloud_input_chain")
-    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vms._resolve_kernel_path")
-    @patch("mvmctl.api.vms._write_pid_file")
-    @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.api.vm.setup_nocloud_input_chain")
+    @patch("mvmctl.api.vm.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._write_pid_file")
+    @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
     def test_failure_cleanup_on_firecracker_error(
         self,
@@ -852,15 +852,15 @@ class TestNocloudNetFailureCleanup:
         vm_dir = tmp_path / "vms" / "fc-fail-vm"
         mock_get_vm_dir.return_value = vm_dir
 
-        from mvmctl.api.vms import create_vm
+        from mvmctl.api.vm import create_vm
         from mvmctl.core.vm_manager import VMManager
         from mvmctl.exceptions import MVMError
         from mvmctl.models import CloudInitMode
 
         vm_mgr = VMManager(tmp_path / "vms")
 
-        with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
-            with patch("mvmctl.api.vms.setup_nat"):
+        with patch("mvmctl.api.vm.get_vm_manager", return_value=vm_mgr):
+            with patch("mvmctl.api.vm.setup_nat"):
                 with pytest.raises(MVMError, match="Firecracker binary not found"):
                     create_vm(
                         VMCreateInput(
@@ -892,14 +892,14 @@ class TestVMWithoutNocloudNet:
 
     @patch("mvmctl.utils.process.require_mvm_group_membership")
     @patch("mvmctl.api.host.check_privileges_interactive")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
-    @patch("mvmctl.api.vms.add_nocloud_input_rule")
-    @patch("mvmctl.api.vms.subprocess.Popen")
-    @patch("mvmctl.api.vms.subprocess.run")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.add_nocloud_input_rule")
+    @patch("mvmctl.api.vm.subprocess.Popen")
+    @patch("mvmctl.api.vm.subprocess.run")
     @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-    @patch("mvmctl.api.vms.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vms._resolve_kernel_path")
-    @patch("mvmctl.api.vms._setup_rootfs_with_guestfs")
+    @patch("mvmctl.api.vm.resolve_image_multi_strategy")
+    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._setup_rootfs_with_guestfs")
     def test_vm_with_disabled_mode_no_nocloud(
         self,
         mock_setup_guestfs,
@@ -935,24 +935,24 @@ class TestVMWithoutNocloudNet:
         mock_proc.pid = 12345
         mock_popen.return_value = mock_proc
 
-        from mvmctl.api.vms import create_vm
+        from mvmctl.api.vm import create_vm
         from mvmctl.core.vm_manager import VMManager
         from mvmctl.models import CloudInitMode
 
         vm_mgr = VMManager(tmp_path / "vms")
 
         with patch.object(vm_mgr, "register", return_value=None):
-            with patch("mvmctl.api.vms.get_vm_manager", return_value=vm_mgr):
+            with patch("mvmctl.api.vm.get_vm_manager", return_value=vm_mgr):
                 with patch("mvmctl.api.network.get_network") as mock_get_net:
                     with patch("mvmctl.api.network.allocate_network_ip", return_value="10.20.0.2"):
-                        with patch("mvmctl.api.vms.bridge_exists", return_value=True):
-                            with patch("mvmctl.api.vms.create_tap"):
-                                with patch("mvmctl.api.vms.add_iptables_forward_rules"):
-                                    with patch("mvmctl.api.vms.setup_nat"):
-                                        with patch("mvmctl.api.vms._write_pid_file"):
-                                            with patch("mvmctl.api.vms.setup_nocloud_input_chain"):
+                        with patch("mvmctl.api.vm.bridge_exists", return_value=True):
+                            with patch("mvmctl.api.vm.create_tap"):
+                                with patch("mvmctl.api.vm.add_iptables_forward_rules"):
+                                    with patch("mvmctl.api.vm.setup_nat"):
+                                        with patch("mvmctl.api.vm._write_pid_file"):
+                                            with patch("mvmctl.api.vm.setup_nocloud_input_chain"):
                                                 with patch(
-                                                    "mvmctl.api.vms.get_vm_dir_by_hash"
+                                                    "mvmctl.api.vm.get_vm_dir_by_hash"
                                                 ) as mock_get_vm_dir:
                                                     vm_dir = tmp_path / "vms" / "disabled-mode-vm"
                                                     mock_get_vm_dir.return_value = vm_dir

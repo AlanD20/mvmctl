@@ -7,7 +7,7 @@ import pytest
 from mvmctl.api.assets import resolve_image_fs_type as _resolve_image_fs_type
 from mvmctl.api.assets import resolve_image_path as _resolve_image_path
 from mvmctl.api.kernel import resolve_kernel_path as _resolve_kernel_path
-from mvmctl.api.vms import (
+from mvmctl.api.vm import (
     create_vm,
     load_snapshot,
     reboot_vm,
@@ -84,28 +84,28 @@ def test_graceful_shutdown_api(mock_kill, mock_exists, mock_client):
 
 
 @patch("mvmctl.core.rootfs_injector.inject_cloud_init")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_core_success(
     mock_setup_nat,
     mock_open,
@@ -237,30 +237,30 @@ def test_create_vm_core_success(
 
 
 @patch("mvmctl.core.rootfs_injector.inject_cloud_init")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_inject_mode_is_default(
     mock_setup_nat,
     mock_open,
@@ -378,7 +378,7 @@ def test_create_vm_inject_mode_is_default(
     mock_create_iso.assert_not_called()
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_create_vm_limit_reached(mock_get_vm_mgr):
     """create_vm raises MVMError if max VMs reached."""
     mock_manager = MagicMock()
@@ -405,17 +405,17 @@ def test_create_vm_limit_reached(mock_get_vm_mgr):
         )
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.remove_iptables_forward_rules")
-@patch("mvmctl.api.vms.delete_tap")
+@patch("mvmctl.api.vm.remove_iptables_forward_rules")
+@patch("mvmctl.api.vm.delete_tap")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.shutil.rmtree")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms._read_pid_file")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.shutil.rmtree")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._read_pid_file")
 def test_remove_vm_success(
     mock_read_pid,
     mock_get_vm_dir,
@@ -488,16 +488,16 @@ def test_remove_vm_success(
     mock_rmtree.assert_called_once_with(mock_vm_dir_ret)
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.remove_iptables_forward_rules")
-@patch("mvmctl.api.vms.delete_tap")
+@patch("mvmctl.api.vm.remove_iptables_forward_rules")
+@patch("mvmctl.api.vm.delete_tap")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.shutil.rmtree")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms._read_pid_file")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.shutil.rmtree")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._read_pid_file")
 def test_remove_vm_no_nat_skips_teardown(
     mock_read_pid,
     mock_get_vm_dir,
@@ -547,17 +547,17 @@ def test_remove_vm_no_nat_skips_teardown(
     assert rm_kwargs.get("bridge") == "mvm-isolated"
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.remove_iptables_forward_rules")
-@patch("mvmctl.api.vms.delete_tap")
+@patch("mvmctl.api.vm.remove_iptables_forward_rules")
+@patch("mvmctl.api.vm.delete_tap")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.shutil.rmtree")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms._read_pid_file")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.shutil.rmtree")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._read_pid_file")
 def test_remove_vm_does_not_teardown_shared_network_nat(
     mock_read_pid,
     mock_get_vm_dir,
@@ -632,18 +632,18 @@ def test_remove_vm_does_not_teardown_shared_network_nat(
 # =============================================================================
 
 
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.remove_nocloud_input_rule")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.remove_nocloud_input_rule")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.remove_iptables_forward_rules")
-@patch("mvmctl.api.vms.delete_tap")
+@patch("mvmctl.api.vm.remove_iptables_forward_rules")
+@patch("mvmctl.api.vm.delete_tap")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.shutil.rmtree")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms._read_pid_file")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.shutil.rmtree")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._read_pid_file")
 def test_remove_vm_stops_nocloud_server(
     mock_read_pid,
     mock_get_vm_dir,
@@ -694,18 +694,18 @@ def test_remove_vm_stops_nocloud_server(
     mock_remove_fw.assert_called_once_with("10.20.0.10", "nocloud-vm", 8080)
 
 
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.remove_nocloud_input_rule")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.remove_nocloud_input_rule")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.remove_iptables_forward_rules")
-@patch("mvmctl.api.vms.delete_tap")
+@patch("mvmctl.api.vm.remove_iptables_forward_rules")
+@patch("mvmctl.api.vm.delete_tap")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.shutil.rmtree")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms._read_pid_file")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.shutil.rmtree")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._read_pid_file")
 def test_remove_vm_removes_firewall_rule(
     mock_read_pid,
     mock_get_vm_dir,
@@ -755,18 +755,18 @@ def test_remove_vm_removes_firewall_rule(
     mock_remove_fw.assert_called_once_with("10.20.0.15", "fw-test", 9090)
 
 
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.remove_nocloud_input_rule")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.remove_nocloud_input_rule")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.remove_iptables_forward_rules")
-@patch("mvmctl.api.vms.delete_tap")
+@patch("mvmctl.api.vm.remove_iptables_forward_rules")
+@patch("mvmctl.api.vm.delete_tap")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.shutil.rmtree")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms._read_pid_file")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.shutil.rmtree")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._read_pid_file")
 def test_remove_vm_cleanup_is_idempotent(
     mock_read_pid,
     mock_get_vm_dir,
@@ -822,8 +822,8 @@ def test_remove_vm_cleanup_is_idempotent(
 
 
 @patch("mvmctl.core.network.get_default_interface")
-@patch("mvmctl.api.vms.setup_nat")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.setup_nat")
+@patch("mvmctl.api.vm.bridge_exists")
 def test_create_vm_reconciles_nat_when_bridge_exists(
     mock_bridge_exists,
     mock_setup_nat,
@@ -847,8 +847,8 @@ def test_create_vm_reconciles_nat_when_bridge_exists(
     assert mock_get_default_interface.return_value == "eth0"
 
 
-@patch("mvmctl.api.vms.get_vm_socket_path")
-@patch("mvmctl.api.vms.FirecrackerClient")
+@patch("mvmctl.api.vm.get_vm_socket_path")
+@patch("mvmctl.api.vm.FirecrackerClient")
 def test_snapshot_vm(mock_client, mock_socket_path):
     """snapshot_vm calls FirecrackerClient create_snapshot."""
     mock_socket_path.return_value = Path("fake.sock")
@@ -856,7 +856,7 @@ def test_snapshot_vm(mock_client, mock_socket_path):
     mock_client.return_value.create_snapshot.assert_called_once_with(Path("mem"), Path("state"))
 
 
-@patch("mvmctl.api.vms.get_vm_socket_path")
+@patch("mvmctl.api.vm.get_vm_socket_path")
 def test_snapshot_vm_no_socket(mock_socket_path):
     """snapshot_vm errors if no socket."""
     mock_socket_path.return_value = None
@@ -864,8 +864,8 @@ def test_snapshot_vm_no_socket(mock_socket_path):
         snapshot_vm("myvm", Path("mem"), Path("state"))
 
 
-@patch("mvmctl.api.vms.get_vm_socket_path")
-@patch("mvmctl.api.vms.FirecrackerClient")
+@patch("mvmctl.api.vm.get_vm_socket_path")
+@patch("mvmctl.api.vm.FirecrackerClient")
 def test_load_snapshot(mock_client, mock_socket_path):
     """load_snapshot checks socket and forwards to client."""
     mock_socket_path.return_value = Path("fake.sock")
@@ -1030,7 +1030,7 @@ def test_resolve_single_by_id_prefix_none_for_ambiguous(tmp_path):
 def test_resolve_kernel_path_by_absolute(tmp_path):
     kernel = tmp_path / "custom-vmlinux"
     kernel.write_bytes(b"kernel")
-    with patch("mvmctl.api.vms.get_kernels_dir", return_value=tmp_path / "kernels"):
+    with patch("mvmctl.api.vm.get_kernels_dir", return_value=tmp_path / "kernels"):
         result = _resolve_kernel_path(str(kernel))
     assert result == kernel
 
@@ -1038,7 +1038,7 @@ def test_resolve_kernel_path_by_absolute(tmp_path):
 def test_resolve_kernel_path_not_found(tmp_path):
     kernels_dir = tmp_path / "kernels"
     kernels_dir.mkdir()
-    with patch("mvmctl.api.vms.get_kernels_dir", return_value=kernels_dir):
+    with patch("mvmctl.api.vm.get_kernels_dir", return_value=kernels_dir):
         with pytest.raises(MVMError, match="Kernel not found"):
             _resolve_kernel_path("nonexistent")
 
@@ -1113,11 +1113,11 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
 
     # create_vm should detect the symlink and fail
     with (
-        patch("mvmctl.api.vms.get_vm_manager") as mock_mgr,
-        patch("mvmctl.api.vms.get_vm_dir_by_hash", return_value=vm_dir),
+        patch("mvmctl.api.vm.get_vm_manager") as mock_mgr,
+        patch("mvmctl.api.vm.get_vm_dir_by_hash", return_value=vm_dir),
         patch("mvmctl.utils.fs.get_images_dir", return_value=images_dir),
-        patch("mvmctl.api.vms.get_kernels_dir", return_value=kernels_dir),
-        patch("mvmctl.api.vms.setup_nocloud_input_chain"),
+        patch("mvmctl.api.vm.get_kernels_dir", return_value=kernels_dir),
+        patch("mvmctl.api.vm.setup_nocloud_input_chain"),
     ):
         mock_manager = MagicMock()
         mock_manager.count_vms.return_value = 0
@@ -1143,30 +1143,30 @@ def test_create_vm_with_secure_mkdir(tmp_path, monkeypatch):
             )
 
 
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_uses_cached_image_path_not_copy(
     mock_setup_nat,
     mock_open,
@@ -1295,30 +1295,30 @@ def test_create_vm_uses_cached_image_path_not_copy(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms._setup_rootfs_with_guestfs")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._setup_rootfs_with_guestfs")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_disk_size_resizes_local_copy_only(
     mock_setup_nat,
     mock_open,
@@ -1448,31 +1448,31 @@ def test_create_vm_disk_size_resizes_local_copy_only(
     assert resized_path == mock_rootfs_path
 
 
-@patch("mvmctl.api.vms._cleanup_vm_creation_resources")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._cleanup_vm_creation_resources")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.core.mvm_db.MVMDatabase")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_cleanup_removes_local_rootfs_on_failure(
     mock_setup_nat,
     mock_open,
@@ -1609,29 +1609,29 @@ def test_create_vm_cleanup_removes_local_rootfs_on_failure(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_persists_config_with_vm_local_rootfs_path(
     mock_setup_nat,
     mock_open,
@@ -1795,29 +1795,29 @@ def test_create_vm_persists_config_with_vm_local_rootfs_path(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_nocloud_net_starts_server(
     mock_setup_nat,
     mock_open,
@@ -1866,7 +1866,7 @@ def test_create_vm_nocloud_net_starts_server(
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
 
-    from mvmctl.api.vms import create_vm
+    from mvmctl.api.vm import create_vm
 
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
@@ -1935,32 +1935,32 @@ def test_create_vm_nocloud_net_starts_server(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
+@patch("mvmctl.api.vm.shutil.copy2")
 @patch("mvmctl.core.network.get_default_interface")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
-@patch("mvmctl.api.vms.cleanup_tap")
-@patch("mvmctl.api.vms.shutil.rmtree")
+@patch("mvmctl.api.vm.cleanup_tap")
+@patch("mvmctl.api.vm.shutil.rmtree")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_setup_nat,
     mock_open,
@@ -2012,7 +2012,7 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
 
-    from mvmctl.api.vms import create_vm
+    from mvmctl.api.vm import create_vm
 
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
@@ -2085,29 +2085,29 @@ def test_create_vm_nocloud_net_server_cleanup_on_fc_failure(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_nocloud_net_success_sets_port(
     mock_setup_nat,
     mock_open,
@@ -2156,7 +2156,7 @@ def test_create_vm_nocloud_net_success_sets_port(
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
 
-    from mvmctl.api.vms import create_vm
+    from mvmctl.api.vm import create_vm
 
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
@@ -2231,30 +2231,30 @@ def test_create_vm_nocloud_net_success_sets_port(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_nocloud_net_adds_firewall_rule(
     mock_setup_nat,
     mock_open,
@@ -2304,7 +2304,7 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
 
-    from mvmctl.api.vms import create_vm
+    from mvmctl.api.vm import create_vm
 
     mock_manager = MagicMock()
     mock_manager.count_vms.return_value = 0
@@ -2376,35 +2376,35 @@ def test_create_vm_nocloud_net_adds_firewall_rule(
     assert vm.nocloud_net_port == test_port
 
 
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.remove_nocloud_input_rule")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.remove_nocloud_input_rule")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
+@patch("mvmctl.api.vm.setup_nat")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("mvmctl.core.mvm_db.MVMDatabase")
-@patch("mvmctl.api.vms.cleanup_tap")
+@patch("mvmctl.api.vm.cleanup_tap")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.shutil.rmtree")
+@patch("mvmctl.api.vm.shutil.rmtree")
 @patch("builtins.open", new_callable=MagicMock)
 def test_firewall_failure_stops_server_and_raises(
     mock_open,
@@ -2439,7 +2439,7 @@ def test_firewall_failure_stops_server_and_raises(
     mock_copy2,
 ):
     """Test that firewall failure stops server and re-raises exception."""
-    from mvmctl.api.vms import create_vm
+    from mvmctl.api.vm import create_vm
     from mvmctl.db.models import Image
     from mvmctl.db.models import Network as DBNetwork
     from mvmctl.exceptions import NetworkError
@@ -2558,29 +2558,29 @@ def test_firewall_failure_stops_server_and_raises(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_returns_immediately_with_nocloud_net(
     mock_setup_nat,
     mock_open,
@@ -2629,7 +2629,7 @@ def test_create_vm_returns_immediately_with_nocloud_net(
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
 
-    from mvmctl.api.vms import create_vm
+    from mvmctl.api.vm import create_vm
     from mvmctl.models import CloudInitMode
 
     mock_manager = MagicMock()
@@ -2701,29 +2701,29 @@ def test_create_vm_returns_immediately_with_nocloud_net(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 def test_create_vm_starts_nocloud_server(
     mock_setup_nat,
     mock_open,
@@ -2772,7 +2772,7 @@ def test_create_vm_starts_nocloud_server(
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
 
-    from mvmctl.api.vms import create_vm
+    from mvmctl.api.vm import create_vm
     from mvmctl.models import CloudInitMode
 
     mock_manager = MagicMock()
@@ -2847,26 +2847,26 @@ def test_create_vm_starts_nocloud_server(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms._secure_mkdir_vm")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._secure_mkdir_vm")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 @patch("mvmctl.core.rootfs_injector.inject_cloud_init")
 def test_direct_injection_uses_vm_local_copied_rootfs(
     mock_inject,
@@ -2938,7 +2938,7 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
     def spy_inject(rootfs_path: str, cloud_init_dir: str) -> None:
         call_log.append(f"inject:{rootfs_path}")
 
-    with patch("mvmctl.api.vms.shutil.copy2", side_effect=spy_copy2):
+    with patch("mvmctl.api.vm.shutil.copy2", side_effect=spy_copy2):
         mock_inject.side_effect = spy_inject
         create_vm(
             input=VMCreateInput(
@@ -2980,30 +2980,30 @@ def test_direct_injection_uses_vm_local_copied_rootfs(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms._secure_mkdir_vm")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm._secure_mkdir_vm")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 @patch("mvmctl.core.rootfs_injector.inject_cloud_init")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.shutil.rmtree")
+@patch("mvmctl.api.vm.shutil.rmtree")
 def test_direct_injection_cleanup_on_injection_failure(
     mock_rmtree,
     mock_release_ip,
@@ -3088,7 +3088,7 @@ def test_direct_injection_cleanup_on_injection_failure(
     mock_net.name = "default"
 
     with (
-        patch("mvmctl.api.vms.shutil.copy2"),
+        patch("mvmctl.api.vm.shutil.copy2"),
         pytest.raises(CloudInitError, match="Direct injection failed"),
     ):
         create_vm(
@@ -3126,29 +3126,29 @@ def test_direct_injection_cleanup_on_injection_failure(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 @patch("mvmctl.core.key_manager.get_default_keys")
 def test_create_vm_without_ssh_key_injects_default_keys(
     mock_get_default_keys,
@@ -3309,30 +3309,30 @@ def test_create_vm_without_ssh_key_injects_default_keys(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
-@patch("mvmctl.api.vms.resolve_ssh_key")
+@patch("mvmctl.api.vm.setup_nat")
+@patch("mvmctl.api.vm.resolve_ssh_key")
 def test_create_vm_with_explicit_ssh_key_takes_precedence(
     mock_resolve_ssh_key,
     mock_setup_nat,
@@ -3443,31 +3443,31 @@ def test_create_vm_with_explicit_ssh_key_takes_precedence(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.add_nocloud_input_rule")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.add_nocloud_input_rule")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.bridge_exists")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.bridge_exists")
 @patch("mvmctl.api.assets.resolve_image_fs_uuid")
 @patch("mvmctl.api.assets.resolve_image_fs_type")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("mvmctl.api.vms.setup_nat")
+@patch("mvmctl.api.vm.setup_nat")
 @patch("mvmctl.core.key_manager.get_default_keys")
-@patch("mvmctl.api.vms.resolve_ssh_key")
+@patch("mvmctl.api.vm.resolve_ssh_key")
 def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
     mock_resolve_ssh_key,
     mock_get_default_keys,
@@ -3576,26 +3576,26 @@ def test_create_vm_no_defaults_no_explicit_key_falls_back_to_resolve(
 
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
-@patch("mvmctl.api.vms.shutil.copy2")
-@patch("mvmctl.api.vms.subprocess.run")
-@patch("mvmctl.api.vms.setup_nocloud_input_chain")
-@patch("mvmctl.api.vms.get_vm_manager")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.shutil.copy2")
+@patch("mvmctl.api.vm.subprocess.run")
+@patch("mvmctl.api.vm.setup_nocloud_input_chain")
+@patch("mvmctl.api.vm.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
 @patch("mvmctl.utils.fs.get_images_dir")
-@patch("mvmctl.api.vms.get_kernels_dir")
+@patch("mvmctl.api.vm.get_kernels_dir")
 @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
 @patch("mvmctl.api.network.get_network")
 @patch("mvmctl.api.network.allocate_network_ip")
-@patch("mvmctl.api.vms.generate_mac")
+@patch("mvmctl.api.vm.generate_mac")
 @patch("mvmctl.core.cloud_init.write_cloud_init")
 @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
-@patch("mvmctl.api.vms.ConfigGenerator")
-@patch("mvmctl.api.vms.cleanup_tap")
-@patch("mvmctl.api.vms.create_tap")
-@patch("mvmctl.api.vms.add_iptables_forward_rules")
-@patch("mvmctl.api.vms.shutil.rmtree")
+@patch("mvmctl.api.vm.ConfigGenerator")
+@patch("mvmctl.api.vm.cleanup_tap")
+@patch("mvmctl.api.vm.create_tap")
+@patch("mvmctl.api.vm.add_iptables_forward_rules")
+@patch("mvmctl.api.vm.shutil.rmtree")
 @patch("mvmctl.api.network.release_network_ip")
-@patch("mvmctl.api.vms.NoCloudNetServerManager")
+@patch("mvmctl.api.vm.NoCloudNetServerManager")
 def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_net_mgr,
     mock_release_ip,
@@ -3641,7 +3641,7 @@ def test_create_vm_network_failure_cleans_up_tap_iptables(
     mock_db_get_image.return_value = test_image
     mock_db_get_image_by_os_slug.return_value = test_image
 
-    from mvmctl.api.vms import create_vm
+    from mvmctl.api.vm import create_vm
     from mvmctl.db.models import Network as DBNetwork
     from mvmctl.exceptions import NetworkError
 
@@ -3728,19 +3728,19 @@ class TestRemoveVMNATOrdering:
     """
 
     @patch("mvmctl.core.firewall.subprocess.run")
-    @patch("mvmctl.api.vms.get_vm_manager")
-    @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.api.vm.get_vm_manager")
+    @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
     @patch("mvmctl.api.network.get_network")
-    @patch("mvmctl.api.vms.graceful_shutdown")
-    @patch("mvmctl.api.vms.cleanup_tap")
-    @patch("mvmctl.api.vms.remove_iptables_forward_rules")
-    @patch("mvmctl.api.vms.teardown_nat")
-    @patch("mvmctl.api.vms.delete_tap")
+    @patch("mvmctl.api.vm.graceful_shutdown")
+    @patch("mvmctl.api.vm.cleanup_tap")
+    @patch("mvmctl.api.vm.remove_iptables_forward_rules")
+    @patch("mvmctl.api.vm.teardown_nat")
+    @patch("mvmctl.api.vm.delete_tap")
     @patch("mvmctl.api.network.release_network_ip")
-    @patch("mvmctl.api.vms.shutil.rmtree")
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.shutil.rmtree")
+    @patch("mvmctl.api.vm.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
     @patch("mvmctl.core.firewall._chain_exists")
     def test_remove_vm_calls_teardown_nat_before_delete_tap(
         self,
@@ -3766,7 +3766,7 @@ class TestRemoveVMNATOrdering:
         teardown_nat will see zero TAPs and incorrectly tear down shared
         NAT rules, breaking connectivity for all remaining VMs on the bridge.
         """
-        from mvmctl.api.vms import remove_vm
+        from mvmctl.api.vm import remove_vm
         from mvmctl.db.models import Network as DBNetwork
         from mvmctl.models.vm import VMInstance, VMStatus
 
@@ -3842,19 +3842,19 @@ class TestRemoveVMNATOrdering:
         )
 
     @patch("mvmctl.core.firewall.subprocess.run")
-    @patch("mvmctl.api.vms.get_vm_manager")
-    @patch("mvmctl.api.vms.get_vm_dir_by_hash")
+    @patch("mvmctl.api.vm.get_vm_manager")
+    @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     @patch("mvmctl.core.mvm_db.MVMDatabase.get_network_by_name")
     @patch("mvmctl.api.network.get_network")
-    @patch("mvmctl.api.vms.graceful_shutdown")
-    @patch("mvmctl.api.vms.cleanup_tap")
-    @patch("mvmctl.api.vms.remove_iptables_forward_rules")
-    @patch("mvmctl.api.vms.teardown_nat")
-    @patch("mvmctl.api.vms.delete_tap")
+    @patch("mvmctl.api.vm.graceful_shutdown")
+    @patch("mvmctl.api.vm.cleanup_tap")
+    @patch("mvmctl.api.vm.remove_iptables_forward_rules")
+    @patch("mvmctl.api.vm.teardown_nat")
+    @patch("mvmctl.api.vm.delete_tap")
     @patch("mvmctl.api.network.release_network_ip")
-    @patch("mvmctl.api.vms.shutil.rmtree")
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.shutil.rmtree")
+    @patch("mvmctl.api.vm.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
     @patch("mvmctl.core.firewall._chain_exists")
     def test_teardown_nat_called_with_force_false(
         self,
@@ -3875,7 +3875,7 @@ class TestRemoveVMNATOrdering:
         mock_firewall_subprocess,
     ):
         """teardown_nat should be called with force=False to enable guard check."""
-        from mvmctl.api.vms import remove_vm
+        from mvmctl.api.vm import remove_vm
         from mvmctl.db.models import Network as DBNetwork
         from mvmctl.models.vm import VMInstance, VMStatus
 
@@ -3968,8 +3968,8 @@ def mock_vm_manager_for_start(mocker):
     return mock_mgr
 
 
-@patch("mvmctl.api.vms.graceful_shutdown")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_stop_vm_success(mock_get_mgr, mock_graceful_shutdown):
     """stop_vm stops a running VM and updates status."""
     mock_mgr = MagicMock()
@@ -3986,7 +3986,7 @@ def test_stop_vm_success(mock_get_mgr, mock_graceful_shutdown):
     mock_mgr.update_status.assert_called_with("myvm", VMStatus.STOPPED)
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_stop_vm_not_found(mock_get_mgr):
     """stop_vm raises error if VM not found."""
     mock_mgr = MagicMock()
@@ -3997,7 +3997,7 @@ def test_stop_vm_not_found(mock_get_mgr):
         stop_vm("myvm")
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_stop_vm_already_stopped(mock_get_mgr):
     """stop_vm raises error if VM is already stopped."""
     mock_mgr = MagicMock()
@@ -4010,8 +4010,8 @@ def test_stop_vm_already_stopped(mock_get_mgr):
         stop_vm("myvm")
 
 
-@patch("mvmctl.api.vms.graceful_shutdown")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_stop_vm_force(mock_get_mgr, mock_graceful_shutdown):
     """stop_vm passes force=True to graceful_shutdown."""
     mock_mgr = MagicMock()
@@ -4028,8 +4028,8 @@ def test_stop_vm_force(mock_get_mgr, mock_graceful_shutdown):
     mock_mgr.update_status.assert_called_with("myvm", VMStatus.STOPPED)
 
 
-@patch("mvmctl.api.vms.graceful_shutdown")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_stop_vm_handles_paused(mock_get_mgr, mock_graceful_shutdown):
     """stop_vm can stop a paused VM."""
     mock_mgr = MagicMock()
@@ -4046,8 +4046,8 @@ def test_stop_vm_handles_paused(mock_get_mgr, mock_graceful_shutdown):
     mock_mgr.update_status.assert_called_with("myvm", VMStatus.STOPPED)
 
 
-@patch("mvmctl.api.vms.graceful_shutdown")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.graceful_shutdown")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_stop_vm_failure_sets_error(mock_get_mgr, mock_graceful_shutdown):
     """stop_vm sets ERROR status on failure."""
     mock_mgr = MagicMock()
@@ -4071,10 +4071,10 @@ def test_stop_vm_failure_sets_error(mock_get_mgr, mock_graceful_shutdown):
 # -----------------------------------------------------------------------------
 
 
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_success(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
     """start_vm starts a stopped VM and updates status."""
     mock_mgr = MagicMock()
@@ -4098,7 +4098,7 @@ def test_start_vm_success(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_
     mock_popen.return_value = mock_proc
 
     with patch("builtins.open", MagicMock()):
-        with patch("mvmctl.api.vms.time.sleep"):
+        with patch("mvmctl.api.vm.time.sleep"):
             with patch("pathlib.Path.exists", return_value=True):
                 start_vm("myvm")
 
@@ -4107,7 +4107,7 @@ def test_start_vm_success(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_
     mock_mgr.register.assert_called_once()
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_not_found(mock_get_mgr):
     """start_vm raises error if VM not found."""
     mock_mgr = MagicMock()
@@ -4118,7 +4118,7 @@ def test_start_vm_not_found(mock_get_mgr):
         start_vm("myvm")
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_already_running(mock_get_mgr):
     """start_vm raises error if VM is already running."""
     mock_mgr = MagicMock()
@@ -4131,7 +4131,7 @@ def test_start_vm_already_running(mock_get_mgr):
         start_vm("myvm")
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_no_id(mock_get_mgr):
     """start_vm raises error if VM has no ID."""
     mock_mgr = MagicMock()
@@ -4145,9 +4145,9 @@ def test_start_vm_no_id(mock_get_mgr):
         start_vm("myvm")
 
 
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_failure_cleanup(mock_get_mgr, mock_get_vm_dir, mock_popen):
     """start_vm cleans up resources on failure."""
     mock_mgr = MagicMock()
@@ -4179,8 +4179,8 @@ def test_start_vm_failure_cleanup(mock_get_mgr, mock_get_vm_dir, mock_popen):
 # -----------------------------------------------------------------------------
 
 
-@patch("mvmctl.api.vms.start_vm")
-@patch("mvmctl.api.vms.stop_vm")
+@patch("mvmctl.api.vm.start_vm")
+@patch("mvmctl.api.vm.stop_vm")
 def test_reboot_vm_success(mock_stop, mock_start):
     """reboot_vm calls stop then start."""
     reboot_vm("myvm")
@@ -4189,8 +4189,8 @@ def test_reboot_vm_success(mock_stop, mock_start):
     mock_start.assert_called_once_with("myvm")
 
 
-@patch("mvmctl.api.vms.start_vm")
-@patch("mvmctl.api.vms.stop_vm")
+@patch("mvmctl.api.vm.start_vm")
+@patch("mvmctl.api.vm.stop_vm")
 def test_reboot_vm_force(mock_stop, mock_start):
     """reboot_vm passes force=True to stop_vm."""
     reboot_vm("myvm", force=True)
@@ -4199,7 +4199,7 @@ def test_reboot_vm_force(mock_stop, mock_start):
     mock_start.assert_called_once_with("myvm")
 
 
-@patch("mvmctl.api.vms.stop_vm")
+@patch("mvmctl.api.vm.stop_vm")
 def test_reboot_vm_stop_fails(mock_stop):
     """reboot_vm raises error if stop fails."""
     mock_stop.side_effect = MVMError("Stop failed")
@@ -4208,10 +4208,10 @@ def test_reboot_vm_stop_fails(mock_stop):
         reboot_vm("myvm")
 
 
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_with_console(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
     """start_vm handles console-enabled VMs."""
     mock_mgr = MagicMock()
@@ -4235,7 +4235,7 @@ def test_start_vm_with_console(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_w
     mock_popen.return_value = mock_proc
 
     with patch("builtins.open", MagicMock()):
-        with patch("mvmctl.api.vms.time.sleep"):
+        with patch("mvmctl.api.vm.time.sleep"):
             with patch("pathlib.Path.exists", return_value=True):
                 start_vm("myvm")
 
@@ -4243,8 +4243,8 @@ def test_start_vm_with_console(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_w
     mock_write_pid.assert_called_once()
 
 
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_missing_config_file(mock_get_mgr, mock_get_vm_dir):
     """start_vm raises error if firecracker.json is missing."""
     mock_mgr = MagicMock()
@@ -4267,10 +4267,10 @@ def test_start_vm_missing_config_file(mock_get_mgr, mock_get_vm_dir):
             start_vm("myvm")
 
 
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_missing_firecracker_binary(
     mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid
 ):
@@ -4296,10 +4296,10 @@ def test_start_vm_missing_firecracker_binary(
     mock_popen.return_value = mock_proc
 
     with patch("builtins.open", MagicMock()):
-        with patch("mvmctl.api.vms.time.sleep"):
+        with patch("mvmctl.api.vm.time.sleep"):
             with patch("pathlib.Path.exists", return_value=True):
                 with patch(
-                    "mvmctl.api.vms.DEFAULT_FIRECRACKER_BIN_NAME",
+                    "mvmctl.api.vm.DEFAULT_FIRECRACKER_BIN_NAME",
                     "firecracker",
                 ):
                     start_vm("myvm")
@@ -4308,10 +4308,10 @@ def test_start_vm_missing_firecracker_binary(
     mock_write_pid.assert_called_once()
 
 
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.subprocess.Popen")
-@patch("mvmctl.api.vms.get_vm_dir_by_hash")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.subprocess.Popen")
+@patch("mvmctl.api.vm.get_vm_dir_by_hash")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_start_vm_log_close_oserror(mock_get_mgr, mock_get_vm_dir, mock_popen, mock_write_pid):
     """start_vm handles OSError when closing log file by raising MVMError."""
     mock_mgr = MagicMock()
@@ -4338,7 +4338,7 @@ def test_start_vm_log_close_oserror(mock_get_mgr, mock_get_vm_dir, mock_popen, m
     mock_log_fp.close.side_effect = OSError("Close failed")
 
     with patch("builtins.open", return_value=mock_log_fp):
-        with patch("mvmctl.api.vms.time.sleep"):
+        with patch("mvmctl.api.vm.time.sleep"):
             with patch("pathlib.Path.exists", return_value=True):
                 with pytest.raises(MVMError, match="Failed to start VM"):
                     start_vm("myvm")

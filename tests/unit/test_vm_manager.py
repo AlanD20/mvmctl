@@ -722,7 +722,7 @@ def test_get_vm_status_with_exit_code_running(mocker, sample_vm):
     mock_kill = mocker.patch("os.kill", return_value=None)
 
     # Import and call the function
-    from mvmctl.api.vms import get_vm_status_with_exit_code
+    from mvmctl.api.vm import get_vm_status_with_exit_code
 
     status, exit_code = get_vm_status_with_exit_code(sample_vm)
 
@@ -750,7 +750,7 @@ def test_get_vm_status_with_exit_code_from_log(mocker, sample_vm, tmp_path):
     # Mock get_vm_dir to return our tmp path
     mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir)
 
-    from mvmctl.api.vms import get_vm_status_with_exit_code
+    from mvmctl.api.vm import get_vm_status_with_exit_code
 
     status, exit_code = get_vm_status_with_exit_code(sample_vm)
 
@@ -777,7 +777,7 @@ def test_get_vm_status_with_exit_code_from_status_file(mocker, sample_vm, tmp_pa
     # Mock get_vm_dir to return our tmp path
     mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir)
 
-    from mvmctl.api.vms import get_vm_status_with_exit_code
+    from mvmctl.api.vm import get_vm_status_with_exit_code
 
     status, exit_code = get_vm_status_with_exit_code(sample_vm)
 
@@ -802,7 +802,7 @@ def test_get_vm_status_exited_no_code(mocker, sample_vm, tmp_path):
     # Mock get_vm_dir to return our tmp path
     mocker.patch("mvmctl.utils.fs.get_vm_dir_by_hash", return_value=vm_dir)
 
-    from mvmctl.api.vms import get_vm_status_with_exit_code
+    from mvmctl.api.vm import get_vm_status_with_exit_code
 
     status, exit_code = get_vm_status_with_exit_code(sample_vm)
 
@@ -815,7 +815,7 @@ def test_get_vm_status_no_pid(mocker, sample_vm):
     sample_vm.pid = None
     sample_vm.status = VMStatus.STOPPED
 
-    from mvmctl.api.vms import get_vm_status_with_exit_code
+    from mvmctl.api.vm import get_vm_status_with_exit_code
 
     status, exit_code = get_vm_status_with_exit_code(sample_vm)
 

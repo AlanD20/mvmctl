@@ -13,7 +13,7 @@ from pytest_mock import MockerFixture
 
 from mvmctl.core.host_privilege import _generate_sudoers_content
 from mvmctl.api.assets import resolve_image_path as _resolve_image_path
-from mvmctl.api.vms import create_vm
+from mvmctl.api.vm import create_vm
 from mvmctl.exceptions import HostError, MVMError
 from mvmctl.models import VMCreateInput, CloudInitMode
 from mvmctl.utils.http import download_file
@@ -244,8 +244,8 @@ def test_create_vm_rejects_malicious_names(
     malicious_name: str,
 ):
     """VM creation must reject malicious names before any filesystem operations."""
-    mocker.patch("mvmctl.api.vms.get_vm_manager")
-    mocker.patch("mvmctl.api.vms.validate_entity_name", side_effect=MVMError("Invalid VM name"))
+    mocker.patch("mvmctl.api.vm.get_vm_manager")
+    mocker.patch("mvmctl.api.vm.validate_entity_name", side_effect=MVMError("Invalid VM name"))
 
     with pytest.raises(MVMError, match="Invalid VM name"):
         input_data = VMCreateInput(

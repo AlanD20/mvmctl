@@ -66,7 +66,7 @@ def test_list_vms_all_flag(mocker: MockerFixture):
 
 
 def test_rm_vm_not_found(mocker: MockerFixture):
-    from mvmctl.api.vms import ResolveVMTargetsResult
+    from mvmctl.api.vm import ResolveVMTargetsResult
 
     result = ResolveVMTargetsResult(
         targets=[], errors=["No VM found with name 'nonexistent'"], exit_code=1
@@ -839,7 +839,7 @@ def test_vm_ls_json_includes_exit_code(mocker: MockerFixture):
 
 def test_resolve_image_direct_path(tmp_path: Path, monkeypatch):
     """resolve_image_multi_strategy returns direct path when file exists."""
-    from mvmctl.api.vms import resolve_image_multi_strategy
+    from mvmctl.api.vm import resolve_image_multi_strategy
 
     image_file = tmp_path / "test-image.ext4"
     image_file.write_text("dummy")
@@ -850,7 +850,7 @@ def test_resolve_image_direct_path(tmp_path: Path, monkeypatch):
 
 def test_resolve_image_yaml_name(mocker: MockerFixture, tmp_path: Path, monkeypatch):
     """resolve_image_multi_strategy resolves YAML image name via internal_id lookup."""
-    from mvmctl.api.vms import resolve_image_multi_strategy
+    from mvmctl.api.vm import resolve_image_multi_strategy
 
     # Create images directory with a file named after the full hash
     images_dir = tmp_path / "cache" / "images"
@@ -873,7 +873,7 @@ def test_resolve_image_yaml_name(mocker: MockerFixture, tmp_path: Path, monkeypa
 
 def test_resolve_image_id_prefix(mocker: MockerFixture, tmp_path: Path, monkeypatch):
     """resolve_image_multi_strategy falls back to ID prefix resolution."""
-    from mvmctl.api.vms import resolve_image_multi_strategy
+    from mvmctl.api.vm import resolve_image_multi_strategy
 
     # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "images" / "abc123.ext4"
@@ -888,7 +888,7 @@ def test_resolve_image_id_prefix(mocker: MockerFixture, tmp_path: Path, monkeypa
 
 def test_resolve_kernel_direct_path(tmp_path: Path, monkeypatch):
     """resolve_kernel_multi_strategy returns direct path when file exists."""
-    from mvmctl.api.vms import resolve_kernel_multi_strategy
+    from mvmctl.api.vm import resolve_kernel_multi_strategy
 
     kernel_file = tmp_path / "vmlinux"
     kernel_file.write_text("dummy kernel")
@@ -899,7 +899,7 @@ def test_resolve_kernel_direct_path(tmp_path: Path, monkeypatch):
 
 def test_resolve_kernel_id_prefix(mocker: MockerFixture, tmp_path: Path):
     """resolve_kernel_multi_strategy falls back to ID prefix resolution."""
-    from mvmctl.api.vms import resolve_kernel_multi_strategy
+    from mvmctl.api.vm import resolve_kernel_multi_strategy
 
     # Mock ID prefix resolution to return a path
     mock_path = tmp_path / "kernels" / "abc123"

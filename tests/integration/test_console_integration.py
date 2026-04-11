@@ -27,17 +27,17 @@ class TestConsoleWorkflow:
     @patch("mvmctl.api.network.allocate_network_ip")
     @patch("mvmctl.utils.network.generate_mac")
     @patch("mvmctl.utils.network.bridge_exists")
-    @patch("mvmctl.api.vms.create_tap")
-    @patch("mvmctl.api.vms.add_iptables_forward_rules")
-    @patch("mvmctl.api.vms.setup_nat")
+    @patch("mvmctl.api.vm.create_tap")
+    @patch("mvmctl.api.vm.add_iptables_forward_rules")
+    @patch("mvmctl.api.vm.setup_nat")
     @patch("mvmctl.utils.fs.write_pid_file")
-    @patch("mvmctl.api.vms.ConfigGenerator")
+    @patch("mvmctl.api.vm.ConfigGenerator")
     @patch("mvmctl.core.cloud_init.write_cloud_init")
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vms.add_nocloud_input_rule")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.add_nocloud_input_rule")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.ConsoleRelayManager")
     @patch("mvmctl.services.console_relay.manager.subprocess.Popen")
     @patch("shutil.which")
     @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
@@ -74,7 +74,7 @@ class TestConsoleWorkflow:
         mock_vm_register,
         tmp_path: Path,
     ):
-        from mvmctl.api.vms import create_vm
+        from mvmctl.api.vm import create_vm
         from mvmctl.db.models import Image
 
         # Setup mock for subprocess.run to return success
@@ -242,16 +242,16 @@ class TestConsoleWorkflow:
     @patch("mvmctl.api.network.allocate_network_ip")
     @patch("mvmctl.utils.network.generate_mac")
     @patch("mvmctl.utils.network.bridge_exists")
-    @patch("mvmctl.api.vms.create_tap")
-    @patch("mvmctl.api.vms.add_iptables_forward_rules")
-    @patch("mvmctl.api.vms.setup_nat")
+    @patch("mvmctl.api.vm.create_tap")
+    @patch("mvmctl.api.vm.add_iptables_forward_rules")
+    @patch("mvmctl.api.vm.setup_nat")
     @patch("mvmctl.utils.fs.write_pid_file")
-    @patch("mvmctl.api.vms.ConfigGenerator")
+    @patch("mvmctl.api.vm.ConfigGenerator")
     @patch("mvmctl.core.cloud_init.write_cloud_init")
     @patch("mvmctl.core.firewall.subprocess.run")
     @patch("mvmctl.utils.process.require_mvm_group_membership")
-    @patch("mvmctl.api.vms.add_nocloud_input_rule")
-    @patch("mvmctl.api.vms.NoCloudNetServerManager")
+    @patch("mvmctl.api.vm.add_nocloud_input_rule")
+    @patch("mvmctl.api.vm.NoCloudNetServerManager")
     @patch("shutil.which")
     @patch("mvmctl.core.mvm_db.MVMDatabase.get_image")
     def test_create_vm_without_console_skips_relay(
@@ -284,7 +284,7 @@ class TestConsoleWorkflow:
         mock_vm_register,
         tmp_path: Path,
     ):
-        from mvmctl.api.vms import create_vm
+        from mvmctl.api.vm import create_vm
         from mvmctl.db.models import Image
 
         # Setup mock for subprocess.run to return success
@@ -459,10 +459,10 @@ class TestConsoleRelayLifecycle:
 
 
 class TestConsoleAPI:
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_attach_console_returns_socket_path(self, mock_get_mgr, mock_mgr_class):
-        from mvmctl.api.vms import attach_console
+        from mvmctl.api.vm import attach_console
 
         mock_vm = MagicMock()
         mock_vm.name = "testvm"
@@ -480,10 +480,10 @@ class TestConsoleAPI:
         assert result.socket_path == Path("/tmp/test.sock")
         assert result.vm_name == "testvm"
 
-    @patch("mvmctl.api.vms.ConsoleRelayManager")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm.ConsoleRelayManager")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_kill_console_terminates_relay(self, mock_get_mgr, mock_mgr_class):
-        from mvmctl.api.vms import kill_console
+        from mvmctl.api.vm import kill_console
 
         mock_vm = MagicMock()
         mock_vm.id = "a" * 64  # Mock VM hash
@@ -500,10 +500,10 @@ class TestConsoleAPI:
         assert result is True
         mock_relay_mgr.kill_relay.assert_called_once_with("testvm", mock_vm.id)
 
-    @patch("mvmctl.api.vms._get_console_state")
-    @patch("mvmctl.api.vms.get_vm_manager")
+    @patch("mvmctl.api.vm._get_console_state")
+    @patch("mvmctl.api.vm.get_vm_manager")
     def test_get_console_state_returns_status(self, mock_get_mgr, mock_get_state):
-        from mvmctl.api.vms import get_console_state
+        from mvmctl.api.vm import get_console_state
 
         mock_vm = MagicMock()
         mock_manager = MagicMock()

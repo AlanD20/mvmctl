@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pytest_mock import MockerFixture
 
-from mvmctl.api.vms import (
+from mvmctl.api.vm import (
     cleanup_vms,
     get_logs,
     get_vm,
@@ -24,7 +24,7 @@ from mvmctl.models.vm import VMInstance, VMStatus
 
 
 @patch("mvmctl.core.vm_monitor.reconcile_vm")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_list_vms(mock_get_manager, mock_reconcile):
     """list_vms retrieves VMs from manager."""
     # Mock reconcile_vm to return the original status without changing it
@@ -73,7 +73,7 @@ def test_list_vms(mock_get_manager, mock_reconcile):
     assert list_vms(include_stopped=False)[0].name == "vm1"
 
 
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_get_vm(mock_get_manager):
     """get_vm interacts with manager correctly."""
     mock_manager = MagicMock()
@@ -108,8 +108,8 @@ def test_vm_cache_dir(mock_get_vm_dir_by_hash):
     mock_get_vm_dir_by_hash.assert_called_once_with(vm.id)
 
 
-@patch("mvmctl.api.vms.connect_to_vm")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.connect_to_vm")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_ssh_vm(mock_get_manager, mock_connect):
     """ssh_vm looks up VM and forwards to connect_to_vm with IP."""
     mock_connect.return_value = 0
@@ -145,7 +145,7 @@ def test_ssh_vm(mock_get_manager, mock_connect):
     )
 
 
-@patch("mvmctl.api.vms.show_logs")
+@patch("mvmctl.api.vm.show_logs")
 def test_get_logs(mock_show_logs):
     """get_logs forwards to show_logs."""
     mock_show_logs.return_value = ["log1"]
@@ -155,7 +155,7 @@ def test_get_logs(mock_show_logs):
 
 
 @patch("shutil.rmtree")
-@patch("mvmctl.api.vms.teardown_nat")
+@patch("mvmctl.api.vm.teardown_nat")
 @patch("mvmctl.core.network.delete_tap")
 @patch("mvmctl.core.network.remove_iptables_forward_rules")
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
@@ -163,7 +163,7 @@ def test_get_logs(mock_show_logs):
 @patch("os.kill")
 @patch("mvmctl.api.host.check_privileges_interactive")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_cleanup_vms(
     mock_get_manager,
     mock_get_network,
@@ -240,7 +240,7 @@ def test_cleanup_vms(
 
 
 @patch("shutil.rmtree")
-@patch("mvmctl.api.vms.teardown_nat")
+@patch("mvmctl.api.vm.teardown_nat")
 @patch("mvmctl.core.network.delete_tap")
 @patch("mvmctl.core.network.remove_iptables_forward_rules")
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
@@ -248,7 +248,7 @@ def test_cleanup_vms(
 @patch("os.kill")
 @patch("mvmctl.api.host.check_privileges_interactive")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_cleanup_vms_removes_hash_based_dir(
     mock_get_manager,
     mock_get_network,
@@ -304,7 +304,7 @@ def test_cleanup_vms_removes_hash_based_dir(
 
 
 @patch("shutil.rmtree")
-@patch("mvmctl.api.vms.teardown_nat")
+@patch("mvmctl.api.vm.teardown_nat")
 @patch("mvmctl.core.network.delete_tap")
 @patch("mvmctl.core.network.remove_iptables_forward_rules")
 @patch("mvmctl.services.nocloud_server.NoCloudNetServerManager")
@@ -312,7 +312,7 @@ def test_cleanup_vms_removes_hash_based_dir(
 @patch("os.kill")
 @patch("mvmctl.api.host.check_privileges_interactive")
 @patch("mvmctl.api.network.get_network")
-@patch("mvmctl.api.vms.get_vm_manager")
+@patch("mvmctl.api.vm.get_vm_manager")
 def test_cleanup_vms_handles_missing_vm_id(
     mock_get_manager,
     mock_get_network,
@@ -382,7 +382,7 @@ def test_inspect_vm_by_id_prefix(mocker: MockerFixture):
 
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_id_prefix.return_value = mock_vm
-    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("mvmctl.api.vm.get_vm_manager", return_value=mock_mgr)
 
     result = inspect_vm("abc123")
 
@@ -416,7 +416,7 @@ def test_inspect_vm_by_name(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_id_prefix.return_value = None
     mock_mgr.get_by_name.return_value = [mock_vm]
-    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("mvmctl.api.vm.get_vm_manager", return_value=mock_mgr)
 
     result = inspect_vm("myvm")
 
@@ -464,7 +464,7 @@ def test_inspect_vm_ambiguous(mocker: MockerFixture):
             disk_size_mib=2048,
         ),
     ]
-    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("mvmctl.api.vm.get_vm_manager", return_value=mock_mgr)
 
     with pytest.raises(MVMError, match="Multiple VMs match"):
         inspect_vm("myvm")
@@ -475,7 +475,7 @@ def test_inspect_vm_not_found(mocker: MockerFixture):
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_id_prefix.return_value = None
     mock_mgr.get_by_name.return_value = []
-    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("mvmctl.api.vm.get_vm_manager", return_value=mock_mgr)
 
     with pytest.raises(VMNotFoundError, match="not found"):
         inspect_vm("nonexistent")
@@ -488,7 +488,7 @@ def test_inspect_vm_not_found(mocker: MockerFixture):
 
 def test_resolve_rootfs_path_from_config(mocker: MockerFixture, tmp_path: Path):
     """Test _resolve_rootfs_path uses config.rootfs_path when available."""
-    from mvmctl.api.vms import _resolve_rootfs_path
+    from mvmctl.api.vm._data import _resolve_rootfs_path
 
     config_path = tmp_path / "shared" / "image.ext4"
     config_path.parent.mkdir(parents=True)
@@ -527,7 +527,7 @@ def test_resolve_rootfs_path_from_config(mocker: MockerFixture, tmp_path: Path):
 
 def test_resolve_rootfs_path_local_fallback(mocker: MockerFixture, tmp_path: Path):
     """Test _resolve_rootfs_path falls back to local rootfs file."""
-    from mvmctl.api.vms import _resolve_rootfs_path
+    from mvmctl.api.vm._data import _resolve_rootfs_path
 
     vm = VMInstance(
         name="test-vm",
@@ -561,7 +561,7 @@ def test_resolve_rootfs_path_local_fallback(mocker: MockerFixture, tmp_path: Pat
 
 def test_resolve_rootfs_path_none_when_missing(mocker: MockerFixture, tmp_path: Path):
     """Test _resolve_rootfs_path returns None when no rootfs found."""
-    from mvmctl.api.vms import _resolve_rootfs_path
+    from mvmctl.api.vm._data import _resolve_rootfs_path
 
     vm = VMInstance(
         name="test-vm",
@@ -613,7 +613,7 @@ def test_inspect_vm_rootfs_source_field(mocker: MockerFixture, tmp_path: Path):
 
     mock_mgr = mocker.MagicMock()
     mock_mgr.get_by_id_prefix.return_value = mock_vm
-    mocker.patch("mvmctl.api.vms.get_vm_manager", return_value=mock_mgr)
+    mocker.patch("mvmctl.api.vm.get_vm_manager", return_value=mock_mgr)
 
     # Mock the VM directory with a local rootfs
     with patch("mvmctl.utils.fs.get_vm_dir_by_hash") as mock_get_dir:
@@ -633,10 +633,10 @@ def test_inspect_vm_rootfs_source_field(mocker: MockerFixture, tmp_path: Path):
 # -----------------------------------------------------------------------------
 
 
-@patch("mvmctl.api.vms._pause_process")
+@patch("mvmctl.api.vm._pause_process")
 def test_pause_vm_api(mock_pause):
     """pause_vm calls the process helper with a Firecracker client."""
-    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+    with patch("mvmctl.api.vm.get_vm_manager") as mock_get_manager:
         mock_manager = MagicMock()
         mock_vm = MagicMock()
         mock_vm.status = VMStatus.RUNNING
@@ -644,16 +644,16 @@ def test_pause_vm_api(mock_pause):
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
-        with patch("mvmctl.api.vms.FirecrackerClient"):
+        with patch("mvmctl.api.vm.FirecrackerClient"):
             pause_vm("myvm")
 
     mock_pause.assert_called_once()
 
 
-@patch("mvmctl.api.vms._resume_process")
+@patch("mvmctl.api.vm._resume_process")
 def test_resume_vm_api(mock_resume):
     """resume_vm calls the process helper with a Firecracker client."""
-    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+    with patch("mvmctl.api.vm.get_vm_manager") as mock_get_manager:
         mock_manager = MagicMock()
         mock_vm = MagicMock()
         mock_vm.status = VMStatus.PAUSED
@@ -661,7 +661,7 @@ def test_resume_vm_api(mock_resume):
         mock_manager.get.return_value = mock_vm
         mock_get_manager.return_value = mock_manager
 
-        with patch("mvmctl.api.vms.FirecrackerClient"):
+        with patch("mvmctl.api.vm.FirecrackerClient"):
             resume_vm("myvm")
 
     mock_resume.assert_called_once()
@@ -672,10 +672,10 @@ def test_resume_vm_api(mock_resume):
 # -----------------------------------------------------------------------------
 
 
-@patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.api.vm.graceful_shutdown")
 def test_stop_vm_api(mock_stop):
     """stop_vm updates state and delegates shutdown."""
-    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+    with patch("mvmctl.api.vm.get_vm_manager") as mock_get_manager:
         mock_manager = MagicMock()
         mock_vm = MagicMock()
         mock_vm.status = VMStatus.RUNNING
@@ -689,10 +689,10 @@ def test_stop_vm_api(mock_stop):
     mock_stop.assert_called_once_with(123, Path("/tmp/fc.sock"), force=False)
 
 
-@patch("mvmctl.api.vms.graceful_shutdown")
+@patch("mvmctl.api.vm.graceful_shutdown")
 def test_stop_vm_api_force(mock_stop):
     """stop_vm passes force=True to shutdown."""
-    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+    with patch("mvmctl.api.vm.get_vm_manager") as mock_get_manager:
         mock_manager = MagicMock()
         mock_vm = MagicMock()
         mock_vm.status = VMStatus.RUNNING
@@ -706,13 +706,13 @@ def test_stop_vm_api_force(mock_stop):
     mock_stop.assert_called_once_with(123, Path("/tmp/fc.sock"), force=True)
 
 
-@patch("mvmctl.api.vms.time.sleep")
-@patch("mvmctl.api.vms._write_pid_file")
-@patch("mvmctl.api.vms.subprocess.Popen")
+@patch("mvmctl.api.vm.time.sleep")
+@patch("mvmctl.api.vm._write_pid_file")
+@patch("mvmctl.api.vm.subprocess.Popen")
 def test_start_vm_api(mock_popen, mock_write_pid, mock_sleep):
     """start_vm queries the default binary and registers the VM."""
     mock_popen.return_value.pid = 456
-    with patch("mvmctl.api.vms.get_vm_manager") as mock_get_manager:
+    with patch("mvmctl.api.vm.get_vm_manager") as mock_get_manager:
         mock_manager = MagicMock()
         mock_vm = MagicMock()
         mock_vm.status = VMStatus.STOPPED
@@ -728,8 +728,8 @@ def test_start_vm_api(mock_popen, mock_write_pid, mock_sleep):
     mock_write_pid.assert_called_once()
 
 
-@patch("mvmctl.api.vms.start_vm")
-@patch("mvmctl.api.vms.stop_vm")
+@patch("mvmctl.api.vm.start_vm")
+@patch("mvmctl.api.vm.stop_vm")
 def test_reboot_vm_api(mock_stop, mock_start):
     """reboot_vm stops then starts the VM."""
     reboot_vm("myvm")
