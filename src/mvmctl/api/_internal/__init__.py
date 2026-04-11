@@ -11,25 +11,5 @@ See docs/plans/vms-api-refactoring.md for boundary rules.
 from __future__ import annotations
 
 __all__ = [
-    # Resolvers
-    "resolve_vm_selector",
-    "resolve_vm_targets",
-    "ResolveVMTargetsResult",
-    # Network helpers
-    "generate_mac_address",
-    "generate_tap_device_name",
-    # Firewall/nocloud orchestration
-    "NocloudManager",
-    "FirewallManager",
-    # Exception handling
-    "handle_creation_error",
-    # ID resolution
-    "find_by_id_prefix",
-    # Signal handling
-    "SigtermContext",
-    # Validation
-    "validate_mac",
-    "validate_vm_name",
-    "validate_boot_args",
-    "validate_file_exists",
+    # Exception handling (moved to api.vm._exceptions)
 ]
