@@ -78,8 +78,9 @@ def update_pkgbuild(
     new_version: str,
     dry_run: bool,
     author: tuple[str, str] = ("AlanD20", "aland20@pm.me"),
+    aur_mode: bool = False,
 ) -> None:
-    """Update pkgver and maintainer in packaging/PKGBUILD."""
+    """Update pkgver and maintainer in packaging/PKGBUILD, and regenerate .SRCINFO."""
     file_path = root / "packaging" / "PKGBUILD"
     if not file_path.exists():
         print(f"  ⚠️  packaging/PKGBUILD: file not found")
@@ -101,8 +102,106 @@ def update_pkgbuild(
         if not dry_run:
             file_path.write_text(new_content)
         print(f"  packaging/PKGBUILD: {old} → {base_version}")
+
+        # In AUR mode, download artifacts and update checksums
+        if aur_mode and not dry_run:
+            update_pkgbuild_checksums(root, base_version, file_path)
+
+        # Regenerate .SRCINFO if makepkg is available
+        if not dry_run:
+            regenerate_srcinfo(root)
     else:
         print(f"  ⚠️  packaging/PKGBUILD: pkgver not found")
+
+
+def update_pkgbuild_checksums(root: Path, version: str, pkgbuild_path: Path) -> None:
+    """Download release artifacts and update PKGBUILD sha256sums."""
+    import subprocess
+    import hashlib
+    import urllib.request
+    import tempfile
+
+    print(f"  Downloading release artifacts for v{version}...")
+
+    # URLs for the artifacts
+    binary_url = f"https://github.com/AlanD20/mvmctl/releases/download/v{version}/mvm"
+    manpage_url = f"https://raw.githubusercontent.com/AlanD20/mvmctl/v{version}/docs/mvm.1"
+
+    checksums = []
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Download binary
+            binary_path = Path(tmpdir) / f"mvm-{version}"
+            try:
+                urllib.request.urlretrieve(binary_url, binary_path)
+                binary_hash = hashlib.sha256(binary_path.read_bytes()).hexdigest()
+                checksums.append(binary_hash)
+                print(f"    mvm binary: {binary_hash[:16]}...")
+            except Exception as e:
+                print(f"    ⚠️  Failed to download binary: {e}")
+                return
+
+            # Download man page
+            manpage_path = Path(tmpdir) / f"mvm.1-{version}"
+            try:
+                urllib.request.urlretrieve(manpage_url, manpage_path)
+                manpage_hash = hashlib.sha256(manpage_path.read_bytes()).hexdigest()
+                checksums.append(manpage_hash)
+                print(f"    mvm.1 manpage: {manpage_hash[:16]}...")
+            except Exception as e:
+                print(f"    ⚠️  Failed to download manpage: {e}")
+                return
+
+        content = pkgbuild_path.read_text()
+        new_checksums_line = f"sha256sums=('{checksums[0]}' '{checksums[1]}')"
+        new_content = re.sub(r"sha256sums=\([^)]+\)", new_checksums_line, content)
+        pkgbuild_path.write_text(new_content)
+        print(f"  packaging/PKGBUILD: updated sha256sums")
+
+    except Exception as e:
+        print(f"  ⚠️  Failed to update checksums: {e}")
+        print(f"      Make sure GitHub release v{version} is published with artifacts")
+
+
+def regenerate_srcinfo(root: Path) -> None:
+    """Regenerate .SRCINFO from PKGBUILD using makepkg."""
+    import subprocess
+
+    pkgbuild_dir = root / "packaging"
+    srcinfo_path = pkgbuild_dir / ".SRCINFO"
+
+    try:
+        # Check if makepkg is available
+        result = subprocess.run(
+            ["which", "makepkg"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"  ⚠️  .SRCINFO: makepkg not found, skipping regeneration")
+            print(
+                f"      Install pacman-contrib or run manually: makepkg --printsrcinfo > .SRCINFO"
+            )
+            return
+
+        # Regenerate .SRCINFO
+        result = subprocess.run(
+            ["makepkg", "--printsrcinfo"],
+            cwd=pkgbuild_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        srcinfo_path.write_text(result.stdout)
+        print(f"  packaging/.SRCINFO: regenerated")
+    except subprocess.CalledProcessError as e:
+        print(f"  ⚠️  .SRCINFO: failed to regenerate")
+        print(f"      Error: {e.stderr}")
+    except FileNotFoundError:
+        print(f"  ⚠️  .SRCINFO: makepkg not found, skipping regeneration")
+        print(f"      Install pacman-contrib or run manually: makepkg --printsrcinfo > .SRCINFO")
 
 
 def update_rpm_spec(root: Path, new_version: str, dry_run: bool) -> None:
@@ -321,6 +420,11 @@ Examples:
     )
     parser.add_argument("version", help="New version number (e.g., 0.2.0)")
     parser.add_argument(
+        "--aur",
+        action="store_true",
+        help="AUR mode: download release artifacts and update sha256sums in PKGBUILD (run after GitHub release)",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="Show what would change without modifying files"
     )
     parser.add_argument("--commit", action="store_true", help="Automatically commit after bumping")
@@ -371,6 +475,30 @@ Examples:
     script_dir = Path(__file__).parent.absolute()
     root = script_dir  # Script is at root
 
+    # AUR mode: only update PKGBUILD checksums and .SRCINFO
+    if args.aur:
+        print(f"\n{'=' * 60}")
+        print(f"AUR Mode: Preparing PKGBUILD for v{args.version}")
+        print(f"{'=' * 60}\n")
+        print("This will download release artifacts from GitHub and update checksums.")
+        print("Make sure the GitHub release is published with the 'mvm' binary.\n")
+
+        update_pkgbuild(root, args.version, args.dry_run, author, aur_mode=True)
+
+        print(f"\n{'=' * 60}")
+        if args.dry_run:
+            print("Dry run complete. No files were modified.")
+        else:
+            print("PKGBUILD updated with checksums and .SRCINFO regenerated!")
+            print("\nNext steps for AUR:")
+            print("  1. Review changes: git diff packaging/")
+            print("  2. Commit: git commit -am 'aur: update to v" + args.version + "'")
+            print("  3. Push to AUR:")
+            print("     cd packaging")
+            print("     git push aur master")
+        print(f"{'=' * 60}\n")
+        return
+
     print(f"\n{'=' * 60}")
     print(f"Bumping version to: {args.version}")
     if changelog:
@@ -384,7 +512,7 @@ Examples:
     print("Updating files:")
     update_pyproject_toml(root, args.version, args.dry_run)
     update_init_py(root, args.version, args.dry_run)
-    update_pkgbuild(root, args.version, args.dry_run, author)
+    update_pkgbuild(root, args.version, args.dry_run, author, aur_mode=False)
     update_rpm_spec(root, args.version, args.dry_run)
     update_rpm_changelog(root, args.version, args.dry_run, changelog, author)
     update_debian_changelog(root, args.version, args.dry_run, changelog, author)

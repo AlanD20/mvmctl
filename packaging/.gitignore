@@ -1,0 +1,10 @@
+# Exclude everything by default
+*
+
+# Force-add only files needed for AUR
+!PKGBUILD
+!.SRCINFO
+!LICENSE
+!.gitignore
+!*.install
+!*.patch

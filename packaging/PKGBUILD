@@ -1,5 +1,5 @@
 # Maintainer: AlanD20 <aland20@pm.me>
-pkgname=mvmctl
+pkgname=mvmctl-bin
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="MicroVM Manager - Container speed, VM isolation"
@@ -8,6 +8,8 @@ url="https://github.com/AlanD20/mvmctl"
 license=('MIT')
 depends=('iproute2' 'iptables' 'qemu' 'libguestfs' 'xorriso' 'openssh')
 makedepends=()
+provides=('mvmctl')
+conflicts=('mvmctl')
 source=("mvm-${pkgver}::https://github.com/AlanD20/mvmctl/releases/download/v${pkgver}/mvm"
         "mvm.1-${pkgver}::https://raw.githubusercontent.com/AlanD20/mvmctl/v${pkgver}/docs/mvm.1")
 sha256sums=('SKIP' 'SKIP')
