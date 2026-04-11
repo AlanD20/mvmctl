@@ -633,6 +633,14 @@ def vm_rm(
     name: Optional[List[str]] = typer.Option(
         None, "--name", "-n", help="VM name to remove (can be specified multiple times)"
     ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force immediate shutdown (SIGKILL, no graceful shutdown)"
+    ),
+    fast: bool = typer.Option(
+        False,
+        "--fast",
+        help="Fast removal - skip non-essential cleanup (SSH known_hosts, orphan cleanup)",
+    ),
 ) -> None:
     """Stop and remove VMs by ID prefix or name.
 
@@ -642,6 +650,9 @@ def vm_rm(
 
         # Remove by name (prompts if multiple with same name):
         mvm vm rm --name runner1 --name runner2
+
+        # Fast force removal (quickest):
+        mvm vm rm --force --fast --name runner1
     """
     effective_ids: list[str] = list(ids) if ids else []
     effective_names: list[str] = name if name is not None else []
@@ -664,7 +675,7 @@ def vm_rm(
     removed_count = 0
     for vm in result.targets:
         try:
-            remove_vm(vm.name)
+            remove_vm(vm.name, force=force, fast=fast)
             print_success(f"VM '{vm.name}' removed")
             removed_count += 1
         except MVMError as e:

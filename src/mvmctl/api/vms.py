@@ -82,7 +82,7 @@ from mvmctl.core.network import (
     teardown_nat,
 )
 from mvmctl.core.ssh import connect_to_vm, resolve_ssh_key
-from mvmctl.core.vm_lifecycle import _secure_mkdir_vm, grow_rootfs_with_guestfs
+from mvmctl.core.vm_lifecycle import _secure_mkdir_vm
 from mvmctl.core.vm_manager import VMManager, get_vm_manager
 from mvmctl.core.vm_process import (
     _read_pid_file,
@@ -704,20 +704,35 @@ def _inject_ssh_keys_for_disabled_mode(
         raise VMCreateError(f"Failed to inject SSH keys: {exc}") from exc
 
 
-def _setup_offline_mode(
+def _setup_rootfs_with_guestfs(
     rootfs_path: Path,
     hostname: str,
     ssh_pub_key: list[str] | str | None,
     user: str,
+    target_size_bytes: int | None = None,
 ) -> None:
-    """Single guestfs VM startup for offline mode: SSH keys + DNS injection."""
+    """Unified guestfs session for rootfs resize + SSH/DNS setup.
+
+    This function performs all rootfs modifications in a SINGLE guestfs session
+    to avoid the overhead of multiple guestfs launches (each takes 1-3 seconds).
+    """
     from mvmctl.utils.guestfs import check_libguestfs, optimized_guestfs
 
     if not check_libguestfs():
-        raise VMCreateError("libguestfs required for offline mode setup")
+        raise VMCreateError("libguestfs required for rootfs setup")
 
     keys: list[str] = [ssh_pub_key] if isinstance(ssh_pub_key, str) else (ssh_pub_key or [])
     has_keys = bool(keys)
+
+    # Handle resize before mounting if target size is specified
+    if target_size_bytes is not None:
+        try:
+            current_size = rootfs_path.stat().st_size
+            if isinstance(current_size, int) and current_size < target_size_bytes:
+                with open(rootfs_path, "r+b") as f:
+                    f.truncate(target_size_bytes)
+        except (OSError, AttributeError):
+            pass
 
     with optimized_guestfs(rootfs_path, readonly=False) as guestfs_handle:
         filesystems: dict[str, str] = guestfs_handle._g.list_filesystems()
@@ -730,6 +745,16 @@ def _setup_offline_mode(
             root_device = str(list(filesystems.keys())[0])
         if root_device is None:
             raise VMCreateError(f"No filesystem found in {rootfs_path}")
+
+        # Resize filesystem if target size was specified
+        if target_size_bytes is not None:
+            fs_type = guestfs_handle._g.vfs_type(root_device)
+            if fs_type in ("ext2", "ext3", "ext4"):
+                guestfs_handle._g.resize2fs(root_device)
+            elif fs_type == "btrfs":
+                guestfs_handle._g.mount(root_device, "/")
+                guestfs_handle._g.btrfs_filesystem_resize("/", target_size_bytes)
+                guestfs_handle._g.umount(root_device)
 
         guestfs_handle._g.mount(root_device, "/")
         try:
@@ -1285,13 +1310,17 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 shutil.copy2(resolved_image_path, vm_rootfs_path)
             rootfs_path = vm_rootfs_path
 
-            if disk_size is not None:
-                grow_rootfs_with_guestfs(vm_rootfs_path, parse_disk_size(disk_size))
-
+            # Unified guestfs session for resize + SSH/DNS setup (single launch vs 2 separate)
             disabled_ssh_pub_key: list[str] | str | None = None
+            target_size = parse_disk_size(disk_size) if disk_size is not None else None
             if effective_mode == CloudInitMode.OFF:
                 disabled_ssh_pub_key = _resolve_default_public_keys(ssh_key)
-                _setup_offline_mode(rootfs_path, name, disabled_ssh_pub_key, user)
+                _setup_rootfs_with_guestfs(
+                    rootfs_path, name, disabled_ssh_pub_key, user, target_size
+                )
+            elif target_size is not None:
+                # Only resize needed - no SSH/DNS setup for other cloud-init modes
+                _setup_rootfs_with_guestfs(rootfs_path, name, None, user, target_size)
 
             cloud_init_iso: Path | None = None
             extra_drives: list[DriveConfig] = []
@@ -1524,7 +1553,9 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
         signal.signal(signal.SIGTERM, old_handler)
 
 
-def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
+def remove_vm(
+    name: str, vm_manager: VMManager | None = None, force: bool = False, fast: bool = False
+) -> None:
     from mvmctl.api.host import check_privileges_interactive
     from mvmctl.api.network import get_network, release_network_ip
     from mvmctl.core.mvm_db import MVMDatabase
@@ -1545,7 +1576,15 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
     if pid is None:
         pid = vm.pid
 
-    graceful_shutdown(pid, vm.api_socket_path)
+    if force and pid is not None:
+        # Fast path: SIGKILL immediately, no graceful shutdown
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+    else:
+        graceful_shutdown(pid, vm.api_socket_path)
+
     if pid is not None:
         try:
             _, status = os.waitpid(pid, os.WNOHANG)
@@ -1556,48 +1595,73 @@ def remove_vm(name: str, vm_manager: VMManager | None = None) -> None:
         except (ChildProcessError, OSError):
             pass
 
-    if vm.console_relay_pid is not None:
-        try:
-            ConsoleRelayManager().stop_relay(name, vm.id)
-        except (OSError, RuntimeError) as exc:
-            logger.warning("Failed to cleanup console relay: %s", exc)
+    # Parallelize independent cleanup operations
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    if vm.nocloud_net_port is not None and vm.ipv4 is not None:
-        try:
-            nocloud_manager = NoCloudNetServerManager()
-            nocloud_manager.stop_server(name, vm.id) if vm.id else nocloud_manager.stop_server(name)
-            remove_nocloud_input_rule(vm.ipv4, name, vm.nocloud_net_port)
-        except (OSError, RuntimeError, NetworkError) as exc:
-            logger.warning("Failed to cleanup nocloud-net resources: %s", exc)
+    def _cleanup_console():
+        if vm.console_relay_pid is not None:
+            try:
+                ConsoleRelayManager().stop_relay(name, vm.id)
+            except (OSError, RuntimeError) as exc:
+                logger.warning("Failed to cleanup console relay: %s", exc)
 
-    remove_iptables_forward_rules(tap_name, bridge=bridge)
-    try:
-        teardown_nat(bridge, force=False, subnet=net_config.subnet if net_config else None)
-    except NetworkError as exc:
-        logger.debug("NAT teardown for bridge %s: %s", bridge, exc)
-    try:
-        delete_tap(tap_name)
-    except NetworkError:
-        pass
-    try:
-        db_net = MVMDatabase().get_network_by_name(net_name) if net_config else None
-        release_network_ip(db_net.id, vm.id) if db_net and vm.id else None
-    except NetworkError as exc:
-        logger.warning("Failed to release network IP: %s", exc)
+    def _cleanup_nocloud():
+        if vm.nocloud_net_port is not None and vm.ipv4 is not None:
+            try:
+                nocloud_manager = NoCloudNetServerManager()
+                nocloud_manager.stop_server(name, vm.id) if vm.id else nocloud_manager.stop_server(
+                    name
+                )
+                remove_nocloud_input_rule(vm.ipv4, name, vm.nocloud_net_port)
+            except (OSError, RuntimeError, NetworkError) as exc:
+                logger.warning("Failed to cleanup nocloud-net resources: %s", exc)
 
-    if vm.ipv4:
+    def _cleanup_network():
+        remove_iptables_forward_rules(tap_name, bridge=bridge)
         try:
-            subprocess.run(["ssh-keygen", "-R", vm.ipv4], capture_output=True, check=False)
-        except FileNotFoundError:
+            teardown_nat(bridge, force=False, subnet=net_config.subnet if net_config else None)
+        except NetworkError as exc:
+            logger.debug("NAT teardown for bridge %s: %s", bridge, exc)
+        try:
+            delete_tap(tap_name)
+        except NetworkError:
             pass
+
+    def _cleanup_ip():
+        try:
+            db_net = MVMDatabase().get_network_by_name(net_name) if net_config else None
+            release_network_ip(db_net.id, vm.id) if db_net and vm.id else None
+        except NetworkError as exc:
+            logger.warning("Failed to release network IP: %s", exc)
+
+    # Run cleanup tasks in parallel
+    cleanup_tasks = [_cleanup_console, _cleanup_nocloud, _cleanup_network, _cleanup_ip]
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(task) for task in cleanup_tasks]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:
+                logger.debug("Cleanup task failed: %s", exc)
+
+    # Skip SSH known_hosts cleanup and orphan cleanup in fast mode
+    if not fast:
+        if vm.ipv4:
+            try:
+                subprocess.run(["ssh-keygen", "-R", vm.ipv4], capture_output=True, check=False)
+            except FileNotFoundError:
+                pass
 
     manager.deregister(vm.id)
     if vm_dir.exists():
         shutil.rmtree(vm_dir)
-    try:
-        NoCloudNetServerManager().cleanup_orphans()
-    except Exception:
-        pass
+
+    # Skip orphan cleanup in fast mode (can be slow and is non-essential)
+    if not fast:
+        try:
+            NoCloudNetServerManager().cleanup_orphans()
+        except Exception:
+            pass
 
     from mvmctl.utils.audit import log_audit
 

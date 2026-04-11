@@ -28,7 +28,7 @@ from mvmctl.exceptions import ImageError, RootPartitionDetectionError, TieDetect
 from mvmctl.models import ImageFetchInput
 from mvmctl.models.image import ImageImportInput
 from mvmctl.utils.fs import get_cache_dir
-from mvmctl.utils.full_hash import generate_full_hash_image
+from mvmctl.utils.full_hash import generate_full_hash_image, shorten_hash
 from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
 if TYPE_CHECKING:
@@ -476,3 +476,65 @@ def import_image_and_register(input: ImageImportInput) -> ImageFetchResult:
     full_hash = register_fetched_image(result, spec)
 
     return ImageFetchResult(result=result, full_hash=full_hash)
+
+
+def warm_image_for_ready_pool(image_id: str) -> Path:
+    """Pre-decompress image to ready pool for fast VM creation.
+
+    This ensures the image is decompressed in tmpfs/RAM ahead of time,
+    so VM creation can use fast copy instead of waiting for decompression.
+
+    Args:
+        image_id: Image ID, hash prefix, or OS slug (e.g., "ubuntu-24.04", "abc123")
+
+    Returns:
+        Path to the warmed image in ready pool
+
+    Raises:
+        ImageError: If image not found or warming fails
+    """
+    from mvmctl.core.image import ensure_image_in_ready_pool, get_ready_pool_dir
+
+    cache_dir = get_cache_dir()
+
+    # Find the image by ID prefix or OS slug
+    matches = find_images_by_id_prefix(cache_dir, image_id)
+
+    if not matches:
+        raise ImageError(f"Image not found: {image_id}")
+
+    if len(matches) > 1:
+        # Check if any match the ID exactly as OS slug
+        for full_hash, meta in matches:
+            if meta.get("os_slug") == image_id or meta.get("internal_id") == image_id:
+                matches = [(full_hash, meta)]
+                break
+        if len(matches) > 1:
+            ids = [shorten_hash(h) for h, _ in matches[:5]]
+            raise ImageError(f"Ambiguous image ID '{image_id}' matches: {', '.join(ids)}...")
+
+    full_hash, metadata = matches[0]
+    image_path = Path(metadata.get("path", ""))
+
+    if not image_path.exists():
+        raise ImageError(f"Image file not found: {image_path}")
+
+    # Determine filesystem type from path or metadata
+    fs_type = metadata.get("fs_type", "ext4")
+    if not fs_type and image_path.suffix:
+        fs_type = image_path.suffix.lstrip(".")
+    if not fs_type:
+        fs_type = "ext4"
+
+    # Check if already warmed
+    ready_pool_path = get_ready_pool_dir() / f"{full_hash}.{fs_type}"
+    if ready_pool_path.exists():
+        logger.info("Image already warmed: %s", ready_pool_path)
+        return ready_pool_path
+
+    # Decompress to ready pool
+    logger.info("Warming image to ready pool: %s", image_path.name)
+    warmed_path = ensure_image_in_ready_pool(image_path, full_hash, fs_type)
+
+    logger.info("Image warmed successfully: %s", warmed_path)
+    return warmed_path

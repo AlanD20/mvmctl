@@ -808,3 +808,39 @@ def image_import(
         print_success(f"Default image set to: {image_id}")
 
     raise typer.Exit(code=0)
+
+
+@image_app.command(name="warm")
+def image_warm(
+    image_id: str = typer.Argument(
+        ..., help="Image ID, hash prefix, or OS slug to warm (e.g., 'ubuntu-24.04', 'abc123')"
+    ),
+) -> None:
+    """Pre-decompress image to ready pool for fast VM creation.
+
+    This command decompresses the image to tmpfs/RAM ahead of time,
+    so subsequent VM creations can use fast copy instead of waiting
+    for decompression.
+
+    Examples:
+        # Warm an image by OS slug:
+        mvm image warm ubuntu-24.04
+
+        # Warm by image ID prefix:
+        mvm image warm abc123
+    """
+    from mvmctl.api.image import warm_image_for_ready_pool
+
+    try:
+        warmed_path = warm_image_for_ready_pool(image_id)
+        size_mb = warmed_path.stat().st_size / (1024 * 1024)
+        print_success(f"Image warmed successfully: {image_id}")
+        print_info(f"  Path: {warmed_path}")
+        print_info(f"  Size: {size_mb:.1f} MB")
+        print_info("  Ready for fast VM creation!")
+    except ImageError as e:
+        print_error(str(e))
+        raise typer.Exit(code=1)
+    except Exception as e:
+        print_error(f"Failed to warm image: {e}")
+        raise typer.Exit(code=1)
