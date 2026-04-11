@@ -296,6 +296,17 @@ class MVMDatabase:
             return None
         return Kernel(**dict(row))
 
+    def get_kernel_by_version_and_type(self, version: str, type: str) -> Optional[Kernel]:
+        """Return a kernel by its version and type, or None if not found."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM kernels WHERE version = ? AND type = ? LIMIT 1",
+                (version, type),
+            ).fetchone()
+        if row is None:
+            return None
+        return Kernel(**dict(row))
+
     # -------------------------------------------------------------------------
     # binaries
     # -------------------------------------------------------------------------
@@ -329,6 +340,17 @@ class MVMDatabase:
                 (name,),
             ).fetchall()
         return [Binary(**dict(row)) for row in rows]
+
+    def get_binary_by_name_and_version(self, name: str, version: str) -> Optional[Binary]:
+        """Return a binary by its name and version, or None if not found."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM binaries WHERE name = ? AND version = ? LIMIT 1",
+                (name, version),
+            ).fetchone()
+        if row is None:
+            return None
+        return Binary(**dict(row))
 
     def upsert_binary(self, binary: Binary) -> None:
         """Insert or replace a binary record."""
@@ -440,6 +462,14 @@ class MVMDatabase:
     def find_vm_by_ip(self, ipv4: str) -> Optional[VMInstance]:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM vm_instances WHERE ipv4 = ?", (ipv4,)).fetchone()
+        if row is None:
+            return None
+        return VMInstance(**dict(row))
+
+    def find_vm_by_mac(self, mac: str) -> Optional[VMInstance]:
+        """Return a VM by MAC address, or None if not found."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM vm_instances WHERE mac = ?", (mac,)).fetchone()
         if row is None:
             return None
         return VMInstance(**dict(row))

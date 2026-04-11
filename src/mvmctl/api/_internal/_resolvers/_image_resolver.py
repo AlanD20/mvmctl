@@ -2,106 +2,67 @@
 
 from __future__ import annotations
 
-import hashlib
-from pathlib import Path
+from dataclasses import dataclass
 
-from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.exceptions import AssetNotFoundError
-from mvmctl.utils.fs import get_cache_dir, get_images_dir
+from mvmctl.exceptions import ImageNotFoundError
+from mvmctl.models.image import ImageItem
 
 __all__ = [
-    "resolve_image_hash",
-    "resolve_image_multi_strategy",
+    "ImageResolver",
+    "ImageResolveResult",
 ]
 
 
-def resolve_image_hash(image_path: Path, image_hash: str | None) -> str | None:
-    """Resolve image hash from path.
-
-    Args:
-        image_path: Path to image file
-        image_hash: Optional pre-computed hash
-
-    Returns:
-        Image hash or None if file doesn't exist
-    """
-    if image_hash:
-        return image_hash
-
-    if image_path and image_path.exists():
-        return hashlib.sha256(image_path.read_bytes()).hexdigest()
-
-    return None
+@dataclass
+class ImageResolveResult:
+    items: list[ImageItem]
+    errors: list[str]
+    exit_code: int
 
 
-def resolve_image_multi_strategy(value: str) -> Path:
-    """Resolve image value to path using multiple strategies.
+class ImageResolver:
+    """Resolver for image resources."""
 
-    Resolution order:
-    1. Direct path (if contains '/' or ends with .ext4/.btrfs)
-    2. YAML image name lookup (via os_slug)
-    3. Short-ID resolution against SQLite database
-    """
-    from mvmctl.core.metadata import list_image_entries
+    def __init__(self) -> None:
+        self._db = MVMDatabase()
 
-    images_dir = get_images_dir()
-    cache_dir = get_cache_dir()
+    def by_id(self, image_id: str) -> ImageItem:
+        """Resolve by full ID."""
+        matches = self._db.find_images_by_prefix(image_id)
+        if len(matches) == 0:
+            raise ImageNotFoundError(f"Image not found: {image_id!r}")
+        if len(matches) > 1:
+            raise ImageNotFoundError(f"Image ID is ambiguous: {image_id!r}")
+        return ImageItem.from_db(matches[0])
 
-    # Direct path check
-    if "/" in value or value.endswith((".ext4", ".btrfs")):
-        path = Path(value)
-        if path.exists():
-            return path
+    def by_os_slug(self, os_slug: str) -> ImageItem:
+        """Resolve by OS slug."""
+        db_image = self._db.get_image_by_os_slug(os_slug)
+        if db_image is None:
+            raise ImageNotFoundError(f"Image not found: {os_slug!r}")
+        return ImageItem.from_db(db_image)
 
-    # YAML image name lookup (check os_slug in metadata)
-    all_entries = list_image_entries(cache_dir)
-    for full_key, meta in all_entries.items():
-        os_slug = str(meta.get("os_slug", ""))
-        if os_slug == value:
-            path_str = str(meta.get("path", ""))
-            if path_str:
-                candidate = images_dir / path_str
-                if candidate.exists():
-                    return candidate
-            # Try full_key with extensions
-            for ext in (".ext4", ".btrfs"):
-                candidate = images_dir / f"{full_key}{ext}"
-                if candidate.exists():
-                    return candidate
-            # Try just the value name with extensions
-            for ext in (".ext4", ".btrfs"):
-                candidate = images_dir / f"{value}{ext}"
-                if candidate.exists():
-                    return candidate
+    def resolve(self, value: str) -> ImageItem:
+        """Resolve image by os_slug or ID prefix."""
+        try:
+            return self.by_os_slug(value)
+        except ImageNotFoundError:
+            pass
+        return self.by_id(value)
 
-    # ID prefix resolution via database
-    db = MVMDatabase()
-    matches = db.find_images_by_prefix(value)
+    def resolve_many(self, identifiers: list[str]) -> ImageResolveResult:
+        """Resolve multiple image identifiers by os_slug or id."""
+        items: list[ImageItem] = []
+        errors: list[str] = []
 
-    if len(matches) != 1:
-        raise AssetNotFoundError(f"Image ID not found or ambiguous: {value!r}")
+        for identifier in identifiers:
+            try:
+                item = self.resolve(identifier)
+                if item not in items:
+                    items.append(item)
+            except Exception as e:
+                errors.append(f"{identifier}: {e}")
 
-    image = matches[0]
-    filename = image.path
-
-    # Try the path from database record
-    if filename:
-        # Try compressed version first
-        compressed = images_dir / f"{filename}.zst"
-        if compressed.exists():
-            return compressed
-        candidate = images_dir / filename
-        if candidate.exists():
-            return candidate
-
-    # Try with image ID and supported extensions
-    for ext in SUPPORTED_IMAGE_EXTENSIONS:
-        compressed = images_dir / f"{image.id}{ext}.zst"
-        if compressed.exists():
-            return compressed
-        candidate = images_dir / f"{image.id}{ext}"
-        if candidate.exists():
-            return candidate
-
-    raise AssetNotFoundError(f"Image not found: {value!r}")
+        exit_code = 1 if errors and not items else 0
+        return ImageResolveResult(items=items, errors=errors, exit_code=exit_code)

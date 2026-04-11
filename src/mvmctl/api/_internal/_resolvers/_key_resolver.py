@@ -2,61 +2,48 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import dataclass
+
+from mvmctl.exceptions import KeyNotFoundError
 
 __all__ = [
-    "resolve_default_public_keys",
+    "KeyResolver",
+    "KeyResolveResult",
 ]
 
 
-def resolve_default_public_keys(
-    ssh_key: str | list[str] | None,
-) -> str | list[str] | None:
-    """Resolve SSH key specification to key content.
+@dataclass
+class KeyResolveResult:
+    items: list[str]
+    errors: list[str]
+    exit_code: int
 
-    Args:
-        ssh_key: Can be:
-            - None: Returns None (use VM default)
-            - String "default": Fetch default keys
-            - Single key path: Read and return content
-            - List of key paths: Read and return list of contents
 
-    Returns:
-        Resolved key content or None
-    """
-    if ssh_key is None:
-        return None
+class KeyResolver:
+    """Resolver for SSH key resources."""
 
-    if ssh_key == "default":
-        from mvmctl.core.key_manager import get_default_keys
+    def by_name(self, name: str) -> str:
+        """Resolve key by name (reads from ~/.mvmctl/keys/ directory)."""
+        from mvmctl.core.key_manager import resolve_key_input
 
-        return get_default_keys()
+        return resolve_key_input(name)
 
-    if isinstance(ssh_key, list):
-        resolved: list[str] = []
-        for key in ssh_key:
-            if key == "default":
-                from mvmctl.core.key_manager import get_default_keys
+    def resolve(self, value: str) -> str:
+        """Resolve key by name."""
+        return self.by_name(value)
 
-                default_keys = get_default_keys()
-                if isinstance(default_keys, list):
-                    resolved.extend(default_keys)
-                elif default_keys:
-                    resolved.append(default_keys)
-            else:
-                key_path = Path(key)
-                if not key_path.exists():
-                    from mvmctl.exceptions import VMCreateError
+    def resolve_many(self, identifiers: list[str]) -> KeyResolveResult:
+        """Resolve multiple key identifiers by name."""
+        items: list[str] = []
+        errors: list[str] = []
 
-                    raise VMCreateError(f"SSH key file not found: {key}")
-                resolved.append(key_path.read_text().strip())
-        return resolved
+        for identifier in identifiers:
+            try:
+                item = self.resolve(identifier)
+                if item not in items:
+                    items.append(item)
+            except KeyNotFoundError as e:
+                errors.append(f"{identifier}: {e}")
 
-    # Single key path
-    key_path = Path(ssh_key)
-    if not key_path.exists():
-        from mvmctl.exceptions import VMCreateError
-
-        raise VMCreateError(f"SSH key file not found: {ssh_key}")
-
-    return key_path.read_text().strip()
+        exit_code = 1 if errors and not items else 0
+        return KeyResolveResult(items=items, errors=errors, exit_code=exit_code)

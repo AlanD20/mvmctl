@@ -9,6 +9,26 @@ class VMNotFoundError(MVMError):
     """VM does not exist in state."""
 
 
+class BinaryNotFoundError(MVMError):
+    """Binary does not exist in registry."""
+
+
+class KernelNotFoundError(MVMError):
+    """Kernel does not exist in registry."""
+
+
+class NetworkNotFoundError(MVMError):
+    """Network does not exist in registry."""
+
+
+class KeyNotFoundError(MVMError):
+    """SSH key does not exist in registry."""
+
+
+class ImageNotFoundError(MVMError):
+    """Image does not exist in registry."""
+
+
 class NetworkError(MVMError):
     """Network setup/teardown failure."""
 

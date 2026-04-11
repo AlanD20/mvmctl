@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from mvmctl.db.models import Network
+from mvmctl.exceptions import NetworkNotFoundError
+
 __all__ = [
     "NetworkResolver",
+    "NetworkResolveResult",
 ]
+
+
+@dataclass
+class NetworkResolveResult:
+    items: list[Network]
+    errors: list[str]
+    exit_code: int
 
 
 class NetworkResolver:
@@ -15,26 +28,42 @@ class NetworkResolver:
 
         self._db = MVMDatabase()
 
-    def resolve(self, network_name: str | None) -> tuple[str, str]:
-        """Resolve network name to name and network_id.
+    def by_id(self, network_id: str) -> Network:
+        """Resolve network by ID prefix."""
+        matches = self._db.find_networks_by_prefix(network_id)
+        if len(matches) == 0:
+            raise NetworkNotFoundError(f"Network not found: {network_id}")
+        if len(matches) > 1:
+            raise NetworkNotFoundError(f"Network ID is ambiguous: {network_id}")
+        return matches[0]
 
-        Args:
-            network_name: Network name or None for default
-
-        Returns:
-            Tuple of (network_name, network_id)
-        """
-        if network_name is None:
-            default_network = self._db.get_default_network()
-            if default_network is None:
-                from mvmctl.exceptions import NetworkError
-
-                raise NetworkError("No default network configured. Run 'mvm network create' first.")
-            return default_network.name, default_network.id
-
-        network = self._db.get_network_by_name(network_name)
+    def by_name(self, name: str) -> Network:
+        """Resolve network by name."""
+        network = self._db.get_network_by_name(name)
         if network is None:
-            from mvmctl.exceptions import NetworkError
+            raise NetworkNotFoundError(f"Network not found: {name}")
+        return network
 
-            raise NetworkError(f"Network not found: {network_name}")
-        return network.name, network.id
+    def resolve(self, value: str) -> Network:
+        """Resolve network by name or ID prefix."""
+        try:
+            return self.by_name(value)
+        except NetworkNotFoundError:
+            pass
+        return self.by_id(value)
+
+    def resolve_many(self, identifiers: list[str]) -> NetworkResolveResult:
+        """Resolve multiple network identifiers by name or id."""
+        items: list[Network] = []
+        errors: list[str] = []
+
+        for identifier in identifiers:
+            try:
+                item = self.resolve(identifier)
+                if item not in items:
+                    items.append(item)
+            except Exception as e:
+                errors.append(f"{identifier}: {e}")
+
+        exit_code = 1 if errors and not items else 0
+        return NetworkResolveResult(items=items, errors=errors, exit_code=exit_code)
