@@ -21,6 +21,7 @@ from mvmctl.core.firecracker import FirecrackerClient
 from mvmctl.core.network import delete_tap, remove_iptables_forward_rules
 from mvmctl.exceptions import NetworkError, ProcessError
 from mvmctl.utils.fs import read_pid_file, write_exit_code, write_pid_file
+from mvmctl.utils.process_signals import ProcessSignalHandler
 
 logger = logging.getLogger(__name__)
 
@@ -98,26 +99,13 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None, force: bool = F
     if pid is None:
         return
 
-    def _is_alive(process_id: int) -> bool:
-        try:
-            os.kill(process_id, 0)
-            return True
-        except (ProcessLookupError, PermissionError):
-            return False
+    handler = ProcessSignalHandler(pid)
 
     if force:
-        if _is_alive(pid):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
-            time.sleep(float(FIRECRACKER_SIGTERM_WAIT_S))
-
-        if _is_alive(pid):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+        handler.graceful_shutdown(
+            timeout=int(FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S),
+            sigterm_wait=float(FIRECRACKER_SIGTERM_WAIT_S),
+        )
         return
 
     if socket_path is not None and Path(socket_path).exists():
@@ -131,21 +119,13 @@ def graceful_shutdown(pid: int | None, socket_path: Path | None, force: bool = F
         poll_steps = int(FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S / CONST_POLL_STEP_SECONDS)
         for _ in range(poll_steps):
             time.sleep(FIRECRACKER_SHUTDOWN_POLL_INTERVAL_S)
-            if not _is_alive(pid):
+            if not handler.is_running():
                 break
 
-    if _is_alive(pid):
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
-        time.sleep(float(FIRECRACKER_SIGTERM_WAIT_S))
-
-    if _is_alive(pid):
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
+    handler.graceful_shutdown(
+        timeout=int(FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S),
+        sigterm_wait=float(FIRECRACKER_SIGTERM_WAIT_S),
+    )
 
 
 def pause_vm(fc_client: Any) -> None:

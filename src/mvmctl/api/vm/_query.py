@@ -20,9 +20,9 @@ from mvmctl.constants import (
 )
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.vm_manager import VMManager
-from mvmctl.core.vm_monitor import reconcile_vm
 from mvmctl.exceptions import VMNotFoundError
-from mvmctl.models import VMInstance, VMStatus
+from mvmctl.db.models import VMInstance
+from mvmctl.models import VMStatus
 from mvmctl.utils.fs import get_vm_dir_by_hash, is_file_missing
 from mvmctl.utils.process import is_process_running
 
@@ -70,7 +70,7 @@ def resolve_vm_target_instances(
     identifiers = ids + names
     result = resolver.resolve_many(identifiers)
     return ResolveVMInstancesResult(
-        targets=result.items,  # type: ignore[arg-type]
+        targets=result.items,
         errors=result.errors,
         exit_code=result.exit_code,
     )
@@ -82,20 +82,11 @@ def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) 
     Reconciles live VM state from process status and Firecracker API
     before returning the list.
     """
-    import mvmctl.api.vm
-
-    manager = vm_manager or mvmctl.api.vm.get_vm_manager()
-    all_vms = manager.list_all()
-
-    # Reconcile live state for VMs that might have changed
-    for vm in all_vms:
-        # Skip VMs with no PID — they're definitively stopped/unstarted
-        if vm.pid is not None:
-            new_state = reconcile_vm(vm, manager)
-            vm.status = new_state
+    db = MVMDatabase()
+    all_vms = db.list_vms()
 
     if not include_stopped:
-        terminal_states = {VMStatus.STOPPED, VMStatus.ERROR, VMStatus.CRASHED}
+        terminal_states = {VMStatus.STOPPED.value, VMStatus.ERROR.value, VMStatus.CRASHED.value}
         return [vm for vm in all_vms if vm.status not in terminal_states]
     return all_vms
 
@@ -173,12 +164,12 @@ def _resolve_rootfs_path(vm: VMInstance, vm_dir: Path) -> tuple[Path | None, str
     """Resolve rootfs path from multiple sources.
 
     Checks sources in priority order:
-    1. vm.config.rootfs_path - if config exists and path is set
+    1. vm.rootfs_path - if path is set
     2. VM-local rootfs{suffix} - fallback for legacy VMs
     """
-    # Priority 1: Check config.rootfs_path if config exists
-    if vm.config is not None and vm.config.rootfs_path is not None:
-        config_path = Path(vm.config.rootfs_path)
+    # Priority 1: Check rootfs_path if set
+    if vm.rootfs_path:
+        config_path = Path(vm.rootfs_path)
         if config_path.exists():
             return config_path, "config"
 
@@ -233,14 +224,14 @@ def _gather_vm_details(vm: VMInstance) -> VMInspectInfo:
     return VMInspectInfo(
         id=vm.id,
         name=vm.name,
-        status=vm.status.value,
-        created_at=vm.created_at.isoformat() if vm.created_at else None,
+        status=vm.status,
+        created_at=vm.created_at,
         pid=vm.pid,
         ip=vm.ipv4,
         mac=vm.mac,
         network_name=network_name,
         tap_device=vm.tap_device,
-        cloud_init_mode=vm.config.cloud_init_mode.value if vm.config else "inject",
+        cloud_init_mode=vm.cloud_init_mode or "inject",
         image_id=vm.image_id,
         image_name=image_name,
         kernel_id=vm.kernel_id,
@@ -286,9 +277,9 @@ def get_vm_status_with_exit_code(vm: VMInstance) -> tuple[str, int | None]:
         return f"exited({exit_code})", exit_code
 
     # Check VM state from metadata
-    if vm.status == VMStatus.RUNNING:
+    if vm.status == VMStatus.RUNNING.value:
         return "exited", None  # Was running but process died
-    return vm.status.value, None
+    return vm.status, None
 
 
 def _get_exit_code_from_sources(vm: VMInstance) -> int | None:
@@ -356,7 +347,7 @@ def compute_vm_is_missing(vm: VMInstance) -> bool:
     vm_dir = get_vm_dir_by_hash(vm.id)
     dir_missing = is_file_missing(vm_dir)
     process_running = is_process_running(vm.pid) if vm.pid else False
-    return dir_missing or (vm.status == VMStatus.RUNNING and not process_running)
+    return dir_missing or (vm.status == VMStatus.RUNNING.value and not process_running)
 
 
 def export_vm_config(name: str) -> "VMExportConfig":
@@ -398,11 +389,6 @@ def export_vm_config(name: str) -> "VMExportConfig":
             vm = resolver.by_name(name)
         except VMNotFoundError:
             raise VMNotFoundError(f"VM '{name}' not found")
-
-    if vm.config is None:
-        raise VMNotFoundError(f"VM '{name}' has no configuration")
-
-    config = vm.config
 
     # Resolve image os_slug from metadata
     image_os_slug = ""
@@ -496,8 +482,8 @@ def export_vm_config(name: str) -> "VMExportConfig":
     return VMExportConfig(
         name=vm.name,
         compute=VMExportComputeConfig(
-            vcpus=config.vcpu_count,
-            mem=config.mem_size_mib,
+            vcpus=vm.vcpu_count,
+            mem=vm.mem_size_mib,
         ),
         image=VMExportImageConfig(
             os_slug=image_os_slug,
@@ -517,17 +503,17 @@ def export_vm_config(name: str) -> "VMExportConfig":
             mac=network_mac,
         ),
         boot=VMExportBootConfig(
-            args=config.boot_args,
-            enable_console=config.enable_console,
+            args=vm.lsm_flags,  # Using lsm_flags as boot args fallback
+            enable_console=vm.enable_console,
         ),
         firecracker=VMExportFirecrackerConfig(
-            enable_api_socket=config.enable_api_socket,
-            enable_pci=config.enable_pci,
-            lsm_flags=config.lsm_flags,
+            enable_api_socket=vm.enable_api_socket,
+            enable_pci=vm.enable_pci,
+            lsm_flags=vm.lsm_flags,
         ),
         cloud_init=VMExportCloudInitConfig(
-            mode=config.cloud_init_mode.value,
-            user=config.name,  # VM name doubles as default user
-            keep_iso=config.keep_cloud_init_iso,
+            mode=vm.cloud_init_mode or "inject",
+            user=vm.name,  # VM name doubles as default user
+            keep_iso=False,  # Default value
         ),
     )
