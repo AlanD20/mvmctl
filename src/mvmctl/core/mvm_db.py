@@ -150,7 +150,7 @@ class MVMDatabase:
                     compressed_size, original_size, compression_ratio,
                     compressed_format, minimum_rootfs_size_mib, pulled_at, is_default, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
+                ON CONFLICT(os_slug) DO UPDATE SET
                     os_slug = excluded.os_slug,
                     os_name = excluded.os_name,
                     arch = excluded.arch,
