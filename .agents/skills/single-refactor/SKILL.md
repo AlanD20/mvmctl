@@ -1,7 +1,7 @@
 ---
-name: free-refactor
+name: single-refactor
 version: 1.0.0
-description: Guide autonomous deep refactoring for mvmctl
+description: Guide single-file deep refactoring for mvmctl
 author: mvmctl team
 license: MIT
 compatibility: opencode
@@ -28,7 +28,7 @@ Use me when refactoring involves:
 - Architectural patterns that require deep understanding
 - Problems where the solution isn't obvious from the surface
 
-I am NOT for coordination or delegation-heavy work — use `@.agents/skills/recipe-refactor/` skill for that.
+I am NOT for coordination or delegation-heavy work — use `@.agents/skills/multi-refactor/` skill for that.
 
 ## Core Principles
 

@@ -1,7 +1,7 @@
 ---
-name: recipe-refactor
+name: multi-refactor
 version: 1.0.0
-description: Guide orchestration-driven refactoring for mvmctl
+description: Guide multi-file orchestrated refactoring for mvmctl
 author: mvmctl team
 license: MIT
 compatibility: opencode
@@ -28,7 +28,7 @@ Use me when refactoring involves:
 - Complex multi-step workflows that need orchestration
 - Delegating investigation to specialists before implementation
 
-I am NOT for deep autonomous technical problem-solving — use `@.agents/skills/free-refactor/` skill for that.
+I am NOT for deep autonomous technical problem-solving — use `@.agents/skills/single-refactor/` skill for that.
 
 ## Core Principles
 
@@ -83,7 +83,7 @@ When presenting results or delegating work:
 When the technical problem runs deeper than coordination:
 
 1. You are a orchestrator, not a deep technical specialist
-2. If you find yourself stuck on a hard technical detail → escalate to `@free-refactor`
+2. If you find yourself stuck on a hard technical detail → escalate to `@single-refactor`
 3. Present your findings clearly so the specialist can hit the ground running
 4. Don't pretend to know what you don't
 
@@ -108,7 +108,7 @@ When the technical problem runs deeper than coordination:
 
 ### Step 3: Delegation (if needed)
 ```
-- For technical deep dives: delegate to @free-refactor
+- For technical deep dives: delegate to @single-refactor
 - For implementation: delegate to appropriate subagents
 - For verification: run CI checks yourself
 ```
