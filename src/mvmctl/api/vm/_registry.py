@@ -16,13 +16,17 @@ from mvmctl.api.vm._creation import (
     VMCreationContext,
 )
 from mvmctl.api.vm._creation_resolver import VMCreationResolver
+from mvmctl.api.vm._removal import VMBulkCleanupContext, VMRemovalContext
 from mvmctl.api.vm._spawn import spawn_firecracker_vm
 from mvmctl.constants import (
     CONST_VM_MEM_MAX_MIB,
     CONST_VM_MEM_MIN_MIB,
     CONST_VM_VCPU_MAX,
     CONST_VM_VCPU_MIN,
+    DEFAULT_BRIDGE_NAME,
     DEFAULT_FC_CONFIG_FILENAME,
+    DEFAULT_FC_PID_FILENAME,
+    DEFAULT_NETWORK_NAME,
     MAX_VMS,
 )
 from mvmctl.core.config_gen import ConfigGenerator
@@ -46,11 +50,12 @@ from mvmctl.exceptions import (
     MVMError,
     NetworkError,
     VMCreateError,
+    VMNotFoundError,
 )
 from mvmctl.models.vm import VMConfig, VMInstance, VMStatus
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.disk_size import parse_disk_size
-from mvmctl.utils.fs import get_vm_dir_by_hash
+from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
 from mvmctl.utils.network import generate_tap_name
 
 if TYPE_CHECKING:
@@ -459,4 +464,113 @@ def _sigterm_handler(ctx: VMCreationContext, signum: int) -> None:
     raise SystemExit(CONST_SIGNAL_EXIT_CODE_BASE + signum)
 
 
-__all__ = ["create_vm"]
+def remove_vm(
+    name: str, vm_manager: VMManager | None = None, force: bool = False, fast: bool = False
+) -> None:
+    """Remove a VM and clean up all associated resources.
+
+    This is the orchestrator function that coordinates all components
+    for VM removal using the class-based architecture.
+
+    Args:
+        name: The name of the VM to remove.
+        vm_manager: Optional VM manager instance for dependency injection.
+        force: If True, forcefully kill the VM process immediately.
+        fast: If True, skip non-essential cleanup operations.
+
+    Raises:
+        VMNotFoundError: If the VM is not found.
+        MVMError: If removal fails.
+    """
+    from mvmctl.api.host import check_privileges_interactive
+    from mvmctl.api.network import get_network
+    from mvmctl.core.mvm_db import MVMDatabase
+    from mvmctl.core.vm_process import _read_pid_file
+
+    check_privileges_interactive("/usr/sbin/ip", f"remove VM '{name}'")
+
+    manager = vm_manager or get_vm_manager()
+    vm = manager.get(name)
+    if not vm:
+        raise VMNotFoundError(f"VM '{name}' not found")
+
+    vm_dir = get_vm_dir_by_hash(vm.id)
+    # Get network name from network_id
+    db_net = MVMDatabase().get_network(vm.network_id) if vm.network_id else None
+    net_name = db_net.name if db_net else DEFAULT_NETWORK_NAME
+    net_config = get_network(net_name)
+    bridge = net_config.bridge if net_config else DEFAULT_BRIDGE_NAME
+
+    # Create removal context
+    ctx = VMRemovalContext(
+        vm=vm,
+        vm_dir=vm_dir,
+        net_config=net_config,
+        bridge=bridge,
+        manager=manager,
+    )
+
+    # Read PID from file or use VM's recorded PID
+    pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
+    pid = _read_pid_file(pid_file)
+    if pid is None:
+        pid = vm.pid
+    ctx.pid = pid
+
+    # Shutdown the VM
+    ctx.shutdown(force=force)
+
+    # Wait and record exit code
+    ctx.wait_and_record_exit()
+
+    # Clean up all resources
+    ctx.cleanup_all(fast=fast)
+
+    # Deregister and remove VM directory
+    ctx.deregister(fast=fast)
+
+    # Log the removal
+    log_audit("vm.remove", f"name={name}")
+
+
+def cleanup_vms(
+    all_vms: bool = False, dry_run: bool = False, vm_manager: VMManager | None = None
+) -> list[VMInstance]:
+    """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules.
+
+    This is the orchestrator function that coordinates bulk VM cleanup
+    using the class-based architecture.
+
+    Args:
+        all_vms: If True, clean up all VMs. Otherwise, only clean up non-running VMs.
+        dry_run: If True, return the list of VMs that would be cleaned up without actually cleaning.
+        vm_manager: Optional VM manager instance for dependency injection.
+
+    Returns:
+        List of VM instances that were (or would be) cleaned up.
+    """
+    from mvmctl.api.host import check_privileges_interactive
+
+    check_privileges_interactive("/usr/sbin/ip", "cleanup VMs")
+
+    manager = vm_manager or get_vm_manager()
+    vms = manager.list_all()
+
+    targets = vms if all_vms else [v for v in vms if v.status != VMStatus.RUNNING]
+
+    if dry_run or not targets:
+        return targets
+
+    cache_dir = Path(get_cache_dir())
+
+    # Create bulk cleanup context
+    ctx = VMBulkCleanupContext(manager=manager, cache_dir=cache_dir)
+    ctx.set_targets(targets)
+
+    # Clean up all targets
+    ctx.cleanup_all()
+
+    return targets
+
+
+__all__ = ["create_vm", "remove_vm", "cleanup_vms"]
