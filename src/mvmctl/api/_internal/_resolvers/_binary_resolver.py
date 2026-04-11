@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import BinaryNotFoundError
 from mvmctl.models.binary import BinaryItem
+from src.mvmctl.db.models import Binary
 
 __all__ = [
     "BinaryResolver",
@@ -15,7 +17,7 @@ __all__ = [
 
 @dataclass
 class BinaryResolveResult:
-    items: list[BinaryItem]
+    items: list[Binary]
     errors: list[str]
     exit_code: int
 
@@ -23,34 +25,32 @@ class BinaryResolveResult:
 class BinaryResolver:
     """Resolver for firecracker binary."""
 
-    def __init__(self) -> None:
-        from mvmctl.core.mvm_db import MVMDatabase
+    def __init__(self, db: MVMDatabase | None = None) -> None:
+        self._db = db if db is not None else MVMDatabase()
 
-        self._db = MVMDatabase()
-
-    def by_id(self, binary_id: str) -> BinaryItem:
+    def by_id(self, binary_id: str) -> Binary:
         """Resolve binary by ID prefix."""
         matches = self._db.find_binaries_by_prefix(binary_id)
         if len(matches) == 0:
             raise BinaryNotFoundError(f"Binary not found: {binary_id}")
         if len(matches) > 1:
             raise BinaryNotFoundError(f"Binary ID is ambiguous: {binary_id}")
-        return BinaryItem.from_db(matches[0])
+        return matches[0]
 
-    def by_name_version(self, name: str, version: str) -> BinaryItem:
+    def by_name_version(self, name: str, version: str) -> Binary:
         """Resolve binary by name and version (both required)."""
         binary = self._db.get_binary_by_name_and_version(name, version)
         if binary is None:
             raise BinaryNotFoundError(f"Binary not found: name={name!r}, version={version!r}")
-        return BinaryItem.from_db(binary)
+        return binary
 
-    def resolve(self, value: str) -> BinaryItem:
+    def resolve(self, value: str) -> Binary:
         """Resolve binary by ID prefix."""
         return self.by_id(value)
 
     def resolve_many(self, identifiers: list[str | list[str]]) -> BinaryResolveResult:
         """Resolve multiple binary identifiers by id or [name, version] pairs."""
-        items: list[BinaryItem] = []
+        items: list[Binary] = []
         errors: list[str] = []
 
         for identifier in identifiers:

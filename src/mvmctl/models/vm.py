@@ -210,7 +210,7 @@ class VMInspectInfo:
     image_name: str | None
     kernel_id: str | None
     kernel_name: str | None
-    paths: dict[str, str | None]  # vm_dir, rootfs, rootfs_source, config
+    paths: dict[str, str | None]  # vm_dir, rootfs, config
     features: dict[str, bool]  # api_socket, console, nocloud_net
     nocloud_net: dict[str, Any] | None = None
     console: dict[str, Any] | None = None

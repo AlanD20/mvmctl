@@ -12,9 +12,16 @@ from mvmctl.api._internal._resolvers import (
     ImageResolver,
     NetworkResolver,
 )
-from mvmctl.constants import DEFAULT_NETWORK_NAME
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.exceptions import AssetNotFoundError, VMCreateError
+from mvmctl.exceptions import (
+    BinaryNotFoundError,
+    ImageNotFoundError,
+    KernelNotFoundError,
+    NetworkNotFoundError,
+)
+from src.mvmctl.api._internal._resolvers._kernel_resolver import KernelResolver
+from src.mvmctl.db.models import Binary, Image, Kernel, Network
+from src.mvmctl.utils.validation import validate_mac
 
 if TYPE_CHECKING:
     from mvmctl.models.vm import VMCreateInput
@@ -25,40 +32,42 @@ logger = logging.getLogger(__name__)
 class VMInputResolver:
     """Resolve all DB-backed defaults using a single DB instance."""
 
-    def __init__(self) -> None:
+    _result: VMResolvedDependencies | None = None
+
+    def __init__(self, db: MVMDatabase | None = None) -> None:
         """Initialize the resolver with database and sub-resolvers."""
-        self._db = MVMDatabase()
-        self._network_resolver = NetworkResolver()
-        self._binary_resolver = BinaryResolver()
-        self._image_resolver = ImageResolver()
+        self._db = db if db is not None else MVMDatabase()
+        self._network_resolver = NetworkResolver(self._db)
+        self._binary_resolver = BinaryResolver(self._db)
+        self._image_resolver = ImageResolver(self._db)
+        self._kernel_resolver = KernelResolver(self._db)
+
+    def get_result(self) -> VMResolvedDependencies | None:
+        return self._result
 
     def resolve(self, input: VMCreateInput, vm_id: str) -> VMResolvedDependencies:
         """Resolve all inputs to explicit values."""
-        name = input.name
-        vcpus = input.vcpus
-        mem = input.mem
-        user = input.user
 
-        image_path, image_id, image_fs_uuid, image_fs_type = self._resolve_image(input)
-        kernel_path, kernel_id = self._resolve_kernel(input)
-        network_name, network_id = self._resolve_network(input)
-        binary_path, binary_id = self._resolve_binary(input)
-        kernel_args = self._build_kernel_args(input, image_fs_uuid)
+        image = self._resolve_image(input)
+        kernel = self._resolve_kernel(input)
+        network = self._resolve_network(input)
+        fc_binary = self._resolve_binary(input)
+        kernel_args = self._build_kernel_args(input, image.fs_uuid)
 
-        return VMResolvedDependencies(
-            name=name,
+        self._result = VMResolvedDependencies(
+            name=input.name,
             vm_id=vm_id,
-            vcpus=vcpus,
-            mem=mem,
-            user=user,
-            network_name=network_name,
-            network_id=network_id,
-            image_path=image_path,
-            kernel_path=kernel_path,
-            firecracker_bin=binary_path,
-            image_id=image_id,
-            kernel_id=kernel_id,
-            binary_id=binary_id,
+            vcpus=input.vcpus,
+            mem=input.mem,
+            user=input.user,
+            network_name=network.name,
+            network_id=network.id,
+            image_path=Path(image.path),
+            kernel_path=Path(kernel.path),
+            firecracker_bin=fc_binary.path,
+            image_id=image.id,
+            kernel_id=kernel.id,
+            binary_id=fc_binary.id,
             kernel_args=kernel_args,
             cloud_init_mode=input.cloud_init_mode,
             enable_api_socket=input.enable_api_socket,
@@ -70,9 +79,8 @@ class VMInputResolver:
             keep_cloud_init_iso=input.keep_cloud_init_iso,
             nocloud_net_port=input.nocloud_net_port,
             skip_cleanup=input.skip_cleanup,
-            image_fs_uuid=image_fs_uuid,
-            image_fs_type=image_fs_type,
-            image_hash=image_id,
+            image_fs_uuid=image.fs_uuid,
+            image_fs_type=image.fs_type,
             mac=input.mac,
             ip=input.ip,
             ssh_key=input.ssh_key,
@@ -81,113 +89,93 @@ class VMInputResolver:
             cloud_init_iso_path=input.cloud_init_iso_path,
         )
 
-    def _resolve_image(self, input: VMCreateInput) -> tuple[Path, str, str | None, str | None]:
+        return self._result
+
+    def validate(self) -> bool:
+        if self._result is None:
+            return False
+
+        return True
+
+    def _resolve_image(self, input: VMCreateInput) -> Image:
         """Resolve image to path, ID, fs_uuid, and fs_type."""
-        from mvmctl.api.assets import resolve_image_fs_type, resolve_image_fs_uuid
 
         if input.image_path is not None:
-            image_path = input.image_path
-            fs_uuid = input.image_fs_uuid or (
-                resolve_image_fs_uuid(input.image) if input.image else None
+            # TODO: need to identify fs uuid since this is non-imported image
+            # maybe enforce importing?
+            pass
+
+        image = (
+            self._db.get_default_image()
+            if input.image is None
+            else self._image_resolver.resolve(input.image)
+        )
+        if image is None:
+            raise ImageNotFoundError(
+                "No image specified and no default image set. "
+                "Use 'mvm image fetch <name>' then 'mvm image set-default <name>', "
+                "or pass --image."
             )
-            fs_type = input.image_fs_type or (
-                resolve_image_fs_type(input.image) if input.image else None
-            )
-            image_id = str(image_path)
-        else:
-            image_name = input.image
-            if image_name is None:
-                default_image = self._db.get_default_image()
-                if default_image is None:
-                    raise AssetNotFoundError(
-                        "No image specified and no default image set. "
-                        "Use 'mvm image fetch <name>' then 'mvm image set-default <name>', "
-                        "or pass --image."
-                    )
-                image_name = default_image.os_slug
 
-            image_item = self._image_resolver.resolve(image_name)
-            image_path = Path(image_item.path)
-            fs_uuid = input.image_fs_uuid or resolve_image_fs_uuid(image_name)
-            fs_type = input.image_fs_type or resolve_image_fs_type(image_name)
-            image_id = image_item.id
+        return image
 
-        return image_path, image_id, fs_uuid, fs_type
-
-    def _resolve_kernel(self, input: VMCreateInput) -> tuple[Path, str]:
+    def _resolve_kernel(self, input: VMCreateInput) -> Kernel:
         """Resolve kernel to path and ID."""
-        from mvmctl.core.kernel import resolve_kernel_path
-        from mvmctl.utils.fs import get_kernels_dir
 
         if input.kernel_path is not None:
-            kernel_path = input.kernel_path
-            kernel_entry = None
-            if input.kernel:
-                kernel_entry = self._db.get_kernel_by_name(input.kernel)
-            if kernel_entry is None:
-                kernel_entry = self._db.get_default_kernel()
-            kernel_id = kernel_entry.id if kernel_entry else str(kernel_path)
-        elif input.kernel:
-            kernel_path = resolve_kernel_path(input.kernel)
-            kernel_entry = self._db.get_kernel_by_name(input.kernel)
-            kernel_id = kernel_entry.id if kernel_entry else str(kernel_path)
-        else:
-            default_kernel = self._db.get_default_kernel()
-            if default_kernel is not None:
-                kernel_path = get_kernels_dir() / default_kernel.path
-                kernel_id = default_kernel.id
-            else:
-                import os
+            # TODO: kernel is fine to be passed, but maybe enforce importing?
+            pass
 
-                env_kernel = os.environ.get("MVM_KERNEL")
-                if env_kernel:
-                    kernel_path = resolve_kernel_path(env_kernel)
-                else:
-                    from mvmctl.constants import DEFAULT_VM_KERNEL_FILENAME
+        kernel = (
+            self._db.get_default_kernel()
+            if input.kernel is None
+            else self._kernel_resolver.resolve(input.kernel)
+        )
+        if kernel is None:
+            raise KernelNotFoundError(
+                "No kernel specified and no default kernel set. "
+                "Use 'mvm kernel fetch --type <firecracker|official>' then 'mvm kernel set-default <id>', "
+                "or pass --kernel."
+            )
 
-                    kernel_path = get_kernels_dir() / DEFAULT_VM_KERNEL_FILENAME
-                kernel_id = str(kernel_path)
+        return kernel
 
-        return kernel_path, kernel_id
-
-    def _resolve_network(self, input: VMCreateInput) -> tuple[str, str]:
+    def _resolve_network(self, input: VMCreateInput) -> Network:
         """Resolve network to name and ID."""
-        network_name = input.network_name
 
-        if network_name is None:
-            default_network = self._db.get_default_network()
-            if default_network is None:
-                network_name = DEFAULT_NETWORK_NAME
-                db_net = self._db.get_network_by_name(network_name)
-                network_id = db_net.id if db_net else ""
-            else:
-                network_name = default_network.name
-                network_id = default_network.id
+        network = None
+
+        if input.network_name is None:
+            network = self._db.get_default_network()
         else:
-            db_net = self._db.get_network_by_name(network_name)
-            network_id = db_net.id if db_net else ""
+            network = self._network_resolver.resolve(input.network_name)
 
-        return network_name, network_id
+        if network is None:
+            raise NetworkNotFoundError(
+                "No network specified and no default network set. "
+                "Use 'mvm network create' then 'mvm network set-default <id>', "
+                "or pass --network."
+            )
 
-    def _resolve_binary(self, input: VMCreateInput) -> tuple[str, str]:
+        return network
+
+    def _resolve_binary(self, input: VMCreateInput) -> Binary:
         """Resolve firecracker binary to path and ID."""
-        binary_id = input.binary_id
+        fc_binary = None
 
-        if binary_id is None:
-            default_binary = self._db.get_default_binary("firecracker")
-            if default_binary is None:
-                raise VMCreateError(
-                    "No firecracker binary specified and no default set. Run 'mvm bin fetch' first."
-                )
-            binary_path = default_binary.path
-            binary_id = default_binary.id
+        if input.binary_id is None:
+            fc_binary = self._db.get_default_binary("firecracker")
         else:
-            binary_entry = self._db.get_binary(binary_id)
-            if binary_entry is None:
-                raise VMCreateError(f"Binary not found: {binary_id}")
-            binary_path = binary_entry.path
+            fc_binary = self._binary_resolver.resolve(input.binary_id)
 
-        return binary_path, binary_id
+        if fc_binary is None:
+            raise BinaryNotFoundError(
+                "No binary specified and no default binary set. "
+                "Use 'mvm bin fetch <version>' then 'mvm bin set-default <id>', "
+                "or pass --firecracker-bin."
+            )
+
+        return fc_binary
 
     def _build_kernel_args(self, input: VMCreateInput, root_uuid: str | None) -> str:
         """Build kernel boot arguments."""
@@ -231,7 +219,6 @@ class VMResolvedDependencies:
     skip_cleanup: bool
     image_fs_uuid: str | None = None
     image_fs_type: str | None = None
-    image_hash: str | None = None
     mac: str | None = None
     ip: str | None = None
     ssh_key: str | None = None

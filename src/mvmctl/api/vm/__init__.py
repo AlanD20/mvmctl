@@ -2,7 +2,7 @@
 
 This module re-exports all VM-related API functions from the submodules:
 - _manager.py: VMManager class for VM lifecycle operations
-- _query.py: Data gathering functions (inspect, export, list, etc.)
+- _inventory.py: VM inventory and query operations
 - _orchestration.py: VM orchestration operations (create, remove, cleanup)
 - _resolver.py: VM creation resolver
 """
@@ -12,6 +12,18 @@ from __future__ import annotations
 # Exception handling helpers
 from mvmctl.api.vm._exceptions import handle_creation_error
 
+# VM Inventory class for querying VMs
+# Data gathering functions and inventory class
+from mvmctl.api.vm._inventory import (
+    ResolveVMInstancesResult,
+    VMInventory,
+    compute_vm_is_missing,
+    export_vm_config,
+    get_vm_status_with_exit_code,
+    list_vms,
+    resolve_vm_target_instances,
+)
+
 # VMManager class for VM lifecycle operations
 from mvmctl.api.vm._manager import VMManager
 
@@ -20,17 +32,6 @@ from mvmctl.api.vm._orchestration import (
     cleanup_vms,
     create_vm,
     remove_vm,
-)
-
-# Data gathering functions (inspect, export, list, status, etc.)
-from mvmctl.api.vm._query import (
-    ResolveVMInstancesResult,
-    compute_vm_is_missing,
-    export_vm_config,
-    get_vm_status_with_exit_code,
-    inspect_vm,
-    list_vms,
-    resolve_vm_target_instances,
 )
 
 # Removal context classes (pure state trackers)
@@ -54,9 +55,9 @@ __all__ = [
     "cleanup_vms",
     # VMManager class
     "VMManager",
+    # VMInventory class
+    "VMInventory",
     # Data gathering functions
-    "list_vms",
-    "inspect_vm",
     "export_vm_config",
     "get_vm_status_with_exit_code",
     "compute_vm_is_missing",

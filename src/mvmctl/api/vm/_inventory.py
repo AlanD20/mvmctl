@@ -1,7 +1,7 @@
-"""Data gathering functions for VM operations.
+"""VM inventory and data gathering operations.
 
-This module contains functions for gathering VM information and data
-like inspect, export, status checking, and listing.
+This module contains VMInventory class and functions for querying VM state,
+counting, filtering by status, and gathering VM information.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from mvmctl.constants import (
 )
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.vm_manager import VMManager
-from mvmctl.exceptions import VMNotFoundError
 from mvmctl.db.models import VMInstance
+from mvmctl.exceptions import VMNotFoundError
 from mvmctl.models import VMStatus
 from mvmctl.utils.fs import get_vm_dir_by_hash, is_file_missing
 from mvmctl.utils.process import is_process_running
@@ -33,7 +33,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "inspect_vm",
+    "GuestfsProvisioner",
+    "CloudInitProvisioner",
+    "CloudInitProvisionResult",
+    "VMBuilder",
+    "VMInventory",
     "export_vm_config",
     "get_vm_status_with_exit_code",
     "compute_vm_is_missing",
@@ -48,6 +52,93 @@ class ResolveVMInstancesResult:
     targets: list[VMInstance]
     errors: list[str]
     exit_code: int
+
+
+class VMInventory:
+    """Inventory and query operations for VMs.
+
+    Provides methods to list, count, and filter VMs by various criteria.
+    """
+
+    def __init__(self, db: MVMDatabase | None = None) -> None:
+        """Initialize with optional database instance.
+
+        Args:
+            db: Optional MVMDatabase instance (creates new if None)
+        """
+        self._db = db if db is not None else MVMDatabase()
+
+    def list_all(self, include_stopped: bool = True) -> list[VMInstance]:
+        """Return all registered VMs.
+
+        Args:
+            include_stopped: If False, filter out stopped/error/crashed VMs
+
+        Returns:
+            List of VMInstance objects
+        """
+        if not include_stopped:
+            terminal_states = [VMStatus.STOPPED.value, VMStatus.ERROR.value, VMStatus.CRASHED.value]
+            return self._db.list_vms_excluding_statuses(terminal_states)
+
+        return self._db.list_vms()
+
+    def count(self) -> int:
+        """Total count of all VMs.
+
+        Returns:
+            Total number of VMs in database
+        """
+        return len(self._db.list_vms())
+
+    def list_by_status(self, statuses: VMStatus | list[VMStatus]) -> list[VMInstance]:
+        """List VMs filtered by status(es) using direct DB query.
+
+        This method queries the database directly with the status filter,
+        making it more efficient than filtering in Python for large datasets.
+
+        Args:
+            statuses: Single status or list of statuses to filter by
+
+        Returns:
+            List of VMs with matching status(es)
+        """
+        if isinstance(statuses, VMStatus):
+            statuses = [statuses]
+
+        status_values = [s.value for s in statuses]
+        return self._db.list_vms_by_status(status_values)
+
+    def count_by_status(self, statuses: VMStatus | list[VMStatus]) -> int:
+        """Count VMs matching given status(es).
+
+        Args:
+            statuses: Single status or list of statuses to count
+
+        Returns:
+            Count of VMs with matching status
+        """
+        if isinstance(statuses, VMStatus):
+            statuses = [statuses]
+
+        status_values = [s.value for s in statuses]
+        vms = self._db.list_vms_by_status(status_values)
+        return len(vms)
+
+    def find_by_status(self, statuses: VMStatus | list[VMStatus]) -> list[VMInstance]:
+        """Find all VMs with given status(es).
+
+        Args:
+            statuses: Single status or list of statuses to match
+
+        Returns:
+            List of VMs with matching status(es)
+        """
+        if isinstance(statuses, VMStatus):
+            statuses = [statuses]
+
+        status_values = [s.value for s in statuses]
+        return self._db.list_vms_by_status(status_values)
 
 
 def resolve_vm_target_instances(
@@ -73,182 +164,6 @@ def resolve_vm_target_instances(
         targets=result.items,
         errors=result.errors,
         exit_code=result.exit_code,
-    )
-
-
-def list_vms(include_stopped: bool = True, vm_manager: VMManager | None = None) -> list[VMInstance]:
-    """Return all registered VMs, optionally filtering out stopped ones.
-
-    Reconciles live VM state from process status and Firecracker API
-    before returning the list.
-    """
-    db = MVMDatabase()
-    all_vms = db.list_vms()
-
-    if not include_stopped:
-        terminal_states = {VMStatus.STOPPED.value, VMStatus.ERROR.value, VMStatus.CRASHED.value}
-        return [vm for vm in all_vms if vm.status not in terminal_states]
-    return all_vms
-
-
-def inspect_vm(name: str) -> VMInspectInfo:
-    """Get detailed VM information.
-
-    Args:
-        name: VM name or ID prefix to look up.
-
-    Returns:
-        VMInspectInfo containing comprehensive VM details.
-
-    Raises:
-        VMNotFoundError: If the VM is not found.
-    """
-    resolver = VMResolver()
-
-    # Try ID prefix first
-    try:
-        vm = resolver.by_id(name)
-        return _gather_vm_details(vm)
-    except VMNotFoundError:
-        pass
-
-    # Fall back to name lookup
-    try:
-        vm = resolver.by_name(name)
-        return _gather_vm_details(vm)
-    except VMNotFoundError:
-        raise VMNotFoundError(f"VM '{name}' not found")
-
-
-def _resolve_asset_names(
-    image_id: str | None, kernel_id: str | None
-) -> tuple[str | None, str | None]:
-    """Resolve friendly names for image and kernel IDs from database.
-
-    Args:
-        image_id: The image ID to resolve.
-        kernel_id: The kernel ID to resolve.
-
-    Returns:
-        Tuple of (image_name, kernel_name) with friendly names or IDs as fallback.
-    """
-    from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
-    from mvmctl.utils.fs import get_cache_dir
-
-    image_name: str | None = None
-    kernel_name: str | None = None
-
-    if image_id:
-        try:
-            matches = find_images_by_id_prefix(get_cache_dir(), image_id)
-            if matches:
-                _, meta = matches[0]
-                image_name = meta.get("os_slug") or image_id
-        except Exception as exc:
-            logger.debug("Failed to resolve image name for %r: %s", image_id, exc)
-            image_name = image_id
-    if kernel_id:
-        try:
-            matches = find_kernels_by_id_prefix(get_cache_dir(), kernel_id)
-            if matches:
-                _, meta = matches[0]
-                kernel_name = meta.get("version") or kernel_id
-        except Exception as exc:
-            logger.debug("Failed to resolve kernel name for %r: %s", kernel_id, exc)
-            kernel_name = kernel_id
-
-    return image_name, kernel_name
-
-
-def _resolve_rootfs_path(vm: VMInstance, vm_dir: Path) -> tuple[Path | None, str]:
-    """Resolve rootfs path from multiple sources.
-
-    Checks sources in priority order:
-    1. vm.rootfs_path - if path is set
-    2. VM-local rootfs{suffix} - fallback for legacy VMs
-    """
-    # Priority 1: Check rootfs_path if set
-    if vm.rootfs_path:
-        config_path = Path(vm.rootfs_path)
-        if config_path.exists():
-            return config_path, "config"
-
-    # Priority 2: Fallback to VM-local rootfs file
-    if not vm.rootfs_suffix:
-        return None, "none"
-    local_path = vm_dir / f"rootfs{vm.rootfs_suffix}"
-    if local_path.exists():
-        return local_path, "local"
-
-    # No rootfs found
-    return None, "none"
-
-
-def _gather_vm_details(vm: VMInstance) -> VMInspectInfo:
-    """Gather comprehensive VM details.
-
-    Args:
-        vm: The VM instance to gather details for.
-
-    Returns:
-        VMInspectInfo containing comprehensive VM details.
-    """
-    from mvmctl.models import VMInspectInfo
-
-    vm_dir = get_vm_dir_by_hash(vm.id)
-
-    rootfs_path, rootfs_source = _resolve_rootfs_path(vm, vm_dir)
-
-    config_path = vm_dir / "firecracker.json"
-
-    image_name, kernel_name = _resolve_asset_names(vm.image_id, vm.kernel_id)
-
-    # Get network name from network_id
-    db_net = MVMDatabase().get_network(vm.network_id) if vm.network_id else None
-    network_name = db_net.name if db_net else None
-
-    nocloud_net = None
-    if vm.nocloud_net_port:
-        nocloud_net = {
-            "port": vm.nocloud_net_port,
-            "server_pid": vm.nocloud_server_pid,
-        }
-
-    console = None
-    if vm.console_socket_path:
-        console = {
-            "socket_path": str(vm.console_socket_path),
-            "relay_pid": vm.console_relay_pid,
-        }
-
-    return VMInspectInfo(
-        id=vm.id,
-        name=vm.name,
-        status=vm.status,
-        created_at=vm.created_at,
-        pid=vm.pid,
-        ip=vm.ipv4,
-        mac=vm.mac,
-        network_name=network_name,
-        tap_device=vm.tap_device,
-        cloud_init_mode=vm.cloud_init_mode or "inject",
-        image_id=vm.image_id,
-        image_name=image_name,
-        kernel_id=vm.kernel_id,
-        kernel_name=kernel_name,
-        paths={
-            "vm_dir": str(vm_dir),
-            "rootfs": str(rootfs_path) if rootfs_path else None,
-            "rootfs_source": rootfs_source,
-            "config": str(config_path) if config_path.exists() else None,
-        },
-        features={
-            "api_socket": vm.api_socket_path is not None,
-            "console": vm.console_socket_path is not None,
-            "nocloud_net": vm.nocloud_net_port is not None,
-        },
-        nocloud_net=nocloud_net,
-        console=console,
     )
 
 

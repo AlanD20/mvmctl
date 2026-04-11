@@ -7,7 +7,9 @@ like start, stop, pause, resume, ssh, logs, etc.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+from mvmctl.api.vm._creation import _setup_console_relay
 from mvmctl.constants import (
     CONST_VM_START_WAIT_S,
     DEFAULT_SNAPSHOT_RESUME,
@@ -21,11 +23,14 @@ from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.core.ssh import connect_to_vm
 from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import MVMError
-from mvmctl.models import ConsoleInfo, ConsoleState, VMStatus
+from mvmctl.models import ConsoleInfo, ConsoleState, VMInspectInfo, VMStatus
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import write_pid_file
 from mvmctl.utils.process_signals import ProcessSignalHandler
+from src.mvmctl.api._internal._resolvers._image_resolver import ImageResolver
+from src.mvmctl.api._internal._resolvers._kernel_resolver import KernelResolver
+from src.mvmctl.api._internal._resolvers._network_resolver import NetworkResolver
 
 
 class VMManager:
@@ -132,10 +137,13 @@ class VMManager:
         Raises:
             MVMError: If VM is not stopped or boot fails
         """
+        import os
+        import pty
         import subprocess
         import time
 
         from mvmctl.constants import (
+            CONST_POLL_STEP_SECONDS,
             DEFAULT_FC_CONSOLE_LOG_FILENAME,
             DEFAULT_FC_LOG_FILENAME,
             DEFAULT_FC_PID_FILENAME,
@@ -182,19 +190,67 @@ class VMManager:
         log_file = vm_dir / DEFAULT_FC_LOG_FILENAME
         console_log_file = vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
 
+        # Setup PTY if console enabled
+        pty_master_fd: int | None = None
+        pty_slave_fd: int | None = None
+        if self._vm.enable_console:
+            try:
+                pty_master_fd, pty_slave_fd = pty.openpty()
+            except OSError:
+                pass
+
         log_fp = open(log_file, "w", buffering=1, encoding="utf-8")
         console_fp = None
+        proc: subprocess.Popen[Any] | None = None
+
         try:
-            console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
-            proc = subprocess.Popen(
-                fc_cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=console_fp,
-                stderr=log_fp,
-                start_new_session=True,
-            )
+            if self._vm.enable_console and pty_slave_fd is not None:
+                proc = subprocess.Popen(
+                    fc_cmd,
+                    stdin=pty_slave_fd,
+                    stdout=pty_slave_fd,
+                    stderr=log_fp,
+                    start_new_session=True,
+                    pass_fds=[pty_slave_fd],
+                )
+            else:
+                console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
+                proc = subprocess.Popen(
+                    fc_cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=console_fp,
+                    stderr=log_fp,
+                    start_new_session=True,
+                )
+
+            time.sleep(CONST_POLL_STEP_SECONDS)
+            poll_result = proc.poll()
+            if poll_result is not None and isinstance(poll_result, int):
+                raise MVMError(f"Firecracker process exited immediately with code {poll_result}")
+
+            # Close PTY slave if used
+            if pty_slave_fd is not None:
+                try:
+                    os.close(pty_slave_fd)
+                except OSError:
+                    pass
+
             log_fp.close()
-            console_fp.close()
+            if console_fp is not None:
+                console_fp.close()
+
+            # Setup console relay if enabled
+            relay_mgr = ConsoleRelayManager() if self._vm.enable_console else None
+            console_relay_pid = _setup_console_relay(
+                enable_console=self._vm.enable_console,
+                relay_mgr=relay_mgr,
+                pty_master_fd=pty_master_fd,
+                vm_dir=vm_dir,
+                vm_name=name,
+            )
+            if console_relay_pid:
+                self._db.update_vm_pid(self._vm.id, console_relay_pid)
+
             write_pid_file(pid_file, proc.pid)
             self._db.update_vm_pid(self._vm.id, proc.pid)
             self._db.update_vm_status(self._vm.id, VMStatus.RUNNING.value)
@@ -207,6 +263,17 @@ class VMManager:
             if console_fp is not None:
                 try:
                     console_fp.close()
+                except OSError:
+                    pass
+            # Cleanup PTY on error
+            if pty_master_fd is not None:
+                try:
+                    os.close(pty_master_fd)
+                except OSError:
+                    pass
+            if pty_slave_fd is not None:
+                try:
+                    os.close(pty_slave_fd)
                 except OSError:
                     pass
             raise MVMError(f"Failed to boot VM '{name}': {exc}") from exc
@@ -331,6 +398,78 @@ class VMManager:
             lines=lines,
             follow=follow,
         )
+
+    def inspect(self) -> VMInspectInfo:
+        """Get detailed VM information
+
+        Returns:
+            VMInspectInfo containing comprehensive VM details from database.
+        """
+
+        nr = NetworkResolver(self._db)
+        kr = KernelResolver(self._db)
+        ir = ImageResolver(self._db)
+        network = nr.by_id(self._vm.network_id)
+        image = ir.by_id(self._vm.image_id)
+        kernel = kr.by_id(self._vm.kernel_id)
+
+        nocloud_net = self._build_nocloud_info()
+        console = self._build_console_info()
+        vm_dir = self._get_vm_directory()
+
+        return VMInspectInfo(
+            id=self._vm.id,
+            name=self._vm.name,
+            status=self._vm.status,
+            created_at=self._vm.created_at,
+            pid=self._vm.pid,
+            ip=self._vm.ipv4,
+            mac=self._vm.mac,
+            network_name=network.name,
+            tap_device=self._vm.tap_device,
+            cloud_init_mode=self._vm.cloud_init_mode,
+            image_id=self._vm.image_id,
+            image_name=image.os_name,
+            kernel_id=self._vm.kernel_id,
+            kernel_name=kernel.name,
+            paths={
+                "vm_dir": str(vm_dir) if vm_dir else None,
+                "rootfs": str(self._vm.rootfs_path) if self._vm.rootfs_path else None,
+                "config": str(self._vm.config_path) if self._vm.config_path else None,
+            },
+            features={
+                "api_socket": self._vm.api_socket_path is not None,
+                "console": self._vm.console_socket_path is not None,
+                "nocloud_net": self._vm.nocloud_net_port is not None,
+            },
+            nocloud_net=nocloud_net,
+            console=console,
+        )
+
+    def _build_nocloud_info(self) -> dict | None:
+        if self._vm.nocloud_net_port:
+            return {
+                "port": self._vm.nocloud_net_port,
+                "server_pid": self._vm.nocloud_server_pid,
+            }
+        return None
+
+    def _build_console_info(self) -> dict | None:
+        if self._vm.console_socket_path:
+            return {
+                "socket_path": str(self._vm.console_socket_path),
+                "relay_pid": self._vm.console_relay_pid,
+            }
+        return None
+
+    def _get_vm_directory(self) -> Path | None:
+        if self._vm.config_path:
+            return Path(self._vm.config_path).parent
+        elif self._vm.id:
+            from mvmctl.utils.fs import get_vm_dir_by_hash
+
+            return get_vm_dir_by_hash(self._vm.id)
+        return None
 
     def attach_console(self) -> ConsoleInfo:
         """Attach to the VM's console relay.

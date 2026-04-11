@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import ImageNotFoundError
-from mvmctl.models.image import ImageItem
+from src.mvmctl.db.models import Image
 
 __all__ = [
     "ImageResolver",
@@ -16,7 +16,7 @@ __all__ = [
 
 @dataclass
 class ImageResolveResult:
-    items: list[ImageItem]
+    items: list[Image]
     errors: list[str]
     exit_code: int
 
@@ -24,26 +24,26 @@ class ImageResolveResult:
 class ImageResolver:
     """Resolver for image resources."""
 
-    def __init__(self) -> None:
-        self._db = MVMDatabase()
+    def __init__(self, db: MVMDatabase | None = None) -> None:
+        self._db = db if db is not None else MVMDatabase()
 
-    def by_id(self, image_id: str) -> ImageItem:
+    def by_id(self, image_id: str) -> Image:
         """Resolve by full ID."""
         matches = self._db.find_images_by_prefix(image_id)
         if len(matches) == 0:
             raise ImageNotFoundError(f"Image not found: {image_id!r}")
         if len(matches) > 1:
             raise ImageNotFoundError(f"Image ID is ambiguous: {image_id!r}")
-        return ImageItem.from_db(matches[0])
+        return matches[0]
 
-    def by_os_slug(self, os_slug: str) -> ImageItem:
+    def by_os_slug(self, os_slug: str) -> Image:
         """Resolve by OS slug."""
         db_image = self._db.get_image_by_os_slug(os_slug)
         if db_image is None:
             raise ImageNotFoundError(f"Image not found: {os_slug!r}")
-        return ImageItem.from_db(db_image)
+        return db_image
 
-    def resolve(self, value: str) -> ImageItem:
+    def resolve(self, value: str) -> Image:
         """Resolve image by os_slug or ID prefix."""
         try:
             return self.by_os_slug(value)
@@ -53,7 +53,7 @@ class ImageResolver:
 
     def resolve_many(self, identifiers: list[str]) -> ImageResolveResult:
         """Resolve multiple image identifiers by os_slug or id."""
-        items: list[ImageItem] = []
+        items: list[Image] = []
         errors: list[str] = []
 
         for identifier in identifiers:

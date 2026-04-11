@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import VMNotFoundError
 
@@ -23,10 +24,8 @@ class VMResolveResult:
 class VMResolver:
     """Resolver for VM resources."""
 
-    def __init__(self) -> None:
-        from mvmctl.core.mvm_db import MVMDatabase
-
-        self._db = MVMDatabase()
+    def __init__(self, db: MVMDatabase | None = None) -> None:
+        self._db = db if db is not None else MVMDatabase()
 
     def by_id(self, vm_id: str) -> VMInstance:
         """Resolve VM by ID prefix."""

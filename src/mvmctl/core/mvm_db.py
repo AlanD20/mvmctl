@@ -194,7 +194,7 @@ class MVMDatabase:
     def set_default_image(self, image_id: str) -> None:
         """Set one image as default, clearing all others.
 
-        Uses explicit BEGIN/COMMIT for atomicity (two UPDATEs).
+        Uses explicit BEGIN/COMMIT for atomicity (two UPDATEEs).
         """
         with self._connect() as conn:
             conn.execute("BEGIN")
@@ -484,9 +484,48 @@ class MVMDatabase:
 
     def list_vms(self) -> list[VMInstance]:
         """Return all VM records."""
-        self._ensure_schema_exists()
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM vm_instances ORDER BY created_at").fetchall()
+        return [VMInstance(**dict(row)) for row in rows]
+
+    def list_vms_by_status(self, statuses: list[str]) -> list[VMInstance]:
+        """Return VM records filtered by status(es).
+
+        Args:
+            statuses: List of status values to filter by (e.g., ['running', 'stopped'])
+
+        Returns:
+            List of VMInstance objects matching the given statuses
+        """
+        if not statuses:
+            return self.list_vms()
+
+        placeholders = ",".join(["?"] * len(statuses))
+        query = f"SELECT * FROM vm_instances WHERE status IN ({placeholders}) ORDER BY created_at"
+
+        with self._connect() as conn:
+            rows = conn.execute(query, statuses).fetchall()
+        return [VMInstance(**dict(row)) for row in rows]
+
+    def list_vms_excluding_statuses(self, excluded_statuses: list[str]) -> list[VMInstance]:
+        """Return VM records excluding certain status(es).
+
+        Args:
+            excluded_statuses: List of status values to exclude (e.g., ['stopped', 'error'])
+
+        Returns:
+            List of VMInstance objects with status not in the excluded list
+        """
+        if not excluded_statuses:
+            return self.list_vms()
+
+        placeholders = ",".join(["?"] * len(excluded_statuses))
+        query = (
+            f"SELECT * FROM vm_instances WHERE status NOT IN ({placeholders}) ORDER BY created_at"
+        )
+
+        with self._connect() as conn:
+            rows = conn.execute(query, excluded_statuses).fetchall()
         return [VMInstance(**dict(row)) for row in rows]
 
     def upsert_vm(self, vm: VMInstance) -> None:
@@ -769,7 +808,7 @@ class MVMDatabase:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT OR IGNORE INTO host_state 
+                INSERT OR IGNORE INTO host_state
                 (id, initialized, mvm_group_created, sudoers_configured, default_network_created, initialized_at, updated_at)
                 VALUES (1, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """
@@ -989,13 +1028,13 @@ class MVMDatabase:
         with self._connect() as conn:
             if active_only:
                 rows = conn.execute(
-                    """SELECT * FROM iptables_rules 
+                    """SELECT * FROM iptables_rules
                        WHERE table_name = ? AND chain_name = ? AND is_active = 1""",
                     (table_name, chain_name),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    """SELECT * FROM iptables_rules 
+                    """SELECT * FROM iptables_rules
                        WHERE table_name = ? AND chain_name = ?""",
                     (table_name, chain_name),
                 ).fetchall()
@@ -1005,8 +1044,8 @@ class MVMDatabase:
         """Update the last_verified_at timestamp for a rule."""
         with self._connect() as conn:
             conn.execute(
-                """UPDATE iptables_rules 
-                   SET last_verified_at = CURRENT_TIMESTAMP 
+                """UPDATE iptables_rules
+                   SET last_verified_at = CURRENT_TIMESTAMP
                    WHERE id = ?""",
                 (rule_id,),
             )

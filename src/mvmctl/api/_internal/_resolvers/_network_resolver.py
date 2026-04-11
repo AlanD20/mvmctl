@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import Network
 from mvmctl.exceptions import NetworkNotFoundError
 
@@ -23,10 +24,8 @@ class NetworkResolveResult:
 class NetworkResolver:
     """Resolver for network configuration."""
 
-    def __init__(self) -> None:
-        from mvmctl.core.mvm_db import MVMDatabase
-
-        self._db = MVMDatabase()
+    def __init__(self, db: MVMDatabase | None = None) -> None:
+        self._db = db if db is not None else MVMDatabase()
 
     def by_id(self, network_id: str) -> Network:
         """Resolve network by ID prefix."""

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import KernelNotFoundError
-from mvmctl.models.kernel import KernelItem
+from src.mvmctl.db.models import Kernel
 
 __all__ = [
     "KernelResolver",
@@ -16,7 +16,7 @@ __all__ = [
 
 @dataclass
 class KernelResolveResult:
-    items: list[KernelItem]
+    items: list[Kernel]
     errors: list[str]
     exit_code: int
 
@@ -24,32 +24,32 @@ class KernelResolveResult:
 class KernelResolver:
     """Resolver for kernel resources."""
 
-    def __init__(self) -> None:
-        self._db = MVMDatabase()
+    def __init__(self, db: MVMDatabase | None = None) -> None:
+        self._db = db if db is not None else MVMDatabase()
 
-    def by_id(self, kernel_id: str) -> KernelItem:
+    def by_id(self, kernel_id: str) -> Kernel:
         """Resolve by ID prefix."""
         matches = self._db.find_kernels_by_prefix(kernel_id)
         if len(matches) == 0:
             raise KernelNotFoundError(f"Kernel not found: {kernel_id!r}")
         if len(matches) > 1:
             raise KernelNotFoundError(f"Kernel ID is ambiguous: {kernel_id!r}")
-        return KernelItem.from_db(matches[0])
+        return matches[0]
 
-    def by_version_type(self, version: str, type: str) -> KernelItem:
+    def by_version_type(self, version: str, type: str) -> Kernel:
         """Resolve by version and type (both required)."""
         kernel = self._db.get_kernel_by_version_and_type(version, type)
         if kernel is None:
             raise KernelNotFoundError(f"Kernel not found: version={version!r}, type={type!r}")
-        return KernelItem.from_db(kernel)
+        return kernel
 
-    def resolve(self, value: str) -> KernelItem:
+    def resolve(self, value: str) -> Kernel:
         """Resolve kernel by ID prefix."""
         return self.by_id(value)
 
     def resolve_many(self, identifiers: list[str | list[str]]) -> KernelResolveResult:
         """Resolve multiple kernel identifiers by id or [version, type] pairs."""
-        items: list[KernelItem] = []
+        items: list[Kernel] = []
         errors: list[str] = []
 
         for identifier in identifiers:

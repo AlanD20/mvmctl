@@ -13,11 +13,11 @@ from mvmctl.api._internal._resolvers import KeyResolver
 from mvmctl.api.vm._creation import (
     CloudInitProvisioner,
     GuestfsProvisioner,
-    VMCreationContext,
+    VMBuilder,
 )
+from mvmctl.api.vm._manager import VMManager
 from mvmctl.api.vm._removal import VMBulkCleanupContext, VMRemovalContext
 from mvmctl.api.vm._resolver import VMInputResolver
-from mvmctl.api.vm._spawn import spawn_firecracker_vm
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
     CONST_VM_MEM_MAX_MIB,
@@ -60,6 +60,7 @@ from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
 from mvmctl.utils.network import generate_tap_name
 from mvmctl.utils.signals import SigtermContext
 from mvmctl.utils.validation import validate_mac
+from src.mvmctl.api.vm._inventory import VMInventory
 
 if TYPE_CHECKING:
     from mvmctl.models.network import NetworkConfig
@@ -95,17 +96,19 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
 
     check_privileges_interactive("/usr/sbin/ip", f"create VM '{input.name}'")
 
-    vm_id = _generate_vm_id(input.name)
-    resolver = VMInputResolver()
+    db = MVMDatabase()
+    # Create builder first - it generates VM ID automatically
+    ctx = VMBuilder(name=input.name)
+    vm_id = ctx.vm_id
+
+    resolver = VMInputResolver(db)
     resolved = resolver.resolve(input, vm_id=vm_id)
 
     if resolved.mac is not None:
         validate_mac(resolved.mac)
 
-    import mvmctl.api.vm
-
-    manager = vm_manager or mvmctl.api.vm.get_vm_manager()
-    if manager.count_vms() >= MAX_VMS:
+    inventory = VMInventory(db)
+    if inventory.count() >= MAX_VMS:
         raise MVMError(
             f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
         )
@@ -129,17 +132,12 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
     if resolved.user_data is not None and not resolved.user_data.exists():
         raise MVMError(f"User-data file not found: {resolved.user_data}")
 
-    net_config = get_network(resolved.network_name)
-    if net_config is None:
-        raise NetworkError(f"Network '{resolved.network_name}' not found")
-
+    # TODO: move to nocloud if enabled only
     setup_nocloud_input_chain()
 
-    ctx = VMCreationContext(resolved=resolved)
+    ctx.resolved = resolved
 
-    vm_dir = get_vm_dir_by_hash(vm_id)
-    ctx.vm_dir = vm_dir
-    _secure_mkdir_vm(vm_dir, input.name)
+    _secure_mkdir_vm(ctx.vm_dir, input.name)
     ctx.mark_created("vm_dir")
 
     guest_mac = resolved.mac if resolved.mac else generate_mac()
@@ -394,7 +392,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
 
     with SigtermContext(lambda: _perform_creation_cleanup(ctx)):
         try:
-            pid, api_socket, console_relay_pid = spawn_firecracker_vm(ctx, resolved, config_file)
+            pid, api_socket, console_relay_pid = ctx.spawn(resolved, config_file)
 
             vm_instance.pid = pid
             vm_instance.api_socket_path = api_socket
@@ -438,22 +436,11 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
             raise VMCreateError(f"Failed to create VM: {exc}") from exc
 
 
-def _generate_vm_id(name: str) -> str:
-    """Generate unique VM ID from name and timestamp."""
-    import hashlib
-    import time
-
-    timestamp = str(time.time())
-    hash_input = f"{name}:{timestamp}"
-    full_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-    return full_hash[:16]
-
-
-def _perform_creation_cleanup(ctx: VMCreationContext) -> None:
+def _perform_creation_cleanup(ctx: VMBuilder) -> None:
     """Perform cleanup of all created resources. Called on creation failure.
 
     This is the orchestrator function that handles cleanup sequencing.
-    VMCreationContext is a pure state tracker - it does not call core modules.
+    VMBuilder is a pure state tracker - it does not call core modules.
     """
     import shutil
 

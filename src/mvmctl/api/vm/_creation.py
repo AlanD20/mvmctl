@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from mvmctl.constants import (
     CONST_DEFAULT_NAMESERVER,
@@ -25,6 +26,7 @@ from mvmctl.constants import (
     CONST_SHADOW_WARN_DAYS,
 )
 from mvmctl.exceptions import VMCreateError
+from src.mvmctl.utils.fs import get_vm_dir_by_hash
 
 if TYPE_CHECKING:
     from mvmctl.models.cloud_init import CloudInitMode
@@ -682,16 +684,21 @@ class CloudInitProvisioner:
 
 
 @dataclass
-class VMCreationContext:
-    """Mutable state during creation - tracks what was created.
+@dataclass
+class VMBuilder:
+    """Builder for VM creation - tracks state and spawns processes.
 
-    NOTE: PURE STATE TRACKER. Does NOT call core modules.
-    Core call sequencing stays in _registry.py (the orchestrator).
+    Generates VM ID automatically on instantiation based on name.
+    NOTE: PURE STATE TRACKER for creation. Does NOT call core modules directly
+    except for spawn() which is a builder action.
+    Core call sequencing stays in _orchestration.py (the orchestrator).
     """
 
-    resolved: Any  # VMResolvedDependencies
+    name: str
+    vm_id: str = field(init=False)
+    resolved: Any = None  # VMResolvedDependencies
 
-    vm_dir: Path | None = None
+    vm_dir: Path = field(init=False)
     tap_name: str = ""
     guest_ip: str = ""
     net_manager: NoCloudNetServerManager | None = None
@@ -705,6 +712,20 @@ class VMCreationContext:
 
     resources_created: dict[str, bool] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Generate VM ID after initialization."""
+        created_at = datetime.now()
+        self.vm_id = self._generate_vm_id(self.name, created_at)
+        self.vm_dir = Path(get_vm_dir_by_hash(self.vm_id))
+
+    @staticmethod
+    def _generate_vm_id(name: str, created_at: datetime) -> str:
+        """Generate a unique VM ID from name and creation time."""
+        import hashlib
+
+        data = f"{name}:{created_at.isoformat()}"
+        return hashlib.sha256(data.encode()).hexdigest()[:16]
+
     def mark_created(self, resource: str) -> None:
         """Mark a resource as created (for cleanup tracking)."""
         self.resources_created[resource] = True
@@ -714,29 +735,195 @@ class VMCreationContext:
         return self.resources_created.get(resource, False)
 
     def cleanup(self) -> None:
-        """Clean up all created resources. Delegates to _registry.py.
+        """Clean up all created resources. Delegates to _orchestration.py.
 
-        VMCreationContext is a pure state tracker. Actual cleanup orchestration
-        lives in _registry.py to maintain clean layer separation.
+        VMBuilder is a pure state tracker. Actual cleanup orchestration
+        lives in _orchestration.py to maintain clean layer separation.
         """
         from mvmctl.api.vm._orchestration import _perform_creation_cleanup
 
         _perform_creation_cleanup(self)
 
-    def persist_failed_vm(self, instance: Any, manager: Any | None) -> None:
-        """Persist failed VM to DB. Delegates to _registry.py.
+    def spawn(self, resolved: Any, config_file: Path) -> tuple[int, Path | None, int | None]:
+        """Spawn firecracker process and return PID, socket path, and console relay PID.
 
-        VMCreationContext is a pure state tracker. Actual persistence orchestration
-        lives in _registry.py to maintain clean layer separation.
+        Args:
+            resolved: Resolved VM inputs
+            config_file: Path to firecracker config file
+
+        Returns:
+            Tuple of (pid, socket_path, console_relay_pid)
+
+        Raises:
+            VMCreateError: If firecracker process fails to start
         """
-        from mvmctl.api.vm._orchestration import _persist_failed_vm
+        import logging
+        import os
+        import subprocess
+        import time
+        from typing import Any as TypingAny
 
-        _persist_failed_vm(instance, manager)
+        from mvmctl.constants import (
+            CONST_POLL_STEP_SECONDS,
+            DEFAULT_FC_API_SOCKET_FILENAME,
+            DEFAULT_FC_CONSOLE_LOG_FILENAME,
+            DEFAULT_FC_LOG_FILENAME,
+            DEFAULT_FC_PID_FILENAME,
+        )
+        from mvmctl.exceptions import VMCreateError
+        from mvmctl.utils.fs import write_pid_file
+
+        logger = logging.getLogger(__name__)
+
+        if self.vm_dir is None:
+            raise VMCreateError("VM directory not set in context")
+
+        log_file = self.vm_dir / DEFAULT_FC_LOG_FILENAME
+        console_log_file = self.vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
+        pid_file = self.vm_dir / DEFAULT_FC_PID_FILENAME
+
+        socket_path: Path | None = None
+        if resolved.enable_api_socket:
+            socket_path = self.vm_dir / DEFAULT_FC_API_SOCKET_FILENAME
+
+        fc_cmd = [resolved.firecracker_bin, "--no-api", "--config-file", str(config_file)]
+        if resolved.enable_api_socket and socket_path:
+            fc_cmd = [
+                resolved.firecracker_bin,
+                "--api-sock",
+                str(socket_path),
+                "--config-file",
+                str(config_file),
+            ]
+
+        log_fp = open(log_file, "w", buffering=1, encoding="utf-8")
+        self.log_fp = log_fp
+
+        console_fp = None
+        proc: subprocess.Popen[TypingAny] | None = None
+
+        try:
+            if resolved.enable_console and self.pty_slave_fd is not None:
+                proc = subprocess.Popen(
+                    fc_cmd,
+                    stdin=self.pty_slave_fd,
+                    stdout=self.pty_slave_fd,
+                    stderr=log_fp,
+                    start_new_session=True,
+                    pass_fds=[self.pty_slave_fd],
+                )
+            else:
+                console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
+                self.console_fp = console_fp
+                proc = subprocess.Popen(
+                    fc_cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=console_fp,
+                    stderr=log_fp,
+                    start_new_session=True,
+                )
+
+            time.sleep(CONST_POLL_STEP_SECONDS)
+            poll_result = proc.poll()
+            if poll_result is not None and isinstance(poll_result, int):
+                raise VMCreateError(
+                    f"Firecracker process exited immediately with code {poll_result}"
+                )
+
+            if resolved.enable_console and self.pty_slave_fd is not None:
+                try:
+                    os.close(self.pty_slave_fd)
+                    self.pty_slave_fd = None
+                except OSError:
+                    pass
+
+            try:
+                log_fp.close()
+                self.log_fp = None
+            except OSError:
+                pass
+
+            if console_fp is not None:
+                try:
+                    console_fp.close()
+                    self.console_fp = None
+                except OSError:
+                    pass
+
+            console_relay_pid = _setup_console_relay(
+                enable_console=resolved.enable_console,
+                relay_mgr=self.relay_mgr,
+                pty_master_fd=self.pty_master_fd,
+                vm_dir=self.vm_dir,
+                vm_name=resolved.name,
+                mark_created=self.mark_created,
+            )
+
+            write_pid_file(pid_file, proc.pid)
+
+            return proc.pid, socket_path, console_relay_pid
+
+        except Exception as exc:
+            logger.error("Failed to start Firecracker VM: %s", exc)
+            if log_fp is not None:
+                try:
+                    log_fp.close()
+                except OSError:
+                    pass
+            if console_fp is not None:
+                try:
+                    console_fp.close()
+                except OSError:
+                    pass
+            raise
+
+
+def _setup_console_relay(
+    enable_console: bool,
+    relay_mgr: ConsoleRelayManager | None,
+    pty_master_fd: int | None,
+    vm_dir: Path | None,
+    vm_name: str,
+    mark_created: Callable[[str], None] | None = None,
+) -> int | None:
+    """Setup console relay for VM.
+
+    Args:
+        enable_console: Whether console is enabled
+        relay_mgr: Console relay manager instance
+        pty_master_fd: PTY master file descriptor
+        vm_dir: VM directory path
+        vm_name: VM name for relay identification
+        mark_created: Optional callback to mark resource as created
+
+    Returns:
+        Console relay PID or None if not started
+    """
+    import logging
+    import os
+
+    logger = logging.getLogger(__name__)
+
+    if not enable_console or relay_mgr is None or pty_master_fd is None or vm_dir is None:
+        return None
+
+    try:
+        console_relay_pid = relay_mgr.start_relay(vm_name, pty_master_fd, vm_dir)[1]
+        if mark_created:
+            mark_created("console_relay")
+        return console_relay_pid
+    except Exception as exc:
+        logger.warning("Failed to start console relay: %s", exc)
+        try:
+            os.close(pty_master_fd)
+        except OSError:
+            pass
+        return None
 
 
 __all__ = [
     "GuestfsProvisioner",
     "CloudInitProvisioner",
     "CloudInitProvisionResult",
-    "VMCreationContext",
+    "VMBuilder",
 ]
