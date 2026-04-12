@@ -32,6 +32,7 @@ from mvmctl.db.models import (
     Kernel,
     Network,
     NetworkLease,
+    SSHKey,
     VMInstance,
 )
 from mvmctl.exceptions import DatabaseError
@@ -1086,3 +1087,135 @@ class MVMDatabase:
         row_dict["protocol"] = IPTablesProtocol(row_dict["protocol"])
         row_dict["is_active"] = bool(row_dict["is_active"])
         return IPTablesRule(**row_dict)
+
+    # -------------------------------------------------------------------------
+    # ssh_keys
+    # -------------------------------------------------------------------------
+
+    def get_ssh_key(self, key_id: str) -> Optional[SSHKey]:
+        """Return an SSH key by its ID (fingerprint), or None if not found."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM ssh_keys WHERE id = ?", (key_id,)).fetchone()
+        if row is None:
+            return None
+        return SSHKey(**dict(row))
+
+    def get_ssh_key_by_name(self, name: str) -> Optional[SSHKey]:
+        """Return an SSH key by name, or None if not found."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM ssh_keys WHERE name = ?", (name,)).fetchone()
+        if row is None:
+            return None
+        return SSHKey(**dict(row))
+
+    def find_ssh_keys_by_prefix(self, prefix: str) -> list[SSHKey]:
+        """Return all SSH keys whose ID starts with prefix."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ssh_keys WHERE id LIKE ?", (f"{prefix}%",)
+            ).fetchall()
+        return [SSHKey(**dict(row)) for row in rows]
+
+    def find_ssh_keys_by_fingerprint_prefix(self, prefix: str) -> list[SSHKey]:
+        """Return all SSH keys whose fingerprint starts with prefix."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ssh_keys WHERE fingerprint LIKE ?", (f"{prefix}%",)
+            ).fetchall()
+        return [SSHKey(**dict(row)) for row in rows]
+
+    def list_ssh_keys(self) -> list[SSHKey]:
+        """Return all SSH keys."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM ssh_keys ORDER BY created_at").fetchall()
+        return [SSHKey(**dict(row)) for row in rows]
+
+    def upsert_ssh_key(self, key: SSHKey) -> None:
+        """Insert or replace an SSH key record."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO ssh_keys (
+                    id, name, fingerprint, algorithm, comment,
+                    private_key_path, public_key_path, is_default, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    fingerprint = excluded.fingerprint,
+                    algorithm = excluded.algorithm,
+                    comment = excluded.comment,
+                    private_key_path = excluded.private_key_path,
+                    public_key_path = excluded.public_key_path,
+                    is_default = excluded.is_default,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    key.id,
+                    key.name,
+                    key.fingerprint,
+                    key.algorithm,
+                    key.comment,
+                    key.private_key_path,
+                    key.public_key_path,
+                    int(key.is_default),
+                    key.created_at,
+                    key.updated_at,
+                ),
+            )
+
+    def delete_ssh_key(self, key_id: str) -> None:
+        """Delete an SSH key by ID. No-op if not found."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM ssh_keys WHERE id = ?", (key_id,))
+
+    def delete_ssh_key_by_name(self, name: str) -> None:
+        """Delete an SSH key by name. No-op if not found."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM ssh_keys WHERE name = ?", (name,))
+
+    def set_default_ssh_key(self, key_id: str) -> None:
+        """Set one SSH key as default, clearing all others atomically."""
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            conn.execute("UPDATE ssh_keys SET is_default = 0")
+            conn.execute("UPDATE ssh_keys SET is_default = 1 WHERE id = ?", (key_id,))
+            conn.execute("COMMIT")
+
+    def add_default_ssh_key(self, key_id: str) -> None:
+        """Add an SSH key to the default list without clearing existing defaults."""
+        with self._connect() as conn:
+            conn.execute("UPDATE ssh_keys SET is_default = 1 WHERE id = ?", (key_id,))
+
+    def remove_default_ssh_key(self, key_id: str) -> None:
+        """Remove an SSH key from the default list."""
+        with self._connect() as conn:
+            conn.execute("UPDATE ssh_keys SET is_default = 0 WHERE id = ?", (key_id,))
+
+    def get_default_ssh_keys(self) -> list[SSHKey]:
+        """Return all SSH keys marked as default."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ssh_keys WHERE is_default = 1 ORDER BY created_at"
+            ).fetchall()
+        return [SSHKey(**dict(row)) for row in rows]
+
+    def clear_default_ssh_keys(self) -> None:
+        """Clear all default SSH keys."""
+        with self._connect() as conn:
+            conn.execute("UPDATE ssh_keys SET is_default = 0")
+
+    def set_default_ssh_keys_bulk(self, key_ids: list[str]) -> None:
+        """Set multiple SSH keys as default in a single transaction.
+
+        Clears all existing defaults and sets the specified keys as default.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            conn.execute("UPDATE ssh_keys SET is_default = 0")
+            if key_ids:
+                placeholders = ",".join(["?"] * len(key_ids))
+                conn.execute(
+                    f"UPDATE ssh_keys SET is_default = 1 WHERE id IN ({placeholders})",
+                    key_ids,
+                )
+            conn.execute("COMMIT")

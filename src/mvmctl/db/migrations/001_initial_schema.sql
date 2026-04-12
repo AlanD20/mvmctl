@@ -221,5 +221,24 @@ CREATE UNIQUE INDEX idx_iptables_rules_unique_active
                       COALESCE(sport, -1), COALESCE(dport, -1))
     WHERE is_active = 1;
 
+-- SSH_KEYS: SSH key metadata and paths
+CREATE TABLE ssh_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    fingerprint TEXT NOT NULL,
+    algorithm TEXT NOT NULL,
+    comment TEXT NOT NULL,
+    private_key_path TEXT NULL,
+    public_key_path TEXT NOT NULL,
+    is_default INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- Indexes for efficient queries
+CREATE INDEX idx_ssh_keys_name ON ssh_keys(name);
+CREATE INDEX idx_ssh_keys_fingerprint ON ssh_keys(fingerprint);
+CREATE INDEX idx_ssh_keys_is_default ON ssh_keys(is_default) WHERE is_default = 1;
+
 -- Set schema version
 PRAGMA user_version = 1;

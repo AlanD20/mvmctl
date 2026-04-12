@@ -197,3 +197,20 @@ class HostStateChange:
     original_value: Optional[str] = None
     reverted_at: Optional[str] = None
     revert_mechanism: Optional[str] = None
+
+
+@dataclass
+class SSHKey:
+    """SSH key metadata stored in the database."""
+
+    id: str
+    name: str
+    fingerprint: str
+    algorithm: str
+    comment: str
+    public_key_path: str
+    is_default: bool
+    created_at: str
+    updated_at: str
+
+    private_key_path: Optional[str] = None

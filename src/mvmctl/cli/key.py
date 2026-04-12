@@ -70,7 +70,7 @@ def key_ls(
     rows = []
     keys_dir = get_keys_config_dir()
     for k in keys:
-        status = "yes" if k.has_private_key else "no"
+        status = "yes" if k.private_key_path is not None else "no"
         private_key_path = keys_dir / k.name
         is_missing = is_file_missing(private_key_path)
         display_name = get_combined_marker(k.name in default_keys, is_missing) + k.name
@@ -81,7 +81,7 @@ def key_ls(
                 k.algorithm,
                 k.comment,
                 status,
-                human_readable_time(k.added_at) if k.added_at else "-",
+                human_readable_time(k.created_at) if k.created_at else "-",
             ]
         )
     print_table(
@@ -286,17 +286,15 @@ def key_inspect(
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 
-    added_formatted = datetime.fromisoformat(info["added_at"]).strftime("%Y/%m/%d %H:%M:%S")
-    print_info(f"Key: {info['name']}")
-    print_info(f"  Algorithm:   {info['algorithm']}")
-    print_info(f"  Fingerprint: {info['fingerprint']}")
-    print_info(f"  Comment:     {info['comment']}")
+    added_formatted = human_readable_time(info.created_at) if info.created_at else "-"
+    print_info(f"Key: {info.name}")
+    print_info(f"  Algorithm:   {info.algorithm}")
+    print_info(f"  Fingerprint: {info.fingerprint}")
+    print_info(f"  Comment:     {info.comment}")
     print_info(f"  Added:       {added_formatted}")
-    print_info(f"  Public key:  {info['public_key']}")
-    if info.get("private_key_path"):
-        print_info(f"  Private key path: {info['private_key_path']}")
-    if info.get("public_key_path"):
-        print_info(f"  Public key path:  {info['public_key_path']}")
+    if info.private_key_path:
+        print_info(f"  Private key path: {info.private_key_path}")
+    print_info(f"  Public key path:  {info.public_key_path}")
 
 
 @key_app.command(
