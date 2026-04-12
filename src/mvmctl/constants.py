@@ -306,6 +306,9 @@ DEFAULT_VM_MEM_MIB: Final[int] = _resolve_with_config_override(
 DEFAULT_VM_SSH_USER: Final[str] = _resolve_with_config_override(
     "DEFAULT_VM_SSH_USER", _require_str(("vm_defaults", "ssh_user"))
 )
+DEFAULT_VM_USER_PASSWORD: Final[str] = _resolve_with_config_override(
+    "DEFAULT_VM_USER_PASSWORD", _require_str(("vm_defaults", "user_password"))
+)
 DEFAULT_VM_ROOT_FS_TYPE: Final[str] = _resolve_with_config_override(
     "DEFAULT_VM_ROOT_FS_TYPE", _require_str(("vm_defaults", "root_fs_type"))
 )
@@ -739,8 +742,8 @@ def __getattr__(name: str) -> Any:
         val = f"{__getattr__('CLI_NAME').upper()}-POSTROUTING"
         _LAZY_CONSTANTS[name] = val
         return val
-    if name == "MVM_NO_CLOUD_INPUT_CHAIN":
-        val = f"{__getattr__('CLI_NAME').upper()}-NOCLOUD-INPUT"
+    if name == "MVM_NOCLOUD_NET_INPUT_CHAIN":
+        val = f"{__getattr__('CLI_NAME').upper()}-NOCLOUDNET-INPUT"
         _LAZY_CONSTANTS[name] = val
         return val
     if name == "PROJECT_GROUP":

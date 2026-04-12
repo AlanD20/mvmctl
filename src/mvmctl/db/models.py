@@ -11,12 +11,32 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from mvmctl.constants import (
+    MVM_FORWARD_CHAIN,
+    MVM_NOCLOUD_NET_INPUT_CHAIN,
+    MVM_POSTROUTING_CHAIN,
+)
+
 
 class IPTablesRuleType(str, Enum):
     MASQUERADE = "masquerade"
     FORWARD_IN = "forward_in"
     FORWARD_OUT = "forward_out"
-    NOCLOUD_INPUT = "nocloud_input"
+    NOCLOUDNET_INPUT = "nocloudnet_input"
+
+
+class IPTablesTable(str, Enum):
+    FILTER = "filter"
+    NAT = "nat"
+    MANGLE = "mangle"
+    RAW = "raw"
+    SECURITY = "security"
+
+
+class IPTablesChain(str, Enum):
+    MVM_FORWARD = MVM_FORWARD_CHAIN
+    MVM_POSTROUTING = MVM_POSTROUTING_CHAIN
+    MVM_NOCLOUDNET_INPUT = MVM_NOCLOUD_NET_INPUT_CHAIN
 
 
 class IPTablesProtocol(str, Enum):
@@ -24,6 +44,15 @@ class IPTablesProtocol(str, Enum):
     UDP = "udp"
     ICMP = "icmp"
     ALL = "all"
+
+
+class IPTablesTarget(str, Enum):
+    ACCEPT = "ACCEPT"
+    DROP = "DROP"
+    REJECT = "REJECT"
+    MASQUERADE = "MASQUERADE"
+    LOG = "LOG"
+    MARK = "MARK"
 
 
 class IPTablesWildcard(str, Enum):
@@ -37,16 +66,16 @@ class IPTablesPort(int, Enum):
 
 @dataclass
 class IPTablesRule:
-    table_name: str
-    chain_name: str
+    table_name: IPTablesTable
+    chain_name: IPTablesChain
     rule_type: IPTablesRuleType
-    target: str
+    target: IPTablesTarget
     network_id: str
     protocol: IPTablesProtocol
     source: str
     destination: str
-    in_interface: str
-    out_interface: str
+    in_interface: str  # packet enters the host/network namespace
+    out_interface: str  # packet exits the host/network namespace
     sport: int
     dport: int
     is_active: bool
@@ -148,7 +177,6 @@ class VMInstance:
     kernel_id: str
     binary_id: str
     config_path: str
-    cloud_init_mode: str
     vcpu_count: int
     mem_size_mib: int
     disk_size_mib: int
@@ -162,6 +190,7 @@ class VMInstance:
     enable_logging: bool
     enable_metrics: bool
     enable_console: bool
+    cloud_init_mode: str
     api_socket_path: Optional[str] = None
     console_socket_path: Optional[str] = None
     nocloud_net_port: Optional[int] = None

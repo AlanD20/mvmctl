@@ -1,6 +1,5 @@
 # Cloud-init template for mvmctl VMs
 # All sections are rendered together; Jinja2 placeholders are substituted at runtime.
-
 user_data: |
   #cloud-config
   datasource:
@@ -21,26 +20,26 @@ user_data: |
 
   users:
     - default
-    {% if ssh_pub_keys %}
+    {% if ssh_pubkeys %}
     - name: {{user}}
       groups: sudo
       shell: /bin/bash
       sudo: ALL=(ALL) NOPASSWD:ALL
       ssh-authorized-keys:
-        {% for key in ssh_pub_keys %}- {{key}}
+        {% for key in ssh_pubkeys %}- {{key}}
         {% endfor %}
     {% endif %}
 
-  {% if ssh_pub_keys %}
+  {% if ssh_pubkeys %}
     - name: human
       sudo: ALL=(ALL) NOPASSWD:ALL
       groups: users, admin
       home: /home/human
       shell: /bin/bash
       lock_passwd: false
-      passwd: "$6$z7g1munt3fJycblB$cCzLDdjCdNUkNr2il4kTXy2.FZsY2qMvwmMoNGiIUaXOjTGRoX.5E.NbZH.eYe9ksxdqEQ5YU/rPCU1ga2KD40"
+      passwd: {{ password_hash }}
       ssh-authorized-keys:
-        {% for key in ssh_pub_keys %}- {{key}}
+        {% for key in ssh_pubkeys %}- {{key}}
         {% endfor %}
     {% endif %}
 
@@ -59,18 +58,16 @@ user_data: |
     - htop
     - cloud-init
 
-  {% if ssh_pub_keys %}
   runcmd:
-    - systemctl enable --now sshd || systemctl enable --now ssh
     - systemctl disable --now snapd.appliance.service 2>/dev/null || true
-  {% endif %}
+    {% if ssh_pubkeys %}
+    - systemctl enable --now sshd || systemctl enable --now ssh
+    {% endif %}
 
-  final_message: "mvmctl VM provisioning complete"
-
+  final_message: "[x] VM provisioned via MVMCTL"
 meta_data: |
   instance-id: {{vm_name}}
   local-hostname: {{vm_name}}
-
 # Network configuration for cloud-init netplan/systemd-networkd
 # NOTE: This is IGNORED when kernel ip= parameter is present (kernel has absolute priority)
 # The kernel ip= parameter already configures the network, this is kept for documentation purposes
@@ -89,7 +86,6 @@ network_config: |
         addresses:
           - 8.8.8.8
           - 1.1.1.1
-
 nocloud_cfg: |
   datasource_list:
     - NoCloud

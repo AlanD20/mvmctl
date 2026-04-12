@@ -33,6 +33,10 @@ class NetworkError(MVMError):
     """Network setup/teardown failure."""
 
 
+class IPTablesTrackerError(MVMError):
+    """IPTables action failure."""
+
+
 class ImageError(MVMError):
     """Image download or conversion failure."""
 
@@ -50,6 +54,10 @@ class FirecrackerError(MVMError):
 
 
 class ConfigError(MVMError):
+    """Configuration loading or validation failure."""
+
+
+class VMBuilderError(MVMError):
     """Configuration loading or validation failure."""
 
 
@@ -103,6 +111,23 @@ class CloudInitError(MVMError):
     Common messages:
     - cloud-localds not found. Install cloud-image-utils or cloud-utils package
     - Failed to create cloud-init ISO: {details}
+    """
+
+
+class CloudInitProvisionError(MVMError):
+    """Cloud-init provisioning failure.
+
+    Common messages:
+    - Invalid custom user data
+    """
+
+
+class CloudInitModeError(MVMError):
+    """Cloud-init mode failure.
+
+    Common messages:
+    - Failed to resolve cloud-init mode
+    - Custom ISO file not found
     """
 
 
