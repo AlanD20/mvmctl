@@ -7,7 +7,7 @@ from typing import Optional
 
 import typer
 
-from mvmctl.api.vms import ssh_vm
+from mvmctl.api.vm import ssh_vm
 from mvmctl.cli._helpers import get_vm_defaults, resolve_ssh_target
 from mvmctl.exceptions import MVMError
 from mvmctl.utils.error_handler import handle_mvm_error

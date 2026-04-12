@@ -6,20 +6,20 @@ from typing import Optional
 
 import typer
 
-from mvmctl.api.vms import (
+from mvmctl.api.vm import (
     attach_console as _attach_console,
 )
-from mvmctl.api.vms import (
+from mvmctl.api.vm import (
     check_escape_sequence,
     connect_to_relay,
     disconnect_from_relay,
     read_console_output,  # noqa: F401 (exported for tests)
     send_console_input,
 )
-from mvmctl.api.vms import (
+from mvmctl.api.vm import (
     get_console_state as _get_console_state,
 )
-from mvmctl.api.vms import (
+from mvmctl.api.vm import (
     kill_console as _kill_console,
 )
 from mvmctl.cli._helpers import resolve_vm_by_id_or_name

@@ -330,7 +330,7 @@ def dump_vm_config(name: str) -> dict[str, Any]:
     """
     import json
 
-    from mvmctl.api.vms import get_vm
+    from mvmctl.api.vm import get_vm
     from mvmctl.constants import DEFAULT_FC_CONFIG_FILENAME
     from mvmctl.exceptions import VMNotFoundError
     from mvmctl.utils.fs import get_vm_dir_by_hash

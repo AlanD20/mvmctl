@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from mvmctl.api.vms import get_logs
+from mvmctl.api.vm import get_logs
 from mvmctl.constants import (
     DEFAULT_VM_LOG_FOLLOW,
     DEFAULT_VM_LOG_LINES,

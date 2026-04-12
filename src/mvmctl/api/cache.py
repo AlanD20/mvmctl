@@ -61,10 +61,10 @@ def remove_network(network_name: str) -> None:
 
 
 def remove_vm(vm_name: str) -> None:
-    """Remove VM using vms API."""
-    from mvmctl.api import vms as vms_api
+    """Remove VM using vm API."""
+    from mvmctl.api import vm as vm_api
 
-    return vms_api.remove_vm(vm_name)
+    return vm_api.remove_vm(vm_name)
 
 
 __all__ = [
@@ -124,15 +124,19 @@ def _get_kernel_references() -> set[str]:
 
 def _get_network_references() -> set[str]:
     """Get set of network names referenced by all VMs."""
+    from mvmctl.core.mvm_db import MVMDatabase
     from mvmctl.core.vm_manager import get_vm_manager
 
     vm_manager = get_vm_manager()
     vms = vm_manager.list_all()
+    db = MVMDatabase()
 
     referenced: set[str] = set()
     for vm in vms:
-        if vm.network_name:
-            referenced.add(vm.network_name)
+        if vm.network_id:
+            db_net = db.get_network(vm.network_id)
+            if db_net and db_net.name:
+                referenced.add(db_net.name)
 
     return referenced
 

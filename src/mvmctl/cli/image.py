@@ -23,7 +23,7 @@ from mvmctl.api.image import (
     validate_image_type_selector,
 )
 from mvmctl.api.metadata import find_images_by_id_prefix
-from mvmctl.api.vms import get_vm_manager
+from mvmctl.api.vm import get_vm_manager
 from mvmctl.constants import (
     DEFAULT_IMAGE_ARCH,
     DEFAULT_IMAGE_IMPORT_FORMAT,

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mvmctl.api.metadata import find_kernels_by_id_prefix
-from mvmctl.api.vms import get_vm_manager
+from mvmctl.api.vm import get_vm_manager
 from mvmctl.constants import (
     KERNEL_TYPE_FIRECRACKER,
     KERNEL_TYPE_OFFICIAL,

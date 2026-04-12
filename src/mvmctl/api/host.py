@@ -546,6 +546,6 @@ def get_ready_pool_dir() -> Path:
 
 def get_running_vms() -> list[VMInstance]:
     """Return all currently running VMs."""
-    from mvmctl.api.vms import list_vms
+    from mvmctl.api.vm import list_vms
 
     return [v for v in list_vms(include_stopped=True) if v.status == VMStatus.RUNNING]

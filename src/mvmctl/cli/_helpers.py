@@ -5,7 +5,7 @@ from typing import Optional
 import typer
 
 from mvmctl.api.config import load_config
-from mvmctl.api.vms import get_vm_manager
+from mvmctl.api.vm import get_vm_manager
 from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
     DEFAULT_VM_BOOT_ARGS,

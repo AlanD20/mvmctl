@@ -8,8 +8,7 @@ import typer
 
 from mvmctl.api.assets import get_binary_path
 from mvmctl.api.network import check_ip_available
-from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
-from mvmctl.api.vms import (
+from mvmctl.api.vm import (
     compute_vm_is_missing,
     create_vm,
     export_vm_config,
@@ -29,6 +28,7 @@ from mvmctl.api.vms import (
     start_vm,
     stop_vm,
 )
+from mvmctl.api.vm_config import build_vm_config_file, load_vm_config_file, merge_cli_overrides
 from mvmctl.cli._helpers import get_vm_defaults
 from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_FINAL_MESSAGE,
