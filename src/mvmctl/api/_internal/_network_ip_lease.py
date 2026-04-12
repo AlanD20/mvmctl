@@ -126,6 +126,38 @@ class NetworkIPLeaseManager:
 
         raise NetworkError(f"No available IPs in subnet {self._network.subnet}")
 
+    def lease_specific(self, ip: str, vm_id: str) -> str:
+        """Allocate a specific IP address from this network's subnet.
+
+        Validates that the IP is in the subnet, not already leased, and not the gateway.
+
+        Args:
+            ip: The specific IP address to allocate.
+            vm_id: ID of the VM requesting the IP.
+
+        Returns:
+            The allocated IP address string.
+
+        Raises:
+            NetworkError: If IP is not in subnet, is the gateway, or is already leased.
+        """
+        network = ipaddress.IPv4Network(self._network.subnet, strict=False)
+        try:
+            ip_obj = ipaddress.IPv4Address(ip)
+            if ip_obj not in network:
+                raise NetworkError(f"IP {ip} is not in subnet {self._network.subnet}")
+        except ValueError as exc:
+            raise NetworkError(f"Invalid IP address: {ip}") from exc
+
+        if ip == self._network.ipv4_gateway:
+            raise NetworkError(f"IP {ip} is the network gateway and cannot be allocated")
+
+        if not self.is_available(ip):
+            raise NetworkError(f"IP {ip} is already leased")
+
+        self._db.acquire_lease(self._network.id, ip, vm_id)
+        return ip
+
     def release(self, vm_id: str) -> None:
         """Release all leases for a VM from this network.
 

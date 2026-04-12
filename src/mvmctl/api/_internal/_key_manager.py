@@ -151,7 +151,7 @@ class KeyManager:
         if ssh_key.public_key_path is None:
             raise MVMKeyError(f"Key '{ssh_key.name}' has no public key path")
 
-        return KeyManager._read_pubkey_file(Path(ssh_key.public_key_path))
+        return KeyManager._read_pubkey_file(Path(ssh_key.public_key_path)).strip()
 
     @staticmethod
     def get_pubkeys(key_names: list[str], db: MVMDatabase | None = None) -> list[str]:
