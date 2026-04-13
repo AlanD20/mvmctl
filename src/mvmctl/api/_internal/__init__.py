@@ -10,8 +10,10 @@ See docs/plans/vms-api-refactoring.md for boundary rules.
 
 from __future__ import annotations
 
+from mvmctl.api._internal._asset_manager import AssetManager
 from mvmctl.api._internal._key_manager import KeyManager
 
 __all__ = [
+    "AssetManager",
     "KeyManager",
 ]

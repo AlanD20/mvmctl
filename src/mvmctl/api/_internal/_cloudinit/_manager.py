@@ -16,6 +16,7 @@ from passlib.hash import bcrypt, sha512_crypt
 
 from mvmctl.constants import DEFAULT_VM_USER_PASSWORD, REQUIRED_ISO_TOOL
 from mvmctl.exceptions import CloudInitError, CloudInitProvisionError, ConfigError, ProcessError
+from src.mvmctl.api._internal._asset_manager import AssetManager
 from src.mvmctl.api._internal._cloudinit._provisioner import CloudInitProvisionConfig
 
 logger = logging.getLogger(__name__)
@@ -197,18 +198,6 @@ class CloudInitManager:
             f"{', '.join(dangerous_directives)}. {details}"
         )
 
-    @functools.lru_cache(maxsize=1)
-    def _load_cloud_init_template(self) -> str:
-        """Load the cloud-init template from the assets directory.
-
-        Returns:
-            The template string content.
-        """
-        import importlib.resources
-
-        template_path = importlib.resources.files("mvmctl.assets") / "cloud-init.template.yaml"
-        return template_path.read_text()
-
     def generate_password_hash(self, password: str, algorithm: str = "sha512") -> str:
         """Generate Unix password hash for cloud-init.
 
@@ -243,7 +232,7 @@ class CloudInitManager:
         from jinja2.sandbox import SandboxedEnvironment
 
         env = SandboxedEnvironment(undefined=StrictUndefined)
-        template_str = self._load_cloud_init_template()
+        template_str = AssetManager().read_file("cloud-init.template.yaml")
         template = env.from_string(template_str)
 
         rendered = template.render(
