@@ -101,21 +101,29 @@ def _forward_to_pty(pty_fd: int, data: bytes) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Console relay process for VM serial console")
-    parser.add_argument("--vm-name", required=True, help="VM name")
+    parser = argparse.ArgumentParser(description="Console relay process for serial console")
+    parser.add_argument("--id", required=True, help="Unique identifier")
+    parser.add_argument("--name", required=True, help="Name for logging")
     parser.add_argument(
-        "--pty-master-fd", type=int, required=True, help="PTY master file descriptor"
+        "--pty-controller-fd", type=int, required=True, help="PTY controller file descriptor"
     )
     parser.add_argument("--socket-path", type=Path, required=True, help="Unix socket path")
     parser.add_argument("--pid-file", type=Path, required=True, help="PID file path")
     parser.add_argument("--log-file", type=Path, required=True, help="Console log file path")
-    parser.add_argument("--buffer-size", type=int, default=4096, help="Read buffer size")
+    from mvmctl.services.console_relay._defaults import CONST_CONSOLE_READ_BUFFER_SIZE
+
+    parser.add_argument(
+        "--buffer-size",
+        type=int,
+        default=CONST_CONSOLE_READ_BUFFER_SIZE,
+        help="Read buffer size",
+    )
     args = parser.parse_args()
 
     _setup_signal_handlers()
     _write_pid_file(args.pid_file)
 
-    pty_fd = args.pty_master_fd
+    pty_fd = args.pty_controller_fd
     sock_path = args.socket_path
     log_file = args.log_file
     buffer_size = args.buffer_size
