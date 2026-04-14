@@ -11,9 +11,16 @@ See docs/plans/vms-api-refactoring.md for boundary rules.
 from __future__ import annotations
 
 from mvmctl.api._internal._asset_manager import AssetManager
+from mvmctl.api._internal._iptables_tracker import IPTablesRuleResult, IPTablesTracker
 from mvmctl.api._internal._key_manager import KeyManager
+from mvmctl.api._internal._network_ip_lease import NetworkIPLeaseManager
+from mvmctl.api._internal._network_manager import NetworkManager
 
 __all__ = [
     "AssetManager",
+    "IPTablesRuleResult",
+    "IPTablesTracker",
     "KeyManager",
+    "NetworkIPLeaseManager",
+    "NetworkManager",
 ]

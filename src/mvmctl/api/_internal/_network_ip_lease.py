@@ -48,7 +48,7 @@ class NetworkIPLeaseManager:
         """Get the resolved network name."""
         return self._network.name
 
-    def list_leases(self) -> list[NetworkLease]:
+    def get_leases(self) -> list[NetworkLease]:
         """Get all IP leases for this network.
 
         Returns:
@@ -111,7 +111,7 @@ class NetworkIPLeaseManager:
         Raises:
             NetworkError: If no IPs available.
         """
-        leases = self.list_leases()
+        leases = self.get_leases()
         used_ips = {lease.ipv4 for lease in leases}
         used_ips.add(self._network.ipv4_gateway)
 
