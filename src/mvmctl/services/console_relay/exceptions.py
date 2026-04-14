@@ -23,10 +23,15 @@ class ConsoleRelayPermissionError(ConsoleRelayError):
     """Raised when the relay lacks necessary permissions (e.g., for PTY or socket)."""
 
 
+class ConsoleRelayConnectionError(ConsoleRelayError):
+    """Raised when the client fails to connect to the relay socket."""
+
+
 __all__ = [
     "ConsoleRelayError",
     "ConsoleRelayAlreadyRunningError",
     "ConsoleRelayProcessError",
     "ConsoleRelayNotRunningError",
     "ConsoleRelayPermissionError",
+    "ConsoleRelayConnectionError",
 ]

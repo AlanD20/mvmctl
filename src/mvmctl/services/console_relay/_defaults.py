@@ -12,10 +12,14 @@ DEFAULT_CONSOLE_LOG_FILENAME: str = "firecracker.console.log"
 # Timing
 CONST_CONSOLE_KILL_TIMEOUT_S: float = 2.0  # Seconds to wait before SIGKILL
 CONST_CONSOLE_READ_BUFFER_SIZE: int = 4096  # PTY read buffer size in bytes
+CONST_CONSOLE_SELECT_TIMEOUT_S: float = 0.1  # Socket select timeout in seconds
 
 # Socket settings
 CONST_CONSOLE_SOCKET_BACKLOG: int = 1  # Max pending connections
 CONST_CONSOLE_SELECT_TIMEOUT_S: float = 0.1  # Select loop timeout
+
+# Client settings
+CONST_CONSOLE_DETACH_SEQUENCE: bytes = b"\x18d"  # Ctrl+X followed by 'd'
 
 __all__ = [
     "DEFAULT_CONSOLE_PID_FILENAME",
