@@ -53,6 +53,10 @@ class FirecrackerError(MVMError):
     """Firecracker process or API failure."""
 
 
+class FirecrackerConfigError(MVMError):
+    """Firecracker config generation failure."""
+
+
 class ConfigError(MVMError):
     """Configuration loading or validation failure."""
 
@@ -85,6 +89,16 @@ class HostError(MVMError):
     """Host configuration or prerequisite failure."""
 
 
+class ConsoleError(MVMError):
+    """Console or PTY operation failure.
+
+    Common messages:
+    - PTY allocation failed: {details}
+    - Console relay failed to start: {details}
+    - Failed to attach to console: {details}
+    """
+
+
 class PrivilegeError(HostError):
     """Insufficient privileges for an operation."""
 
@@ -95,6 +109,14 @@ class ProcessError(MVMError):
 
 class AssetNotFoundError(MVMError):
     """Requested asset (binary, kernel, image) not found locally or remotely."""
+
+
+class BundledAssetError(MVMError):
+    """Bundled package asset (templates, configs) access failure."""
+
+
+class BundledAssetNotFoundError(BundledAssetError):
+    """Requested bundled asset file not found in package."""
 
 
 class BinaryError(MVMError):

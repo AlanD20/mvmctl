@@ -1,11 +1,7 @@
-"""Idempotent iptables rule management.
+"""Idempotent iptables rule management with database synchronization.
 
-This module provides IPTablesTracker for creating/removing iptables rules.
-
-IMPORTANT: This is a Core layer module. It does NOT access the database directly.
-Database operations are the responsibility of the API layer.
-
-For synchronization between DB and iptables, see api/network_sync.py
+This module provides IPTablesTracker for creating/removing iptables rules
+and synchronizing them with the database.
 """
 
 from __future__ import annotations
@@ -15,7 +11,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
 from mvmctl.db.models import (
@@ -29,6 +25,9 @@ from mvmctl.db.models import (
 )
 from mvmctl.exceptions import IPTablesTrackerError
 from mvmctl.utils.process import privileged_cmd
+
+if TYPE_CHECKING:
+    from mvmctl.core.mvm_db import MVMDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +43,23 @@ class IPTablesRuleResult:
 
 
 class IPTablesTracker:
-    """Idempotent iptables rule manager.
+    """Idempotent iptables rule manager with database synchronization.
 
-    This class handles the actual iptables subprocess calls.
-    It does NOT interact with the database - that is the API layer's responsibility.
+    This class handles iptables subprocess calls and synchronizes rules
+    with the database. Rules are stored in the iptables_rules table.
 
-    Usage (by API layer):
-        tracker = IPTablesTracker()
+    Usage:
+        tracker = IPTablesTracker()  # Creates own DB instance
+        # or
+        tracker = IPTablesTracker(db=existing_db_instance)
+
         result = tracker.ensure_rule(
             table="nat", chain="MVM-POSTROUTING",
             source="10.0.0.0/24", out_interface="eth0",
             target="MASQUERADE", network_id="net-abc123",
             network_name="my-network"
         )
-        # API layer should store result.rule to database
+        # Rule is automatically stored in database
     """
 
     COMMENT_PREFIX = "mvm"
@@ -70,12 +72,23 @@ class IPTablesTracker:
         APPEND = "-A"
         DELETE = "-D"
 
-    def ensure_rule(self, rule: IPTablesRule, *, context: str = "") -> IPTablesRuleResult:
-        """Idempotently ensure a rule exists in iptables.
+    def __init__(self, db: Optional[MVMDatabase] = None) -> None:
+        """Initialize IPTablesTracker with optional database instance."""
+        if db is None:
+            from mvmctl.core.mvm_db import MVMDatabase
 
-        1. Check if rule exists (iptables -C)
-        2. If not exists, create it (iptables -A)
-        3. Return rule metadata for API layer to store
+            self._db = MVMDatabase()
+        else:
+            self._db = db
+
+    def ensure_rule(self, rule: IPTablesRule, *, context: str = "") -> IPTablesRuleResult:
+        """Idempotently ensure a rule exists in iptables and database.
+
+        1. Check if rule exists in database by unique attributes
+        2. Check if rule exists in iptables (iptables -C)
+        3. If not in iptables, create it (iptables -A)
+        4. If not in database, insert it; if in DB but inactive, reactivate it
+        5. Return rule metadata
 
         Args:
             rule: IPTablesRule dataclass containing all rule parameters.
@@ -93,30 +106,50 @@ class IPTablesTracker:
         add_args = self._build_iptables_args(rule, self.RuleAction.APPEND)
         rule.command_string = " ".join(shlex.quote(arg) for arg in add_args)
 
-        # Check if rule exists
+        # Check if rule exists in database
+        existing_db_rule = self._db.find_iptables_rule_by_attributes(
+            table_name=rule.table_name,
+            chain_name=rule.chain_name,
+            rule_type=rule.rule_type,
+            network_id=rule.network_id,
+            protocol=rule.protocol,
+            source=rule.source,
+            destination=rule.destination,
+            in_interface=rule.in_interface,
+            out_interface=rule.out_interface,
+            sport=rule.sport,
+            dport=rule.dport,
+        )
+
+        # Check if rule exists in iptables
+        iptables_exists = False
         try:
             subprocess.run(
                 privileged_cmd(check_args),
                 capture_output=True,
                 check=True,
             )
-            # Rule exists - return success with existing rule info
-            return IPTablesRuleResult(success=True, rule=rule)
+            iptables_exists = True
         except subprocess.CalledProcessError:
-            # Rule doesn't exist - need to create it
             pass
 
-        # Create the rule
+        # If rule exists in both DB and iptables, update verification timestamp
+        if existing_db_rule and iptables_exists:
+            if existing_db_rule.id is not None:
+                self._db.update_iptables_rule_verified(existing_db_rule.id)
+            return IPTablesRuleResult(success=True, rule=existing_db_rule)
+
+        # If rule exists in iptables but not in DB, record it
+        if iptables_exists and not existing_db_rule:
+            recorded_rule = self._db.record_iptables_rule(rule)
+            return IPTablesRuleResult(success=True, rule=recorded_rule)
+
+        # Create the rule in iptables
         try:
             subprocess.run(
                 privileged_cmd(add_args),
                 capture_output=True,
                 check=True,
-            )
-            return IPTablesRuleResult(
-                success=True,
-                rule=rule,
-                command_executed=add_args,
             )
         except subprocess.CalledProcessError as e:
             return IPTablesRuleResult(
@@ -125,41 +158,79 @@ class IPTablesTracker:
                 command_executed=add_args,
             )
 
-    def remove_rule(self, rule: IPTablesRule) -> IPTablesRuleResult:
-        """Remove a specific rule from iptables.
+        # Record in database (insert new or reactivate existing)
+        if existing_db_rule:
+            # Reactivate existing rule
+            if existing_db_rule.id is not None:
+                self._db.update_iptables_rule_verified(existing_db_rule.id)
+            rule.id = existing_db_rule.id
+            recorded_rule = rule
+        else:
+            recorded_rule = self._db.record_iptables_rule(rule)
 
-        Best-effort removal - if rule doesn't exist, still returns success.
+        return IPTablesRuleResult(
+            success=True,
+            rule=recorded_rule,
+            command_executed=add_args,
+        )
+
+    def remove_rule(self, rule: IPTablesRule) -> IPTablesRuleResult:
+        """Remove a specific rule from iptables and mark as deleted in database.
+
+        Best-effort removal - if rule doesn't exist in iptables, still returns success.
+        Also marks the rule as inactive in the database if found.
 
         Returns:
             RuleOperationResult with success status
         """
         delete_args = self._build_iptables_args(rule, self.RuleAction.DELETE)
 
+        # Find and mark the rule as deleted in database
+        db_rule_id = rule.id
+        if db_rule_id is None:
+            # Look up the rule by its attributes
+            existing_rule = self._db.find_iptables_rule_by_attributes(
+                table_name=rule.table_name,
+                chain_name=rule.chain_name,
+                rule_type=rule.rule_type,
+                network_id=rule.network_id,
+                protocol=rule.protocol,
+                source=rule.source,
+                destination=rule.destination,
+                in_interface=rule.in_interface,
+                out_interface=rule.out_interface,
+                sport=rule.sport,
+                dport=rule.dport,
+            )
+            if existing_rule:
+                db_rule_id = existing_rule.id
+
+        # Remove from iptables
         try:
             subprocess.run(
                 privileged_cmd(delete_args),
                 capture_output=True,
                 check=True,
             )
-            return IPTablesRuleResult(
-                success=True,
-                rule=rule,
-                command_executed=delete_args,
-            )
         except subprocess.CalledProcessError as e:
-            # Check if rule just didn't exist (which is fine for idempotent removal)
             stderr = e.stderr.decode()
-            if "No chain/target/match by that name" in stderr:
+            if "No chain/target/match by that name" not in stderr:
                 return IPTablesRuleResult(
-                    success=True,  # Idempotent - rule already gone
-                    rule=rule,
+                    success=False,
+                    error_message=f"Failed to remove rule: {stderr}",
                     command_executed=delete_args,
                 )
-            return IPTablesRuleResult(
-                success=False,
-                error_message=f"Failed to remove rule: {stderr}",
-                command_executed=delete_args,
-            )
+            # Rule already gone from iptables - this is fine, continue to mark as deleted in DB
+
+        # Mark as deleted in database if we found it
+        if db_rule_id is not None:
+            self._db.mark_iptables_rule_deleted(db_rule_id)
+
+        return IPTablesRuleResult(
+            success=True,
+            rule=rule,
+            command_executed=delete_args,
+        )
 
     def _build_iptables_args(
         self,
@@ -328,7 +399,7 @@ class IPTablesTracker:
     def flush_chain(
         self, chain_name: IPTablesChain, table: IPTablesTable = IPTablesTable.FILTER
     ) -> bool:
-        """Flush all rules from an iptables chain.
+        """Flush all rules from an iptables chain and mark them deleted in DB.
 
         Args:
             chain_name: Name of the chain to flush.
@@ -354,14 +425,30 @@ class IPTablesTracker:
             logger.debug("Chain %s doesn't exist, nothing to flush", chain_name_str)
             return False
 
-        # Flush the chain
+        # Flush the chain in iptables
         cmd_flush = ["iptables", "-t", table, "-F", chain_name_str]
         try:
             subprocess.run(privileged_cmd(cmd_flush), check=True, capture_output=True)
             logger.debug("Flushed all rules from chain %s", chain_name_str)
-            return True
         except subprocess.CalledProcessError as e:
             raise IPTablesTrackerError(f"Failed to flush {chain_name_str} chain") from e
+
+        # Mark all rules for this chain as deleted in database
+        deleted_count = self._db.mark_iptables_rules_deleted_for_chain(table, chain_name)
+        logger.debug("Marked %d rules as deleted for chain %s", deleted_count, chain_name_str)
+
+        return True
+
+    def cleanup_inactive_rules(self) -> int:
+        """Hard delete all inactive iptables rules from database.
+
+        This is a maintenance operation to clean up soft-deleted records
+        that are no longer needed for audit purposes.
+
+        Returns:
+            Number of records permanently deleted.
+        """
+        return self._db.cleanup_inactive_iptables_rules()
 
 
 __all__ = ["IPTablesTracker", "IPTablesRuleResult"]

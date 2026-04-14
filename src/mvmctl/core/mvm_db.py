@@ -26,9 +26,11 @@ from mvmctl.db.models import (
     HostState,
     HostStateChange,
     Image,
+    IPTablesChain,
     IPTablesProtocol,
     IPTablesRule,
     IPTablesRuleType,
+    IPTablesTable,
     Kernel,
     Network,
     NetworkLease,
@@ -1079,6 +1081,79 @@ class MVMDatabase:
                 (network_id,),
             )
         return cursor.rowcount
+
+    def cleanup_inactive_iptables_rules(self) -> int:
+        """Hard delete all inactive iptables rules (is_active=0).
+
+        This is a maintenance operation to remove soft-deleted records
+        that are no longer needed for audit purposes.
+
+        Returns:
+            Number of records permanently deleted.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM iptables_rules WHERE is_active = 0")
+        return cursor.rowcount
+
+    def mark_iptables_rules_deleted_for_chain(
+        self, table_name: IPTablesTable, chain_name: IPTablesChain
+    ) -> int:
+        """Soft delete all active rules for a specific chain.
+
+        Marks all rules with is_active=1 for the given table/chain as is_active=0.
+        Returns the number of rules marked as deleted.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE iptables_rules
+                   SET is_active = 0
+                   WHERE table_name = ? AND chain_name = ? AND is_active = 1""",
+                (table_name.value, chain_name.value),
+            )
+        return cursor.rowcount
+
+    def find_iptables_rule_by_attributes(
+        self,
+        table_name: IPTablesTable,
+        chain_name: IPTablesChain,
+        rule_type: IPTablesRuleType,
+        network_id: str,
+        protocol: IPTablesProtocol,
+        source: str,
+        destination: str,
+        in_interface: str,
+        out_interface: str,
+        sport: int,
+        dport: int,
+    ) -> Optional[IPTablesRule]:
+        """Find an iptables rule by its unique attributes.
+
+        Returns the rule if found, None otherwise.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM iptables_rules
+                   WHERE table_name = ? AND chain_name = ? AND rule_type = ?
+                   AND network_id = ? AND protocol = ? AND source = ?
+                   AND destination = ? AND in_interface = ? AND out_interface = ?
+                   AND sport = ? AND dport = ? AND is_active = 1""",
+                (
+                    table_name.value,
+                    chain_name.value,
+                    rule_type.value,
+                    network_id,
+                    protocol.value,
+                    source,
+                    destination,
+                    in_interface,
+                    out_interface,
+                    sport,
+                    dport,
+                ),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_iptables_rule(row)
 
     def _row_to_iptables_rule(self, row: sqlite3.Row) -> IPTablesRule:
         """Convert DB row to IPTablesRule dataclass."""
