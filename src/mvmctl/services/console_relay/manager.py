@@ -11,7 +11,6 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
 
 from mvmctl.services.console_relay._defaults import (
     CONST_CONSOLE_KILL_TIMEOUT_S,
@@ -41,6 +40,8 @@ class ConsoleRelayManager:
         _lock: Lock for thread-safe access
     """
 
+    _pid: int | None = None
+
     def __init__(
         self,
         id: str,
@@ -63,10 +64,10 @@ class ConsoleRelayManager:
         self._id = id
         self._path = path
         self._name = name or id
-        self._pid_filename = pid_filename
-        self._socket_filename = socket_filename
-        self._log_filename = log_filename
-        self._info: dict[str, Any] | None = None
+        self._pid_path = path / pid_filename
+        self._socket_path = path / socket_filename
+        self._log_path = path / log_filename
+        self._pid: int | None = None
         self._lock: threading.Lock | None = None
 
     @property
@@ -86,6 +87,29 @@ class ConsoleRelayManager:
         """Return the relay's human-readable name."""
         return self._name
 
+    @property
+    def pid(self) -> int | None:
+        if self._pid is not None:
+            return self._pid
+        if self._pid_path.exists():
+            try:
+                return int(self._pid_path.read_text().strip())
+            except (ValueError, OSError):
+                pass
+        return None
+
+    @property
+    def pid_path(self) -> Path:
+        return self._pid_path
+
+    @property
+    def socket_path(self) -> Path:
+        return self._socket_path
+
+    @property
+    def log_path(self) -> Path:
+        return self._log_path
+
     def start(self, pty_controller_fd: int) -> tuple[Path, int]:
         """Start the console relay subprocess.
 
@@ -102,14 +126,10 @@ class ConsoleRelayManager:
             ConsoleRelayAlreadyRunningError: If relay is already running
         """
         with self._thread_lock:
-            if self._info is not None:
+            if self._pid is not None:
                 raise ConsoleRelayAlreadyRunningError(
                     f"Console relay already running for ID: {self._id}"
                 )
-
-            socket_path = self._path / self._socket_filename
-            pid_file = self._path / self._pid_filename
-            log_file = self._path / self._log_filename
 
             relay_cmd = [
                 sys.executable,
@@ -122,11 +142,11 @@ class ConsoleRelayManager:
                 "--pty-controller-fd",
                 str(pty_controller_fd),
                 "--socket-path",
-                str(socket_path),
+                str(self._socket_path),
                 "--pid-file",
-                str(pid_file),
+                str(self._pid_path),
                 "--log-file",
-                str(log_file),
+                str(self._log_path),
             ]
 
             try:
@@ -141,12 +161,7 @@ class ConsoleRelayManager:
             except OSError as e:
                 raise ConsoleRelayProcessError(f"Failed to spawn console relay process: {e}") from e
 
-            self._info = {
-                "name": self._name,
-                "pid": proc.pid,
-                "socket_path": socket_path,
-                "pid_file": pid_file,
-            }
+            self._pid = proc.pid
 
             logger.info(
                 "Started console relay for %s (ID: %s, PID: %d)",
@@ -155,168 +170,63 @@ class ConsoleRelayManager:
                 proc.pid,
             )
 
-            return socket_path, proc.pid
+            return self._socket_path, proc.pid
 
-    def stop(self) -> None:
-        """Stop the console relay.
-
-        Idempotent operation - safe to call multiple times. If no relay
-        is running, this is a no-op.
-        """
-        with self._thread_lock:
-            if self._info is not None:
-                pid = int(self._info["pid"])
-                pid_file = self._info["pid_file"]
-                socket_path = self._info["socket_path"]
-
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                    logger.info(
-                        "Sent SIGTERM to console relay (PID: %d) for %s",
-                        pid,
-                        self._name,
-                    )
-                except ProcessLookupError:
-                    logger.debug("Console relay process (PID: %d) already terminated", pid)
-                except PermissionError:
-                    logger.warning("Cannot kill console relay (PID: %d) - permission denied", pid)
-
-                if isinstance(pid_file, Path) and pid_file.exists():
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-
-                if isinstance(socket_path, Path) and socket_path.exists():
-                    try:
-                        socket_path.unlink()
-                    except OSError:
-                        pass
-
-                self._info = None
-                logger.info("Stopped console relay for %s", self._name)
-            else:
-                self._stop_by_path()
-
-    def _stop_by_path(self) -> bool:
-        """Stop a relay using only its PID file (recovery path).
-
-        Returns:
-            True if a relay was stopped using the PID file, False otherwise
-        """
-        pid_file = self._path / self._pid_filename
-
-        if not pid_file.exists():
-            logger.debug("No PID file found at %s", pid_file)
-            return False
-
+    def _send_signal(self, pid: int, sig: int) -> bool:
         try:
-            pid_text = pid_file.read_text().strip()
-            pid = int(pid_text)
-        except (ValueError, OSError) as e:
-            logger.debug("Could not read PID from file %s: %s", pid_file, e)
-            return False
-
-        try:
-            os.kill(pid, 0)
-            os.kill(pid, signal.SIGTERM)
-            logger.info(
-                "Stopped console relay via PID file recovery (PID: %d) for %s",
-                pid,
-                self._name,
-            )
+            os.kill(pid, sig)
+            return True
         except ProcessLookupError:
             logger.debug("Console relay process (PID: %d) already terminated", pid)
+            return False
         except PermissionError:
-            logger.warning("Cannot kill console relay (PID: %d) - permission denied", pid)
+            logger.warning("Cannot signal console relay (PID: %d) - permission denied", pid)
+            return False
 
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-
-        socket_path = self._path / self._socket_filename
-        if socket_path.exists():
+    def _cleanup_files(self) -> None:
+        if self._pid_path.exists():
             try:
-                socket_path.unlink()
+                self._pid_path.unlink()
+            except OSError:
+                pass
+        if self._socket_path.exists():
+            try:
+                self._socket_path.unlink()
             except OSError:
                 pass
 
-        return True
+    def stop(self) -> bool:
+        with self._thread_lock:
+            if self.pid is None:
+                return False
+
+            self._send_signal(self.pid, signal.SIGTERM)
+            self._cleanup_files()
+            self._pid = None
+            logger.info("Stopped console relay for %s", self._name)
+            return True
 
     def terminate(self) -> bool:
-        """Forcefully terminate the console relay.
-
-        Sends SIGTERM first, waits up to CONST_CONSOLE_KILL_TIMEOUT_S seconds,
-        then sends SIGKILL if still running.
-
-        Returns:
-            True if relay was terminated, False if no relay was running
-        """
         with self._thread_lock:
-            pid_file = None
-            pid = None
+            if self.pid is None:
+                return False
 
-            if self._info is not None:
-                pid = self._info["pid"]
-                pid_file = self._info["pid_file"]
+            if not self._send_signal(self.pid, signal.SIGTERM):
+                self._cleanup_files()
+                self._pid = None
+                return True
+
+            import time
+
+            for _ in range(int(CONST_CONSOLE_KILL_TIMEOUT_S * 10)):
+                time.sleep(0.1)
+                if not self._send_signal(self.pid, 0):
+                    break
             else:
-                pid_file = self._path / self._pid_filename
-                if pid_file.exists():
-                    try:
-                        pid = int(pid_file.read_text().strip())
-                    except (ValueError, OSError):
-                        pass
+                self._send_signal(self.pid, signal.SIGKILL)
 
-            if pid is None:
-                return False
-
-            try:
-                os.kill(pid, 0)
-            except (ProcessLookupError, PermissionError):
-                if pid_file and pid_file.exists():
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-                self._info = None
-                return False
-
-            try:
-                os.kill(pid, signal.SIGTERM)
-                import time
-
-                for _ in range(int(CONST_CONSOLE_KILL_TIMEOUT_S * 10)):
-                    time.sleep(0.1)
-                    try:
-                        os.kill(pid, 0)
-                    except ProcessLookupError:
-                        break
-                else:
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-            except ProcessLookupError:
-                pass
-            except PermissionError:
-                logger.warning("Cannot kill console relay (PID: %d) - permission denied", pid)
-
-            if pid_file and pid_file.exists():
-                try:
-                    pid_file.unlink()
-                except OSError:
-                    pass
-
-            socket_path = self._path / self._socket_filename
-            if socket_path.exists():
-                try:
-                    socket_path.unlink()
-                except OSError:
-                    pass
-
-            self._info = None
-
+            self._cleanup_files()
+            self._pid = None
             logger.info("Terminated console relay for %s", self._name)
             return True
 
@@ -327,25 +237,19 @@ class ConsoleRelayManager:
             The subprocess PID if running, None otherwise
         """
         with self._thread_lock:
-            if self._info is not None:
-                return int(self._info["pid"])
-            return self._get_pid_from_path()
-
-    def _get_pid_from_path(self) -> int | None:
-        """Get PID from PID file if it exists and process is running.
-
-        Returns:
-            PID if file exists and process is running, None otherwise
-        """
-        pid_file = self._path / self._pid_filename
-        if not pid_file.exists():
-            return None
-
-        try:
-            pid = int(pid_file.read_text().strip())
-            os.kill(pid, 0)
-            return pid
-        except (ValueError, OSError, ProcessLookupError, PermissionError):
+            if self._pid is not None:
+                try:
+                    os.kill(self._pid, 0)
+                    return self._pid
+                except (ProcessLookupError, PermissionError):
+                    return None
+            if self._pid_path.exists():
+                try:
+                    pid = int(self._pid_path.read_text().strip())
+                    os.kill(pid, 0)
+                    return pid
+                except (ValueError, OSError, ProcessLookupError, PermissionError):
+                    pass
             return None
 
     def is_running(self) -> bool:
@@ -354,26 +258,9 @@ class ConsoleRelayManager:
         Returns:
             True if relay is running, False otherwise
         """
-        with self._thread_lock:
-            if self._info is not None:
-                pid = self._info.get("pid")
-                if pid is None:
-                    return False
-                try:
-                    os.kill(pid, 0)
-                    return True
-                except (ProcessLookupError, PermissionError):
-                    return False
-            return self._get_pid_from_path() is not None
+        return self.get_pid() is not None
 
-    def get_socket_path(self) -> Path:
-        """Get the socket path for this relay.
-
-        Returns:
-            Path to the socket file
-        """
-        return self._path / self._socket_filename
-
+    # FIXME: this needs review because orphan cleanup requires looping through all vm dirs
     def cleanup_orphans(self) -> None:
         """Clean up any orphaned relays from previous crashed sessions.
 
