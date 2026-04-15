@@ -29,14 +29,14 @@ class NetworkIPLeaseManager:
         NetworkNotFoundError: If the network cannot be resolved.
     """
 
-    def __init__(self, network: str | DBNetwork, db: MVMDatabase | None = None) -> None:
+    def __init__(self, entity: str | DBNetwork, db: MVMDatabase | None = None) -> None:
         self._db = db if db is not None else MVMDatabase()
 
-        if isinstance(network, DBNetwork):
-            self._network = network
+        if isinstance(entity, DBNetwork):
+            self._network = entity
         else:
             self._resolver = NetworkResolver(self._db)
-            self._network = self._resolver.resolve(network)
+            self._network = self._resolver.resolve(entity)
 
     @property
     def network_id(self) -> str:

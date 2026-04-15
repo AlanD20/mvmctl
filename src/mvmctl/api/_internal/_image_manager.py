@@ -35,21 +35,21 @@ class ImageManager:
     for fast VM rootfs cloning.
 
     Args:
-        image: Image os_slug, ID prefix, or Image db model instance.
+        entity: Image os_slug, ID prefix, or Image db model instance.
         db: Optional MVMDatabase instance (creates new if None).
 
     Raises:
         ImageNotFoundError: If the image cannot be resolved.
     """
 
-    def __init__(self, image: str | Image, db: MVMDatabase | None = None) -> None:
+    def __init__(self, entity: str | Image, db: MVMDatabase | None = None) -> None:
         self._db = db if db is not None else MVMDatabase()
 
-        if isinstance(image, str):
-            self._resolver = ImageResolver(self._db)
-            self._image = self._resolver.resolve(image)
+        if isinstance(entity, Image):
+            self._image = entity
         else:
-            self._image = image
+            self._resolver = ImageResolver(self._db)
+            self._image = self._resolver.resolve(entity)
 
     @property
     def image_id(self) -> str:

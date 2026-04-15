@@ -72,14 +72,9 @@ class IPTablesTracker:
         APPEND = "-A"
         DELETE = "-D"
 
-    def __init__(self, db: Optional[MVMDatabase] = None) -> None:
+    def __init__(self, db: MVMDatabase | None = None) -> None:
         """Initialize IPTablesTracker with optional database instance."""
-        if db is None:
-            from mvmctl.core.mvm_db import MVMDatabase
-
-            self._db = MVMDatabase()
-        else:
-            self._db = db
+        self._db = db if db is not None else MVMDatabase()
 
     def ensure_rule(self, rule: IPTablesRule, *, context: str = "") -> IPTablesRuleResult:
         """Idempotently ensure a rule exists in iptables and database.

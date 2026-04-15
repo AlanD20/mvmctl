@@ -43,14 +43,14 @@ class NetworkManager:
     Shares database connection with IPTablesTracker for rule synchronization.
     """
 
-    def __init__(self, db: Optional["MVMDatabase"] = None) -> None:
+    def __init__(self, db: MVMDatabase | None = None) -> None:
         """Initialize NetworkManager with optional database instance.
 
         Args:
             db: Optional MVMDatabase instance. If not provided, IPTablesTracker
                 instances will create their own.
         """
-        self._db = db
+        self._db = db if db is not None else MVMDatabase()
 
     def initialize(self) -> None:
         """Initialize MVM iptables chains with proper jump rules.

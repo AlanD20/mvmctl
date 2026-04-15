@@ -41,14 +41,14 @@ class KeyManager:
         KeyNotFoundError: If the key cannot be resolved.
     """
 
-    def __init__(self, key: str | SSHKey, db: MVMDatabase | None = None) -> None:
+    def __init__(self, entity: str | SSHKey, db: MVMDatabase | None = None) -> None:
         self._db = db if db is not None else MVMDatabase()
 
-        if isinstance(key, str):
-            resolver = KeyResolver(self._db)
-            self._key = resolver.resolve(key)
+        if isinstance(entity, SSHKey):
+            self._key = entity
         else:
-            self._key = key
+            resolver = KeyResolver(self._db)
+            self._key = resolver.resolve(entity)
 
     @property
     def key_id(self) -> str:
