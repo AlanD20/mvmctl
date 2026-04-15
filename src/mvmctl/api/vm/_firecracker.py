@@ -5,9 +5,13 @@ from typing import Any, NotRequired, TypedDict
 from mvmctl.api.vm._creation import VMBuilder
 from mvmctl.api.vm._resolver import VMInputResolved
 from mvmctl.constants import (
+    DEFAULT_FC_API_SOCKET_FILENAME,
+    DEFAULT_FC_CONFIG_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
     DEFAULT_FC_LOG_LEVEL,
     DEFAULT_FC_METRICS_FILENAME,
+    DEFAULT_FC_PID_FILENAME,
+    DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     DEFAULT_LIBGUESTFS_SEED_DIR,
 )
 from mvmctl.exceptions import FirecrackerConfigError
@@ -75,9 +79,19 @@ FirecrackerConfig = TypedDict(
 class FirecrackerConfigManager:
     """Manage Firecracker JSON configuration."""
 
-    def __init__(self, vm_builder: VMBuilder, resolved: VMInputResolved):
+    def __init__(
+        self, vm_builder: VMBuilder, resolved: VMInputResolved, *, config_path: Path | None = None
+    ):
         self._resolved = resolved
         self._ctx = vm_builder
+        self.config_path = (
+            config_path if config_path else vm_builder.vm_dir / DEFAULT_FC_CONFIG_FILENAME
+        )
+        self.log_path = vm_builder.vm_dir / DEFAULT_FC_LOG_FILENAME
+        self.metrics_path = vm_builder.vm_dir / DEFAULT_FC_METRICS_FILENAME
+        self.serial_output_path = vm_builder.vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
+        self.pid_path = vm_builder.vm_dir / DEFAULT_FC_PID_FILENAME
+        self.api_socket_path = vm_builder.vm_dir / DEFAULT_FC_API_SOCKET_FILENAME
 
     def generate(self) -> FirecrackerConfig:
         # Build as regular dict to allow dynamic optional keys
@@ -138,7 +152,7 @@ class FirecrackerConfigManager:
 
     def _build_logger_config(self) -> LoggerConfig:
         logger: LoggerConfig = {
-            "log_path": str(self._ctx.vm_dir / DEFAULT_FC_LOG_FILENAME),
+            "log_path": str(self.log_path),
             "level": DEFAULT_FC_LOG_LEVEL,
             "show_level": True,
             "show_log_origin": True,
@@ -148,7 +162,7 @@ class FirecrackerConfigManager:
 
     def _build_metrics_config(self) -> MetricsConfig:
         metric: MetricsConfig = {
-            "metrics_path": str(self._ctx.vm_dir / DEFAULT_FC_METRICS_FILENAME),
+            "metrics_path": str(self.metrics_path),
         }
 
         return metric
@@ -333,13 +347,9 @@ class FirecrackerConfigManager:
 
         return networks
 
-    def write_to_file(self, path: Path | None = None) -> None:
-
-        output = path
-        if output is None:
-            output = self._resolved.config_path
+    def write_to_file(self) -> None:
 
         config = self.generate()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with open(output, "w") as f:
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.config_path, "w") as f:
             json.dump(config, f)
