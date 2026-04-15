@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any, Collection, NotRequired, TextIO, TypedDict
 
-from mvmctl.api.vm._creation import VMBuilder
+from mvmctl.api.vm._builder import VMBuilder
 from mvmctl.api.vm._resolver import VMInputResolved
 from mvmctl.constants import (
     CONST_POLL_STEP_SECONDS,
@@ -95,14 +95,38 @@ class FirecrackerManager:
     ):
         self._resolved = resolved
         self._ctx = vm_builder
-        self.config_path = (
+        self._config_path = (
             config_path if config_path else vm_builder.vm_dir / DEFAULT_FC_CONFIG_FILENAME
         )
-        self.log_path = vm_builder.vm_dir / DEFAULT_FC_LOG_FILENAME
-        self.metrics_path = vm_builder.vm_dir / DEFAULT_FC_METRICS_FILENAME
-        self.serial_output_path = vm_builder.vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
-        self.pid_path = vm_builder.vm_dir / DEFAULT_FC_PID_FILENAME
-        self.api_socket_path = vm_builder.vm_dir / DEFAULT_FC_API_SOCKET_FILENAME
+        self._log_path = vm_builder.vm_dir / DEFAULT_FC_LOG_FILENAME
+        self._metrics_path = vm_builder.vm_dir / DEFAULT_FC_METRICS_FILENAME
+        self._serial_output_path = vm_builder.vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
+        self._pid_path = vm_builder.vm_dir / DEFAULT_FC_PID_FILENAME
+        self._api_socket_path = vm_builder.vm_dir / DEFAULT_FC_API_SOCKET_FILENAME
+
+    @property
+    def log_path(self) -> Path:
+        return self._log_path
+
+    @property
+    def api_socket_path(self) -> Path:
+        return self._api_socket_path
+
+    @property
+    def pid_path(self) -> Path:
+        return self._pid_path
+
+    @property
+    def serial_output_path(self) -> Path:
+        return self._serial_output_path
+
+    @property
+    def metrics_path(self) -> Path:
+        return self._metrics_path
+
+    @property
+    def config_path(self) -> Path:
+        return self._config_path
 
     def spawn(
         self,
@@ -123,18 +147,18 @@ class FirecrackerManager:
             fc_stdout = relay_client_fd
             fc_pass_fds = [relay_client_fd]
         else:
-            self.serial_output_fp = self.create_filepointer(self.serial_output_path)
+            self.serial_output_fp = self.create_filepointer(self._serial_output_path)
 
         fc_proc: subprocess.Popen[Any] | None = None
-        self.fc_log_fp = self.create_filepointer(self.log_path)
+        self.fc_log_fp = self.create_filepointer(self._log_path)
 
         fc_proc = subprocess.Popen(
             [
                 self._resolved.binary.path,
                 "--api-sock",
-                str(self.api_socket_path),
+                str(self._api_socket_path),
                 "--config-file",
-                str(self.config_path),
+                str(self._config_path),
             ],
             stdin=fc_stdin,
             stdout=fc_stdout,
@@ -154,7 +178,7 @@ class FirecrackerManager:
         # Close file pointers since the firecracker process is managing them
         self._close_filepointers()
 
-        write_pid_file(self.pid_path, fc_proc.pid)
+        write_pid_file(self._pid_path, fc_proc.pid)
 
     def cleanup(self) -> None:
         """Perform cleanup of all created resources."""
@@ -220,7 +244,7 @@ class FirecrackerManager:
 
     def _build_logger_config(self) -> LoggerConfig:
         logger: LoggerConfig = {
-            "log_path": str(self.log_path),
+            "log_path": str(self._log_path),
             "level": DEFAULT_FC_LOG_LEVEL,
             "show_level": True,
             "show_log_origin": True,
@@ -230,7 +254,7 @@ class FirecrackerManager:
 
     def _build_metrics_config(self) -> MetricsConfig:
         metric: MetricsConfig = {
-            "metrics_path": str(self.metrics_path),
+            "metrics_path": str(self._metrics_path),
         }
 
         return metric
@@ -418,8 +442,8 @@ class FirecrackerManager:
     def write_to_file(self) -> None:
 
         config = self.generate()
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.config_path, "w") as f:
+        self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._config_path, "w") as f:
             json.dump(config, f)
 
     def create_filepointer(self, path: Path):

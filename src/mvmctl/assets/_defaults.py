@@ -15,8 +15,8 @@ DEFAULTS: dict[str, object] = {
         "user_password": "password",
         "root_fs_type": "ext4",
         "network_interface": "eth0",
-        "boot_args": "console=ttyS0 reboot=k panic=1",
-        "disk_size": "2G",
+        "boot_args": "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait",
+        "disk_size": "2G",  # FIXME: remove this
         "enable_api_socket": True,
         "enable_pci": False,
         "enable_logging": True,
@@ -39,14 +39,11 @@ DEFAULTS: dict[str, object] = {
         },
         "cloud_init": {
             "seed_path": "/var/lib/cloud/seed/nocloud",
-            "kernel_cmdline_ds": "ds=nocloud",
             "final_message": "mvm cloud-init done",
             "disable_snapd_cmd": "systemctl disable --now snapd.socket 2>/dev/null || true",
             "dirname": "cloud-init",
-            "kernel_cmdline_nocloud": "ds=nocloud",
             "iso_name": "cloud-init.iso",
             "iso_volume_label": "cidata",
-            "drive_id": "cloud-init",
             "required_iso_tool": "cloud-localds",
         },
         "boot": {
@@ -150,9 +147,9 @@ DEFAULTS: dict[str, object] = {
             "sudoers_drop_in_template": "/etc/sudoers.d/{cli_name}",
             "iptables_rules_v4": "/etc/iptables/rules.v4",
             "iptables_chains": [
-                {"name": "MVM-FORWARD", "table": "filter", "built_in": "FORWARD"},
-                {"name": "MVM-POSTROUTING", "table": "nat", "built_in": "POSTROUTING"},
-                {"name": "MVM-NOCLOUDNET-INPUT", "table": "filter", "built_in": "INPUT"},
+                {"name": "MVM-FORWARD", "table": "filter", "jump_from": "FORWARD"},
+                {"name": "MVM-POSTROUTING", "table": "nat", "jump_from": "POSTROUTING"},
+                {"name": "MVM-NOCLOUDNET-INPUT", "table": "filter", "jump_from": "INPUT"},
             ],
         },
     },

@@ -48,6 +48,8 @@ class VMConsoleRelay:
         self._client: ConsoleRelayClient | None = None
         self._controller_fd: int | None = None
         self._client_fd: int | None = None
+        self._pid: int | None = None
+        self._socket_path: Path | None = None
 
     @property
     def controller_fd(self) -> int | None:
@@ -63,6 +65,14 @@ class VMConsoleRelay:
     def manager(self) -> ConsoleRelayManager:
         """Access the underlying relay manager."""
         return self._manager
+
+    @property
+    def socket_path(self) -> Path | None:
+        return self._socket_path
+
+    @property
+    def pid(self) -> int | None:
+        return self._pid
 
     def create_pty(self) -> int:
         """Lazy PTY creation - returns client FD for Firecracker.
@@ -123,7 +133,9 @@ class VMConsoleRelay:
         if self._controller_fd is None:
             raise RuntimeError("Must call create_pty() before start()")
 
-        return self._manager.start(self._controller_fd)
+        self._socket_path, self._pid = self._manager.start(self._controller_fd)
+
+        return self._socket_path, self._pid
 
     def cleanup(self) -> None:
         self.stop()

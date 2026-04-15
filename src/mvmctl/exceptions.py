@@ -61,10 +61,6 @@ class ConfigError(MVMError):
     """Configuration loading or validation failure."""
 
 
-class VMBuilderError(MVMError):
-    """Configuration loading or validation failure."""
-
-
 class DatabaseError(MVMError):
     """Database operation failure.
 

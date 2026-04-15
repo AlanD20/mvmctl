@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,7 +23,9 @@ from src.mvmctl.api.vm._firecracker import FirecrackerManager
 from src.mvmctl.api.vm._guestfs import GuestfsProvisioner
 from src.mvmctl.api.vm._resolver import VMInputResolved
 from src.mvmctl.core.mvm_db import MVMDatabase
+from src.mvmctl.db.models import VMInstance
 from src.mvmctl.models.cloud_init import CloudInitMode
+from src.mvmctl.models.vm import VMStatus
 from src.mvmctl.utils.fs import get_vm_dir_by_hash
 
 if TYPE_CHECKING:
@@ -262,6 +264,55 @@ class VMBuilder:
             self.relay.close_client_fd()
             self.relay.start()
             self.mark_created("console_relay")
+
+    def to_model(self) -> VMInstance | None:
+
+        if self.resolved is None or self.fc_manager is None or self.fc_manager.pid is None:
+            return None
+
+        now = datetime.now(tz=timezone.utc)
+        vm_instance = VMInstance(
+            name=self.resolved.name,
+            id=self.resolved.vm_id,
+            pid=self.fc_manager.pid,
+            ipv4=self.resolved.guest_ip,
+            mac=self.resolved.guest_mac,
+            network_id=self.resolved.network.id,
+            tap_device=self.resolved.tap_name,
+            created_at=now.isoformat(),
+            updated_at=now.isoformat(),
+            status=VMStatus.RUNNING,
+            config_path=str(self.fc_manager.config_path),
+            kernel_id=self.resolved.kernel.id,
+            image_id=self.resolved.image.id,
+            binary_id=self.resolved.binary.id,
+            disk_size_mib=self.resolved.disk_size_mib,
+            vcpu_count=self.resolved.vcpu_count,
+            mem_size_mib=self.resolved.mem_size_mib,
+            api_socket_path=str(self.fc_manager.api_socket_path),
+            rootfs_path=str(self.rootfs_path),
+            rootfs_suffix=self.resolved.image.fs_type,
+            enable_pci=self.resolved.enable_pci,
+            enable_logging=self.resolved.enable_logging,
+            enable_metrics=self.resolved.enable_metrics,
+            enable_console=self.resolved.enable_console,
+            cloud_init_mode=self.resolved.cloud_init_mode.value,
+            log_path=str(self.fc_manager.log_path),
+            serial_output_path=str(self.fc_manager.serial_output_path),
+            exit_code=None,
+            lsm_flags=self.resolved.lsm_flags,
+            boot_args=self.resolved.boot_args,
+        )
+
+        if self.cloud_init_result and self.cloud_init_result.nocloud_net_manager:
+            vm_instance.nocloud_net_port = self.cloud_init_result.nocloud_port
+            vm_instance.nocloud_net_pid = self.cloud_init_result.nocloud_pid
+
+        if self.relay and self.relay.pid and self.relay.socket_path:
+            vm_instance.relay_socket_path = str(self.relay.socket_path)
+            vm_instance.relay_pid = self.relay.pid
+
+        return vm_instance
 
 
 __all__ = [
