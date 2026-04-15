@@ -9,58 +9,30 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.api._internal._resolvers import KeyResolver
-from mvmctl.api.vm._creation import (
-    CloudInitProvisioner,
-    GuestfsProvisioner,
-    VMBuilder,
-)
 from mvmctl.api.vm._manager import VMManager
 from mvmctl.api.vm._removal import VMBulkCleanupContext, VMRemovalContext
 from mvmctl.api.vm._resolver import VMInputResolver
 from mvmctl.constants import (
-    CONST_MEBIBYTE_BYTES,
-    CONST_VM_MEM_MAX_MIB,
-    CONST_VM_MEM_MIN_MIB,
-    CONST_VM_VCPU_MAX,
-    CONST_VM_VCPU_MIN,
     DEFAULT_BRIDGE_NAME,
-    DEFAULT_FC_CONFIG_FILENAME,
     DEFAULT_FC_PID_FILENAME,
     DEFAULT_NETWORK_NAME,
     MAX_VMS,
 )
-from mvmctl.core.config_gen import ConfigGenerator
-from mvmctl.core.firewall import (
-    add_nocloud_input_rule,
-    setup_nocloud_input_chain,
-)
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.core.network import (
-    add_iptables_forward_rules,
-    bridge_exists,
-    create_tap,
-    generate_mac,
-    setup_bridge,
-    setup_nat,
-)
-from mvmctl.core.vm_lifecycle import _secure_mkdir_vm
-from mvmctl.core.vm_manager import VMManager
 from mvmctl.exceptions import (
-    CloudInitError,
     MVMError,
     NetworkError,
-    VMCreateError,
+    VMBuilderError,
     VMNotFoundError,
 )
-from mvmctl.models.vm import VMConfig, VMInstance, VMStatus
+from mvmctl.models.vm import VMStatus
 from mvmctl.utils.audit import log_audit
-from mvmctl.utils.disk_size import parse_disk_size
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
-from mvmctl.utils.network import generate_tap_name
 from mvmctl.utils.signals import SigtermContext
-from mvmctl.utils.validation import validate_mac
+from src.mvmctl.api.vm._builder import VMBuilder
 from src.mvmctl.api.vm._inventory import VMInventory
+from src.mvmctl.core.host_privilege import check_privileges_interactive
+from src.mvmctl.db.models import VMInstance
 
 if TYPE_CHECKING:
     from mvmctl.models.network import NetworkConfig
@@ -69,449 +41,46 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMInstance:
-    """Create a new VM from the provided input configuration.
+class VMOrchestrator:
+    def __init__(self, input: VMCreateInput) -> None:
+        self._input = input
+        self._db = MVMDatabase()
 
-    This is the orchestrator function that coordinates all components
-    for VM creation using the class-based architecture.
+    def create_vm(self) -> None:
 
-    Args:
-        input: VM creation input containing all configuration parameters.
-        vm_manager: Optional VM manager instance for dependency injection.
+        check_privileges_interactive("/usr/sbin/ip", f"create VM '{self._input.name}'")
 
-    Returns:
-        The created VM instance.
+        # Create builder first - it generates VM ID automatically
+        ctx = VMBuilder(name=self._input.name)
 
-    Raises:
-        AssetNotFoundError: If no image is specified and no default image is set.
-        MVMError: If VM limits are exceeded or validation fails.
-        VMCreateError: If VM creation fails.
-        NetworkError: If network setup fails.
-        CloudInitError: If cloud-init configuration fails.
-    """
-    from mvmctl.api.host import check_privileges_interactive
-    from mvmctl.api.network import allocate_network_ip, get_network
-    from mvmctl.core.image import copy_from_ready_pool, ensure_image_in_ready_pool
-    from mvmctl.models.cloud_init import CloudInitMode
+        # Sanitized - use resolved inputs
+        resolver = VMInputResolver(self._db)
+        resolved = resolver.resolve(self._input, vm_id=ctx.vm_id, vm_dir=ctx.vm_dir)
+        resolver.ensure_validate()
 
-    check_privileges_interactive("/usr/sbin/ip", f"create VM '{input.name}'")
-
-    db = MVMDatabase()
-    # Create builder first - it generates VM ID automatically
-    ctx = VMBuilder(name=input.name)
-    vm_id = ctx.vm_id
-
-    resolver = VMInputResolver(db)
-    resolved = resolver.resolve(input, vm_id=vm_id)
-
-    if resolved.mac is not None:
-        validate_mac(resolved.mac)
-
-    inventory = VMInventory(db)
-    if inventory.count() >= MAX_VMS:
-        raise MVMError(
-            f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
-        )
-
-    if not (CONST_VM_VCPU_MIN <= resolved.vcpus <= CONST_VM_VCPU_MAX):
-        raise MVMError(
-            f"Invalid vcpus={resolved.vcpus}: must be between {CONST_VM_VCPU_MIN} and {CONST_VM_VCPU_MAX}"
-        )
-    if not (CONST_VM_MEM_MIN_MIB <= resolved.mem <= CONST_VM_MEM_MAX_MIB):
-        raise MVMError(f"Invalid mem_size_mib={resolved.mem}: must be between 128 and 65536")
-
-    if not resolved.kernel_path.exists():
-        raise MVMError(f"Kernel not found: {resolved.kernel_path}")
-
-    fc_bin_path = Path(resolved.firecracker_bin)
-    if (fc_bin_path.is_absolute() or "/" in resolved.firecracker_bin) and (
-        not fc_bin_path.exists() or not os.access(fc_bin_path, os.X_OK)
-    ):
-        raise MVMError(f"Firecracker binary not found: {resolved.firecracker_bin}")
-
-    if resolved.user_data is not None and not resolved.user_data.exists():
-        raise MVMError(f"User-data file not found: {resolved.user_data}")
-
-    # TODO: move to nocloud if enabled only
-    setup_nocloud_input_chain()
-
-    ctx.resolved = resolved
-
-    _secure_mkdir_vm(ctx.vm_dir, input.name)
-    ctx.mark_created("vm_dir")
-
-    guest_mac = resolved.mac if resolved.mac else generate_mac()
-    tap_name = generate_tap_name(resolved.network_name, input.name)
-    ctx.tap_name = tap_name
-
-    if resolved.ip:
-        import ipaddress as ipaddress_module
-
-        ip_net = ipaddress_module.IPv4Network(net_config.subnet, strict=False)
-        if ipaddress_module.IPv4Address(resolved.ip.split("/")[0]) not in ip_net:
-            raise NetworkError(
-                f"IP {resolved.ip} is outside network '{resolved.network_name}' subnet {net_config.subnet}"
-            )
-        guest_ip = resolved.ip
-    else:
-        guest_ip = allocate_network_ip(resolved.network_name, vm_id)
-        ctx.mark_created("network_ip")
-
-    ctx.guest_ip = guest_ip
-
-    db = MVMDatabase()
-    image_entry = None
-    if resolved.image_hash:
-        image_entry = db.get_image(resolved.image_hash)
-    elif input.image:
-        image_entry = db.get_image_by_os_slug(input.image)
-
-    if image_entry is None or image_entry.minimum_rootfs_size_mib is None:
-        image_id = input.image or resolved.image_hash or str(resolved.image_path)
-        os_slug = image_entry.os_slug if image_entry else input.image or "unknown"
-        raise VMCreateError(
-            f"Image {image_id} is missing minimum_rootfs_size_mib. "
-            f"This image was created with an older version. "
-            f"Re-import the image: mvm image fetch {os_slug} --force"
-        )
-
-    min_size_mb = image_entry.minimum_rootfs_size_mib
-
-    if resolved.disk_size is not None:
-        requested_bytes = parse_disk_size(resolved.disk_size)
-
-        min_required_bytes = min_size_mb * CONST_MEBIBYTE_BYTES
-        if requested_bytes < min_required_bytes:
-            raise VMCreateError(
-                f"Requested disk size ({resolved.disk_size}) is smaller than "
-                f"minimum required ({min_size_mb} MiB). "
-                f"Use a larger size or choose a different image."
+        vm_inventory = VMInventory(self._db)
+        if vm_inventory.count() >= MAX_VMS:
+            raise MVMError(
+                f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
             )
 
-    if resolved.image_path.suffix == ".zst":
-        rootfs_ext = resolved.image_path.suffixes[-2]
-        vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
-        fs_type = rootfs_ext.lstrip(".")
-        if resolved.image_hash is None:
-            raise MVMError(f"image_hash required for compressed images: {resolved.image_path}")
-        ensure_image_in_ready_pool(resolved.image_path, resolved.image_hash, fs_type)
-        copy_from_ready_pool(resolved.image_hash, fs_type, vm_rootfs_path)
-    else:
-        rootfs_ext = resolved.image_path.suffix
-        vm_rootfs_path = vm_dir / f"rootfs{rootfs_ext}"
-        import shutil
+        ctx.set_resolved(resolved)
 
-        shutil.copy2(resolved.image_path, vm_rootfs_path)
+        with SigtermContext(lambda: ctx.cleanup()):
+            try:
+                ctx.spawn()
 
-    target_size = parse_disk_size(resolved.disk_size) if resolved.disk_size is not None else None
+                vm_instance = ctx.to_model()
+                if vm_instance is None:
+                    raise VMBuilderError("Failed to create VM instance model")
 
-    if resolved.cloud_init_mode == CloudInitMode.OFF:
-        ssh_keys = KeyResolver().resolve(resolved.ssh_key) if resolved.ssh_key else None
-        provisioner = GuestfsProvisioner(
-            rootfs_path=vm_rootfs_path,
-            hostname=input.name,
-            user=resolved.user,
-            ssh_pub_key=ssh_keys,
-        )
-        provisioner.provision(target_size_bytes=target_size)
-    elif target_size is not None:
-        provisioner = GuestfsProvisioner(
-            rootfs_path=vm_rootfs_path,
-            hostname=input.name,
-            user=resolved.user,
-            ssh_pub_key=None,
-        )
-        provisioner.provision(target_size_bytes=target_size)
+                self._db.upsert_vm(vm_instance)
+                log_audit("vm.create", f"name={input.name}")
+            except Exception as exc:
+                ctx.cleanup()
 
-    if resolved.cloud_init_mode != CloudInitMode.OFF:
-        ssh_pub_key = KeyResolver().resolve(resolved.ssh_key) if resolved.ssh_key else None
-        cloud_init_provisioner = CloudInitProvisioner()
-        ctx.cloud_init_result = cloud_init_provisioner.provision(
-            mode=resolved.cloud_init_mode,
-            vm_dir=vm_dir,
-            guest_ip=guest_ip,
-            user=resolved.user,
-            ssh_pub_key=ssh_pub_key,
-            user_data=resolved.user_data,
-            net_config=net_config,
-            vm_id=vm_id,
-            nocloud_net_port=resolved.nocloud_net_port if resolved.nocloud_net_port else None,
-            cloud_init_iso_path=resolved.cloud_init_iso_path,
-            keep_cloud_init_iso=resolved.keep_cloud_init_iso,
-        )
-
-        if ctx.cloud_init_result.nocloud_url:
-            ctx.nocloud_net_port = ctx.cloud_init_result.nocloud_port
-            ctx.mark_created("nocloud_server")
-            add_nocloud_input_rule(guest_ip, input.name, ctx.nocloud_net_port)
-            ctx.mark_created("firewall_rule")
-
-    from mvmctl.utils.network import subnet_mask_from_subnet
-
-    subnet_mask = subnet_mask_from_subnet(net_config.subnet)
-
-    disk_size_mib = (
-        (parse_disk_size(resolved.disk_size) // CONST_MEBIBYTE_BYTES)
-        if resolved.disk_size is not None
-        else min_size_mb
-    )
-
-    config_file = vm_dir / DEFAULT_FC_CONFIG_FILENAME
-
-    vm_config = VMConfig(
-        name=input.name,
-        vm_id=vm_id,
-        vcpu_count=resolved.vcpus,
-        mem_size_mib=resolved.mem,
-        disk_size_mib=disk_size_mib,
-        kernel_path=resolved.kernel_path,
-        rootfs_path=vm_rootfs_path,
-        root_uuid=resolved.image_fs_uuid,
-        root_fs_type=resolved.image_fs_type,
-        enable_api_socket=resolved.enable_api_socket,
-        enable_pci=resolved.enable_pci,
-        lsm_flags=resolved.lsm_flags,
-        enable_logging=resolved.enable_logging,
-        enable_metrics=resolved.enable_metrics,
-        enable_console=resolved.enable_console,
-        cloud_init_mode=resolved.cloud_init_mode,
-        cloud_init_iso_path=ctx.cloud_init_result.iso_path if ctx.cloud_init_result else None,
-        keep_cloud_init_iso=resolved.keep_cloud_init_iso,
-        nocloud_net_url=ctx.cloud_init_result.nocloud_url if ctx.cloud_init_result else None,
-        extra_drives=[],
-    )
-
-    now = datetime.now(tz=timezone.utc)
-
-    if image_entry is not None:
-        resolved_image_id = image_entry.id
-    else:
-        resolved_image_id = resolved.image_hash or str(resolved.image_path)
-
-    kernel_entry = None
-    if input.kernel:
-        kernel_entry = db.get_kernel_by_name(input.kernel)
-    if kernel_entry is None:
-        kernel_entry = db.get_default_kernel()
-    if kernel_entry is not None:
-        resolved_kernel_id = kernel_entry.id
-    else:
-        resolved_kernel_id = str(resolved.kernel_path)
-
-    if resolved.binary_id:
-        resolved_binary_id = resolved.binary_id
-    else:
-        binary_entry = db.get_default_binary("firecracker")
-        if binary_entry is not None:
-            resolved_binary_id = binary_entry.id
-        else:
-            resolved_binary_id = ""
-
-    vm_instance = VMInstance(
-        name=input.name,
-        id=vm_id,
-        pid=0,
-        ipv4=guest_ip,
-        mac=guest_mac,
-        network_id=resolved.network_id,
-        tap_device=tap_name,
-        ipv4_gateway=net_config.ipv4_gateway,
-        subnet_mask=subnet_mask,
-        created_at=now,
-        updated_at=now,
-        status=VMStatus.RUNNING,
-        config=vm_config,
-        config_path=config_file,
-        rootfs_suffix=rootfs_ext,
-        kernel_id=resolved_kernel_id,
-        image_id=resolved_image_id,
-        binary_id=resolved_binary_id,
-        disk_size_mib=disk_size_mib,
-    )
-
-    if vm_config.boot_args:
-        from mvmctl.utils.validation import validate_boot_arg_component
-
-        for component in vm_config.boot_args.split():
-            validate_boot_arg_component(component, "boot_args")
-    if vm_config.root_uuid:
-        from mvmctl.utils.validation import validate_fs_uuid
-
-        validate_fs_uuid(vm_config.root_uuid, "root_uuid")
-    if vm_config.root_fs_type:
-        from mvmctl.utils.validation import validate_fs_type
-
-        validate_fs_type(vm_config.root_fs_type, "root_fs_type")
-    if vm_instance.ipv4:
-        from mvmctl.utils.validation import validate_boot_arg_component
-
-        validate_boot_arg_component(vm_instance.ipv4, "guest_ip")
-    if vm_instance.ipv4_gateway:
-        from mvmctl.utils.validation import validate_boot_arg_component
-
-        validate_boot_arg_component(vm_instance.ipv4_gateway, "ipv4_gateway")
-    if vm_instance.subnet_mask:
-        from mvmctl.utils.validation import validate_boot_arg_component
-
-        validate_boot_arg_component(vm_instance.subnet_mask, "subnet_mask")
-    if vm_config.lsm_flags:
-        from mvmctl.utils.validation import validate_boot_arg_component
-
-        validate_boot_arg_component(vm_config.lsm_flags, "lsm_flags")
-
-    ConfigGenerator(vm_config, vm_instance, vm_dir).write_to_file(config_file)
-
-    if resolved.enable_console:
-        ctx.pty_master_fd, ctx.pty_slave_fd = os.openpty()
-        from mvmctl.services.console_relay.manager import ConsoleRelayManager
-
-        ctx.relay_mgr = ConsoleRelayManager()
-
-    bridge = net_config.bridge
-    if not bridge_exists(bridge):
-        import ipaddress as ipaddress_module
-
-        gateway_cidr = (
-            f"{net_config.ipv4_gateway}/"
-            f"{ipaddress_module.IPv4Network(net_config.subnet, strict=False).prefixlen}"
-        )
-        setup_bridge(bridge, ipv4_gateway_subnet=gateway_cidr)
-        if net_config.nat_enabled:
-            setup_nat(
-                bridge,
-                nat_gateways=net_config.nat_gateways or None,
-                subnet=net_config.subnet,
-            )
-
-    try:
-        create_tap(tap_name, bridge=bridge)
-        ctx.mark_created("tap")
-        add_iptables_forward_rules(tap_name, bridge=bridge)
-    except NetworkError as exc:
-        raise NetworkError(f"Network setup failed: {exc}") from exc
-
-    with SigtermContext(lambda: _perform_creation_cleanup(ctx)):
-        try:
-            pid, api_socket, console_relay_pid = ctx.spawn(resolved, config_file)
-
-            vm_instance.pid = pid
-            vm_instance.api_socket_path = api_socket
-            vm_instance.nocloud_net_port = (
-                ctx.cloud_init_result.nocloud_port if ctx.cloud_init_result else None
-            )
-            vm_instance.nocloud_server_pid = (
-                ctx.cloud_init_result.nocloud_pid if ctx.cloud_init_result else None
-            )
-            vm_instance.console_relay_pid = console_relay_pid
-
-            if console_relay_pid:
-                from mvmctl.constants import DEFAULT_CONSOLE_SOCKET_FILENAME
-
-                vm_instance.console_socket_path = vm_dir / DEFAULT_CONSOLE_SOCKET_FILENAME
-
-            manager.register(vm_instance)
-            ctx.mark_created("vm_instance")
-
-            log_audit("vm.create", f"name={input.name}")
-
-            return vm_instance
-
-        except (VMCreateError, NetworkError, CloudInitError, MVMError):
-            if input.skip_cleanup:
-                _persist_failed_vm(vm_instance, manager)
-            else:
-                _perform_creation_cleanup(ctx)
-            raise
-        except FileNotFoundError as exc:
-            if input.skip_cleanup:
-                _persist_failed_vm(vm_instance, manager)
-            else:
-                _perform_creation_cleanup(ctx)
-            raise MVMError(f"Firecracker binary not found: {resolved.firecracker_bin}") from exc
-        except Exception as exc:
-            if input.skip_cleanup:
-                _persist_failed_vm(vm_instance, manager)
-            else:
-                _perform_creation_cleanup(ctx)
-            raise VMCreateError(f"Failed to create VM: {exc}") from exc
-
-
-def _perform_creation_cleanup(ctx: VMBuilder) -> None:
-    """Perform cleanup of all created resources. Called on creation failure.
-
-    This is the orchestrator function that handles cleanup sequencing.
-    VMBuilder is a pure state tracker - it does not call core modules.
-    """
-    import shutil
-
-    from mvmctl.api.network import get_network, release_network_ip
-    from mvmctl.core.firewall import remove_nocloud_input_rule
-    from mvmctl.core.mvm_db import MVMDatabase
-    from mvmctl.core.vm_process import cleanup_tap
-    from mvmctl.exceptions import NetworkError
-
-    if ctx.log_fp is not None:
-        try:
-            ctx.log_fp.close()
-        except OSError as exc:
-            logger.warning("Failed to close log file during cleanup: %s", exc)
-
-    if ctx.console_fp is not None:
-        try:
-            ctx.console_fp.close()
-        except OSError as exc:
-            logger.warning("Failed to close console file during cleanup: %s", exc)
-
-    if ctx.was_created("nocloud_server") and ctx.net_manager is not None and ctx.resolved.vm_id:
-        try:
-            ctx.net_manager.stop_server(ctx.resolved.name, ctx.resolved.vm_id)
-        except Exception as exc:
-            logger.warning("Failed to stop nocloud server during cleanup: %s", exc)
-
-    if ctx.was_created("firewall_rule") and ctx.guest_ip:
-        try:
-            remove_nocloud_input_rule(ctx.guest_ip, ctx.resolved.name, ctx.nocloud_net_port)
-        except NetworkError as exc:
-            logger.warning("Failed to remove firewall rule during cleanup: %s", exc)
-
-    if ctx.was_created("tap") and ctx.tap_name:
-        net_config = get_network(ctx.resolved.network_name)
-        try:
-            cleanup_tap(ctx.tap_name, bridge=net_config.bridge if net_config else None)
-        except NetworkError as exc:
-            logger.warning("Failed to cleanup TAP device during cleanup: %s", exc)
-
-    if ctx.was_created("network_ip"):
-        try:
-            db_net = MVMDatabase().get_network_by_name(ctx.resolved.network_name)
-            if db_net and ctx.resolved.vm_id:
-                release_network_ip(db_net.id, ctx.resolved.vm_id)
-        except (NetworkError, TypeError) as exc:
-            logger.warning("Failed to release network IP during cleanup: %s", exc)
-
-    if ctx.was_created("console_relay") and ctx.relay_mgr is not None and ctx.resolved.vm_id:
-        try:
-            ctx.relay_mgr.stop_relay(ctx.resolved.name, ctx.resolved.vm_id)
-        except Exception as exc:
-            logger.warning("Failed to stop console relay during cleanup: %s", exc)
-
-    if ctx.pty_slave_fd is not None:
-        try:
-            os.close(ctx.pty_slave_fd)
-        except OSError:
-            pass
-
-    if ctx.pty_master_fd is not None:
-        try:
-            os.close(ctx.pty_master_fd)
-        except OSError:
-            pass
-
-    if ctx.was_created("vm_dir") and ctx.vm_dir and ctx.vm_dir.exists():
-        try:
-            shutil.rmtree(ctx.vm_dir, ignore_errors=True)
-        except OSError as exc:
-            logger.warning("Failed to remove VM directory during cleanup: %s", exc)
+    def cleanup_create_vm(self) -> None:
+        pass
 
 
 def _persist_failed_vm(instance: VMInstance, manager: VMManager | None) -> None:
@@ -596,7 +165,7 @@ def _perform_removal_cleanup(
     nm = NocloudManager()
 
     def _cleanup_console() -> None:
-        if vm.console_relay_pid is not None:
+        if vm.relay_pid is not None:
             try:
                 ConsoleRelayManager().stop_relay(vm.name, vm.id)
             except (OSError, RuntimeError) as exc:

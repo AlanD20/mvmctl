@@ -7,9 +7,8 @@ like start, stop, pause, resume, ssh, logs, etc.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
-from mvmctl.api.vm._creation import _setup_console_relay
 from mvmctl.constants import (
     CONST_VM_START_WAIT_S,
     DEFAULT_SNAPSHOT_RESUME,
@@ -36,24 +35,19 @@ from src.mvmctl.api._internal._resolvers._network_resolver import NetworkResolve
 class VMManager:
     """Stateful VM lifecycle manager.
 
-    Resolves VM selector in __init__ and operates on cached VM instance.
+    Resolves VM entity in __init__ and operates on cached VM instance.
     """
 
-    def __init__(self, selector: str, db: MVMDatabase | None = None) -> None:
-        """Initialize with VM selector and resolve immediately.
-
-        Args:
-            selector: VM name, ID prefix, IP, or MAC address
-            db: Optional MVMDatabase instance (creates new if None)
-
-        Raises:
-            VMNotFoundError: If VM not found
-        """
+    def __init__(self, entity: str | VMInstance, db: MVMDatabase | None = None) -> None:
         from mvmctl.api._internal._resolvers import VMResolver
 
         self._db = db if db is not None else MVMDatabase()
-        resolver = VMResolver()
-        self._vm: VMInstance = resolver.resolve(selector)
+
+        if isinstance(entity, VMInstance):
+            self._vm = entity
+        else:
+            self._resolver = VMResolver(self._db)
+            self._vm = self._resolver.resolve(entity)
 
     def stop(self, force: bool = False) -> None:
         """Stop the VM.
@@ -130,153 +124,6 @@ class VMManager:
             self._db.update_vm_status(self._vm.id, VMStatus.RUNNING.value)
         finally:
             client.close()
-
-    def boot(self) -> None:
-        """Boot the VM by spawning a new firecracker process.
-
-        Raises:
-            MVMError: If VM is not stopped or boot fails
-        """
-        import os
-        import pty
-        import subprocess
-        import time
-
-        from mvmctl.constants import (
-            CONST_POLL_STEP_SECONDS,
-            DEFAULT_FC_CONSOLE_LOG_FILENAME,
-            DEFAULT_FC_LOG_FILENAME,
-            DEFAULT_FC_PID_FILENAME,
-        )
-
-        name = self._vm.name
-        if self._vm.status != VMStatus.STOPPED.value:
-            raise MVMError(f"VM '{name}' is not stopped (current state: {self._vm.status})")
-        if not self._vm.id:
-            raise MVMError(f"VM '{name}' has no ID")
-
-        # Use config_path directly from DB
-        config_file = Path(self._vm.config_path)
-        if not config_file.exists():
-            raise MVMError(f"VM config not found: {config_file}")
-
-        # Resolve binary via DB using binary_id
-        if not self._vm.binary_id:
-            raise MVMError(f"VM '{name}' has no binary assigned")
-        binary = self._db.get_binary(self._vm.binary_id)
-        if not binary:
-            raise MVMError(f"Binary not found for VM '{name}': {self._vm.binary_id}")
-        firecracker_bin = binary.path
-
-        # Use api_socket_path directly from DB
-        enable_api_socket_runtime = self._vm.enable_api_socket
-        socket_path = Path(self._vm.api_socket_path) if self._vm.api_socket_path else None
-
-        if enable_api_socket_runtime and socket_path:
-            fc_cmd = [
-                firecracker_bin,
-                "--api-sock",
-                str(socket_path),
-                "--config-file",
-                str(config_file),
-            ]
-        else:
-            fc_cmd = [firecracker_bin, "--no-api", "--config-file", str(config_file)]
-
-        # Log files are not stored in DB - construct from vm_dir
-        # TODO: add these to db table
-        vm_dir = config_file.parent
-        pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
-        log_file = vm_dir / DEFAULT_FC_LOG_FILENAME
-        console_log_file = vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
-
-        # Setup PTY if console enabled
-        pty_master_fd: int | None = None
-        pty_slave_fd: int | None = None
-        if self._vm.enable_console:
-            try:
-                pty_master_fd, pty_slave_fd = pty.openpty()
-            except OSError:
-                pass
-
-        log_fp = open(log_file, "w", buffering=1, encoding="utf-8")
-        console_fp = None
-        proc: subprocess.Popen[Any] | None = None
-
-        try:
-            if self._vm.enable_console and pty_slave_fd is not None:
-                proc = subprocess.Popen(
-                    fc_cmd,
-                    stdin=pty_slave_fd,
-                    stdout=pty_slave_fd,
-                    stderr=log_fp,
-                    start_new_session=True,
-                    pass_fds=[pty_slave_fd],
-                )
-            else:
-                console_fp = open(console_log_file, "w", buffering=1, encoding="utf-8")
-                proc = subprocess.Popen(
-                    fc_cmd,
-                    stdin=subprocess.DEVNULL,
-                    stdout=console_fp,
-                    stderr=log_fp,
-                    start_new_session=True,
-                )
-
-            time.sleep(CONST_POLL_STEP_SECONDS)
-            poll_result = proc.poll()
-            if poll_result is not None and isinstance(poll_result, int):
-                raise MVMError(f"Firecracker process exited immediately with code {poll_result}")
-
-            # Close PTY slave if used
-            if pty_slave_fd is not None:
-                try:
-                    os.close(pty_slave_fd)
-                except OSError:
-                    pass
-
-            log_fp.close()
-            if console_fp is not None:
-                console_fp.close()
-
-            # Setup console relay if enabled
-            relay_mgr = ConsoleRelayManager() if self._vm.enable_console else None
-            console_relay_pid = _setup_console_relay(
-                enable_console=self._vm.enable_console,
-                relay_mgr=relay_mgr,
-                pty_master_fd=pty_master_fd,
-                vm_dir=vm_dir,
-                vm_name=name,
-            )
-            if console_relay_pid:
-                self._db.update_vm_pid(self._vm.id, console_relay_pid)
-
-            write_pid_file(pid_file, proc.pid)
-            self._db.update_vm_pid(self._vm.id, proc.pid)
-            self._db.update_vm_status(self._vm.id, VMStatus.RUNNING.value)
-            time.sleep(CONST_VM_START_WAIT_S)
-        except Exception as exc:
-            try:
-                log_fp.close()
-            except OSError:
-                pass
-            if console_fp is not None:
-                try:
-                    console_fp.close()
-                except OSError:
-                    pass
-            # Cleanup PTY on error
-            if pty_master_fd is not None:
-                try:
-                    os.close(pty_master_fd)
-                except OSError:
-                    pass
-            if pty_slave_fd is not None:
-                try:
-                    os.close(pty_slave_fd)
-                except OSError:
-                    pass
-            raise MVMError(f"Failed to boot VM '{name}': {exc}") from exc
 
     def start(self) -> None:
         """Start an already configured VM via Firecracker API.
@@ -372,6 +219,7 @@ class VMManager:
 
         log_audit("vm.ssh", f"name={self._vm.name},user={user}")
 
+        # TODO: Move to SSHSessionManager
         return connect_to_vm(
             ip=self._vm.ipv4,
             user=user,
@@ -439,7 +287,7 @@ class VMManager:
             },
             features={
                 "api_socket": self._vm.api_socket_path is not None,
-                "console": self._vm.console_socket_path is not None,
+                "console": self._vm.relay_socket_path is not None,
                 "nocloud_net": self._vm.nocloud_net_port is not None,
             },
             nocloud_net=nocloud_net,
@@ -450,15 +298,15 @@ class VMManager:
         if self._vm.nocloud_net_port:
             return {
                 "port": self._vm.nocloud_net_port,
-                "server_pid": self._vm.nocloud_server_pid,
+                "server_pid": self._vm.nocloud_net_pid,
             }
         return None
 
     def _build_console_info(self) -> dict | None:
-        if self._vm.console_socket_path:
+        if self._vm.relay_socket_path:
             return {
-                "socket_path": str(self._vm.console_socket_path),
-                "relay_pid": self._vm.console_relay_pid,
+                "socket_path": str(self._vm.relay_socket_path),
+                "relay_pid": self._vm.relay_pid,
             }
         return None
 
@@ -486,7 +334,7 @@ class VMManager:
         if not mgr.is_relay_running(name, vm_hash):
             raise MVMError(f"No console relay running for VM '{name}'")
 
-        socket_path_str = mgr.get_socket_path(vm_hash if vm_hash else name)
+        socket_path_str = mgr.socket_path(vm_hash if vm_hash else name)
         return ConsoleInfo(socket_path=Path(socket_path_str), vm_name=name)
 
     def kill_console(self) -> bool:
