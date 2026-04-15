@@ -5,9 +5,13 @@ This module re-exports all VM-related API functions from the submodules:
 - _inventory.py: VM inventory and query operations
 - _orchestration.py: VM orchestration operations (create, remove, cleanup)
 - _resolver.py: VM creation resolver
+- _console_relay.py: Console relay operations
 """
 
 from __future__ import annotations
+
+# Console relay operations
+from mvmctl.api.vm._console_relay import VMConsoleRelay
 
 # Exception handling helpers
 from mvmctl.api.vm._exceptions import handle_creation_error
@@ -20,7 +24,6 @@ from mvmctl.api.vm._inventory import (
     compute_vm_is_missing,
     export_vm_config,
     get_vm_status_with_exit_code,
-    list_vms,
     resolve_vm_target_instances,
 )
 
@@ -49,6 +52,8 @@ from mvmctl.services.console_relay import ConsoleRelayManager
 __all__ = [
     # Exception handling
     "handle_creation_error",
+    # Console relay operations
+    "VMConsoleRelay",
     # Orchestration operations
     "create_vm",
     "remove_vm",

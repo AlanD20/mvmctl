@@ -82,20 +82,19 @@ class CloudInitProvisioner:
         Returns:
             CloudInitProvisionResult with what was created (iso path, nocloud url, etc.).
         """
-        if self._config.mode.value == "off":
+        if self._config.mode == CloudInitMode.OFF:
             return self._provision_off()
 
         # Prepare the cloud-init configs
-        cloud_init_dir = self._config.vm_dir / "cloud-init"
-        cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
+        self._config.cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
 
         self._manager.write_config_files()
 
         result = None
 
-        if self._config.mode.value == "net":
+        if self._config.mode == CloudInitMode.NET:
             result = self._provision_net()
-        elif self._config.mode.value == "iso":
+        elif self._config.mode == CloudInitMode.ISO:
             result = self._provision_iso()
         else:
             result = self._provision_inject()

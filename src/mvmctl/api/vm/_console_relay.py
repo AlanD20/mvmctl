@@ -79,8 +79,10 @@ class VMConsoleRelay:
         """
         if self._controller_fd is None:
             self._controller_fd, self._client_fd = os.openpty()
+
         if self._client_fd is None:
             raise ConsoleError("PTY allocation failed: client FD is None after creation")
+
         return self._client_fd
 
     def close_client_fd(self) -> None:
@@ -99,6 +101,7 @@ class VMConsoleRelay:
     def close_pty(self) -> None:
         """Close both PTY FDs. For cleanup on error paths."""
         self.close_client_fd()
+
         if self._controller_fd is not None:
             try:
                 os.close(self._controller_fd)
@@ -119,6 +122,7 @@ class VMConsoleRelay:
         """
         if self._controller_fd is None:
             raise RuntimeError("Must call create_pty() before start()")
+
         return self._manager.start(self._controller_fd)
 
     def stop(self) -> None:
@@ -147,7 +151,7 @@ class VMConsoleRelay:
         Returns:
             Connected ConsoleRelayClient
         """
-        self._client = ConsoleRelayClient(self._manager.get_socket_path())
+        self._client = ConsoleRelayClient(self._manager.socket_path)
         self._client.connect()
         return self._client
 
@@ -156,15 +160,3 @@ class VMConsoleRelay:
         if self._client:
             self._client.disconnect()
             self._client = None
-
-    def get_state(self) -> dict[str, Any]:
-        """Get console state.
-
-        Returns:
-            Dict with: running (bool), pid (int|None), socket_path (str)
-        """
-        return {
-            "running": self._manager.is_running(),
-            "pid": self._manager.get_pid(),
-            "socket_path": str(self._manager.get_socket_path()),
-        }
