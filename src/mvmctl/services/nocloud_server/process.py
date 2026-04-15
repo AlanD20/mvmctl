@@ -75,6 +75,12 @@ def main() -> None:
         type=Path,
         help="Path to write PID file",
     )
+    parser.add_argument(
+        "--log-file",
+        required=True,
+        type=Path,
+        help="Path to write log file",
+    )
 
     args = parser.parse_args()
 
@@ -92,6 +98,14 @@ def main() -> None:
         args.pid_file.write_text(str(os.getpid()))
     except OSError as e:
         print(f"Error: Cannot write PID file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        log_fp = open(args.log_file, "w", buffering=1, encoding="utf-8")
+        sys.stdout = log_fp
+        sys.stderr = log_fp
+    except OSError as e:
+        print(f"Error: Cannot open log file: {e}", file=sys.stderr)
         sys.exit(1)
 
     # Set up signal handler for graceful shutdown
@@ -142,11 +156,14 @@ def main() -> None:
         print(f"Error starting server: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
-        # Clean up PID file
         try:
             if args.pid_file.exists():
                 args.pid_file.unlink()
         except OSError:
+            pass
+        try:
+            log_fp.close()
+        except Exception:
             pass
 
 

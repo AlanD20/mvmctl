@@ -170,7 +170,7 @@ class ConsoleRelayManager:
                 proc.pid,
             )
 
-            return self._socket_path, proc.pid
+            return self._socket_path, self._pid
 
     def _send_signal(self, pid: int, sig: int) -> bool:
         try:

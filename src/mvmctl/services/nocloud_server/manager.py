@@ -14,231 +14,159 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
+import warnings
 from pathlib import Path
 from typing import Any
 
-from mvmctl.constants import (
-    CONST_NO_CLOUD_NET_BIND_TIMEOUT_S,
-    CONST_NO_CLOUD_NET_MAX_PORT_RETRIES,
-    CONST_NO_CLOUD_NET_PORT_RANGE,
+from mvmctl.services.nocloud_server._defaults import (
+    DEFAULT_NOCLOUD_LOG_FILENAME,
+    DEFAULT_NOCLOUD_PID_FILENAME,
 )
-from mvmctl.exceptions import MVMError
-from mvmctl.models.vm import VMStatus
+from mvmctl.services.nocloud_server.exceptions import (
+    NoCloudServerAlreadyRunningError,
+    NoCloudServerError,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class NoCloudNetServerManager:
-    """Manager for NoCloudNetServer subprocess instances.
+    """Manager for a single NoCloud-net server subprocess instance.
 
-    Coordinates HTTP servers for VM cloud-init datasource, ensuring
-    proper port allocation and cleanup of orphaned servers.
-
-    The server runs as a subprocess that persists beyond CLI process lifetime,
-    using PID files for cleanup tracking.
+    Coordinates one NoCloud-net HTTP server, ensuring proper
+    lifecycle management and cleanup.
 
     Attributes:
-        _servers: Registry of active servers keyed by VM name
-        _lock: Lock for thread-safe access to server registry
+        _id: Unique identifier for this server (VM hash)
+        _path: Directory path for PID file and cloud-init files
+        _name: Human-readable name for logging
+        _ipv4_gateway: IP address to bind the server to
+        _port: Port number the server is bound to
+        _pid: Process ID of the running server subprocess
+        _url: Base URL for cloud-init access
+        _pid_path: Full path to the PID file
+        _log_path: Full path to the log file
+        _lock: Lock for thread-safe access
     """
 
-    _servers: dict[str, dict[str, Any]]
+    _pid: int | None = None
+    _url: str | None = None
 
-    def __init__(self) -> None:
-        """Initialize the server manager."""
-        self._servers: dict[str, dict[str, object]] = {}
-        self._lock: object = None  # Will be initialized lazily
-        self.cleanup_orphans()
+    def __init__(
+        self,
+        *,
+        id: str,
+        path: Path,
+        ipv4_gateway: str,
+        port: int,
+        name: str | None = None,
+        pid_filename: str = DEFAULT_NOCLOUD_PID_FILENAME,
+        log_filename: str = DEFAULT_NOCLOUD_LOG_FILENAME,
+    ) -> None:
+        """Initialize the server manager for a specific VM.
+
+        Args:
+            id: Unique identifier for this server (VM hash)
+            path: Directory path where PID file and cloud-init files are located
+            ipv4_gateway: IP address to bind the server to
+            port: Port number to use for the server
+            name: Human-readable name for logging (uses id if None)
+            pid_filename: Name of the PID file (default: nocloud-server.pid)
+            log_filename: Name of the log file (default: cloud-init.log)
+        """
+        self._id = id
+        self._path = path
+        self._ipv4_gateway = ipv4_gateway
+        self._port = port
+        self._name = name or id
+        self._pid_path = path / pid_filename
+        self._log_path = path / log_filename
+        self._lock: threading.Lock | None = None
 
     @property
-    def _thread_lock(self) -> Any:
+    def _thread_lock(self) -> threading.Lock:
         """Lazy initialization of threading lock."""
-        import threading
-
         if self._lock is None:
             self._lock = threading.Lock()
         return self._lock
 
-    def _allocate_port_for_gateway(self, vm_name: str, gateway_ip: str) -> int:
-        """Find an available port by binding to gateway_ip.
+    @property
+    def id(self) -> str:
+        return self._id
 
-        Scans the configured port range (8000-9000) and uses socket.bind()
-        to detect available ports. Binds specifically to the gateway IP
-        to ensure the port is available for VM connectivity.
+    @property
+    def name(self) -> str:
+        return self._name
 
-        Args:
-            vm_name: Name of the VM (used for logging context)
-            gateway_ip: IP address to bind the port to
+    @property
+    def pid(self) -> int | None:
+        return self._pid
 
-        Returns:
-            Available port number in the configured range
+    @property
+    def port(self) -> int | None:
+        return self._port
 
-        Raises:
-            MVMError: If no available port found after max retries
-        """
-        port_min, port_max = CONST_NO_CLOUD_NET_PORT_RANGE
-        max_retries = CONST_NO_CLOUD_NET_MAX_PORT_RETRIES
+    @property
+    def url(self) -> str | None:
+        return self._url
 
-        for attempt in range(max_retries):
-            port = port_min + (attempt % (port_max - port_min + 1))
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                    sock.settimeout(CONST_NO_CLOUD_NET_BIND_TIMEOUT_S)
-                    sock.bind((gateway_ip, port))
-                    logger.debug("Allocated port %d for VM %s on %s", port, vm_name, gateway_ip)
-                    return port
-            except OSError:
-                continue
+    @property
+    def pid_path(self) -> Path:
+        return self._pid_path
 
-        raise MVMError(
-            f"No available port found in range {port_min}-{port_max} after {max_retries} attempts"
-        )
+    @property
+    def log_path(self) -> Path:
+        return self._log_path
 
-    def _try_bind_specific_port(self, vm_name: str, gateway_ip: str, port: int) -> int | None:
-        """Try to bind to a specific port.
-
-        Args:
-            vm_name: Name of the VM (used for logging context)
-            gateway_ip: IP address to bind the port to
-            port: Specific port number to try
-
-        Returns:
-            The port number if successfully bound, None otherwise
-        """
+    def _send_signal(self, pid: int, sig: int) -> bool:
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(CONST_NO_CLOUD_NET_BIND_TIMEOUT_S)
-                sock.bind((gateway_ip, port))
-                logger.debug(
-                    "Bound to requested port %d for VM %s on %s", port, vm_name, gateway_ip
-                )
-                return port
-        except OSError:
-            logger.debug(
-                "Requested port %d not available for VM %s on %s", port, vm_name, gateway_ip
-            )
-            return None
-
-    def _get_pid_file_path(self, vm_hash: str) -> Path:
-        """Get the PID file path for a VM's nocloud server.
-
-        Args:
-            vm_hash: VM hash (64-char SHA256)
-
-        Returns:
-            Path to the nocloud-server.pid file
-        """
-        from mvmctl.utils.fs import get_vm_dir_by_hash
-
-        return get_vm_dir_by_hash(vm_hash) / "nocloud-server.pid"
-
-    def _stop_by_pid_file(self, vm_hash: str) -> bool:
-        """Stop a server using only its PID file (recovery path).
-
-        This method is used when the server is not tracked in memory
-        but a PID file exists from a previous manager instance.
-
-        Args:
-            vm_hash: VM hash (64-char SHA256)
-
-        Returns:
-            True if a server was stopped using the PID file, False otherwise
-        """
-        pid_file = self._get_pid_file_path(vm_hash)
-
-        if not pid_file.exists():
-            logger.debug("No PID file found for VM hash %s", vm_hash)
-            return False
-
-        try:
-            pid_text = pid_file.read_text().strip()
-            pid = int(pid_text)
-        except (ValueError, OSError) as e:
-            logger.debug("Could not read PID from file %s: %s", pid_file, e)
-            return False
-
-        try:
-            # Check if process exists
-            os.kill(pid, 0)
-            # Process exists, send SIGTERM
-            os.kill(pid, signal.SIGTERM)
-            logger.info(
-                "Stopped NoCloud-net server via PID file recovery (PID: %d) for VM hash %s",
-                pid,
-                vm_hash,
-            )
+            os.kill(pid, sig)
+            return True
         except ProcessLookupError:
             logger.debug("NoCloud-net server process (PID: %d) already terminated", pid)
+            return False
         except PermissionError:
-            logger.warning("Cannot kill NoCloud-net server (PID: %d) - permission denied", pid)
-            # Still try to clean up the PID file even if we can't kill
+            logger.warning("Cannot signal NoCloud-net server (PID: %d) - permission denied", pid)
+            return False
 
-        # Always clean up the PID file
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
+    def _cleanup_file(self) -> None:
+        if self._pid_path.exists():
+            try:
+                self._pid_path.unlink()
+            except OSError:
+                pass
 
-        return True
-
-    def start_server(
-        self,
-        vm_name: str,
-        cloud_init_dir: Path,
-        gateway_ip: str,
-        vm_hash: str | None = None,
-        preferred_port: int = 0,
-    ) -> tuple[str, int]:
-        """Start a NoCloud-net server for the specified VM.
-
-        Allocates a port, creates a server subprocess bound to gateway_ip,
-        and starts it as a persistent background process.
-
-        Args:
-            vm_name: Unique name identifying the VM (for tracking)
-            cloud_init_dir: Directory containing cloud-init files (meta-data,
-                user-data, network-config)
-            gateway_ip: IP address to bind the server to (typically the
-                bridge gateway IP, e.g., "10.20.0.1")
-            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
-            preferred_port: Preferred port number (0 for auto-allocation)
+    def start(self) -> tuple[str, int, int]:
+        """Start the NoCloud-net server subprocess.
 
         Returns:
-            Tuple of (url, port) where url is the base URL for cloud-init
-            access and port is the allocated port number
+            Tuple of (url, port, pid)
 
         Raises:
-            MVMError: If a server is already running for this VM or if
-                port allocation fails
+            NoCloudServerAlreadyRunningError: If server is already running
+            NoCloudServerError: If subprocess fails to start
         """
         with self._thread_lock:
-            if vm_name in self._servers:
-                raise MVMError(f"Server already running for VM: {vm_name}")
+            if self._pid is not None:
+                raise NoCloudServerAlreadyRunningError(
+                    f"NoCloud-net server already running for ID: {self._id}"
+                )
 
-            # Try preferred port first if specified, otherwise auto-allocate
-            port: int | None = None
-            if preferred_port > 0:
-                port = self._try_bind_specific_port(vm_name, gateway_ip, preferred_port)
-            if port is None:
-                port = self._allocate_port_for_gateway(vm_name, gateway_ip)
-
-            # Create PID file path in VM directory (hash-based, fallback to name)
-            lookup_key = vm_hash if vm_hash is not None else vm_name
-            pid_file = self._get_pid_file_path(lookup_key)
-
-            # Spawn subprocess via sys.executable -m mvmctl.services.nocloud_server.process
             server_cmd = [
                 sys.executable,
                 "-m",
                 "mvmctl.services.nocloud_server.process",
                 "--cloud-init-dir",
-                str(cloud_init_dir),
+                str(self._path),
                 "--port",
-                str(port),
+                str(self._port),
                 "--host",
-                gateway_ip,
+                self._ipv4_gateway,
                 "--pid-file",
-                str(pid_file),
+                str(self._pid_path),
+                "--log-file",
+                str(self._log_path),
             ]
 
             try:
@@ -250,239 +178,77 @@ class NoCloudNetServerManager:
                     start_new_session=True,
                 )
             except OSError as e:
-                raise MVMError(f"Failed to spawn nocloud-net server process: {e}") from e
+                raise NoCloudServerError(f"Failed to spawn nocloud-net server process: {e}") from e
 
-            # Store process info
-            self._servers[vm_name] = {
-                "pid": proc.pid,
-                "port": port,
-                "pid_file": pid_file,
-                "gateway_ip": gateway_ip,
-            }
+            self._pid = proc.pid
+            self._url = f"http://{self._ipv4_gateway}:{self._port}/"
 
             logger.info(
-                "Started NoCloud-net server for VM %s on %s:%d (PID: %d)",
-                vm_name,
-                gateway_ip,
-                port,
+                "Started NoCloud-net server for %s on %s:%d (PID: %d)",
+                self._name,
+                self._ipv4_gateway,
+                self._port,
                 proc.pid,
             )
 
-            return f"http://{gateway_ip}:{port}/", port
+            return self._url, self._port, proc.pid
 
-    def stop_server(self, vm_name: str, vm_hash: str | None = None) -> None:
-        """Stop the server for the specified VM.
-
-        Idempotent operation - safe to call multiple times. If no server
-        exists for the VM, this is a no-op.
-
-        This method can stop servers that were started by a previous manager
-        instance by reading from the PID file on disk.
-
-        Args:
-            vm_name: Name of the VM whose server should be stopped (for tracking)
-            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
-        """
-        with self._thread_lock:
-            info = self._servers.get(vm_name)
-            if info is not None:
-                # Server is tracked in memory - use normal path
-                pid = info["pid"]
-                pid_file = info["pid_file"]
-
-                try:
-                    # Send SIGTERM to kill subprocess
-                    os.kill(pid, signal.SIGTERM)
-                    logger.info(
-                        "Sent SIGTERM to NoCloud-net server (PID: %d) for VM %s",
-                        pid,
-                        vm_name,
-                    )
-                except ProcessLookupError:
-                    logger.debug("NoCloud-net server process (PID: %d) already terminated", pid)
-                except PermissionError:
-                    logger.warning(
-                        "Cannot kill NoCloud-net server (PID: %d) - permission denied", pid
-                    )
-
-                # Clean up PID file
-                if pid_file and pid_file.exists():
-                    try:
-                        pid_file.unlink()
-                    except OSError:
-                        pass
-
-                del self._servers[vm_name]
-                logger.info("Stopped NoCloud-net server for VM %s", vm_name)
-            else:
-                # Server not tracked in memory - try PID file recovery
-                lookup_key = vm_hash if vm_hash is not None else vm_name
-                self._stop_by_pid_file(lookup_key)
-
-    def get_server(self, vm_name: str) -> None:
-        """Get the running server info for the specified VM.
-
-        Note:
-            This method now returns None as the server runs as a subprocess.
-            Use start_server() and stop_server() for server lifecycle management.
-
-        Args:
-            vm_name: Name of the VM
+    def stop(self) -> bool:
+        """Stop the NoCloud-net server gracefully.
 
         Returns:
-            Always returns None (server info is stored internally)
+            True if a server was stopped, False otherwise
         """
         with self._thread_lock:
-            _ = vm_name  # Acknowledge parameter
-            # Server now runs as subprocess - return None
-            return None
+            if self._pid is None:
+                return False
 
-    def get_server_pid(self, vm_name: str, vm_hash: str | None = None) -> int | None:
-        """Get the PID of the running server for the specified VM.
+            self._send_signal(self._pid, signal.SIGTERM)
+            self._cleanup_file()
+            self._pid = None
+            logger.info("Stopped NoCloud-net server for %s", self._name)
+            return True
 
-        Args:
-            vm_name: Name of the VM (for tracking)
-            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
+    def terminate(self) -> bool:
+        """Forcefully terminate the NoCloud-net server.
 
         Returns:
-            The subprocess PID if running, None otherwise
+            True if server was terminated, False if no server was running
         """
         with self._thread_lock:
-            info = self._servers.get(vm_name)
-            if info is None:
-                # Try to get PID from PID file
-                lookup_key = vm_hash if vm_hash is not None else vm_name
-                return self._get_pid_from_file(lookup_key)
-            return info.get("pid")
+            if self._pid is None:
+                return False
 
-    def _get_pid_from_file(self, vm_hash: str) -> int | None:
-        """Get PID from PID file if it exists and process is running.
+            self._send_signal(self._pid, signal.SIGTERM)
+            self._cleanup_file()
+            self._pid = None
+            logger.info("Terminated NoCloud-net server for %s", self._name)
+            return True
 
-        Args:
-            vm_hash: VM hash (64-char SHA256)
-
-        Returns:
-            PID if file exists and process is running, None otherwise
-        """
-        pid_file = self._get_pid_file_path(vm_hash)
-        if not pid_file.exists():
-            return None
-
-        try:
-            pid = int(pid_file.read_text().strip())
-            # Check if process exists
-            os.kill(pid, 0)
-            return pid
-        except (ValueError, OSError, ProcessLookupError, PermissionError):
-            return None
-
-    def is_server_running(self, vm_name: str, vm_hash: str | None = None) -> bool:
+    def is_running(self) -> bool:
         """Check if the server is currently running.
-
-        Args:
-            vm_name: Name of the VM (for tracking)
-            vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
 
         Returns:
             True if server is running, False otherwise
         """
         with self._thread_lock:
-            info = self._servers.get(vm_name)
-            if info is not None:
-                pid = info.get("pid")
-                if pid is None:
-                    return False
-
-                try:
-                    os.kill(pid, 0)
-                    return True
-                except (ProcessLookupError, PermissionError):
-                    return False
-
-            # Not in memory - check PID file
-            lookup_key = vm_hash if vm_hash is not None else vm_name
-            return self._get_pid_from_file(lookup_key) is not None
+            if self._pid is not None:
+                return self._send_signal(self._pid, 0)
+            return False
 
     def cleanup_orphans(self) -> list[str]:
         """Clean up any orphaned servers from previous crashed sessions.
 
-        This method is called during initialization to ensure no stale
-        servers remain. It scans for nocloud-server.pid files where the
-        associated VM is no longer running and stops those servers.
+        .. deprecated::
+            This method is deprecated and will be removed in a future version.
 
         Returns:
-            List of VM hashes that were cleaned up
+            List of VM hashes that were cleaned up (always empty now)
         """
-        from mvmctl.core.vm_manager import get_vm_manager
-        from mvmctl.utils.fs import get_cache_dir
-
-        logger.debug("Running orphan cleanup check")
-        cleaned_up: list[str] = []
-
-        vms_dir = get_cache_dir() / "vms"
-        if not vms_dir.exists():
-            return cleaned_up
-
-        # Get VM manager to check which VMs are running
-        vm_manager = get_vm_manager()
-
-        for vm_entry in vms_dir.iterdir():
-            if not vm_entry.is_dir():
-                continue
-
-            vm_hash = vm_entry.name
-            pid_file = vm_entry / "nocloud-server.pid"
-            if not pid_file.exists():
-                continue
-
-            # Check if VM is registered and running (lookup by full hash to avoid collision risk)
-            vm = vm_manager.get_by_full_id(vm_hash)
-            if vm is None or vm.status != VMStatus.RUNNING:
-                # VM is not running - this is an orphan, stop it
-                if self._stop_by_pid_file(vm_hash):
-                    cleaned_up.append(vm_hash)
-                    logger.info("Cleaned up orphaned NoCloud-net server for VM hash %s", vm_hash)
-                else:
-                    # _stop_by_pid_file failed (e.g., invalid PID file)
-                    # Try to clean up the PID file directly
-                    try:
-                        if pid_file.exists():
-                            pid_file.unlink()
-                            logger.info("Cleaned up orphaned PID file for VM hash %s", vm_hash)
-                    except OSError:
-                        pass
-            else:
-                # VM is running - check if process actually exists
-                try:
-                    pid = int(pid_file.read_text().strip())
-                    # Check if process still exists
-                    os.kill(pid, 0)
-                    # Process exists and VM is running - not an orphan
-                    logger.debug(
-                        "Skipping orphan cleanup for VM hash %s - process %d still running",
-                        vm_hash,
-                        pid,
-                    )
-                except (ValueError, OSError):
-                    # Can't read PID or PID file is invalid
-                    try:
-                        pid_file.unlink()
-                        logger.info("Cleaned up invalid PID file for VM hash %s", vm_hash)
-                    except OSError:
-                        pass
-                except ProcessLookupError:
-                    # Process no longer exists but VM is marked running - clean up
-                    try:
-                        pid_file.unlink()
-                        logger.info("Cleaned up stale PID file for VM hash %s", vm_hash)
-                    except OSError:
-                        pass
-                except PermissionError:
-                    # Process exists but we can't signal it - leave it alone
-                    logger.debug(
-                        "Skipping orphan cleanup for VM hash %s - permission denied on process %d",
-                        vm_hash,
-                        pid,
-                    )
-
-        return cleaned_up
+        warnings.warn(
+            "cleanup_orphans is deprecated and no longer functional",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        logger.debug("cleanup_orphans called but is deprecated")
+        return []
