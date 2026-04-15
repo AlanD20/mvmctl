@@ -1,10 +1,14 @@
 import json
+import logging
+import subprocess
+import time
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Collection, NotRequired, TextIO, TypedDict
 
 from mvmctl.api.vm._creation import VMBuilder
 from mvmctl.api.vm._resolver import VMInputResolved
 from mvmctl.constants import (
+    CONST_POLL_STEP_SECONDS,
     DEFAULT_FC_API_SOCKET_FILENAME,
     DEFAULT_FC_CONFIG_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
@@ -14,8 +18,11 @@ from mvmctl.constants import (
     DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     DEFAULT_LIBGUESTFS_SEED_DIR,
 )
-from mvmctl.exceptions import FirecrackerConfigError
+from mvmctl.exceptions import FirecrackerConfigError, FirecrackerError
 from mvmctl.models import CloudInitMode
+from src.mvmctl.utils.fs import write_pid_file
+
+logger = logging.getLogger(__name__)
 
 
 class BootSourceConfig(TypedDict):
@@ -76,8 +83,12 @@ FirecrackerConfig = TypedDict(
 )
 
 
-class FirecrackerConfigManager:
-    """Manage Firecracker JSON configuration."""
+class FirecrackerManager:
+    """Manage Firecracker."""
+
+    pid: int | None = None
+    fc_log_fp: TextIO | None = None
+    serial_output_fp: TextIO | None = None
 
     def __init__(
         self, vm_builder: VMBuilder, resolved: VMInputResolved, *, config_path: Path | None = None
@@ -92,6 +103,63 @@ class FirecrackerConfigManager:
         self.serial_output_path = vm_builder.vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
         self.pid_path = vm_builder.vm_dir / DEFAULT_FC_PID_FILENAME
         self.api_socket_path = vm_builder.vm_dir / DEFAULT_FC_API_SOCKET_FILENAME
+
+    def spawn(
+        self,
+        *,
+        relay_enabled: bool = False,
+        relay_client_fd: int | None = None,
+    ) -> None:
+
+        fc_stdin = subprocess.DEVNULL
+        fc_stdout = self.serial_output_fp
+        fc_pass_fds: Collection[int] = []
+
+        if self._resolved.enable_console and relay_enabled:
+            if relay_client_fd is None:
+                raise FirecrackerError("Console enabled but PTY client FD is None")
+
+            fc_stdin = relay_client_fd
+            fc_stdout = relay_client_fd
+            fc_pass_fds = [relay_client_fd]
+        else:
+            self.serial_output_fp = self.create_filepointer(self.serial_output_path)
+
+        fc_proc: subprocess.Popen[Any] | None = None
+        self.fc_log_fp = self.create_filepointer(self.log_path)
+
+        fc_proc = subprocess.Popen(
+            [
+                self._resolved.binary.path,
+                "--api-sock",
+                str(self.api_socket_path),
+                "--config-file",
+                str(self.config_path),
+            ],
+            stdin=fc_stdin,
+            stdout=fc_stdout,
+            stderr=self.fc_log_fp,
+            start_new_session=True,
+            pass_fds=fc_pass_fds,
+        )
+
+        time.sleep(CONST_POLL_STEP_SECONDS)
+        poll_result = fc_proc.poll()
+
+        if poll_result is not None and isinstance(poll_result, int):
+            raise FirecrackerError(
+                f"Firecracker process exited immediately with code {poll_result}"
+            )
+
+        # Close file pointers since the firecracker process is managing them
+        self._close_filepointers()
+
+        write_pid_file(self.pid_path, fc_proc.pid)
+
+    def cleanup(self) -> None:
+        """Perform cleanup of all created resources."""
+
+        self._close_filepointers()
 
     def generate(self) -> FirecrackerConfig:
         # Build as regular dict to allow dynamic optional keys
@@ -353,3 +421,19 @@ class FirecrackerConfigManager:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.config_path, "w") as f:
             json.dump(config, f)
+
+    def create_filepointer(self, path: Path):
+        return open(path, "w", buffering=1, encoding="utf-8")
+
+    def _close_filepointers(self) -> None:
+        try:
+            if self.fc_log_fp is not None:
+                self.fc_log_fp.close()
+                self.fc_log_fp = None
+
+            if self.serial_output_fp is not None:
+                self.serial_output_fp.close()
+                self.serial_output_fp = None
+
+        except OSError as exc:
+            logger.warning("Failed to close filepointer(s): %s", exc)
