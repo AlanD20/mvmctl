@@ -12,7 +12,7 @@ CREATE TABLE images (
     arch TEXT NOT NULL,
     path TEXT NOT NULL,
     fs_type TEXT NOT NULL,
-    fs_uuid TEXT NOT NULL,
+    fs_uuid TEXT NULL,
     compressed_size INTEGER NULL,
     original_size INTEGER NOT NULL,
     compression_ratio REAL NULL,
@@ -60,10 +60,10 @@ CREATE INDEX idx_binaries_name ON binaries(name);
 CREATE INDEX idx_binaries_version ON binaries(version);
 
 -- NETWORKS: Named network definitions
--- JSON mappings: cidr -> subnet, gateway -> ipv4_gateway
 CREATE TABLE networks (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
+    full_name TEXT NULL,
     subnet TEXT NOT NULL,
     bridge TEXT NOT NULL,
     ipv4_gateway TEXT NOT NULL,
@@ -94,7 +94,6 @@ CREATE INDEX idx_leases_vm ON network_leases(vm_id);
 CREATE INDEX idx_leases_ipv4 ON network_leases(ipv4);
 
 -- VM_STATES: VM runtime state
--- JSON mappings: socket_path -> api_socket_path, ip -> ipv4, network_name -> network_id
 CREATE TABLE vm_instances (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -107,20 +106,21 @@ CREATE TABLE vm_instances (
     image_id TEXT NOT NULL,
     kernel_id TEXT NOT NULL,
     binary_id TEXT NOT NULL,
-    api_socket_path TEXT NULL,
-    console_socket_path TEXT NULL,
+    api_socket_path TEXT NOT NULL,
+    relay_socket_path TEXT NULL,
     config_path TEXT NOT NULL,
     cloud_init_mode TEXT NOT NULL,
     nocloud_net_port INTEGER NULL,
-    nocloud_server_pid INTEGER NULL,
-    console_relay_pid INTEGER NULL,
+    nocloud_net_pid INTEGER NULL,
+    relay_pid INTEGER NULL,
     exit_code INTEGER NULL,
+    log_path TEXT NULL,
+    serial_output_path TEXT NULL,
     vcpu_count INTEGER NOT NULL,
     mem_size_mib INTEGER NOT NULL,
     disk_size_mib INTEGER NOT NULL,
     rootfs_path TEXT NOT NULL,
     rootfs_suffix TEXT NOT NULL,
-    enable_api_socket INTEGER NOT NULL,  -- Boolean: 0 or 1
     enable_pci INTEGER NOT NULL,  -- Boolean: 0 or 1
     lsm_flags TEXT NULL,
     enable_logging INTEGER NOT NULL,  -- Boolean: 0 or 1
