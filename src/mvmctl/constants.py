@@ -309,9 +309,6 @@ DEFAULT_VM_SSH_USER: Final[str] = _resolve_with_config_override(
 DEFAULT_VM_USER_PASSWORD: Final[str] = _resolve_with_config_override(
     "DEFAULT_VM_USER_PASSWORD", _require_str(("vm_defaults", "user_password"))
 )
-DEFAULT_VM_ROOT_FS_TYPE: Final[str] = _resolve_with_config_override(
-    "DEFAULT_VM_ROOT_FS_TYPE", _require_str(("vm_defaults", "root_fs_type"))
-)
 DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = _require_str(("vm", "firecracker_bin_name"))
 
 # VM feature flags
@@ -426,7 +423,7 @@ DEFAULT_MAX_PARALLEL_DOWNLOADS: Final[int] = _require_int(("fallbacks", "max_par
 # ---------------------------------------------------------------------------
 
 DEFAULT_FC_LOG_FILENAME: Final[str] = "firecracker.log"
-DEFAULT_FC_CONSOLE_LOG_FILENAME: Final[str] = "firecracker.console.log"
+DEFAULT_FC_SERIAL_OUTPUT_FILENAME: Final[str] = "firecracker.console.log"
 DEFAULT_FC_METRICS_FILENAME: Final[str] = "firecracker.metrics"
 DEFAULT_FC_API_SOCKET_FILENAME: Final[str] = "firecracker.api.socket"
 DEFAULT_FC_PID_FILENAME: Final[str] = "firecracker.pid"
@@ -452,12 +449,6 @@ KERNEL_TYPE_UNKNOWN: Final[str] = "unknown"
 # VM cloud-init defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 DEFAULT_CLOUD_INIT_SEED_PATH: Final[str] = _require_str(("vm", "cloud_init", "seed_path"))
-DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_DS: Final[str] = _require_str(
-    ("vm", "cloud_init", "kernel_cmdline_ds")
-)
-DEFAULT_CLOUD_INIT_KERNEL_CMDLINE_NOCLOUD: Final[str] = _require_str(
-    ("vm", "cloud_init", "kernel_cmdline_nocloud")
-)
 DEFAULT_CLOUD_INIT_FINAL_MESSAGE: Final[str] = _require_str(("vm", "cloud_init", "final_message"))
 DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD: Final[str] = _require_str(
     ("vm", "cloud_init", "disable_snapd_cmd")
@@ -483,7 +474,6 @@ DEFAULT_BOOT_PCI_OFF: Final[str] = _require_str(("vm", "boot", "pci_off"))
 # ---------------------------------------------------------------------------
 # VM guest network defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
-DEFAULT_GUEST_MAC_DEFAULT: Final[str] = _require_str(("vm", "network_guest", "mac_default"))
 DEFAULT_GUEST_MAC_PREFIX: Final[str] = _require_str(("vm", "network_guest", "mac_prefix"))
 DEFAULT_GUEST_NETWORK_IFACE: Final[str] = _require_str(("vm", "network_guest", "iface"))
 DEFAULT_GUEST_NETWORK_BOOT_MODE: Final[str] = _require_str(("vm", "network_guest", "boot_mode"))
@@ -672,7 +662,7 @@ CONST_NO_CLOUD_NET_SHUTDOWN_TIMEOUT_S: Final[float] = 5.0
 CONST_NO_CLOUD_NET_PORT_RANGE: Final[tuple[int, int]] = (8000, 9000)
 CONST_NO_CLOUD_NET_BIND_TIMEOUT_S: Final[float] = 5.0
 CONST_NO_CLOUD_NET_MAX_PORT_RETRIES: Final[int] = 100
-CONST_CONSOLE_SOCKET_TIMEOUT_S: Final[float] = 5.0
+CONST_CONSOLE_SOCKET_TIMEOUT_S: Final[float] = 2.0
 CONST_CONSOLE_BUFFER_SIZE: Final[int] = 4096
 CONST_CONSOLE_RECONNECT_DELAY_S: Final[float] = 0.5
 CONST_VM_START_WAIT_S: Final[float] = 0.5  # Brief wait after starting VM process

@@ -20,6 +20,7 @@ from src.mvmctl.db.models import (
     IPTablesTarget,
     IPTablesWildcard,
 )
+from src.mvmctl.services.nocloud_server.manager import NoCloudNetServerManager
 
 if TYPE_CHECKING:
     from mvmctl.db.models import Network
@@ -61,6 +62,8 @@ class CloudInitProvisionResult:
     nocloud_url: str | None = None
     nocloud_port: int = 0
     nocloud_pid: int | None = None
+    nocloud_net_manager: NoCloudNetServerManager | None = None
+    nocloud_net_rules: list[IPTablesRule] = []
 
 
 class CloudInitProvisioner:
@@ -110,19 +113,16 @@ class CloudInitProvisioner:
 
         from mvmctl.services.nocloud_server.manager import NoCloudNetServerManager
 
-        net_manager = NoCloudNetServerManager()
-        url, port = net_manager.start_server(
-            self._config.vm_dir.name,
-            self._config.cloud_init_dir,
-            self._config.network.ipv4_gateway,
-            self._config.vm_id,
-            preferred_port=self._config.nocloud_net_port
+        net_manager = NoCloudNetServerManager(
+            id=self._config.vm_id,
+            path=self._config.vm_dir,
+            name=self._config.vm_name,
+            ipv4_gateway=self._config.network.ipv4_gateway,
+            port=self._config.nocloud_net_port
             if self._config.nocloud_net_port is not None
             else 0,  # Zero is used to allocate next available port in the pool
         )
-        nocloud_server_pid = net_manager.get_server_pid(
-            self._config.vm_dir.name, self._config.vm_id
-        )
+        url, port, pid = net_manager.start()
 
         iptables_tracker = IPTablesTracker()
         iptables_tracker.ensure_chain(IPTablesChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT")
@@ -150,7 +150,9 @@ class CloudInitProvisioner:
             mode=CloudInitMode.NET,
             nocloud_url=url,
             nocloud_port=port,
-            nocloud_pid=nocloud_server_pid,
+            nocloud_pid=pid,
+            nocloud_net_manager=net_manager,
+            nocloud_net_rules=[nocloud_net_in_rule],
         )
 
     def _provision_iso(self) -> CloudInitProvisionResult:

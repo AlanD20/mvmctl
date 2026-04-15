@@ -163,6 +163,16 @@ class VMCreateError(MVMError):
     """
 
 
+class VMBuilderError(MVMError):
+    """VM builder failed - resources may have been partially created.
+
+    This error is raised when VM creation fails mid-way. The exception
+    handler performs best-effort cleanup of any resources that were
+    created before the failure (VM directory, TAP device, network IP,
+    firewall rules, nocloud server, console relay).
+    """
+
+
 class GuestfsNotAvailableError(MVMError):
     """Raised when libguestfs Python bindings are not available."""
 

@@ -142,8 +142,7 @@ class VMBuilder:
 
         if self.was_created("console_relay") and self.relay is not None:
             try:
-                self.relay.stop()
-                self.relay.close_pty()
+                self.relay.cleanup()
             except Exception as exc:
                 logger.warning("Failed to stop console relay during cleanup: %s", exc)
 
@@ -237,11 +236,21 @@ class VMBuilder:
         config = FirecrackerManager(self, self.resolved)
         self.set_firecracker_manager(config)
         config.write_to_file()
-
         self.mark_created("firecracker")
 
         if self.fc_manager is None:
             raise VMBuilderError("Firecracker manager is not set in context")
+
+        # Console
+        if self.resolved.enable_console:
+            from mvmctl.api.vm._console_relay import VMConsoleRelay
+
+            self.relay = VMConsoleRelay(
+                vm_id=self.vm_id,
+                vm_dir=self.vm_dir,
+                vm_name=self.resolved.name,
+            )
+            self.relay.create_pty()
 
         relay_enabled = self.relay is not None
         relay_client_fd = self.relay.client_fd if self.relay is not None else None

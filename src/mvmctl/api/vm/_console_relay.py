@@ -125,6 +125,11 @@ class VMConsoleRelay:
 
         return self._manager.start(self._controller_fd)
 
+    def cleanup(self) -> None:
+        self.stop()
+        self.close_pty()
+        self.close_client_fd()
+
     def stop(self) -> None:
         """Stop the console relay gracefully."""
         self._manager.stop()
