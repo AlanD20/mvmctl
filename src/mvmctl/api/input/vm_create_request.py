@@ -26,11 +26,6 @@ from mvmctl.constants import (
     DEFAULT_VM_VCPU_COUNT,
 )
 from mvmctl.core._internal._db import Database
-from mvmctl.core._resolvers import (
-    BinaryResolver,
-    ImageResolver,
-    NetworkResolver,
-)
 from mvmctl.core.kernel._resolver import KernelResolver
 from mvmctl.core.key._controller import KeyController
 from mvmctl.core.key._resolver import KeyResolver
@@ -49,6 +44,15 @@ from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.utils.disk_size import parse_disk_size
 from mvmctl.utils.network import generate_mac, generate_tap_name
 from mvmctl.utils.validation import validate_boot_arg_component, validate_mac
+from src.mvmctl.core.binary._repository import BinaryRepository
+from src.mvmctl.core.binary._resolver import BinaryResolver
+from src.mvmctl.core.image._repository import ImageRepository
+from src.mvmctl.core.image._resolver import ImageResolver
+from src.mvmctl.core.kernel._repository import KernelRepository
+from src.mvmctl.core.key._repository import KeyRepository
+from src.mvmctl.core.key._service import KeyService
+from src.mvmctl.core.network._repository import NetworkRepository
+from src.mvmctl.core.network._resolver import NetworkResolver
 
 if TYPE_CHECKING:
     from mvmctl.models.vm import VMCreateInput
@@ -72,7 +76,6 @@ class ResolvedVMCreateRequest:
     image: Image
     kernel: Kernel
     binary: Binary
-    kernel_args: str
     network_prefix_len: int
     cloud_init_mode: CloudInitMode
     skip_ci_network_config: bool
@@ -115,12 +118,14 @@ class VMCreateRequest:
     def __init__(self, db: Database | None = None) -> None:
         """Initialize the resolver with database and sub-resolvers."""
         self._db = db if db is not None else Database()
-        self._network_resolver = NetworkResolver(self._db)
-        self._binary_resolver = BinaryResolver(self._db)
-        self._image_resolver = ImageResolver(self._db)
-        self._kernel_resolver = KernelResolver(self._db)
+        self._network_resolver = NetworkResolver(NetworkRepository(self._db))
+        self._binary_resolver = BinaryResolver(BinaryRepository(self._db))
+        self._image_resolver = ImageResolver(ImageRepository(self._db))
+        self._kernel_resolver = KernelResolver(KernelRepository(self._db))
+        self._key_resolver = KeyResolver(KeyRepository(self._db))
 
-    def get_result(self) -> ResolvedVMCreateRequest | None:
+    @property
+    def result(self) -> ResolvedVMCreateRequest | None:
         return self._result
 
     def resolve(self, input: VMCreateInput, vm_id: str, vm_dir: Path) -> ResolvedVMCreateRequest:
@@ -131,7 +136,6 @@ class VMCreateRequest:
         network = self._resolve_network(input)
         fc_binary = self._resolve_binary(input)
         ssh_keys = self._resolve_ssh_keys(input)
-        kernel_args = self._build_kernel_args(input, image.fs_uuid)
 
         guest_mac = input.guest_mac if input.guest_mac is not None else generate_mac()
         tap_name = generate_tap_name(network.name, input.name)
@@ -167,7 +171,6 @@ class VMCreateRequest:
             image=image,
             kernel=kernel,
             binary=fc_binary,
-            kernel_args=kernel_args,
             cloud_init_mode=ci_mode_result.mode,
             enable_pci=input.enable_pci if input.enable_pci is not None else DEFAULT_VM_ENABLE_PCI,
             enable_console=input.enable_console
@@ -199,7 +202,9 @@ class VMCreateRequest:
             cloud_init_iso_path=input.cloud_init_iso_path
             if ci_mode_result.mode == CloudInitMode.ISO
             else None,
-            boot_args=input.boot_args if input.boot_args is not None else DEFAULT_VM_BOOT_ARGS,
+            boot_args=input.boot_args
+            if input.boot_args is not None
+            else f"{DEFAULT_VM_BOOT_ARGS} root=UUID={image.fs_uuid}",
             lsm_flags=input.lsm_flags if input.lsm_flags is not None else DEFAULT_VM_LSM_FLAGS,
             extra_drives=[],
         )
@@ -274,7 +279,7 @@ class VMCreateRequest:
             pass
 
         image = (
-            self._db.get_default_image()
+            self._image_resolver.get_default()
             if input.image is None
             else self._image_resolver.resolve(input.image)
         )
@@ -295,7 +300,7 @@ class VMCreateRequest:
             pass
 
         kernel = (
-            self._db.get_default_kernel()
+            self._kernel_resolver.get_default()
             if input.kernel is None
             else self._kernel_resolver.resolve(input.kernel)
         )
@@ -311,12 +316,11 @@ class VMCreateRequest:
     def _resolve_network(self, input: VMCreateInput) -> Network:
         """Resolve network to name and ID."""
 
-        network = None
-
-        if input.network_name is None:
-            network = self._db.get_default_network()
-        else:
-            network = self._network_resolver.resolve(input.network_name)
+        network = (
+            self._network_resolver.get_default()
+            if input.network_name is None
+            else self._network_resolver.resolve(input.network_name)
+        )
 
         if network is None:
             raise NetworkNotFoundError(
@@ -329,12 +333,12 @@ class VMCreateRequest:
 
     def _resolve_binary(self, input: VMCreateInput) -> Binary:
         """Resolve firecracker binary to path and ID."""
-        fc_binary = None
 
-        if input.binary_id is None:
-            fc_binary = self._db.get_default_binary("firecracker")
-        else:
-            fc_binary = self._binary_resolver.resolve(input.binary_id)
+        fc_binary = (
+            self._binary_resolver.get_default("firecracker")
+            if input.binary_id is None
+            else self._binary_resolver.resolve(input.binary_id)
+        )
 
         if fc_binary is None:
             raise BinaryNotFoundError(
@@ -349,23 +353,12 @@ class VMCreateRequest:
         """Resolve SSH keys to public key content"""
 
         ssh_keys = (
-            KeyController.get_default_keys(self._db)
+            self._key_resolver.get_defaults()
             if len(input.ssh_keys) == 0
-            else KeyResolver(self._db).resolve_many(input.ssh_keys).items
+            else self._key_resolver.resolve_many(input.ssh_keys).items
         )
 
-        return KeyController.get_pubkeys(ssh_keys, self._db)
-
-    def _build_kernel_args(self, input: VMCreateInput, root_uuid: str | None) -> str:
-        """Build kernel boot arguments."""
-        from mvmctl.constants import DEFAULT_BOOT_CONSOLE, DEFAULT_BOOT_PANIC, DEFAULT_BOOT_REBOOT
-
-        args = f"{DEFAULT_BOOT_CONSOLE} {DEFAULT_BOOT_REBOOT} {DEFAULT_BOOT_PANIC}"
-
-        if root_uuid:
-            args += f" root=UUID={root_uuid}"
-
-        return args
+        return KeyService.get_pubkeys(ssh_keys, self._db)
 
     def _resolve_cloud_init_mode(self, input: VMCreateInput, vm_dir: Path) -> CloudInitModeResolved:
 
