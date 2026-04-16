@@ -10,16 +10,14 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.constants import (
     DEFAULT_FC_EXITCODE_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
 )
 from mvmctl.core._internal._db import Database
-from mvmctl.core.vm._controller import VMController
+from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import VMNotFoundError
 from mvmctl.models import VMStatus
@@ -27,21 +25,15 @@ from mvmctl.utils.fs import get_vm_dir_by_hash, is_file_missing
 from mvmctl.utils.process import is_process_running
 
 if TYPE_CHECKING:
-    from mvmctl.models import VMInspectInfo
     from mvmctl.models.vm_config_file import VMExportConfig
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "GuestfsProvisioner",
-    "CloudInitProvisioner",
-    "CloudInitProvisionResult",
-    "VMBuilder",
     "VMInventory",
     "export_vm_config",
     "get_vm_status_with_exit_code",
     "compute_vm_is_missing",
-    "list_vms",
     "ResolveVMInstancesResult",
     "resolve_vm_target_instances",
 ]

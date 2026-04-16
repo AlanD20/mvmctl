@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mvmctl.core._internal._db import Database
-from mvmctl.exceptions import KernelNotFoundError
 from mvmctl.db.models import Kernel
+from mvmctl.exceptions import KernelNotFoundError
 
 __all__ = [
     "KernelResolver",

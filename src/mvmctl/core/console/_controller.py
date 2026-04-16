@@ -5,7 +5,6 @@ Provides high-level console relay management.
 
 import os
 from pathlib import Path
-from typing import Any
 
 from mvmctl.exceptions import ConsoleError
 from mvmctl.services.console_relay import ConsoleRelayClient, ConsoleRelayManager

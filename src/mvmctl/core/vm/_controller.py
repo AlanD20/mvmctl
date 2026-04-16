@@ -13,12 +13,15 @@ from mvmctl.constants import (
     CONST_VM_START_WAIT_S,
     DEFAULT_SNAPSHOT_RESUME,
 )
+from mvmctl.core._internal._db import Database
 from mvmctl.core.console import (
     get_console_state as _get_console_state,
 )
 from mvmctl.core.firecracker import FirecrackerClient
+from mvmctl.core.image._resolver import ImageResolver
+from mvmctl.core.kernel._resolver import KernelResolver
 from mvmctl.core.logs import show_logs
-from mvmctl.core._internal._db import Database
+from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.core.ssh import connect_to_vm
 from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import MVMError
@@ -27,9 +30,6 @@ from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import write_pid_file
 from mvmctl.utils.process_signals import ProcessSignalHandler
-from mvmctl.core.image._resolver import ImageResolver
-from mvmctl.core.kernel._resolver import KernelResolver
-from mvmctl.core.network._resolver import NetworkResolver
 
 
 class VMController:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from mvmctl.core._internal._db import Database
 from mvmctl.db.models import Network, NetworkLease
 

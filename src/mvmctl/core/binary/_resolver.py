@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mvmctl.core._internal._db import Database
-from mvmctl.exceptions import BinaryNotFoundError
 from mvmctl.db.models import Binary
+from mvmctl.exceptions import BinaryNotFoundError
 
 __all__ = [
     "BinaryResolver",

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.api.input.vm_create_request import VMCreateRequest, ResolvedVMCreateRequest
+from mvmctl.api.input.vm_create_request import ResolvedVMCreateRequest, VMCreateRequest
 from mvmctl.constants import (
     DEFAULT_BRIDGE_NAME,
     DEFAULT_FC_PID_FILENAME,
@@ -38,7 +38,7 @@ from mvmctl.core.key._controller import KeyController
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._service import NetworkService
 from mvmctl.core.vm._controller import VMController
-from mvmctl.core.vm._firecracker import FirecrackerController, DriveConfig
+from mvmctl.core.vm._firecracker import DriveConfig, FirecrackerController
 from mvmctl.core.vm._guestfs import GuestfsProvisioner
 from mvmctl.core.vm._inventory import VMInventory
 from mvmctl.core.vm._resolver import VMResolver

@@ -3,7 +3,7 @@
 import logging
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from mvmctl.core._internal._iptables_tracker import IPTablesTracker
 from mvmctl.db.models import (
