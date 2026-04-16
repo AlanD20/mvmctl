@@ -369,36 +369,34 @@ class VMCreateInput:
 
     # Required fields (no defaults)
     name: str
-    vcpus: int
-    mem: int
-    user: str
-    enable_api_socket: bool
-    enable_pci: bool
-    enable_console: bool
-    firecracker_bin: str
-    lsm_flags: str
-    enable_logging: bool
-    enable_metrics: bool
+    vcpu_count: int
+    mem_size_mib: int
+    ssh_keys: list[str]
 
     # Optional fields (DB-backed at API layer)
+    user: str | None
+    enable_pci: bool | None
+    enable_console: bool | None
+    enable_logging: bool | None
+    enable_metrics: bool | None
+    firecracker_bin: str | None = None
     image: str | None = None
     kernel: str | None = None
     image_path: Path | None = None
     kernel_path: Path | None = None
     disk_size: str | None = None
-    ip: str | None = None
+    guest_ip: str | None = None
+    skip_ci_network_config: bool = False
+    boot_args: str | None = None
+    lsm_flags: str | None = None
     network_name: str | None = None
-    mac: str | None = None
-    ssh_key: str | None = None
-    user_data: Path | None = None
-    cloud_init_mode: CloudInitMode = CloudInitMode.INJECT
+    guest_mac: str | None = None
+    custom_user_data: Path | None = None
+    cloud_init_mode: str | None = None
     cloud_init_iso_path: Path | None = None
     keep_cloud_init_iso: bool = False
     nocloud_net_port: int = 0
 
     # Additional discovered fields
-    image_fs_uuid: str | None = None
-    image_fs_type: str | None = None
-    image_hash: str | None = None
     binary_id: str | None = None
     skip_cleanup: bool = False

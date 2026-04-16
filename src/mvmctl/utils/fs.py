@@ -1,9 +1,14 @@
 import fcntl
+import importlib.resources
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mvmctl.constants import MVM_DB_FILENAME, PROJECT_NAME, env_var
 from mvmctl.exceptions import MVMError
+
+if TYPE_CHECKING:
+    from importlib.resources.abc import Traversable
 
 
 def _get_real_home() -> Path:
@@ -161,6 +166,66 @@ def get_logs_dir() -> Path:
 def get_assets_dir() -> Path:
     """Return the path to the bundled assets directory inside the package."""
     return Path(__file__).parent.parent / "assets"
+
+
+def get_asset_file(*path_parts: str) -> "Traversable":
+    """Return a traversable path to a bundled asset file.
+
+    Uses ``importlib.resources`` for reliable access to package resources,
+    which works regardless of how the package is installed (regular install,
+    zipped, or PyInstaller bundled).
+
+    Supports nested paths by passing multiple path components or using
+    path separators within a single string.
+
+    Args:
+        *path_parts: Path components to the asset file. Can be a single
+            filename (e.g., "cloud-init.template.yaml") or multiple
+            components for nested paths (e.g., "templates", "cloud-init.yaml").
+
+    Returns:
+        A traversable path to the asset file.
+
+    Example::
+
+        # Simple file in assets root
+        template_path = get_asset_file("cloud-init.template.yaml")
+
+        # Nested file using multiple arguments
+        template_path = get_asset_file("templates", "cloud-init.yaml")
+
+        # Nested file using path separator
+        config_path = get_asset_file("configs/defaults.yaml")
+
+        # Read file contents
+        content = template_path.read_text()
+    """
+    base = importlib.resources.files("mvmctl.assets")
+    for part in path_parts:
+        base = base.joinpath(part)
+    return base
+
+
+def read_asset_file(filename: str) -> str:
+    """Read and return the contents of a bundled asset file as text.
+
+    Args:
+        filename: Name of the asset file (e.g., "cloud-init.template.yaml").
+
+    Returns:
+        Contents of the asset file as a string.
+
+    Raises:
+        MVMError: If the asset file cannot be read.
+
+    Example::
+
+        template_content = read_asset_file("cloud-init.template.yaml")
+    """
+    try:
+        return get_asset_file(filename).read_text()
+    except (OSError, ValueError) as exc:
+        raise MVMError(f"Failed to read asset file '{filename}': {exc}") from exc
 
 
 def get_real_user_ids() -> tuple[int, int] | None:

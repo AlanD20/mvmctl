@@ -42,9 +42,9 @@ from mvmctl.constants import (
     DEFAULT_CLOUD_INIT_ISO_NAME,
     DEFAULT_FC_API_SOCKET_FILENAME,
     DEFAULT_FC_CONFIG_FILENAME,
-    DEFAULT_FC_CONSOLE_LOG_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
     DEFAULT_FC_PID_FILENAME,
+    DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     DEFAULT_FIRECRACKER_BIN_NAME,
     DEFAULT_NETWORK_NAME,
     DEFAULT_SNAPSHOT_RESUME,
@@ -1399,7 +1399,7 @@ def create_vm(input: VMCreateInput, vm_manager: VMManager | None = None) -> VMIn
                 raise NetworkError(f"Network setup failed: {exc}") from exc
 
             log_file = vm_dir / DEFAULT_FC_LOG_FILENAME
-            console_log_file = vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
+            console_log_file = vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
             pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
             fc_cmd = [firecracker_bin, "--no-api", "--config-file", str(config_file)]
             if enable_api_socket and socket_path:
@@ -1743,7 +1743,7 @@ def start_vm(name: str) -> None:
         fc_cmd = [firecracker_bin, "--no-api", "--config-file", str(config_file)]
 
     log_file = vm_dir / DEFAULT_FC_LOG_FILENAME
-    console_log_file = vm_dir / DEFAULT_FC_CONSOLE_LOG_FILENAME
+    console_log_file = vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
     log_fp = open(log_file, "w", buffering=1, encoding="utf-8")
     console_fp: Any = None
     try:
@@ -1985,7 +1985,7 @@ def attach_console(name: str) -> ConsoleInfo:
     if not mgr.is_relay_running(name, vm_hash):
         raise MVMError(f"No console relay running for VM '{name}'")
 
-    socket_path = mgr.get_socket_path(vm_hash if vm_hash else name)
+    socket_path = mgr.socket_path(vm_hash if vm_hash else name)
     return ConsoleInfo(socket_path=socket_path, vm_name=name)
 
 

@@ -13,7 +13,7 @@ from mvmctl.api.vm._creation import (
     GuestfsProvisioner,
     VMCreationContext,
 )
-from mvmctl.api.vm._registry import (
+from mvmctl.api.vm._orchestration import (
     _perform_creation_cleanup,
     _persist_failed_vm,
 )
@@ -32,7 +32,7 @@ class TestVMCreationContext:
 
     @pytest.fixture
     def mock_resolved(self):
-        """Create a mock ResolvedVMInputs object."""
+        """Create a mock VMResolvedDependencies object."""
         mock = MagicMock()
         mock.name = "test-vm"
         mock.vm_id = "abc123def456"
@@ -94,7 +94,7 @@ class TestVMCreationContext:
         assert creation_context.was_created("vm_dir") is False
         assert creation_context.was_created("anything") is False
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     def test_cleanup_closes_log_fp(self, mock_logger, creation_context, tmp_path):
         """Test cleanup closes log file pointer."""
         mock_fp = MagicMock()
@@ -108,7 +108,7 @@ class TestVMCreationContext:
 
         mock_fp.close.assert_called_once()
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     def test_cleanup_closes_console_fp(self, mock_logger, creation_context, tmp_path):
         """Test cleanup closes console file pointer."""
         mock_fp = MagicMock()
@@ -122,7 +122,7 @@ class TestVMCreationContext:
 
         mock_fp.close.assert_called_once()
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     def test_cleanup_handles_close_errors(self, mock_logger, creation_context, tmp_path):
         """Test cleanup handles file close errors gracefully."""
         mock_fp = MagicMock()
@@ -150,7 +150,7 @@ class TestVMCreationContext:
 
         mock_net_manager.stop_server.assert_called_once_with("test-vm", "abc123")
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     def test_cleanup_handles_nocloud_stop_error(self, mock_logger, creation_context, mock_resolved):
         """Test cleanup handles nocloud stop errors gracefully."""
         mock_net_manager = MagicMock()
@@ -178,7 +178,7 @@ class TestVMCreationContext:
 
         mock_remove_rule.assert_called_once_with("10.20.0.5", "test-vm", 8080)
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     @patch("mvmctl.core.firewall.remove_nocloud_input_rule")
     def test_cleanup_handles_firewall_error(
         self, mock_remove_rule, mock_logger, creation_context, mock_resolved
@@ -235,7 +235,7 @@ class TestVMCreationContext:
 
         mock_release_ip.assert_called_once_with("net-123", "vm-123")
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     @patch("mvmctl.core.mvm_db.MVMDatabase")
     def test_cleanup_handles_ip_release_error(
         self, mock_db_class, mock_logger, creation_context, mock_resolved
@@ -267,7 +267,7 @@ class TestVMCreationContext:
 
         mock_relay_mgr.stop_relay.assert_called_once_with("test-vm", "abc123")
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     def test_cleanup_handles_console_relay_error(
         self, mock_logger, creation_context, mock_resolved
     ):
@@ -284,7 +284,7 @@ class TestVMCreationContext:
 
         mock_logger.warning.assert_called()
 
-    @patch("mvmctl.api.vm._registry.os.close")
+    @patch("mvmctl.api.vm._orchestration.os.close")
     def test_cleanup_closes_pty_fds(self, mock_close, creation_context):
         """Test cleanup closes PTY file descriptors."""
         creation_context.pty_slave_fd = 5
@@ -296,7 +296,7 @@ class TestVMCreationContext:
 
         assert mock_close.call_count == 2
 
-    @patch("mvmctl.api.vm._registry.os.close")
+    @patch("mvmctl.api.vm._orchestration.os.close")
     def test_cleanup_handles_pty_close_errors(self, mock_close, creation_context):
         """Test cleanup handles PTY close errors gracefully."""
         mock_close.side_effect = OSError("Close failed")
@@ -321,7 +321,7 @@ class TestVMCreationContext:
 
         assert not vm_dir.exists()
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     def test_cleanup_handles_vm_dir_removal_error(self, mock_logger, creation_context, tmp_path):
         """Test cleanup handles VM directory removal errors gracefully."""
         vm_dir = tmp_path / "test-vm"
@@ -344,7 +344,7 @@ class TestVMCreationContext:
         assert mock_instance.status.value == "error"
         mock_manager.register.assert_called_once_with(mock_instance)
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     def test_persist_failed_vm_handles_none_manager(self, mock_logger, creation_context):
         """Test persist_failed_vm handles None manager gracefully."""
         mock_instance = MagicMock()
@@ -354,7 +354,7 @@ class TestVMCreationContext:
         mock_logger.warning.assert_called_once()
         mock_logger.warning.assert_called_with("Failed to persist failed VM: manager is None")
 
-    @patch("mvmctl.api.vm._registry.logger")
+    @patch("mvmctl.api.vm._orchestration.logger")
     def test_persist_failed_vm_handles_register_error(self, mock_logger, creation_context):
         """Test persist_failed_vm handles register errors gracefully."""
         mock_manager = MagicMock()

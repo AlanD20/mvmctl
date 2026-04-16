@@ -1,7 +1,6 @@
 """Console socket client for VM serial console access.
 
-Provides functions to connect to the console relay process,
-send input, receive output, and manage the console session.
+Provides both low-level socket operations and high-level console management.
 """
 
 import select
@@ -10,41 +9,120 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
-from mvmctl.constants import (
-    CONST_CONSOLE_BUFFER_SIZE,
-    CONST_CONSOLE_RECONNECT_DELAY_S,
-    CONST_CONSOLE_SOCKET_TIMEOUT_S,
-)
-from mvmctl.services.console_relay import ConsoleRelayManager
+from mvmctl.services.console_relay import ConsoleRelayClient, ConsoleRelayManager
+from mvmctl.services.console_relay._defaults import CONST_CONSOLE_SELECT_TIMEOUT_S
 
 
-def connect_to_relay(socket_path: Path) -> socket.socket:
-    """Connect to the console relay Unix socket.
+class VMConsole:
+    """High-level console interface for a specific VM.
+
+    Combines relay manager (lifecycle) and client (connection) for
+    easy console operations.
+    """
+
+    def __init__(self, vm_id: str, vm_dir: Path, vm_name: str | None = None) -> None:
+        """Initialize console for a VM.
+
+        Args:
+            vm_id: VM unique identifier
+            vm_dir: VM directory path
+            vm_name: Human-readable name (uses vm_id if None)
+        """
+        self._manager = ConsoleRelayManager(
+            id=vm_id,
+            path=vm_dir,
+            name=vm_name or vm_id,
+        )
+        self._client: ConsoleRelayClient | None = None
+
+    def start_relay(self, pty_controller_fd: int) -> tuple[Path, int]:
+        """Start the console relay for this VM.
+
+        Args:
+            pty_controller_fd: File descriptor of PTY controller
+
+        Returns:
+            Tuple of (socket_path, pid)
+        """
+        return self._manager.start(pty_controller_fd)
+
+    def stop_relay(self) -> None:
+        """Stop the console relay gracefully."""
+        self._manager.stop()
+
+    def terminate_relay(self) -> bool:
+        """Forcefully terminate the relay.
+
+        Returns:
+            True if terminated, False if not running
+        """
+        return self._manager.terminate()
+
+    def is_running(self) -> bool:
+        """Check if relay is running."""
+        return self._manager.is_running()
+
+    def get_pid(self) -> int | None:
+        """Get relay PID if running."""
+        return self._manager.get_pid()
+
+    def connect(self, timeout: float = 5.0) -> ConsoleRelayClient:
+        """Connect to the console.
+
+        Args:
+            timeout: Connection timeout in seconds
+
+        Returns:
+            Connected ConsoleRelayClient
+        """
+        self._client = ConsoleRelayClient(self._manager.socket_path())
+        self._client.connect(timeout)
+        return self._client
+
+    def disconnect(self) -> None:
+        """Disconnect from console."""
+        if self._client:
+            self._client.disconnect()
+            self._client = None
+
+    def get_state(self) -> dict[str, Any]:
+        """Get console state.
+
+        Returns:
+            Dict with: running (bool), pid (int|None), socket_path (str)
+        """
+        return {
+            "running": self._manager.is_running(),
+            "pid": self._manager.get_pid(),
+            "socket_path": str(self._manager.socket_path()),
+        }
+
+    @property
+    def manager(self) -> ConsoleRelayManager:
+        """Access the underlying relay manager."""
+        return self._manager
+
+
+# Low-level socket operations (for advanced use)
+def connect_to_relay(socket_path: Path, timeout: float = 5.0) -> socket.socket:
+    """Connect to console relay Unix socket.
 
     Args:
-        socket_path: Path to the Unix socket
+        socket_path: Path to Unix socket
+        timeout: Connection timeout in seconds
 
     Returns:
-        Connected socket object
-
-    Raises:
-        ConnectionRefusedError: If connection is refused
-        FileNotFoundError: If socket does not exist
-        TimeoutError: If connection times out
+        Connected socket
     """
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(CONST_CONSOLE_SOCKET_TIMEOUT_S)
+    sock.settimeout(timeout)
     sock.connect(str(socket_path))
     sock.setblocking(False)
     return sock
 
 
 def disconnect_from_relay(sock: socket.socket) -> None:
-    """Disconnect from the console relay socket.
-
-    Args:
-        sock: Socket to close
-    """
+    """Disconnect from relay socket."""
     try:
         sock.close()
     except OSError:
@@ -52,14 +130,14 @@ def disconnect_from_relay(sock: socket.socket) -> None:
 
 
 def send_console_input(sock: socket.socket, data: bytes) -> bool:
-    """Send input data to the console.
+    """Send input to console.
 
     Args:
         sock: Connected socket
         data: Bytes to send
 
     Returns:
-        True if successful, False if connection broken
+        True if successful
     """
     if not data:
         return True
@@ -70,23 +148,23 @@ def send_console_input(sock: socket.socket, data: bytes) -> bool:
         return False
 
 
-def read_console_output(sock: socket.socket) -> Generator[bytes]:
-    """Read output from the console socket.
-
-    Yields bytes as they become available. Returns when socket is closed
-    or an error occurs.
+def read_console_output(
+    sock: socket.socket, buffer_size: int = 4096
+) -> Generator[bytes, None, None]:
+    """Read output from console.
 
     Args:
         sock: Connected socket
+        buffer_size: Read buffer size
 
     Yields:
-        Bytes read from the socket
+        Bytes from console
     """
     while True:
-        ready, _, _ = select.select([sock.fileno()], [], [], CONST_CONSOLE_RECONNECT_DELAY_S)
+        ready, _, _ = select.select([sock.fileno()], [], [], CONST_CONSOLE_SELECT_TIMEOUT_S)
         if sock.fileno() in ready:
             try:
-                data = sock.recv(CONST_CONSOLE_BUFFER_SIZE)
+                data = sock.recv(buffer_size)
                 if data:
                     yield data
                 else:
@@ -97,41 +175,31 @@ def read_console_output(sock: socket.socket) -> Generator[bytes]:
                 return
 
 
-def check_escape_sequence(buffer: bytearray) -> tuple[bool, str]:
-    """Check if the buffer contains a console escape sequence.
-
-    Detects Ctrl+X followed by D.
+def check_escape_sequence(buffer: bytearray, sequence: bytes = b"\x18d") -> bool:
+    """Check if buffer ends with escape sequence.
 
     Args:
-        buffer: Byte buffer to check
+        buffer: Input buffer
+        sequence: Escape sequence to check (default: Ctrl+X then 'd')
 
     Returns:
-        Tuple of (matched, action) where action is "detach" if matched
+        True if sequence found
     """
-    if bytes(buffer) == b"\x18d":
-        return True, "detach"
-    return False, ""
+    if len(buffer) >= len(sequence):
+        return bytes(buffer[-len(sequence) :]) == sequence
+    return False
 
 
-def get_console_state(vm_name: str, vm_hash: str | None = None) -> dict[str, Any]:
-    """Get console relay state for a VM.
+def get_console_state(vm_id: str, vm_dir: Path, vm_name: str | None = None) -> dict[str, Any]:
+    """Get console state for a VM.
 
     Args:
-        vm_name: Name of the VM (for tracking)
-        vm_hash: VM hash (64-char SHA256) for PID file path. If None, uses vm_name.
+        vm_id: VM unique identifier
+        vm_dir: VM directory path
+        vm_name: VM name (optional)
 
     Returns:
-        Dict with keys: running (bool), pid (int), socket_path (str)
+        Dict with: running (bool), pid (int|None), socket_path (str)
     """
-    mgr = ConsoleRelayManager()
-    running = mgr.is_relay_running(vm_name, vm_hash)
-    pid = mgr.get_relay_pid(vm_name, vm_hash)
-    # If vm_hash not provided, use vm_name as fallback for socket path
-    lookup_key = vm_hash if vm_hash is not None else vm_name
-    socket_path = mgr.get_socket_path(lookup_key)
-
-    return {
-        "running": running,
-        "pid": pid,
-        "socket_path": str(socket_path) if socket_path else None,
-    }
+    console = VMConsole(vm_id, vm_dir, vm_name)
+    return console.get_state()

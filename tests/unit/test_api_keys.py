@@ -53,13 +53,17 @@ class TestClearDefaultKeys:
 class TestResolveKeyInputs:
     """Tests for resolve_key_inputs()."""
 
-    def test_resolves_each_input(self):
-        """Should call resolve_key_input for each input."""
-        with patch("mvmctl.api.keys.resolve_key_input") as mock_resolve:
-            mock_resolve.side_effect = lambda x: f"resolved-{x}"
-            result = resolve_key_inputs(["key1", "key2"])
-            assert result == ["resolved-key1", "resolved-key2"]
-            assert mock_resolve.call_count == 2
+    def test_resolves_each_input(self, mocker):
+        """Should resolve each key input using KeyResolver."""
+        mock_resolver = mocker.MagicMock()
+        mock_resolver.resolve_many.return_value = mocker.MagicMock(
+            items=["resolved-key1", "resolved-key2"],
+            errors=[],
+        )
+        mocker.patch("mvmctl.api.keys.KeyResolver", return_value=mock_resolver)
+
+        result = resolve_key_inputs(["key1", "key2"])
+        assert result == ["resolved-key1", "resolved-key2"]
 
     def test_empty_list(self):
         """Should return empty list for empty input."""

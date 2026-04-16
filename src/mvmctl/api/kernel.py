@@ -13,7 +13,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mvmctl.api.metadata import find_kernels_by_id_prefix
+from mvmctl.api._internal._resolvers import KernelResolver
 from mvmctl.api.vm import get_vm_manager
 from mvmctl.constants import (
     KERNEL_TYPE_FIRECRACKER,
@@ -21,11 +21,10 @@ from mvmctl.constants import (
     KERNEL_TYPE_UNKNOWN,
 )
 from mvmctl.core.mvm_db import MVMDatabase
-from mvmctl.exceptions import KernelError
+from mvmctl.exceptions import AssetNotFoundError, KernelError
 from mvmctl.models.kernel import KernelFetchInput, KernelFetchResult, KernelItem, KernelSpec
 from mvmctl.utils.fs import get_cache_dir, get_kernels_dir
 from mvmctl.utils.full_hash import generate_full_hash_kernel
-from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -440,17 +439,22 @@ def set_default_kernel(kernels_dir: Path, kernel_prefix: str) -> None:
         logger.info("Default kernel set to: %s", kernel_prefix)
         return
 
-    # Try resolving as ID prefix
-    match = resolve_single_by_id_prefix(
-        kernel_prefix, find_kernels_by_id_prefix, cache_dir, "kernel"
-    )
-    if match is None:
-        raise KernelError(f"Kernel not found: {kernel_prefix}")
-
-    _full_id, meta = match
-    path = str(meta.get("path", ""))
-    if not path:
-        raise KernelError(f"Kernel path not found for: {kernel_prefix}")
+    # Try resolving as ID using KernelResolver
+    resolver = KernelResolver()
+    try:
+        kernel = resolver.by_id(kernel_prefix)
+        path = kernel.path
+        if not path:
+            raise KernelError(f"Kernel path not found for: {kernel_prefix}")
+    except AssetNotFoundError:
+        # Try as name (for backward compatibility with name-based lookups)
+        try:
+            kernel = resolver.by_name(kernel_prefix)
+            path = kernel.path
+            if not path:
+                raise KernelError(f"Kernel path not found for: {kernel_prefix}")
+        except AssetNotFoundError as e:
+            raise KernelError(f"Kernel not found: {kernel_prefix}") from e
 
     kernel_path = kernels_dir / path
     if not kernel_path.exists():
@@ -549,12 +553,15 @@ def remove_kernel(prefix: str, kernels_dir: Path, force: bool = False) -> None:
 
     cache_dir = get_cache_dir()
 
-    match = resolve_single_by_id_prefix(prefix, find_kernels_by_id_prefix, cache_dir, "kernel")
-    if match is None:
-        raise KernelError(f"Kernel not found: {prefix}")
+    # Resolve kernel using KernelResolver
+    resolver = KernelResolver()
+    try:
+        kernel = resolver.by_id(prefix)
+    except AssetNotFoundError as e:
+        raise KernelError(f"Kernel not found: {prefix}") from e
 
-    full_id, meta = match
-    path = str(meta.get("path", ""))
+    full_id = kernel.id
+    path = kernel.path
     kernel_path = kernels_dir / path if path else None
 
     # Check for VM references unless force is True
@@ -586,7 +593,7 @@ def resolve_kernel_path(kernel: str) -> Path:
     Tries multiple strategies:
     1. Direct file path in kernels directory
     2. Absolute path
-    3. Database lookup by ID prefix
+    3. Database lookup by ID using KernelResolver
 
     Args:
         kernel: Kernel identifier (filename, path, or ID prefix)
@@ -597,8 +604,6 @@ def resolve_kernel_path(kernel: str) -> Path:
     Raises:
         KernelError: If kernel cannot be found
     """
-    from mvmctl.core.metadata import list_kernel_entries
-
     kernels_dir = get_kernels_dir()
     candidate = kernels_dir / kernel
     if candidate.exists():
@@ -608,23 +613,20 @@ def resolve_kernel_path(kernel: str) -> Path:
     if direct.is_absolute() and direct.exists():
         return direct
 
-    # Try database lookup by ID prefix
-    cache_dir = get_cache_dir()
-    matches = [
-        (k, m)
-        for k, m in list_kernel_entries(cache_dir, kernels_dir).items()
-        if k.startswith(kernel)
-    ]
-    if len(matches) == 1:
-        full_key, meta = matches[0]
-        path = str(meta.get("path", ""))
+    # Try database lookup by ID using KernelResolver
+    resolver = KernelResolver()
+    try:
+        kernel_item = resolver.by_id(kernel)
+        path = kernel_item.path
         if path:
             candidate = kernels_dir / path
             if candidate.exists():
                 return candidate
-        candidate = kernels_dir / full_key
+        candidate = kernels_dir / kernel_item.id
         if candidate.exists():
             return candidate
+    except AssetNotFoundError:
+        pass  # Continue to try other strategies
 
     if direct.exists():
         return direct
@@ -644,29 +646,21 @@ def resolve_kernel_id_path(kernel: str) -> Path:
     Raises:
         KernelError: If kernel ID is not found or ambiguous
     """
-    from mvmctl.core.metadata import list_kernel_entries
-
     kernels_dir = get_kernels_dir()
-    cache_dir = get_cache_dir()
 
-    def _find(cache_dir: Path, prefix: str) -> list[tuple[str, dict[str, object]]]:
-        return [
-            (k, m)
-            for k, m in list_kernel_entries(cache_dir, kernels_dir).items()
-            if k.startswith(prefix)
-        ]
+    # Resolve kernel using KernelResolver
+    resolver = KernelResolver()
+    try:
+        kernel_item = resolver.by_id(kernel)
+    except AssetNotFoundError as e:
+        raise KernelError(f"Kernel ID not found: {kernel!r}") from e
 
-    match = resolve_single_by_id_prefix(kernel, _find, cache_dir)
-    if match is None:
-        raise KernelError(f"Kernel ID not found or ambiguous: {kernel!r}")
-
-    full_key, meta = match
-    path = str(meta.get("path", ""))
+    path = kernel_item.path
     if path:
         candidate = kernels_dir / path
         if candidate.exists():
             return candidate
-    candidate = kernels_dir / full_key
+    candidate = kernels_dir / kernel_item.id
     if candidate.exists():
         return candidate
 

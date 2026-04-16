@@ -87,7 +87,7 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.api.network.release_network_ip")
     @patch("mvmctl.api.vm.setup_nocloud_input_chain")
     @patch("mvmctl.api.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._asset_resolution.resolve_kernel_path")
     @patch("mvmctl.api.vm._write_pid_file")
     @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     def test_full_nocloud_net_lifecycle(
@@ -246,7 +246,7 @@ class TestFullNocloudNetLifecycle:
     @patch("mvmctl.api.network.release_network_ip")
     @patch("mvmctl.api.vm.setup_nocloud_input_chain")
     @patch("mvmctl.api.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._asset_resolution.resolve_kernel_path")
     @patch("mvmctl.api.vm._write_pid_file")
     @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     def test_nocloud_net_remove_cleanup(
@@ -407,7 +407,7 @@ class TestMultipleVMsDifferentPorts:
     @patch("mvmctl.api.vm.remove_nocloud_input_rule")
     @patch("mvmctl.api.vm.subprocess.Popen")
     @patch("mvmctl.api.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._asset_resolution.resolve_kernel_path")
     def test_multiple_vms_different_ports(
         self,
         mock_resolve_kernel,
@@ -586,10 +586,10 @@ class TestFirewallIsolation:
 
     def test_firewall_comment_format(self):
         """Verify firewall rules include correct comment format."""
-        from mvmctl.constants import MVM_NO_CLOUD_INPUT_CHAIN
+        from mvmctl.constants import MVM_NOCLOUD_NET_INPUT_CHAIN
 
         # Verify the chain name constant is correct
-        assert MVM_NO_CLOUD_INPUT_CHAIN == "MVM-NOCLOUD-INPUT"
+        assert MVM_NOCLOUD_NET_INPUT_CHAIN == "MVM-NOCLOUD-INPUT"
 
     @patch("mvmctl.core.firewall.subprocess.run")
     def test_firewall_rule_allows_specific_ip_only(self, mock_run):
@@ -626,7 +626,7 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.network.release_network_ip")
     @patch("mvmctl.api.vm.setup_nocloud_input_chain")
     @patch("mvmctl.api.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._asset_resolution.resolve_kernel_path")
     @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     def test_failure_cleanup_on_firewall_error(
         self,
@@ -751,7 +751,7 @@ class TestNocloudNetFailureCleanup:
     @patch("mvmctl.api.network.release_network_ip")
     @patch("mvmctl.api.vm.setup_nocloud_input_chain")
     @patch("mvmctl.api.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._asset_resolution.resolve_kernel_path")
     @patch("mvmctl.api.vm._write_pid_file")
     @patch("mvmctl.api.vm.get_vm_dir_by_hash")
     @patch("mvmctl.core.mvm_db.MVMDatabase.get_image_by_os_slug")
@@ -898,7 +898,7 @@ class TestVMWithoutNocloudNet:
     @patch("mvmctl.api.vm.subprocess.run")
     @patch("mvmctl.core.cloud_init.create_cloud_init_iso")
     @patch("mvmctl.api.vm.resolve_image_multi_strategy")
-    @patch("mvmctl.api.vm._resolve_kernel_path")
+    @patch("mvmctl.api.vm._asset_resolution.resolve_kernel_path")
     @patch("mvmctl.api.vm._setup_rootfs_with_guestfs")
     def test_vm_with_disabled_mode_no_nocloud(
         self,

@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from mvmctl.api._internal._network_ip_lease import NetworkIPLeaseManager
+from mvmctl.api._internal._resolvers import NetworkResolver
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET
 from mvmctl.core import host_setup
 from mvmctl.core import network as network_core
@@ -34,6 +36,7 @@ from mvmctl.db.models import (
 from mvmctl.db.models import Network as DBNetwork
 from mvmctl.exceptions import NetworkError
 from mvmctl.models import NetworkConfig, NetworkInspectInfo, NetworkItem, NetworkLease
+from mvmctl.utils.fs import get_cache_dir
 from mvmctl.utils.full_hash import generate_full_hash_network
 from mvmctl.utils.network import (
     bridge_exists,
@@ -193,24 +196,25 @@ def get_default_network_entry(cache_dir: Path) -> NetworkItem | None:
     Returns:
         NetworkItem if a default network is set, None otherwise.
     """
-    db = MVMDatabase()
-    db_network = db.get_default_network()
-    if db_network is None:
+    resolver = NetworkResolver()
+    try:
+        db_network = resolver.by_name(DEFAULT_NETWORK_NAME)
+        return NetworkItem.from_db(db_network)
+    except NetworkError:
         return None
-    return NetworkItem.from_db(db_network)
 
 
 __all__ = [
     "NetworkConfig",
     "NetworkLease",
     "allocate_network_ip",
-    "check_ip_available",
     "create_network",
     "ensure_default_network",
     "get_iptables_rules_for_bridge",
     "get_network",
     "get_network_leases",
     "inspect_network",
+    "is_ip_available",
     "list_network_interfaces",
     "list_networks",
     "reconcile_networks",
@@ -252,21 +256,25 @@ def list_networks() -> list[NetworkConfig]:
 
 def get_network(name: str) -> NetworkConfig | None:
     """Get a named network by name."""
-    db = MVMDatabase()
-    db_network = db.get_network_by_name(name)
-    if db_network is None:
+    resolver = NetworkResolver()
+    try:
+        db_network = resolver.by_name(name)
+        return _db_network_to_config(db_network)
+    except NetworkError:
         return None
-    return _db_network_to_config(db_network)
 
 
 def get_network_leases(name: str) -> list[NetworkLease]:
-    """Get all IP leases for a network."""
-    db = MVMDatabase()
-    network = db.get_network_by_name(name)
-    if network is None:
-        return []
-    db_leases = db.list_leases(network.id)
-    return [NetworkLease(vm_id=lease.vm_id or "", ipv4=lease.ipv4) for lease in db_leases]
+    """Get all IP leases for a network.
+
+    Args:
+        name: Network name.
+
+    Returns:
+        List of NetworkLease objects for the network.
+    """
+    manager = NetworkIPLeaseManager(name)
+    return manager.get_leases()
 
 
 def set_default_network(name: str) -> None:
@@ -300,26 +308,6 @@ def _get_default_network_entry_name() -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def check_ip_available(network_name: str, ip: str) -> None:
-    """Check if an IP is available for use in a network.
-
-    Args:
-        network_name: Name of the network to check.
-        ip: IP address to verify availability.
-
-    Raises:
-        NetworkError: If the IP is already leased to another VM.
-    """
-    config = get_network(network_name)
-    if config is None:
-        raise NetworkError(f"Network '{network_name}' not found")
-
-    leases = get_network_leases(network_name)
-    from mvmctl.core.network_manager import check_ip_available as _check_ip_available
-
-    _check_ip_available(config, leases, ip)
-
-
 def is_ip_available(network_name: str, ip: str) -> bool:
     """Check if an IP address is available for use in a network.
 
@@ -330,14 +318,8 @@ def is_ip_available(network_name: str, ip: str) -> bool:
     Returns:
         True if the IP is not currently leased, False otherwise.
     """
-    config = get_network(network_name)
-    if config is None:
-        return False
-
-    leases = get_network_leases(network_name)
-    from mvmctl.core.network_manager import is_ip_available as _is_ip_available
-
-    return _is_ip_available(config, leases, ip)
+    manager = NetworkIPLeaseManager(network_name)
+    return manager.is_available(ip)
 
 
 def allocate_network_ip(network_name: str, vm_id: str) -> str:
@@ -345,32 +327,32 @@ def allocate_network_ip(network_name: str, vm_id: str) -> str:
 
     Registers the lease in database.
 
+    Args:
+        network_name: Name of the network.
+        vm_id: ID of the VM requesting the IP.
+
     Returns:
         The allocated IP address string.
     """
-    config = get_network(network_name)
-    if config is None:
-        raise NetworkError(f"Network '{network_name}' not found")
+    from mvmctl.api._internal._resolvers import NetworkResolver
 
-    leases = get_network_leases(network_name)
-    from mvmctl.core.network_manager import allocate_network_ip as _allocate_network_ip
+    resolver = NetworkResolver()
+    db_network = resolver.by_name(network_name)
+    config = _db_network_to_config(db_network)
 
-    ip, _updated_leases = _allocate_network_ip(config, leases, vm_id)
-
-    # Persist the lease to database
-    db = MVMDatabase()
-    network = db.get_network_by_name(network_name)
-    if network is None:
-        raise NetworkError(f"Network '{network_name}' not found")
-    db.acquire_lease(network.id, ip, vm_id)
-
-    return ip
+    manager = NetworkIPLeaseManager(network_name)
+    return manager.lease(vm_id)
 
 
 def release_network_ip(network_id: str, vm_id: str) -> None:
-    """Release a VM's IP lease from a network."""
-    db = MVMDatabase()
-    db.release_vm_leases(vm_id)
+    """Release a VM's IP lease from a network.
+
+    Args:
+        network_id: ID of the network (unused, kept for API compatibility).
+        vm_id: ID of the VM whose leases should be released.
+    """
+    manager = NetworkIPLeaseManager(network_id)
+    manager.release(vm_id)
 
 
 # ---------------------------------------------------------------------------
@@ -418,8 +400,13 @@ def create_network(
     validate_entity_name(name, "network")
 
     # Check if network already exists
-    if get_network(name) is not None:
+    resolver = NetworkResolver()
+    try:
+        resolver.by_name(name)
         raise NetworkError(f"Network '{name}' already exists")
+    except NetworkError:
+        # Network doesn't exist, which is what we want - proceed with creation
+        pass
 
     # Validate no subnet overlap
     existing_networks = list_networks()
@@ -583,15 +570,18 @@ def remove_network(name: str) -> None:
     if name == DEFAULT_NETWORK_NAME:
         from mvmctl.core.vm_manager import VMManager
 
-        existing_vms = VMManager().list_all()
+        existing_vms = VMManager(get_cache_dir()).list_all()
         if existing_vms:
             raise NetworkError(
                 "Cannot remove the 'default' network while VMs exist. Remove all VMs first."
             )
 
-    config = get_network(name)
-    if config is None:
-        raise NetworkError(f"Network '{name}' not found")
+    resolver = NetworkResolver()
+    try:
+        db_network = resolver.by_name(name)
+        config = _db_network_to_config(db_network)
+    except NetworkError as e:
+        raise NetworkError(f"Network '{name}' not found") from e
 
     # Check for attached VMs
     leases = get_network_leases(name)
@@ -653,9 +643,12 @@ def inspect_network(name: str) -> NetworkInspectInfo:
     """
     from mvmctl.core.vm_manager import VMManager
 
-    config = get_network(name)
-    if config is None:
-        raise NetworkError(f"Network '{name}' not found")
+    resolver = NetworkResolver()
+    try:
+        db_network = resolver.by_name(name)
+        config = _db_network_to_config(db_network)
+    except NetworkError as e:
+        raise NetworkError(f"Network '{name}' not found") from e
 
     leases = get_network_leases(name)
     active = bridge_exists(config.bridge)
@@ -665,7 +658,7 @@ def inspect_network(name: str) -> NetworkInspectInfo:
     if network:
         db.update_network_bridge_active(network.id, active)
 
-    vm_manager = VMManager()
+    vm_manager = VMManager(get_cache_dir())
     enriched_vms: list[dict[str, Any]] = []
     for lease in leases:
         vm = vm_manager.get(lease.vm_id)

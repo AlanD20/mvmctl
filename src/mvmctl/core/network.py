@@ -21,7 +21,6 @@ from mvmctl.constants import (
     bridge_name,
 )
 from mvmctl.exceptions import NetworkError
-from mvmctl.utils.network import generate_mac as _generate_mac_util
 from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
 logger = logging.getLogger(__name__)
@@ -1297,7 +1296,3 @@ def get_iptables_rules_for_bridge(bridge: str) -> list[str]:
                     rules.append(line.strip())
 
     return rules
-
-
-def generate_mac() -> str:
-    return _generate_mac_util()

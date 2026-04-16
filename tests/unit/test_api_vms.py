@@ -380,9 +380,9 @@ def test_inspect_vm_by_id_prefix(mocker: MockerFixture):
         disk_size_mib=2048,
     )
 
-    mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_id_prefix.return_value = mock_vm
-    mocker.patch("mvmctl.api.vm.get_vm_manager", return_value=mock_mgr)
+    mock_resolver = mocker.MagicMock()
+    mock_resolver.by_id.return_value = mock_vm
+    mocker.patch("mvmctl.api.vm._query.VMResolver", return_value=mock_resolver)
 
     result = inspect_vm("abc123")
 
@@ -413,10 +413,10 @@ def test_inspect_vm_by_name(mocker: MockerFixture):
         disk_size_mib=2048,
     )
 
-    mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_id_prefix.return_value = None
-    mock_mgr.get_by_name.return_value = [mock_vm]
-    mocker.patch("mvmctl.api.vm.get_vm_manager", return_value=mock_mgr)
+    mock_resolver = mocker.MagicMock()
+    mock_resolver.by_id.side_effect = VMNotFoundError("not found")
+    mock_resolver.by_name.return_value = mock_vm
+    mocker.patch("mvmctl.api.vm._query.VMResolver", return_value=mock_resolver)
 
     result = inspect_vm("myvm")
 
@@ -426,45 +426,10 @@ def test_inspect_vm_by_name(mocker: MockerFixture):
 
 def test_inspect_vm_ambiguous(mocker: MockerFixture):
     """Test inspect_vm raises error for ambiguous name."""
-    mock_mgr = mocker.MagicMock()
-    mock_mgr.get_by_id_prefix.return_value = None
-    mock_mgr.get_by_name.return_value = [
-        VMInstance(
-            name="myvm",
-            id="abc123" + "x" * 10,
-            status=VMStatus.RUNNING,
-            pid=1234,
-            ipv4="10.0.0.2",
-            mac="02:FC:00:00:00:01",
-            network_id="default",
-            tap_device="mvm-def-abc-123",
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            rootfs_suffix=".ext4",
-            kernel_id="k" * 64,
-            image_id="i" * 64,
-            binary_id="b" * 64,
-            disk_size_mib=2048,
-        ),
-        VMInstance(
-            name="myvm",
-            id="def456" + "y" * 10,
-            status=VMStatus.RUNNING,
-            pid=5678,
-            ipv4="10.0.0.3",
-            mac="02:FC:00:00:00:02",
-            network_id="default",
-            tap_device="mvm-def-abc-456",
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            rootfs_suffix=".ext4",
-            kernel_id="k" * 64,
-            image_id="i" * 64,
-            binary_id="b" * 64,
-            disk_size_mib=2048,
-        ),
-    ]
-    mocker.patch("mvmctl.api.vm.get_vm_manager", return_value=mock_mgr)
+    mock_resolver = mocker.MagicMock()
+    mock_resolver.by_id.side_effect = VMNotFoundError("not found")
+    mock_resolver.by_name.side_effect = MVMError("Multiple VMs match")
+    mocker.patch("mvmctl.api.vm._query.VMResolver", return_value=mock_resolver)
 
     with pytest.raises(MVMError, match="Multiple VMs match"):
         inspect_vm("myvm")
@@ -488,7 +453,7 @@ def test_inspect_vm_not_found(mocker: MockerFixture):
 
 def test_resolve_rootfs_path_from_config(mocker: MockerFixture, tmp_path: Path):
     """Test _resolve_rootfs_path uses config.rootfs_path when available."""
-    from mvmctl.api.vm._data import _resolve_rootfs_path
+    from mvmctl.api.vm._query import _resolve_rootfs_path
 
     config_path = tmp_path / "shared" / "image.ext4"
     config_path.parent.mkdir(parents=True)
@@ -527,7 +492,7 @@ def test_resolve_rootfs_path_from_config(mocker: MockerFixture, tmp_path: Path):
 
 def test_resolve_rootfs_path_local_fallback(mocker: MockerFixture, tmp_path: Path):
     """Test _resolve_rootfs_path falls back to local rootfs file."""
-    from mvmctl.api.vm._data import _resolve_rootfs_path
+    from mvmctl.api.vm._query import _resolve_rootfs_path
 
     vm = VMInstance(
         name="test-vm",
@@ -561,7 +526,7 @@ def test_resolve_rootfs_path_local_fallback(mocker: MockerFixture, tmp_path: Pat
 
 def test_resolve_rootfs_path_none_when_missing(mocker: MockerFixture, tmp_path: Path):
     """Test _resolve_rootfs_path returns None when no rootfs found."""
-    from mvmctl.api.vm._data import _resolve_rootfs_path
+    from mvmctl.api.vm._query import _resolve_rootfs_path
 
     vm = VMInstance(
         name="test-vm",

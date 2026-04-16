@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
 
+from mvmctl.api._internal._resolvers import BinaryResolver, ImageResolver
 from mvmctl.core.binary_manager import BinaryVersion
 from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.db.models import Binary
@@ -12,7 +13,7 @@ from mvmctl.exceptions import AssetNotFoundError
 from mvmctl.utils.fs import get_cache_dir
 
 if TYPE_CHECKING:
-    pass
+    from mvmctl.models.image import ImageItem
 
 logger = logging.getLogger(__name__)
 
@@ -142,10 +143,15 @@ def get_binary_path(name: str, version: str | None = None) -> str:
         AssetNotFoundError: If version is None and no default is set.
         AssetNotFoundError: If the resolved path does not exist on disk.
     """
-    from mvmctl.core.binary_manager import get_binary_path as _core_get_binary_path
-
     if version is not None:
-        return _core_get_binary_path(name, version)
+        resolver = BinaryResolver()
+        binary = resolver.by_name_version(name, version)
+        if not Path(binary.path).exists():
+            raise AssetNotFoundError(
+                f"Binary for '{name}' v{version} is registered at '{binary.path}' but the file is "
+                f"missing — run 'mvm bin fetch {version}' to re-download it."
+            )
+        return binary.path
 
     db = MVMDatabase()
     default = db.get_default_binary(name)
@@ -323,6 +329,48 @@ class AssetInfo(TypedDict):
     details: str | None
 
 
+def _try_resolve_image_by_id_or_slug(
+    resolver: ImageResolver, image: str, images_dir: Path
+) -> Path | None:
+    from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
+
+    def try_image_paths(image_obj: ImageItem) -> Path | None:
+        path = image_obj.path
+        if path:
+            compressed = images_dir / f"{path}.zst"
+            if compressed.exists():
+                return compressed
+            candidate = images_dir / path
+            if candidate.exists():
+                return candidate
+        for ext in SUPPORTED_IMAGE_EXTENSIONS:
+            compressed = images_dir / f"{image_obj.id}{ext}.zst"
+            if compressed.exists():
+                return compressed
+            candidate = images_dir / f"{image_obj.id}{ext}"
+            if candidate.exists():
+                return candidate
+        return None
+
+    try:
+        image_obj = resolver.by_id(image)
+        result = try_image_paths(image_obj)
+        if result:
+            return result
+    except AssetNotFoundError:
+        pass
+
+    try:
+        image_obj = resolver.by_os_slug(image)
+        result = try_image_paths(image_obj)
+        if result:
+            return result
+    except AssetNotFoundError:
+        pass
+
+    return None
+
+
 def resolve_image_path(image: str) -> Path:
     """Resolve an image identifier to a filesystem path.
 
@@ -336,7 +384,6 @@ def resolve_image_path(image: str) -> Path:
         AssetNotFoundError: If the image cannot be found.
     """
     from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
-    from mvmctl.core.metadata import find_images_by_id_prefix as _find_images_by_id_prefix
     from mvmctl.utils.fs import get_images_dir
 
     images_dir = get_images_dir()
@@ -352,24 +399,10 @@ def resolve_image_path(image: str) -> Path:
     if direct.is_absolute() and direct.exists():
         return direct
 
-    matches = _find_images_by_id_prefix(get_cache_dir(), image)
-    if len(matches) == 1:
-        full_key, meta = matches[0]
-        path = str(meta.get("path", ""))
-        if path:
-            compressed = images_dir / f"{path}.zst"
-            if compressed.exists():
-                return compressed
-            candidate = images_dir / path
-            if candidate.exists():
-                return candidate
-        for ext in SUPPORTED_IMAGE_EXTENSIONS:
-            compressed = images_dir / f"{full_key}{ext}.zst"
-            if compressed.exists():
-                return compressed
-            candidate = images_dir / f"{full_key}{ext}"
-            if candidate.exists():
-                return candidate
+    resolver = ImageResolver()
+    resolved_image = _try_resolve_image_by_id_or_slug(resolver, image, images_dir)
+    if resolved_image is not None:
+        return resolved_image
 
     if direct.exists():
         return direct
@@ -386,27 +419,20 @@ def resolve_image_fs_uuid(image: str) -> str | None:
     Returns:
         Filesystem UUID string, or None if not found.
     """
-    from mvmctl.core.metadata import (
-        find_images_by_id_prefix as _find_images_by_id_prefix,
-    )
-    from mvmctl.core.metadata import (
-        list_image_entries as _list_image_entries,
-    )
+    resolver = ImageResolver()
 
-    cache_dir = get_cache_dir()
-    for _full_key, meta in _list_image_entries(cache_dir).items():
-        if image not in {str(meta.get("os_slug", "")), str(meta.get("path", ""))}:
-            continue
-        fs_uuid = meta.get("fs_uuid")
-        if isinstance(fs_uuid, str) and fs_uuid.strip():
-            return fs_uuid.strip()
+    try:
+        resolved = resolver.by_id(image)
+        return resolved.fs_uuid
+    except AssetNotFoundError:
+        pass
 
-    matches = _find_images_by_id_prefix(cache_dir, image)
-    if len(matches) == 1:
-        _, meta = matches[0]
-        fs_uuid = meta.get("fs_uuid")
-        if isinstance(fs_uuid, str) and fs_uuid.strip():
-            return fs_uuid.strip()
+    try:
+        resolved = resolver.by_os_slug(image)
+        return resolved.fs_uuid
+    except AssetNotFoundError:
+        pass
+
     return None
 
 
@@ -419,27 +445,20 @@ def resolve_image_fs_type(image: str) -> str | None:
     Returns:
         Filesystem type string (e.g., "ext4", "btrfs"), or None if not found.
     """
-    from mvmctl.core.metadata import (
-        find_images_by_id_prefix as _find_images_by_id_prefix,
-    )
-    from mvmctl.core.metadata import (
-        list_image_entries as _list_image_entries,
-    )
+    resolver = ImageResolver()
 
-    cache_dir = get_cache_dir()
-    for _full_key, meta in _list_image_entries(cache_dir).items():
-        if image not in {str(meta.get("os_slug", "")), str(meta.get("path", ""))}:
-            continue
-        fs_type = meta.get("fs_type")
-        if isinstance(fs_type, str) and fs_type.strip():
-            return fs_type.strip()
+    try:
+        resolved = resolver.by_id(image)
+        return resolved.fs_type
+    except AssetNotFoundError:
+        pass
 
-    matches = _find_images_by_id_prefix(cache_dir, image)
-    if len(matches) == 1:
-        _, meta = matches[0]
-        fs_type = meta.get("fs_type")
-        if isinstance(fs_type, str) and fs_type.strip():
-            return fs_type.strip()
+    try:
+        resolved = resolver.by_os_slug(image)
+        return resolved.fs_type
+    except AssetNotFoundError:
+        pass
+
     return None
 
 
@@ -456,29 +475,30 @@ def resolve_image_id_path(image: str) -> Path:
         AssetNotFoundError: If the image ID is not found or is ambiguous.
     """
     from mvmctl.constants import SUPPORTED_IMAGE_EXTENSIONS
-    from mvmctl.core.metadata import find_images_by_id_prefix as _find_images_by_id_prefix
     from mvmctl.utils.fs import get_images_dir
-    from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
 
     images_dir = get_images_dir()
-    match = resolve_single_by_id_prefix(image, _find_images_by_id_prefix, get_cache_dir())
-    if match is None:
-        raise AssetNotFoundError(f"Image ID not found or ambiguous: {image!r}")
+    resolver = ImageResolver()
 
-    full_key, meta = match
-    filename = str(meta.get("path", ""))
-    if filename:
-        compressed = images_dir / f"{filename}.zst"
+    try:
+        resolved = resolver.by_id(image)
+    except AssetNotFoundError as e:
+        raise AssetNotFoundError(f"Image ID not found or ambiguous: {image!r}") from e
+
+    path = resolved.path
+    if path:
+        compressed = images_dir / f"{path}.zst"
         if compressed.exists():
             return compressed
-        candidate = images_dir / filename
+        candidate = images_dir / path
         if candidate.exists():
             return candidate
+
     for ext in SUPPORTED_IMAGE_EXTENSIONS:
-        compressed = images_dir / f"{full_key}{ext}.zst"
+        compressed = images_dir / f"{resolved.id}{ext}.zst"
         if compressed.exists():
             return compressed
-        candidate = images_dir / f"{full_key}{ext}"
+        candidate = images_dir / f"{resolved.id}{ext}"
         if candidate.exists():
             return candidate
 

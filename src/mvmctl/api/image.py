@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from mvmctl.api._internal._resolvers import ImageResolver
 from mvmctl.api.metadata import (
     find_images_by_id_prefix,
     get_image_entry,
@@ -28,8 +29,7 @@ from mvmctl.exceptions import ImageError, RootPartitionDetectionError, TieDetect
 from mvmctl.models import ImageFetchInput
 from mvmctl.models.image import ImageImportInput
 from mvmctl.utils.fs import get_cache_dir
-from mvmctl.utils.full_hash import generate_full_hash_image, shorten_hash
-from mvmctl.utils.id_lookup import resolve_single_by_id_prefix
+from mvmctl.utils.full_hash import generate_full_hash_image
 from mvmctl.utils.validation import validate_fs_type, validate_fs_uuid
 
 if TYPE_CHECKING:
@@ -102,17 +102,14 @@ def remove_image(
     cache_dir = get_cache_dir()
     effective_images_dir = images_dir if images_dir is not None else get_images_dir()
 
-    match = resolve_single_by_id_prefix(image_id, find_images_by_id_prefix, cache_dir, "image")
-    if match is None:
-        matches = find_images_by_id_prefix(cache_dir, image_id)
-        if not matches:
-            raise ImageError(f"No image found with ID prefix '{image_id}'")
-        raise ImageError(
-            f"Ambiguous ID prefix '{image_id}' matches {len(matches)} images — use more characters"
-        )
+    resolver = ImageResolver()
+    try:
+        image_item = resolver.by_id(image_id)
+    except Exception as e:
+        raise ImageError(str(e))
 
-    full_key, meta = match
-    filename = str(meta.get("path", ""))
+    full_key = image_item.id
+    filename = image_item.path
     files_to_remove: list[Path] = []
 
     if filename:
@@ -127,7 +124,7 @@ def remove_image(
             if (effective_images_dir / f"{full_key}{ext}").exists()
         ]
 
-    had_metadata = bool(meta)
+    had_metadata = bool(image_item.path)
 
     if files_to_remove:
         for path in files_to_remove:
@@ -504,32 +501,25 @@ def warm_image_for_ready_pool(image_id: str) -> Path:
     """
     from mvmctl.core.image import ensure_image_in_ready_pool, get_ready_pool_dir
 
-    cache_dir = get_cache_dir()
-
     # Find the image by ID prefix or OS slug
-    matches = find_images_by_id_prefix(cache_dir, image_id)
+    resolver = ImageResolver()
+    try:
+        # Try OS slug first, then fall back to ID resolution
+        try:
+            image_item = resolver.by_os_slug(image_id)
+        except Exception:
+            image_item = resolver.by_id(image_id)
+    except Exception as e:
+        raise ImageError(f"Image not found: {image_id}: {e}")
 
-    if not matches:
-        raise ImageError(f"Image not found: {image_id}")
-
-    if len(matches) > 1:
-        # Check if any match the ID exactly as OS slug
-        for full_hash, meta in matches:
-            if meta.get("os_slug") == image_id or meta.get("internal_id") == image_id:
-                matches = [(full_hash, meta)]
-                break
-        if len(matches) > 1:
-            ids = [shorten_hash(h) for h, _ in matches[:5]]
-            raise ImageError(f"Ambiguous image ID '{image_id}' matches: {', '.join(ids)}...")
-
-    full_hash, metadata = matches[0]
-    image_path = Path(metadata.get("path", ""))
+    full_hash = image_item.id
+    image_path = Path(image_item.path)
 
     if not image_path.exists():
         raise ImageError(f"Image file not found: {image_path}")
 
     # Determine filesystem type from path or metadata
-    fs_type = metadata.get("fs_type", "ext4")
+    fs_type = image_item.fs_type or "ext4"
     if not fs_type and image_path.suffix:
         fs_type = image_path.suffix.lstrip(".")
     if not fs_type:

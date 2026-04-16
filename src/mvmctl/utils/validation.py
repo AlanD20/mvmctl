@@ -1,9 +1,11 @@
 """Input validation utilities for entity names and paths."""
 
 import ipaddress
+import os
 import re
+from pathlib import Path
 
-from mvmctl.exceptions import MVMError
+from mvmctl.exceptions import MVMError, NetworkError
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,30}$")
 
@@ -369,3 +371,201 @@ def sanitize_metadata_string(
         raise MVMError(f"Invalid {field_name}: '{value}' must contain only {chars}")
 
     return value
+
+
+def validate_mac(mac: str) -> None:
+    """Validate MAC address format."""
+    import re
+
+    MAC_REGEX = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
+    if not MAC_REGEX.match(mac):
+        raise ValueError(f"Invalid MAC address format: {mac}")
+
+
+def validate_vm_name(name: str) -> None:
+    """Validate VM name format.
+
+    Rules:
+        - Must not be empty
+        - Must match pattern: [a-zA-Z0-9_-]+
+        - Must not exceed 64 characters
+
+    Args:
+        name: Name to validate
+
+    Raises:
+        MVMError: If name is invalid
+    """
+    if not name:
+        raise MVMError("Name cannot be empty")
+
+    if len(name) > 64:
+        raise MVMError(f"Name too long (max 64 chars): {name!r}")
+
+    pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+    if not pattern.match(name):
+        raise MVMError(
+            f"Invalid name: {name!r}. "
+            "Names must contain only letters, numbers, hyphens, and underscores"
+        )
+
+
+def validate_boot_args(boot_args: str, root_uuid: str, guest_ip: str) -> list[str]:
+    """Validate boot arguments.
+
+    Args:
+        boot_args: Kernel boot arguments
+        root_uuid: Root filesystem UUID
+        guest_ip: Guest IP address
+
+    Returns:
+        List of validation error messages (empty if valid)
+    """
+    errors: list[str] = []
+
+    if not root_uuid:
+        errors.append("root UUID is required")
+
+    if not guest_ip:
+        errors.append("guest IP is required")
+
+    if boot_args:
+        if "root_uuid" in boot_args and not re.match(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            root_uuid,
+        ):
+            errors.append(f"Invalid root UUID format: {root_uuid}")
+
+    return errors
+
+
+def validate_file_exists(path: str | None, description: str) -> None:
+    """Validate that a file exists.
+
+    Args:
+        path: File path to check
+        description: Description for error message
+
+    Raises:
+        MVMError: If file doesn't exist
+    """
+    if path is None:
+        return
+
+    file_path = Path(path)
+    if not file_path.exists():
+        raise MVMError(f"{description} not found: {path}")
+
+
+def validate_cidr(subnet: str, field_name: str = "subnet") -> ipaddress.IPv4Network:
+    """Validate a CIDR subnet string.
+
+    Args:
+        subnet: CIDR notation string (e.g., "192.168.1.0/24")
+        field_name: Field name for error messages
+
+    Returns:
+        The validated IPv4Network object
+
+    Raises:
+        MVMError: If subnet is invalid
+    """
+    try:
+        return ipaddress.IPv4Network(subnet, strict=False)
+    except ValueError as e:
+        raise MVMError(f"Invalid {field_name}: {subnet!r} - {e}") from e
+
+
+def validate_ip_in_subnet(ip: str, subnet: str, field_name: str = "IP") -> None:
+    """Validate that an IP is within a subnet.
+
+    Args:
+        ip: IP address to validate
+        subnet: Subnet CIDR notation
+        field_name: Field name for error messages
+
+    Raises:
+        NetworkError: If IP is outside subnet
+    """
+    try:
+        network = ipaddress.IPv4Network(subnet, strict=False)
+        ip_addr = ipaddress.IPv4Address(ip.split("/")[0])
+        if ip_addr not in network:
+            raise NetworkError(f"{field_name} {ip} is outside subnet {subnet}")
+    except ValueError as e:
+        raise NetworkError(f"Invalid {field_name}: {e}") from e
+
+
+def validate_file_readable(path: Path, field_name: str = "file") -> None:
+    """Validate that a file exists and is readable.
+
+    Args:
+        path: File path to check
+        field_name: Field name for error messages
+
+    Raises:
+        MVMError: If file doesn't exist or isn't readable
+    """
+    if not path.exists():
+        raise MVMError(f"{field_name} not found: {path}")
+    if not os.access(path, os.R_OK):
+        raise MVMError(f"{field_name} not readable: {path}")
+
+
+def validate_file_executable(path: Path, field_name: str = "binary") -> None:
+    """Validate that a file exists and is executable.
+
+    Args:
+        path: File path to check
+        field_name: Field name for error messages
+
+    Raises:
+        MVMError: If file doesn't exist or isn't executable
+    """
+    if not path.exists():
+        raise MVMError(f"{field_name} not found: {path}")
+    if not os.access(path, os.X_OK):
+        raise MVMError(f"{field_name} not executable: {path}")
+
+
+def validate_resource_count(
+    current: int,
+    limit: int,
+    resource_name: str = "resource",
+) -> None:
+    """Validate that resource count is within limit.
+
+    Args:
+        current: Current count of resources
+        limit: Maximum allowed resources
+        resource_name: Name of the resource for error messages
+
+    Raises:
+        MVMError: If limit is reached
+    """
+    if current >= limit:
+        raise MVMError(
+            f"{resource_name} limit reached ({limit}). "
+            f"Remove existing {resource_name}s before creating new ones."
+        )
+
+
+def validate_range(
+    value: int,
+    min_val: int,
+    max_val: int,
+    field_name: str = "value",
+) -> None:
+    """Validate that a value is within range.
+
+    Args:
+        value: Value to validate
+        min_val: Minimum allowed value
+        max_val: Maximum allowed value
+        field_name: Field name for error messages
+
+    Raises:
+        MVMError: If value is out of range
+    """
+    if not (min_val <= value <= max_val):
+        raise MVMError(f"Invalid {field_name}={value}: must be between {min_val} and {max_val}")

@@ -7,8 +7,8 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 
 from mvmctl.constants import (
-    DEFAULT_FC_CONSOLE_LOG_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
+    DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     LOG_FOLLOW_POLL_INTERVAL_S,
 )
 from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
@@ -17,7 +17,7 @@ from mvmctl.utils.fs import get_vm_dir_by_hash
 logger = logging.getLogger(__name__)
 
 _LOG_TYPE_FILES: dict[str, str] = {
-    "boot": DEFAULT_FC_CONSOLE_LOG_FILENAME,
+    "boot": DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     "os": DEFAULT_FC_LOG_FILENAME,
 }
 

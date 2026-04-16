@@ -21,7 +21,6 @@ from mvmctl.constants import (
     DEFAULT_GUEST_NETWORK_BOOT_MODE,
     DEFAULT_GUEST_NETWORK_IFACE,
     DEFAULT_LIBGUESTFS_SEED_DIR,
-    DEFAULT_VM_ROOT_FS_TYPE,
 )
 from mvmctl.exceptions import ConfigError, MVMError
 from mvmctl.models import CloudInitMode, VMConfig
@@ -273,7 +272,7 @@ class ConfigGenerator:
             root_arg = "root=/dev/vda"
 
         # Validate filesystem type
-        fs_type = self.vm_config.root_fs_type or DEFAULT_VM_ROOT_FS_TYPE
+        fs_type = self.vm_config.root_fs_type
         validate_fs_type(fs_type)
 
         parts = [

@@ -1,4 +1,4 @@
-"""Unit tests for api/vm/_creation_resolver.py — VMCreationResolver, ResolvedVMInputs."""
+"""Unit tests for api/vm/_creation_resolver.py — VMInputResolver, VMResolvedDependencies."""
 
 from __future__ import annotations
 
@@ -7,24 +7,24 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.api.vm._creation_resolver import ResolvedVMInputs, VMCreationResolver
+from mvmctl.api.vm._resolver import VMResolvedDependencies, VMInputResolver
 from mvmctl.exceptions import AssetNotFoundError, VMCreateError
 from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.models.vm import VMCreateInput
 
 
 # =============================================================================
-# VMCreationResolver Tests
+# VMInputResolver Tests
 # =============================================================================
 
 
-class TestVMCreationResolver:
-    """Tests for VMCreationResolver input resolution."""
+class TestVMInputResolver:
+    """Tests for VMInputResolver input resolution."""
 
     @pytest.fixture
     def resolver(self):
-        """Create a VMCreationResolver instance."""
-        return VMCreationResolver()
+        """Create a VMInputResolver instance."""
+        return VMInputResolver()
 
     @pytest.fixture
     def basic_input(self):
@@ -44,12 +44,12 @@ class TestVMCreationResolver:
         )
 
     def test_init(self):
-        """Test VMCreationResolver initialization."""
-        with patch("mvmctl.api.vm._creation_resolver.MVMDatabase") as mock_db_class:
+        """Test VMInputResolver initialization."""
+        with patch("mvmctl.api.vm._resolver.MVMDatabase") as mock_db_class:
             mock_db = MagicMock()
             mock_db_class.return_value = mock_db
 
-            resolver = VMCreationResolver()
+            resolver = VMInputResolver()
 
             assert resolver._db == mock_db
             assert resolver._network_resolver is not None
@@ -68,7 +68,7 @@ class TestVMCreationResolver:
                 ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
                         with patch(
-                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            "mvmctl.api.vm._resolver.resolve_image_hash",
                             return_value="hash123",
                         ):
                             result = resolver.resolve(basic_input, vm_id="vm-abc123")
@@ -92,9 +92,7 @@ class TestVMCreationResolver:
 
         with patch("mvmctl.api.assets.resolve_image_fs_uuid", return_value="uuid-123"):
             with patch("mvmctl.api.assets.resolve_image_fs_type", return_value="ext4"):
-                with patch(
-                    "mvmctl.api.vm._creation_resolver.resolve_image_hash", return_value="hash123"
-                ):
+                with patch("mvmctl.api.vm._resolver.resolve_image_hash", return_value="hash123"):
                     with patch.object(resolver._db, "get_image") as mock_get_image:
                         mock_image_entry = MagicMock()
                         mock_image_entry.id = "img-123"
@@ -143,7 +141,7 @@ class TestVMCreationResolver:
                 with patch("mvmctl.api.assets.resolve_image_fs_uuid", return_value="uuid-123"):
                     with patch("mvmctl.api.assets.resolve_image_fs_type", return_value="ext4"):
                         with patch(
-                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            "mvmctl.api.vm._resolver.resolve_image_hash",
                             return_value="hash123",
                         ):
                             with patch.object(resolver._db, "get_image") as mock_get_image:
@@ -179,7 +177,7 @@ class TestVMCreationResolver:
             with patch("mvmctl.api.assets.resolve_image_fs_uuid", return_value="uuid-123"):
                 with patch("mvmctl.api.assets.resolve_image_fs_type", return_value="ext4"):
                     with patch(
-                        "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                        "mvmctl.api.vm._resolver.resolve_image_hash",
                         return_value="hash123",
                     ):
                         with patch.object(resolver._db, "get_image") as mock_get_image:
@@ -398,7 +396,7 @@ class TestVMCreationResolver:
                 ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
                         with patch(
-                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            "mvmctl.api.vm._resolver.resolve_image_hash",
                             return_value="hash123",
                         ):
                             result = resolver.resolve(basic_input, vm_id="vm-abc123")
@@ -425,7 +423,7 @@ class TestVMCreationResolver:
                 ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
                         with patch(
-                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            "mvmctl.api.vm._resolver.resolve_image_hash",
                             return_value="hash123",
                         ):
                             result = resolver.resolve(basic_input, vm_id="vm-abc123")
@@ -446,7 +444,7 @@ class TestVMCreationResolver:
                 ):
                     with patch.object(resolver, "_resolve_binary", return_value=("/fc", "bin-123")):
                         with patch(
-                            "mvmctl.api.vm._creation_resolver.resolve_image_hash",
+                            "mvmctl.api.vm._resolver.resolve_image_hash",
                             return_value="abc123hash",
                         ):
                             result = resolver.resolve(basic_input, vm_id="vm-abc123")
@@ -500,16 +498,16 @@ class TestVMCreationResolver:
 
 
 # =============================================================================
-# ResolvedVMInputs Tests
+# VMResolvedDependencies Tests
 # =============================================================================
 
 
-class TestResolvedVMInputs:
-    """Tests for ResolvedVMInputs dataclass."""
+class TestVMResolvedDependencies:
+    """Tests for VMResolvedDependencies dataclass."""
 
     def test_init_required_fields(self):
-        """Test ResolvedVMInputs initialization with required fields."""
-        result = ResolvedVMInputs(
+        """Test VMResolvedDependencies initialization with required fields."""
+        result = VMResolvedDependencies(
             name="test-vm",
             vm_id="abc123",
             vcpus=2,
@@ -553,8 +551,8 @@ class TestResolvedVMInputs:
         assert result.cloud_init_mode == CloudInitMode.INJECT
 
     def test_init_optional_fields_defaults(self):
-        """Test ResolvedVMInputs optional field defaults."""
-        result = ResolvedVMInputs(
+        """Test VMResolvedDependencies optional field defaults."""
+        result = VMResolvedDependencies(
             name="test-vm",
             vm_id="abc123",
             vcpus=2,
@@ -592,8 +590,8 @@ class TestResolvedVMInputs:
         assert result.cloud_init_iso_path is None
 
     def test_init_all_fields(self):
-        """Test ResolvedVMInputs with all fields set."""
-        result = ResolvedVMInputs(
+        """Test VMResolvedDependencies with all fields set."""
+        result = VMResolvedDependencies(
             name="test-vm",
             vm_id="abc123",
             vcpus=4,

@@ -1,4 +1,3 @@
-import select
 import sys
 import termios
 import tty
@@ -6,25 +5,9 @@ from typing import Optional
 
 import typer
 
-from mvmctl.api.vm import (
-    attach_console as _attach_console,
-)
-from mvmctl.api.vm import (
-    check_escape_sequence,
-    connect_to_relay,
-    disconnect_from_relay,
-    read_console_output,  # noqa: F401 (exported for tests)
-    send_console_input,
-)
-from mvmctl.api.vm import (
-    get_console_state as _get_console_state,
-)
-from mvmctl.api.vm import (
-    kill_console as _kill_console,
-)
+from mvmctl.api.console import ConsoleRelaySession
 from mvmctl.cli._helpers import resolve_vm_by_id_or_name
 from mvmctl.exceptions import MVMError, VMNotFoundError
-from mvmctl.models import ConsoleInfo, ConsoleState
 from mvmctl.utils.console import print_error, print_info, print_success
 from mvmctl.utils.error_handler import handle_mvm_error
 
@@ -36,10 +19,6 @@ console_app = typer.Typer(
 )
 
 
-def _resolve_vm(vm_id: Optional[str], name: Optional[str]) -> str:
-    return resolve_vm_by_id_or_name(vm_id, name)
-
-
 @console_app.command()
 def console_attach(
     vm_id: Optional[str] = typer.Argument(None, help="VM ID prefix or name"),
@@ -48,132 +27,82 @@ def console_attach(
     kill: bool = typer.Option(False, "--kill", help="Kill the console relay"),
 ) -> None:
     """Attach to a VM console by ID prefix (e.g., 3df) or --name."""
-    vm_name = _resolve_vm(vm_id, name)
-
+    # Setup: resolve target VM
+    vm_name = resolve_vm_by_id_or_name(vm_id, name)
+    
+    # Setup: create session for this VM
+    try:
+        session = ConsoleRelaySession(vm_name)
+    except VMNotFoundError as e:
+        print_error(str(e))
+        raise typer.Exit(1)
+    
+    # Route to operation
     if state:
-        _show_state(vm_name)
+        _show_console_state(session, vm_name)
+    elif kill:
+        _kill_console_relay(session, vm_name)
+    else:
+        _attach_to_console(session, vm_name)
+
+
+def _show_console_state(session: ConsoleRelaySession, vm_name: str) -> None:
+    """Display console relay state for a VM."""
+    try:
+        state_dict = session.get_state()
+    except MVMError as e:
+        handle_mvm_error(e)
         return
+        
+    status = "running" if state_dict["running"] else "stopped"
+    print_info(f"Console for '{vm_name}': {status}")
+    if state_dict["pid"]:
+        print_info(f"  PID: {state_dict['pid']}")
+    if state_dict["socket_path"]:
+        print_info(f"  Socket: {state_dict['socket_path']}")
 
-    if kill:
-        _do_kill(vm_name)
+
+def _kill_console_relay(session: ConsoleRelaySession, vm_name: str) -> None:
+    """Kill the console relay for a VM."""
+    try:
+        killed = session.kill()
+    except MVMError as e:
+        handle_mvm_error(e)
         return
-
-    _do_attach(vm_name)
-
-
-def _show_state(name: str) -> None:
-    try:
-        state: ConsoleState = _get_console_state(name)
-        status = "running" if state.running else "stopped"
-        print_info(f"Console for '{name}': {status}")
-        if state.pid:
-            print_info(f"  PID: {state.pid}")
-        if state.socket_path:
-            print_info(f"  Socket: {state.socket_path}")
-    except VMNotFoundError as e:
-        print_error(str(e))
+        
+    if killed:
+        print_success(f"Console relay stopped for '{vm_name}'")
+    else:
+        print_error(f"No console relay running for '{vm_name}'")
         raise typer.Exit(1)
+
+
+def _attach_to_console(session: ConsoleRelaySession, vm_name: str) -> None:
+    """Attach to VM console interactively."""
+    # Validate: check relay is running
+    try:
+        session.attach()
     except MVMError as e:
         handle_mvm_error(e)
-
-
-def _do_kill(name: str) -> None:
-    try:
-        killed = _kill_console(name)
-        if killed:
-            print_success(f"Console relay stopped for '{name}'")
-        else:
-            print_error(f"No console relay running for '{name}'")
-            raise typer.Exit(1)
-    except VMNotFoundError as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    except MVMError as e:
-        handle_mvm_error(e)
-
-
-def _do_attach(name: str) -> None:
-    try:
-        info: ConsoleInfo = _attach_console(name)
-        socket_path = info.socket_path
-    except VMNotFoundError as e:
-        print_error(str(e))
-        raise typer.Exit(1)
-    except MVMError as e:
-        handle_mvm_error(e)
-
-    print_info(f"Attaching to console of '{name}'...")
+        return
+    
+    print_info(f"Attaching to console of '{vm_name}'...")
     print_info("Press Ctrl+X then D to detach")
-
-    try:
-        sock = connect_to_relay(socket_path)
-    except (ConnectionRefusedError, FileNotFoundError, TimeoutError) as e:
-        print_error(f"Failed to connect to console: {e}")
-        raise typer.Exit(1)
-
+    
+    # Execute: connect and run interactive session
     old_tty = None
     try:
+        session.connect()
         old_tty = termios.tcgetattr(sys.stdin)
         tty.setraw(sys.stdin.fileno())
-
-        input_buffer = bytearray()
-        detach_requested = False
-        running = True
-
-        while running:
-            readable, _, _ = select.select([sys.stdin, sock], [], [], 0.05)
-
-            if sock in readable:
-                try:
-                    data = sock.recv(4096)
-                    if data:
-                        sys.stdout.buffer.write(data)
-                        sys.stdout.flush()
-                    else:
-                        running = False
-                except BlockingIOError:
-                    pass
-                except (OSError, ConnectionResetError):
-                    running = False
-
-            if sys.stdin in readable:
-                char = sys.stdin.buffer.read(1)
-                if not char:
-                    running = False
-                    continue
-
-                input_buffer.extend(char)
-                matched, action = check_escape_sequence(input_buffer)
-                if matched and action == "detach":
-                    detach_requested = True
-                    running = False
-                    continue
-
-                # Send immediately unless buffer starts with Ctrl+X (escape sequence prefix)
-                if input_buffer[0:1] != b"\x18":
-                    to_send = bytes(input_buffer)
-                    if to_send:
-                        send_console_input(sock, to_send)
-                    input_buffer = bytearray()
-                elif len(input_buffer) >= 2:
-                    # Have Ctrl+X + next char - check if it's the full sequence
-                    if input_buffer != b"\x18d":
-                        # Not detach sequence, send both chars
-                        to_send = bytes(input_buffer)
-                        if to_send:
-                            send_console_input(sock, to_send)
-                        input_buffer = bytearray()
-
-        if detach_requested:
-            if input_buffer:
-                send_console_input(sock, bytes(input_buffer[:-2]))
-            print_info("\nDetached from console")
-        elif input_buffer:
-            send_console_input(sock, bytes(input_buffer))
-
+        session.interact()
+        print_info("\nDetached from console")
     except KeyboardInterrupt:
         pass
+    except MVMError as e:
+        handle_mvm_error(e)
     finally:
+        # Terminate: cleanup terminal and disconnect
         if old_tty is not None:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
-        disconnect_from_relay(sock)
+        session.disconnect()

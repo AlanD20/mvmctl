@@ -1,3 +1,3 @@
 """Utility modules."""
 
-__all__ = ["console", "fs", "http"]
+__all__ = ["console", "fs", "http", "process_signals"]

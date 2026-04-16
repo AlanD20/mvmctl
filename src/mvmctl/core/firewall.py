@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import subprocess
 
-from mvmctl.constants import MVM_NO_CLOUD_INPUT_CHAIN
+from mvmctl.constants import MVM_NOCLOUD_NET_INPUT_CHAIN
 from mvmctl.exceptions import NetworkError
 from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
@@ -154,7 +154,7 @@ def setup_nocloud_input_chain() -> None:
     Raises:
         NetworkError: If chain creation or jump rule setup fails.
     """
-    chain_name = MVM_NO_CLOUD_INPUT_CHAIN
+    chain_name = MVM_NOCLOUD_NET_INPUT_CHAIN
 
     # Create the chain if it doesn't exist
     _create_chain_if_missing(chain_name)
@@ -197,7 +197,7 @@ def add_nocloud_input_rule(vm_ip: str, vm_name: str, port: int) -> None:
     Raises:
         NetworkError: If rule addition fails.
     """
-    chain_name = MVM_NO_CLOUD_INPUT_CHAIN
+    chain_name = MVM_NOCLOUD_NET_INPUT_CHAIN
 
     # Ensure the chain exists
     setup_nocloud_input_chain()
@@ -235,7 +235,7 @@ def remove_nocloud_input_rule(vm_ip: str, vm_name: str, port: int) -> None:
         vm_name: The VM's name (used in comment matching if needed).
         port: The port number that was allowed.
     """
-    chain_name = MVM_NO_CLOUD_INPUT_CHAIN
+    chain_name = MVM_NOCLOUD_NET_INPUT_CHAIN
 
     # Only try to remove rules if chain exists
     if not _chain_exists(chain_name):
@@ -267,7 +267,7 @@ def cleanup_nocloud_input_rules() -> None:
     Raises:
         NetworkError: If flush operation fails unexpectedly.
     """
-    chain_name = MVM_NO_CLOUD_INPUT_CHAIN
+    chain_name = MVM_NOCLOUD_NET_INPUT_CHAIN
 
     # Only flush if chain exists
     if not _chain_exists(chain_name):

@@ -22,7 +22,7 @@ from mvmctl.api.vm import (
     resolve_image_multi_strategy,
     resolve_kernel_multi_strategy,
     resolve_vm_selector,
-    resolve_vm_targets,
+    resolve_vm_target_instances,
     resume_vm,
     snapshot_vm,
     start_vm,
@@ -338,7 +338,7 @@ def _build_output_config(
     ssh_key: str | None,
     effective_user: str,
     effective_pci: bool,
-    effective_bin: str,
+    effective_bin: str | None,
     cloud_init_result: _ResolvedCloudInitResult,
     user_data: Path | None,
     no_cloud_init: bool,
@@ -419,22 +419,6 @@ def vm_create(
     ),
     user_data: Optional[Path] = typer.Option(
         None, "--user-data", help="Path to custom cloud-init user-data file"
-    ),
-    cloud_init_iso: Optional[Path] = typer.Option(
-        None,
-        "--cloud-init-iso",
-        help="Use ISO mode (optionally specify custom ISO path)",
-        callback=_cloud_init_iso_callback,
-    ),
-    no_cloud_init: bool = typer.Option(
-        False,
-        "--no-cloud-init",
-        help="Disable cloud-init injection entirely",
-    ),
-    nocloud_net: bool = typer.Option(
-        False,
-        "--nocloud-net",
-        help="Use nocloud-net HTTP datasource (default mode; use --cloud-init-iso for ISO mode)",
     ),
     cloud_init_mode: Optional[str] = typer.Option(
         None,
@@ -558,16 +542,17 @@ def vm_create(
     effective_pci: bool = enable_pci if enable_pci is not None else _defaults.enable_pci
     effective_network: str | None = network_name
 
-    _validate_create_inputs(ip, effective_network)
-
     image_result = _resolve_image_strategy(image, image_path)
     kernel_result = _resolve_kernel_strategy(kernel, kernel_path)
 
     cloud_init_result = _resolve_cloud_init_mode(
         cloud_init_mode, no_cloud_init, cloud_init_iso, nocloud_net
     )
+    if no_cloud_init and cloud_init_iso is not None:
+        print_error("--no-cloud-init and --cloud-init-iso are mutually exclusive")
+        raise typer.Exit(code=1)
 
-    effective_bin: str = firecracker_bin or _resolve_active_firecracker_bin()
+    effective_ssh_keys = ssh_key.split(",") if ssh_key is not None else []
 
     if output_config is not None:
         _build_output_config(
@@ -583,7 +568,7 @@ def vm_create(
             ssh_key,
             effective_user,
             effective_pci,
-            effective_bin,
+            firecracker_bin,
             cloud_init_result,
             user_data,
             no_cloud_init,
@@ -593,13 +578,12 @@ def vm_create(
     try:
         input_data = VMCreateInput(
             name=name,
-            vcpus=effective_vcpus,
-            mem=effective_mem,
+            vcpu_count=effective_vcpus,
+            mem_size_mib=effective_mem,
             user=effective_user,
-            enable_api_socket=True,
             enable_pci=effective_pci,
             enable_console=not no_console,
-            firecracker_bin=effective_bin,
+            firecracker_bin=firecracker_bin,
             lsm_flags=effective_lsm_flags,
             enable_logging=effective_enable_logging,
             enable_metrics=effective_enable_metrics,
@@ -608,12 +592,12 @@ def vm_create(
             image_path=image_result.path,
             kernel_path=kernel_result.path,
             disk_size=disk_size,
-            ip=ip,
+            guest_ip=ip,
             network_name=effective_network,
-            mac=mac,
-            ssh_key=ssh_key,
-            user_data=user_data,
-            cloud_init_mode=cloud_init_result.mode,
+            guest_mac=mac,
+            ssh_keys=effective_ssh_keys,
+            custom_user_data=user_data,
+            cloud_init_mode=cloud_init_mode,
             cloud_init_iso_path=cloud_init_result.iso_path,
             keep_cloud_init_iso=skip_cleanup,
             nocloud_net_port=nocloud_net_port if nocloud_net_port is not None else 0,
@@ -665,7 +649,7 @@ def vm_rm(
         print_error("Provide at least one VM ID prefix or --name")
         raise typer.Exit(code=1)
 
-    result = resolve_vm_targets(ids=effective_ids, names=effective_names)
+    result = resolve_vm_target_instances(ids=effective_ids, names=effective_names)
 
     if not result.targets and result.errors:
         for err in result.errors:
