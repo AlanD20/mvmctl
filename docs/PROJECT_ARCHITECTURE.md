@@ -29,57 +29,71 @@ Domains represent business capabilities. They are isolated and only import from 
 core/
 ├── vm/                    # VM lifecycle (start, stop, pause, config)
 │   ├── _controller.py     # VMController - stateful VM operations
-│   ├── _service.py        # VMService - stateless VM operations
-│   ├── _repository.py     # VMRepository - database operations for VMs
+│   ├── _firecracker.py    # FirecrackerController - process management
+│   ├── _guestfs.py        # GuestfsProvisioner - rootfs provisioning
+│   ├── _inventory.py      # VMInventory - VM listing and status
+│   ├── _resolver.py       # VMResolver - resolve VM by name/id/ip/mac
+│   ├── _repository.py     # VMRepository - database operations
 │   └── __init__.py
 ├── network/               # Networking (bridge, tap, NAT, IP lease)
-│   ├── _controller.py
-│   ├── _service.py
-│   ├── _repository.py     # NetworkRepository + LeaseRepository
+│   ├── _controller.py     # NetworkController
+│   ├── _service.py          # NetworkService
+│   ├── _lease_service.py    # LeaseService - IP lease management
+│   ├── _resolver.py         # NetworkResolver
+│   ├── _repository.py       # NetworkRepository + LeaseRepository
 │   └── __init__.py
 ├── image/                 # OS images (fetch, import, cache)
-│   ├── _controller.py
-│   ├── _service.py
-│   ├── _repository.py     # ImageRepository
+│   ├── _controller.py     # ImageController
+│   ├── _resolver.py         # ImageResolver
+│   ├── _repository.py       # ImageRepository
 │   └── __init__.py
 ├── kernel/                # Kernel images (fetch, build)
 │   ├── _controller.py
-│   ├── _service.py
-│   ├── _repository.py     # KernelRepository
+│   ├── _resolver.py         # KernelResolver
+│   ├── _repository.py       # KernelRepository
 │   └── __init__.py
 ├── key/                   # SSH keys (create, list)
-│   ├── _controller.py
-│   ├── _service.py
-│   ├── _repository.py     # KeyRepository
+│   ├── _controller.py     # KeyController
+│   ├── _resolver.py         # KeyResolver
+│   ├── _repository.py       # KeyRepository
 │   └── __init__.py
 ├── binary/                # Firecracker binaries (fetch, versions)
 │   ├── _controller.py
-│   ├── _service.py
-│   ├── _repository.py     # BinaryRepository
+│   ├── _resolver.py         # BinaryResolver
+│   ├── _repository.py       # BinaryRepository
 │   └── __init__.py
 ├── host/                  # Host-level operations (init, reset, prune)
 │   ├── _controller.py
-│   ├── _service.py
-│   ├── _repository.py     # HostRepository
+│   ├── _repository.py       # HostRepository
 │   └── __init__.py
 ├── cache/                 # Cache management
 ├── config/                # Configuration management
 ├── console/               # Console relay management
-├── _internal/             # Shared infrastructure (DB, resolvers, validators, iptables)
-│   ├── _db.py
-│   ├── _resolvers/
-│   ├── _validators/
-│   └── _iptables_tracker.py   # Generic iptables (used by network, firewall)
+│   └── _controller.py     # ConsoleController
+├── cloudinit/             # Cloud-init provisioning (separate domain)
+│   ├── _manager.py          # CloudInitManager
+│   ├── _provisioner.py      # CloudInitProvisioner
+│   └── __init__.py
+├── _internal/             # Shared infrastructure
+│   ├── _db.py               # Database class (connection manager)
+│   ├── _iptables_tracker.py # Generic iptables
+│   └── _asset_manager.py    # Asset management
 └── _orchestration/        # Cross-domain operations
     ├── __init__.py
-    ├── vm_operations.py       # Imports: vm, network, image, kernel, binary
-    ├── cloudinit_operations.py # Example: if cloudinit were its own domain
-    ├── network_operations.py  # Imports: network
-    ├── host_operations.py     # Imports: host, network
-    ├── image_operations.py    # Imports: image
-    ├── kernel_operations.py   # Imports: kernel
-    ├── key_operations.py      # Imports: key
-    └── binary_operations.py   # Imports: binary
+    └── vm_operations.py     # Merged: VMBuilder + VMOrchestrator + removal
+```
+
+### API Input Layer
+
+Input resolution classes live in `api/input/`:
+
+```
+api/
+├── input/                     # Request → ResolvedRequest pattern
+│   ├── __init__.py
+│   ├── vm_create_request.py   # VMCreateRequest + ResolvedVMCreateRequest
+│   └── vm_request.py          # VMRequest + ResolvedVMRequest
+└── ...
 ```
 
 ## Domain ≠ CLI Command
@@ -208,13 +222,12 @@ class VMRepository:
 ```python
 # core/vm/_service.py
 from mvmctl.core.vm._repository import VMRepository
-from mvmctl.core._internal._db import get_db_connection
+from mvmctl.core._internal._db import Database
 
 class VMService:
     def list_vms(self) -> list[VMInstance]:
-        db = get_db_connection()
-        repo = VMRepository(db)
-        return repo.list_vms()
+        repo = VMRepository(Database())
+        return repo.list_all()
 ```
 
 ## Import Boundaries (Enforced)
@@ -228,8 +241,13 @@ from mvmctl.core.vm import VMController, VMService
 from mvmctl.core._orchestration import vm_operations
 
 # ✅ Domain - ONLY imports _internal
-from mvmctl.core._internal import MVMDatabase
-from mvmctl.core._internal import IPTablesTracker  # OK: generic infrastructure
+from mvmctl.core._internal._db import Database
+from mvmctl.core._internal._iptables_tracker import IPTablesTracker
+
+# ✅ Domain resolvers - located in each domain
+from mvmctl.core.vm._resolver import VMResolver
+from mvmctl.core.network._resolver import NetworkResolver
+from mvmctl.core.image._resolver import ImageResolver
 
 # ❌ FORBIDDEN - Domains never import other domains or orchestration
 # In core/vm/_controller.py:
@@ -241,10 +259,9 @@ from mvmctl.core.image import ImageManager              # NEVER
 # In core/_orchestration/vm_operations.py:
 from mvmctl.core.vm import VMController, VMBuilder
 from mvmctl.core.network import NetworkController
-from mvmctl.core.image import ImageManager
-from mvmctl.core.kernel import KernelService
-# from mvmctl.core.cloudinit import CloudInitController  # If cloudinit were a domain
-from mvmctl.core._internal import MVMDatabase
+from mvmctl.core.image import ImageController
+from mvmctl.core.kernel import KernelResolver
+from mvmctl.core._internal._db import Database
 ```
 
 ## Dependency Direction
@@ -268,10 +285,12 @@ _orchestration/  →  vm/  →  _internal/
 | Pattern | Suffix | Location | Example | Purpose |
 |---------|--------|----------|---------|---------|
 | **Stateful entity manager** | `Controller` | `core/{domain}/` | `VMController`, `NetworkController` | Bound to specific instance (self._vm), lifecycle operations |
-| **Stateless resource ops** | `Service` | `core/{domain}/` | `VMService`, `ImageService` | CRUD operations, search, list |
-| **Cross-domain workflow** | `_operations.py` | `core/_orchestration/` | `vm_operations.py`, `host_operations.py` | Functions importing multiple domains |
-| **Shared infrastructure** | None | `core/_internal/` | `MVMDatabase`, `VMResolver`, `IPTablesTracker` | No domain knowledge, reusable utilities |
-| **Domain-specific helpers** | `Manager` or descriptive | `core/{domain}/` | `NetworkIPLeaseManager` | Domain-specific but reusable within domain |
+| **Stateless resource ops** | `Service` | `core/{domain}/` | `NetworkService`, `LeaseService` | CRUD operations, search, list |
+| **Database operations** | `Repository` | `core/{domain}/_repository.py` | `VMRepository`, `ImageRepository` | Data persistence, queries, transactions |
+| **Entity resolution** | `Resolver` | `core/{domain}/_resolver.py` | `VMResolver`, `ImageResolver` | Resolve IDs/names to domain objects |
+| **Cross-domain workflow** | `_operations.py` | `core/_orchestration/` | `vm_operations.py` | Functions importing multiple domains |
+| **Shared infrastructure** | None | `core/_internal/` | `Database`, `IPTablesTracker` | No domain knowledge, reusable utilities |
+| **Domain-specific helpers** | Descriptive | `core/{domain}/` | `GuestfsProvisioner` | Domain-specific but reusable within domain |
 
 ## Public API Example
 
@@ -280,13 +299,15 @@ API layer is thin curation - no business logic:
 ```python
 # api/vm.py
 from mvmctl.core._orchestration.vm_operations import create_vm, remove_vm
-from mvmctl.core.vm import VMController, VMService
+from mvmctl.core.vm import VMController, VMInventory
+from mvmctl.api.input.vm_create_request import VMCreateRequest
 
 __all__ = [
-    "VMController",   # Stateful: stop, start, pause, ssh (from domain)
-    "VMService",      # Stateless: list, search, exists (from domain)
-    "create_vm",      # Orchestrated creation (from _orchestration)
-    "remove_vm",      # Orchestrated removal (from _orchestration)
+    "VMController",     # Stateful: stop, start, pause (from domain)
+    "VMInventory",      # Stateless: list, search, exists (from domain)
+    "VMCreateRequest",  # Input resolution (from api/input)
+    "create_vm",        # Orchestrated creation (from _orchestration)
+    "remove_vm",        # Orchestrated removal (from _orchestration)
 ]
 ```
 
@@ -295,13 +316,15 @@ CLI consumes only this public surface:
 ```python
 # cli/vm.py
 from mvmctl.api import vm
+from mvmctl.api.input.vm_create_request import VMCreateRequest
 
 # Single domain operation - uses Controller directly
 controller = vm.VMController("myvm")
 controller.stop()
 
-# Orchestrated operation - uses orchestration function
-vm.create_vm(name="newvm", image="ubuntu-24.04")  # Orchestrates 6 domains
+# Orchestrated operation - uses Request pattern
+request = VMCreateRequest(name="newvm", image="ubuntu-24.04")
+vm.create_vm(request)  # Orchestrates 6 domains
 ```
 
 ## Domain Growth Patterns
@@ -313,10 +336,11 @@ When a domain grows, add files following the naming convention:
 ```
 core/vm/
 ├── _controller.py          # VMController (primary lifecycle)
-├── _service.py             # VMService
 ├── _firecracker.py         # FirecrackerController (process management)
-├── _console.py             # ConsoleController (relay management)
-├── _snapshot.py            # SnapshotController (if large enough)
+├── _guestfs.py             # GuestfsProvisioner (rootfs operations)
+├── _inventory.py           # VMInventory (listing, status, export)
+├── _resolver.py            # VMResolver (resolve by name/id/ip/mac)
+├── _repository.py          # VMRepository (database operations)
 └── __init__.py
 ```
 
@@ -470,5 +494,6 @@ core/_orchestration/vm_operations.py:
 - **Orchestration rule** - If code imports multiple domains → `core/_orchestration/`
 - **Domain isolation** - Domains only import `core/_internal/`, never other domains
 - **Infrastructure placement** - Generic → `_internal/`, domain-specific → `{domain}/`
-- **Naming** - `Controller` (stateful), `Service` (stateless), `_operations.py` (cross-domain)
+- **Naming** - `Controller` (stateful), `Service` (stateless), `Repository` (DB), `Resolver` (lookup)
 - **Input resolution** - `Request` (raw) → `validate()` → `resolve()` → `ResolvedRequest` (frozen)
+- **File naming** - `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`, `_operations.py`
