@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core.key._repository import KeyRepository
 from mvmctl.db.models import SSHKey
 from mvmctl.exceptions import KeyNotFoundError, MVMKeyError
 
@@ -29,12 +29,12 @@ class KeyResolveResult:
 class KeyResolver:
     """Resolver for SSH key resources using database storage."""
 
-    def __init__(self, db: Database | None = None) -> None:
-        self._db = db if db is not None else Database()
+    def __init__(self, repo: KeyRepository | None = None) -> None:
+        self._repo = repo if repo is not None else KeyRepository()
 
     def by_id(self, key_id: str) -> SSHKey:
         """Resolve by ID (fingerprint) prefix."""
-        matches = self._db.find_ssh_keys_by_prefix(key_id)
+        matches = self._repo.find_by_prefix(key_id)
         if len(matches) == 0:
             raise KeyNotFoundError(f"Key not found: {key_id!r}")
         if len(matches) > 1:
@@ -43,7 +43,7 @@ class KeyResolver:
 
     def by_name(self, name: str) -> SSHKey:
         """Resolve by key name."""
-        key = self._db.get_ssh_key_by_name(name)
+        key = self._repo.get_by_name(name)
         if key is None:
             raise KeyNotFoundError(f"Key not found: {name!r}")
         return key

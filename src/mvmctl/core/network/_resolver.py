@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.db.models import Network
 from mvmctl.exceptions import NetworkNotFoundError
 
@@ -24,12 +24,12 @@ class NetworkResolveResult:
 class NetworkResolver:
     """Resolver for network configuration."""
 
-    def __init__(self, db: Database | None = None) -> None:
-        self._db = db if db is not None else Database()
+    def __init__(self, repo: NetworkRepository | None = None) -> None:
+        self._repo = repo if repo is not None else NetworkRepository()
 
     def by_id(self, network_id: str) -> Network:
         """Resolve network by ID prefix."""
-        matches = self._db.find_networks_by_prefix(network_id)
+        matches = self._repo.find_by_prefix(network_id)
         if len(matches) == 0:
             raise NetworkNotFoundError(f"Network not found: {network_id}")
         if len(matches) > 1:
@@ -38,7 +38,7 @@ class NetworkResolver:
 
     def by_name(self, name: str) -> Network:
         """Resolve network by name."""
-        network = self._db.get_network_by_name(name)
+        network = self._repo.get_by_name(name)
         if network is None:
             raise NetworkNotFoundError(f"Network not found: {name}")
         return network

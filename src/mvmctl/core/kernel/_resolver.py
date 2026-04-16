@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.db.models import Kernel
 from mvmctl.exceptions import KernelNotFoundError
 
@@ -24,12 +24,12 @@ class KernelResolveResult:
 class KernelResolver:
     """Resolver for kernel resources."""
 
-    def __init__(self, db: Database | None = None) -> None:
-        self._db = db if db is not None else Database()
+    def __init__(self, repo: KernelRepository | None = None) -> None:
+        self._repo = repo if repo is not None else KernelRepository()
 
     def by_id(self, kernel_id: str) -> Kernel:
         """Resolve by ID prefix."""
-        matches = self._db.find_kernels_by_prefix(kernel_id)
+        matches = self._repo.find_by_prefix(kernel_id)
         if len(matches) == 0:
             raise KernelNotFoundError(f"Kernel not found: {kernel_id!r}")
         if len(matches) > 1:
@@ -38,7 +38,7 @@ class KernelResolver:
 
     def by_version_type(self, version: str, type: str) -> Kernel:
         """Resolve by version and type (both required)."""
-        kernel = self._db.get_kernel_by_version_and_type(version, type)
+        kernel = self._repo.get_by_version_and_type(version, type)
         if kernel is None:
             raise KernelNotFoundError(f"Kernel not found: version={version!r}, type={type!r}")
         return kernel

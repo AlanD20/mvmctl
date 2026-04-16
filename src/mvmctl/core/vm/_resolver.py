@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core.vm._repository import VMRepository
 from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import VMNotFoundError
 
@@ -24,12 +24,12 @@ class VMResolveResult:
 class VMResolver:
     """Resolver for VM resources."""
 
-    def __init__(self, db: Database | None = None) -> None:
-        self._db = db if db is not None else Database()
+    def __init__(self, repo: VMRepository | None = None) -> None:
+        self._repo = repo if repo is not None else VMRepository()
 
     def by_id(self, vm_id: str) -> VMInstance:
         """Resolve VM by ID prefix."""
-        matches = self._db.find_vms_by_prefix(vm_id)
+        matches = self._repo.find_by_prefix(vm_id)
         if len(matches) == 0:
             raise VMNotFoundError(f"VM not found: {vm_id}")
         if len(matches) > 1:
@@ -39,21 +39,21 @@ class VMResolver:
 
     def by_name(self, name: str) -> VMInstance:
         """Resolve VM by name."""
-        vm = self._db.find_vm_by_name(name)
+        vm = self._repo.get_by_name(name)
         if vm is None:
             raise VMNotFoundError(f"VM not found: {name}")
         return vm
 
     def by_ip(self, ip: str) -> VMInstance:
         """Resolve VM by IP address via DB lookup."""
-        vm = self._db.find_vm_by_ip(ip)
+        vm = self._repo.find_by_ip(ip)
         if vm is None:
             raise VMNotFoundError(f"No VM found with IP: {ip}")
         return vm
 
     def by_mac(self, mac: str) -> VMInstance:
         """Resolve VM by MAC address via DB lookup."""
-        vm = self._db.find_vm_by_mac(mac)
+        vm = self._repo.find_by_mac(mac)
         if vm is None:
             raise VMNotFoundError(f"No VM found with MAC: {mac}")
         return vm

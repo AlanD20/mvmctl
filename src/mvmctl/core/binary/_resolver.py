@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.db.models import Binary
 from mvmctl.exceptions import BinaryNotFoundError
 
@@ -24,12 +24,12 @@ class BinaryResolveResult:
 class BinaryResolver:
     """Resolver for firecracker binary."""
 
-    def __init__(self, db: Database | None = None) -> None:
-        self._db = db if db is not None else Database()
+    def __init__(self, repo: BinaryRepository | None = None) -> None:
+        self._repo = repo if repo is not None else BinaryRepository()
 
     def by_id(self, binary_id: str) -> Binary:
         """Resolve binary by ID prefix."""
-        matches = self._db.find_binaries_by_prefix(binary_id)
+        matches = self._repo.find_by_prefix(binary_id)
         if len(matches) == 0:
             raise BinaryNotFoundError(f"Binary not found: {binary_id}")
         if len(matches) > 1:
@@ -38,7 +38,7 @@ class BinaryResolver:
 
     def by_name_version(self, name: str, version: str) -> Binary:
         """Resolve binary by name and version (both required)."""
-        binary = self._db.get_binary_by_name_and_version(name, version)
+        binary = self._repo.get_by_name_and_version(name, version)
         if binary is None:
             raise BinaryNotFoundError(f"Binary not found: name={name!r}, version={version!r}")
         return binary

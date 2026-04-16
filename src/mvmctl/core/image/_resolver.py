@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._db import Database
+from mvmctl.core.image._repository import ImageRepository
 from mvmctl.db.models import Image
 from mvmctl.exceptions import ImageNotFoundError
 
@@ -24,12 +24,12 @@ class ImageResolveResult:
 class ImageResolver:
     """Resolver for image resources."""
 
-    def __init__(self, db: Database | None = None) -> None:
-        self._db = db if db is not None else Database()
+    def __init__(self, repo: ImageRepository | None = None) -> None:
+        self._repo = repo if repo is not None else ImageRepository()
 
     def by_id(self, image_id: str) -> Image:
         """Resolve by full ID."""
-        matches = self._db.find_images_by_prefix(image_id)
+        matches = self._repo.find_by_prefix(image_id)
         if len(matches) == 0:
             raise ImageNotFoundError(f"Image not found: {image_id!r}")
         if len(matches) > 1:
@@ -38,7 +38,7 @@ class ImageResolver:
 
     def by_os_slug(self, os_slug: str) -> Image:
         """Resolve by OS slug."""
-        db_image = self._db.get_image_by_os_slug(os_slug)
+        db_image = self._repo.get_by_os_slug(os_slug)
         if db_image is None:
             raise ImageNotFoundError(f"Image not found: {os_slug!r}")
         return db_image
