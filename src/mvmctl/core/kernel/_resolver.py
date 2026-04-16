@@ -43,6 +43,10 @@ class KernelResolver:
             raise KernelNotFoundError(f"Kernel not found: version={version!r}, type={type!r}")
         return kernel
 
+    def get_default(self) -> Kernel | None:
+        """Resolve the default kernel, or None if not set."""
+        return self._repo.get_default()
+
     def resolve(self, value: str) -> Kernel:
         """Resolve kernel by ID prefix."""
         return self.by_id(value)

@@ -43,6 +43,10 @@ class NetworkResolver:
             raise NetworkNotFoundError(f"Network not found: {name}")
         return network
 
+    def get_default(self) -> Network | None:
+        """Resolve the default network, or None if not set."""
+        return self._repo.get_default()
+
     def resolve(self, value: str) -> Network:
         """Resolve network by name or ID prefix."""
         try:

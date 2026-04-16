@@ -43,6 +43,10 @@ class ImageResolver:
             raise ImageNotFoundError(f"Image not found: {os_slug!r}")
         return db_image
 
+    def get_default(self) -> Image | None:
+        """Resolve the default image, or None if not set."""
+        return self._repo.get_default()
+
     def resolve(self, value: str) -> Image:
         """Resolve image by os_slug or ID prefix."""
         try:

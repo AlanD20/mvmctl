@@ -43,6 +43,10 @@ class BinaryResolver:
             raise BinaryNotFoundError(f"Binary not found: name={name!r}, version={version!r}")
         return binary
 
+    def get_default(self, name: str) -> Binary | None:
+        """Resolve the default binary for a given name, or None if not set."""
+        return self._repo.get_default(name)
+
     def resolve(self, value: str) -> Binary:
         """Resolve binary by ID prefix."""
         return self.by_id(value)

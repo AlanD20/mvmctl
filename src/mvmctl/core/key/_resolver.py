@@ -21,7 +21,7 @@ __all__ = [
 
 @dataclass
 class KeyResolveResult:
-    items: list[str]
+    items: list[SSHKey]
     errors: list[str]
     exit_code: int
 
@@ -47,6 +47,10 @@ class KeyResolver:
         if key is None:
             raise KeyNotFoundError(f"Key not found: {name!r}")
         return key
+
+    def get_defaults(self) -> list[SSHKey]:
+        """Resolve all SSH keys marked as default."""
+        return self._repo.get_defaults()
 
     def resolve(self, value: str) -> SSHKey:
         """Resolve key by name or ID prefix."""
@@ -78,14 +82,14 @@ class KeyResolver:
 
     def resolve_many(self, identifiers: list[str]) -> KeyResolveResult:
         """Resolve multiple key identifiers."""
-        items: list[str] = []
+        items: list[SSHKey] = []
         errors: list[str] = []
 
         for identifier in identifiers:
             try:
                 key = self.resolve(identifier)
-                if key.name not in items:
-                    items.append(key.name)
+                if key not in items:
+                    items.append(key)
             except KeyNotFoundError as e:
                 errors.append(f"{identifier}: {e}")
 

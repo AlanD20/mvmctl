@@ -108,3 +108,11 @@ class KeyRepository:
         if row is None:
             return None
         return SSHKey(**dict(row))
+
+    def get_defaults(self) -> list[SSHKey]:
+        """Return all SSH keys marked as default."""
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ssh_keys WHERE is_default = 1 ORDER BY created_at"
+            ).fetchall()
+        return [SSHKey(**dict(row)) for row in rows]
