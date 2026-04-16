@@ -77,6 +77,23 @@ class DatabaseError(MVMError):
         return self.message
 
 
+class MigrationError(DatabaseError):
+    """Database migration failure.
+
+    Common messages:
+    - Migration {version} failed: {details}
+    - Missing migration versions: {versions}
+    - Invalid migration filename: {filename}
+    """
+
+    def __init__(self, message: str = "Migration failed") -> None:
+        self.message = message
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return self.message
+
+
 class SocketNotFoundError(FirecrackerError):
     """Unix socket for VM API not found."""
 
