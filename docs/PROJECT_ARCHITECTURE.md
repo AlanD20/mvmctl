@@ -342,6 +342,127 @@ Create a new domain folder when:
 2. **Used by multiple orchestrations** (e.g., used by vm_operations and host_operations)
 3. **Independent lifecycle** (can be tested in isolation)
 
+## Input Resolution Pattern (Request → ResolvedRequest)
+
+For complex orchestrated operations, use a two-phase input resolution pattern to avoid passing 20+ individual arguments through layers.
+
+### Pattern Structure
+
+```
+api/input/
+├── __init__.py
+├── vm_create_request.py    # VMCreateRequest + ResolvedVMCreateRequest
+├── vm_remove_request.py    # VMRemoveRequest + ResolvedVMRemoveRequest
+└── ...
+```
+
+### Request Types
+
+**CREATE Operations** (complex, many parameters):
+```python
+@dataclass
+class VMCreateRequest:
+    """Holds raw CLI arguments for VM creation."""
+    name: str
+    image: str           # Raw: "ubuntu-24.04"
+    kernel: str          # Raw: "v6.1"
+    vcpus: int | None
+    memory_mib: int | None
+    network: str | None
+    binary: str | None
+    # ... many more fields
+    
+    def validate(self) -> None:
+        """Validate without DB lookups."""
+        if not self.name:
+            raise ValueError("VM name is required")
+        # ... other validation
+    
+    def resolve(self) -> ResolvedVMCreateRequest:
+        """Resolve all string references to actual objects."""
+        # Uses domain controllers to resolve
+        return ResolvedVMCreateRequest(
+            name=self.name,
+            image=ImageController().get_by_os_slug(self.image),
+            kernel=KernelController().get_by_version(self.kernel),
+            network=NetworkController().resolve(self.network),
+            # ... all fields resolved
+        )
+
+@dataclass(frozen=True)
+class ResolvedVMCreateRequest:
+    """Fully resolved and validated - ready for orchestration."""
+    name: str
+    image: Image           # Resolved object
+    kernel: Kernel         # Resolved object
+    network: Network       # Resolved object
+    # ... all resolved, immutable
+```
+
+**OTHER Operations** (simple, reference existing VM):
+```python
+@dataclass
+class VMRequest:
+    """For remove, start, stop, pause, resume operations.
+    
+    Uses VMInstance properties to identify existing VM.
+    """
+    vm_id: str | None
+    name: str | None
+    # Minimal fields - just need to identify the VM
+    
+    def resolve(self) -> ResolvedVMRequest:
+        """Resolve to existing VMInstance."""
+        return ResolvedVMRequest(
+            vm=VMRepository().get(self.vm_id) or VMRepository().get_by_name(self.name)
+        )
+
+@dataclass(frozen=True)
+class ResolvedVMRequest:
+    """Resolved to actual VMInstance."""
+    vm: VMInstance
+```
+
+### Flow
+
+```
+CLI: Create Request(...) → API: request.validate() → request.resolve() → Orchestration
+
+# Example:
+cli/vm.py:
+    request = VMCreateRequest(name="myvm", image="ubuntu", ...)
+    api.vm.create_vm(request)
+
+api/vms.py:
+    def create_vm(request: VMCreateRequest) -> VMInstance:
+        request.validate()              # Fast validation
+        resolved = request.resolve()      # Heavy DB lookups
+        return orchestration.create_vm(resolved)
+
+core/_orchestration/vm_operations.py:
+    def create_vm(resolved: ResolvedVMCreateRequest) -> VMInstance:
+        # Use resolved.image, resolved.kernel directly
+        network_ctrl = NetworkController(resolved.network.id)
+        image_ctrl = ImageController(resolved.image)
+        # ... coordinate domains with resolved objects
+```
+
+### Why This Pattern
+
+1. **Single object passed through layers** - Not 20+ individual args
+2. **Validation in one place** - `request.validate()`
+3. **Resolution in one place** - `request.resolve()`
+4. **Orchestration gets clean objects** - No lookups needed
+5. **Immutable resolved requests** - `frozen=True` prevents mutation
+6. **Separation of concerns** - Validation (fast) vs Resolution (slow with DB)
+
+### Key Distinctions
+
+| Operation Type | Request Class | Resolved Class | Fields |
+|----------------|---------------|----------------|--------|
+| **CREATE** | `VMCreateRequest` | `ResolvedVMCreateRequest` | Many (all creation params) |
+| **EXISTING** | `VMRequest` | `ResolvedVMRequest` | Minimal (just VM identifier) |
+
 ## Summary
 
 - **Domains ≠ CLI commands** - Domains are business capabilities (vm, network, image, etc.)
@@ -350,3 +471,4 @@ Create a new domain folder when:
 - **Domain isolation** - Domains only import `core/_internal/`, never other domains
 - **Infrastructure placement** - Generic → `_internal/`, domain-specific → `{domain}/`
 - **Naming** - `Controller` (stateful), `Service` (stateless), `_operations.py` (cross-domain)
+- **Input resolution** - `Request` (raw) → `validate()` → `resolve()` → `ResolvedRequest` (frozen)
