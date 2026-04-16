@@ -63,52 +63,6 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class VMRemovalContext:
-    """Manages VM removal state. Does NOT call core modules directly.
-
-    Core call sequencing stays in vm_operations.py (the orchestrator).
-    """
-
-    vm: VMInstance
-    vm_dir: Path
-    net_config: NetworkConfig | None
-    bridge: str
-    manager: VMController
-    _pid: int | None = None
-
-    @property
-    def pid(self) -> int | None:
-        """Get the PID of the VM process."""
-        return self._pid
-
-    @pid.setter
-    def pid(self, value: int | None) -> None:
-        """Set the PID of the VM process."""
-        self._pid = value
-
-
-@dataclass
-class VMBulkCleanupContext:
-    """Manages bulk VM cleanup state. Does NOT call core modules directly.
-
-    Core call sequencing stays in vm_operations.py (the orchestrator).
-    """
-
-    manager: VMController
-    cache_dir: Path
-    _targets: list[VMInstance] = field(default_factory=list)
-
-    @property
-    def targets(self) -> list[VMInstance]:
-        """Get the list of VMs targeted for cleanup."""
-        return self._targets
-
-    def set_targets(self, vms: list[VMInstance]) -> None:
-        """Set the list of VMs to clean up."""
-        self._targets = vms
-
-
-@dataclass
 class VMBuilder:
     """Builder for VM creation - tracks state and spawns processes.
 
@@ -125,7 +79,7 @@ class VMBuilder:
     resolved: ResolvedVMCreateRequest | None = None
 
     fc_manager: FirecrackerController | None = None
-    relay: "VMConsoleRelay" | None = None
+    relay: VMConsoleRelay | None = None
     # Stores final state of cloud-init, use this as reference
     cloud_init_result: CloudInitProvisionResult | None = None
 
