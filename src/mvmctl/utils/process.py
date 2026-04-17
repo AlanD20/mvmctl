@@ -10,7 +10,7 @@ import threading
 import time
 from collections.abc import Iterator
 
-from mvmctl.constants import CONST_TIMESTAMP_INITIAL, PROJECT_GROUP
+from mvmctl.constants import CONST_TIMESTAMP_INITIAL, MVM_UNIX_GROUP
 from mvmctl.exceptions import ProcessError
 
 logger = logging.getLogger(__name__)
@@ -224,10 +224,10 @@ def require_mvm_group_membership() -> None:
     from mvmctl.exceptions import PrivilegeError
 
     try:
-        g = grp.getgrnam(PROJECT_GROUP)
+        g = grp.getgrnam(MVM_UNIX_GROUP)
     except KeyError:
         raise PrivilegeError(
-            f"Group '{PROJECT_GROUP}' does not exist. "
+            f"Group '{MVM_UNIX_GROUP}' does not exist. "
             f"Run 'sudo mvm host init' to set up privilege management."
         )
 
@@ -238,17 +238,17 @@ def require_mvm_group_membership() -> None:
     is_primary_group = user_pw.pw_gid == g.gr_gid
     if not (is_supplementary_member or is_primary_group):
         raise PrivilegeError(
-            f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
+            f"User '{username}' is not in the '{MVM_UNIX_GROUP}' group. "
             f"Run 'sudo mvm host init' to configure privileges, "
-            f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
+            f"then 'newgrp {MVM_UNIX_GROUP}' or log out and back in."
         )
 
     process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
     if g.gr_gid not in process_gids:
         raise PrivilegeError(
-            f"Your user is in the '{PROJECT_GROUP}' group, but your current session "
+            f"Your user is in the '{MVM_UNIX_GROUP}' group, but your current session "
             f"does not have the group active yet. Please log out and log back in, "
-            f"or run: newgrp {PROJECT_GROUP}"
+            f"or run: newgrp {MVM_UNIX_GROUP}"
         )
 
 

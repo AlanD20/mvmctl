@@ -8,7 +8,7 @@ from typing import Any
 
 from mvmctl.constants import (
     DEFAULT_NETWORK_NAME,
-    PROJECT_GROUP,
+    MVM_UNIX_GROUP,
     SUDOERS_DROP_IN_PATH,
     TAP_PREFIX,
     device_prefix,
@@ -87,7 +87,7 @@ def init_host(cache_dir: Path | None = None) -> list[HostStateChange]:
     import os
 
     from mvmctl.constants import (
-        PROJECT_GROUP,
+        MVM_UNIX_GROUP,
         SUDOERS_DROP_IN_PATH,
     )
     from mvmctl.core.host_privilege import (
@@ -140,25 +140,25 @@ def init_host(cache_dir: Path | None = None) -> list[HostStateChange]:
 
     changes: list[HostStateChange] = []
 
-    group_created = _create_group(PROJECT_GROUP)
+    group_created = _create_group(MVM_UNIX_GROUP)
     if group_created:
         changes.append(
             HostStateChange(
-                setting=f"group:{PROJECT_GROUP}",
+                setting=f"group:{MVM_UNIX_GROUP}",
                 original_value=None,
-                applied_value=PROJECT_GROUP,
+                applied_value=MVM_UNIX_GROUP,
                 mechanism="groupadd",
             )
         )
 
     username = _get_current_user()
-    user_added = _add_user_to_group(username, PROJECT_GROUP)
+    user_added = _add_user_to_group(username, MVM_UNIX_GROUP)
     if user_added:
         changes.append(
             HostStateChange(
                 setting=f"group_member:{username}",
                 original_value=None,
-                applied_value=f"{username}:{PROJECT_GROUP}",
+                applied_value=f"{username}:{MVM_UNIX_GROUP}",
                 mechanism="usermod",
             )
         )
@@ -168,12 +168,12 @@ def init_host(cache_dir: Path | None = None) -> list[HostStateChange]:
     try:
         if sudoers_path.exists():
             existing = sudoers_path.read_text()
-            expected = _generate_sudoers_content(PROJECT_GROUP)
+            expected = _generate_sudoers_content(MVM_UNIX_GROUP)
             sudoers_stale = existing != expected
     except (PermissionError, OSError):
         pass
     if sudoers_stale:
-        _write_sudoers(sudoers_path, PROJECT_GROUP)
+        _write_sudoers(sudoers_path, MVM_UNIX_GROUP)
         changes.append(
             HostStateChange(
                 setting="sudoers_dropin",
@@ -473,8 +473,8 @@ def reset_host(cache_dir: Path | None = None) -> list[str]:
         summary.append(f"Warning: {e}")
 
     try:
-        if _remove_group(PROJECT_GROUP):
-            summary.append(f"Removed group '{PROJECT_GROUP}'")
+        if _remove_group(MVM_UNIX_GROUP):
+            summary.append(f"Removed group '{MVM_UNIX_GROUP}'")
     except HostError as e:
         summary.append(f"Warning: {e}")
 

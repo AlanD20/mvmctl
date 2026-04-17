@@ -21,7 +21,7 @@ from mvmctl.api.host import (
     reset_host,
 )
 from mvmctl.api.network import ensure_default_network, restore_networks
-from mvmctl.constants import PROJECT_GROUP
+from mvmctl.constants import MVM_UNIX_GROUP
 from mvmctl.exceptions import HostError, MVMError
 from mvmctl.utils.console import print_error, print_info, print_success, print_table, print_warning
 from mvmctl.utils.error_handler import handle_mvm_error
@@ -148,7 +148,7 @@ def host_init() -> None:
             print_warning(
                 "ACTION REQUIRED: Log out and back in for group membership to take effect."
             )
-            print_info(f"Or run immediately: newgrp {PROJECT_GROUP}")
+            print_info(f"Or run immediately: newgrp {MVM_UNIX_GROUP}")
 
     try:
         restore_results = restore_networks()

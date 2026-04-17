@@ -736,7 +736,7 @@ def __getattr__(name: str) -> Any:
         val = f"{__getattr__('CLI_NAME').upper()}-NOCLOUDNET-INPUT"
         _LAZY_CONSTANTS[name] = val
         return val
-    if name == "PROJECT_GROUP":
+    if name == "MVM_UNIX_GROUP":
         val = __getattr__("CLI_NAME")
         _LAZY_CONSTANTS[name] = val
         return val

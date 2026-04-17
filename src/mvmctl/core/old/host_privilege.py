@@ -20,7 +20,7 @@ from mvmctl.constants import (
     DEFAULT_USR_SBIN_IPTABLES_SAVE,
     DEFAULT_USR_SBIN_SYSCTL,
     PRIVILEGED_BINARIES,
-    PROJECT_GROUP,
+    MVM_UNIX_GROUP,
 )
 from mvmctl.exceptions import HostError, PrivilegeError
 
@@ -48,10 +48,10 @@ def check_privileges(binary: str) -> None:
         return
 
     try:
-        g = grp.getgrnam(PROJECT_GROUP)
+        g = grp.getgrnam(MVM_UNIX_GROUP)
     except KeyError as e:
         raise PrivilegeError(
-            f"Group '{PROJECT_GROUP}' does not exist. "
+            f"Group '{MVM_UNIX_GROUP}' does not exist. "
             f"Run 'sudo mvm host init' to set up privilege management."
         ) from e
 
@@ -65,18 +65,18 @@ def check_privileges(binary: str) -> None:
 
     if not user_in_group:
         raise PrivilegeError(
-            f"User '{username}' is not in the '{PROJECT_GROUP}' group. "
+            f"User '{username}' is not in the '{MVM_UNIX_GROUP}' group. "
             f"Run 'sudo mvm host init' to configure privileges, "
-            f"then 'newgrp {PROJECT_GROUP}' or log out and back in."
+            f"then 'newgrp {MVM_UNIX_GROUP}' or log out and back in."
         )
 
     # User is in group per /etc/group — but check if THIS process has the credentials
     process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
     if g.gr_gid not in process_gids:
         raise PrivilegeError(
-            f"Your user is in the '{PROJECT_GROUP}' group, but your current session "
+            f"Your user is in the '{MVM_UNIX_GROUP}' group, but your current session "
             f"does not have the group active yet. Please log out and log back in, "
-            f"or run: newgrp {PROJECT_GROUP}"
+            f"or run: newgrp {MVM_UNIX_GROUP}"
         )
 
 
@@ -107,7 +107,7 @@ def check_privileges_interactive(binary: str, operation_description: str = "") -
         print_info("Options:")
         print_info(f"  1. Run with sudo:              sudo {CLI_NAME} ...")
         print_info("  2. Configure persistent access: sudo mvm host init")
-        print_info(f"     (then log out and back in, or run: newgrp {PROJECT_GROUP})")
+        print_info(f"     (then log out and back in, or run: newgrp {MVM_UNIX_GROUP})")
         raise
 
 

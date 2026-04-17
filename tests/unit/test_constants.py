@@ -11,7 +11,7 @@ from mvmctl.constants import (
     FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
     FIRECRACKER_SIGTERM_WAIT_S,
     PRIVILEGED_BINARIES,
-    PROJECT_GROUP,
+    MVM_UNIX_GROUP,
     PROJECT_NAME,
     PROJECT_NAME_UPPER,
     SUDOERS_DROP_IN_PATH,
@@ -87,8 +87,8 @@ def test_tap_prefix():
 
 
 def test_project_group():
-    assert PROJECT_GROUP == CLI_NAME
-    assert PROJECT_GROUP == "mvm"
+    assert MVM_UNIX_GROUP == CLI_NAME
+    assert MVM_UNIX_GROUP == "mvm"
 
 
 def test_sudoers_drop_in_path():
