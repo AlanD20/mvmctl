@@ -385,12 +385,12 @@ class VMCreateInput:
     image_path: Path | None = None
     kernel_path: Path | None = None
     disk_size: str | None = None
-    guest_ip: str | None = None
+    requested_guest_ip: str | None = None
     skip_ci_network_config: bool = False
     boot_args: str | None = None
     lsm_flags: str | None = None
     network_name: str | None = None
-    guest_mac: str | None = None
+    requested_guest_mac: str | None = None
     custom_user_data: Path | None = None
     cloud_init_mode: str | None = None
     cloud_init_iso_path: Path | None = None

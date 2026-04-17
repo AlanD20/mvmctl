@@ -12,13 +12,17 @@ from typing import TYPE_CHECKING
 from mvmctl.api.vm._manager import VMManager
 from mvmctl.api.vm._removal import VMBulkCleanupContext, VMRemovalContext
 from mvmctl.api.vm._resolver import VMInputResolver
+from mvmctl.core.mvm_db import MVMDatabase
+from src.mvmctl.api.vm._builder import VMBuilder
+from src.mvmctl.api.vm._inventory import VMInventory
+from src.mvmctl.core.host_privilege import check_privileges_interactive
+
 from mvmctl.constants import (
     DEFAULT_BRIDGE_NAME,
     DEFAULT_FC_PID_FILENAME,
     DEFAULT_NETWORK_NAME,
     MAX_VMS,
 )
-from mvmctl.core.mvm_db import MVMDatabase
 from mvmctl.exceptions import (
     MVMError,
     NetworkError,
@@ -29,9 +33,6 @@ from mvmctl.models.vm import VMStatus
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
 from mvmctl.utils.signals import SigtermContext
-from src.mvmctl.api.vm._builder import VMBuilder
-from src.mvmctl.api.vm._inventory import VMInventory
-from src.mvmctl.core.host_privilege import check_privileges_interactive
 from src.mvmctl.db.models import VMInstance
 
 if TYPE_CHECKING:
@@ -158,6 +159,7 @@ def _perform_removal_cleanup(
     from mvmctl.api.network import release_network_ip
     from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
     from mvmctl.core.mvm_db import MVMDatabase
+
     from mvmctl.core.network import delete_tap
     from mvmctl.services.console_relay import ConsoleRelayManager
 
@@ -305,6 +307,7 @@ def _perform_bulk_cleanup(
     from mvmctl.api.network import get_network
     from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
     from mvmctl.core.mvm_db import MVMDatabase
+
     from mvmctl.core.network import delete_tap
     from mvmctl.utils.fs import get_vm_dir_by_hash
 

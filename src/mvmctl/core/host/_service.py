@@ -9,7 +9,8 @@ from src.mvmctl.exceptions import PrivilegeError
 
 
 class HostInteractiveService:
-    def check_privileges(self, binary: str, operation_description: str = "") -> None:
+    @staticmethod
+    def check_privileges(binary: str, operation_description: str = "") -> None:
         """Check privileges; if lacking, show interactive guidance with actionable options.
 
         This wrapper is intended for CLI command handlers. It catches ``PrivilegeError``

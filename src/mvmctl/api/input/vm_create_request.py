@@ -27,9 +27,7 @@ from mvmctl.constants import (
 )
 from mvmctl.core._internal._db import Database
 from mvmctl.core.kernel._resolver import KernelResolver
-from mvmctl.core.key._controller import KeyController
 from mvmctl.core.key._resolver import KeyResolver
-from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.vm._firecracker import DriveConfig
 from mvmctl.db.models import Binary, Image, Kernel, Network
 from mvmctl.exceptions import (
@@ -42,7 +40,6 @@ from mvmctl.exceptions import (
 )
 from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.utils.disk_size import parse_disk_size
-from mvmctl.utils.network import generate_mac, generate_tap_name
 from mvmctl.utils.validation import validate_boot_arg_component, validate_mac
 from src.mvmctl.core.binary._repository import BinaryRepository
 from src.mvmctl.core.binary._resolver import BinaryResolver
@@ -86,16 +83,15 @@ class ResolvedVMCreateRequest:
 
     keep_cloud_init_iso: bool
     skip_cleanup: bool
-    tap_name: str
     network_netmask: str
-    guest_mac: str
-    guest_ip: str
     disk_size_bytes: int
     disk_size_mib: int
     ssh_keys: list[str]
 
     lsm_flags: str
 
+    requested_guest_ip: str | None
+    requested_guest_mac: str | None
     nocloud_net_port: int | None = None
     custom_user_data_path: Path | None = None
     cloud_init_iso_path: Path | None = None
@@ -137,20 +133,9 @@ class VMCreateRequest:
         fc_binary = self._resolve_binary(input)
         ssh_keys = self._resolve_ssh_keys(input)
 
-        guest_mac = input.guest_mac if input.guest_mac is not None else generate_mac()
-        tap_name = generate_tap_name(network.name, input.name)
         ipv4_net = ipaddress.IPv4Network(network.subnet, strict=False)
         network_prefix_len = ipv4_net.prefixlen
         network_netmask = ipv4_net.netmask
-        guest_ip = None
-
-        # Only place db connection is required, and this is necessary to ensure
-        # this class stays frozen=true, avoiding any mutation after resolve
-        leaseManager = LeaseService(network, self._db)
-        if input.guest_ip:
-            guest_ip = leaseManager.lease_specific(input.guest_ip, vm_id)
-        else:
-            guest_ip = leaseManager.lease(vm_id)  # Persists the lease to the DB!!
 
         rootfs_disk_size_bytes = image.minimum_rootfs_size_mib * CONST_MEBIBYTE_BYTES
         if input.disk_size is not None:
@@ -183,9 +168,8 @@ class VMCreateRequest:
             if input.enable_metrics is not None
             else DEFAULT_VM_ENABLE_METRICS,
             skip_cleanup=input.skip_cleanup,
-            guest_mac=guest_mac,
-            guest_ip=guest_ip,
-            tap_name=tap_name,
+            requested_guest_mac=input.requested_guest_mac,
+            requested_guest_ip=input.requested_guest_ip,
             ssh_keys=ssh_keys,
             disk_size_bytes=rootfs_disk_size_bytes,
             disk_size_mib=rootfs_disk_size_mib,
@@ -220,8 +204,8 @@ class VMCreateRequest:
         if self._result is None:
             raise VMBuilderError("Failed to resolve necessary dependencies to validate")
 
-        if self._result.guest_mac is not None:
-            validate_mac(self._result.guest_mac)
+        if self._result.requested_guest_mac is not None:
+            validate_mac(self._result.requested_guest_mac)
 
         if not (CONST_VM_VCPU_MIN <= self._result.vcpu_count <= CONST_VM_VCPU_MAX):
             raise VMBuilderError(

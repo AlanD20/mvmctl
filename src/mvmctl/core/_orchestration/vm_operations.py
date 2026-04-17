@@ -33,15 +33,15 @@ from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisioner,
     CloudInitProvisionResult,
 )
+from mvmctl.core.host._service import HostInteractiveService
 from mvmctl.core.image._controller import ImageController
-from mvmctl.core.key._controller import KeyController
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._service import NetworkService
 from mvmctl.core.vm._controller import VMController
-from mvmctl.core.vm._firecracker import DriveConfig, FirecrackerController
+from mvmctl.core.vm._firecracker import FirecrackerController
 from mvmctl.core.vm._guestfs import GuestfsProvisioner
 from mvmctl.core.vm._inventory import VMInventory
-from mvmctl.core.vm._resolver import VMResolver
+from mvmctl.core.vm._repository import VMRepository
 from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import (
     MVMError,
@@ -53,7 +53,9 @@ from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.models.vm import VMStatus
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
+from mvmctl.utils.network import generate_mac, generate_tap_name
 from mvmctl.utils.signals import SigtermContext
+from src.mvmctl.core.console._controller import ConsoleController
 
 if TYPE_CHECKING:
     from mvmctl.models.network import NetworkConfig
@@ -63,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class VMBuilder:
+class VMCreateContext:
     """Builder for VM creation - tracks state and spawns processes.
 
     Generates VM ID automatically on instantiation based on name.
@@ -75,11 +77,14 @@ class VMBuilder:
     name: str
     vm_id: str
     vm_dir: Path
+    guest_ip: str
+    guest_mac: str
+    tap_name: str
     rootfs_path: Path
     resolved: ResolvedVMCreateRequest | None = None
 
     fc_manager: FirecrackerController | None = None
-    relay: VMConsoleRelay | None = None
+    relay: ConsoleController | None = None
     # Stores final state of cloud-init, use this as reference
     cloud_init_result: CloudInitProvisionResult | None = None
 
@@ -160,7 +165,7 @@ class VMBuilder:
         # Networking
         if self.was_created("network_tap") and self.resolved:
             try:
-                net_service.remove_tap(self.resolved.tap_name, self.resolved.network.bridge)
+                net_service.remove_tap(self.tap_name, self.resolved.network.bridge)
             except Exception as exc:
                 logger.warning("Failed to cleanup TAP device during cleanup: %s", exc)
 
@@ -187,7 +192,7 @@ class VMBuilder:
             except OSError as exc:
                 logger.warning("Failed to remove VM directory during cleanup: %s", exc)
 
-    def spawn(self) -> None:
+    def execute(self) -> None:
 
         if self.vm_dir is None:
             raise VMBuilderError("VM directory not set in context")
@@ -197,8 +202,24 @@ class VMBuilder:
 
         from mvmctl.utils.fs import secure_mkdir
 
+        self.guest_mac = (
+            self.resolved.requested_guest_mac
+            if self.resolved.requested_guest_mac
+            else generate_mac()
+        )
+        self.tap_name = generate_tap_name(self.resolved.network.name, self.name)
+
         secure_mkdir(self.vm_dir, self.resolved.name)
         self.mark_created("vm_dir")
+
+        # IP Lease
+        leaseManager = LeaseService(self.resolved.network, self._db)
+        if self.resolved.requested_guest_ip:
+            self.guest_ip = leaseManager.lease_specific(
+                self.resolved.requested_guest_ip, self.vm_id
+            )
+        else:
+            self.guest_ip = leaseManager.lease(self.vm_id)
 
         # Networking
         net_service = NetworkService(self._db)
@@ -214,7 +235,7 @@ class VMBuilder:
                 subnet=self.resolved.network.subnet,
             )
 
-        net_service.ensure_tap(self.resolved.tap_name, self.resolved.network.bridge)
+        net_service.ensure_tap(self.tap_name, self.resolved.network.bridge)
         self.mark_created("network_tap")
 
         # Rootfs
@@ -240,8 +261,8 @@ class VMBuilder:
                 vm_id=self.vm_id,
                 vm_dir=self.vm_dir,
                 cloud_init_dir=(self.vm_dir / "cloud-init"),
-                guest_ip=self.resolved.guest_ip,
-                tap_name=self.resolved.tap_name,
+                guest_ip=self.guest_ip,
+                tap_name=self.tap_name,
                 user=self.resolved.user,
                 network=self.resolved.network,
                 network_prefix_len=self.resolved.network_prefix_len,
@@ -304,10 +325,10 @@ class VMBuilder:
             name=self.resolved.name,
             id=self.resolved.vm_id,
             pid=self.fc_manager.pid,
-            ipv4=self.resolved.guest_ip,
-            mac=self.resolved.guest_mac,
+            ipv4=self.guest_ip,
+            mac=self.guest_mac,
             network_id=self.resolved.network.id,
-            tap_device=self.resolved.tap_name,
+            tap_device=self.tap_name,
             created_at=now.isoformat(),
             updated_at=now.isoformat(),
             status=VMStatus.RUNNING,
@@ -344,46 +365,47 @@ class VMBuilder:
         return vm_instance
 
 
-class VMOrchestrator:
-    def __init__(self, input: VMCreateInput) -> None:
-        self._input = input
-        self._db = Database()
+class VMOperations:
+    @staticmethod
+    def create(inputs: VMCreateInput) -> None:
 
-    def create_vm(self) -> None:
-        from mvmctl.core.host_privilege import check_privileges_interactive
+        db = Database()
 
-        check_privileges_interactive("/usr/sbin/ip", f"create VM '{self._input.name}'")
+        # Pre-checks before wasting resources
+        HostInteractiveService.check_privileges("/usr/sbin/ip", f"create VM '{inputs.name}'")
 
-        # Create builder first - it generates VM ID automatically
-        ctx = VMBuilder(name=self._input.name)
-
-        # Sanitized - use resolved inputs
-        resolver = VMCreateRequest(self._db)
-        resolved = resolver.resolve(self._input, vm_id=ctx.vm_id, vm_dir=ctx.vm_dir)
-        resolver.ensure_validate()
-
-        vm_inventory = VMInventory(self._db)
+        vm_inventory = VMInventory(db)
         if vm_inventory.count() >= MAX_VMS:
             raise MVMError(
                 f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
             )
 
+        # New VM context
+        ctx = VMCreateContext(name=inputs.name)
+
+        # Sanitized - use resolved inputs
+        resolver = VMCreateRequest(db)
+        resolved = resolver.resolve(inputs, vm_id=ctx.vm_id, vm_dir=ctx.vm_dir)
+        resolver.ensure_validate()
+
         ctx.set_resolved(resolved)
 
         with SigtermContext(lambda: ctx.cleanup()):
             try:
-                ctx.spawn()
+                ctx.execute()
 
                 vm_instance = ctx.to_model()
                 if vm_instance is None:
                     raise VMBuilderError("Failed to create VM instance model")
 
-                self._db.upsert_vm(vm_instance)
-                log_audit("vm.create", f"name={self._input.name}")
+                vm_repo = VMRepository(db)
+                vm_repo.upsert(vm_instance)
+                log_audit("vm.create", f"name={inputs.name}")
             except Exception as exc:
                 ctx.cleanup()
                 raise
 
+    def remoev(self) -> None:
     def cleanup_create_vm(self) -> None:
         pass
 
@@ -458,6 +480,7 @@ def _perform_removal_cleanup(
     """Perform all cleanup steps for VM removal using firewall."""
     from mvmctl.api.network import release_network_ip
     from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
+
     from mvmctl.core.network._service import NetworkService
     from mvmctl.services.console_relay import ConsoleRelayManager
 
@@ -601,6 +624,7 @@ def _perform_bulk_cleanup(
     """Perform bulk cleanup of multiple VMs using firewall."""
     from mvmctl.api.network import get_network
     from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
+
     from mvmctl.core.network._service import NetworkService
     from mvmctl.utils.fs import get_vm_dir_by_hash
 
@@ -697,22 +721,9 @@ def cleanup_vms(
     return targets
 
 
-def create_vm(input: VMCreateInput) -> None:
-    """Create a VM from input parameters.
-
-    Args:
-        input: VMCreateInput with all VM creation parameters.
-    """
-    orchestrator = VMOrchestrator(input)
-    orchestrator.create_vm()
-
-
 __all__ = [
-    "VMBuilder",
-    "VMOrchestrator",
+    "VMCreateContext",
+    "VMOperations",
     "VMRemovalContext",
     "VMBulkCleanupContext",
-    "create_vm",
-    "remove_vm",
-    "cleanup_vms",
 ]
