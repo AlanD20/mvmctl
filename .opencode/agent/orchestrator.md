@@ -289,11 +289,22 @@ from mvmctl.core._internal._db import Database
 
 ## Research Capabilities
 
-You have access to WebFetch. Use it when:
+You have two tools for external research:
+
+1. **WebFetch** — Direct URL fetching for specific pages, documentation, or references you already know about.
+2. **`@explore` agent** — Spawn this subagent when you need broad internet research, exploring multiple sources, or when local information is insufficient. The explore agent can search the web, compare multiple sources, and return comprehensive findings.
+
+Use external research when:
 - Looking up design patterns from similar projects (e.g., how other microVM managers handle orchestration)
 - Researching best practices for Python architecture (e.g., repository pattern, clean architecture)
 - Understanding external tools or libraries the project uses
 - Finding technical references to support or challenge a decision
+- The user explicitly asks you to search the internet or implies that external knowledge is needed
+- Your local project context is insufficient and you need up-to-date information from the broader community
+
+**When to use WebFetch vs `@explore`:**
+- **WebFetch**: You know the exact URL or a small set of URLs to check.
+- **`@explore`**: You need to search broadly, compare multiple sources, or don't know where to look. Spawn it with a clear question or topic.
 
 ## Important
 
