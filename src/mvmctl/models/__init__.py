@@ -1,6 +1,7 @@
 """Data models for MicroVM Manager."""
 
 from mvmctl.models.binary import BinaryItem
+from mvmctl.models.bulk import BulkResult, BulkResultItem
 from mvmctl.models.cache import PruneAllResult
 from mvmctl.models.cloud_init import (
     CloudInitConfig,
@@ -43,6 +44,8 @@ from mvmctl.models.vm_config_file import (
 
 __all__ = [
     "BinaryItem",
+    "BulkResult",
+    "BulkResultItem",
     "CloudInitConfig",
     "CloudInitMode",
     "CloudInitStatus",

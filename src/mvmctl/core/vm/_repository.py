@@ -16,7 +16,9 @@ class VMRepository:
     def get(self, vm_id: str) -> VMInstance | None:
         """Return a VM by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM vm_instances WHERE id = ?", (vm_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM vm_instances WHERE id = ?", (vm_id,)
+            ).fetchone()
         if row is None:
             return None
         return VMInstance(**dict(row))
@@ -24,7 +26,9 @@ class VMRepository:
     def get_by_name(self, name: str) -> VMInstance | None:
         """Return a VM by name, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM vm_instances WHERE name = ?", (name,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM vm_instances WHERE name = ?", (name,)
+            ).fetchone()
         if row is None:
             return None
         return VMInstance(**dict(row))
@@ -32,7 +36,9 @@ class VMRepository:
     def find_by_ip(self, ipv4: str) -> VMInstance | None:
         """Return a VM by IP address, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM vm_instances WHERE ipv4 = ?", (ipv4,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM vm_instances WHERE ipv4 = ?", (ipv4,)
+            ).fetchone()
         if row is None:
             return None
         return VMInstance(**dict(row))
@@ -40,7 +46,9 @@ class VMRepository:
     def find_by_mac(self, mac: str) -> VMInstance | None:
         """Return a VM by MAC address, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM vm_instances WHERE mac = ?", (mac,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM vm_instances WHERE mac = ?", (mac,)
+            ).fetchone()
         if row is None:
             return None
         return VMInstance(**dict(row))
@@ -57,7 +65,9 @@ class VMRepository:
     def count(self) -> int:
         """Return total count of all VMs."""
         with self._db.connect() as conn:
-            result = conn.execute("SELECT COUNT(*) FROM vm_instances").fetchone()
+            result = conn.execute(
+                "SELECT COUNT(*) FROM vm_instances"
+            ).fetchone()
         return result[0] if result else 0
 
     def count_by_status(self, status: VMStatus | list[VMStatus]) -> int:
@@ -77,10 +87,14 @@ class VMRepository:
     def list_all(self) -> list[VMInstance]:
         """Return all VM records."""
         with self._db.connect() as conn:
-            rows = conn.execute("SELECT * FROM vm_instances ORDER BY created_at").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM vm_instances ORDER BY created_at"
+            ).fetchall()
         return [VMInstance(**dict(row)) for row in rows]
 
-    def list_by_status(self, status: VMStatus | list[VMStatus]) -> list[VMInstance]:
+    def list_by_status(
+        self, status: VMStatus | list[VMStatus]
+    ) -> list[VMInstance]:
         """Return VM records filtered by status(es). Accepts single status or list of statuses."""
         statuses = [status] if isinstance(status, VMStatus) else status
         if not statuses:
@@ -94,17 +108,21 @@ class VMRepository:
             rows = conn.execute(query, status_values).fetchall()
         return [VMInstance(**dict(row)) for row in rows]
 
-    def list_excluding_statuses(self, excluded_statuses: VMStatus | list[VMStatus]) -> list[VMInstance]:
+    def list_excluding_statuses(
+        self, excluded_statuses: VMStatus | list[VMStatus]
+    ) -> list[VMInstance]:
         """Return VM records excluding certain status(es). Accepts single status or list of statuses."""
-        statuses = [excluded_statuses] if isinstance(excluded_statuses, VMStatus) else excluded_statuses
+        statuses = (
+            [excluded_statuses]
+            if isinstance(excluded_statuses, VMStatus)
+            else excluded_statuses
+        )
         if not statuses:
             return self.list_all()
 
         status_values = [s.value for s in statuses]
         placeholders = ",".join(["?"] * len(status_values))
-        query = (
-            f"SELECT * FROM vm_instances WHERE status NOT IN ({placeholders}) ORDER BY created_at"
-        )
+        query = f"SELECT * FROM vm_instances WHERE status NOT IN ({placeholders}) ORDER BY created_at"
 
         with self._db.connect() as conn:
             rows = conn.execute(query, status_values).fetchall()
@@ -217,3 +235,22 @@ class VMRepository:
         """Delete a VM by ID. No-op if not found."""
         with self._db.connect() as conn:
             conn.execute("DELETE FROM vm_instances WHERE id = ?", (vm_id,))
+
+    def delete_many(self, vm_ids: list[str]) -> int:
+        """Delete multiple VMs by ID.
+
+        Uses SQL-level DELETE WHERE id IN (...) for efficiency.
+
+        Args:
+            vm_ids: List of VM IDs to delete.
+
+        Returns:
+            Number of rows deleted.
+        """
+        if not vm_ids:
+            return 0
+        placeholders = ",".join(["?"] * len(vm_ids))
+        query = f"DELETE FROM vm_instances WHERE id IN ({placeholders})"
+        with self._db.connect() as conn:
+            cursor = conn.execute(query, vm_ids)
+            return cursor.rowcount

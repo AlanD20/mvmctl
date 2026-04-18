@@ -38,7 +38,7 @@ from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisioner,
     CloudInitProvisionResult,
 )
-from mvmctl.core.host._service import HostInteractiveService
+from mvmctl.core.host._helper import HostPrivilegeHelper
 from mvmctl.core.image._controller import ImageController
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._service import NetworkService
@@ -52,6 +52,7 @@ from mvmctl.exceptions import (
     VMBuilderError,
     VMNotFoundError,
 )
+from mvmctl.models import VMInspectInfo
 from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.models.vm import VMInstance, VMStatus
 from mvmctl.utils.audit import log_audit
@@ -409,7 +410,7 @@ class VMOperations:
         db = Database()
 
         # Pre-checks before wasting resources
-        HostInteractiveService.check_privileges(
+        HostPrivilegeHelper.check_privileges(
             "/usr/sbin/ip", f"create VM '{inputs.name}'"
         )
 
@@ -453,7 +454,7 @@ class VMOperations:
         db = Database()
 
         # Pre-checks before wasting resources
-        HostInteractiveService.check_privileges(
+        HostPrivilegeHelper.check_privileges(
             "/usr/sbin/ip", f"Remove VM '{inputs.name}'"
         )
 
@@ -1054,6 +1055,86 @@ class VMOperations:
 
     def cleanup_create_vm(self) -> None:
         pass
+
+    def inspect_vm(self, vm: VMInstance) -> VMInspectInfo:
+        """Get detailed VM information.
+
+        TODO: This is a placeholder. The logic was moved from VMController.inspect()
+        and needs to be properly refactored to use resolvers from the API layer.
+        """
+        # FIXME: Re-implement using NetworkResolver, KernelResolver, ImageResolver
+        # from the API layer. The old implementation is in the git history.
+        raise NotImplementedError(
+            "inspect_vm is a placeholder — needs proper cross-domain implementation"
+        )
+        nr = NetworkResolver(self._db)
+        kr = KernelResolver(self._db)
+        ir = ImageResolver(self._db)
+        network = nr.by_id(self._vm.network_id)
+        image = ir.by_id(self._vm.image_id)
+        kernel = kr.by_id(self._vm.kernel_id)
+
+        nocloud_net = self._build_nocloud_info()
+        console = self._build_console_info()
+        vm_dir = self._get_vm_directory()
+
+        return VMInspectInfo(
+            id=self._vm.id,
+            name=self._vm.name,
+            status=self._vm.status,
+            created_at=self._vm.created_at,
+            pid=self._vm.pid,
+            ip=self._vm.ipv4,
+            mac=self._vm.mac,
+            network_name=network.name,
+            tap_device=self._vm.tap_device,
+            cloud_init_mode=self._vm.cloud_init_mode,
+            image_id=self._vm.image_id,
+            image_name=image.os_name,
+            kernel_id=self._vm.kernel_id,
+            kernel_name=kernel.name,
+            paths={
+                "vm_dir": str(vm_dir) if vm_dir else None,
+                "rootfs": str(self._vm.rootfs_path)
+                if self._vm.rootfs_path
+                else None,
+                "config": str(self._vm.config_path)
+                if self._vm.config_path
+                else None,
+            },
+            features={
+                "api_socket": self._vm.api_socket_path is not None,
+                "console": self._vm.relay_socket_path is not None,
+                "nocloud_net": self._vm.nocloud_net_port is not None,
+            },
+            nocloud_net=nocloud_net,
+            console=console,
+        )
+
+    def _build_nocloud_info(self) -> dict | None:
+        if self._vm.nocloud_net_port:
+            return {
+                "port": self._vm.nocloud_net_port,
+                "server_pid": self._vm.nocloud_net_pid,
+            }
+        return None
+
+    def _build_console_info(self) -> dict | None:
+        if self._vm.relay_socket_path:
+            return {
+                "socket_path": str(self._vm.relay_socket_path),
+                "relay_pid": self._vm.relay_pid,
+            }
+        return None
+
+    def _get_vm_directory(self) -> Path | None:
+        if self._vm.config_path:
+            return Path(self._vm.config_path).parent
+        elif self._vm.id:
+            from mvmctl.utils.fs import get_vm_dir_by_hash
+
+            return get_vm_dir_by_hash(self._vm.id)
+        return None
 
 
 __all__ = [

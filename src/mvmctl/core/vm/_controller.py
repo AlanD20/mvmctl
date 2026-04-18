@@ -7,29 +7,23 @@ like start, stop, pause, resume, ssh, logs, etc.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, overload
 
 from mvmctl.core.firecracker import FirecrackerClient
 from mvmctl.core.logs import show_logs
 from mvmctl.core.ssh import connect_to_vm
 
 from mvmctl.constants import (
-    CONST_VM_START_WAIT_S,
     DEFAULT_SNAPSHOT_RESUME,
 )
 from mvmctl.core._internal._db import Database
 from mvmctl.core.console import (
     get_console_state as _get_console_state,
 )
-from mvmctl.core.image._resolver import ImageResolver
-from mvmctl.core.kernel._resolver import KernelResolver
-from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.exceptions import MVMError
-from mvmctl.models import ConsoleInfo, ConsoleState, VMInspectInfo, VMStatus
+from mvmctl.models import ConsoleInfo, ConsoleState, VMStatus
 from mvmctl.models.vm import VMInstance
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.utils.audit import log_audit
-from mvmctl.utils.fs import write_pid_file
 from mvmctl.utils.process_signals import ProcessSignalHandler
 
 
@@ -39,7 +33,9 @@ class VMController:
     Resolves VM entity in __init__ and operates on cached VM instance.
     """
 
-    def __init__(self, entity: str | VMInstance, db: Database | None = None) -> None:
+    def __init__(
+        self, entity: str | VMInstance, db: Database | None = None
+    ) -> None:
         from mvmctl.core.vm._resolver import VMResolver
 
         self._db = db if db is not None else Database()
@@ -60,8 +56,13 @@ class VMController:
             MVMError: If VM is not running or stop fails
         """
         name = self._vm.name
-        if self._vm.status not in (VMStatus.RUNNING.value, VMStatus.PAUSED.value):
-            raise MVMError(f"VM '{name}' is not running (current state: {self._vm.status})")
+        if self._vm.status not in (
+            VMStatus.RUNNING.value,
+            VMStatus.PAUSED.value,
+        ):
+            raise MVMError(
+                f"VM '{name}' is not running (current state: {self._vm.status})"
+            )
         self._db.update_vm_status(self._vm.id, VMStatus.STOPPING.value)
         try:
             handler = ProcessSignalHandler(self._vm.pid)
@@ -98,7 +99,9 @@ class VMController:
         """
         name = self._vm.name
         if self._vm.status != VMStatus.RUNNING.value:
-            raise MVMError(f"VM '{name}' is not running (current state: {self._vm.status})")
+            raise MVMError(
+                f"VM '{name}' is not running (current state: {self._vm.status})"
+            )
         if not self._vm.api_socket_path:
             raise MVMError(f"VM '{name}' has no API socket enabled")
         client = FirecrackerClient(Path(self._vm.api_socket_path))
@@ -116,7 +119,9 @@ class VMController:
         """
         name = self._vm.name
         if self._vm.status != VMStatus.PAUSED.value:
-            raise MVMError(f"VM '{name}' is not paused (current state: {self._vm.status})")
+            raise MVMError(
+                f"VM '{name}' is not paused (current state: {self._vm.status})"
+            )
         if not self._vm.api_socket_path:
             raise MVMError(f"VM '{name}' has no API socket enabled")
         client = FirecrackerClient(Path(self._vm.api_socket_path))
@@ -134,7 +139,9 @@ class VMController:
         """
         name = self._vm.name
         if self._vm.status != VMStatus.STOPPED.value:
-            raise MVMError(f"VM '{name}' is not stopped (current state: {self._vm.status})")
+            raise MVMError(
+                f"VM '{name}' is not stopped (current state: {self._vm.status})"
+            )
         if not self._vm.api_socket_path:
             raise MVMError(f"VM '{name}' has no API socket enabled")
 
@@ -178,7 +185,9 @@ class VMController:
         finally:
             client.close()
 
-    def load_snapshot(self, mem_in: Path, state_in: Path, resume_after: bool | None = None) -> None:
+    def load_snapshot(
+        self, mem_in: Path, state_in: Path, resume_after: bool | None = None
+    ) -> None:
         """Load VM from snapshot.
 
         Args:
@@ -189,7 +198,11 @@ class VMController:
         Raises:
             MVMError: If socket not found or load fails
         """
-        effective_resume = resume_after if resume_after is not None else DEFAULT_SNAPSHOT_RESUME
+        effective_resume = (
+            resume_after
+            if resume_after is not None
+            else DEFAULT_SNAPSHOT_RESUME
+        )
         if not self._vm.api_socket_path:
             raise MVMError(
                 f"Socket not found for VM '{self._vm.name}'. Must be running with --enable-api-socket"
@@ -201,7 +214,9 @@ class VMController:
         finally:
             client.close()
 
-    def ssh(self, user: str, key: Path | None = None, cmd: str | None = None) -> int:
+    def ssh(
+        self, user: str, key: Path | None = None, cmd: str | None = None
+    ) -> int:
         """Open SSH session or execute command on the VM.
 
         Args:
@@ -255,71 +270,6 @@ class VMController:
         Returns:
             VMInspectInfo containing comprehensive VM details from database.
         """
-
-        nr = NetworkResolver(self._db)
-        kr = KernelResolver(self._db)
-        ir = ImageResolver(self._db)
-        network = nr.by_id(self._vm.network_id)
-        image = ir.by_id(self._vm.image_id)
-        kernel = kr.by_id(self._vm.kernel_id)
-
-        nocloud_net = self._build_nocloud_info()
-        console = self._build_console_info()
-        vm_dir = self._get_vm_directory()
-
-        return VMInspectInfo(
-            id=self._vm.id,
-            name=self._vm.name,
-            status=self._vm.status,
-            created_at=self._vm.created_at,
-            pid=self._vm.pid,
-            ip=self._vm.ipv4,
-            mac=self._vm.mac,
-            network_name=network.name,
-            tap_device=self._vm.tap_device,
-            cloud_init_mode=self._vm.cloud_init_mode,
-            image_id=self._vm.image_id,
-            image_name=image.os_name,
-            kernel_id=self._vm.kernel_id,
-            kernel_name=kernel.name,
-            paths={
-                "vm_dir": str(vm_dir) if vm_dir else None,
-                "rootfs": str(self._vm.rootfs_path) if self._vm.rootfs_path else None,
-                "config": str(self._vm.config_path) if self._vm.config_path else None,
-            },
-            features={
-                "api_socket": self._vm.api_socket_path is not None,
-                "console": self._vm.relay_socket_path is not None,
-                "nocloud_net": self._vm.nocloud_net_port is not None,
-            },
-            nocloud_net=nocloud_net,
-            console=console,
-        )
-
-    def _build_nocloud_info(self) -> dict | None:
-        if self._vm.nocloud_net_port:
-            return {
-                "port": self._vm.nocloud_net_port,
-                "server_pid": self._vm.nocloud_net_pid,
-            }
-        return None
-
-    def _build_console_info(self) -> dict | None:
-        if self._vm.relay_socket_path:
-            return {
-                "socket_path": str(self._vm.relay_socket_path),
-                "relay_pid": self._vm.relay_pid,
-            }
-        return None
-
-    def _get_vm_directory(self) -> Path | None:
-        if self._vm.config_path:
-            return Path(self._vm.config_path).parent
-        elif self._vm.id:
-            from mvmctl.utils.fs import get_vm_dir_by_hash
-
-            return get_vm_dir_by_hash(self._vm.id)
-        return None
 
     # FIXME: fix
     def attach_console(self) -> ConsoleInfo:
