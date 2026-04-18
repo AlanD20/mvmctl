@@ -56,6 +56,7 @@ class VMInstanceItem:
     updated_at: str
 
     relay_socket_path: str | None = None
+    process_start_time: int | None = None
     nocloud_net_port: int | None = None
     nocloud_net_pid: int | None = None
     relay_pid: int | None = None

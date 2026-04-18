@@ -134,7 +134,7 @@ class VMRepository:
             conn.execute(
                 """
                 INSERT INTO vm_instances (
-                    id, name, status, pid, ipv4, mac, network_id, tap_device,
+                    id, name, status, pid, process_start_time, ipv4, mac, network_id, tap_device,
                     image_id, kernel_id, binary_id, api_socket_path,
                     relay_socket_path, config_path, cloud_init_mode,
                     nocloud_net_port, nocloud_net_pid, relay_pid,
@@ -142,11 +142,12 @@ class VMRepository:
                     rootfs_path, rootfs_suffix, enable_pci, enable_logging,
                     enable_metrics, enable_console, created_at, updated_at,
                     log_path, serial_output_path, lsm_flags, boot_args
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     status = excluded.status,
                     pid = excluded.pid,
+                    process_start_time = excluded.process_start_time,
                     ipv4 = excluded.ipv4,
                     mac = excluded.mac,
                     network_id = excluded.network_id,
@@ -182,6 +183,7 @@ class VMRepository:
                     vm.name,
                     vm.status,
                     vm.pid,
+                    vm.process_start_time,
                     vm.ipv4,
                     vm.mac,
                     vm.network_id,
@@ -229,6 +231,14 @@ class VMRepository:
             conn.execute(
                 "UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (pid, vm_id),
+            )
+
+    def update_exit_code(self, vm_id: str, exit_code: int) -> None:
+        """Update only the VM exit code field."""
+        with self._db.connect() as conn:
+            conn.execute(
+                "UPDATE vm_instances SET exit_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (exit_code, vm_id),
             )
 
     def delete(self, vm_id: str) -> None:

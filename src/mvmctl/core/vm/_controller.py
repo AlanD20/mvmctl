@@ -16,7 +16,6 @@ from mvmctl.constants import (
     DEFAULT_FC_LOG_FILENAME,
     DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     DEFAULT_SNAPSHOT_RESUME,
-    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
     LOG_FOLLOW_POLL_INTERVAL_S,
 )
 from mvmctl.core.vm._firecracker import FirecrackerClient
@@ -74,29 +73,39 @@ class VMController:
             )
         self._repo.update_status(self._vm.id, VMStatus.STOPPING.value)
         try:
-            handler = ProcessSignalHandler(self._vm.pid)
+            handler = ProcessSignalHandler(
+                self._vm.pid,
+                expected_start_time=self._vm.process_start_time,
+            )
 
             if not force and self._vm.api_socket_path:
-                # Try graceful shutdown via API first
+                # Try graceful shutdown via Firecracker API first
                 try:
                     client = FirecrackerClient(Path(self._vm.api_socket_path))
                     client.send_ctrl_alt_del()
                     client.close()
-                    # Wait a bit for shutdown
-                    import time
-
-                    time.sleep(FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S)
+                    # Wait for guest OS shutdown via pre_signal_hook
+                    exit_code = handler.graceful_shutdown(
+                        pre_signal_hook=lambda: False,
+                    )
                 except Exception:
-                    pass  # Fall through to signal-based shutdown
+                    # Fall through to signal-based shutdown
+                    exit_code = None
 
-            # Use ProcessSignalHandler for actual shutdown
-            if force:
-                handler.send_signal(9)  # SIGKILL
+                if exit_code is None:
+                    exit_code = handler.graceful_shutdown()
             else:
-                handler.graceful_shutdown(
-                    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
-                    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
-                )
+                if force:
+                    handler.kill()
+                exit_code = handler.graceful_shutdown()
+
+            # Capture exit code if not already captured
+            if exit_code is None:
+                exit_code = handler.wait_and_capture_exit()
+
+            # Persist exit code to database
+            if exit_code is not None:
+                self._repo.update_exit_code(self._vm.id, exit_code)
 
             self._repo.update_status(self._vm.id, VMStatus.STOPPED.value)
         except Exception as exc:

@@ -99,6 +99,7 @@ CREATE TABLE vm_instances (
     name TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL,
     pid INTEGER NOT NULL,
+    process_start_time INTEGER NULL,
     ipv4 TEXT NOT NULL CHECK(ipv4 IS NULL OR ipv4 GLOB '[0-9]*.[0-9]*.[0-9]*.[0-9]*'),
     mac TEXT NOT NULL CHECK(mac IS NULL OR mac GLOB '[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]'),
     network_id TEXT NOT NULL,
