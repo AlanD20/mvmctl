@@ -51,12 +51,46 @@ from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.utils.disk_size import parse_disk_size
 from mvmctl.utils.validation import validate_boot_arg_component, validate_mac
 
-if TYPE_CHECKING:
-    from mvmctl.models.vm import VMCreateInput
-
 logger = logging.getLogger(__name__)
 
-__all__ = ["VMCreateRequest", "ResolvedVMCreateRequest"]
+__all__ = ["VMCreateInput", "VMCreateRequest", "ResolvedVMCreateRequest"]
+
+
+@dataclass
+class VMCreateInput:
+    """Input model for VM creation — replaces 31 function parameters."""
+
+    # Required fields (no defaults)
+    name: str
+    vcpu_count: int
+    mem_size_mib: int
+    ssh_keys: list[str]
+
+    # Optional fields (DB-backed at API layer)
+    user: str | None
+    enable_pci: bool | None
+    enable_console: bool | None
+    enable_logging: bool | None
+    enable_metrics: bool | None
+    firecracker_bin: str | None = None
+    image: str | None = None
+    kernel_id: str | None = None
+    binary_id: str | None = None
+    image_path: Path | None = None
+    kernel_path: Path | None = None
+    disk_size: str | None = None
+    requested_guest_ip: str | None = None
+    skip_ci_network_config: bool = False
+    boot_args: str | None = None
+    lsm_flags: str | None = None
+    network_name: str | None = None
+    requested_guest_mac: str | None = None
+    custom_user_data: Path | None = None
+    cloud_init_mode: str | None = None
+    cloud_init_iso_path: Path | None = None
+    keep_cloud_init_iso: bool = False
+    nocloud_net_port: int = 0
+    skip_cleanup: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,7 +146,12 @@ class VMCreateRequest:
     _result: ResolvedVMCreateRequest | None = None
 
     def __init__(
-        self, *, vm_id: str, vm_dir: Path, inputs: VMCreateInput, db: Database | None = None
+        self,
+        *,
+        vm_id: str,
+        vm_dir: Path,
+        inputs: VMCreateInput,
+        db: Database | None = None,
     ) -> None:
         """Initialize the resolver with database and sub-resolvers."""
 
@@ -143,11 +182,17 @@ class VMCreateRequest:
         network_prefix_len = ipv4_net.prefixlen
         network_netmask = ipv4_net.netmask
 
-        rootfs_disk_size_bytes = image.minimum_rootfs_size_mib * CONST_MEBIBYTE_BYTES
+        rootfs_disk_size_bytes = (
+            image.minimum_rootfs_size_mib * CONST_MEBIBYTE_BYTES
+        )
         if self._inputs.disk_size is not None:
-            rootfs_disk_size_bytes = parse_disk_size(self._inputs.disk_size) * CONST_MEBIBYTE_BYTES
+            rootfs_disk_size_bytes = (
+                parse_disk_size(self._inputs.disk_size) * CONST_MEBIBYTE_BYTES
+            )
 
-        rootfs_disk_size_mib = image.minimum_rootfs_size_mib // CONST_MEBIBYTE_BYTES
+        rootfs_disk_size_mib = (
+            image.minimum_rootfs_size_mib // CONST_MEBIBYTE_BYTES
+        )
 
         ci_mode_result = self._resolve_cloud_init_mode()
 
@@ -161,7 +206,9 @@ class VMCreateRequest:
             mem_size_mib=self._inputs.mem_size_mib
             if self._inputs.mem_size_mib != 0
             else DEFAULT_VM_MEM_MIB,
-            user=self._inputs.user if self._inputs.user else DEFAULT_VM_SSH_USER,
+            user=self._inputs.user
+            if self._inputs.user
+            else DEFAULT_VM_SSH_USER,
             network=network,
             image=image,
             kernel=kernel,
@@ -216,36 +263,53 @@ class VMCreateRequest:
         """Validate resolved dependencies."""
 
         if self._result is None:
-            raise VMBuilderError("Failed to resolve necessary dependencies to validate")
+            raise VMBuilderError(
+                "Failed to resolve necessary dependencies to validate"
+            )
 
         if self._result.requested_guest_mac is not None:
             validate_mac(self._result.requested_guest_mac)
 
-        if not (CONST_VM_VCPU_MIN <= self._result.vcpu_count <= CONST_VM_VCPU_MAX):
+        if not (
+            CONST_VM_VCPU_MIN <= self._result.vcpu_count <= CONST_VM_VCPU_MAX
+        ):
             raise VMBuilderError(
                 f"Invalid vcpus={self._result.vcpu_count}: must be between {CONST_VM_VCPU_MIN} and {CONST_VM_VCPU_MAX}"
             )
-        if not (CONST_VM_MEM_MIN_MIB <= self._result.mem_size_mib <= CONST_VM_MEM_MAX_MIB):
+        if not (
+            CONST_VM_MEM_MIN_MIB
+            <= self._result.mem_size_mib
+            <= CONST_VM_MEM_MAX_MIB
+        ):
             raise VMBuilderError(
                 f"Invalid mem_size_mib={self._result.mem_size_mib}: must be between 128 and 65536"
             )
 
         if not Path(self._result.kernel.path).exists():
-            raise VMBuilderError(f"Kernel not found: {self._result.kernel.path}")
+            raise VMBuilderError(
+                f"Kernel not found: {self._result.kernel.path}"
+            )
 
         fc_bin_path = Path(self._result.binary.path)
         if (fc_bin_path.is_absolute() or "/" in self._result.binary.path) and (
             not fc_bin_path.exists() or not os.access(fc_bin_path, os.X_OK)
         ):
-            raise VMBuilderError(f"Firecracker binary not found: {self._result.binary.path}")
+            raise VMBuilderError(
+                f"Firecracker binary not found: {self._result.binary.path}"
+            )
 
         if (
             self._result.custom_user_data_path is not None
             and not self._result.custom_user_data_path.exists()
         ):
-            raise VMBuilderError(f"User-data file not found: {self._result.custom_user_data_path}")
+            raise VMBuilderError(
+                f"User-data file not found: {self._result.custom_user_data_path}"
+            )
 
-        if self._result.image is None or self._result.image.minimum_rootfs_size_mib is None:
+        if (
+            self._result.image is None
+            or self._result.image.minimum_rootfs_size_mib is None
+        ):
             raise VMBuilderError(
                 f"Image {input.image} is missing minimum_rootfs_size_mib. "
                 f"This image was created with an older version. "
@@ -253,7 +317,10 @@ class VMCreateRequest:
             )
 
         if self._result.disk_size_bytes is not None:
-            min_required_bytes = self._result.image.minimum_rootfs_size_mib * CONST_MEBIBYTE_BYTES
+            min_required_bytes = (
+                self._result.image.minimum_rootfs_size_mib
+                * CONST_MEBIBYTE_BYTES
+            )
             if self._result.disk_size_bytes < min_required_bytes:
                 raise VMBuilderError(
                     f"Requested disk size is smaller than "
@@ -380,9 +447,13 @@ class VMCreateRequest:
                 iso_path = Path(self._inputs.cloud_init_iso_path)
 
             if not iso_path.exists():
-                raise CloudInitModeError(f"Cloud-init ISO not found: {iso_path}")
+                raise CloudInitModeError(
+                    f"Cloud-init ISO not found: {iso_path}"
+                )
 
-            mode = CloudInitModeResolved(mode=CloudInitMode.ISO, iso_path=iso_path)
+            mode = CloudInitModeResolved(
+                mode=CloudInitMode.ISO, iso_path=iso_path
+            )
         elif mode_lower == "net":
             mode = CloudInitModeResolved(mode=CloudInitMode.NET, iso_path=None)
         else:

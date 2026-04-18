@@ -21,14 +21,6 @@ class VMStatus(StrEnum):
 
 
 @dataclass
-class VMInput:
-    id: list[str]
-    name: list[str]
-    guest_mac: list[str]
-    guest_ip: list[str]
-
-
-@dataclass
 class VMInstance:
     """VM instance state — maps to vm_instances database table."""
 
@@ -67,43 +59,6 @@ class VMInstance:
     exit_code: int | None = None
     lsm_flags: str | None = None
     boot_args: str | None = None
-
-
-@dataclass
-class VMCreateInput:
-    """Input model for VM creation — replaces 31 function parameters."""
-
-    # Required fields (no defaults)
-    name: str
-    vcpu_count: int
-    mem_size_mib: int
-    ssh_keys: list[str]
-
-    # Optional fields (DB-backed at API layer)
-    user: str | None
-    enable_pci: bool | None
-    enable_console: bool | None
-    enable_logging: bool | None
-    enable_metrics: bool | None
-    firecracker_bin: str | None = None
-    image: str | None = None
-    kernel_id: str | None = None
-    binary_id: str | None = None
-    image_path: Path | None = None
-    kernel_path: Path | None = None
-    disk_size: str | None = None
-    requested_guest_ip: str | None = None
-    skip_ci_network_config: bool = False
-    boot_args: str | None = None
-    lsm_flags: str | None = None
-    network_name: str | None = None
-    requested_guest_mac: str | None = None
-    custom_user_data: Path | None = None
-    cloud_init_mode: str | None = None
-    cloud_init_iso_path: Path | None = None
-    keep_cloud_init_iso: bool = False
-    nocloud_net_port: int = 0
-    skip_cleanup: bool = False
 
 
 ## FIXME: require migration

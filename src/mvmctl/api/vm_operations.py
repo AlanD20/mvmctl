@@ -20,10 +20,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.api.inputs._vm_create_request import (
+from mvmctl.api.inputs import (
     ResolvedVMCreateRequest,
     VMCreateRequest,
 )
+from mvmctl.api.inputs._vm_create_request import VMCreateInput
+from mvmctl.api.inputs._vm_request import VMInput
 from mvmctl.constants import (
     DEFAULT_BRIDGE_NAME,
     DEFAULT_FC_PID_FILENAME,
@@ -51,7 +53,7 @@ from mvmctl.exceptions import (
     VMNotFoundError,
 )
 from mvmctl.models.cloud_init import CloudInitMode
-from mvmctl.models.vm import VMInput, VMInstance, VMStatus
+from mvmctl.models.vm import VMInstance, VMStatus
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
 from mvmctl.utils.network import generate_mac, generate_tap_name
@@ -60,7 +62,6 @@ from src.mvmctl.core.console._controller import ConsoleController
 
 if TYPE_CHECKING:
     from mvmctl.models.network import NetworkConfig
-    from mvmctl.models.vm import VMCreateInput
 
 logger = logging.getLogger(__name__)
 

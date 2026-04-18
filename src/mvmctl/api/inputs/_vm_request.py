@@ -8,12 +8,20 @@ from typing import TYPE_CHECKING
 from mvmctl.core._internal._db import Database
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
-from mvmctl.models.vm import VMInput, VMInstance
+from mvmctl.models.vm import VMInstance
 
 if TYPE_CHECKING:
     pass
 
-__all__ = ["VMRequest", "ResolvedVMRequest"]
+__all__ = ["VMInput", "VMRequest", "ResolvedVMRequest"]
+
+
+@dataclass
+class VMInput:
+    id: list[str]
+    name: list[str]
+    guest_mac: list[str]
+    guest_ip: list[str]
 
 
 @dataclass(frozen=True)
