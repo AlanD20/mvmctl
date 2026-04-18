@@ -194,6 +194,82 @@ from mvmctl.core.kernel import KernelResolver
 from mvmctl.core._internal._db import Database
 ```
 
+## Code Quality Standards (MANDATORY)
+
+When implementing code changes, if no specific style is provided by the user, you MUST default to these principles:
+
+### 1. Resource Efficiency First
+
+Always choose the most resource-efficient approach:
+- **Database**: Use SQL-level operations (`COUNT(*)`, `WHERE IN`, `LIMIT`) instead of fetching all rows and filtering in Python
+- **Memory**: Avoid loading entire datasets into memory when a query can filter at the source
+- **I/O**: Minimize file reads/writes. Batch operations when possible.
+- **Subprocess**: Reuse connections, avoid spawning unnecessary processes
+- **Concurrency**: Use parallel execution only when tasks are truly independent and the overhead is justified
+
+### 2. Be Critical of Your Own Code
+
+Before outputting any code, ask yourself:
+- **Is this the most efficient way?** Could a single query replace multiple lookups?
+- **What are the resource constraints?** Will this scale if there are 1000 VMs instead of 10?
+- **What are the failure modes?** What happens if the database is locked? If a subprocess hangs?
+- **Are there hidden costs?** Does this approach create unnecessary file I/O, memory pressure, or network calls?
+- **Is this a common pitfall?** Am I making the same mistake the archive code made?
+
+### 3. Avoid Over-Engineering
+
+**Simple is better than clever.** Do NOT:
+- Create abstraction layers that aren't needed
+- Use design patterns where a simple function suffices
+- Add generics, factories, or metaclasses unless the problem genuinely requires them
+- Write code that's hard to follow in order to appear sophisticated
+- Introduce unnecessary indirection
+
+**Good code is boring.** It should be:
+- Readable at first glance
+- Obvious in its intent
+- Straightforward in its execution
+- Easy to debug when something goes wrong
+
+### 4. Common Pitfalls to Avoid
+
+| Pitfall | Correct Approach |
+|---------|-----------------|
+| `SELECT *` then filter in Python | `SELECT ... WHERE ...` with specific columns |
+| `len(list_all())` for counting | `SELECT COUNT(*)` |
+| Fetching all rows to find one | `SELECT ... WHERE id = ? LIMIT 1` |
+| N+1 queries in loops | Batch queries or JOINs |
+| Bare `except:` | Catch specific exception types |
+| Hardcoded paths/values | `constants.py` or env vars |
+| Deeply nested conditionals | Early returns, guard clauses |
+| Magic numbers/strings | Named constants |
+| Over-abstracted classes | Simple functions when possible |
+
+## Engineering Autonomy
+
+You are a skilled engineer — the examples and pitfalls above are **guidelines, not boundaries**. You have full autonomy to:
+
+1. **Come up with better approaches** — If you see a more efficient, cleaner, or more robust solution than what the examples suggest, use it. The standards (resource efficiency, simplicity, correctness) are the goal — the examples are just illustrations.
+2. **Apply your own expertise** — You know Python, SQLite, subprocess management, and system programming. Trust your judgment. If a pattern from your experience is better than what's documented here, use it.
+3. **Innovate within constraints** — The architecture rules (layer boundaries, naming conventions, import rules) are hard constraints. Everything else is flexible if you can justify a better approach.
+
+### When in Doubt — Research
+
+If you are uncertain about an approach, questioning whether your solution is optimal, or suspect there might be a better pattern:
+
+1. **Spawn `@explore`** — Ask the explore agent to search the internet for best practices, alternative approaches, or validation of your approach.
+2. **Be specific in your query** — Don't ask "is this good?" — ask "What is the most resource-efficient way to handle X in Python with SQLite?" or "Are there known pitfalls with approach Y for Z use case?"
+3. **Use the findings** — Incorporate what you learn into your implementation. If the research confirms your approach, proceed with confidence. If it reveals a better approach, adapt.
+
+**When to spawn `@explore`:**
+- You're unsure if your approach has hidden performance costs
+- You suspect there's a standard pattern you're not aware of
+- The problem is complex and you want to validate against industry best practices
+- You're weighing multiple approaches and need external perspective
+- The user's request involves a technology or pattern you haven't encountered before
+
+**Don't over-research.** If you're confident in your approach, implement it. Research is for doubt, not for every decision.
+
 ## Refactoring Process
 
 ### Step 1: Read Source
