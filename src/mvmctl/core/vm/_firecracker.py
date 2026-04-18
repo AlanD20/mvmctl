@@ -1,14 +1,19 @@
+from __future__ import annotations
+
+import http.client
 import json
 import logging
+import socket
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Collection, NotRequired, TextIO, TypedDict
+from typing import Any, Collection, NotRequired, TextIO, TypedDict, override
 
-from mvmctl.api.vm._builder import VMBuilder
-from mvmctl.api.vm._resolver import VMInputResolved
 from mvmctl.constants import (
+    CONST_HTTP_STATUS_NO_CONTENT,
+    CONST_HTTP_STATUS_SUCCESS,
     CONST_POLL_STEP_SECONDS,
+    CONST_SOCKET_TIMEOUT_SECONDS,
     DEFAULT_FC_API_SOCKET_FILENAME,
     DEFAULT_FC_CONFIG_FILENAME,
     DEFAULT_FC_LOG_FILENAME,
@@ -18,8 +23,14 @@ from mvmctl.constants import (
     DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     DEFAULT_LIBGUESTFS_SEED_DIR,
 )
-from mvmctl.exceptions import FirecrackerConfigError, FirecrackerError
-from mvmctl.models import CloudInitMode
+from mvmctl.exceptions import (
+    FirecrackerClientError,
+    FirecrackerConfigError,
+    FirecrackerSpawnError,
+    SocketNotFoundError,
+)
+from mvmctl.models.cloudinit import CloudInitMode
+from mvmctl.models.firecracker import FirecrackerConfig
 from mvmctl.utils.fs import write_pid_file
 
 logger = logging.getLogger(__name__)
@@ -68,8 +79,8 @@ class MetricsConfig(TypedDict):
     metrics_path: str
 
 
-FirecrackerConfig = TypedDict(
-    "FirecrackerConfig",
+FirecrackerConfigDict = TypedDict(
+    "FirecrackerConfigDict",
     {
         "boot-source": BootSourceConfig,
         "drives": list[DriveConfig],
@@ -83,7 +94,7 @@ FirecrackerConfig = TypedDict(
 )
 
 
-class FirecrackerController:
+class FirecrackerSpawner:
     """Manage Firecracker."""
 
     pid: int | None = None
@@ -91,18 +102,24 @@ class FirecrackerController:
     serial_output_fp: TextIO | None = None
 
     def __init__(
-        self, vm_builder: VMBuilder, resolved: VMInputResolved, *, config_path: Path | None = None
+        self,
+        config: FirecrackerConfig,
+        *,
+        config_path: Path | None = None,
     ):
-        self._resolved = resolved
-        self._ctx = vm_builder
+        self._config = config
         self._config_path = (
-            config_path if config_path else vm_builder.vm_dir / DEFAULT_FC_CONFIG_FILENAME
+            config_path
+            if config_path
+            else config.vm_dir / DEFAULT_FC_CONFIG_FILENAME
         )
-        self._log_path = vm_builder.vm_dir / DEFAULT_FC_LOG_FILENAME
-        self._metrics_path = vm_builder.vm_dir / DEFAULT_FC_METRICS_FILENAME
-        self._serial_output_path = vm_builder.vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
-        self._pid_path = vm_builder.vm_dir / DEFAULT_FC_PID_FILENAME
-        self._api_socket_path = vm_builder.vm_dir / DEFAULT_FC_API_SOCKET_FILENAME
+        self._log_path = config.vm_dir / DEFAULT_FC_LOG_FILENAME
+        self._metrics_path = config.vm_dir / DEFAULT_FC_METRICS_FILENAME
+        self._serial_output_path = (
+            config.vm_dir / DEFAULT_FC_SERIAL_OUTPUT_FILENAME
+        )
+        self._pid_path = config.vm_dir / DEFAULT_FC_PID_FILENAME
+        self._api_socket_path = config.vm_dir / DEFAULT_FC_API_SOCKET_FILENAME
 
     @property
     def log_path(self) -> Path:
@@ -139,22 +156,26 @@ class FirecrackerController:
         fc_stdout = self.serial_output_fp
         fc_pass_fds: Collection[int] = []
 
-        if self._resolved.enable_console and relay_enabled:
+        if self._config.enable_console and relay_enabled:
             if relay_client_fd is None:
-                raise FirecrackerError("Console enabled but PTY client FD is None")
+                raise FirecrackerSpawnError(
+                    "Console enabled but PTY client FD is None"
+                )
 
             fc_stdin = relay_client_fd
             fc_stdout = relay_client_fd
             fc_pass_fds = [relay_client_fd]
         else:
-            self.serial_output_fp = self.create_filepointer(self._serial_output_path)
+            self.serial_output_fp = self.create_filepointer(
+                self._serial_output_path
+            )
 
         fc_proc: subprocess.Popen[Any] | None = None
         self.fc_log_fp = self.create_filepointer(self._log_path)
 
         fc_proc = subprocess.Popen(
             [
-                self._resolved.binary.path,
+                self._config.binary_path,
                 "--api-sock",
                 str(self._api_socket_path),
                 "--config-file",
@@ -171,7 +192,7 @@ class FirecrackerController:
         poll_result = fc_proc.poll()
 
         if poll_result is not None and isinstance(poll_result, int):
-            raise FirecrackerError(
+            raise FirecrackerSpawnError(
                 f"Firecracker process exited immediately with code {poll_result}"
             )
 
@@ -185,26 +206,27 @@ class FirecrackerController:
 
         self._close_filepointers()
 
-    def generate(self) -> FirecrackerConfig:
+    def generate(self) -> FirecrackerConfigDict:
         # Build as regular dict to allow dynamic optional keys
         config: dict[str, Any] = {
             "boot-source": BootSourceConfig(
-                kernel_image_path=self._resolved.kernel.path, boot_args=self._build_boot_args()
+                kernel_image_path=self._config.kernel_path,
+                boot_args=self._build_boot_args(),
             ),
             "drives": self._build_drives_config(),
             "network-interfaces": self._build_network_config(),
             "machine-config": MachineConfig(
-                vcpu_count=self._resolved.vcpu_count,
-                mem_size_mib=self._resolved.mem_size_mib,
+                vcpu_count=self._config.vcpu_count,
+                mem_size_mib=self._config.mem_size_mib,
                 smt=False,
                 track_dirty_pages=False,
             ),
         }
 
-        if self._resolved.enable_logging:
+        if self._config.enable_logging:
             config["logger"] = self._build_logger_config()
 
-        if self._resolved.enable_metrics:
+        if self._config.enable_metrics:
             config["metrics"] = self._build_metrics_config()
 
         return config  # type: ignore[return-value]
@@ -213,7 +235,7 @@ class FirecrackerController:
         drives: list[DriveConfig] = [
             {
                 "drive_id": "rootfs",
-                "path_on_host": str(self._ctx.rootfs_path.absolute()),
+                "path_on_host": str(self._config.rootfs_path.absolute()),
                 "is_root_device": True,
                 "is_read_only": False,
                 "cache_type": "Unsafe",
@@ -223,13 +245,13 @@ class FirecrackerController:
 
         # Cloud-init ISO drive (if configured)
         if (
-            self._ctx.cloud_init_result is not None
-            and self._ctx.cloud_init_result.mode != CloudInitMode.OFF
-            and self._ctx.cloud_init_result.iso_path is not None
+            self._config.cloud_init_mode is not None
+            and self._config.cloud_init_mode != CloudInitMode.OFF
+            and self._config.cloud_init_iso_path is not None
         ):
             cloud_init_drive: DriveConfig = {
                 "drive_id": "cloud-init",
-                "path_on_host": str(self._ctx.cloud_init_result.iso_path),
+                "path_on_host": str(self._config.cloud_init_iso_path),
                 "is_root_device": False,
                 "is_read_only": True,
                 "cache_type": "Unsafe",
@@ -263,10 +285,10 @@ class FirecrackerController:
 
         boot_args = {}
 
-        if self._resolved.boot_args is not None:
-            boot_args = self._parse_boot_args_to_dict(self._resolved.boot_args)
+        if self._config.boot_args is not None:
+            boot_args = self._parse_boot_args_to_dict(self._config.boot_args)
 
-        if not self._resolved.enable_pci:
+        if not self._config.enable_pci:
             self._set_boot_arg(boot_args, "pci", "off")
 
         # Use static kernel ip= parameter for early network bringup
@@ -277,48 +299,64 @@ class FirecrackerController:
         self._set_boot_arg(
             boot_args,
             "ip",
-            f"{self._resolved.guest_ip}::{self._resolved.network.ipv4_gateway}:{self._resolved.network_netmask}::eth0:off",
+            f"{self._config.guest_ip}::{self._config.network_gateway}:{self._config.network_netmask}::eth0:off",
         )
 
-        if self._resolved.lsm_flags:
-            self._set_boot_arg(boot_args, "lsm", self._resolved.lsm_flags)
+        if self._config.lsm_flags:
+            self._set_boot_arg(boot_args, "lsm", self._config.lsm_flags)
 
-        if self._resolved.image.fs_uuid:
-            self._set_boot_arg(boot_args, "root", f"UUID={self._resolved.image.fs_uuid}")
+        if self._config.image_fs_uuid:
+            self._set_boot_arg(
+                boot_args, "root", f"UUID={self._config.image_fs_uuid}"
+            )
         else:
             self._set_boot_arg(boot_args, "root", "/dev/vda")
 
-        if self._resolved.image.fs_uuid:
-            self._set_boot_arg(boot_args, "rootfstype", self._resolved.image.fs_type)
+        if self._config.image_fs_uuid:
+            self._set_boot_arg(
+                boot_args, "rootfstype", self._config.image_fs_type
+            )
 
         # Determine cloud-init datasource string
         # Don't handle CloudInitMode.OFF since we don't have to add any boot args
         if (
-            self._ctx.cloud_init_result is not None
-            and self._ctx.cloud_init_result.mode != CloudInitMode.OFF
+            self._config.cloud_init_mode is not None
+            and self._config.cloud_init_mode != CloudInitMode.OFF
         ):
             # Mask systemd-networkd-wait-online to prevent 2+ minute boot delay
             # The kernel ip= parameter already configures the network; this service
             # would block waiting for systemd-networkd to mark it as "online"
-            self._set_boot_arg(boot_args, "systemd.mask", "systemd-networkd-wait-online.service")
-            if self._ctx.cloud_init_result.mode == CloudInitMode.NET:
+            self._set_boot_arg(
+                boot_args,
+                "systemd.mask",
+                "systemd-networkd-wait-online.service",
+            )
+            if self._config.cloud_init_mode == CloudInitMode.NET:
                 # For nocloud-net, validate URL is configured
-                if not self._ctx.cloud_init_result.nocloud_url:
-                    raise FirecrackerConfigError("NoCloud URL must be set when using NET mode, pos")
+                if not self._config.cloud_init_nocloud_url:
+                    raise FirecrackerConfigError(
+                        "NoCloud URL must be set when using NET mode, pos"
+                    )
                 self._set_boot_arg(
-                    boot_args, "ds", f"nocloud;seedfrom={self._ctx.cloud_init_result.nocloud_url}"
+                    boot_args,
+                    "ds",
+                    f"nocloud;seedfrom={self._config.cloud_init_nocloud_url}",
                 )
-            elif self._ctx.cloud_init_result.mode == CloudInitMode.INJECT:
+            elif self._config.cloud_init_mode == CloudInitMode.INJECT:
                 self._set_boot_arg(
-                    boot_args, "ds", f"ds=nocloud;s=file://{DEFAULT_LIBGUESTFS_SEED_DIR}/"
+                    boot_args,
+                    "ds",
+                    f"ds=nocloud;s=file://{DEFAULT_LIBGUESTFS_SEED_DIR}/",
                 )
-            elif self._ctx.cloud_init_result.mode == CloudInitMode.ISO:
+            elif self._config.cloud_init_mode == CloudInitMode.ISO:
                 # ISO mode: local nocloud datasource
                 self._set_boot_arg(boot_args, "ds", "nocloud")
 
         return self._join_boot_args_dict(boot_args)
 
-    def _parse_boot_args_to_dict(self, boot_args: str) -> dict[str, list[str] | None]:
+    def _parse_boot_args_to_dict(
+        self, boot_args: str
+    ) -> dict[str, list[str] | None]:
         """Parse boot arguments string into a dictionary with list values.
 
         Handles kernel-style boot arguments in format 'key=value' or flags.
@@ -360,7 +398,9 @@ class FirecrackerController:
 
         return result
 
-    def _join_boot_args_dict(self, boot_args_dict: dict[str, list[str] | None]) -> str:
+    def _join_boot_args_dict(
+        self, boot_args_dict: dict[str, list[str] | None]
+    ) -> str:
         """Join boot arguments dictionary back into a space-separated string.
 
         Reverses _parse_boot_args_to_dict(). Handles both key=value pairs and
@@ -429,8 +469,8 @@ class FirecrackerController:
         networks: list[NetworkInterfaceConfig] = [
             {
                 "iface_id": "eth0",
-                "guest_mac": self._resolved.guest_mac,
-                "host_dev_name": self._resolved.tap_name,
+                "guest_mac": self._config.guest_mac,
+                "host_dev_name": self._config.tap_name,
             }
         ]
 
@@ -461,3 +501,287 @@ class FirecrackerController:
 
         except OSError as exc:
             logger.warning("Failed to close filepointer(s): %s", exc)
+
+
+class InstanceInfo(TypedDict):
+    """Instance info returned from Firecracker get_instance_info()."""
+
+    id: str
+    state: str
+    vcpu_count: int
+    mem_size_mib: int
+    boot_time: str | None
+
+
+class InstanceDescription(TypedDict):
+    """Instance description returned from Firecracker describe_instance()."""
+
+    id: str
+    state: str
+    vcpu_count: int
+    mem_size_mib: int
+    flags: list[str]
+    if_addr: dict[str, str]
+    used_block_devices: list[str]
+
+
+class UnixSocketHTTPConnection(http.client.HTTPConnection):
+    """HTTP connection over Unix domain socket."""
+
+    def __init__(self, socket_path: Path):
+        self._socket_path = socket_path
+        super().__init__("localhost")
+
+    @override
+    def connect(self) -> None:
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(CONST_SOCKET_TIMEOUT_SECONDS)
+        self.sock.connect(str(self._socket_path))
+
+
+class FirecrackerClient:
+    """Firecracker API client."""
+
+    def __init__(self, socket_path: Path):
+        self._socket_path = Path(socket_path)
+        self._conn: UnixSocketHTTPConnection | None = None
+
+    def __enter__(self) -> FirecrackerClient:
+        """Connect to Firecracker socket and return client."""
+        self._connect()
+        return self
+
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: object,
+    ) -> None:
+        """Close the socket connection."""
+        self.close()
+
+    def _connect(self) -> None:
+        """Connect to Firecracker socket.
+
+        Raises:
+            SocketNotFoundError: If the socket file does not exist.
+            FirecrackerError: If connection to the socket fails.
+        """
+        if not self._socket_path.exists():
+            raise SocketNotFoundError(f"Socket not found: {self._socket_path}")
+
+        try:
+            self._conn = UnixSocketHTTPConnection(self._socket_path)
+        except OSError as e:
+            raise FirecrackerClientError(
+                f"Failed to connect to socket: {e}"
+            ) from e
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, object] | None = None,
+    ) -> tuple[int, dict[str, object] | None]:
+        """Make HTTP request to Firecracker API.
+
+        Raises:
+            SocketNotFoundError: If the socket file does not exist.
+            FirecrackerError: If the API request fails.
+        """
+        if not self._conn:
+            self._connect()
+        assert self._conn is not None
+
+        headers = {"Content-Type": "application/json"} if body else {}
+        body_json = json.dumps(body) if body else None
+
+        try:
+            self._conn.request(method, path, body=body_json, headers=headers)
+            response = self._conn.getresponse()
+            status = response.status
+
+            # Read response body
+            response_body = response.read().decode("utf-8")
+            data = json.loads(response_body) if response_body else None
+
+            return status, data
+
+        except (SocketNotFoundError, FirecrackerClientError):
+            raise
+        except OSError as e:
+            raise FirecrackerClientError(f"API request failed: {e}") from e
+
+    def close(self) -> None:
+        """Close connection."""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+
+    def create_snapshot(
+        self,
+        mem_path: Path,
+        snapshot_path: Path,
+    ) -> bool:
+        """Create VM snapshot.
+
+        Args:
+            mem_path: Path to save memory state
+            snapshot_path: Path to save VM state
+
+        Returns:
+            True if successful.
+
+        Raises:
+            FirecrackerError: If snapshot creation fails.
+        """
+        logger.info("Creating snapshot...")
+
+        body: dict[str, object] = {
+            "mem_file_path": str(mem_path),
+            "snapshot_path": str(snapshot_path),
+        }
+
+        status, data = self._request("PUT", "/snapshot/create", body)
+
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
+            logger.info("Snapshot created")
+            logger.info("  Memory: %s", mem_path)
+            logger.info("  State: %s", snapshot_path)
+            return True
+        else:
+            msg = f"Failed to create snapshot: {status}"
+            if data:
+                msg += f" Response: {data}"
+            raise FirecrackerClientError(msg)
+
+    def load_snapshot(
+        self,
+        mem_path: Path,
+        snapshot_path: Path,
+        resume: bool = True,
+    ) -> bool:
+        """Load VM from snapshot.
+
+        Args:
+            mem_path: Path to memory state file
+            snapshot_path: Path to VM state file
+            resume: Whether to resume VM after loading
+
+        Returns:
+            True if successful.
+
+        Raises:
+            FirecrackerError: If snapshot loading fails.
+        """
+        logger.info("Loading snapshot...")
+
+        body = {
+            "mem_file_path": str(mem_path),
+            "snapshot_path": str(snapshot_path),
+            "resume_vm": resume,
+        }
+
+        status, data = self._request("PUT", "/snapshot/load", body)
+
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
+            logger.info("Snapshot loaded")
+            return True
+        else:
+            msg = f"Failed to load snapshot: {status}"
+            if data:
+                msg += f" Response: {data}"
+            raise FirecrackerClientError(msg)
+
+    def get_instance_info(self) -> InstanceInfo | None:
+        """Get VM instance information.
+
+        Returns:
+            InstanceInfo TypedDict or None
+        """
+        status, data = self._request("GET", "/")
+
+        if status == CONST_HTTP_STATUS_SUCCESS and data:
+            return data  # type: ignore[return-value]
+        return None
+
+    def describe_instance(self) -> InstanceDescription | None:
+        """Describe the VM instance.
+
+        Returns:
+            InstanceDescription TypedDict or None
+        """
+        status, data = self._request("GET", "/vm")
+
+        if status == CONST_HTTP_STATUS_SUCCESS and data:
+            return data  # type: ignore[return-value]
+        return None
+
+    def start_instance(self) -> bool:
+        """Start the VM instance.
+
+        Returns:
+            True if successful.
+
+        Raises:
+            FirecrackerError: If the start operation fails.
+        """
+        logger.info("Starting VM...")
+        status, _ = self._request(
+            "PUT", "/actions", {"action_type": "InstanceStart"}
+        )
+
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
+            logger.info("VM started")
+            return True
+        else:
+            raise FirecrackerClientError(f"Failed to start VM: {status}")
+
+    def send_ctrl_alt_del(self) -> bool:
+        """Send Ctrl+Alt+Del to VM.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            status, _ = self._request(
+                "PUT", "/actions", {"action_type": "SendCtrlAltDel"}
+            )
+        except (SocketNotFoundError, FirecrackerClientError):
+            logger.error("Failed to send Ctrl+Alt+Del")
+            return False
+
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
+            logger.info("Ctrl+Alt+Del sent")
+            return True
+        else:
+            logger.error("Failed to send Ctrl+Alt+Del: %s", status)
+            return False
+
+    def pause_vm(self) -> None:
+        """Pause the microVM via PATCH /vm.
+
+        Raises:
+            FirecrackerError: If the pause operation fails.
+        """
+        logger.info("Pausing VM...")
+        status, _ = self._request("PATCH", "/vm", {"state": "Paused"})
+
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
+            logger.info("VM paused")
+        else:
+            raise FirecrackerClientError(f"Failed to pause VM: {status}")
+
+    def resume_vm(self) -> None:
+        """Resume a paused microVM via PATCH /vm.
+
+        Raises:
+            FirecrackerError: If the resume operation fails.
+        """
+        logger.info("Resuming VM...")
+        status, _ = self._request("PATCH", "/vm", {"state": "Resumed"})
+
+        if status == CONST_HTTP_STATUS_NO_CONTENT:
+            logger.info("VM resumed")
+        else:
+            raise FirecrackerClientError(f"Failed to resume VM: {status}")

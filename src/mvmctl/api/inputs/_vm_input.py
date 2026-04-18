@@ -20,10 +20,12 @@ __all__ = ["VMInput", "VMRequest", "ResolvedVMRequest"]
 
 @dataclass
 class VMInput:
-    id: list[str]
-    name: list[str]
-    guest_mac: list[str]
-    guest_ip: list[str]
+    id: list[str] = []
+    name: list[str] = []
+    guest_mac: list[str] = []
+    guest_ip: list[str] = []
+
+    force: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -31,8 +33,7 @@ class ResolvedVMRequest:
     """Immutable resolved VM request - contains the VM instance."""
 
     vms: list[VMInstanceItem]
-    # Allow for future expansion with additional resolved fields
-    extra: dict = field(default_factory=dict)
+    force: bool
 
 
 @dataclass
@@ -50,7 +51,10 @@ class VMRequest:
 
         self._inputs = inputs
         self._db = db if db is not None else Database()
-        self._vm_resolver = VMResolver(VMRepository(self._db))
+        self._vm_resolver = VMResolver(
+            VMRepository(self._db),
+            include=["image", "kernel", "network.leases"],
+        )
 
     @property
     def result(self) -> ResolvedVMRequest | None:
@@ -77,7 +81,10 @@ class VMRequest:
         )
 
         result = self._vm_resolver.resolve_many(identifiers)
-        self._result = ResolvedVMRequest(vms=result.items)
+        self._result = ResolvedVMRequest(
+            vms=result.items,
+            force=self._inputs.force if self._inputs.force else False,
+        )
 
         # Validate
         self.ensure_validate()

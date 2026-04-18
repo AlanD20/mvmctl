@@ -54,7 +54,9 @@ def _load_user_config_json() -> dict[str, Any]:
     if dir_override:
         config_path = Path(dir_override) / "config.json"
     else:
-        config_path = Path.home() / ".config" / _resolve_cli_name() / "config.json"
+        config_path = (
+            Path.home() / ".config" / _resolve_cli_name() / "config.json"
+        )
     if config_path.exists():
         try:
             with open(config_path, encoding="utf-8") as f:
@@ -105,7 +107,9 @@ _CONFIG_KEY_MAP: Final[dict[str, str]] = {
 }
 
 
-def _resolve_with_config_override(constant_name: str, yaml_fallback: Any) -> Any:
+def _resolve_with_config_override(
+    constant_name: str, yaml_fallback: Any
+) -> Any:
     """Resolve constant value, preferring config.json over _defaults.py."""
     config_key = _CONFIG_KEY_MAP.get(constant_name)
     if config_key is None:
@@ -124,7 +128,9 @@ def _get_required(path: tuple[str, ...]) -> Any:
     current: Any = _load_defaults()
     for key in path:
         if not isinstance(current, dict) or key not in current:
-            raise RuntimeError(f"Missing required defaults key: {_format_path(path)}")
+            raise RuntimeError(
+                f"Missing required defaults key: {_format_path(path)}"
+            )
         current = current[key]
     return current
 
@@ -182,14 +188,24 @@ def _require_chain_list(path: tuple[str, ...]) -> list[tuple[str, str, str]]:
     if isinstance(value, list):
         result: list[tuple[str, str, str]] = []
         for item in value:
-            if isinstance(item, dict) and all(k in item for k in ("name", "table", "built_in")):
-                result.append((str(item["name"]), str(item["table"]), str(item["built_in"])))
+            if isinstance(item, dict) and all(
+                k in item for k in ("name", "table", "built_in")
+            ):
+                result.append(
+                    (
+                        str(item["name"]),
+                        str(item["table"]),
+                        str(item["built_in"]),
+                    )
+                )
             else:
                 raise RuntimeError(
                     f"defaults key must be list of dicts with name/table/built_in: {_format_path(path)}"
                 )
         return result
-    raise RuntimeError(f"defaults key must be list of chain dicts: {_format_path(path)}")
+    raise RuntimeError(
+        f"defaults key must be list of chain dicts: {_format_path(path)}"
+    )
 
 
 def _require_str_dict(path: tuple[str, ...]) -> dict[str, str]:
@@ -198,16 +214,21 @@ def _require_str_dict(path: tuple[str, ...]) -> dict[str, str]:
         isinstance(k, str) and isinstance(v, str) for k, v in value.items()
     ):
         return dict(value)
-    raise RuntimeError(f"defaults key must be dict[str, str]: {_format_path(path)}")
+    raise RuntimeError(
+        f"defaults key must be dict[str, str]: {_format_path(path)}"
+    )
 
 
 def _require_str_float_dict(path: tuple[str, ...]) -> dict[str, float]:
     value = _get_required(path)
     if isinstance(value, dict) and all(
-        isinstance(k, str) and isinstance(v, (int, float)) for k, v in value.items()
+        isinstance(k, str) and isinstance(v, (int, float))
+        for k, v in value.items()
     ):
         return {k: float(v) for k, v in value.items()}
-    raise RuntimeError(f"defaults key must be dict[str, float]: {_format_path(path)}")
+    raise RuntimeError(
+        f"defaults key must be dict[str, float]: {_format_path(path)}"
+    )
 
 
 def _default_bridge_name(network_name: str) -> str:
@@ -220,7 +241,9 @@ def _ipv4_gateway_subnet(ipv4_gateway: str, subnet: str) -> str:
     try:
         prefix = ipaddress.ip_network(subnet, strict=False).prefixlen
     except ValueError as exc:
-        raise RuntimeError(f"Invalid network.defaults.subnet value: {subnet}") from exc
+        raise RuntimeError(
+            f"Invalid network.defaults.subnet value: {subnet}"
+        ) from exc
     return f"{ipv4_gateway}/{prefix}"
 
 
@@ -286,10 +309,16 @@ IPTABLES_CHAINS: Final[list[tuple[str, str, str]]] = _require_chain_list(
 DEFAULT_NETWORK_NAME: Final[str] = _require_str(("network", "defaults", "name"))
 FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: Final[int] = 5
 FIRECRACKER_SIGTERM_WAIT_S: Final[int] = 1
-PRIVILEGED_BINARIES: Final[list[str]] = _require_str_list(("host", "privileged_binaries"))
+PRIVILEGED_BINARIES: Final[list[str]] = _require_str_list(
+    ("host", "privileged_binaries")
+)
 
-IPTABLES_RULES_V4: Final[str] = _require_str(("host", "system_files", "iptables_rules_v4"))
-REQUIRED_BINARIES: Final[list[str]] = _require_str_list(("host", "required_binaries"))
+IPTABLES_RULES_V4: Final[str] = _require_str(
+    ("host", "system_files", "iptables_rules_v4")
+)
+REQUIRED_BINARIES: Final[list[str]] = _require_str_list(
+    ("host", "required_binaries")
+)
 ISO_BINARIES: Final[list[str]] = _require_str_list(("host", "iso_binaries"))
 
 # ---------------------------------------------------------------------------
@@ -309,28 +338,35 @@ DEFAULT_VM_SSH_USER: Final[str] = _resolve_with_config_override(
 DEFAULT_VM_USER_PASSWORD: Final[str] = _resolve_with_config_override(
     "DEFAULT_VM_USER_PASSWORD", _require_str(("vm_defaults", "user_password"))
 )
-DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = _require_str(("vm", "firecracker_bin_name"))
+DEFAULT_FIRECRACKER_BIN_NAME: Final[str] = _require_str(
+    ("vm", "firecracker_bin_name")
+)
 
 # VM feature flags
 DEFAULT_VM_ENABLE_API_SOCKET: Final[bool] = _resolve_with_config_override(
-    "DEFAULT_VM_ENABLE_API_SOCKET", _require_bool(("vm_defaults", "enable_api_socket"))
+    "DEFAULT_VM_ENABLE_API_SOCKET",
+    _require_bool(("vm_defaults", "enable_api_socket")),
 )
 DEFAULT_VM_ENABLE_PCI: Final[bool] = _resolve_with_config_override(
     "DEFAULT_VM_ENABLE_PCI", _require_bool(("vm_defaults", "enable_pci"))
 )
 DEFAULT_VM_ENABLE_LOGGING: Final[bool] = _resolve_with_config_override(
-    "DEFAULT_VM_ENABLE_LOGGING", _require_bool(("vm_defaults", "enable_logging"))
+    "DEFAULT_VM_ENABLE_LOGGING",
+    _require_bool(("vm_defaults", "enable_logging")),
 )
 DEFAULT_VM_ENABLE_METRICS: Final[bool] = _resolve_with_config_override(
-    "DEFAULT_VM_ENABLE_METRICS", _require_bool(("vm_defaults", "enable_metrics"))
+    "DEFAULT_VM_ENABLE_METRICS",
+    _require_bool(("vm_defaults", "enable_metrics")),
 )
 DEFAULT_VM_ENABLE_CONSOLE: Final[bool] = _resolve_with_config_override(
-    "DEFAULT_VM_ENABLE_CONSOLE", _require_bool(("vm_defaults", "enable_console"))
+    "DEFAULT_VM_ENABLE_CONSOLE",
+    _require_bool(("vm_defaults", "enable_console")),
 )
 
 # VM network defaults
 DEFAULT_VM_NETWORK_INTERFACE: Final[str] = _resolve_with_config_override(
-    "DEFAULT_VM_NETWORK_INTERFACE", _require_str(("vm_defaults", "network_interface"))
+    "DEFAULT_VM_NETWORK_INTERFACE",
+    _require_str(("vm_defaults", "network_interface")),
 )
 DEFAULT_VM_BOOT_ARGS: Final[str] = _resolve_with_config_override(
     "DEFAULT_VM_BOOT_ARGS", _require_str(("vm_defaults", "boot_args"))
@@ -343,8 +379,12 @@ DEFAULT_VM_DISK_SIZE: Final[str] = _resolve_with_config_override(
 )
 
 # VM model structural defaults (internal path names)
-DEFAULT_VM_KERNEL_FILENAME: Final[str] = _require_str(("vm", "files", "kernel_filename"))
-DEFAULT_VM_ROOTFS_FILENAME: Final[str] = _require_str(("vm", "files", "rootfs_filename"))
+DEFAULT_VM_KERNEL_FILENAME: Final[str] = _require_str(
+    ("vm", "files", "kernel_filename")
+)
+DEFAULT_VM_ROOTFS_FILENAME: Final[str] = _require_str(
+    ("vm", "files", "rootfs_filename")
+)
 
 # Firecracker binary path default
 DEFAULT_FIRECRACKER_BINARY_PATH: Final[str] = _resolve_with_config_override(
@@ -356,7 +396,8 @@ DEFAULT_NETWORK_SUBNET: Final[str] = _resolve_with_config_override(
     "DEFAULT_NETWORK_SUBNET", _require_str(("network", "defaults", "subnet"))
 )
 DEFAULT_NETWORK_IPV4_GATEWAY: Final[str] = _resolve_with_config_override(
-    "DEFAULT_NETWORK_GATEWAY", _require_str(("network", "defaults", "ipv4_gateway"))
+    "DEFAULT_NETWORK_GATEWAY",
+    _require_str(("network", "defaults", "ipv4_gateway")),
 )
 DEFAULT_NETWORK_BRIDGE_IP: Final[str] = _ipv4_gateway_subnet(
     ipv4_gateway=DEFAULT_NETWORK_IPV4_GATEWAY,
@@ -365,13 +406,16 @@ DEFAULT_NETWORK_BRIDGE_IP: Final[str] = _ipv4_gateway_subnet(
 
 # Image defaults
 DEFAULT_IMAGE_CONVERT_TO: Final[str] = _resolve_with_config_override(
-    "DEFAULT_IMAGE_CONVERT_TO", _require_str(("image", "defaults", "convert_to"))
+    "DEFAULT_IMAGE_CONVERT_TO",
+    _require_str(("image", "defaults", "convert_to")),
 )
 DEFAULT_IMAGE_IMPORT_FORMAT: Final[str] = _resolve_with_config_override(
-    "DEFAULT_IMAGE_IMPORT_FORMAT", _require_str(("image", "defaults", "import_format"))
+    "DEFAULT_IMAGE_IMPORT_FORMAT",
+    _require_str(("image", "defaults", "import_format")),
 )
 DEFAULT_IMAGE_IMPORT_SIZE_MIB: Final[int] = _resolve_with_config_override(
-    "DEFAULT_IMAGE_IMPORT_SIZE_MIB", _require_int(("image", "defaults", "import_size_mib"))
+    "DEFAULT_IMAGE_IMPORT_SIZE_MIB",
+    _require_int(("image", "defaults", "import_size_mib")),
 )
 SUPPORTED_IMAGE_EXTENSIONS: Final[list[str]] = _require_str_list(
     ("image", "defaults", "supported_extensions")
@@ -386,7 +430,9 @@ IMAGE_IMPORT_FORMAT_MAP: Final[dict[str, str]] = _require_str_dict(
 )
 
 # Image runtime buffer for dynamic minimum rootfs size calculation
-CONST_RUNTIME_BUFFER_MB: Final[int] = _require_int(("image", "runtime_buffer_mb"))
+CONST_RUNTIME_BUFFER_MB: Final[int] = _require_int(
+    ("image", "runtime_buffer_mb")
+)
 
 # VM log defaults
 DEFAULT_VM_LOG_TYPE: Final[str] = _resolve_with_config_override(
@@ -406,7 +452,8 @@ DEFAULT_SNAPSHOT_RESUME: Final[bool] = _resolve_with_config_override(
 
 # Binary management defaults
 DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = _resolve_with_config_override(
-    "DEFAULT_REMOTE_VERSION_LIMIT", _require_int(("image", "remote", "version_limit"))
+    "DEFAULT_REMOTE_VERSION_LIMIT",
+    _require_int(("image", "remote", "version_limit")),
 )
 
 # ---------------------------------------------------------------------------
@@ -414,9 +461,15 @@ DEFAULT_REMOTE_VERSION_LIMIT: Final[int] = _resolve_with_config_override(
 # ---------------------------------------------------------------------------
 
 DEFAULT_FC_CI_VERSION: Final[str] = _require_str(("fallbacks", "fc_ci_version"))
-DEFAULT_FIRECRACKER_BIN: Final[str] = _require_str(("fallbacks", "firecracker_bin"))
-DEFAULT_KERNEL_BUILD_JOBS: Final[int] = _require_int(("fallbacks", "kernel_build_jobs"))
-DEFAULT_MAX_PARALLEL_DOWNLOADS: Final[int] = _require_int(("fallbacks", "max_parallel_downloads"))
+DEFAULT_FIRECRACKER_BIN: Final[str] = _require_str(
+    ("fallbacks", "firecracker_bin")
+)
+DEFAULT_KERNEL_BUILD_JOBS: Final[int] = _require_int(
+    ("fallbacks", "kernel_build_jobs")
+)
+DEFAULT_MAX_PARALLEL_DOWNLOADS: Final[int] = _require_int(
+    ("fallbacks", "max_parallel_downloads")
+)
 
 # ---------------------------------------------------------------------------
 # Firecracker file names
@@ -448,18 +501,30 @@ KERNEL_TYPE_UNKNOWN: Final[str] = "unknown"
 # ---------------------------------------------------------------------------
 # VM cloud-init defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
-DEFAULT_CLOUD_INIT_SEED_PATH: Final[str] = _require_str(("vm", "cloud_init", "seed_path"))
-DEFAULT_CLOUD_INIT_FINAL_MESSAGE: Final[str] = _require_str(("vm", "cloud_init", "final_message"))
+DEFAULT_CLOUD_INIT_SEED_PATH: Final[str] = _require_str(
+    ("vm", "cloud_init", "seed_path")
+)
+DEFAULT_CLOUD_INIT_FINAL_MESSAGE: Final[str] = _require_str(
+    ("vm", "cloud_init", "final_message")
+)
 DEFAULT_CLOUD_INIT_DISABLE_SNAPD_CMD: Final[str] = _require_str(
     ("vm", "cloud_init", "disable_snapd_cmd")
 )
-DEFAULT_CLOUD_INIT_DIRNAME: Final[str] = _require_str(("vm", "cloud_init", "dirname"))
-DEFAULT_CLOUD_INIT_ISO_NAME: Final[str] = _require_str(("vm", "cloud_init", "iso_name"))
+DEFAULT_CLOUD_INIT_DIRNAME: Final[str] = _require_str(
+    ("vm", "cloud_init", "dirname")
+)
+DEFAULT_CLOUD_INIT_ISO_NAME: Final[str] = _require_str(
+    ("vm", "cloud_init", "iso_name")
+)
 DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL: Final[str] = _require_str(
     ("vm", "cloud_init", "iso_volume_label")
 )
-DEFAULT_CLOUD_INIT_DRIVE_ID: Final[str] = _require_str(("vm", "cloud_init", "drive_id"))
-REQUIRED_ISO_TOOL: Final[str] = _require_str(("vm", "cloud_init", "required_iso_tool"))
+DEFAULT_CLOUD_INIT_DRIVE_ID: Final[str] = _require_str(
+    ("vm", "cloud_init", "drive_id")
+)
+REQUIRED_ISO_TOOL: Final[str] = _require_str(
+    ("vm", "cloud_init", "required_iso_tool")
+)
 
 # Cloud-init detection timeouts
 
@@ -474,49 +539,87 @@ DEFAULT_BOOT_PCI_OFF: Final[str] = _require_str(("vm", "boot", "pci_off"))
 # ---------------------------------------------------------------------------
 # VM guest network defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
-DEFAULT_GUEST_MAC_PREFIX: Final[str] = _require_str(("vm", "network_guest", "mac_prefix"))
-DEFAULT_GUEST_NETWORK_IFACE: Final[str] = _require_str(("vm", "network_guest", "iface"))
-DEFAULT_GUEST_NETWORK_BOOT_MODE: Final[str] = _require_str(("vm", "network_guest", "boot_mode"))
+DEFAULT_GUEST_MAC_PREFIX: Final[str] = _require_str(
+    ("vm", "network_guest", "mac_prefix")
+)
+DEFAULT_GUEST_NETWORK_IFACE: Final[str] = _require_str(
+    ("vm", "network_guest", "iface")
+)
+DEFAULT_GUEST_NETWORK_BOOT_MODE: Final[str] = _require_str(
+    ("vm", "network_guest", "boot_mode")
+)
 
 # ---------------------------------------------------------------------------
 # Firecracker driver defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
-DEFAULT_FC_LOG_LEVEL: Final[str] = _require_str(("vm", "firecracker", "log_level"))
-DEFAULT_FC_DRIVE_CACHE_TYPE: Final[str] = _require_str(("vm", "firecracker", "drive_cache_type"))
-DEFAULT_FC_DRIVE_IO_ENGINE: Final[str] = _require_str(("vm", "firecracker", "drive_io_engine"))
+DEFAULT_FC_LOG_LEVEL: Final[str] = _require_str(
+    ("vm", "firecracker", "log_level")
+)
+DEFAULT_FC_DRIVE_CACHE_TYPE: Final[str] = _require_str(
+    ("vm", "firecracker", "drive_cache_type")
+)
+DEFAULT_FC_DRIVE_IO_ENGINE: Final[str] = _require_str(
+    ("vm", "firecracker", "drive_io_engine")
+)
 
 # VM rootfs basename (no extension — extension comes from image's filesystem type)
-DEFAULT_VM_ROOTFS_BASENAME: Final[str] = _require_str(("vm", "files", "rootfs_basename"))
+DEFAULT_VM_ROOTFS_BASENAME: Final[str] = _require_str(
+    ("vm", "files", "rootfs_basename")
+)
 
 # ---------------------------------------------------------------------------
 # Rootfs detector constants (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 
-DETECTOR_WEIGHTS: Final[dict[str, float]] = _require_str_float_dict(("detectors", "weights"))
-DETECTOR_SCORES: Final[dict[str, float]] = _require_str_float_dict(("detectors", "scores"))
-MIN_ROOT_SIZE_MB: Final[int] = _require_int(("detectors", "thresholds", "MIN_ROOT_SIZE_MB"))
-SIZE_TOO_SMALL_MB: Final[int] = _require_int(("detectors", "thresholds", "SIZE_TOO_SMALL_MB"))
+DETECTOR_WEIGHTS: Final[dict[str, float]] = _require_str_float_dict(
+    ("detectors", "weights")
+)
+DETECTOR_SCORES: Final[dict[str, float]] = _require_str_float_dict(
+    ("detectors", "scores")
+)
+MIN_ROOT_SIZE_MB: Final[int] = _require_int(
+    ("detectors", "thresholds", "MIN_ROOT_SIZE_MB")
+)
+SIZE_TOO_SMALL_MB: Final[int] = _require_int(
+    ("detectors", "thresholds", "SIZE_TOO_SMALL_MB")
+)
 
 # ---------------------------------------------------------------------------
 # Host system paths (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
-DEFAULT_SYSCTL_CONF_DIR: Final[str] = _require_str(("host", "system_dirs", "sysctl_conf_dir"))
-DEFAULT_SUDOERS_DIR: Final[str] = _require_str(("host", "system_dirs", "sudoers_dir"))
+DEFAULT_SYSCTL_CONF_DIR: Final[str] = _require_str(
+    ("host", "system_dirs", "sysctl_conf_dir")
+)
+DEFAULT_SUDOERS_DIR: Final[str] = _require_str(
+    ("host", "system_dirs", "sudoers_dir")
+)
 DEFAULT_USR_SBIN_IP: Final[str] = _require_str(("host", "sbin_paths", "ip"))
-DEFAULT_USR_SBIN_IPTABLES: Final[str] = _require_str(("host", "sbin_paths", "iptables"))
+DEFAULT_USR_SBIN_IPTABLES: Final[str] = _require_str(
+    ("host", "sbin_paths", "iptables")
+)
 DEFAULT_USR_SBIN_IPTABLES_RESTORE: Final[str] = _require_str(
     ("host", "sbin_paths", "iptables_restore")
 )
-DEFAULT_USR_SBIN_IPTABLES_SAVE: Final[str] = _require_str(("host", "sbin_paths", "iptables_save"))
-DEFAULT_USR_SBIN_SYSCTL: Final[str] = _require_str(("host", "sbin_paths", "sysctl"))
+DEFAULT_USR_SBIN_IPTABLES_SAVE: Final[str] = _require_str(
+    ("host", "sbin_paths", "iptables_save")
+)
+DEFAULT_USR_SBIN_SYSCTL: Final[str] = _require_str(
+    ("host", "sbin_paths", "sysctl")
+)
 DEFAULT_SYSCTL_CONF_PATH: Final[str] = "/etc/sysctl.d/mvmctl.conf"
 
 # ---------------------------------------------------------------------------
 # Libguestfs defaults (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
-DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT: Final[int] = _require_int(("libguestfs", "launch_timeout"))
-DEFAULT_LIBGUESTFS_ROOT_DEVICE: Final[str] = _require_str(("libguestfs", "fallback_root_device"))
-DEFAULT_LIBGUESTFS_SEED_DIR: Final[str] = _require_str(("libguestfs", "seed_dir"))
+DEFAULT_LIBGUESTFS_LAUNCH_TIMEOUT: Final[int] = _require_int(
+    ("libguestfs", "launch_timeout")
+)
+DEFAULT_LIBGUESTFS_ROOT_DEVICE: Final[str] = _require_str(
+    ("libguestfs", "fallback_root_device")
+)
+DEFAULT_LIBGUESTFS_SEED_DIR: Final[str] = _require_str(
+    ("libguestfs", "seed_dir")
+)
 DEFAULT_LIBGUESTFS_ROOT_INDICATORS: Final[tuple[str, ...]] = _require_str_tuple(
     ("libguestfs", "root_indicators")
 )
@@ -529,6 +632,7 @@ CONST_GUESTFS_OS_RELEASE_PATH: Final[str] = "/etc/os-release"
 # ---------------------------------------------------------------------------
 
 FIRECRACKER_SHUTDOWN_POLL_INTERVAL_S: Final[float] = 0.1
+FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: Final[float] = 2
 LOG_FOLLOW_POLL_INTERVAL_S: Final[float] = 0.3
 
 # ---------------------------------------------------------------------------
@@ -547,10 +651,14 @@ HTTP_TIMEOUT_FC_KERNEL_DOWNLOAD_S: Final[int] = 300
 # ---------------------------------------------------------------------------
 
 # Default Firecracker version (full semantic version)
-DEFAULT_FIRECRACKER_VERSION: Final[str] = _require_str(("firecracker", "versions", "full"))
+DEFAULT_FIRECRACKER_VERSION: Final[str] = _require_str(
+    ("firecracker", "versions", "full")
+)
 
 # Default Firecracker CI version (major.minor for kernel downloads)
-DEFAULT_FIRECRACKER_CI_VERSION: Final[str] = _require_str(("firecracker", "versions", "ci"))
+DEFAULT_FIRECRACKER_CI_VERSION: Final[str] = _require_str(
+    ("firecracker", "versions", "ci")
+)
 
 
 def _resolve_version() -> str:
@@ -585,7 +693,9 @@ CONST_MEGABYTE_BYTES: Final[int] = 1_000_000
 CONST_GIGABYTE_BYTES: Final[int] = 1_000_000_000
 
 # Image processing constants
-CONST_SHRINK_SAFETY_MARGIN: Final[float] = _require_float(("image", "shrink_safety_margin"))
+CONST_SHRINK_SAFETY_MARGIN: Final[float] = _require_float(
+    ("image", "shrink_safety_margin")
+)
 CONST_RATIO_MIN: Final[float] = _require_float(("image", "ratio_min"))
 CONST_MIN_ROOTFS_SIZE_MIB: Final[int] = 128
 CONST_ROOTFS_HEADROOM_FACTOR: Final[float] = 1.25
@@ -647,10 +757,18 @@ CONST_SECONDS_PER_YEAR: Final[int] = 31536000
 CONST_HTTP_TIMEOUT_SECONDS: Final[int] = 300
 
 # Retry and timeout constants (loaded from assets/_defaults.py)
-CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = _require_int(("http", "download_chunk_size"))
-CONST_DOWNLOAD_MAX_RETRIES: Final[int] = _require_int(("http", "download_max_retries"))
-CONST_DOWNLOAD_RETRY_DELAY: Final[float] = _require_float(("http", "download_retry_delay"))
-CONST_DOWNLOAD_RETRY_BACKOFF: Final[float] = _require_float(("http", "download_retry_backoff"))
+CONST_DOWNLOAD_CHUNK_SIZE: Final[int] = _require_int(
+    ("http", "download_chunk_size")
+)
+CONST_DOWNLOAD_MAX_RETRIES: Final[int] = _require_int(
+    ("http", "download_max_retries")
+)
+CONST_DOWNLOAD_RETRY_DELAY: Final[float] = _require_float(
+    ("http", "download_retry_delay")
+)
+CONST_DOWNLOAD_RETRY_BACKOFF: Final[float] = _require_float(
+    ("http", "download_retry_backoff")
+)
 CONST_BINARY_FETCH_TIMEOUT: Final[int] = 300
 CONST_SOCKET_TIMEOUT_SECONDS: Final[float] = 5.0
 CONST_POLL_STEP_SECONDS: Final[float] = 0.1
@@ -665,7 +783,9 @@ CONST_NO_CLOUD_NET_MAX_PORT_RETRIES: Final[int] = 100
 CONST_CONSOLE_SOCKET_TIMEOUT_S: Final[float] = 2.0
 CONST_CONSOLE_BUFFER_SIZE: Final[int] = 4096
 CONST_CONSOLE_RECONNECT_DELAY_S: Final[float] = 0.5
-CONST_VM_START_WAIT_S: Final[float] = 0.5  # Brief wait after starting VM process
+CONST_VM_START_WAIT_S: Final[float] = (
+    0.5  # Brief wait after starting VM process
+)
 CONST_VM_NAME_MAX_LENGTH: Final[int] = 255  # Linux hostname max length
 CONST_CONSOLE_KILL_TIMEOUT_S: Final[float] = 5.0
 CONST_TIMESTAMP_INITIAL: Final[float] = 0.0
@@ -678,20 +798,28 @@ FIRECRACKER_GITHUB_RELEASES_API_URL: Final[str] = _require_str(
 FIRECRACKER_GITHUB_DOWNLOAD_URL: Final[str] = _require_str(
     ("urls", "firecracker", "github_download_base")
 )
-FIRECRACKER_GITHUB_RAW_URL: Final[str] = _require_str(("urls", "firecracker", "github_raw_base"))
+FIRECRACKER_GITHUB_RAW_URL: Final[str] = _require_str(
+    ("urls", "firecracker", "github_raw_base")
+)
 
 # ---------------------------------------------------------------------------
 # Debug mode constants (loaded from assets/_defaults.py)
 # ---------------------------------------------------------------------------
 
 # Debug mode master switch - enables verbose logging and detailed error output
-DEBUG_MODE: Final[bool] = _load_defaults().get("debug", {}).get("enabled", False)
+DEBUG_MODE: Final[bool] = (
+    _load_defaults().get("debug", {}).get("enabled", False)
+)
 
 # When True, show detailed error messages with context
-DEBUG_VERBOSE_ERRORS: Final[bool] = _load_defaults().get("debug", {}).get("verbose_errors", True)
+DEBUG_VERBOSE_ERRORS: Final[bool] = (
+    _load_defaults().get("debug", {}).get("verbose_errors", True)
+)
 
 # When True, include full Python tracebacks in error output
-DEBUG_SHOW_TRACEBACKS: Final[bool] = _load_defaults().get("debug", {}).get("show_tracebacks", False)
+DEBUG_SHOW_TRACEBACKS: Final[bool] = (
+    _load_defaults().get("debug", {}).get("show_tracebacks", False)
+)
 
 _LAZY_CONSTANTS: dict[str, Any] = {}
 
@@ -741,9 +869,9 @@ def __getattr__(name: str) -> Any:
         _LAZY_CONSTANTS[name] = val
         return val
     if name == "SUDOERS_DROP_IN_PATH":
-        val = _require_str(("host", "system_files", "sudoers_drop_in_template")).format(
-            cli_name=__getattr__("CLI_NAME")
-        )
+        val = _require_str(
+            ("host", "system_files", "sudoers_drop_in_template")
+        ).format(cli_name=__getattr__("CLI_NAME"))
         _LAZY_CONSTANTS[name] = val
         return val
     if name == "DEFAULT_BRIDGE_NAME":

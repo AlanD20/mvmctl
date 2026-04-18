@@ -6,6 +6,7 @@ from mvmctl.models.cloudinit import (
     CloudInitMode,
     CloudInitStatus,
 )
+from mvmctl.models.firecracker import FirecrackerConfig
 from mvmctl.models.host import HostStateChangeItem, HostStateItem
 from mvmctl.models.image import ImageItem, ImageSpec
 from mvmctl.models.kernel import KernelItem, KernelSpec
@@ -41,6 +42,7 @@ __all__ = [
     "CloudInitStatus",
     "ConsoleInfo",
     "ConsoleState",
+    "FirecrackerConfig",
     "HostStateChangeItem",
     "HostStateItem",
     "IPTablesChain",

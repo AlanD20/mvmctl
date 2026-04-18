@@ -30,7 +30,9 @@ class ProcessSignalHandler:
         except (ProcessLookupError, PermissionError):
             return False
 
-    def graceful_shutdown(self, timeout: int = 10, sigterm_wait: float = 2.0) -> bool:
+    def graceful_shutdown(
+        self, timeout: float = 10, sigterm_wait: float = 2.0
+    ) -> bool:
         """Send SIGTERM, wait, then SIGKILL if needed. Returns True if shutdown successful."""
         if not self.is_running():
             return True

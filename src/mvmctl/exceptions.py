@@ -56,8 +56,12 @@ class KernelError(MVMError):
     """Kernel build or configuration failure."""
 
 
-class FirecrackerError(MVMError):
+class FirecrackerClientError(MVMError):
     """Firecracker process or API failure."""
+
+
+class FirecrackerSpawnError(MVMError):
+    """Firecracker spawn failure."""
 
 
 class FirecrackerConfigError(MVMError):
@@ -101,7 +105,7 @@ class MigrationError(DatabaseError):
         return self.message
 
 
-class SocketNotFoundError(FirecrackerError):
+class SocketNotFoundError(FirecrackerClientError):
     """Unix socket for VM API not found."""
 
 

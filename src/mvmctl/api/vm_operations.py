@@ -20,14 +20,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.models.cloudinit import CloudInitMode
-
 from mvmctl.api.inputs import (
     ResolvedVMCreateRequest,
     VMCreateRequest,
 )
 from mvmctl.api.inputs._vm_create_input import VMCreateInput
-from mvmctl.api.inputs._vm_input import ResolvedVMRequest, VMInput, VMRequest
+from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.constants import (
     DEFAULT_BRIDGE_NAME,
     DEFAULT_FC_PID_FILENAME,
@@ -45,17 +43,20 @@ from mvmctl.core.image._controller import ImageController
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._service import NetworkService
 from mvmctl.core.vm._controller import VMController
-from mvmctl.core.vm._firecracker import FirecrackerController
+from mvmctl.core.vm._firecracker import FirecrackerSpawner
 from mvmctl.core.vm._guestfs import GuestfsProvisioner
 from mvmctl.core.vm._repository import VMRepository
+from mvmctl.core.vm._service import VMService
 from mvmctl.exceptions import (
     MVMError,
     NetworkError,
-    VMBuilderError,
+    VMCreateError,
     VMNotFoundError,
 )
 from mvmctl.models import VMInspectInfo
-from mvmctl.models.vm import VMStatus
+from mvmctl.models.cloudinit import CloudInitMode
+from mvmctl.models.firecracker import FirecrackerConfig
+from mvmctl.models.vm import VMInstanceItem, VMStatus
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
 from mvmctl.utils.network import generate_mac, generate_tap_name
@@ -87,7 +88,7 @@ class VMCreateContext:
     rootfs_path: Path
     resolved: ResolvedVMCreateRequest | None = None
 
-    fc_manager: FirecrackerController | None = None
+    fc_manager: FirecrackerSpawner | None = None
     relay: ConsoleController | None = None
     # Stores final state of cloud-init, use this as reference
     cloud_init_result: CloudInitProvisionResult | None = None
@@ -110,13 +111,13 @@ class VMCreateContext:
     def set_resolved(self, resolved: ResolvedVMCreateRequest) -> None:
         self.resolved = resolved
 
-    def set_firecracker_manager(self, manager: FirecrackerController) -> None:
+    def set_firecracker_manager(self, manager: FirecrackerSpawner) -> None:
         self.fc_manager = manager
 
     def clone_image(self) -> None:
 
         if self.resolved is None:
-            raise VMBuilderError("Failed to resolve necessary dependencies")
+            raise VMCreateError("Failed to resolve necessary dependencies")
 
         vm_rootfs_path = Path(
             f"{self.vm_dir}/rootfs.{self.resolved.image.fs_type}"
@@ -140,10 +141,10 @@ class VMCreateContext:
         """Perform cleanup of all created resources. Called on creation failure."""
 
         if self.vm_dir is None:
-            raise VMBuilderError("VM directory not set in context")
+            raise VMCreateError("VM directory not set in context")
 
         if self.resolved is None:
-            raise VMBuilderError("Failed to resolve necessary dependencies")
+            raise VMCreateError("Failed to resolve necessary dependencies")
 
         net_service = NetworkService(self._db)
         lease_service = LeaseService(self.resolved.network, self._db)
@@ -218,10 +219,10 @@ class VMCreateContext:
     def execute(self) -> None:
 
         if self.vm_dir is None:
-            raise VMBuilderError("VM directory not set in context")
+            raise VMCreateError("VM directory not set in context")
 
         if self.resolved is None:
-            raise VMBuilderError("Failed to resolve necessary dependencies")
+            raise VMCreateError("Failed to resolve necessary dependencies")
 
         from mvmctl.utils.fs import secure_mkdir
 
@@ -313,13 +314,17 @@ class VMCreateContext:
                 self.mark_created("cloud-init-inject")
 
         # Firecracker
-        config = FirecrackerController(self, self.resolved)
-        self.set_firecracker_manager(config)
-        config.write_to_file()
+        fc_config = self.build_firecracker_config()
+        if fc_config is None:
+            raise VMCreateError("Firecracker config is not set in context")
+
+        firecracker_spawner = FirecrackerSpawner(fc_config)
+        self.set_firecracker_manager(firecracker_spawner)
+        firecracker_spawner.write_to_file()
         self.mark_created("firecracker")
 
         if self.fc_manager is None:
-            raise VMBuilderError("Firecracker manager is not set in context")
+            raise VMCreateError("Firecracker manager is not set in context")
 
         # Console
         if self.resolved.enable_console:
@@ -346,6 +351,47 @@ class VMCreateContext:
             self.relay.close_client_fd()
             self.relay.start()
             self.mark_created("console_relay")
+
+    def build_firecracker_config(self) -> FirecrackerConfig | None:
+        """Build Firecracker spawn configuration from resolved state."""
+
+        if self.resolved is None:
+            return None
+
+        return FirecrackerConfig(
+            vm_dir=self.vm_dir,
+            rootfs_path=self.rootfs_path,
+            binary_path=self.resolved.binary.path,
+            kernel_path=self.resolved.kernel.path,
+            vcpu_count=self.resolved.vcpu_count,
+            mem_size_mib=self.resolved.mem_size_mib,
+            guest_ip=self.guest_ip,
+            guest_mac=self.guest_mac,
+            tap_name=self.tap_name,
+            network_gateway=self.resolved.network.ipv4_gateway,
+            network_netmask=self.resolved.network_netmask,
+            image_fs_uuid=self.resolved.image.fs_uuid,
+            image_fs_type=self.resolved.image.fs_type,
+            boot_args=self.resolved.boot_args,
+            lsm_flags=self.resolved.lsm_flags,
+            enable_pci=self.resolved.enable_pci,
+            enable_console=self.resolved.enable_console,
+            enable_logging=self.resolved.enable_logging,
+            enable_metrics=self.resolved.enable_metrics,
+            cloud_init_mode=(
+                self.cloud_init_result.mode if self.cloud_init_result else None
+            ),
+            cloud_init_iso_path=(
+                self.cloud_init_result.iso_path
+                if self.cloud_init_result
+                else None
+            ),
+            cloud_init_nocloud_url=(
+                self.cloud_init_result.nocloud_url
+                if self.cloud_init_result
+                else None
+            ),
+        )
 
     def to_model(self) -> VMInstanceItem | None:
 
@@ -404,7 +450,7 @@ class VMCreateContext:
         return vm_instance
 
 
-class VMOperations:
+class VMOperation:
     @staticmethod
     def create(inputs: VMCreateInput) -> None:
 
@@ -437,7 +483,7 @@ class VMOperations:
 
                 vm_instance = ctx.to_model()
                 if vm_instance is None:
-                    raise VMBuilderError("Failed to create VM instance model")
+                    raise VMCreateError("Failed to create VM instance model")
 
                 vm_repo.upsert(vm_instance)
                 log_audit("vm.create", f"name={inputs.name}")
@@ -448,10 +494,6 @@ class VMOperations:
     @staticmethod
     def remove(inputs: VMInput) -> None:
         """Remove a VM."""
-        # =====================================================================
-        # COPIED FROM: api/old/vms.py — remove_vm() (lines 1506-1620)
-        # =====================================================================
-        db = Database()
 
         # Pre-checks before wasting resources
         HostPrivilegeHelper.check_privileges(
@@ -459,22 +501,15 @@ class VMOperations:
         )
 
         db = Database()
-
         vm_repo = VMRepository(db)
         resolver = VMRequest(inputs=inputs, db=db)
         resolved = resolver.resolve()
 
-        db_net = (
-            MVMDatabase().get_network(vm.network_id) if vm.network_id else None
+        VMService(db).stop_many(
+            resolved.vms,
+            force=resolved.force,
+            parallel=True,
         )
-        net_name = db_net.name if db_net else DEFAULT_NETWORK_NAME
-        tap_name = vm.tap_device or generate_tap_name(net_name, name)
-        net_config = get_network(net_name)
-        bridge = net_config.bridge if net_config else DEFAULT_BRIDGE_NAME
-        pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
-        pid = _read_pid_file(pid_file)
-        if pid is None:
-            pid = vm.pid
 
         if force and pid is not None:
             # Fast path: SIGKILL immediately, no graceful shutdown
@@ -826,10 +861,10 @@ class VMOperations:
         import shutil
 
         if self.vm_dir is None:
-            raise VMBuilderError("VM directory not set in context")
+            raise VMCreateError("VM directory not set in context")
 
         if self.resolved is None:
-            raise VMBuilderError("Failed to resolve necessary dependencies")
+            raise VMCreateError("Failed to resolve necessary dependencies")
 
         net_manager = NetworkManager()
         iptables_tracker = IPTablesTracker()
@@ -1132,7 +1167,7 @@ class VMOperations:
 
 __all__ = [
     "VMCreateContext",
-    "VMOperations",
+    "VMOperation",
     "VMRemovalContext",
     "VMBulkCleanupContext",
 ]

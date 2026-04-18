@@ -9,6 +9,7 @@ from __future__ import annotations
 from mvmctl.core._internal._db import Database
 from mvmctl.core._internal._parallel import ParallelExecutor
 from mvmctl.core.vm._controller import VMController
+from mvmctl.core.vm._repository import VMRepository
 from mvmctl.models.bulk import BulkResult, BulkResultItem
 from mvmctl.models.vm import VMInstanceItem
 
@@ -21,11 +22,12 @@ class VMService:
 
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._repo = VMRepository(self._db)
         self._executor = ParallelExecutor()
 
     def stop(self, vm: VMInstanceItem, force: bool = False) -> None:
         """Stop a single VM."""
-        controller = VMController(entity=vm, db=self._db)
+        controller = VMController(entity=vm, repo=self._repo)
         controller.stop(force=force)
 
     def stop_many(
@@ -50,7 +52,7 @@ class VMService:
 
     def start(self, vm: VMInstanceItem) -> None:
         """Start a single VM."""
-        controller = VMController(entity=vm, db=self._db)
+        controller = VMController(entity=vm, repo=self._repo)
         controller.start()
 
     def start_many(
@@ -74,7 +76,7 @@ class VMService:
 
     def pause(self, vm: VMInstanceItem) -> None:
         """Pause a single VM."""
-        controller = VMController(entity=vm, db=self._db)
+        controller = VMController(entity=vm, repo=self._repo)
         controller.pause()
 
     def pause_many(
@@ -98,7 +100,7 @@ class VMService:
 
     def resume(self, vm: VMInstanceItem) -> None:
         """Resume a single VM."""
-        controller = VMController(entity=vm, db=self._db)
+        controller = VMController(entity=vm, repo=self._repo)
         controller.resume()
 
     def resume_many(
@@ -122,7 +124,7 @@ class VMService:
 
     def reboot(self, vm: VMInstanceItem, force: bool = False) -> None:
         """Reboot a single VM."""
-        controller = VMController(entity=vm, db=self._db)
+        controller = VMController(entity=vm, repo=self._repo)
         controller.reboot(force=force)
 
     def reboot_many(

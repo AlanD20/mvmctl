@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY
-from mvmctl.core._internal._db import Database
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._resolver import KeyResolver
 from mvmctl.core.key._service import KeyService
@@ -37,17 +36,14 @@ class KeyController:
         KeyNotFoundError: If the key cannot be resolved.
     """
 
-    def __init__(
-        self, entity: str | SSHKeyItem, db: Database | None = None
-    ) -> None:
-        self._db = db if db is not None else Database()
-        self._repo = KeyRepository(self._db)
+    def __init__(self, entity: str | SSHKeyItem, repo: KeyRepository) -> None:
+        self._repo = repo
 
         if isinstance(entity, SSHKeyItem):
             self._key = entity
         else:
-            resolver = KeyResolver(self._repo)
-            self._key = resolver.resolve(entity)
+            self._resolver = KeyResolver(self._repo)
+            self._key = self._resolver.resolve(entity)
 
     @property
     def key_id(self) -> str:

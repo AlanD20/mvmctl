@@ -12,19 +12,14 @@ from collections import deque
 from collections.abc import Generator
 from pathlib import Path
 
-from mvmctl.core.firecracker import FirecrackerClient
-from mvmctl.core.ssh import connect_to_vm
-
 from mvmctl.constants import (
     DEFAULT_FC_LOG_FILENAME,
     DEFAULT_FC_SERIAL_OUTPUT_FILENAME,
     DEFAULT_SNAPSHOT_RESUME,
+    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
     LOG_FOLLOW_POLL_INTERVAL_S,
 )
-from mvmctl.core._internal._db import Database
-from mvmctl.core.console import (
-    get_console_state as _get_console_state,
-)
+from mvmctl.core.vm._firecracker import FirecrackerClient
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
 from mvmctl.models import ConsoleInfo, ConsoleState, VMStatus
@@ -51,17 +46,16 @@ class VMController:
     def __init__(
         self,
         entity: str | VMInstanceItem,
-        repo: VMRepository | None = None,
-        db: Database | None = None,
+        repo: VMRepository,
     ) -> None:
         from mvmctl.core.vm._resolver import VMResolver
 
-        self._repo = repo if repo is not None else VMRepository(db)
+        self._repo = repo
 
         if isinstance(entity, VMInstanceItem):
             self._vm = entity
         else:
-            self._resolver = VMResolver(self._repo._db)
+            self._resolver = VMResolver(self._repo)
             self._vm = self._resolver.resolve(entity)
 
     def stop(self, force: bool = False) -> None:
@@ -91,7 +85,7 @@ class VMController:
                     # Wait a bit for shutdown
                     import time
 
-                    time.sleep(2.0)
+                    time.sleep(FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S)
                 except Exception:
                     pass  # Fall through to signal-based shutdown
 
@@ -99,7 +93,10 @@ class VMController:
             if force:
                 handler.send_signal(9)  # SIGKILL
             else:
-                handler.graceful_shutdown()
+                handler.graceful_shutdown(
+                    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+                    FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+                )
 
             self._repo.update_status(self._vm.id, VMStatus.STOPPED.value)
         except Exception as exc:
