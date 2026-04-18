@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from mvmctl.models.cloud_init import CloudInitConfig, CloudInitMode, CloudInitStatus
+from mvmctl.models.cloudinit import CloudInitConfig, CloudInitMode, CloudInitStatus
 
 
 class TestCloudInitMode:

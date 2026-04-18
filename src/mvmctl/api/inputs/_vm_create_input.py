@@ -8,8 +8,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mvmctl.models.cloud_init import CloudInitMode
-
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
     CONST_VM_MEM_MAX_MIB,
@@ -48,6 +46,7 @@ from mvmctl.exceptions import (
     VMCreateError,
 )
 from mvmctl.models.binary import BinaryItem
+from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.image import ImageItem
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkItem

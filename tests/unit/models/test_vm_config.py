@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from mvmctl.models.cloud_init import CloudInitMode
+from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.vm import VMConfig
 
 

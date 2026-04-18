@@ -8,7 +8,7 @@ import pytest
 
 from mvmctl.core.vm_manager import VMManager
 from mvmctl.models.vm import VMConfig, VMInstance, VMStatus
-from mvmctl.models.cloud_init import CloudInitMode
+from mvmctl.models.cloudinit import CloudInitMode
 
 
 @pytest.fixture

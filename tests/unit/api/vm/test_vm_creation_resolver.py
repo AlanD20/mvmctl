@@ -9,7 +9,7 @@ import pytest
 
 from mvmctl.api.vm._resolver import VMResolvedDependencies, VMInputResolver
 from mvmctl.exceptions import AssetNotFoundError, VMCreateError
-from mvmctl.models.cloud_init import CloudInitMode
+from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.vm import VMCreateInput
 
 

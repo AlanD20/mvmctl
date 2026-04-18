@@ -109,7 +109,7 @@ def make_test_vmconfig():
             config = make_test_vmconfig(name="my-vm", vcpus=4)
             # config has all required fields populated with test-safe defaults
     """
-    from mvmctl.models.cloud_init import CloudInitMode
+    from mvmctl.models.cloudinit import CloudInitMode
 
     def _make(
         name: str = "test-vm",

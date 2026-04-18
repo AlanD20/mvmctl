@@ -17,7 +17,7 @@ from mvmctl.api.inputs._network_input import (
     NetworkConfig,
     NetworkCreateInput,
 )
-from mvmctl.api.inputs._vm_create_request import (
+from mvmctl.api.inputs._vm_create_input import (
     CloudInitModeResolved,
     ResolvedVMCreateRequest,
     VMCreateInput,
@@ -34,7 +34,7 @@ from mvmctl.api.inputs._vm_export_config import (
     VMExportKernelConfig,
     VMExportNetworkConfig,
 )
-from mvmctl.api.inputs._vm_request import (
+from mvmctl.api.inputs._vm_input import (
     ResolvedVMRequest,
     VMInput,
     VMRequest,

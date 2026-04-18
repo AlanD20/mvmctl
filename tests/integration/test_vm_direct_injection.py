@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from mvmctl.cli.vm import vm_app as vm_app
-from mvmctl.models.cloud_init import CloudInitMode
+from mvmctl.models.cloudinit import CloudInitMode
 
 
 class TestVMDirectInjection:

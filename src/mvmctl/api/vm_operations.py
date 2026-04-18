@@ -20,12 +20,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mvmctl.models.cloudinit import CloudInitMode
+
 from mvmctl.api.inputs import (
     ResolvedVMCreateRequest,
     VMCreateRequest,
 )
-from mvmctl.api.inputs._vm_create_request import VMCreateInput
-from mvmctl.api.inputs._vm_request import ResolvedVMRequest, VMInput, VMRequest
+from mvmctl.api.inputs._vm_create_input import VMCreateInput
+from mvmctl.api.inputs._vm_input import ResolvedVMRequest, VMInput, VMRequest
 from mvmctl.constants import (
     DEFAULT_BRIDGE_NAME,
     DEFAULT_FC_PID_FILENAME,
@@ -53,8 +55,7 @@ from mvmctl.exceptions import (
     VMNotFoundError,
 )
 from mvmctl.models import VMInspectInfo
-from mvmctl.models.cloud_init import CloudInitMode
-from mvmctl.models.vm import VMInstanceItemItem, VMStatus
+from mvmctl.models.vm import VMStatus
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
 from mvmctl.utils.network import generate_mac, generate_tap_name

@@ -24,7 +24,7 @@ from mvmctl.models.network import (
 from mvmctl.services.nocloud_server.manager import NoCloudNetServerManager
 
 if TYPE_CHECKING:
-    from mvmctl.models.cloud_init import CloudInitMode
+    from mvmctl.models.cloudinit import CloudInitMode
 
 
 @dataclass
