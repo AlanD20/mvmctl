@@ -112,9 +112,17 @@ Three-layer architecture: **CLI → API → Core**
 src/mvmctl/
 ├── cli/              # Typer commands — argument parsing, output formatting
 │   ├── archive/      # ORIGINAL CLI CODE — READ ONLY, NEVER MODIFY
-├── api/              # Public interface — privilege checks, DB queries, orchestration
+├── api/              # Public interface — privilege checks, DB queries, ORCHESTRATION
 │   ├── archive/      # ORIGINAL API CODE — READ ONLY, NEVER MODIFY
-├── core/             # Business logic — isolated domains + orchestration
+│   ├── vm_operations.py      # VM creation, removal, cleanup orchestration
+│   ├── network_operations.py # Network orchestration
+│   ├── image_operations.py   # Image orchestration
+│   ├── kernel_operations.py  # Kernel orchestration
+│   ├── key_operations.py     # Key orchestration
+│   ├── host_operations.py    # Host orchestration
+│   ├── binary_operations.py  # Binary orchestration
+│       └── inputs/               # Request → ResolvedRequest pattern (grows with project)
+├── core/             # Business logic — isolated domains ONLY (no orchestration)
 │   ├── archive/      # ORIGINAL CORE CODE — READ ONLY, NEVER MODIFY
 │   ├── {domain}/     # VM, network, image, kernel, key, binary, host, etc.
 │   │   ├── _controller.py    # Stateful entity operations
@@ -122,8 +130,7 @@ src/mvmctl/
 │   │   ├── _repository.py    # Database operations (ALL queries go here)
 │   │   ├── _resolver.py      # Entity resolution by name/id/ip/mac
 │   │   └── __init__.py
-│   ├── _internal/    # Shared infrastructure (Database, iptables, etc.)
-│   └── _orchestration/  # Cross-domain operations
+│   └── _internal/    # Shared infrastructure (Database, iptables, etc.)
 ├── models/           # Pure @dataclass objects
 ├── utils/            # Shared helpers
 └── archive/          # ORIGINAL CODE — READ ONLY, NEVER MODIFY
@@ -137,7 +144,7 @@ src/mvmctl/
 | Stateless operations | `Service` | Setup/teardown, stateless business logic |
 | Database operations | `Repository` | ALL data access: get, list, count, upsert, delete. Use SQL-level ops. |
 | Entity resolution | `Resolver` | Resolve IDs/names to domain objects |
-| Cross-domain workflow | `_operations.py` | Functions importing multiple domains |
+| Cross-domain workflow | `*_operations.py` | Functions importing multiple domains — lives in `api/` |
 | Shared infrastructure | None | No domain knowledge, reusable utilities |
 
 ### Repository Pattern Rules
@@ -154,7 +161,6 @@ src/mvmctl/
 | **CLI** | Argument parsing, output formatting | Imports `api/*` only. NO DB queries. |
 | **API** | Public contract, privilege checks, DB resolution | Imports `core/*` only. Queries DB when CLI passes `None`. |
 | **Core** | Business logic, domain isolation | Imports `core/_internal/` only. NO DB queries (except `_internal/_db.py`). NO cross-domain imports. |
-| **Core/_orchestration** | Cross-domain sequencing | ONLY place that imports multiple domains. |
 
 ### Default Value Policy
 
@@ -168,16 +174,24 @@ src/mvmctl/
 # ✅ CLI — ONLY imports api
 from mvmctl.api import vm, network
 
-# ✅ API — ONLY re-exports from core
+# ✅ API — re-exports from core + orchestration lives here
 from mvmctl.core.vm import VMController, VMRepository
-from mvmctl.core._orchestration import vm_operations
+from mvmctl.api.vm_operations import create_vm, remove_vm  # Orchestration in API
 
 # ✅ Domain — ONLY imports _internal
 from mvmctl.core._internal._db import Database
 
 # ❌ FORBIDDEN — Domains never import other domains or orchestration
 from mvmctl.core.network import NetworkController       # NEVER in core/vm/
-from mvmctl.core._orchestration import create_vm        # NEVER in any domain
+from mvmctl.api.vm_operations import create_vm           # NEVER in any domain
+
+# ✅ API orchestration — ONLY place that imports multiple domains
+# In api/vm_operations.py:
+from mvmctl.core.vm import VMController
+from mvmctl.core.network import NetworkController
+from mvmctl.core.image import ImageController
+from mvmctl.core.kernel import KernelResolver
+from mvmctl.core._internal._db import Database
 ```
 
 ## Refactoring Process
@@ -193,7 +207,7 @@ Determine where the code should go based on architecture rules:
 - Stateful operations → `core/{domain}/_controller.py`
 - Stateless operations → `core/{domain}/_service.py`
 - Entity resolution → `core/{domain}/_resolver.py`
-- Cross-domain → `core/_orchestration/`
+- Cross-domain orchestration → `api/{domain}_operations.py`
 - CLI commands → `cli/`
 - API wrappers → `api/`
 
@@ -282,7 +296,7 @@ Task: Migrate VM listing from VMInventory to VMRepository
 4. Adapt: Use SQL COUNT instead of len(), accept VMStatus | list[VMStatus]
 5. Comment: Add source attribution above each method
 6. Update: core/vm/__init__.py — remove VMInventory export
-7. Update: core/_orchestration/vm_operations.py — use VMRepository instead of VMInventory
+7. Update: api/vm_operations.py — use VMRepository instead of VMInventory
 8. Lint: uv run ruff check src/ && uv run ruff format src/
 ```
 

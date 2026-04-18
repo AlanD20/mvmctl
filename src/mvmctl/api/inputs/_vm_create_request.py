@@ -26,8 +26,17 @@ from mvmctl.constants import (
     DEFAULT_VM_VCPU_COUNT,
 )
 from mvmctl.core._internal._db import Database
+from mvmctl.core.binary._repository import BinaryRepository
+from mvmctl.core.binary._resolver import BinaryResolver
+from mvmctl.core.image._repository import ImageRepository
+from mvmctl.core.image._resolver import ImageResolver
+from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._resolver import KernelResolver
+from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._resolver import KeyResolver
+from mvmctl.core.key._service import KeyService
+from mvmctl.core.network._repository import NetworkRepository
+from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.core.vm._firecracker import DriveConfig
 from mvmctl.db.models import Binary, Image, Kernel, Network
 from mvmctl.exceptions import (
@@ -41,15 +50,6 @@ from mvmctl.exceptions import (
 from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.utils.disk_size import parse_disk_size
 from mvmctl.utils.validation import validate_boot_arg_component, validate_mac
-from src.mvmctl.core.binary._repository import BinaryRepository
-from src.mvmctl.core.binary._resolver import BinaryResolver
-from src.mvmctl.core.image._repository import ImageRepository
-from src.mvmctl.core.image._resolver import ImageResolver
-from src.mvmctl.core.kernel._repository import KernelRepository
-from src.mvmctl.core.key._repository import KeyRepository
-from src.mvmctl.core.key._service import KeyService
-from src.mvmctl.core.network._repository import NetworkRepository
-from src.mvmctl.core.network._resolver import NetworkResolver
 
 if TYPE_CHECKING:
     from mvmctl.models.vm import VMCreateInput

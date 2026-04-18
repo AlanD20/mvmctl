@@ -6,10 +6,12 @@ Three-layer architecture with strict import boundaries: **CLI → API → Core**
 
 **Key Principle:** Domains are **business capabilities**, not CLI commands. A single CLI command (like `vm create`) often orchestrates multiple domains.
 
+**Orchestration lives in `api/`, NOT in `core/`.** The API layer is the ONLY entity that imports multiple domains and sequences them together.
+
 ```
 mvmctl/
-├── api/              # Public interface (thin re-exports only)
-├── core/             # All business logic (domains + orchestration + shared infrastructure)
+├── api/              # Public interface + ORCHESTRATION (imports multiple domains)
+├── core/             # All business logic (isolated domains + shared infrastructure)
 └── cli/              # Frontend (Typer commands)
 ```
 
@@ -18,8 +20,8 @@ mvmctl/
 | Layer | Purpose | Import Rules |
 |-------|---------|--------------|
 | **CLI** | Argument parsing, output formatting | `api/*` only |
-| **API** | Public contract curation | `core/*` only |
-| **Core** | Business logic, domain isolation | `core/_internal/` for infrastructure, `core/_orchestration/` for cross-domain |
+| **API** | Public contract curation, DB resolution, **ORCHESTRATION** | `core/*` only. **ONLY layer that imports multiple domains.** |
+| **Core** | Business logic, domain isolation | `core/_internal/` for infrastructure. **NO cross-domain imports.** |
 
 ## Core Structure
 
@@ -73,27 +75,33 @@ core/
 │   ├── _manager.py          # CloudInitManager
 │   ├── _provisioner.py      # CloudInitProvisioner
 │   └── __init__.py
-├── _internal/             # Shared infrastructure
-│   ├── _db.py               # Database class (connection manager)
-│   ├── _iptables_tracker.py # Generic iptables
-│   └── _asset_manager.py    # Asset management
-└── _orchestration/        # Cross-domain operations
-    ├── __init__.py
-    └── vm_operations.py     # Merged: VMBuilder + VMOrchestrator + removal
+└── _internal/             # Shared infrastructure
+    ├── _db.py               # Database class (connection manager)
+    ├── _iptables_tracker.py # Generic iptables
+    └── _asset_manager.py    # Asset management
 ```
 
-### API Input Layer
+### API Orchestration Layer
 
-Input resolution classes live in `api/input/`:
+Cross-domain orchestration lives in `api/` as `*_operations.py` files:
 
 ```
 api/
-├── input/                     # Request → ResolvedRequest pattern
-│   ├── __init__.py
-│   ├── vm_create_request.py   # VMCreateRequest + ResolvedVMCreateRequest
-│   └── vm_request.py          # VMRequest + ResolvedVMRequest
-└── ...
+├── vm_operations.py       # VM creation, removal, cleanup (orchestrates vm + network + image + kernel)
+├── network_operations.py  # Network orchestration
+├── image_operations.py    # Image orchestration
+├── kernel_operations.py   # Kernel orchestration
+├── key_operations.py      # Key orchestration
+├── host_operations.py     # Host orchestration
+├── binary_operations.py   # Binary orchestration
+└── inputs/                # Request → ResolvedRequest pattern (grows with project)
+    ├── __init__.py
+    ├── _vm_create_request.py      # VMCreateRequest + ResolvedVMCreateRequest
+    ├── _vm_request.py             # VMRequest + ResolvedVMRequest
+    └── ...                        # More input request types as project grows
 ```
+
+### API Input Layer
 
 ## Domain ≠ CLI Command
 
@@ -135,18 +143,18 @@ Where does domain code go?
 
 ### 2. Orchestration Files (Multiple Domains)
 
-**Golden Rule:** If an implementation imports from multiple domains, it belongs in `_orchestration/`.
+**Golden Rule:** If an implementation imports from multiple domains, it belongs in `api/` as `{domain}_operations.py`.
 
 ```
 Does it import from multiple domains?
 │
-└── YES → core/_orchestration/{primary_domain}_operations.py
+└── YES → api/{primary_domain}_operations.py
     Example: vm_operations.py imports vm, network, image, kernel
     (could also import cloudinit if cloudinit were its own domain)
     
     Why: VM creation (vm domain) requires network setup (network domain),
     image cloning (image domain), and kernel selection (kernel domain).
-    This is orchestration, not vm domain logic.
+    This is orchestration, which lives in the API layer, not in core.
 ```
 
 ### 3. Infrastructure Placement Decision
@@ -266,9 +274,9 @@ def count_by_status_wrong(self, statuses: list[str]) -> int:
 # ✅ CLI - ONLY imports api
 from mvmctl.api import vm, network
 
-# ✅ API - ONLY re-exports from core
+# ✅ API - re-exports from core + orchestration lives here
 from mvmctl.core.vm import VMController, VMService
-from mvmctl.core._orchestration import vm_operations
+from mvmctl.api.vm_operations import create_vm, remove_vm  # Orchestration in API
 
 # ✅ Domain - ONLY imports _internal
 from mvmctl.core._internal._db import Database
@@ -282,12 +290,12 @@ from mvmctl.core.image._resolver import ImageResolver
 # ❌ FORBIDDEN - Domains never import other domains or orchestration
 # In core/vm/_controller.py:
 from mvmctl.core.network import NetworkController       # NEVER
-from mvmctl.core._orchestration import create_vm        # NEVER
+from mvmctl.api.vm_operations import create_vm           # NEVER
 from mvmctl.core.image import ImageManager              # NEVER
 
-# ✅ Orchestration - ONLY place that imports multiple domains + _internal
-# In core/_orchestration/vm_operations.py:
-from mvmctl.core.vm import VMController, VMBuilder
+# ✅ API orchestration - ONLY place that imports multiple domains + _internal
+# In api/vm_operations.py:
+from mvmctl.core.vm import VMController
 from mvmctl.core.network import NetworkController
 from mvmctl.core.image import ImageController
 from mvmctl.core.kernel import KernelResolver

@@ -6,11 +6,14 @@ explicit domain objects for orchestration.
 
 from __future__ import annotations
 
-from mvmctl.api.input.vm_create_request import (
+from mvmctl.api.inputs._vm_create_request import (
     ResolvedVMCreateRequest,
     VMCreateRequest,
 )
-from mvmctl.api.input.vm_request import ResolvedVMRequest, VMRequest
+from mvmctl.api.inputs._vm_request import (
+    ResolvedVMRequest,
+    VMRequest,
+)
 
 __all__ = [
     "VMCreateRequest",

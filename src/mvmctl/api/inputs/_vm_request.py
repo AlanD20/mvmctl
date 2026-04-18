@@ -6,8 +6,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from mvmctl.core._internal._db import Database
-from mvmctl.db.models import VMInstance
-from mvmctl.exceptions import VMNotFoundError
+from mvmctl.core.vm._repository import VMRepository
+from mvmctl.core.vm._resolver import VMResolver
+from mvmctl.models.vm import VMInput, VMInstance
 
 if TYPE_CHECKING:
     pass
@@ -19,7 +20,7 @@ __all__ = ["VMRequest", "ResolvedVMRequest"]
 class ResolvedVMRequest:
     """Immutable resolved VM request - contains the VM instance."""
 
-    vm: VMInstance
+    vms: list[VMInstance]
     # Allow for future expansion with additional resolved fields
     extra: dict = field(default_factory=dict)
 
@@ -32,13 +33,20 @@ class VMRequest:
     (start, stop, remove, etc.) that require resolving the VM first.
     """
 
-    identifier: str  # name, ID prefix, IP, or MAC
+    _result: ResolvedVMRequest | None = None
 
-    def __post_init__(self) -> None:
-        if not self.identifier:
-            raise VMNotFoundError("VM identifier is required")
+    def __init__(self, *, inputs: VMInput, db: Database | None = None) -> None:
+        """Initialize the resolver with database and sub-resolvers."""
 
-    def resolve(self, db: Database | None = None) -> ResolvedVMRequest:
+        self._inputs = inputs
+        self._db = db if db is not None else Database()
+        self._vm_resolver = VMResolver(VMRepository(self._db))
+
+    @property
+    def result(self) -> ResolvedVMRequest | None:
+        return self._result
+
+    def resolve(self) -> ResolvedVMRequest:
         """Resolve the VM identifier to a VMInstance.
 
         Args:
@@ -50,10 +58,14 @@ class VMRequest:
         Raises:
             VMNotFoundError: If VM cannot be found
         """
-        from mvmctl.core.vm._resolver import VMResolver
 
-        database = db if db is not None else Database()
-        resolver = VMResolver(database)
-        vm = resolver.resolve(self.identifier)
+        identifiers = (
+            self._inputs.id
+            + self._inputs.name
+            + self._inputs.guest_mac
+            + self._inputs.guest_ip
+        )
 
-        return ResolvedVMRequest(vm=vm)
+        result = self._vm_resolver.resolve_many(identifiers)
+        self._result = ResolvedVMRequest(vms=result.items)
+        return self._result

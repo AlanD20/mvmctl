@@ -134,7 +134,7 @@ Use these keywords (adapt based on the operation):
 
 Copied blocks MUST be ordered by plausibility — from most likely to be the correct/current implementation to least likely:
 
-1. **Top (most plausible):** Current orchestration functions in `core/_orchestration/` — These are the active, current implementations called by the CLI layer
+1. **Top (most plausible):** Current orchestration functions in `api/` — `*_operations.py` files (e.g., `api/vm_operations.py`) — These are the active, current implementations called by the CLI layer
 2. **Second:** Current API layer functions in `api/` (excluding `api/archive/`) — These are the current API wrappers
 3. **Third:** CLI layer functions in `cli/` (excluding `cli/archive/`) — These are the current CLI implementations
 4. **Fourth:** Current core domain logic in `core/{domain}/` — These are the current domain implementations
