@@ -9,6 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, overload
 
+from mvmctl.core.firecracker import FirecrackerClient
+from mvmctl.core.logs import show_logs
+from mvmctl.core.ssh import connect_to_vm
+
 from mvmctl.constants import (
     CONST_VM_START_WAIT_S,
     DEFAULT_SNAPSHOT_RESUME,
@@ -17,15 +21,12 @@ from mvmctl.core._internal._db import Database
 from mvmctl.core.console import (
     get_console_state as _get_console_state,
 )
-from mvmctl.core.firecracker import FirecrackerClient
 from mvmctl.core.image._resolver import ImageResolver
 from mvmctl.core.kernel._resolver import KernelResolver
-from mvmctl.core.logs import show_logs
 from mvmctl.core.network._resolver import NetworkResolver
-from mvmctl.core.ssh import connect_to_vm
-from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import MVMError
 from mvmctl.models import ConsoleInfo, ConsoleState, VMInspectInfo, VMStatus
+from mvmctl.models.vm import VMInstance
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import write_pid_file
@@ -247,6 +248,7 @@ class VMController:
             follow=follow,
         )
 
+    # FIXME: fix
     def inspect(self) -> VMInspectInfo:
         """Get detailed VM information
 
@@ -319,6 +321,7 @@ class VMController:
             return get_vm_dir_by_hash(self._vm.id)
         return None
 
+    # FIXME: fix
     def attach_console(self) -> ConsoleInfo:
         """Attach to the VM's console relay.
 
@@ -347,6 +350,7 @@ class VMController:
         vm_hash = self._vm.id if self._vm.id else None
         return mgr.kill_relay(self._vm.name, vm_hash)
 
+    # FIXME: fix
     def get_console_state(self) -> ConsoleState:
         """Get the current console state for the VM.
 

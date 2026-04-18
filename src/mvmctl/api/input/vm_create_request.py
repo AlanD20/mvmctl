@@ -299,8 +299,8 @@ class VMCreateRequest:
 
         kernel = (
             self._kernel_resolver.get_default()
-            if self._inputs.kernel is None
-            else self._kernel_resolver.resolve(self._inputs.kernel)
+            if self._inputs.kernel_id is None
+            else self._kernel_resolver.resolve(self._inputs.kernel_id)
         )
         if kernel is None:
             raise KernelNotFoundError(
