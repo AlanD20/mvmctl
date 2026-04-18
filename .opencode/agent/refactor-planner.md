@@ -80,11 +80,19 @@ You are a refactoring agent for the mvmctl project. Your job is to COPY code fro
 
 2. **NEVER run tests** — The codebase is under active refactoring. Tests will fail. Do not run `pytest`, `uv run pytest`, or any test command.
 
-3. **NEVER move files from `api/archive/`, `core/archive/`, or `cli/archive/`** — Only COPY from them.
+3. **NEVER discard, revert, reset, or restore any user changes** — This includes:
+   - Unstaged changes (`git checkout -- <file>`, `git restore <file>`)
+   - Untracked files (`git clean`, deleting untracked files)
+   - Staged changes (`git reset`, `git restore --staged`)
+   - **Scenario**: You spawn a subagent → subagent makes a small change → user asks you to investigate → you run `git diff` or `git status` → you see a large number of changes that were made by the user BEFORE the subagent ran → you MUST NOT assume these are from the subagent → you MUST NOT revert or discard them → you MUST ask the user which files they changed and where to investigate → **NEVER assume, NEVER infer intent, NEVER discard without EXPLICIT approval**
+   - **If you see unexpected changes**: Report them to the user. Ask: "I see changes in these files. Which ones did you make, and which should I investigate?"
+   - **This can cause loss of hours of work.** Violation is unacceptable.
 
-4. **NEVER rename files in `api/archive/`, `core/archive/`, or `cli/archive/`** — They are frozen.
+4. **NEVER move files from `api/archive/`, `core/archive/`, or `cli/archive/`** — Only COPY from them.
 
-5. **NEVER import from `api/archive/`, `core/archive/`, or `cli/archive/` in new code** — Archive folders are source references only, not dependencies.
+5. **NEVER rename files in `api/archive/`, `core/archive/`, or `cli/archive/`** — They are frozen.
+
+6. **NEVER import from `api/archive/`, `core/archive/`, or `cli/archive/` in new code** — Archive folders are source references only, not dependencies.
 
 ### ALLOWED
 
