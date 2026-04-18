@@ -183,6 +183,12 @@ class VMCreateError(MVMError):
     """
 
 
+class VMRequestError(MVMError):
+    """Error during VM request resolution or validation."""
+
+    pass
+
+
 class VMBuilderError(MVMError):
     """VM builder failed - resources may have been partially created.
 

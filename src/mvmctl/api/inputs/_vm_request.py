@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 from mvmctl.core._internal._db import Database
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
+from mvmctl.exceptions import VMRequestError
 from mvmctl.models.vm import VMInstance
+from mvmctl.utils.validation import validate_ipv4_address, validate_mac
 
 if TYPE_CHECKING:
     pass
@@ -76,4 +78,28 @@ class VMRequest:
 
         result = self._vm_resolver.resolve_many(identifiers)
         self._result = ResolvedVMRequest(vms=result.items)
+
+        # Validate
+        self.ensure_validate()
+
         return self._result
+
+    def ensure_validate(self) -> None:
+        """Validate resolved VM inputs.
+
+        Validates:
+        - MAC addresses: must be valid format
+        - IP addresses: must be valid IPv4 and internal/private
+        """
+        for mac in self._inputs.guest_mac:
+            try:
+                validate_mac(mac)
+            except ValueError as exc:
+                raise VMRequestError(
+                    f"Invalid guest MAC address: {mac}"
+                ) from exc
+
+        for ip in self._inputs.guest_ip:
+            validate_ipv4_address(
+                ip, field_name="guest IP", require_private=True
+            )

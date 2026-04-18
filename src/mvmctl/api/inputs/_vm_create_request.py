@@ -45,11 +45,15 @@ from mvmctl.exceptions import (
     ImageNotFoundError,
     KernelNotFoundError,
     NetworkNotFoundError,
-    VMBuilderError,
+    VMCreateError,
 )
 from mvmctl.models.cloud_init import CloudInitMode
 from mvmctl.utils.disk_size import parse_disk_size
-from mvmctl.utils.validation import validate_boot_arg_component, validate_mac
+from mvmctl.utils.validation import (
+    validate_boot_arg_component,
+    validate_ipv4_address,
+    validate_mac,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -263,17 +267,26 @@ class VMCreateRequest:
         """Validate resolved dependencies."""
 
         if self._result is None:
-            raise VMBuilderError(
+            raise VMCreateError(
                 "Failed to resolve necessary dependencies to validate"
             )
 
         if self._result.requested_guest_mac is not None:
             validate_mac(self._result.requested_guest_mac)
 
+        if self._result.requested_guest_ip is not None:
+            validate_ipv4_address(
+                self._result.requested_guest_ip,
+                field_name="Guest IP",
+                require_private=True,
+                subnet=self._result.network.subnet,
+                gateway=self._result.network.ipv4_gateway,
+            )
+
         if not (
             CONST_VM_VCPU_MIN <= self._result.vcpu_count <= CONST_VM_VCPU_MAX
         ):
-            raise VMBuilderError(
+            raise VMCreateError(
                 f"Invalid vcpus={self._result.vcpu_count}: must be between {CONST_VM_VCPU_MIN} and {CONST_VM_VCPU_MAX}"
             )
         if not (
@@ -281,20 +294,18 @@ class VMCreateRequest:
             <= self._result.mem_size_mib
             <= CONST_VM_MEM_MAX_MIB
         ):
-            raise VMBuilderError(
+            raise VMCreateError(
                 f"Invalid mem_size_mib={self._result.mem_size_mib}: must be between 128 and 65536"
             )
 
         if not Path(self._result.kernel.path).exists():
-            raise VMBuilderError(
-                f"Kernel not found: {self._result.kernel.path}"
-            )
+            raise VMCreateError(f"Kernel not found: {self._result.kernel.path}")
 
         fc_bin_path = Path(self._result.binary.path)
         if (fc_bin_path.is_absolute() or "/" in self._result.binary.path) and (
             not fc_bin_path.exists() or not os.access(fc_bin_path, os.X_OK)
         ):
-            raise VMBuilderError(
+            raise VMCreateError(
                 f"Firecracker binary not found: {self._result.binary.path}"
             )
 
@@ -302,7 +313,7 @@ class VMCreateRequest:
             self._result.custom_user_data_path is not None
             and not self._result.custom_user_data_path.exists()
         ):
-            raise VMBuilderError(
+            raise VMCreateError(
                 f"User-data file not found: {self._result.custom_user_data_path}"
             )
 
@@ -310,7 +321,7 @@ class VMCreateRequest:
             self._result.image is None
             or self._result.image.minimum_rootfs_size_mib is None
         ):
-            raise VMBuilderError(
+            raise VMCreateError(
                 f"Image {input.image} is missing minimum_rootfs_size_mib. "
                 f"This image was created with an older version. "
                 f"Re-import the image: mvm image fetch <slug> --force"
@@ -322,7 +333,7 @@ class VMCreateRequest:
                 * CONST_MEBIBYTE_BYTES
             )
             if self._result.disk_size_bytes < min_required_bytes:
-                raise VMBuilderError(
+                raise VMCreateError(
                     f"Requested disk size is smaller than "
                     f"minimum required ({self._result.image.minimum_rootfs_size_mib} MiB). "
                     f"Use a larger size or choose a different image."

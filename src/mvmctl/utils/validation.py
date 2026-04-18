@@ -171,7 +171,9 @@ def validate_interface_name(name: str, field_name: str = "interface") -> str:
         )
 
     if name.startswith("-"):
-        raise MVMError(f"Invalid {field_name}: '{name}' cannot start with a hyphen")
+        raise MVMError(
+            f"Invalid {field_name}: '{name}' cannot start with a hyphen"
+        )
 
     if _contains_dangerous_chars(name):
         raise MVMError(
@@ -238,21 +240,34 @@ def validate_subnet(subnet: str, field_name: str = "SUBNET") -> str:
         )
 
     if " " in subnet:
-        raise MVMError(f"Invalid {field_name}: '{subnet}' cannot contain spaces")
+        raise MVMError(
+            f"Invalid {field_name}: '{subnet}' cannot contain spaces"
+        )
 
     try:
         network = ipaddress.IPv4Network(subnet, strict=False)
         return str(network)
     except ValueError as e:
-        raise MVMError(f"Invalid {field_name}: '{subnet}' is not a valid IPv4 CIDR: {e}") from e
+        raise MVMError(
+            f"Invalid {field_name}: '{subnet}' is not a valid IPv4 CIDR: {e}"
+        ) from e
 
 
-def validate_ipv4_address(ip: str, field_name: str = "IP address") -> str:
+def validate_ipv4_address(
+    ip: str,
+    field_name: str = "IP address",
+    require_private: bool = False,
+    subnet: str | None = None,
+    gateway: str | None = None,
+) -> str:
     """Validate IPv4 address and return sanitized version.
 
     Args:
         ip: IPv4 address string
         field_name: Field name for error messages
+        require_private: If True, the IP must be a private/internal address
+        subnet: Optional CIDR subnet (e.g. "172.30.0.0/24"). IP must be within this range.
+        gateway: Optional gateway IP. IP must not equal this address.
 
     Returns:
         The validated IP address string
@@ -277,9 +292,35 @@ def validate_ipv4_address(ip: str, field_name: str = "IP address") -> str:
 
     try:
         addr = ipaddress.IPv4Address(ip)
-        return str(addr)
     except ValueError as e:
-        raise MVMError(f"Invalid {field_name}: '{ip}' is not a valid IPv4 address: {e}") from e
+        raise MVMError(
+            f"Invalid {field_name}: '{ip}' is not a valid IPv4 address: {e}"
+        ) from e
+
+    if require_private and not addr.is_private:
+        raise MVMError(
+            f"Invalid {field_name}: '{ip}' must be a private/internal address"
+        )
+
+    if subnet is not None:
+        network = ipaddress.IPv4Network(subnet, strict=False)
+        if addr not in network:
+            raise MVMError(
+                f"Invalid {field_name}: '{ip}' is not within subnet {subnet}"
+            )
+        if addr == network.network_address:
+            raise MVMError(
+                f"Invalid {field_name}: '{ip}' is the network address of {subnet}"
+            )
+
+    if gateway is not None:
+        gateway_addr = ipaddress.IPv4Address(gateway)
+        if addr == gateway_addr:
+            raise MVMError(
+                f"Invalid {field_name}: '{ip}' is the gateway address"
+            )
+
+    return str(addr)
 
 
 def validate_nat_gateways(gateways_str: str) -> list[str]:
@@ -322,7 +363,10 @@ def validate_nat_gateways(gateways_str: str) -> list[str]:
 
 
 def sanitize_metadata_string(
-    value: str, field_name: str, max_length: int = 255, allow_hyphen: bool = True
+    value: str,
+    field_name: str,
+    max_length: int = 255,
+    allow_hyphen: bool = True,
 ) -> str:
     """Sanitize a metadata string field for safe use.
 
@@ -368,7 +412,9 @@ def sanitize_metadata_string(
         chars = "alphanumeric and underscore"
         if allow_hyphen:
             chars += " and hyphen"
-        raise MVMError(f"Invalid {field_name}: '{value}' must contain only {chars}")
+        raise MVMError(
+            f"Invalid {field_name}: '{value}' must contain only {chars}"
+        )
 
     return value
 
@@ -410,7 +456,9 @@ def validate_vm_name(name: str) -> None:
         )
 
 
-def validate_boot_args(boot_args: str, root_uuid: str, guest_ip: str) -> list[str]:
+def validate_boot_args(
+    boot_args: str, root_uuid: str, guest_ip: str
+) -> list[str]:
     """Validate boot arguments.
 
     Args:
@@ -457,7 +505,9 @@ def validate_file_exists(path: str | None, description: str) -> None:
         raise MVMError(f"{description} not found: {path}")
 
 
-def validate_cidr(subnet: str, field_name: str = "subnet") -> ipaddress.IPv4Network:
+def validate_cidr(
+    subnet: str, field_name: str = "subnet"
+) -> ipaddress.IPv4Network:
     """Validate a CIDR subnet string.
 
     Args:
@@ -568,4 +618,6 @@ def validate_range(
         MVMError: If value is out of range
     """
     if not (min_val <= value <= max_val):
-        raise MVMError(f"Invalid {field_name}={value}: must be between {min_val} and {max_val}")
+        raise MVMError(
+            f"Invalid {field_name}={value}: must be between {min_val} and {max_val}"
+        )

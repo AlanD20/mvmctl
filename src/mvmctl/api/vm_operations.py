@@ -25,7 +25,7 @@ from mvmctl.api.inputs import (
     VMCreateRequest,
 )
 from mvmctl.api.inputs._vm_create_request import VMCreateInput
-from mvmctl.api.inputs._vm_request import VMInput
+from mvmctl.api.inputs._vm_request import ResolvedVMRequest, VMInput, VMRequest
 from mvmctl.constants import (
     DEFAULT_BRIDGE_NAME,
     DEFAULT_FC_PID_FILENAME,
@@ -407,12 +407,12 @@ class VMOperations:
     @staticmethod
     def create(inputs: VMCreateInput) -> None:
 
-        db = Database()
-
         # Pre-checks before wasting resources
         HostPrivilegeHelper.check_privileges(
             "/usr/sbin/ip", f"create VM '{inputs.name}'"
         )
+
+        db = Database()
 
         vm_repo = VMRepository(db)
         if vm_repo.count() >= MAX_VMS:
@@ -428,8 +428,6 @@ class VMOperations:
             vm_id=ctx.vm_id, vm_dir=ctx.vm_dir, inputs=inputs, db=db
         )
         resolved = resolver.resolve()
-        resolver.ensure_validate()
-
         ctx.set_resolved(resolved)
 
         with SigtermContext(lambda: ctx.cleanup()):
@@ -446,7 +444,8 @@ class VMOperations:
                 ctx.cleanup()
                 raise
 
-    def remove(self, inputs: VMInput) -> None:
+    @staticmethod
+    def remove(inputs: VMInput) -> None:
         """Remove a VM."""
         # =====================================================================
         # COPIED FROM: api/old/vms.py — remove_vm() (lines 1506-1620)
@@ -458,11 +457,11 @@ class VMOperations:
             "/usr/sbin/ip", f"Remove VM '{inputs.name}'"
         )
 
+        db = Database()
+
         vm_repo = VMRepository(db)
-        if vm_repo.count() >= MAX_VMS:
-            raise MVMError(
-                f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
-            )
+        resolver = VMRequest(inputs=inputs, db=db)
+        resolved = resolver.resolve()
 
         manager = vm_manager or get_vm_manager()
         vm = manager.get(name)
