@@ -55,6 +55,7 @@ class BinaryResolver:
         """Resolve multiple binary identifiers by id or [name, version] pairs."""
         items: list[Binary] = []
         errors: list[str] = []
+        seen_ids: set[str] = set()
 
         for identifier in identifiers:
             try:
@@ -65,7 +66,8 @@ class BinaryResolver:
                 else:
                     raise BinaryNotFoundError(f"Invalid identifier format: {identifier}")
 
-                if item not in items:
+                if item.id not in seen_ids:
+                    seen_ids.add(item.id)
                     items.append(item)
             except Exception as e:
                 errors.append(f"{identifier}: {e}")

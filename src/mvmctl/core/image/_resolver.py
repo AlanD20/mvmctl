@@ -59,11 +59,13 @@ class ImageResolver:
         """Resolve multiple image identifiers by os_slug or id."""
         items: list[Image] = []
         errors: list[str] = []
+        seen_ids: set[str] = set()
 
         for identifier in identifiers:
             try:
                 item = self.resolve(identifier)
-                if item not in items:
+                if item.id not in seen_ids:
+                    seen_ids.add(item.id)
                     items.append(item)
             except Exception as e:
                 errors.append(f"{identifier}: {e}")

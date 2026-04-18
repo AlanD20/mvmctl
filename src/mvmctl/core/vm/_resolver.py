@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mvmctl.core.vm._repository import VMRepository
-from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import VMNotFoundError
+from mvmctl.models.vm import VMInstance
 
 __all__ = [
     "VMResolver",
@@ -74,11 +74,13 @@ class VMResolver:
         """Resolve multiple VM identifiers by name, ip, mac, or id."""
         items: list[VMInstance] = []
         errors: list[str] = []
+        seen_ids: set[str] = set()
 
         for identifier in identifiers:
             try:
                 item = self.resolve(identifier)
-                if item not in items:
+                if item.id not in seen_ids:
+                    seen_ids.add(item.id)
                     items.append(item)
             except Exception as e:
                 errors.append(f"{identifier}: {e}")

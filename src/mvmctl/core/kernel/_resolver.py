@@ -55,6 +55,7 @@ class KernelResolver:
         """Resolve multiple kernel identifiers by id or [version, type] pairs."""
         items: list[Kernel] = []
         errors: list[str] = []
+        seen_ids: set[str] = set()
 
         for identifier in identifiers:
             try:
@@ -65,7 +66,8 @@ class KernelResolver:
                 else:
                     raise KernelNotFoundError(f"Invalid identifier format: {identifier}")
 
-                if item not in items:
+                if item.id not in seen_ids:
+                    seen_ids.add(item.id)
                     items.append(item)
             except Exception as e:
                 errors.append(f"{identifier}: {e}")

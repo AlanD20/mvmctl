@@ -84,11 +84,13 @@ class KeyResolver:
         """Resolve multiple key identifiers."""
         items: list[SSHKey] = []
         errors: list[str] = []
+        seen_ids: set[str] = set()
 
         for identifier in identifiers:
             try:
                 key = self.resolve(identifier)
-                if key not in items:
+                if key.id not in seen_ids:
+                    seen_ids.add(key.id)
                     items.append(key)
             except KeyNotFoundError as e:
                 errors.append(f"{identifier}: {e}")
