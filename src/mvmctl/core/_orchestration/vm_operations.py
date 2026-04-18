@@ -40,7 +40,6 @@ from mvmctl.core.network._service import NetworkService
 from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._firecracker import FirecrackerController
 from mvmctl.core.vm._guestfs import GuestfsProvisioner
-from mvmctl.core.vm._inventory import VMInventory
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.db.models import VMInstance
 from mvmctl.exceptions import (
@@ -374,8 +373,8 @@ class VMOperations:
         # Pre-checks before wasting resources
         HostInteractiveService.check_privileges("/usr/sbin/ip", f"create VM '{inputs.name}'")
 
-        vm_inventory = VMInventory(db)
-        if vm_inventory.count() >= MAX_VMS:
+        vm_repo = VMRepository(db)
+        if vm_repo.count() >= MAX_VMS:
             raise MVMError(
                 f"VM limit reached ({MAX_VMS}). Remove existing VMs before creating new ones."
             )
@@ -384,12 +383,7 @@ class VMOperations:
         ctx = VMCreateContext(name=inputs.name)
 
         # Sanitized - use resolved inputs
-        resolver = VMCreateRequest(
-            vm_id=ctx.vm_id,
-            vm_dir=ctx.vm_dir,
-            inputs=inputs,
-            db=db
-        )
+        resolver = VMCreateRequest(vm_id=ctx.vm_id, vm_dir=ctx.vm_dir, inputs=inputs, db=db)
         resolved = resolver.resolve()
         resolver.ensure_validate()
 
@@ -403,18 +397,29 @@ class VMOperations:
                 if vm_instance is None:
                     raise VMBuilderError("Failed to create VM instance model")
 
-                vm_repo = VMRepository(db)
                 vm_repo.upsert(vm_instance)
                 log_audit("vm.create", f"name={inputs.name}")
             except Exception as exc:
                 ctx.cleanup()
                 raise
 
-    def remoev(self) -> None:
+    def remove(self) -> None:
+        """Remove a VM."""
+        pass
+
     def cleanup_create_vm(self) -> None:
         pass
 
 
+__all__ = [
+    "VMCreateContext",
+    "VMOperations",
+    "VMRemovalContext",
+    "VMBulkCleanupContext",
+]
+
+
+## TO BE MIGRATED
 def _persist_failed_vm(instance: VMInstance, manager: VMController | None) -> None:
     """Persist failed VM to DB. Called when skip_cleanup=True."""
     if manager is None:
@@ -726,9 +731,171 @@ def cleanup_vms(
     return targets
 
 
-__all__ = [
-    "VMCreateContext",
-    "VMOperations",
-    "VMRemovalContext",
-    "VMBulkCleanupContext",
-]
+def export_vm_config(name: str) -> "VMExportConfig":
+    """Export a VM's configuration as a portable VMExportConfig.
+
+    Uses semantic references (os_slug, version, name) — NEVER internal SHA256 IDs.
+
+    Args:
+        name: VM name or ID prefix
+
+    Returns:
+        VMExportConfig with semantic references
+
+    Raises:
+        VMNotFoundError: If VM not found
+    """
+    from mvmctl.api.metadata import find_images_by_id_prefix, find_kernels_by_id_prefix
+    from mvmctl.core.metadata import list_image_entries, list_kernel_entries
+
+    from mvmctl.models.vm_config_file import (
+        VMExportBinaryConfig,
+        VMExportBootConfig,
+        VMExportCloudInitConfig,
+        VMExportComputeConfig,
+        VMExportFirecrackerConfig,
+        VMExportImageConfig,
+        VMExportKernelConfig,
+        VMExportNetworkConfig,
+    )
+    from mvmctl.utils.fs import get_cache_dir
+
+    resolver = VMResolver()
+
+    # Try ID prefix first
+    try:
+        vm = resolver.by_id(name)
+    except VMNotFoundError:
+        # Fall back to name lookup
+        try:
+            vm = resolver.by_name(name)
+        except VMNotFoundError:
+            raise VMNotFoundError(f"VM '{name}' not found")
+
+    # Resolve image os_slug from metadata
+    image_os_slug = ""
+    image_arch = ""
+    if vm.image_id:
+        cache_dir = get_cache_dir()
+        try:
+            image_matches = find_images_by_id_prefix(cache_dir, vm.image_id)
+            if image_matches:
+                _, meta = image_matches[0]
+                image_os_slug = meta.get("os_slug", "")
+                image_arch = meta.get("arch", "")
+        except Exception as exc:
+            logger.debug("Failed to resolve image os_slug for %r: %s", vm.image_id, exc)
+            pass
+
+        # Fallback: search all entries by matching the image_id
+        if not image_os_slug:
+            try:
+                all_entries = list_image_entries(cache_dir)
+                for img_id, meta in all_entries.items():
+                    if img_id == vm.image_id or img_id.startswith(vm.image_id):
+                        image_os_slug = meta.get("os_slug", "")
+                        image_arch = meta.get("arch", "")
+                        break
+            except Exception as exc:
+                logger.debug(
+                    "Failed to resolve image os_slug from entries for %r: %s", vm.image_id, exc
+                )
+                pass
+
+    # Resolve kernel version from metadata
+    kernel_version: str | None = None
+    kernel_arch: str | None = None
+    kernel_type: str | None = None
+    if vm.kernel_id:
+        cache_dir = get_cache_dir()
+        try:
+            kernel_matches = find_kernels_by_id_prefix(cache_dir, vm.kernel_id)
+            if kernel_matches:
+                _, meta = kernel_matches[0]
+                kernel_version = meta.get("version")
+                kernel_arch = meta.get("arch")
+                kernel_type = meta.get("type")
+        except Exception as exc:
+            logger.debug("Failed to resolve kernel version for %r: %s", vm.kernel_id, exc)
+            pass
+
+        # Fallback: search all entries
+        if not kernel_version:
+            try:
+                all_entries = list_kernel_entries(cache_dir)
+                for kern_id, meta in all_entries.items():
+                    if kern_id == vm.kernel_id or kern_id.startswith(vm.kernel_id):
+                        kernel_version = meta.get("version")
+                        kernel_arch = meta.get("arch")
+                        kernel_type = meta.get("type")
+                        break
+            except Exception as exc:
+                logger.debug(
+                    "Failed to resolve kernel version from entries for %r: %s", vm.kernel_id, exc
+                )
+                pass
+
+    # Resolve binary version from metadata
+    binary_version: str | None = None
+    try:
+        from mvmctl.core.metadata import list_binary_entries
+
+        cache_dir = get_cache_dir()
+        all_binaries = list_binary_entries(cache_dir)
+        for bin_name, entries in all_binaries.items():
+            for meta in entries:
+                if meta.get("is_default"):
+                    binary_version = meta.get("version")
+                    break
+            if binary_version:
+                break
+    except Exception as exc:
+        logger.debug("Failed to resolve binary version: %s", exc)
+        pass
+
+    # Build network config - get network name from network_id
+    db_net_export = Database().get_network(vm.network_id) if vm.network_id else None
+    network_name = db_net_export.name if db_net_export else None
+    network_ip = vm.ipv4
+    network_mac = vm.mac
+
+    from mvmctl.models.vm_config_file import VMExportConfig
+
+    return VMExportConfig(
+        name=vm.name,
+        compute=VMExportComputeConfig(
+            vcpus=vm.vcpu_count,
+            mem=vm.mem_size_mib,
+        ),
+        image=VMExportImageConfig(
+            os_slug=image_os_slug,
+            arch=image_arch,
+        ),
+        kernel=VMExportKernelConfig(
+            version=kernel_version,
+            arch=kernel_arch,
+            type=kernel_type,
+        ),
+        binary=VMExportBinaryConfig(
+            version=binary_version,
+        ),
+        network=VMExportNetworkConfig(
+            name=network_name,
+            ip=network_ip,
+            mac=network_mac,
+        ),
+        boot=VMExportBootConfig(
+            args=vm.lsm_flags,  # Using lsm_flags as boot args fallback
+            enable_console=vm.enable_console,
+        ),
+        firecracker=VMExportFirecrackerConfig(
+            enable_api_socket=vm.enable_api_socket,
+            enable_pci=vm.enable_pci,
+            lsm_flags=vm.lsm_flags,
+        ),
+        cloud_init=VMExportCloudInitConfig(
+            mode=vm.cloud_init_mode or "inject",
+            user=vm.name,  # VM name doubles as default user
+            keep_iso=False,  # Default value
+        ),
+    )

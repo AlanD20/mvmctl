@@ -31,9 +31,8 @@ core/
 │   ├── _controller.py     # VMController - stateful VM operations
 │   ├── _firecracker.py    # FirecrackerController - process management
 │   ├── _guestfs.py        # GuestfsProvisioner - rootfs provisioning
-│   ├── _inventory.py      # VMInventory - VM listing and status
 │   ├── _resolver.py       # VMResolver - resolve VM by name/id/ip/mac
-│   ├── _repository.py     # VMRepository - database operations
+│   ├── _repository.py     # VMRepository - database operations (queries, counts)
 │   └── __init__.py
 ├── network/               # Networking (bridge, tap, NAT, IP lease)
 │   ├── _controller.py     # NetworkController
@@ -118,15 +117,16 @@ Where does domain code go?
 │   └── YES → core/{domain}/_controller.py
 │       Example: VMController with stop(), pause(), ssh() methods operating on self._vm
 │
-├── Is it stateless operations on a resource? (list, search, find, create_single)
+├── Is it stateless operations on a resource? (create, setup, teardown)
 │   └── YES → core/{domain}/_service.py
-│       Example: VMService with list_all(), search_by_name(), exists()
+│       Example: NetworkService with setup_bridge(), teardown_nat()
 │
-├── Is it database operations for a specific entity type? (get, list, upsert, delete)
+├── Is it database operations for a specific entity type? (get, list, upsert, delete, count)
 │   └── YES → core/{domain}/_repository.py
-│       Example: VMRepository with get_vm(), list_vms(), upsert_vm(), delete_vm()
-│       Each domain owns its data persistence. Repositories are the ONLY files
-│       in a domain that touch the database.
+│       Example: VMRepository with get(), list_all(), list_by_status(), count(), upsert(), delete()
+│       - All queries (list, count, filter) belong here — NO separate Inventory class
+│       - Use SQL-level computation (COUNT, WHERE IN) not Python filtering
+│       - Repositories are the ONLY files in a domain that touch the database
 │
 └── Is it infrastructure with no domain knowledge? (DB connection, iptables, validation)
     └── YES → core/_internal/
@@ -183,51 +183,81 @@ core/
 **Repository Responsibilities:**
 - Database CRUD operations for domain entities
 - Query methods (get_by_id, get_by_name, list_all, find_by_prefix)
+- Aggregate queries (count, count_by_*) — use SQL COUNT, not fetch-all + len()
+- Flexible filtering — Methods accept single value or list: `value | list[value]` with SQL `WHERE IN`
 - Atomic transactions for multi-row operations
 - **NO business logic** — repositories only move data between domain objects and database
 
-**Why This Pattern:**
-1. **Domain owns its data** — Each domain controls how its entities are persisted
-2. **No giant files** — `mvm_db.py` (1000+ lines) splits into focused domain repositories
-3. **Testable** — Can mock repository at domain boundary
-4. **Clear separation** — Business logic (Controller/Service) vs Data access (Repository)
+**Repository Pattern Rules:**
+1. **SQL-level computation** — Use `SELECT COUNT(*)`, `WHERE column IN (...)` instead of fetching all rows and filtering in Python
+2. **No separate Inventory/Query classes** — All queries belong in Repository
+3. **Flexible query parameters** — Methods accept both single value and list for filtering: `status: Status | list[Status]`
+4. **Domain owns its data** — Each domain controls how its entities are persisted
 
-**Example Repository Structure:**
+**Why This Pattern:**
+1. **Performance** — SQL COUNT is O(1) vs fetching all rows
+2. **No giant files** — `mvm_db.py` (1000+ lines) splits into focused domain repositories
+3. **Single query location** — All data access in one file per domain
+4. **Testable** — Can mock repository at domain boundary
+5. **Clear separation** — Business logic (Controller/Service) vs Data access (Repository)
+
+**Example Repository Structure (Generic Pattern):**
 ```python
-# core/vm/_repository.py
-class VMRepository:
-    """Database operations for VM instances."""
+# core/{domain}/_repository.py
+from mvmctl.models import SomeStatusEnum
+
+class SomeRepository:
+    """Database operations for domain entities."""
     
     def __init__(self, db: DatabaseConnection) -> None:
         self._db = db
     
-    def get_vm(self, vm_id: str) -> Optional[VMInstance]:
-        """Return VM by ID or None."""
+    def get(self, id: str) -> SomeEntity | None:
+        """Return entity by ID or None."""
         ...
     
-    def list_vms(self) -> list[VMInstance]:
-        """Return all VMs."""
+    def list_all(self) -> list[SomeEntity]:
+        """Return all entities."""
         ...
     
-    def upsert_vm(self, vm: VMInstance) -> None:
-        """Insert or update VM record."""
+    def list_by_status(self, status: SomeStatusEnum | list[SomeStatusEnum]) -> list[SomeEntity]:
+        """Return entities filtered by status(es). SQL WHERE IN clause."""
         ...
     
-    def delete_vm(self, vm_id: str) -> None:
-        """Delete VM by ID."""
+    def count(self) -> int:
+        """Total count using SQL COUNT."""
+        ...
+    
+    def count_by_status(self, status: SomeStatusEnum | list[SomeStatusEnum]) -> int:
+        """Count by status using SQL COUNT + WHERE IN."""
+        ...
+    
+    def upsert(self, entity: SomeEntity) -> None:
+        """Insert or update entity record."""
+        ...
+    
+    def delete(self, id: str) -> None:
+        """Delete entity by ID."""
         ...
 ```
 
-**Repository Usage in Domain:**
+**Repository Pattern in Action:**
 ```python
-# core/vm/_service.py
-from mvmctl.core.vm._repository import VMRepository
-from mvmctl.core._internal._db import Database
+# Generic pattern for any domain - SQL-level computation (CORRECT)
+def count_by_status(self, status: SomeStatus | list[SomeStatus]) -> int:
+    statuses = [status] if isinstance(status, SomeStatus) else status
+    status_values = [s.value for s in statuses]
+    placeholders = ",".join(["?"] * len(status_values))
+    
+    # Use SQL COUNT instead of fetching all rows
+    query = f"SELECT COUNT(*) FROM {table_name} WHERE status IN ({placeholders})"
+    result = conn.execute(query, status_values).fetchone()
+    return result[0] if result else 0
 
-class VMService:
-    def list_vms(self) -> list[VMInstance]:
-        repo = VMRepository(Database())
-        return repo.list_all()
+# ❌ WRONG: Fetch all, then filter in Python
+def count_by_status_wrong(self, statuses: list[str]) -> int:
+    all_entities = self.list_all()  # Fetches ALL rows!
+    return len([e for e in all_entities if e.status in statuses])
 ```
 
 ## Import Boundaries (Enforced)
@@ -285,8 +315,8 @@ _orchestration/  →  vm/  →  _internal/
 | Pattern | Suffix | Location | Example | Purpose |
 |---------|--------|----------|---------|---------|
 | **Stateful entity manager** | `Controller` | `core/{domain}/` | `VMController`, `NetworkController` | Bound to specific instance (self._vm), lifecycle operations |
-| **Stateless resource ops** | `Service` | `core/{domain}/` | `NetworkService`, `LeaseService` | CRUD operations, search, list |
-| **Database operations** | `Repository` | `core/{domain}/_repository.py` | `VMRepository`, `ImageRepository` | Data persistence, queries, transactions |
+| **Stateless operations** | `Service` | `core/{domain}/` | `NetworkService`, `LeaseService` | Setup/teardown operations, stateless business logic |
+| **Database operations** | `Repository` | `core/{domain}/_repository.py` | `VMRepository`, `ImageRepository` | ALL data access: get, list, count, upsert, delete. Use SQL-level ops. |
 | **Entity resolution** | `Resolver` | `core/{domain}/_resolver.py` | `VMResolver`, `ImageResolver` | Resolve IDs/names to domain objects |
 | **Cross-domain workflow** | `_operations.py` | `core/_orchestration/` | `vm_operations.py` | Functions importing multiple domains |
 | **Shared infrastructure** | None | `core/_internal/` | `Database`, `IPTablesTracker` | No domain knowledge, reusable utilities |
@@ -299,12 +329,12 @@ API layer is thin curation - no business logic:
 ```python
 # api/vm.py
 from mvmctl.core._orchestration.vm_operations import create_vm, remove_vm
-from mvmctl.core.vm import VMController, VMInventory
+from mvmctl.core.vm import VMController, VMRepository
 from mvmctl.api.input.vm_create_request import VMCreateRequest
 
 __all__ = [
     "VMController",     # Stateful: stop, start, pause (from domain)
-    "VMInventory",      # Stateless: list, search, exists (from domain)
+    "VMRepository",     # Data access: list, count, get (from domain)
     "VMCreateRequest",  # Input resolution (from api/input)
     "create_vm",        # Orchestrated creation (from _orchestration)
     "remove_vm",        # Orchestrated removal (from _orchestration)
@@ -338,9 +368,8 @@ core/vm/
 ├── _controller.py          # VMController (primary lifecycle)
 ├── _firecracker.py         # FirecrackerController (process management)
 ├── _guestfs.py             # GuestfsProvisioner (rootfs operations)
-├── _inventory.py           # VMInventory (listing, status, export)
 ├── _resolver.py            # VMResolver (resolve by name/id/ip/mac)
-├── _repository.py          # VMRepository (database operations)
+├── _repository.py          # VMRepository (database operations - all queries)
 └── __init__.py
 ```
 
@@ -494,6 +523,9 @@ core/_orchestration/vm_operations.py:
 - **Orchestration rule** - If code imports multiple domains → `core/_orchestration/`
 - **Domain isolation** - Domains only import `core/_internal/`, never other domains
 - **Infrastructure placement** - Generic → `_internal/`, domain-specific → `{domain}/`
+- **Repository consolidation** - All queries in `_repository.py` (no separate Inventory)
+- **SQL-level computation** - Use `COUNT(*)`, `WHERE IN` instead of fetch-all + Python filtering
+- **Flexible queries** - Accept `single_value | list[single_value]` for filtering parameters
 - **Naming** - `Controller` (stateful), `Service` (stateless), `Repository` (DB), `Resolver` (lookup)
 - **Input resolution** - `Request` (raw) → `validate()` → `resolve()` → `ResolvedRequest` (frozen)
 - **File naming** - `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`, `_operations.py`

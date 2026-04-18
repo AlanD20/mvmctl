@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
 from mvmctl.db.models import VMInstance
+from mvmctl.models import VMStatus
 
 
 class VMRepository:
@@ -53,36 +54,60 @@ class VMRepository:
             ).fetchall()
         return [VMInstance(**dict(row)) for row in rows]
 
+    def count(self) -> int:
+        """Return total count of all VMs."""
+        with self._db.connect() as conn:
+            result = conn.execute("SELECT COUNT(*) FROM vm_instances").fetchone()
+        return result[0] if result else 0
+
+    def count_by_status(self, status: VMStatus | list[VMStatus]) -> int:
+        """Count VMs by status(es). Accepts single status or list of statuses."""
+        statuses = [status] if isinstance(status, VMStatus) else status
+        if not statuses:
+            return self.count()
+
+        status_values = [s.value for s in statuses]
+        placeholders = ",".join(["?"] * len(status_values))
+        query = f"SELECT COUNT(*) FROM vm_instances WHERE status IN ({placeholders})"
+
+        with self._db.connect() as conn:
+            result = conn.execute(query, status_values).fetchone()
+        return result[0] if result else 0
+
     def list_all(self) -> list[VMInstance]:
         """Return all VM records."""
         with self._db.connect() as conn:
             rows = conn.execute("SELECT * FROM vm_instances ORDER BY created_at").fetchall()
         return [VMInstance(**dict(row)) for row in rows]
 
-    def list_by_status(self, statuses: list[str]) -> list[VMInstance]:
-        """Return VM records filtered by status(es)."""
+    def list_by_status(self, status: VMStatus | list[VMStatus]) -> list[VMInstance]:
+        """Return VM records filtered by status(es). Accepts single status or list of statuses."""
+        statuses = [status] if isinstance(status, VMStatus) else status
         if not statuses:
             return self.list_all()
 
-        placeholders = ",".join(["?"] * len(statuses))
+        status_values = [s.value for s in statuses]
+        placeholders = ",".join(["?"] * len(status_values))
         query = f"SELECT * FROM vm_instances WHERE status IN ({placeholders}) ORDER BY created_at"
 
         with self._db.connect() as conn:
-            rows = conn.execute(query, statuses).fetchall()
+            rows = conn.execute(query, status_values).fetchall()
         return [VMInstance(**dict(row)) for row in rows]
 
-    def list_excluding_statuses(self, excluded_statuses: list[str]) -> list[VMInstance]:
-        """Return VM records excluding certain status(es)."""
-        if not excluded_statuses:
+    def list_excluding_statuses(self, excluded_statuses: VMStatus | list[VMStatus]) -> list[VMInstance]:
+        """Return VM records excluding certain status(es). Accepts single status or list of statuses."""
+        statuses = [excluded_statuses] if isinstance(excluded_statuses, VMStatus) else excluded_statuses
+        if not statuses:
             return self.list_all()
 
-        placeholders = ",".join(["?"] * len(excluded_statuses))
+        status_values = [s.value for s in statuses]
+        placeholders = ",".join(["?"] * len(status_values))
         query = (
             f"SELECT * FROM vm_instances WHERE status NOT IN ({placeholders}) ORDER BY created_at"
         )
 
         with self._db.connect() as conn:
-            rows = conn.execute(query, excluded_statuses).fetchall()
+            rows = conn.execute(query, status_values).fetchall()
         return [VMInstance(**dict(row)) for row in rows]
 
     def upsert(self, vm: VMInstance) -> None:
