@@ -384,8 +384,13 @@ class VMOperations:
         ctx = VMCreateContext(name=inputs.name)
 
         # Sanitized - use resolved inputs
-        resolver = VMCreateRequest(db)
-        resolved = resolver.resolve(inputs, vm_id=ctx.vm_id, vm_dir=ctx.vm_dir)
+        resolver = VMCreateRequest(
+            vm_id=ctx.vm_id,
+            vm_dir=ctx.vm_dir,
+            inputs=inputs,
+            db=db
+        )
+        resolved = resolver.resolve()
         resolver.ensure_validate()
 
         ctx.set_resolved(resolved)

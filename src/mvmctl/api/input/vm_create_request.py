@@ -111,8 +111,14 @@ class VMCreateRequest:
 
     _result: ResolvedVMCreateRequest | None = None
 
-    def __init__(self, db: Database | None = None) -> None:
+    def __init__(
+        self, *, vm_id: str, vm_dir: Path, inputs: VMCreateInput, db: Database | None = None
+    ) -> None:
         """Initialize the resolver with database and sub-resolvers."""
+
+        self._vm_id = vm_id
+        self._vm_dir = vm_dir
+        self._inputs = inputs
         self._db = db if db is not None else Database()
         self._network_resolver = NetworkResolver(NetworkRepository(self._db))
         self._binary_resolver = BinaryResolver(BinaryRepository(self._db))
@@ -124,72 +130,80 @@ class VMCreateRequest:
     def result(self) -> ResolvedVMCreateRequest | None:
         return self._result
 
-    def resolve(self, input: VMCreateInput, vm_id: str, vm_dir: Path) -> ResolvedVMCreateRequest:
+    def resolve(self) -> ResolvedVMCreateRequest:
         """Resolve all inputs to explicit values."""
 
-        image = self._resolve_image(input)
-        kernel = self._resolve_kernel(input)
-        network = self._resolve_network(input)
-        fc_binary = self._resolve_binary(input)
-        ssh_keys = self._resolve_ssh_keys(input)
+        image = self._resolve_image()
+        kernel = self._resolve_kernel()
+        network = self._resolve_network()
+        fc_binary = self._resolve_binary()
+        ssh_keys = self._resolve_ssh_keys()
 
         ipv4_net = ipaddress.IPv4Network(network.subnet, strict=False)
         network_prefix_len = ipv4_net.prefixlen
         network_netmask = ipv4_net.netmask
 
         rootfs_disk_size_bytes = image.minimum_rootfs_size_mib * CONST_MEBIBYTE_BYTES
-        if input.disk_size is not None:
-            rootfs_disk_size_bytes = parse_disk_size(input.disk_size) * CONST_MEBIBYTE_BYTES
+        if self._inputs.disk_size is not None:
+            rootfs_disk_size_bytes = parse_disk_size(self._inputs.disk_size) * CONST_MEBIBYTE_BYTES
 
         rootfs_disk_size_mib = image.minimum_rootfs_size_mib // CONST_MEBIBYTE_BYTES
 
-        ci_mode_result = self._resolve_cloud_init_mode(input, vm_dir)
+        ci_mode_result = self._resolve_cloud_init_mode()
 
         self._result = ResolvedVMCreateRequest(
-            name=input.name,
-            vm_id=vm_id,
-            vm_dir=vm_dir,
-            vcpu_count=input.vcpu_count if input.vcpu_count != 0 else DEFAULT_VM_VCPU_COUNT,
-            mem_size_mib=input.mem_size_mib if input.mem_size_mib != 0 else DEFAULT_VM_MEM_MIB,
-            user=input.user if input.user else DEFAULT_VM_SSH_USER,
+            name=self._inputs.name,
+            vm_id=self._vm_id,
+            vm_dir=self._vm_dir,
+            vcpu_count=self._inputs.vcpu_count
+            if self._inputs.vcpu_count != 0
+            else DEFAULT_VM_VCPU_COUNT,
+            mem_size_mib=self._inputs.mem_size_mib
+            if self._inputs.mem_size_mib != 0
+            else DEFAULT_VM_MEM_MIB,
+            user=self._inputs.user if self._inputs.user else DEFAULT_VM_SSH_USER,
             network=network,
             image=image,
             kernel=kernel,
             binary=fc_binary,
             cloud_init_mode=ci_mode_result.mode,
-            enable_pci=input.enable_pci if input.enable_pci is not None else DEFAULT_VM_ENABLE_PCI,
-            enable_console=input.enable_console
-            if input.enable_console is not None
+            enable_pci=self._inputs.enable_pci
+            if self._inputs.enable_pci is not None
+            else DEFAULT_VM_ENABLE_PCI,
+            enable_console=self._inputs.enable_console
+            if self._inputs.enable_console is not None
             else DEFAULT_VM_ENABLE_CONSOLE,
-            enable_logging=input.enable_logging
-            if input.enable_logging is not None
+            enable_logging=self._inputs.enable_logging
+            if self._inputs.enable_logging is not None
             else DEFAULT_VM_ENABLE_LOGGING,
-            enable_metrics=input.enable_metrics
-            if input.enable_metrics is not None
+            enable_metrics=self._inputs.enable_metrics
+            if self._inputs.enable_metrics is not None
             else DEFAULT_VM_ENABLE_METRICS,
-            skip_cleanup=input.skip_cleanup,
-            requested_guest_mac=input.requested_guest_mac,
-            requested_guest_ip=input.requested_guest_ip,
+            skip_cleanup=self._inputs.skip_cleanup,
+            requested_guest_mac=self._inputs.requested_guest_mac,
+            requested_guest_ip=self._inputs.requested_guest_ip,
             ssh_keys=ssh_keys,
             disk_size_bytes=rootfs_disk_size_bytes,
             disk_size_mib=rootfs_disk_size_mib,
-            nocloud_net_port=input.nocloud_net_port
+            nocloud_net_port=self._inputs.nocloud_net_port
             if ci_mode_result.mode == CloudInitMode.NET
             else None,
-            custom_user_data_path=input.custom_user_data,
-            skip_ci_network_config=input.skip_ci_network_config,
+            custom_user_data_path=self._inputs.custom_user_data,
+            skip_ci_network_config=self._inputs.skip_ci_network_config,
             network_prefix_len=network_prefix_len,
             network_netmask=str(network_netmask),
-            keep_cloud_init_iso=input.keep_cloud_init_iso
+            keep_cloud_init_iso=self._inputs.keep_cloud_init_iso
             if ci_mode_result.mode == CloudInitMode.ISO
             else False,
-            cloud_init_iso_path=input.cloud_init_iso_path
+            cloud_init_iso_path=self._inputs.cloud_init_iso_path
             if ci_mode_result.mode == CloudInitMode.ISO
             else None,
-            boot_args=input.boot_args
-            if input.boot_args is not None
+            boot_args=self._inputs.boot_args
+            if self._inputs.boot_args is not None
             else f"{DEFAULT_VM_BOOT_ARGS} root=UUID={image.fs_uuid}",
-            lsm_flags=input.lsm_flags if input.lsm_flags is not None else DEFAULT_VM_LSM_FLAGS,
+            lsm_flags=self._inputs.lsm_flags
+            if self._inputs.lsm_flags is not None
+            else DEFAULT_VM_LSM_FLAGS,
             extra_drives=[],
         )
 
@@ -254,18 +268,18 @@ class VMCreateRequest:
         if self._result.lsm_flags is not None:
             validate_boot_arg_component(self._result.lsm_flags, "lsm_flags")
 
-    def _resolve_image(self, input: VMCreateInput) -> Image:
+    def _resolve_image(self) -> Image:
         """Resolve image to path, ID, fs_uuid, and fs_type."""
 
-        if input.image_path is not None:
+        if self._inputs.image_path is not None:
             # TODO: need to identify fs uuid since this is non-imported image
             # maybe enforce importing?
             pass
 
         image = (
             self._image_resolver.get_default()
-            if input.image is None
-            else self._image_resolver.resolve(input.image)
+            if self._inputs.image is None
+            else self._image_resolver.resolve(self._inputs.image)
         )
         if image is None:
             raise ImageNotFoundError(
@@ -276,17 +290,17 @@ class VMCreateRequest:
 
         return image
 
-    def _resolve_kernel(self, input: VMCreateInput) -> Kernel:
+    def _resolve_kernel(self) -> Kernel:
         """Resolve kernel to path and ID."""
 
-        if input.kernel_path is not None:
+        if self._inputs.kernel_path is not None:
             # TODO: kernel is fine to be passed, but maybe enforce importing?
             pass
 
         kernel = (
             self._kernel_resolver.get_default()
-            if input.kernel is None
-            else self._kernel_resolver.resolve(input.kernel)
+            if self._inputs.kernel is None
+            else self._kernel_resolver.resolve(self._inputs.kernel)
         )
         if kernel is None:
             raise KernelNotFoundError(
@@ -297,13 +311,13 @@ class VMCreateRequest:
 
         return kernel
 
-    def _resolve_network(self, input: VMCreateInput) -> Network:
+    def _resolve_network(self) -> Network:
         """Resolve network to name and ID."""
 
         network = (
             self._network_resolver.get_default()
-            if input.network_name is None
-            else self._network_resolver.resolve(input.network_name)
+            if self._inputs.network_name is None
+            else self._network_resolver.resolve(self._inputs.network_name)
         )
 
         if network is None:
@@ -315,13 +329,13 @@ class VMCreateRequest:
 
         return network
 
-    def _resolve_binary(self, input: VMCreateInput) -> Binary:
+    def _resolve_binary(self) -> Binary:
         """Resolve firecracker binary to path and ID."""
 
         fc_binary = (
             self._binary_resolver.get_default("firecracker")
-            if input.binary_id is None
-            else self._binary_resolver.resolve(input.binary_id)
+            if self._inputs.binary_id is None
+            else self._binary_resolver.resolve(self._inputs.binary_id)
         )
 
         if fc_binary is None:
@@ -333,37 +347,37 @@ class VMCreateRequest:
 
         return fc_binary
 
-    def _resolve_ssh_keys(self, input: VMCreateInput) -> list[str]:
+    def _resolve_ssh_keys(self) -> list[str]:
         """Resolve SSH keys to public key content"""
 
         ssh_keys = (
             self._key_resolver.get_defaults()
-            if len(input.ssh_keys) == 0
-            else self._key_resolver.resolve_many(input.ssh_keys).items
+            if len(self._inputs.ssh_keys) == 0
+            else self._key_resolver.resolve_many(self._inputs.ssh_keys).items
         )
 
         return KeyService.get_pubkeys(ssh_keys, self._db)
 
-    def _resolve_cloud_init_mode(self, input: VMCreateInput, vm_dir: Path) -> CloudInitModeResolved:
+    def _resolve_cloud_init_mode(self) -> CloudInitModeResolved:
 
         # Inject is default cloud-init mode!
         mode = CloudInitModeResolved(mode=CloudInitMode.INJECT, iso_path=None)
 
-        if input.cloud_init_mode is None:
+        if self._inputs.cloud_init_mode is None:
             return mode
 
-        mode_lower = input.cloud_init_mode.lower()
+        mode_lower = self._inputs.cloud_init_mode.lower()
         valid_modes = ["inject", "iso", "off", "net"]
         if mode_lower not in valid_modes:
             raise CloudInitModeError(
-                f"Invalid --cloud-init-mode '{input.cloud_init_mode}'. Valid modes: {', '.join(valid_modes)}"
+                f"Invalid --cloud-init-mode '{self._inputs.cloud_init_mode}'. Valid modes: {', '.join(valid_modes)}"
             )
 
         if mode_lower == "iso":
-            iso_path = vm_dir / "cloud-init.iso"
+            iso_path = self._vm_dir / "cloud-init.iso"
 
-            if input.cloud_init_iso_path is not None:
-                iso_path = Path(input.cloud_init_iso_path)
+            if self._inputs.cloud_init_iso_path is not None:
+                iso_path = Path(self._inputs.cloud_init_iso_path)
 
             if not iso_path.exists():
                 raise CloudInitModeError(f"Cloud-init ISO not found: {iso_path}")
