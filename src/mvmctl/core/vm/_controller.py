@@ -28,7 +28,7 @@ from mvmctl.core.console import (
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
 from mvmctl.models import ConsoleInfo, ConsoleState, VMStatus
-from mvmctl.models.vm import VMInstance
+from mvmctl.models.vm import VMInstanceItem
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_vm_dir_by_hash
@@ -50,7 +50,7 @@ class VMController:
 
     def __init__(
         self,
-        entity: str | VMInstance,
+        entity: str | VMInstanceItem,
         repo: VMRepository | None = None,
         db: Database | None = None,
     ) -> None:
@@ -58,7 +58,7 @@ class VMController:
 
         self._repo = repo if repo is not None else VMRepository(db)
 
-        if isinstance(entity, VMInstance):
+        if isinstance(entity, VMInstanceItem):
             self._vm = entity
         else:
             self._resolver = VMResolver(self._repo._db)

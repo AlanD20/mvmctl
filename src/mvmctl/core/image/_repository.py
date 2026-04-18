@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
-from mvmctl.db.models import Image
+from mvmctl.models.image import ImageItem
 
 
 class ImageRepository:
@@ -12,35 +12,43 @@ class ImageRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    def get(self, image_id: str) -> Image | None:
+    def get(self, image_id: str) -> ImageItem | None:
         """Return an image by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM images WHERE id = ?", (image_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM images WHERE id = ?", (image_id,)
+            ).fetchone()
         if row is None:
             return None
-        return Image(**dict(row))
+        return ImageItem(**dict(row))
 
-    def find_by_prefix(self, prefix: str) -> list[Image]:
+    def find_by_prefix(self, prefix: str) -> list[ImageItem]:
         """Return all images whose ID starts with prefix."""
         with self._db.connect() as conn:
-            rows = conn.execute("SELECT * FROM images WHERE id LIKE ?", (f"{prefix}%",)).fetchall()
-        return [Image(**dict(row)) for row in rows]
+            rows = conn.execute(
+                "SELECT * FROM images WHERE id LIKE ?", (f"{prefix}%",)
+            ).fetchall()
+        return [ImageItem(**dict(row)) for row in rows]
 
-    def get_by_os_slug(self, os_slug: str) -> Image | None:
+    def get_by_os_slug(self, os_slug: str) -> ImageItem | None:
         """Return an image by its os_slug, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM images WHERE os_slug = ?", (os_slug,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM images WHERE os_slug = ?", (os_slug,)
+            ).fetchone()
         if row is None:
             return None
-        return Image(**dict(row))
+        return ImageItem(**dict(row))
 
-    def list_all(self) -> list[Image]:
+    def list_all(self) -> list[ImageItem]:
         """Return all images."""
         with self._db.connect() as conn:
-            rows = conn.execute("SELECT * FROM images ORDER BY created_at").fetchall()
-        return [Image(**dict(row)) for row in rows]
+            rows = conn.execute(
+                "SELECT * FROM images ORDER BY created_at"
+            ).fetchall()
+        return [ImageItem(**dict(row)) for row in rows]
 
-    def upsert(self, image: Image) -> None:
+    def upsert(self, image: ImageItem) -> None:
         """Insert or replace an image record."""
         with self._db.connect() as conn:
             conn.execute(
@@ -96,13 +104,17 @@ class ImageRepository:
         with self._db.connect() as conn:
             conn.execute("BEGIN")
             conn.execute("UPDATE images SET is_default = 0")
-            conn.execute("UPDATE images SET is_default = 1 WHERE id = ?", (image_id,))
+            conn.execute(
+                "UPDATE images SET is_default = 1 WHERE id = ?", (image_id,)
+            )
             conn.execute("COMMIT")
 
-    def get_default(self) -> Image | None:
+    def get_default(self) -> ImageItem | None:
         """Return the default image entry, or None if not set."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM images WHERE is_default = 1 LIMIT 1").fetchone()
+            row = conn.execute(
+                "SELECT * FROM images WHERE is_default = 1 LIMIT 1"
+            ).fetchone()
         if row is None:
             return None
-        return Image(**dict(row))
+        return ImageItem(**dict(row))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
 from mvmctl.models import VMStatus
-from mvmctl.models.vm import VMInstance
+from mvmctl.models.vm import VMInstanceItem
 
 
 class VMRepository:
@@ -13,7 +13,7 @@ class VMRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    def get(self, vm_id: str) -> VMInstance | None:
+    def get(self, vm_id: str) -> VMInstanceItem | None:
         """Return a VM by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
@@ -21,9 +21,9 @@ class VMRepository:
             ).fetchone()
         if row is None:
             return None
-        return VMInstance(**dict(row))
+        return VMInstanceItem(**dict(row))
 
-    def get_by_name(self, name: str) -> VMInstance | None:
+    def get_by_name(self, name: str) -> VMInstanceItem | None:
         """Return a VM by name, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
@@ -31,9 +31,9 @@ class VMRepository:
             ).fetchone()
         if row is None:
             return None
-        return VMInstance(**dict(row))
+        return VMInstanceItem(**dict(row))
 
-    def find_by_ip(self, ipv4: str) -> VMInstance | None:
+    def find_by_ip(self, ipv4: str) -> VMInstanceItem | None:
         """Return a VM by IP address, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
@@ -41,9 +41,9 @@ class VMRepository:
             ).fetchone()
         if row is None:
             return None
-        return VMInstance(**dict(row))
+        return VMInstanceItem(**dict(row))
 
-    def find_by_mac(self, mac: str) -> VMInstance | None:
+    def find_by_mac(self, mac: str) -> VMInstanceItem | None:
         """Return a VM by MAC address, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
@@ -51,16 +51,16 @@ class VMRepository:
             ).fetchone()
         if row is None:
             return None
-        return VMInstance(**dict(row))
+        return VMInstanceItem(**dict(row))
 
-    def find_by_prefix(self, prefix: str) -> list[VMInstance]:
+    def find_by_prefix(self, prefix: str) -> list[VMInstanceItem]:
         """Return all VMs whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM vm_instances WHERE id LIKE ?",
                 (f"{prefix}%",),
             ).fetchall()
-        return [VMInstance(**dict(row)) for row in rows]
+        return [VMInstanceItem(**dict(row)) for row in rows]
 
     def count(self) -> int:
         """Return total count of all VMs."""
@@ -84,17 +84,17 @@ class VMRepository:
             result = conn.execute(query, status_values).fetchone()
         return result[0] if result else 0
 
-    def list_all(self) -> list[VMInstance]:
+    def list_all(self) -> list[VMInstanceItem]:
         """Return all VM records."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM vm_instances ORDER BY created_at"
             ).fetchall()
-        return [VMInstance(**dict(row)) for row in rows]
+        return [VMInstanceItem(**dict(row)) for row in rows]
 
     def list_by_status(
         self, status: VMStatus | list[VMStatus]
-    ) -> list[VMInstance]:
+    ) -> list[VMInstanceItem]:
         """Return VM records filtered by status(es). Accepts single status or list of statuses."""
         statuses = [status] if isinstance(status, VMStatus) else status
         if not statuses:
@@ -106,11 +106,11 @@ class VMRepository:
 
         with self._db.connect() as conn:
             rows = conn.execute(query, status_values).fetchall()
-        return [VMInstance(**dict(row)) for row in rows]
+        return [VMInstanceItem(**dict(row)) for row in rows]
 
     def list_excluding_statuses(
         self, excluded_statuses: VMStatus | list[VMStatus]
-    ) -> list[VMInstance]:
+    ) -> list[VMInstanceItem]:
         """Return VM records excluding certain status(es). Accepts single status or list of statuses."""
         statuses = (
             [excluded_statuses]
@@ -126,9 +126,9 @@ class VMRepository:
 
         with self._db.connect() as conn:
             rows = conn.execute(query, status_values).fetchall()
-        return [VMInstance(**dict(row)) for row in rows]
+        return [VMInstanceItem(**dict(row)) for row in rows]
 
-    def upsert(self, vm: VMInstance) -> None:
+    def upsert(self, vm: VMInstanceItem) -> None:
         """Insert or replace a VM record."""
         with self._db.connect() as conn:
             conn.execute(

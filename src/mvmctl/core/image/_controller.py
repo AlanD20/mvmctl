@@ -11,19 +11,15 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import zstandard as zstd
-
 from mvmctl.api._internal._resolvers import ImageResolver
+
 from mvmctl.constants import CLI_NAME
 from mvmctl.core import image as image_core
 from mvmctl.core._internal._db import Database
 from mvmctl.exceptions import ImageError
-
-if TYPE_CHECKING:
-    from mvmctl.db.models import Image
-
+from mvmctl.models.image import ImageItem
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +38,12 @@ class ImageController:
         ImageNotFoundError: If the image cannot be resolved.
     """
 
-    def __init__(self, entity: str | Image, db: Database | None = None) -> None:
+    def __init__(
+        self, entity: str | ImageItem, db: Database | None = None
+    ) -> None:
         self._db = db if db is not None else Database()
 
-        if isinstance(entity, Image):
+        if isinstance(entity, ImageItem):
             self._image = entity
         else:
             self._resolver = ImageResolver(self._db)
@@ -77,13 +75,20 @@ class ImageController:
         """Get path to cached image in tmpfs."""
         return self._get_cache_dir() / f"{self.image_id}.{self._image.fs_type}"
 
-    def _decompress_zstd(self, compressed_path: Path, output_path: Path) -> None:
+    def _decompress_zstd(
+        self, compressed_path: Path, output_path: Path
+    ) -> None:
         """Decompress a zstd compressed image."""
         try:
             decompressor = zstd.ZstdDecompressor()
-            with open(compressed_path, "rb") as src, open(output_path, "wb") as dst:
+            with (
+                open(compressed_path, "rb") as src,
+                open(output_path, "wb") as dst,
+            ):
                 decompressor.copy_stream(src, dst)
-            logger.info("Decompressed %s → %s", compressed_path.name, output_path.name)
+            logger.info(
+                "Decompressed %s → %s", compressed_path.name, output_path.name
+            )
         except OSError as e:
             raise ImageError(f"Failed to decompress image: {e}") from e
 
@@ -112,7 +117,9 @@ class ImageController:
         """
         compressed_path = self.image_path
         if not compressed_path.suffix == ".zst":
-            compressed_path = compressed_path.with_suffix(compressed_path.suffix + ".zst")
+            compressed_path = compressed_path.with_suffix(
+                compressed_path.suffix + ".zst"
+            )
 
         self._decompress_zstd(compressed_path, output_path)
 
@@ -137,7 +144,9 @@ class ImageController:
 
         compressed_path = self.image_path
         if not compressed_path.suffix == ".zst":
-            compressed_path = compressed_path.with_suffix(compressed_path.suffix + ".zst")
+            compressed_path = compressed_path.with_suffix(
+                compressed_path.suffix + ".zst"
+            )
 
         logger.info("Decompressing to cache: %s", cached_path.name)
         self._decompress_zstd(compressed_path, cached_path)

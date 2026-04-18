@@ -10,16 +10,24 @@ from mvmctl.models.cloud_init import (
     CloudInitWriteConfig,
 )
 from mvmctl.models.firecracker import InstanceDescription, InstanceInfo
-from mvmctl.models.image import ImageFetchInput, ImageItem, ImageSpec
-from mvmctl.models.kernel import KernelFetchInput, KernelItem, KernelSpec
-from mvmctl.models.key import KeyCreateInput
+from mvmctl.models.host import HostStateChangeItem, HostStateItem
+from mvmctl.models.image import ImageItem, ImageSpec
+from mvmctl.models.kernel import KernelItem, KernelSpec
+from mvmctl.models.key import SSHKeyItem
 from mvmctl.models.network import (
+    IPTablesChain,
+    IPTablesPort,
+    IPTablesProtocol,
+    IPTablesRuleItem,
+    IPTablesRuleType,
+    IPTablesTable,
+    IPTablesTarget,
+    IPTablesWildcard,
     LeaseEntry,
-    NetworkConfig,
     NetworkEntry,
     NetworkInspectInfo,
     NetworkItem,
-    NetworkLease,
+    NetworkLeaseItem,
 )
 from mvmctl.models.vm import (
     ConsoleInfo,
@@ -27,7 +35,7 @@ from mvmctl.models.vm import (
     VMConfig,
     VMCreateInput,
     VMInspectInfo,
-    VMInstance,
+    VMInstanceItem,
     VMStatus,
 )
 from mvmctl.models.vm_config_file import (
@@ -52,25 +60,32 @@ __all__ = [
     "CloudInitWriteConfig",
     "ConsoleInfo",
     "ConsoleState",
-    "ImageFetchInput",
+    "HostStateChangeItem",
+    "HostStateItem",
+    "IPTablesChain",
+    "IPTablesPort",
+    "IPTablesProtocol",
+    "IPTablesRuleItem",
+    "IPTablesRuleType",
+    "IPTablesTable",
+    "IPTablesTarget",
+    "IPTablesWildcard",
     "ImageItem",
     "ImageSpec",
     "InstanceDescription",
     "InstanceInfo",
-    "KeyCreateInput",
-    "KernelFetchInput",
     "KernelItem",
     "KernelSpec",
     "LeaseEntry",
-    "NetworkConfig",
     "NetworkEntry",
     "NetworkInspectInfo",
     "NetworkItem",
-    "NetworkLease",
+    "NetworkLeaseItem",
     "PruneAllResult",
+    "SSHKeyItem",
     "VMConfig",
     "VMCreateInput",
-    "VMInstance",
+    "VMInstanceItem",
     "VMInspectInfo",
     "VMStatus",
     "VMExportConfig",

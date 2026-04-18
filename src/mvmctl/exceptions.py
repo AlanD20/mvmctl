@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from mvmctl.models.vm import VMInstance
+    from mvmctl.models.vm import VMInstanceItem
 
 
 class MVMError(Exception):
@@ -282,10 +282,10 @@ def format_exception_debug(exc: Exception, debug: bool = False) -> str:
 
 def handle_creation_error(
     exc: Exception,
-    vm_instance: VMInstance | None,
+    vm_instance: VMInstanceItem | None,
     skip_cleanup: bool,
     cleanup_fn: Callable[[], None],
-    persist_fn: Callable[[VMInstance, object | None], None] | None = None,
+    persist_fn: Callable[[VMInstanceItem, object | None], None] | None = None,
     manager: object | None = None,
 ) -> None:
     """Unified exception handler for VM creation.

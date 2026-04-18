@@ -7,7 +7,6 @@ For stateless key operations, use KeyService.
 from __future__ import annotations
 
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,8 +15,8 @@ from mvmctl.core._internal._db import Database
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._resolver import KeyResolver
 from mvmctl.core.key._service import KeyService
-from mvmctl.db.models import SSHKey
 from mvmctl.exceptions import MVMKeyError
+from mvmctl.models.key import SSHKeyItem
 
 if TYPE_CHECKING:
     pass
@@ -31,18 +30,20 @@ class KeyController:
     use KeyService instead.
 
     Args:
-        entity: Key name, ID prefix, or SSHKey db model instance.
+        entity: Key name, ID prefix, or SSHKeyItem db model instance.
         db: Optional Database instance (creates new if None).
 
     Raises:
         KeyNotFoundError: If the key cannot be resolved.
     """
 
-    def __init__(self, entity: str | SSHKey, db: Database | None = None) -> None:
+    def __init__(
+        self, entity: str | SSHKeyItem, db: Database | None = None
+    ) -> None:
         self._db = db if db is not None else Database()
         self._repo = KeyRepository(self._db)
 
-        if isinstance(entity, SSHKey):
+        if isinstance(entity, SSHKeyItem):
             self._key = entity
         else:
             resolver = KeyResolver(self._repo)
@@ -58,8 +59,8 @@ class KeyController:
         """Get the resolved key name."""
         return self._key.name
 
-    def inspect(self) -> SSHKey:
-        """Return the SSHKey model for this key."""
+    def inspect(self) -> SSHKeyItem:
+        """Return the SSHKeyItem model for this key."""
         return self._key
 
     def remove(self) -> None:

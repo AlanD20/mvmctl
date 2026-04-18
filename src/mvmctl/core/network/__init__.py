@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mvmctl.core.network._iptables_resolver import IPTablesRuleResolver
+from mvmctl.core.network._lease_resolver import NetworkLeaseResolver
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver, NetworkResolveResult
@@ -14,4 +16,6 @@ __all__ = [
     "NetworkResolveResult",
     "NetworkService",
     "LeaseService",
+    "NetworkLeaseResolver",
+    "IPTablesRuleResolver",
 ]

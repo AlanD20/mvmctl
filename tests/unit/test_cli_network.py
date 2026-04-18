@@ -6,7 +6,8 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.network import network_app as app
 from mvmctl.exceptions import MVMError, NetworkError
-from mvmctl.models.network import NetworkConfig, NetworkInspectInfo
+from mvmctl.api.inputs import NetworkConfig
+from mvmctl.models.network import NetworkInspectInfo
 
 runner = CliRunner()
 

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from mvmctl.api import cache as cache_api
 from mvmctl.models.vm import VMStatus
-from mvmctl.models.network import NetworkConfig
+from mvmctl.api.inputs import NetworkConfig
 
 # =============================================================================
 # init_all tests

@@ -12,7 +12,7 @@ from mvmctl.core.network._lease_resolver import NetworkLeaseResolver
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import VMNotFoundError
-from mvmctl.models.vm import VMInstance
+from mvmctl.models.vm import VMInstanceItem
 
 __all__ = [
     "VMResolver",
@@ -22,7 +22,7 @@ __all__ = [
 
 @dataclass
 class VMResolveResult:
-    items: list[VMInstance]
+    items: list[VMInstanceItem]
     errors: list[str]
     exit_code: int
 
@@ -51,7 +51,7 @@ class VMResolver:
         self._repo = repo if repo is not None else VMRepository()
         self._include = include
 
-    def _enrich(self, vms: list[VMInstance]) -> list[VMInstance]:
+    def _enrich(self, vms: list[VMInstanceItem]) -> list[VMInstanceItem]:
         """Enrich VMs with relations if include is set."""
         if self._include and vms:
             RelationEnricher().enrich(
@@ -59,7 +59,7 @@ class VMResolver:
             )
         return vms
 
-    def by_id(self, vm_id: str) -> VMInstance:
+    def by_id(self, vm_id: str) -> VMInstanceItem:
         """Resolve VM by ID prefix."""
         matches = self._repo.find_by_prefix(vm_id)
         if len(matches) == 0:
@@ -69,28 +69,28 @@ class VMResolver:
             raise VMNotFoundError(f"ID {vm_id} matches multiple VMs: {names}")
         return self._enrich(matches)[0]
 
-    def by_name(self, name: str) -> VMInstance:
+    def by_name(self, name: str) -> VMInstanceItem:
         """Resolve VM by name."""
         vm = self._repo.get_by_name(name)
         if vm is None:
             raise VMNotFoundError(f"VM not found: {name}")
         return self._enrich([vm])[0]
 
-    def by_ip(self, ip: str) -> VMInstance:
+    def by_ip(self, ip: str) -> VMInstanceItem:
         """Resolve VM by IP address via DB lookup."""
         vm = self._repo.find_by_ip(ip)
         if vm is None:
             raise VMNotFoundError(f"No VM found with IP: {ip}")
         return self._enrich([vm])[0]
 
-    def by_mac(self, mac: str) -> VMInstance:
+    def by_mac(self, mac: str) -> VMInstanceItem:
         """Resolve VM by MAC address via DB lookup."""
         vm = self._repo.find_by_mac(mac)
         if vm is None:
             raise VMNotFoundError(f"No VM found with MAC: {mac}")
         return self._enrich([vm])[0]
 
-    def resolve(self, identifier: str) -> VMInstance:
+    def resolve(self, identifier: str) -> VMInstanceItem:
         """Resolve VM by name, ip, mac, or id prefix."""
         try:
             vm = self.by_name(identifier)
@@ -114,7 +114,7 @@ class VMResolver:
                 seen_inputs.add(ident)
                 unique_ids.append(ident)
 
-        items: list[VMInstance] = []
+        items: list[VMInstanceItem] = []
         errors: list[str] = []
         resolved_vm_ids: set[str] = set()
 

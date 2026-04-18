@@ -16,8 +16,8 @@ from pathlib import Path
 
 from mvmctl.core._internal._db import Database
 from mvmctl.core.key._repository import KeyRepository
-from mvmctl.db.models import SSHKey
 from mvmctl.exceptions import MVMKeyError
+from mvmctl.models.key import SSHKeyItem
 from mvmctl.utils.fs import get_config_dir
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,9 @@ class KeyService:
         return get_config_dir() / "keys"
 
     @staticmethod
-    def _generate_keypair(private_key_path: Path, pub_key_path: Path, comment: str) -> str:
+    def _generate_keypair(
+        private_key_path: Path, pub_key_path: Path, comment: str
+    ) -> str:
         """Run ssh-keygen to create an ED25519 keypair."""
         cmd = [
             "ssh-keygen",
@@ -108,23 +110,28 @@ class KeyService:
             raise MVMKeyError(f"Failed to read public key file: {e}") from e
 
     @staticmethod
-    def get_pubkey(key: str | SSHKey, db: Database | None = None) -> str:
+    def get_pubkey(key: str | SSHKeyItem, db: Database | None = None) -> str:
         """Get the public key content for a key by name."""
-        if isinstance(key, SSHKey):
-            ssh_key = key
+        if isinstance(key, SSHKeyItem):
+            ssh_key: SSHKeyItem = key
         else:
             db = db if db is not None else Database()
-            ssh_key = KeyRepository(db).get_by_name(key)
-            if ssh_key is None:
+            found = KeyRepository(db).get_by_name(key)
+            if found is None:
                 raise MVMKeyError(f"Key '{key}' not found in cache")
+            ssh_key = found
 
         if ssh_key.public_key_path is None:
             raise MVMKeyError(f"Key '{ssh_key.name}' has no public key path")
 
-        return KeyService._read_pubkey_file(Path(ssh_key.public_key_path)).strip()
+        return KeyService._read_pubkey_file(
+            Path(ssh_key.public_key_path)
+        ).strip()
 
     @staticmethod
-    def get_pubkeys(keys: list[str] | list[SSHKey], db: Database | None = None) -> list[str]:
+    def get_pubkeys(
+        keys: list[str] | list[SSHKeyItem], db: Database | None = None
+    ) -> list[str]:
         """Get public key contents for multiple keys by name."""
         contents: list[str] = []
         for name in keys:
@@ -162,7 +169,7 @@ class KeyService:
         logger.info("Cleared default SSH keys")
 
     @staticmethod
-    def list_keys(db: Database | None = None) -> list[SSHKey]:
+    def list_keys(db: Database | None = None) -> list[SSHKeyItem]:
         """List all keys in the cache."""
         db = db if db is not None else Database()
         repo = KeyRepository(db)
@@ -176,7 +183,7 @@ class KeyService:
         is_default: bool = False,
         overwrite: bool = False,
         db: Database | None = None,
-    ) -> tuple[SSHKey, Path]:
+    ) -> tuple[SSHKeyItem, Path]:
         """Generate a new ED25519 keypair.
 
         This is a stateless operation that creates a new key.
@@ -193,16 +200,24 @@ class KeyService:
         private_key_path = output_dir / name
         pub_key_path = output_dir / f"{name}.pub"
 
-        if not overwrite and (private_key_path.exists() or pub_key_path.exists()):
-            existing = private_key_path if private_key_path.exists() else pub_key_path
-            raise MVMKeyError(f"Key file already exists: {existing}. Use --overwrite to replace.")
+        if not overwrite and (
+            private_key_path.exists() or pub_key_path.exists()
+        ):
+            existing = (
+                private_key_path if private_key_path.exists() else pub_key_path
+            )
+            raise MVMKeyError(
+                f"Key file already exists: {existing}. Use --overwrite to replace."
+            )
 
         existing_key = repo.get_by_name(name)
         if existing_key is not None:
             if overwrite:
                 repo.delete(existing_key.id)
             else:
-                raise MVMKeyError(f"Key '{name}' already exists in cache. Remove it first.")
+                raise MVMKeyError(
+                    f"Key '{name}' already exists in cache. Remove it first."
+                )
 
         if comment is None:
             comment = f"{name}@{socket.gethostname()}"
@@ -213,12 +228,14 @@ class KeyService:
             if pub_key_path.exists():
                 pub_key_path.unlink()
 
-        content = KeyService._generate_keypair(private_key_path, pub_key_path, comment)
+        content = KeyService._generate_keypair(
+            private_key_path, pub_key_path, comment
+        )
         KeyService._persist_public_key(name, content)
 
         fingerprint = KeyService._compute_fingerprint(content)
         now = datetime.now(timezone.utc).isoformat()
-        ssh_key = SSHKey(
+        ssh_key = SSHKeyItem(
             id=fingerprint,
             name=name,
             fingerprint=fingerprint,
@@ -240,7 +257,7 @@ class KeyService:
         pub_key_path: str | Path,
         overwrite: bool = False,
         db: Database | None = None,
-    ) -> SSHKey:
+    ) -> SSHKeyItem:
         """Add a public key to the cache.
 
         This is a stateless operation that adds a key.
@@ -277,25 +294,33 @@ class KeyService:
                     old_pub.unlink()
                 repo.delete(existing.id)
             else:
-                raise MVMKeyError(f"Key '{name}' already exists. Remove it first to replace.")
+                raise MVMKeyError(
+                    f"Key '{name}' already exists. Remove it first to replace."
+                )
 
         KeyService._persist_public_key(name, content)
 
         private_key_path = pub_key_path.with_suffix("")
         if private_key_path == pub_key_path:
             private_key_path = Path(str(pub_key_path).replace(".pub", ""))
-        private_key_exists = private_key_path.exists() and private_key_path != pub_key_path
+        private_key_exists = (
+            private_key_path.exists() and private_key_path != pub_key_path
+        )
 
         fingerprint = KeyService._compute_fingerprint(content)
         now = datetime.now(timezone.utc).isoformat()
-        ssh_key = SSHKey(
+        ssh_key = SSHKeyItem(
             id=fingerprint,
             name=name,
             fingerprint=fingerprint,
             algorithm=KeyService._parse_algorithm(content),
             comment=KeyService._parse_comment(content),
-            private_key_path=str(private_key_path) if private_key_exists else None,
-            public_key_path=str(KeyService._get_keys_config_dir() / f"{name}.pub"),
+            private_key_path=str(private_key_path)
+            if private_key_exists
+            else None,
+            public_key_path=str(
+                KeyService._get_keys_config_dir() / f"{name}.pub"
+            ),
             is_default=False,
             created_at=now,
             updated_at=now,

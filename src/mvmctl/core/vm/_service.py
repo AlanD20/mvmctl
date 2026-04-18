@@ -10,7 +10,7 @@ from mvmctl.core._internal._db import Database
 from mvmctl.core._internal._parallel import ParallelExecutor
 from mvmctl.core.vm._controller import VMController
 from mvmctl.models.bulk import BulkResult, BulkResultItem
-from mvmctl.models.vm import VMInstance
+from mvmctl.models.vm import VMInstanceItem
 
 
 class VMService:
@@ -23,19 +23,19 @@ class VMService:
         self._db = db
         self._executor = ParallelExecutor()
 
-    def stop(self, vm: VMInstance, force: bool = False) -> None:
+    def stop(self, vm: VMInstanceItem, force: bool = False) -> None:
         """Stop a single VM."""
         controller = VMController(entity=vm, db=self._db)
         controller.stop(force=force)
 
     def stop_many(
         self,
-        vms: list[VMInstance],
+        vms: list[VMInstanceItem],
         force: bool = False,
         parallel: bool = False,
         max_workers: int | None = None,
         batch_size: int | None = None,
-    ) -> BulkResult[VMInstance]:
+    ) -> BulkResult[VMInstanceItem]:
         """Stop multiple VMs."""
         raw = self._executor.execute(
             items=vms,
@@ -48,18 +48,18 @@ class VMService:
             items=[BulkResultItem(item=vm, error=exc) for vm, exc in raw]
         )
 
-    def start(self, vm: VMInstance) -> None:
+    def start(self, vm: VMInstanceItem) -> None:
         """Start a single VM."""
         controller = VMController(entity=vm, db=self._db)
         controller.start()
 
     def start_many(
         self,
-        vms: list[VMInstance],
+        vms: list[VMInstanceItem],
         parallel: bool = False,
         max_workers: int | None = None,
         batch_size: int | None = None,
-    ) -> BulkResult[VMInstance]:
+    ) -> BulkResult[VMInstanceItem]:
         """Start multiple VMs."""
         raw = self._executor.execute(
             items=vms,
@@ -72,18 +72,18 @@ class VMService:
             items=[BulkResultItem(item=vm, error=exc) for vm, exc in raw]
         )
 
-    def pause(self, vm: VMInstance) -> None:
+    def pause(self, vm: VMInstanceItem) -> None:
         """Pause a single VM."""
         controller = VMController(entity=vm, db=self._db)
         controller.pause()
 
     def pause_many(
         self,
-        vms: list[VMInstance],
+        vms: list[VMInstanceItem],
         parallel: bool = False,
         max_workers: int | None = None,
         batch_size: int | None = None,
-    ) -> BulkResult[VMInstance]:
+    ) -> BulkResult[VMInstanceItem]:
         """Pause multiple VMs."""
         raw = self._executor.execute(
             items=vms,
@@ -96,18 +96,18 @@ class VMService:
             items=[BulkResultItem(item=vm, error=exc) for vm, exc in raw]
         )
 
-    def resume(self, vm: VMInstance) -> None:
+    def resume(self, vm: VMInstanceItem) -> None:
         """Resume a single VM."""
         controller = VMController(entity=vm, db=self._db)
         controller.resume()
 
     def resume_many(
         self,
-        vms: list[VMInstance],
+        vms: list[VMInstanceItem],
         parallel: bool = False,
         max_workers: int | None = None,
         batch_size: int | None = None,
-    ) -> BulkResult[VMInstance]:
+    ) -> BulkResult[VMInstanceItem]:
         """Resume multiple VMs."""
         raw = self._executor.execute(
             items=vms,
@@ -120,19 +120,19 @@ class VMService:
             items=[BulkResultItem(item=vm, error=exc) for vm, exc in raw]
         )
 
-    def reboot(self, vm: VMInstance, force: bool = False) -> None:
+    def reboot(self, vm: VMInstanceItem, force: bool = False) -> None:
         """Reboot a single VM."""
         controller = VMController(entity=vm, db=self._db)
         controller.reboot(force=force)
 
     def reboot_many(
         self,
-        vms: list[VMInstance],
+        vms: list[VMInstanceItem],
         force: bool = False,
         parallel: bool = False,
         max_workers: int | None = None,
         batch_size: int | None = None,
-    ) -> BulkResult[VMInstance]:
+    ) -> BulkResult[VMInstanceItem]:
         """Reboot multiple VMs."""
         raw = self._executor.execute(
             items=vms,

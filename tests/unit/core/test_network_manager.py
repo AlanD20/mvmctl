@@ -8,7 +8,7 @@ from mvmctl.api.network import (
     is_ip_available,
 )
 from mvmctl.core.network_manager import NetworkLease
-from mvmctl.models.network import NetworkConfig
+from mvmctl.api.inputs import NetworkConfig
 from mvmctl.exceptions import NetworkError
 
 

@@ -54,7 +54,7 @@ from mvmctl.exceptions import (
 )
 from mvmctl.models import VMInspectInfo
 from mvmctl.models.cloud_init import CloudInitMode
-from mvmctl.models.vm import VMInstance, VMStatus
+from mvmctl.models.vm import VMInstanceItemItem, VMStatus
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
 from mvmctl.utils.network import generate_mac, generate_tap_name
@@ -62,7 +62,7 @@ from mvmctl.utils.signals import SigtermContext
 from src.mvmctl.core.console._controller import ConsoleController
 
 if TYPE_CHECKING:
-    from mvmctl.models.network import NetworkConfig
+    from mvmctl.api.inputs import NetworkConfig
 
 logger = logging.getLogger(__name__)
 
@@ -346,7 +346,7 @@ class VMCreateContext:
             self.relay.start()
             self.mark_created("console_relay")
 
-    def to_model(self) -> VMInstance | None:
+    def to_model(self) -> VMInstanceItem | None:
 
         if (
             self.resolved is None
@@ -356,7 +356,7 @@ class VMCreateContext:
             return None
 
         now = datetime.now(tz=timezone.utc)
-        vm_instance = VMInstance(
+        vm_instance = VMInstanceItem(
             name=self.resolved.name,
             id=self.resolved.vm_id,
             pid=self.fc_manager.pid,
@@ -463,13 +463,6 @@ class VMOperations:
         resolver = VMRequest(inputs=inputs, db=db)
         resolved = resolver.resolve()
 
-        manager = vm_manager or get_vm_manager()
-        vm = manager.get(name)
-        if not vm:
-            raise VMNotFoundError(f"VM '{name}' not found")
-
-        vm_dir = get_vm_dir_by_hash(vm.id)
-        # Get network name from network_id
         db_net = (
             MVMDatabase().get_network(vm.network_id) if vm.network_id else None
         )
@@ -1055,7 +1048,7 @@ class VMOperations:
     def cleanup_create_vm(self) -> None:
         pass
 
-    def inspect_vm(self, vm: VMInstance) -> VMInspectInfo:
+    def inspect_vm(self, vm: VMInstanceItem) -> VMInspectInfo:
         """Get detailed VM information.
 
         TODO: This is a placeholder. The logic was moved from VMController.inspect()
@@ -1146,7 +1139,7 @@ __all__ = [
 
 ## TO BE MIGRATED
 def _persist_failed_vm(
-    instance: VMInstance, manager: VMController | None
+    instance: VMInstanceItem, manager: VMController | None
 ) -> None:
     """Persist failed VM to DB. Called when skip_cleanup=True."""
     if manager is None:
@@ -1221,7 +1214,7 @@ def _cleanup_ssh_known_hosts(ipv4: str) -> None:
 
 
 def _perform_removal_cleanup(
-    vm: VMInstance,
+    vm: VMInstanceItem,
     net_config: NetworkConfig | None,
     bridge: str,
     fast: bool = False,
@@ -1296,7 +1289,7 @@ def _perform_removal_cleanup(
 
 
 def _perform_removal_deregister(
-    vm: VMInstance,
+    vm: VMInstanceItem,
     vm_dir: Path,
     manager: VMController,
     fast: bool = False,
@@ -1382,7 +1375,7 @@ def remove_vm(
 
 
 def _perform_bulk_cleanup(
-    targets: list[VMInstance],
+    targets: list[VMInstanceItem],
     manager: VMController,
     cache_dir: Path,
 ) -> None:
@@ -1452,7 +1445,7 @@ def cleanup_vms(
     all_vms: bool = False,
     dry_run: bool = False,
     vm_manager: VMController | None = None,
-) -> list[VMInstance]:
+) -> list[VMInstanceItem]:
     """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules.
 
     This is the orchestrator function that coordinates bulk VM cleanup
@@ -1512,7 +1505,7 @@ def export_vm_config(name: str) -> "VMExportConfig":
     )
     from mvmctl.core.metadata import list_image_entries, list_kernel_entries
 
-    from mvmctl.models.vm_config_file import (
+    from mvmctl.api.inputs import (
         VMExportBinaryConfig,
         VMExportBootConfig,
         VMExportCloudInitConfig,
@@ -1635,7 +1628,7 @@ def export_vm_config(name: str) -> "VMExportConfig":
     network_ip = vm.ipv4
     network_mac = vm.mac
 
-    from mvmctl.models.vm_config_file import VMExportConfig
+    from mvmctl.api.inputs import VMExportConfig
 
     return VMExportConfig(
         name=vm.name,

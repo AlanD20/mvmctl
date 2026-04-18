@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
-from mvmctl.db.models import HostState, HostStateChange
+from mvmctl.models.host import HostStateChangeItem, HostStateItem
 
 
 class HostRepository:
@@ -12,15 +12,17 @@ class HostRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    def get_state(self) -> HostState | None:
+    def get_state(self) -> HostStateItem | None:
         """Return the singleton host state row, or None if not yet initialized."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM host_state WHERE id = 1").fetchone()
+            row = conn.execute(
+                "SELECT * FROM host_state WHERE id = 1"
+            ).fetchone()
         if row is None:
             return None
-        return HostState(**dict(row))
+        return HostStateItem(**dict(row))
 
-    def initialize_state(self) -> HostState:
+    def initialize_state(self) -> HostStateItem:
         """Insert the singleton host state row (id=1) if it doesn't exist."""
         with self._db.connect() as conn:
             conn.execute(
@@ -48,7 +50,11 @@ class HostRepository:
 
     def update_component(self, component: str, value: bool) -> None:
         """Update a single host initialization component flag."""
-        allowed = {"mvm_group_created", "sudoers_configured", "default_network_created"}
+        allowed = {
+            "mvm_group_created",
+            "sudoers_configured",
+            "default_network_created",
+        }
         if component not in allowed:
             raise ValueError(f"Unknown host state component: {component!r}")
         with self._db.connect() as conn:
@@ -72,7 +78,7 @@ class HostRepository:
                 """
             )
 
-    def add_change(self, change: HostStateChange) -> None:
+    def add_change(self, change: HostStateChangeItem) -> None:
         """Record a host configuration change made during mvm host init."""
         with self._db.connect() as conn:
             conn.execute(
@@ -99,7 +105,7 @@ class HostRepository:
 
     def list_changes(
         self, session_id: str | None = None, include_reverted: bool = True
-    ) -> list[HostStateChange]:
+    ) -> list[HostStateChangeItem]:
         """Return host state changes, optionally filtered by session."""
         query = "SELECT * FROM host_state_changes"
         params: list[object] = []
@@ -117,10 +123,13 @@ class HostRepository:
 
         with self._db.connect() as conn:
             rows = conn.execute(query, params).fetchall()
-        return [HostStateChange(**dict(row)) for row in rows]
+        return [HostStateChangeItem(**dict(row)) for row in rows]
 
     def mark_change_reverted(
-        self, change_id: int, reverted_at: str, revert_mechanism: str | None = None
+        self,
+        change_id: int,
+        reverted_at: str,
+        revert_mechanism: str | None = None,
     ) -> None:
         """Mark a single host change as reverted."""
         with self._db.connect() as conn:
@@ -133,9 +142,13 @@ class HostRepository:
                 (reverted_at, revert_mechanism, change_id),
             )
 
-    def revert_changes(self, session_id: str, reverted_at: str) -> list[HostStateChange]:
+    def revert_changes(
+        self, session_id: str, reverted_at: str
+    ) -> list[HostStateChangeItem]:
         """Mark all unreverted changes for a session as reverted (LIFO order)."""
-        changes = self.list_changes(session_id=session_id, include_reverted=False)
+        changes = self.list_changes(
+            session_id=session_id, include_reverted=False
+        )
         for change in reversed(changes):
             if change.id is not None:
                 self.mark_change_reverted(change.id, reverted_at)

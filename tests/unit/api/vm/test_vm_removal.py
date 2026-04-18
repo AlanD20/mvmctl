@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from mvmctl.api.vm._removal import VMBulkCleanupContext, VMRemovalContext
-from mvmctl.models.network import NetworkConfig
+from mvmctl.api.inputs import NetworkConfig
 from mvmctl.models.vm import VMInstance, VMStatus
 
 

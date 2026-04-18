@@ -1,33 +1,34 @@
 """Database module for mvmctl.
 
-Internal database implementation — only used via core/mvm_db.py.
+Internal database implementation — only used via core/_internal/_db.py.
 No other file may import from this module directly.
+
+Dataclass models (Binary, Image, Kernel, Network, VMInstance, etc.) have been
+migrated to domain-specific files in mvmctl.models/. This module now only
+re-exports the MigrationRunner and enum classes retained for archive code
+compatibility.
 """
 
 from .migrations.runner import MigrationRunner
 from .models import (
-    Binary,
-    HostState,
-    HostStateChange,
-    Image,
-    IPTablesRule,
+    IPTablesChain,
+    IPTablesPort,
+    IPTablesProtocol,
     IPTablesRuleType,
-    Kernel,
-    Network,
-    NetworkLease,
-    VMInstance,
+    IPTablesTable,
+    IPTablesTarget,
+    IPTablesWildcard,
 )
 
 __all__ = [
     "MigrationRunner",
-    "Image",
-    "Kernel",
-    "Binary",
-    "Network",
-    "NetworkLease",
-    "VMInstance",
-    "HostState",
-    "HostStateChange",
-    "IPTablesRule",
+    # Enums retained for archive code compatibility.
+    # New code should import from mvmctl.models.network instead.
+    "IPTablesChain",
+    "IPTablesPort",
+    "IPTablesProtocol",
     "IPTablesRuleType",
+    "IPTablesTable",
+    "IPTablesTarget",
+    "IPTablesWildcard",
 ]

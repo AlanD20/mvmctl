@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
-from mvmctl.db.models import Kernel
+from mvmctl.models.kernel import KernelItem
 
 
 class KernelRepository:
@@ -12,27 +12,33 @@ class KernelRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    def get(self, kernel_id: str) -> Kernel | None:
+    def get(self, kernel_id: str) -> KernelItem | None:
         """Return a kernel by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM kernels WHERE id = ?", (kernel_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM kernels WHERE id = ?", (kernel_id,)
+            ).fetchone()
         if row is None:
             return None
-        return Kernel(**dict(row))
+        return KernelItem(**dict(row))
 
-    def find_by_prefix(self, prefix: str) -> list[Kernel]:
+    def find_by_prefix(self, prefix: str) -> list[KernelItem]:
         """Return all kernels whose ID starts with prefix."""
         with self._db.connect() as conn:
-            rows = conn.execute("SELECT * FROM kernels WHERE id LIKE ?", (f"{prefix}%",)).fetchall()
-        return [Kernel(**dict(row)) for row in rows]
+            rows = conn.execute(
+                "SELECT * FROM kernels WHERE id LIKE ?", (f"{prefix}%",)
+            ).fetchall()
+        return [KernelItem(**dict(row)) for row in rows]
 
-    def list_all(self) -> list[Kernel]:
+    def list_all(self) -> list[KernelItem]:
         """Return all kernels."""
         with self._db.connect() as conn:
-            rows = conn.execute("SELECT * FROM kernels ORDER BY created_at").fetchall()
-        return [Kernel(**dict(row)) for row in rows]
+            rows = conn.execute(
+                "SELECT * FROM kernels ORDER BY created_at"
+            ).fetchall()
+        return [KernelItem(**dict(row)) for row in rows]
 
-    def upsert(self, kernel: Kernel) -> None:
+    def upsert(self, kernel: KernelItem) -> None:
         """Insert or replace a kernel record."""
         with self._db.connect() as conn:
             conn.execute(
@@ -75,26 +81,34 @@ class KernelRepository:
         with self._db.connect() as conn:
             conn.execute("BEGIN")
             conn.execute("UPDATE kernels SET is_default = 0")
-            conn.execute("UPDATE kernels SET is_default = 1 WHERE id = ?", (kernel_id,))
+            conn.execute(
+                "UPDATE kernels SET is_default = 1 WHERE id = ?", (kernel_id,)
+            )
             conn.execute("COMMIT")
 
-    def get_default(self) -> Kernel | None:
+    def get_default(self) -> KernelItem | None:
         """Return the default kernel entry, or None if not set."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM kernels WHERE is_default = 1 LIMIT 1").fetchone()
+            row = conn.execute(
+                "SELECT * FROM kernels WHERE is_default = 1 LIMIT 1"
+            ).fetchone()
         if row is None:
             return None
-        return Kernel(**dict(row))
+        return KernelItem(**dict(row))
 
-    def get_by_name(self, name: str) -> Kernel | None:
+    def get_by_name(self, name: str) -> KernelItem | None:
         """Return a kernel by its name, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM kernels WHERE name = ? LIMIT 1", (name,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM kernels WHERE name = ? LIMIT 1", (name,)
+            ).fetchone()
         if row is None:
             return None
-        return Kernel(**dict(row))
+        return KernelItem(**dict(row))
 
-    def get_by_version_and_type(self, version: str, type: str) -> Kernel | None:
+    def get_by_version_and_type(
+        self, version: str, type: str
+    ) -> KernelItem | None:
         """Return a kernel by its version and type, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
@@ -103,4 +117,4 @@ class KernelRepository:
             ).fetchone()
         if row is None:
             return None
-        return Kernel(**dict(row))
+        return KernelItem(**dict(row))

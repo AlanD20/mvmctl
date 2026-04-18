@@ -9,7 +9,7 @@ from mvmctl.core._internal._db import Database
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import VMRequestError
-from mvmctl.models.vm import VMInstance
+from mvmctl.models.vm import VMInstanceItem
 from mvmctl.utils.validation import validate_ipv4_address, validate_mac
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ class VMInput:
 class ResolvedVMRequest:
     """Immutable resolved VM request - contains the VM instance."""
 
-    vms: list[VMInstance]
+    vms: list[VMInstanceItem]
     # Allow for future expansion with additional resolved fields
     extra: dict = field(default_factory=dict)
 
@@ -57,13 +57,13 @@ class VMRequest:
         return self._result
 
     def resolve(self) -> ResolvedVMRequest:
-        """Resolve the VM identifier to a VMInstance.
+        """Resolve the VM identifier to a VMInstanceItem.
 
         Args:
             db: Optional Database instance
 
         Returns:
-            ResolvedVMRequest with the resolved VMInstance
+            ResolvedVMRequest with the resolved VMInstanceItem
 
         Raises:
             VMNotFoundError: If VM cannot be found

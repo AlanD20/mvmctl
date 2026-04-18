@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
-from mvmctl.db.models import SSHKey
+from mvmctl.models.key import SSHKeyItem
 
 
 class KeyRepository:
@@ -12,45 +12,52 @@ class KeyRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    def get(self, key_id: str) -> SSHKey | None:
+    def get(self, key_id: str) -> SSHKeyItem | None:
         """Return an SSH key by its ID (fingerprint), or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM ssh_keys WHERE id = ?", (key_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM ssh_keys WHERE id = ?", (key_id,)
+            ).fetchone()
         if row is None:
             return None
-        return SSHKey(**dict(row))
+        return SSHKeyItem(**dict(row))
 
-    def get_by_name(self, name: str) -> SSHKey | None:
+    def get_by_name(self, name: str) -> SSHKeyItem | None:
         """Return an SSH key by name, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM ssh_keys WHERE name = ?", (name,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM ssh_keys WHERE name = ?", (name,)
+            ).fetchone()
         if row is None:
             return None
-        return SSHKey(**dict(row))
+        return SSHKeyItem(**dict(row))
 
-    def find_by_prefix(self, prefix: str) -> list[SSHKey]:
+    def find_by_prefix(self, prefix: str) -> list[SSHKeyItem]:
         """Return all SSH keys whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM ssh_keys WHERE id LIKE ?", (f"{prefix}%",)
             ).fetchall()
-        return [SSHKey(**dict(row)) for row in rows]
+        return [SSHKeyItem(**dict(row)) for row in rows]
 
-    def find_by_fingerprint_prefix(self, prefix: str) -> list[SSHKey]:
+    def find_by_fingerprint_prefix(self, prefix: str) -> list[SSHKeyItem]:
         """Return all SSH keys whose fingerprint starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM ssh_keys WHERE fingerprint LIKE ?", (f"{prefix}%",)
+                "SELECT * FROM ssh_keys WHERE fingerprint LIKE ?",
+                (f"{prefix}%",),
             ).fetchall()
-        return [SSHKey(**dict(row)) for row in rows]
+        return [SSHKeyItem(**dict(row)) for row in rows]
 
-    def list_all(self) -> list[SSHKey]:
+    def list_all(self) -> list[SSHKeyItem]:
         """Return all SSH keys."""
         with self._db.connect() as conn:
-            rows = conn.execute("SELECT * FROM ssh_keys ORDER BY created_at").fetchall()
-        return [SSHKey(**dict(row)) for row in rows]
+            rows = conn.execute(
+                "SELECT * FROM ssh_keys ORDER BY created_at"
+            ).fetchall()
+        return [SSHKeyItem(**dict(row)) for row in rows]
 
-    def upsert(self, key: SSHKey) -> None:
+    def upsert(self, key: SSHKeyItem) -> None:
         """Insert or replace an SSH key record."""
         with self._db.connect() as conn:
             conn.execute(
@@ -98,21 +105,25 @@ class KeyRepository:
         with self._db.connect() as conn:
             conn.execute("BEGIN")
             conn.execute("UPDATE ssh_keys SET is_default = 0")
-            conn.execute("UPDATE ssh_keys SET is_default = 1 WHERE id = ?", (key_id,))
+            conn.execute(
+                "UPDATE ssh_keys SET is_default = 1 WHERE id = ?", (key_id,)
+            )
             conn.execute("COMMIT")
 
-    def get_default(self) -> SSHKey | None:
+    def get_default(self) -> SSHKeyItem | None:
         """Return the default SSH key entry, or None if not set."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM ssh_keys WHERE is_default = 1 LIMIT 1").fetchone()
+            row = conn.execute(
+                "SELECT * FROM ssh_keys WHERE is_default = 1 LIMIT 1"
+            ).fetchone()
         if row is None:
             return None
-        return SSHKey(**dict(row))
+        return SSHKeyItem(**dict(row))
 
-    def get_defaults(self) -> list[SSHKey]:
+    def get_defaults(self) -> list[SSHKeyItem]:
         """Return all SSH keys marked as default."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM ssh_keys WHERE is_default = 1 ORDER BY created_at"
             ).fetchall()
-        return [SSHKey(**dict(row)) for row in rows]
+        return [SSHKeyItem(**dict(row)) for row in rows]

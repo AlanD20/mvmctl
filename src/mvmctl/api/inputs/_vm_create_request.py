@@ -7,7 +7,8 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+from mvmctl.models.cloud_init import CloudInitMode
 
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
@@ -38,7 +39,6 @@ from mvmctl.core.key._service import KeyService
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.core.vm._firecracker import DriveConfig
-from mvmctl.db.models import Binary, Image, Kernel, Network
 from mvmctl.exceptions import (
     BinaryNotFoundError,
     CloudInitModeError,
@@ -47,7 +47,10 @@ from mvmctl.exceptions import (
     NetworkNotFoundError,
     VMCreateError,
 )
-from mvmctl.models.cloud_init import CloudInitMode
+from mvmctl.models.binary import BinaryItem
+from mvmctl.models.image import ImageItem
+from mvmctl.models.kernel import KernelItem
+from mvmctl.models.network import NetworkItem
 from mvmctl.utils.disk_size import parse_disk_size
 from mvmctl.utils.validation import (
     validate_boot_arg_component,
@@ -107,10 +110,10 @@ class ResolvedVMCreateRequest:
     vcpu_count: int
     mem_size_mib: int
     user: str
-    network: Network
-    image: Image
-    kernel: Kernel
-    binary: Binary
+    network: NetworkItem
+    image: ImageItem
+    kernel: KernelItem
+    binary: BinaryItem
     network_prefix_len: int
     cloud_init_mode: CloudInitMode
     skip_ci_network_config: bool
@@ -346,7 +349,7 @@ class VMCreateRequest:
         if self._result.lsm_flags is not None:
             validate_boot_arg_component(self._result.lsm_flags, "lsm_flags")
 
-    def _resolve_image(self) -> Image:
+    def _resolve_image(self) -> ImageItem:
         """Resolve image to path, ID, fs_uuid, and fs_type."""
 
         if self._inputs.image_path is not None:
@@ -368,7 +371,7 @@ class VMCreateRequest:
 
         return image
 
-    def _resolve_kernel(self) -> Kernel:
+    def _resolve_kernel(self) -> KernelItem:
         """Resolve kernel to path and ID."""
 
         if self._inputs.kernel_path is not None:
@@ -389,7 +392,7 @@ class VMCreateRequest:
 
         return kernel
 
-    def _resolve_network(self) -> Network:
+    def _resolve_network(self) -> NetworkItem:
         """Resolve network to name and ID."""
 
         network = (
@@ -407,7 +410,7 @@ class VMCreateRequest:
 
         return network
 
-    def _resolve_binary(self) -> Binary:
+    def _resolve_binary(self) -> BinaryItem:
         """Resolve firecracker binary to path and ID."""
 
         fc_binary = (

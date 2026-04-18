@@ -19,7 +19,7 @@ from mvmctl.api.vm._orchestration import (
 )
 from mvmctl.exceptions import VMCreateError
 from mvmctl.models.cloud_init import CloudInitMode
-from mvmctl.models.network import NetworkConfig
+from mvmctl.api.inputs import NetworkConfig
 
 
 # =============================================================================

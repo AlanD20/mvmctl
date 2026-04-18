@@ -1,109 +1,127 @@
+"""Network data models."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, TypedDict
+from dataclasses import dataclass
+from enum import Enum
 
-if TYPE_CHECKING:
-    from mvmctl.db.models import Network as DBNetwork
-
-
-@dataclass
-class NetworkLease:
-    vm_id: str
-    ipv4: str
+from mvmctl.constants import (
+    MVM_FORWARD_CHAIN,
+    MVM_NOCLOUD_NET_INPUT_CHAIN,
+    MVM_POSTROUTING_CHAIN,
+)
 
 
-@dataclass
-class NetworkConfig:
-    name: str
-    subnet: str
-    ipv4_gateway: str
-    bridge: str
-    nat_enabled: bool = True
-    nat_gateways: list[str] = field(default_factory=list)
-    created_at: str = field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
-    is_default: bool = False
+class IPTablesTable(str, Enum):
+    FILTER = "filter"
+    NAT = "nat"
+    MANGLE = "mangle"
+    RAW = "raw"
+    SECURITY = "security"
 
 
-@dataclass
-class NetworkInspectInfo:
-    """Complete inspection output for a network."""
-
-    name: str
-    subnet: str
-    ipv4_gateway: str
-    bridge: str
-    nat_enabled: bool
-    nat_gateways: list[str]
-    created_at: str
-    bridge_exists: bool
-    vms: list[dict[str, Any]]  # vm_id, ipv4, status, pid
+class IPTablesChain(str, Enum):
+    MVM_FORWARD = MVM_FORWARD_CHAIN
+    MVM_POSTROUTING = MVM_POSTROUTING_CHAIN
+    MVM_NOCLOUDNET_INPUT = MVM_NOCLOUD_NET_INPUT_CHAIN
 
 
-class LeaseEntry(TypedDict):
-    """Dict shape for network lease data from metadata files."""
+class IPTablesRuleType(str, Enum):
+    MASQUERADE = "masquerade"
+    FORWARD_IN = "forward_in"
+    FORWARD_OUT = "forward_out"
+    NOCLOUDNET_INPUT = "nocloudnet_input"
 
-    vm_id: str
-    ipv4: str
-    assigned_at: str | None
+
+class IPTablesProtocol(str, Enum):
+    TCP = "tcp"
+    UDP = "udp"
+    ICMP = "icmp"
+    ALL = "all"
 
 
-class NetworkEntry(TypedDict, total=False):
-    """Dict shape for network metadata entries."""
+class IPTablesTarget(str, Enum):
+    ACCEPT = "ACCEPT"
+    DROP = "DROP"
+    REJECT = "REJECT"
+    MASQUERADE = "MASQUERADE"
+    LOG = "LOG"
+    MARK = "MARK"
 
-    name: str
-    subnet: str
-    ipv4_gateway: str
-    bridge: str
-    nat_enabled: bool
-    nat_gateways: list[str]
-    created_at: str
-    is_default: bool
-    leases: list[dict[str, Any]]
-    bridge_active: bool
+
+class IPTablesWildcard(str, Enum):
+    ANY_CIDR = "0.0.0.0/0"
+    ANY_INTERFACE = "*"
+
+
+class IPTablesPort(int, Enum):
+    ANY = 0
 
 
 @dataclass
 class NetworkItem:
+    """Network record — maps to networks table."""
+
     id: str
     name: str
     subnet: str
     bridge: str
     ipv4_gateway: str
-    bridge_active: bool = False
+    bridge_active: bool
+    nat_enabled: bool
+    is_default: bool
+    created_at: str
+    updated_at: str
+
+    full_name: str | None = None
     nat_gateways: str | None = None
-    nat_enabled: bool = False
-    is_default: bool = False
+
+    # Resolved relations
+    leases: list[NetworkLeaseItem] | None = None
+    iptables_rules: list[IPTablesRuleItem] | None = None
+
+    @property
+    def nat_gateways_list(self) -> list[str]:
+        """Return nat_gateways as a list of strings."""
+        if not self.nat_gateways:
+            return []
+        return [gw.strip() for gw in self.nat_gateways.split(",") if gw.strip()]
+
+
+@dataclass
+class NetworkLeaseItem:
+    """Network lease record — maps to network_leases table."""
+
+    network_id: str
+    ipv4: str
+    leased_at: str
+
+    id: int | None = None
+    vm_id: str | None = None
+    expires_at: str | None = None
+
+
+@dataclass
+class IPTablesRuleItem:
+    """IPTables rule record — maps to iptables_rules table."""
+
+    table_name: IPTablesTable
+    chain_name: str
+    rule_type: IPTablesRuleType
+    protocol: IPTablesProtocol
+    source: str
+    destination: str
+    in_interface: str
+    out_interface: str
+    target: IPTablesTarget
+    sport: int
+    dport: int
+    network_id: str
+    is_active: bool
+
+    id: int | None = None
+    network_name: str | None = None
+    comment_tag: str | None = None
+    command_string: str | None = None
     created_at: str | None = None
-    updated_at: str | None = None
-
-    @classmethod
-    def from_db(cls, record: "DBNetwork") -> "NetworkItem":
-        return cls(
-            id=record.id,
-            name=record.name,
-            subnet=record.subnet,
-            bridge=record.bridge,
-            ipv4_gateway=record.ipv4_gateway,
-            bridge_active=record.bridge_active,
-            nat_gateways=record.nat_gateways,
-            nat_enabled=record.nat_enabled,
-            is_default=record.is_default,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "network_id": self.id,
-            "subnet": self.subnet,
-            "bridge": self.bridge,
-            "ipv4_gateway": self.ipv4_gateway,
-            "bridge_active": self.bridge_active,
-            "nat_gateways": self.nat_gateways.split(",") if self.nat_gateways else [],
-            "nat_enabled": self.nat_enabled,
-            "is_default": 1 if self.is_default else 0,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
+    last_verified_at: str | None = None

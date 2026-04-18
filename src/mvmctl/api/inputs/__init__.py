@@ -1,16 +1,38 @@
-"""Input resolution layer for VM operations.
+"""Input resolution layer for API boundary.
 
-This module provides Request classes that resolve CLI input into
-explicit domain objects for orchestration.
+This module provides Input/Request/Config classes that represent
+API boundary contracts — raw CLI arguments, resolved requests,
+and portable export configurations.
 """
 
 from __future__ import annotations
 
+from mvmctl.api.inputs._image_input import (
+    ImageFetchInput,
+    ImageImportInput,
+)
+from mvmctl.api.inputs._kernel_input import KernelFetchInput
+from mvmctl.api.inputs._key_input import KeyCreateInput
+from mvmctl.api.inputs._network_input import (
+    NetworkConfig,
+    NetworkCreateInput,
+)
 from mvmctl.api.inputs._vm_create_request import (
     CloudInitModeResolved,
     ResolvedVMCreateRequest,
     VMCreateInput,
     VMCreateRequest,
+)
+from mvmctl.api.inputs._vm_export_config import (
+    VMExportBinaryConfig,
+    VMExportBootConfig,
+    VMExportCloudInitConfig,
+    VMExportComputeConfig,
+    VMExportConfig,
+    VMExportFirecrackerConfig,
+    VMExportImageConfig,
+    VMExportKernelConfig,
+    VMExportNetworkConfig,
 )
 from mvmctl.api.inputs._vm_request import (
     ResolvedVMRequest,
@@ -20,10 +42,25 @@ from mvmctl.api.inputs._vm_request import (
 
 __all__ = [
     "CloudInitModeResolved",
+    "ImageFetchInput",
+    "ImageImportInput",
+    "KernelFetchInput",
+    "KeyCreateInput",
+    "NetworkConfig",
+    "NetworkCreateInput",
     "ResolvedVMCreateRequest",
     "ResolvedVMRequest",
     "VMCreateInput",
     "VMCreateRequest",
+    "VMExportBinaryConfig",
+    "VMExportBootConfig",
+    "VMExportCloudInitConfig",
+    "VMExportComputeConfig",
+    "VMExportConfig",
+    "VMExportFirecrackerConfig",
+    "VMExportImageConfig",
+    "VMExportKernelConfig",
+    "VMExportNetworkConfig",
     "VMInput",
     "VMRequest",
 ]

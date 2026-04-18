@@ -9,11 +9,10 @@ from __future__ import annotations
 import ipaddress
 
 from mvmctl.core._internal._db import Database
-from mvmctl.core.network._repository import LeaseRepository
+from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
-from mvmctl.db.models import Network as DBNetwork
 from mvmctl.exceptions import NetworkError
-from mvmctl.models import NetworkLease
+from mvmctl.models.network import NetworkItem, NetworkLeaseItem
 
 
 class LeaseService:
@@ -30,14 +29,16 @@ class LeaseService:
         NetworkNotFoundError: If the network cannot be resolved.
     """
 
-    def __init__(self, entity: str | DBNetwork, db: Database | None = None) -> None:
+    def __init__(
+        self, entity: str | NetworkItem, db: Database | None = None
+    ) -> None:
         self._db = db if db is not None else Database()
         self._lease_repo = LeaseRepository(self._db)
 
-        if isinstance(entity, DBNetwork):
+        if isinstance(entity, NetworkItem):
             self._network = entity
         else:
-            self._resolver = NetworkResolver(self._db)
+            self._resolver = NetworkResolver(NetworkRepository(self._db))
             self._network = self._resolver.resolve(entity)
 
     @property
@@ -50,40 +51,67 @@ class LeaseService:
         """Get the resolved network name."""
         return self._network.name
 
-    def get_leases(self) -> list[NetworkLease]:
+    def get_leases(self) -> list[NetworkLeaseItem]:
         """Get all IP leases for this network.
 
         Returns:
-            List of NetworkLease objects for the network.
+            List of NetworkLeaseItem objects for the network.
         """
         db_leases = self._lease_repo.list_all(self._network.id)
-        return [NetworkLease(vm_id=lease.vm_id or "", ipv4=lease.ipv4) for lease in db_leases]
+        return [
+            NetworkLeaseItem(
+                network_id=lease.network_id,
+                ipv4=lease.ipv4,
+                vm_id=lease.vm_id,
+                id=lease.id,
+                leased_at=lease.leased_at,
+                expires_at=lease.expires_at,
+            )
+            for lease in db_leases
+        ]
 
-    def get(self, ip: str) -> NetworkLease | None:
+    def get(self, ip: str) -> NetworkLeaseItem | None:
         """Get lease for a specific IP address.
 
         Args:
             ip: IP address to look up.
 
         Returns:
-            NetworkLease if found, None otherwise.
+            NetworkLeaseItem if found, None otherwise.
         """
         lease = self._lease_repo.get(self._network.id, ip)
         if lease is None:
             return None
-        return NetworkLease(vm_id=lease.vm_id or "", ipv4=lease.ipv4)
+        return NetworkLeaseItem(
+            network_id=lease.network_id,
+            ipv4=lease.ipv4,
+            vm_id=lease.vm_id,
+            id=lease.id,
+            leased_at=lease.leased_at,
+            expires_at=lease.expires_at,
+        )
 
-    def get_by_vm_id(self, vm_id: str) -> list[NetworkLease]:
+    def get_by_vm_id(self, vm_id: str) -> list[NetworkLeaseItem]:
         """Get all leases for a specific VM on this network.
 
         Args:
             vm_id: VM ID to look up.
 
         Returns:
-            List of NetworkLease objects for the VM.
+            List of NetworkLeaseItem objects for the VM.
         """
         db_leases = self._lease_repo.list_by_vm(self._network.id, vm_id)
-        return [NetworkLease(vm_id=lease.vm_id or "", ipv4=lease.ipv4) for lease in db_leases]
+        return [
+            NetworkLeaseItem(
+                network_id=lease.network_id,
+                ipv4=lease.ipv4,
+                vm_id=lease.vm_id,
+                id=lease.id,
+                leased_at=lease.leased_at,
+                expires_at=lease.expires_at,
+            )
+            for lease in db_leases
+        ]
 
     def is_available(self, ip: str) -> bool:
         """Check if an IP address is available (not leased).
@@ -147,12 +175,16 @@ class LeaseService:
         try:
             ip_obj = ipaddress.IPv4Address(ip)
             if ip_obj not in network:
-                raise NetworkError(f"IP {ip} is not in subnet {self._network.subnet}")
+                raise NetworkError(
+                    f"IP {ip} is not in subnet {self._network.subnet}"
+                )
         except ValueError as exc:
             raise NetworkError(f"Invalid IP address: {ip}") from exc
 
         if ip == self._network.ipv4_gateway:
-            raise NetworkError(f"IP {ip} is the network gateway and cannot be allocated")
+            raise NetworkError(
+                f"IP {ip} is the network gateway and cannot be allocated"
+            )
 
         if not self.is_available(ip):
             raise NetworkError(f"IP {ip} is already leased")

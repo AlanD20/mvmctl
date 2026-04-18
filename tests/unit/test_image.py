@@ -30,7 +30,8 @@ from mvmctl.core.image import (
     load_images_config,
 )
 from mvmctl.exceptions import ChecksumMismatchError, ConfigError, ImageError, MVMError
-from mvmctl.models.image import ImageImportInput, ImageSpec
+from mvmctl.api.inputs import ImageImportInput
+from mvmctl.models.image import ImageSpec
 
 # ---------------------------------------------------------------------------
 # _calculate_minimum_image_size_mb

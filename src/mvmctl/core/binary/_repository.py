@@ -1,9 +1,9 @@
-"""Binary database operations - Repository Pattern implementation."""
+"""BinaryItem database operations - Repository Pattern implementation."""
 
 from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
-from mvmctl.db.models import Binary
+from mvmctl.models.binary import BinaryItem
 
 
 class BinaryRepository:
@@ -12,37 +12,44 @@ class BinaryRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    def get(self, binary_id: str) -> Binary | None:
+    def get(self, binary_id: str) -> BinaryItem | None:
         """Return a binary by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM binaries WHERE id = ?", (binary_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM binaries WHERE id = ?", (binary_id,)
+            ).fetchone()
         if row is None:
             return None
-        return Binary(**dict(row))
+        return BinaryItem(**dict(row))
 
-    def find_by_prefix(self, prefix: str) -> list[Binary]:
+    def find_by_prefix(self, prefix: str) -> list[BinaryItem]:
         """Return all binaries whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM binaries WHERE id LIKE ?", (f"{prefix}%",)
             ).fetchall()
-        return [Binary(**dict(row)) for row in rows]
+        return [BinaryItem(**dict(row)) for row in rows]
 
-    def list_all(self) -> list[Binary]:
+    def list_all(self) -> list[BinaryItem]:
         """Return all binaries."""
         with self._db.connect() as conn:
-            rows = conn.execute("SELECT * FROM binaries ORDER BY created_at").fetchall()
-        return [Binary(**dict(row)) for row in rows]
+            rows = conn.execute(
+                "SELECT * FROM binaries ORDER BY created_at"
+            ).fetchall()
+        return [BinaryItem(**dict(row)) for row in rows]
 
-    def list_by_name(self, name: str) -> list[Binary]:
+    def list_by_name(self, name: str) -> list[BinaryItem]:
         """Return all binaries with a given name."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM binaries WHERE name = ? ORDER BY created_at", (name,)
+                "SELECT * FROM binaries WHERE name = ? ORDER BY created_at",
+                (name,),
             ).fetchall()
-        return [Binary(**dict(row)) for row in rows]
+        return [BinaryItem(**dict(row)) for row in rows]
 
-    def get_by_name_and_version(self, name: str, version: str) -> Binary | None:
+    def get_by_name_and_version(
+        self, name: str, version: str
+    ) -> BinaryItem | None:
         """Return a binary by its name and version, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
@@ -51,9 +58,9 @@ class BinaryRepository:
             ).fetchone()
         if row is None:
             return None
-        return Binary(**dict(row))
+        return BinaryItem(**dict(row))
 
-    def upsert(self, binary: Binary) -> None:
+    def upsert(self, binary: BinaryItem) -> None:
         """Insert or replace a binary record."""
         with self._db.connect() as conn:
             conn.execute(
@@ -103,7 +110,9 @@ class BinaryRepository:
         """Set a binary as default, clearing all others with the same name atomically."""
         with self._db.connect() as conn:
             conn.execute("BEGIN")
-            conn.execute("UPDATE binaries SET is_default = 0 WHERE name = ?", (name,))
+            conn.execute(
+                "UPDATE binaries SET is_default = 0 WHERE name = ?", (name,)
+            )
             conn.execute(
                 """
                 UPDATE binaries SET is_default = 1, updated_at = CURRENT_TIMESTAMP
@@ -113,7 +122,7 @@ class BinaryRepository:
             )
             conn.execute("COMMIT")
 
-    def get_default(self, name: str) -> Binary | None:
+    def get_default(self, name: str) -> BinaryItem | None:
         """Return the default binary entry for a given name, or None."""
         with self._db.connect() as conn:
             row = conn.execute(
@@ -122,4 +131,4 @@ class BinaryRepository:
             ).fetchone()
         if row is None:
             return None
-        return Binary(**dict(row))
+        return BinaryItem(**dict(row))

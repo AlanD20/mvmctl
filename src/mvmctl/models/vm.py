@@ -7,6 +7,11 @@ from enum import StrEnum, auto
 from pathlib import Path
 from typing import Any
 
+from mvmctl.models.binary import BinaryItem
+from mvmctl.models.image import ImageItem
+from mvmctl.models.kernel import KernelItem
+from mvmctl.models.network import NetworkItem
+
 
 class VMStatus(StrEnum):
     """VM lifecycle states."""
@@ -21,12 +26,12 @@ class VMStatus(StrEnum):
 
 
 @dataclass
-class VMInstance:
-    """VM instance state — maps to vm_instances database table."""
+class VMInstanceItem:
+    """VM instance record — maps to vm_instances table."""
 
     id: str
     name: str
-    status: VMStatus
+    status: str
     pid: int
     ipv4: str
     mac: str
@@ -35,33 +40,36 @@ class VMInstance:
     image_id: str
     kernel_id: str
     binary_id: str
+    api_socket_path: str
     config_path: str
+    cloud_init_mode: str
     vcpu_count: int
     mem_size_mib: int
-    api_socket_path: str
     disk_size_mib: int
     rootfs_path: str
     rootfs_suffix: str
-    created_at: str
-    updated_at: str
     enable_pci: bool
     enable_logging: bool
     enable_metrics: bool
     enable_console: bool
-    cloud_init_mode: str
+    created_at: str
+    updated_at: str
 
-    log_path: str | None = None
-    serial_output_path: str | None = None
+    relay_socket_path: str | None = None
     nocloud_net_port: int | None = None
     nocloud_net_pid: int | None = None
-    relay_socket_path: str | None = None
     relay_pid: int | None = None
     exit_code: int | None = None
+    log_path: str | None = None
+    serial_output_path: str | None = None
     lsm_flags: str | None = None
     boot_args: str | None = None
 
-
-## FIXME: require migration
+    # Resolved relations
+    kernel: KernelItem | None = None
+    image: ImageItem | None = None
+    binary: BinaryItem | None = None
+    network: NetworkItem | None = None
 
 
 @dataclass

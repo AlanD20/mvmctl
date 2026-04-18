@@ -9,21 +9,21 @@ from typing import TYPE_CHECKING
 from mvmctl.constants import CONST_DIR_PERMS_CACHE, DEFAULT_CLOUD_INIT_ISO_NAME
 from mvmctl.core._internal._iptables_tracker import IPTablesTracker
 from mvmctl.core.cloudinit._manager import CloudInitManager
-from mvmctl.db.models import (
+from mvmctl.exceptions import CloudInitError, MVMError
+from mvmctl.models.network import (
     IPTablesChain,
     IPTablesPort,
     IPTablesProtocol,
-    IPTablesRule,
+    IPTablesRuleItem,
     IPTablesRuleType,
     IPTablesTable,
     IPTablesTarget,
     IPTablesWildcard,
+    NetworkItem,
 )
-from mvmctl.exceptions import CloudInitError, MVMError
 from mvmctl.services.nocloud_server.manager import NoCloudNetServerManager
 
 if TYPE_CHECKING:
-    from mvmctl.db.models import Network
     from mvmctl.models.cloud_init import CloudInitMode
 
 
@@ -41,7 +41,7 @@ class CloudInitProvisionConfig:
     guest_ip: str
     user: str
     tap_name: str
-    network: Network
+    network: NetworkItem
     network_prefix_len: int
     skip_network_config: bool
 
@@ -63,7 +63,7 @@ class CloudInitProvisionResult:
     nocloud_port: int = 0
     nocloud_pid: int | None = None
     nocloud_net_manager: NoCloudNetServerManager | None = None
-    nocloud_net_rules: list[IPTablesRule] = []
+    nocloud_net_rules: list[IPTablesRuleItem] = []
 
 
 class CloudInitProvisioner:
@@ -89,7 +89,9 @@ class CloudInitProvisioner:
             return self._provision_off()
 
         # Prepare the cloud-init configs
-        self._config.cloud_init_dir.mkdir(mode=CONST_DIR_PERMS_CACHE, exist_ok=True)
+        self._config.cloud_init_dir.mkdir(
+            mode=CONST_DIR_PERMS_CACHE, exist_ok=True
+        )
 
         self._manager.write_config_files()
 
@@ -111,7 +113,9 @@ class CloudInitProvisioner:
     def _provision_net(self) -> CloudInitProvisionResult:
         """Provision using nocloud-net mode with HTTP server."""
 
-        from mvmctl.services.nocloud_server.manager import NoCloudNetServerManager
+        from mvmctl.services.nocloud_server.manager import (
+            NoCloudNetServerManager,
+        )
 
         net_manager = NoCloudNetServerManager(
             id=self._config.vm_id,
@@ -125,9 +129,11 @@ class CloudInitProvisioner:
         url, port, pid = net_manager.start()
 
         iptables_tracker = IPTablesTracker()
-        iptables_tracker.ensure_chain(IPTablesChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT")
+        iptables_tracker.ensure_chain(
+            IPTablesChain.MVM_NOCLOUDNET_INPUT, auto_jump_from="INPUT"
+        )
 
-        nocloud_net_in_rule = IPTablesRule(
+        nocloud_net_in_rule = IPTablesRuleItem(
             table_name=IPTablesTable.FILTER,
             chain_name=IPTablesChain.MVM_NOCLOUDNET_INPUT,
             rule_type=IPTablesRuleType.NOCLOUDNET_INPUT,
@@ -164,16 +170,21 @@ class CloudInitProvisioner:
                     f"Custom cloud-init ISO not found: {self._config.cloud_init_iso_path}"
                 )
             return CloudInitProvisionResult(
-                mode=CloudInitMode.ISO, iso_path=self._config.cloud_init_iso_path
+                mode=CloudInitMode.ISO,
+                iso_path=self._config.cloud_init_iso_path,
             )
 
         iso_path = self._config.vm_dir / DEFAULT_CLOUD_INIT_ISO_NAME
         try:
             self._manager.create_seed_iso(self._config.cloud_init_dir, iso_path)
         except Exception as exc:
-            raise CloudInitError(f"Failed to create cloud-init ISO: {exc}") from exc
+            raise CloudInitError(
+                f"Failed to create cloud-init ISO: {exc}"
+            ) from exc
 
-        return CloudInitProvisionResult(mode=CloudInitMode.ISO, iso_path=iso_path)
+        return CloudInitProvisionResult(
+            mode=CloudInitMode.ISO, iso_path=iso_path
+        )
 
     def _provision_inject(self) -> CloudInitProvisionResult:
         """Provision using inject mode with direct rootfs injection."""
@@ -188,7 +199,9 @@ class CloudInitProvisioner:
                     break
 
         try:
-            inject_cloud_init(str(rootfs_path), str(self._config.cloud_init_dir))
+            inject_cloud_init(
+                str(rootfs_path), str(self._config.cloud_init_dir)
+            )
         except Exception as exc:
             raise CloudInitError(f"Direct injection failed: {exc}") from exc
 

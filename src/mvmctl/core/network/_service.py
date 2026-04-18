@@ -6,17 +6,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.core._internal._iptables_tracker import IPTablesTracker
-from mvmctl.db.models import (
+from mvmctl.exceptions import NetworkError
+from mvmctl.models.network import (
     IPTablesChain,
     IPTablesPort,
     IPTablesProtocol,
-    IPTablesRule,
+    IPTablesRuleItem,
     IPTablesRuleType,
     IPTablesTable,
     IPTablesTarget,
     IPTablesWildcard,
 )
-from mvmctl.exceptions import NetworkError
 from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
 if TYPE_CHECKING:
@@ -26,7 +26,14 @@ logger = logging.getLogger(__name__)
 
 
 # Excluded virtual interface prefixes when listing physical network interfaces
-_EXCLUDED_VIRTUAL_INTERFACE_PREFIXES = ("mvm-", "tap", "br-", "virbr", "docker", "veth")
+_EXCLUDED_VIRTUAL_INTERFACE_PREFIXES = (
+    "mvm-",
+    "tap",
+    "br-",
+    "virbr",
+    "docker",
+    "veth",
+)
 _EXCLUDED_INTERFACES = ("lo",)
 
 # MVM iptables chains configuration: (chain_enum, table_enum, jump_from_chain)
@@ -92,7 +99,10 @@ class NetworkService:
                 name = entry.name
                 if name in _EXCLUDED_INTERFACES:
                     continue
-                if any(name.startswith(prefix) for prefix in _EXCLUDED_VIRTUAL_INTERFACE_PREFIXES):
+                if any(
+                    name.startswith(prefix)
+                    for prefix in _EXCLUDED_VIRTUAL_INTERFACE_PREFIXES
+                ):
                     continue
                 interfaces.append(name)
 
@@ -115,7 +125,9 @@ class NetworkService:
                 check=True,
             )
         except subprocess.CalledProcessError:
-            logger.debug("Failed to detect outbound network interface", exc_info=True)
+            logger.debug(
+                "Failed to detect outbound network interface", exc_info=True
+            )
             return None
 
         for line in result.stdout.splitlines():
@@ -278,7 +290,9 @@ class NetworkService:
             self.remove_tap(tap, bridge)
 
         try:
-            self._run_ip_batch([f"link set {bridge} down", f"link delete {bridge} type bridge"])
+            self._run_ip_batch(
+                [f"link set {bridge} down", f"link delete {bridge} type bridge"]
+            )
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to teardown bridge {bridge}") from e
 
@@ -305,7 +319,7 @@ class NetworkService:
             context = f"{bridge}:{gateway_iface}"
 
             # MASQUERADE rule
-            masquerade_rule = IPTablesRule(
+            masquerade_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.NAT,
                 chain_name=IPTablesChain.MVM_POSTROUTING,
                 rule_type=IPTablesRuleType.MASQUERADE,
@@ -328,7 +342,7 @@ class NetworkService:
                 )
 
             # Forward out rule
-            forward_out_rule = IPTablesRule(
+            forward_out_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_OUT,
@@ -351,7 +365,7 @@ class NetworkService:
                 )
 
             # Forward in rule
-            forward_in_rule = IPTablesRule(
+            forward_in_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_IN,
@@ -430,7 +444,7 @@ class NetworkService:
         tracker = IPTablesTracker(db=self._db)
 
         for gateway_iface in effective_nat_gateways:
-            masquerade_rule = IPTablesRule(
+            masquerade_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.NAT,
                 chain_name=IPTablesChain.MVM_POSTROUTING,
                 rule_type=IPTablesRuleType.MASQUERADE,
@@ -448,7 +462,7 @@ class NetworkService:
             )
             tracker.remove_rule(masquerade_rule)
 
-            forward_out_rule = IPTablesRule(
+            forward_out_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_OUT,
@@ -466,7 +480,7 @@ class NetworkService:
             )
             tracker.remove_rule(forward_out_rule)
 
-            forward_in_rule = IPTablesRule(
+            forward_in_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_IN,
@@ -520,7 +534,9 @@ class NetworkService:
         if self.tap_exists(tap):
             current_bridge = self._get_tap_bridge(tap)
             if current_bridge == bridge:
-                logger.debug("TAP device %s already attached to bridge %s", tap, bridge)
+                logger.debug(
+                    "TAP device %s already attached to bridge %s", tap, bridge
+                )
             else:
                 if current_bridge:
                     logger.warning(
@@ -544,11 +560,18 @@ class NetworkService:
                 else:
                     try:
                         self._run_ip_batch(
-                            [f"link set {tap} master {bridge}", f"link set {tap} up"]
+                            [
+                                f"link set {tap} master {bridge}",
+                                f"link set {tap} up",
+                            ]
                         )
                     except subprocess.CalledProcessError as e:
-                        raise NetworkError(f"Failed to attach TAP {tap} to bridge {bridge}") from e
-                logger.info("TAP device %s reattached to bridge %s", tap, bridge)
+                        raise NetworkError(
+                            f"Failed to attach TAP {tap} to bridge {bridge}"
+                        ) from e
+                logger.info(
+                    "TAP device %s reattached to bridge %s", tap, bridge
+                )
         else:
             try:
                 self._run_ip_batch(
@@ -560,11 +583,13 @@ class NetworkService:
                 )
             except subprocess.CalledProcessError as e:
                 raise NetworkError(f"Failed to create TAP {tap}") from e
-            logger.info("TAP device %s created and attached to bridge %s", tap, bridge)
+            logger.info(
+                "TAP device %s created and attached to bridge %s", tap, bridge
+            )
 
         self.initialize()
 
-        forward_bridge_to_tap = IPTablesRule(
+        forward_bridge_to_tap = IPTablesRuleItem(
             table_name=IPTablesTable.FILTER,
             chain_name=IPTablesChain.MVM_FORWARD,
             rule_type=IPTablesRuleType.FORWARD_OUT,
@@ -580,13 +605,15 @@ class NetworkService:
             is_active=True,
             network_name=bridge,
         )
-        result = tracker.ensure_rule(forward_bridge_to_tap, context=f"tap:{tap}")
+        result = tracker.ensure_rule(
+            forward_bridge_to_tap, context=f"tap:{tap}"
+        )
         if not result.success:
             raise NetworkError(
                 f"Failed to add FORWARD rule for bridge {bridge} to TAP {tap}: {result.error_message}"
             )
 
-        forward_tap_to_bridge = IPTablesRule(
+        forward_tap_to_bridge = IPTablesRuleItem(
             table_name=IPTablesTable.FILTER,
             chain_name=IPTablesChain.MVM_FORWARD,
             rule_type=IPTablesRuleType.FORWARD_IN,
@@ -602,7 +629,9 @@ class NetworkService:
             is_active=True,
             network_name=bridge,
         )
-        result = tracker.ensure_rule(forward_tap_to_bridge, context=f"tap:{tap}")
+        result = tracker.ensure_rule(
+            forward_tap_to_bridge, context=f"tap:{tap}"
+        )
         if not result.success:
             tracker.remove_rule(forward_bridge_to_tap)
             raise NetworkError(
@@ -642,13 +671,18 @@ class NetworkService:
             logger.debug("TAP device %s does not exist, skipping removal", tap)
             return
 
-        effective_bridge = bridge if bridge is not None else self._get_tap_bridge(tap)
+        effective_bridge = (
+            bridge if bridge is not None else self._get_tap_bridge(tap)
+        )
         if effective_bridge is None:
-            logger.warning("Could not determine bridge for TAP %s, skipping rule cleanup", tap)
+            logger.warning(
+                "Could not determine bridge for TAP %s, skipping rule cleanup",
+                tap,
+            )
         else:
             tracker = IPTablesTracker(db=self._db)
 
-            forward_bridge_to_tap = IPTablesRule(
+            forward_bridge_to_tap = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_OUT,
@@ -666,7 +700,7 @@ class NetworkService:
             )
             tracker.remove_rule(forward_bridge_to_tap)
 
-            forward_tap_to_bridge = IPTablesRule(
+            forward_tap_to_bridge = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_IN,

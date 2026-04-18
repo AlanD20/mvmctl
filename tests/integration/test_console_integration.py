@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from mvmctl.constants import env_var
 from mvmctl.core import vm_lifecycle  # noqa: F401 - imported for patch resolution
 from mvmctl.models import VMInstance
-from mvmctl.models.network import NetworkConfig
+from mvmctl.api.inputs import NetworkConfig
 from mvmctl.models.vm import VMCreateInput
 
 

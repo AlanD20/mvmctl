@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 
 @dataclass
-class KeyCreateInput:
-    """Input model for SSH key creation."""
+class SSHKeyItem:
+    """SSH key record — maps to ssh_keys table."""
 
+    id: str
     name: str
-    output_dir: Path | None = None
-    comment: str | None = None
-    overwrite: bool = False
+    fingerprint: str
+    algorithm: str
+    comment: str
+    public_key_path: str
+    is_default: bool
+    created_at: str
+    updated_at: str
+
+    private_key_path: str | None = None

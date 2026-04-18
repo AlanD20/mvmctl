@@ -14,16 +14,16 @@ from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
-from mvmctl.db.models import (
+from mvmctl.exceptions import IPTablesTrackerError
+from mvmctl.models.network import (
     IPTablesChain,
     IPTablesPort,
     IPTablesProtocol,
-    IPTablesRule,
+    IPTablesRuleItem,
     IPTablesRuleType,
     IPTablesTable,
     IPTablesWildcard,
 )
-from mvmctl.exceptions import IPTablesTrackerError
 from mvmctl.utils.process import privileged_cmd
 
 if TYPE_CHECKING:
@@ -37,7 +37,7 @@ class IPTablesRuleResult:
     """Result of a rule operation."""
 
     success: bool
-    rule: Optional[IPTablesRule] = None
+    rule: Optional[IPTablesRuleItem] = None
     error_message: Optional[str] = None
     command_executed: Optional[list[str]] = None
 
@@ -76,7 +76,9 @@ class IPTablesTracker:
         """Initialize IPTablesTracker with optional database instance."""
         self._db = db if db is not None else Database()
 
-    def ensure_rule(self, rule: IPTablesRule, *, context: str = "") -> IPTablesRuleResult:
+    def ensure_rule(
+        self, rule: IPTablesRuleItem, *, context: str = ""
+    ) -> IPTablesRuleResult:
         """Idempotently ensure a rule exists in iptables and database.
 
         1. Check if rule exists in database by unique attributes
@@ -86,7 +88,7 @@ class IPTablesTracker:
         5. Return rule metadata
 
         Args:
-            rule: IPTablesRule dataclass containing all rule parameters.
+            rule: IPTablesRuleItem dataclass containing all rule parameters.
             context: Optional context string for comment (e.g., "nocloud:vm123").
 
         Returns:
@@ -94,7 +96,9 @@ class IPTablesTracker:
         """
         # Build comment if not already set
         if not rule.comment_tag:
-            rule.comment_tag = self._build_comment(rule.rule_type, rule.network_name or "", context)
+            rule.comment_tag = self._build_comment(
+                rule.rule_type, rule.network_name or "", context
+            )
 
         # Generate command strings
         check_args = self._build_iptables_args(rule, self.RuleAction.CHECK)
@@ -169,7 +173,7 @@ class IPTablesTracker:
             command_executed=add_args,
         )
 
-    def remove_rule(self, rule: IPTablesRule) -> IPTablesRuleResult:
+    def remove_rule(self, rule: IPTablesRuleItem) -> IPTablesRuleResult:
         """Remove a specific rule from iptables and mark as deleted in database.
 
         Best-effort removal - if rule doesn't exist in iptables, still returns success.
@@ -229,11 +233,17 @@ class IPTablesTracker:
 
     def _build_iptables_args(
         self,
-        rule: IPTablesRule,
+        rule: IPTablesRuleItem,
         action: RuleAction,
     ) -> list[str]:
         """Build iptables command arguments from rule specification."""
-        args = ["iptables", "-t", rule.table_name, action.value, rule.chain_name]
+        args = [
+            "iptables",
+            "-t",
+            rule.table_name,
+            action.value,
+            rule.chain_name,
+        ]
 
         # Only add -p flag if protocol is not ALL (wildcard)
         if rule.protocol != IPTablesProtocol.ALL:
@@ -316,7 +326,9 @@ class IPTablesTracker:
         cmd_create = ["iptables", "-t", table, "-N", chain_name_str]
         created = False
         try:
-            subprocess.run(privileged_cmd(cmd_create), check=True, capture_output=True)
+            subprocess.run(
+                privileged_cmd(cmd_create), check=True, capture_output=True
+            )
             logger.debug("Created iptables chain %s", chain_name_str)
             created = True
         except subprocess.CalledProcessError as e:
@@ -328,11 +340,15 @@ class IPTablesTracker:
             if "Chain already exists" in stderr:
                 logger.debug("Chain %s already exists", chain_name_str)
                 return False
-            raise IPTablesTrackerError(f"Failed to create {chain_name_str} chain") from e
+            raise IPTablesTrackerError(
+                f"Failed to create {chain_name_str} chain"
+            ) from e
 
         # Add jump rule if requested
         if created and auto_jump_from:
-            jump_result = self.ensure_jump_rule(auto_jump_from, chain_name_str, table, position)
+            jump_result = self.ensure_jump_rule(
+                auto_jump_from, chain_name_str, table, position
+            )
             if not jump_result.success:
                 raise IPTablesTrackerError(
                     f"Failed to add jump rule {auto_jump_from} -> {chain_name_str}: {jump_result.error_message}"
@@ -370,15 +386,31 @@ class IPTablesTracker:
         )
 
         if result.returncode == 0:
-            logger.debug("Jump rule %s -> %s already exists", from_chain, to_chain)
+            logger.debug(
+                "Jump rule %s -> %s already exists", from_chain, to_chain
+            )
             return IPTablesRuleResult(success=True)
 
         # Insert jump rule at specified position
-        cmd_insert = ["iptables", "-t", table, "-I", from_chain, str(position), "-j", to_chain]
+        cmd_insert = [
+            "iptables",
+            "-t",
+            table,
+            "-I",
+            from_chain,
+            str(position),
+            "-j",
+            to_chain,
+        ]
         try:
-            subprocess.run(privileged_cmd(cmd_insert), check=True, capture_output=True)
+            subprocess.run(
+                privileged_cmd(cmd_insert), check=True, capture_output=True
+            )
             logger.debug(
-                "Inserted jump rule %s -> %s at position %d", from_chain, to_chain, position
+                "Inserted jump rule %s -> %s at position %d",
+                from_chain,
+                to_chain,
+                position,
             )
             return IPTablesRuleResult(success=True, command_executed=cmd_insert)
         except subprocess.CalledProcessError as e:
@@ -387,12 +419,16 @@ class IPTablesTracker:
                 stderr = e.stderr.decode(errors="ignore")
             elif isinstance(e.stderr, str):
                 stderr = e.stderr
-            error_msg = f"Failed to add jump rule {from_chain} -> {to_chain}: {stderr}"
+            error_msg = (
+                f"Failed to add jump rule {from_chain} -> {to_chain}: {stderr}"
+            )
             logger.error(error_msg)
             return IPTablesRuleResult(success=False, error_message=error_msg)
 
     def flush_chain(
-        self, chain_name: IPTablesChain, table: IPTablesTable = IPTablesTable.FILTER
+        self,
+        chain_name: IPTablesChain,
+        table: IPTablesTable = IPTablesTable.FILTER,
     ) -> bool:
         """Flush all rules from an iptables chain and mark them deleted in DB.
 
@@ -417,20 +453,32 @@ class IPTablesTracker:
             check=False,
         )
         if result.returncode != 0:
-            logger.debug("Chain %s doesn't exist, nothing to flush", chain_name_str)
+            logger.debug(
+                "Chain %s doesn't exist, nothing to flush", chain_name_str
+            )
             return False
 
         # Flush the chain in iptables
         cmd_flush = ["iptables", "-t", table, "-F", chain_name_str]
         try:
-            subprocess.run(privileged_cmd(cmd_flush), check=True, capture_output=True)
+            subprocess.run(
+                privileged_cmd(cmd_flush), check=True, capture_output=True
+            )
             logger.debug("Flushed all rules from chain %s", chain_name_str)
         except subprocess.CalledProcessError as e:
-            raise IPTablesTrackerError(f"Failed to flush {chain_name_str} chain") from e
+            raise IPTablesTrackerError(
+                f"Failed to flush {chain_name_str} chain"
+            ) from e
 
         # Mark all rules for this chain as deleted in database
-        deleted_count = self._db.mark_iptables_rules_deleted_for_chain(table, chain_name)
-        logger.debug("Marked %d rules as deleted for chain %s", deleted_count, chain_name_str)
+        deleted_count = self._db.mark_iptables_rules_deleted_for_chain(
+            table, chain_name
+        )
+        logger.debug(
+            "Marked %d rules as deleted for chain %s",
+            deleted_count,
+            chain_name_str,
+        )
 
         return True
 

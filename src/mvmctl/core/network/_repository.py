@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
-from mvmctl.db.models import Network, NetworkLease
+from mvmctl.models.network import NetworkItem, NetworkLeaseItem
 
 
 class NetworkRepository:
@@ -12,38 +12,44 @@ class NetworkRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    def get(self, network_id: str) -> Network | None:
+    def get(self, network_id: str) -> NetworkItem | None:
         """Return a network by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM networks WHERE id = ?", (network_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM networks WHERE id = ?", (network_id,)
+            ).fetchone()
         if row is None:
             return None
-        return Network(**dict(row))
+        return NetworkItem(**dict(row))
 
-    def get_by_name(self, name: str) -> Network | None:
+    def get_by_name(self, name: str) -> NetworkItem | None:
         """Return a network by name, or None if not found."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM networks WHERE name = ?", (name,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM networks WHERE name = ?", (name,)
+            ).fetchone()
         if row is None:
             return None
-        return Network(**dict(row))
+        return NetworkItem(**dict(row))
 
-    def find_by_prefix(self, prefix: str) -> list[Network]:
+    def find_by_prefix(self, prefix: str) -> list[NetworkItem]:
         """Return all networks whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM networks WHERE id LIKE ?",
                 (f"{prefix}%",),
             ).fetchall()
-        return [Network(**dict(row)) for row in rows]
+        return [NetworkItem(**dict(row)) for row in rows]
 
-    def list_all(self) -> list[Network]:
+    def list_all(self) -> list[NetworkItem]:
         """Return all networks."""
         with self._db.connect() as conn:
-            rows = conn.execute("SELECT * FROM networks ORDER BY created_at").fetchall()
-        return [Network(**dict(row)) for row in rows]
+            rows = conn.execute(
+                "SELECT * FROM networks ORDER BY created_at"
+            ).fetchall()
+        return [NetworkItem(**dict(row)) for row in rows]
 
-    def upsert(self, network: Network) -> None:
+    def upsert(self, network: NetworkItem) -> None:
         """Insert or replace a network record."""
         with self._db.connect() as conn:
             conn.execute(
@@ -90,16 +96,20 @@ class NetworkRepository:
         with self._db.connect() as conn:
             conn.execute("BEGIN")
             conn.execute("UPDATE networks SET is_default = 0")
-            conn.execute("UPDATE networks SET is_default = 1 WHERE id = ?", (network_id,))
+            conn.execute(
+                "UPDATE networks SET is_default = 1 WHERE id = ?", (network_id,)
+            )
             conn.execute("COMMIT")
 
-    def get_default(self) -> Network | None:
+    def get_default(self) -> NetworkItem | None:
         """Return the default network entry, or None if not set."""
         with self._db.connect() as conn:
-            row = conn.execute("SELECT * FROM networks WHERE is_default = 1 LIMIT 1").fetchone()
+            row = conn.execute(
+                "SELECT * FROM networks WHERE is_default = 1 LIMIT 1"
+            ).fetchone()
         if row is None:
             return None
-        return Network(**dict(row))
+        return NetworkItem(**dict(row))
 
     def delete(self, network_id: str) -> None:
         """Delete a network by ID. No-op if not found."""
@@ -113,7 +123,7 @@ class LeaseRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
-    def get(self, network_id: str, ipv4: str) -> NetworkLease | None:
+    def get(self, network_id: str, ipv4: str) -> NetworkLeaseItem | None:
         """Return a lease by network_id + ipv4, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
@@ -122,27 +132,29 @@ class LeaseRepository:
             ).fetchone()
         if row is None:
             return None
-        return NetworkLease(**dict(row))
+        return NetworkLeaseItem(**dict(row))
 
-    def list_all(self, network_id: str) -> list[NetworkLease]:
+    def list_all(self, network_id: str) -> list[NetworkLeaseItem]:
         """Return all leases for a network."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM network_leases WHERE network_id = ? ORDER BY leased_at",
                 (network_id,),
             ).fetchall()
-        return [NetworkLease(**dict(row)) for row in rows]
+        return [NetworkLeaseItem(**dict(row)) for row in rows]
 
-    def list_by_vm(self, network_id: str, vm_id: str) -> list[NetworkLease]:
+    def list_by_vm(self, network_id: str, vm_id: str) -> list[NetworkLeaseItem]:
         """Return all leases for a VM on a specific network."""
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM network_leases WHERE network_id = ? AND vm_id = ? ORDER BY leased_at",
                 (network_id, vm_id),
             ).fetchall()
-        return [NetworkLease(**dict(row)) for row in rows]
+        return [NetworkLeaseItem(**dict(row)) for row in rows]
 
-    def acquire(self, network_id: str, ipv4: str, vm_id: str | None = None) -> NetworkLease:
+    def acquire(
+        self, network_id: str, ipv4: str, vm_id: str | None = None
+    ) -> NetworkLeaseItem:
         """Atomically acquire an IP lease."""
         with self._db.connect() as conn:
             conn.execute("BEGIN")

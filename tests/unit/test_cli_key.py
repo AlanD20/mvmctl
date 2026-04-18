@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 from mvmctl.cli.key import key_app as app
 from mvmctl.core.key_manager import KeyInfo
 from mvmctl.exceptions import MVMKeyError
-from mvmctl.models import KeyCreateInput
+from mvmctl.api.inputs import KeyCreateInput
 
 runner = CliRunner()
 

@@ -312,7 +312,7 @@ def test_remove_network(
         leased_at="2026-01-01T00:00:00Z",
     )
 
-    from mvmctl.models.network import NetworkConfig
+    from mvmctl.api.inputs import NetworkConfig
 
     mock_config = NetworkConfig(
         name="mynet",
@@ -783,7 +783,7 @@ class TestRestoreNetworks:
 
     def test_restore_networks_existing_bridge(self, mock_cache_dir: Path):
         """restore_networks should skip networks with existing bridges."""
-        from mvmctl.models.network import NetworkConfig
+        from mvmctl.api.inputs import NetworkConfig
 
         config = NetworkConfig(
             name="testnet",
@@ -802,7 +802,7 @@ class TestRestoreNetworks:
 
     def test_restore_networks_creates_bridge(self, mock_cache_dir: Path):
         """restore_networks should create missing bridges."""
-        from mvmctl.models.network import NetworkConfig
+        from mvmctl.api.inputs import NetworkConfig
 
         config = NetworkConfig(
             name="testnet",
@@ -823,7 +823,7 @@ class TestRestoreNetworks:
 
     def test_restore_networks_validates_interface(self, mock_cache_dir: Path):
         """restore_networks should validate stored interface."""
-        from mvmctl.models.network import NetworkConfig
+        from mvmctl.api.inputs import NetworkConfig
 
         config = NetworkConfig(
             name="testnet",
@@ -848,7 +848,7 @@ class TestRestoreNetworks:
 
     def test_restore_networks_fallback_to_default_interface(self, mock_cache_dir: Path):
         """restore_networks should fallback to default interface if stored invalid."""
-        from mvmctl.models.network import NetworkConfig
+        from mvmctl.api.inputs import NetworkConfig
 
         config = NetworkConfig(
             name="testnet",

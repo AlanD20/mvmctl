@@ -524,6 +524,197 @@ core/_orchestration/vm_operations.py:
 | **CREATE** | `VMCreateRequest` | `ResolvedVMCreateRequest` | Many (all creation params) |
 | **EXISTING** | `VMRequest` | `ResolvedVMRequest` | Minimal (just VM identifier) |
 
+## Relation Enrichment System
+
+Resolvers can optionally enrich resolved entities with related entities (e.g., VM → Kernel, Network → Leases). This prevents N+1 query problems by using batch loading and is configured once at the resolver constructor level.
+
+### Design Principles
+
+1. **Configuration at construction** — `include` is a constructor parameter, not a method parameter. All methods on the resolver auto-enrich.
+2. **Batch loading** — FK values are collected, deduplicated, and resolved in a single query per relation. O(relations) queries regardless of entity count.
+3. **Single model** — No flat vs rich model split. The same model has `Optional[Relation]` fields that are `None` when not requested.
+4. **Declarative registry** — Each resolver declares its relations via a `RELATIONS` class attribute dict.
+5. **Nested support** — Dot notation (`network.leases`) resolves parents before children automatically.
+6. **Centralized engine** — `RelationEnricher` in `core/_internal/` handles all enrichment logic.
+
+### How It Works
+
+```python
+# Resolver declares its relations
+class VMResolver:
+    RELATIONS: dict[str, tuple[str, type, str]] = {
+        # relation_name: (fk_field, resolver_class, method_name)
+        "kernel": ("kernel_id", KernelResolver, "resolve"),
+        "image": ("image_id", ImageResolver, "resolve"),
+        "binary": ("binary_id", BinaryResolver, "resolve"),
+        "network": ("network_id", NetworkResolver, "resolve"),
+        "network.leases": ("network", NetworkLeaseResolver, "list_by_network_id"),
+    }
+
+    def __init__(
+        self,
+        repo: VMRepository | None = None,
+        *,
+        include: list[str] | None = None,
+    ) -> None:
+        self._repo = repo or VMRepository()
+        self._include = include
+
+    def _enrich(self, vms: list[VMInstance]) -> list[VMInstance]:
+        if self._include:
+            RelationEnricher().enrich(
+                vms, self._include, self.RELATIONS, self._repo._db
+            )
+        return vms
+
+    # ALL methods call self._enrich() before returning
+    def by_id(self, vm_id: str) -> VMInstance:
+        vm = self._repo.find_by_prefix(vm_id)[0]
+        return self._enrich([vm])[0]
+
+    def resolve_many(self, identifiers: list[str]) -> list[VMInstance]:
+        vms = self._repo.get_many(identifiers)
+        return self._enrich(vms)
+```
+
+### Complete Relation Graph
+
+```
+VMResolver
+├── "kernel"        → KernelResolver.resolve(kernel_id)
+├── "image"         → ImageResolver.resolve(image_id)
+├── "binary"        → BinaryResolver.resolve(binary_id)
+├── "network"       → NetworkResolver.resolve(network_id)
+└── "network.leases" → NetworkLeaseResolver.list_by_network_id(network.id)
+
+NetworkResolver
+├── "leases"        → NetworkLeaseResolver.list_by_network_id(network.id)
+└── "iptables_rules" → IPTablesRuleResolver.list_by_network_id(network.id)
+
+ImageResolver       → (no relations)
+KernelResolver      → (no relations)
+BinaryResolver      → (no relations)
+KeyResolver         → (no relations)
+NetworkLeaseResolver → (no relations)
+IPTablesRuleResolver → (no relations)
+```
+
+### Model Design — Optional Relation Fields
+
+Models have `Optional` fields for relations that are `None` by default and populated only when requested:
+
+```python
+# models/vm.py
+@dataclass
+class VMInstance:
+    id: str
+    name: str
+    kernel_id: str
+    kernel: "Kernel | None" = None       # Populated when include=["kernel"]
+    image_id: str
+    image: "Image | None" = None         # Populated when include=["image"]
+    # ... all other flat fields ...
+
+# models/network.py
+@dataclass
+class NetworkItem:
+    id: str
+    name: str
+    leases: list["NetworkLease"] | None = None           # include=["leases"]
+    iptables_rules: list["IPTablesRule"] | None = None   # include=["iptables_rules"]
+```
+
+### Batch Loading — How N+1 is Prevented
+
+When `resolve_many` is called with `include`, the `RelationEnricher`:
+
+1. **Collects unique FK values** — deduplicates across all entities
+2. **Single batch query** — uses `WHERE id IN (...)` to resolve all at once
+3. **Maps back** — assigns resolved objects to the correct entity
+
+```python
+# Example: 1000 VMs with include=["kernel", "network"]
+# Queries executed: 3 total (not 3000)
+#   1. SELECT * FROM vm_instances WHERE id IN (...)
+#   2. SELECT * FROM kernels WHERE id IN (...)  -- batch, unique kernel_ids
+#   3. SELECT * FROM networks WHERE id IN (...) -- batch, unique network_ids
+```
+
+### Nested Relations — Parent Auto-Resolution
+
+When a nested path like `network.leases` is requested, the enricher:
+1. Sorts paths by depth (`network` before `network.leases`)
+2. Resolves `network` first (parent)
+3. Collects `network.id` from resolved parents
+4. Batch-resolves `leases` for each unique network ID
+5. Assigns `leases` list to each resolved `Network` object
+
+```python
+# include=["network.leases"]
+# 1. Resolve all networks (batch)
+# 2. For each resolved network, resolve its leases (batch by network_id)
+# 3. vm.network.leases is now populated
+```
+
+### Validation
+
+Unknown relation paths raise `ValueError` with available options:
+
+```python
+resolver = VMResolver(include=["foo"])
+resolver.resolve("my-vm")
+# ValueError: Unknown relation 'foo'. Available: binary, image, kernel, network, network.leases
+```
+
+### Usage
+
+```python
+# Flat resolution (existing behavior)
+resolver = VMResolver(repo=repo)
+vm = resolver.by_id("abc123")
+print(vm.kernel_id)  # Works
+print(vm.kernel)     # None
+
+# With relations — configured once, all methods auto-enrich
+resolver = VMResolver(repo=repo, include=["kernel", "image", "network"])
+vm = resolver.by_id("abc123")        # kernel, image, network populated
+vm = resolver.by_name("my-vm")       # same
+vm = resolver.by_ip("10.0.0.5")      # same
+vm = resolver.resolve("my-vm")       # same
+vms = resolver.resolve_many([...])   # batch-enriched, deduplicated
+
+# Nested relations
+resolver = NetworkResolver(include=["leases", "iptables_rules"])
+network = resolver.by_id("net-123")
+print(network.leases)         # List[NetworkLease]
+print(network.iptables_rules) # List[IPTablesRule]
+
+# VM with nested network relations
+resolver = VMResolver(include=["network.leases"])
+vm = resolver.by_id("abc123")
+print(vm.network.leases)  # Works — network resolved first, then leases
+```
+
+### Adding New Relations
+
+To add a new relation to a resolver:
+
+1. **Add to `RELATIONS` dict:**
+```python
+RELATIONS: dict[str, tuple[str, type, str]] = {
+    "new_relation": ("foreign_key_field", NewResolver, "resolve"),
+}
+```
+
+2. **Add `Optional` field to the model:**
+```python
+new_relation: "NewModel | None" = None
+```
+
+3. **Create the resolver** (if it doesn't exist) with `_enrich()` pattern.
+
+No changes to `RelationEnricher` or any other code needed.
+
 ## Summary
 
 - **Domains ≠ CLI commands** - Domains are business capabilities (vm, network, image, etc.)
@@ -536,4 +727,5 @@ core/_orchestration/vm_operations.py:
 - **Flexible queries** - Accept `single_value | list[single_value]` for filtering parameters
 - **Naming** - `Controller` (stateful), `Service` (stateless), `Repository` (DB), `Resolver` (lookup)
 - **Input resolution** - `Request` (raw) → `validate()` → `resolve()` → `ResolvedRequest` (frozen)
+- **Relation enrichment** - `include` on resolver constructor, `RELATIONS` dict declares relations, `RelationEnricher` batch-loads with deduplication
 - **File naming** - `_controller.py`, `_service.py`, `_repository.py`, `_resolver.py`, `_operations.py`

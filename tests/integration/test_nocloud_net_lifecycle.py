@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from mvmctl.cli.vm import vm_app as vm_app
 from mvmctl.models import CloudInitMode
-from mvmctl.models.network import NetworkConfig
+from mvmctl.api.inputs import NetworkConfig
 from mvmctl.models.vm import VMCreateInput, VMInstance, VMStatus
 
 runner = CliRunner()
@@ -161,7 +161,7 @@ class TestFullNocloudNetLifecycle:
         )
 
         # Mock network
-        from mvmctl.models.network import NetworkConfig
+        from mvmctl.api.inputs import NetworkConfig
 
         mock_get_network.return_value = NetworkConfig(
             name="default",
@@ -320,7 +320,7 @@ class TestFullNocloudNetLifecycle:
         )
 
         # Mock network
-        from mvmctl.models.network import NetworkConfig
+        from mvmctl.api.inputs import NetworkConfig
 
         mock_get_network.return_value = NetworkConfig(
             name="default",
@@ -659,7 +659,7 @@ class TestNocloudNetFailureCleanup:
         mock_resolve_kernel.return_value = kernel_path
 
         # Mock network
-        from mvmctl.models.network import NetworkConfig
+        from mvmctl.api.inputs import NetworkConfig
         from mvmctl.db.models import Network as DBNetwork
 
         mock_get_network.return_value = NetworkConfig(
@@ -812,7 +812,7 @@ class TestNocloudNetFailureCleanup:
         )
 
         # Mock network
-        from mvmctl.models.network import NetworkConfig
+        from mvmctl.api.inputs import NetworkConfig
         from mvmctl.db.models import Network as DBNetwork
 
         mock_get_network.return_value = NetworkConfig(
