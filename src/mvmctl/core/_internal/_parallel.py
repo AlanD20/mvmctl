@@ -30,22 +30,27 @@ class ParallelExecutor:
             items: Items to process.
             func: Function to apply to each item. Must accept one argument.
             parallel: If True, use ThreadPoolExecutor with batching.
-            max_workers: REQUIRED when parallel=True. Max concurrent threads.
-            batch_size: REQUIRED when parallel=True. Items per batch.
+            max_workers: Max concurrent threads. None = auto-calculate based on
+                CPU count and item count.
+            batch_size: Items per batch. None = auto-calculate (single batch).
 
         Returns:
             List of (item, result_or_error) tuples.
             - Sequential: stops on first error (fail-fast).
             - Parallel: processes all items, collects all errors.
-
-        Raises:
-            ValueError: If parallel=True but max_workers or batch_size is None.
         """
         if parallel:
-            if max_workers is None or batch_size is None:
-                raise ValueError(
-                    "parallel=True requires both max_workers and batch_size"
-                )
+            import os
+
+            n = len(items)
+            if max_workers is None:
+                max_workers = min(n, (os.cpu_count() or 4) * 2)
+            if batch_size is None:
+                batch_size = n  # single batch — no sequential staging
+            if max_workers < 1:
+                max_workers = 1
+            if batch_size < 1:
+                batch_size = 1
             return self._parallel(items, func, max_workers, batch_size)
         return self._sequential(items, func)
 
