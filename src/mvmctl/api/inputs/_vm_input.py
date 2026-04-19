@@ -8,28 +8,28 @@ from typing import TYPE_CHECKING
 from mvmctl.core._internal._db import Database
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
-from mvmctl.exceptions import VMRequestError
+from mvmctl.exceptions import VMNotFoundError, VMRequestError
 from mvmctl.models.vm import VMInstanceItem
 from mvmctl.utils.validation import validate_ipv4_address, validate_mac
 
 if TYPE_CHECKING:
     pass
 
-__all__ = ["VMInput", "VMRequest", "ResolvedVMRequest"]
+__all__ = ["VMInput", "VMRequest", "ResolvedVMInput"]
 
 
 @dataclass
 class VMInput:
-    id: list[str] = []
-    name: list[str] = []
-    guest_mac: list[str] = []
-    guest_ip: list[str] = []
+    id: list[str] = field(default_factory=list)
+    name: list[str] = field(default_factory=list)
+    guest_mac: list[str] = field(default_factory=list)
+    guest_ip: list[str] = field(default_factory=list)
 
     force: bool | None = None
 
 
 @dataclass(frozen=True)
-class ResolvedVMRequest:
+class ResolvedVMInput:
     """Immutable resolved VM request - contains the VM instance."""
 
     vms: list[VMInstanceItem]
@@ -44,7 +44,7 @@ class VMRequest:
     (start, stop, remove, etc.) that require resolving the VM first.
     """
 
-    _result: ResolvedVMRequest | None = None
+    _result: ResolvedVMInput | None = None
 
     def __init__(self, *, inputs: VMInput, db: Database | None = None) -> None:
         """Initialize the resolver with database and sub-resolvers."""
@@ -57,10 +57,10 @@ class VMRequest:
         )
 
     @property
-    def result(self) -> ResolvedVMRequest | None:
+    def result(self) -> ResolvedVMInput | None:
         return self._result
 
-    def resolve(self) -> ResolvedVMRequest:
+    def resolve(self) -> ResolvedVMInput:
         """Resolve the VM identifier to a VMInstanceItem.
 
         Args:
@@ -81,7 +81,13 @@ class VMRequest:
         )
 
         result = self._vm_resolver.resolve_many(identifiers)
-        self._result = ResolvedVMRequest(
+
+        if result.errors and not result.items:
+            raise VMNotFoundError(
+                f"Could not resolve any VMs: {', '.join(result.errors)}"
+            )
+
+        self._result = ResolvedVMInput(
             vms=result.items,
             force=self._inputs.force if self._inputs.force else False,
         )

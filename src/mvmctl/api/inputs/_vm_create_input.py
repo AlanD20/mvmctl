@@ -59,7 +59,7 @@ from mvmctl.utils.validation import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["VMCreateInput", "VMCreateRequest", "ResolvedVMCreateRequest"]
+__all__ = ["VMCreateInput", "VMCreateRequest", "ResolvedVMCreateInput"]
 
 
 @dataclass
@@ -100,7 +100,7 @@ class VMCreateInput:
 
 
 @dataclass(frozen=True)
-class ResolvedVMCreateRequest:
+class ResolvedVMCreateInput:
     """Immutable resolved inputs - output of VMCreateRequest."""
 
     name: str
@@ -149,7 +149,7 @@ class CloudInitModeResolved:
 class VMCreateRequest:
     """Resolve all DB-backed defaults using a single DB instance."""
 
-    _result: ResolvedVMCreateRequest | None = None
+    _result: ResolvedVMCreateInput | None = None
 
     def __init__(
         self,
@@ -172,10 +172,10 @@ class VMCreateRequest:
         self._key_resolver = KeyResolver(KeyRepository(self._db))
 
     @property
-    def result(self) -> ResolvedVMCreateRequest | None:
+    def result(self) -> ResolvedVMCreateInput | None:
         return self._result
 
-    def resolve(self) -> ResolvedVMCreateRequest:
+    def resolve(self) -> ResolvedVMCreateInput:
         """Resolve all inputs to explicit values."""
 
         image = self._resolve_image()
@@ -202,7 +202,7 @@ class VMCreateRequest:
 
         ci_mode_result = self._resolve_cloud_init_mode()
 
-        self._result = ResolvedVMCreateRequest(
+        self._result = ResolvedVMCreateInput(
             name=self._inputs.name,
             vm_id=self._vm_id,
             vm_dir=self._vm_dir,

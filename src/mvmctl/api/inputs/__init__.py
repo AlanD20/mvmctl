@@ -13,13 +13,19 @@ from mvmctl.api.inputs._image_input import (
 )
 from mvmctl.api.inputs._kernel_input import KernelFetchInput
 from mvmctl.api.inputs._key_input import KeyCreateInput
-from mvmctl.api.inputs._network_input import (
-    NetworkConfig,
+from mvmctl.api.inputs._network_create_input import (
     NetworkCreateInput,
+    NetworkCreateRequest,
+    ResolvedNetworkCreateRequest,
+)
+from mvmctl.api.inputs._network_input import (
+    NetworkInput,
+    NetworkRequest,
+    ResolvedNetworkInput,
 )
 from mvmctl.api.inputs._vm_create_input import (
     CloudInitModeResolved,
-    ResolvedVMCreateRequest,
+    ResolvedVMCreateInput,
     VMCreateInput,
     VMCreateRequest,
 )
@@ -35,7 +41,7 @@ from mvmctl.api.inputs._vm_export_config import (
     VMExportNetworkConfig,
 )
 from mvmctl.api.inputs._vm_input import (
-    ResolvedVMRequest,
+    ResolvedVMInput,
     VMInput,
     VMRequest,
 )
@@ -46,10 +52,14 @@ __all__ = [
     "ImageImportInput",
     "KernelFetchInput",
     "KeyCreateInput",
-    "NetworkConfig",
     "NetworkCreateInput",
-    "ResolvedVMCreateRequest",
-    "ResolvedVMRequest",
+    "NetworkCreateRequest",
+    "NetworkInput",
+    "NetworkRequest",
+    "ResolvedNetworkCreateRequest",
+    "ResolvedNetworkInput",
+    "ResolvedVMCreateInput",
+    "ResolvedVMInput",
     "VMCreateInput",
     "VMCreateRequest",
     "VMExportBinaryConfig",

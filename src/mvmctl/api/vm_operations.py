@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.api.inputs import (
-    ResolvedVMCreateRequest,
+    ResolvedVMCreateInput,
     VMCreateRequest,
 )
 from mvmctl.api.inputs._vm_create_input import VMCreateInput
@@ -86,7 +86,7 @@ class VMCreateContext:
     guest_mac: str
     tap_name: str
     rootfs_path: Path
-    resolved: ResolvedVMCreateRequest | None = None
+    resolved: ResolvedVMCreateInput | None = None
 
     fc_manager: FirecrackerSpawner | None = None
     relay: ConsoleController | None = None
@@ -108,7 +108,7 @@ class VMCreateContext:
         data = f"{name}:{created_at.isoformat()}"
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
-    def set_resolved(self, resolved: ResolvedVMCreateRequest) -> None:
+    def set_resolved(self, resolved: ResolvedVMCreateInput) -> None:
         self.resolved = resolved
 
     def set_firecracker_manager(self, manager: FirecrackerSpawner) -> None:
