@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.core._internal._db import Database
 from mvmctl.core._internal._iptables_tracker import IPTablesTracker
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError

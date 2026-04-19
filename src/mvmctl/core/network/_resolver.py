@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mvmctl.core._internal._enrichment import RelationEnricher
-from mvmctl.core.network._iptables_resolver import IPTablesRuleResolver
+from mvmctl.core._internal._iptables_tracker import IPTablesRuleResolver
 from mvmctl.core.network._lease_resolver import NetworkLeaseResolver
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkNotFoundError

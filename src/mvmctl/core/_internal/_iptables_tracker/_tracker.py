@@ -11,7 +11,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from mvmctl.constants import CONST_IPTABLES_MAX_COMMENT_LEN
 from mvmctl.exceptions import IPTablesTrackerError
@@ -26,8 +26,7 @@ from mvmctl.models.network import (
 )
 from mvmctl.utils.process import privileged_cmd
 
-if TYPE_CHECKING:
-    from mvmctl.core._internal._db import Database
+from ._repository import IPTablesRuleRepository
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,7 @@ class IPTablesTracker:
     Usage:
         tracker = IPTablesTracker()  # Creates own DB instance
         # or
-        tracker = IPTablesTracker(db=existing_db_instance)
+        tracker = IPTablesTracker(repo=existing_repo_instance)
 
         result = tracker.ensure_rule(
             table="nat", chain="MVM-POSTROUTING",
@@ -72,9 +71,9 @@ class IPTablesTracker:
         APPEND = "-A"
         DELETE = "-D"
 
-    def __init__(self, db: Database | None = None) -> None:
+    def __init__(self, repo: IPTablesRuleRepository) -> None:
         """Initialize IPTablesTracker with optional database instance."""
-        self._db = db if db is not None else Database()
+        self._repo = repo
 
     def ensure_rule(
         self, rule: IPTablesRuleItem, *, context: str = ""
@@ -106,7 +105,7 @@ class IPTablesTracker:
         rule.command_string = " ".join(shlex.quote(arg) for arg in add_args)
 
         # Check if rule exists in database
-        existing_db_rule = self._db.find_iptables_rule_by_attributes(
+        existing_db_rule = self._repo.find_by_attributes(
             table_name=rule.table_name,
             chain_name=rule.chain_name,
             rule_type=rule.rule_type,
@@ -135,12 +134,12 @@ class IPTablesTracker:
         # If rule exists in both DB and iptables, update verification timestamp
         if existing_db_rule and iptables_exists:
             if existing_db_rule.id is not None:
-                self._db.update_iptables_rule_verified(existing_db_rule.id)
+                self._repo.update_verified_at(existing_db_rule.id)
             return IPTablesRuleResult(success=True, rule=existing_db_rule)
 
         # If rule exists in iptables but not in DB, record it
         if iptables_exists and not existing_db_rule:
-            recorded_rule = self._db.record_iptables_rule(rule)
+            recorded_rule = self._repo.insert(rule)
             return IPTablesRuleResult(success=True, rule=recorded_rule)
 
         # Create the rule in iptables
@@ -161,11 +160,11 @@ class IPTablesTracker:
         if existing_db_rule:
             # Reactivate existing rule
             if existing_db_rule.id is not None:
-                self._db.update_iptables_rule_verified(existing_db_rule.id)
+                self._repo.update_verified_at(existing_db_rule.id)
             rule.id = existing_db_rule.id
             recorded_rule = rule
         else:
-            recorded_rule = self._db.record_iptables_rule(rule)
+            recorded_rule = self._repo.insert(rule)
 
         return IPTablesRuleResult(
             success=True,
@@ -188,7 +187,7 @@ class IPTablesTracker:
         db_rule_id = rule.id
         if db_rule_id is None:
             # Look up the rule by its attributes
-            existing_rule = self._db.find_iptables_rule_by_attributes(
+            existing_rule = self._repo.find_by_attributes(
                 table_name=rule.table_name,
                 chain_name=rule.chain_name,
                 rule_type=rule.rule_type,
@@ -223,7 +222,7 @@ class IPTablesTracker:
 
         # Mark as deleted in database if we found it
         if db_rule_id is not None:
-            self._db.mark_iptables_rule_deleted(db_rule_id)
+            self._repo.mark_deleted(db_rule_id)
 
         return IPTablesRuleResult(
             success=True,
@@ -267,7 +266,7 @@ class IPTablesTracker:
         if rule.dport != IPTablesPort.ANY:
             args.extend(["--dport", str(rule.dport)])
 
-        args.extend(["-j", rule.target])
+        args.extend(["-j", rule.target.value])
 
         if rule.comment_tag:
             args.extend(["-m", "comment", "--comment", rule.comment_tag])
@@ -471,7 +470,7 @@ class IPTablesTracker:
             ) from e
 
         # Mark all rules for this chain as deleted in database
-        deleted_count = self._db.mark_iptables_rules_deleted_for_chain(
+        deleted_count = self._repo.mark_deleted_by_table_chain_name(
             table, chain_name
         )
         logger.debug(
@@ -491,7 +490,7 @@ class IPTablesTracker:
         Returns:
             Number of records permanently deleted.
         """
-        return self._db.cleanup_inactive_iptables_rules()
+        return self._repo.delete_inactive()
 
 
 __all__ = ["IPTablesTracker", "IPTablesRuleResult"]

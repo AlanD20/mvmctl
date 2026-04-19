@@ -67,7 +67,7 @@ class NetworkOperation:
             updated_at=resolved.created_at,
         )
 
-        # Persist to DB
+        # Persist to DB so that we have the record to ensure creation
         repo.upsert(network_item)
 
         # Setup infrastructure
