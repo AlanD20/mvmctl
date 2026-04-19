@@ -20,9 +20,6 @@ from mvmctl.models.network import (
     IPTablesTable,
     IPTablesTarget,
     IPTablesWildcard,
-    LeaseEntry,
-    NetworkEntry,
-    NetworkInspectInfo,
     NetworkItem,
     NetworkLeaseItem,
 )
@@ -58,8 +55,6 @@ __all__ = [
     "KernelItem",
     "KernelSpec",
     "LeaseEntry",
-    "NetworkEntry",
-    "NetworkInspectInfo",
     "NetworkItem",
     "NetworkLeaseItem",
     "SSHKeyItem",

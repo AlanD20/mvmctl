@@ -12,6 +12,11 @@ class IPTablesRuleRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
+    @property
+    def db(self) -> Database:
+        """Return the database instance."""
+        return self._db
+
     def list_by_network_id(self, network_id: str) -> list[IPTablesRuleItem]:
         """List all iptables rules for a network."""
         with self._db.connect() as conn:

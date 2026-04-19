@@ -12,6 +12,11 @@ class NetworkRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
+    @property
+    def db(self) -> Database:
+        """Return the database instance."""
+        return self._db
+
     def get(self, network_id: str) -> NetworkItem | None:
         """Return a network by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
@@ -122,6 +127,11 @@ class LeaseRepository:
 
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
+
+    @property
+    def db(self) -> Database:
+        """Return the database instance."""
+        return self._db
 
     def get(self, network_id: str, ipv4: str) -> NetworkLeaseItem | None:
         """Return a lease by network_id + ipv4, or None if not found."""

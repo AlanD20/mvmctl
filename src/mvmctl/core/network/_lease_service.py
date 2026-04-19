@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ipaddress
 
-from mvmctl.core._internal._db import Database
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.exceptions import NetworkError
@@ -22,23 +21,22 @@ class LeaseService:
     for a single network identified by name or ID.
 
     Args:
-        network: Network name, ID prefix, or DBNetwork instance.
-        db: Optional Database instance (creates new if None).
+        entity: Network name, ID prefix, or NetworkItem instance.
+        repo: LeaseRepository instance for database operations.
 
     Raises:
         NetworkNotFoundError: If the network cannot be resolved.
     """
 
     def __init__(
-        self, entity: str | NetworkItem, db: Database | None = None
+        self, entity: str | NetworkItem, repo: LeaseRepository
     ) -> None:
-        self._db = db if db is not None else Database()
-        self._lease_repo = LeaseRepository(self._db)
+        self._lease_repo = repo
 
         if isinstance(entity, NetworkItem):
             self._network = entity
         else:
-            self._resolver = NetworkResolver(NetworkRepository(self._db))
+            self._resolver = NetworkResolver(self._lease_repo)
             self._network = self._resolver.resolve(entity)
 
     @property

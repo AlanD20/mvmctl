@@ -12,6 +12,11 @@ class BinaryRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
+    @property
+    def db(self) -> Database:
+        """Return the database instance."""
+        return self._db
+
     def get(self, binary_id: str) -> BinaryItem | None:
         """Return a binary by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:

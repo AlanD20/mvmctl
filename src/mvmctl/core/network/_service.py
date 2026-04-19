@@ -5,7 +5,9 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mvmctl.core._internal._db import Database
 from mvmctl.core._internal._iptables_tracker import IPTablesTracker
+from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError
 from mvmctl.models.network import (
     IPTablesChain,
@@ -20,7 +22,7 @@ from mvmctl.models.network import (
 from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
 if TYPE_CHECKING:
-    from mvmctl.core._internal._db import Database
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +52,14 @@ class NetworkService:
     Shares database connection with IPTablesTracker for rule synchronization.
     """
 
-    def __init__(self, db: Database | None = None) -> None:
+    def __init__(self, repo: NetworkRepository) -> None:
         """Initialize NetworkService with optional database instance.
 
         Args:
             db: Optional Database instance. If not provided, IPTablesTracker
                 instances will create their own.
         """
-        self._db = db if db is not None else Database()
+        self._repo = repo
 
     def initialize(self) -> None:
         """Initialize MVM iptables chains with proper jump rules.
@@ -420,7 +422,7 @@ class NetworkService:
         effective_subnet = subnet
 
         if effective_nat_gateways is None or effective_subnet is None:
-            resolver = NetworkResolver(db=self._db)
+            resolver = NetworkResolver(repo=self._repo)
             try:
                 network = resolver.by_name(bridge)
                 if effective_subnet is None:

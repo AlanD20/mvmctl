@@ -12,6 +12,11 @@ class HostRepository:
     def __init__(self, db: Database | None = None) -> None:
         self._db = db or Database()
 
+    @property
+    def db(self) -> Database:
+        """Return the database instance."""
+        return self._db
+
     def get_state(self) -> HostStateItem | None:
         """Return the singleton host state row, or None if not yet initialized."""
         with self._db.connect() as conn:
