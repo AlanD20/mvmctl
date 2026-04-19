@@ -3,9 +3,12 @@
 import ipaddress
 import os
 import re
+import warnings
 from pathlib import Path
 
 from mvmctl.exceptions import MVMError, NetworkError
+from mvmctl.utils._network_validator import NetworkValidator
+from mvmctl.utils.common import CommonUtils
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,30}$")
 
@@ -23,100 +26,60 @@ def validate_entity_name(name: str, entity_type: str = "entity") -> str:
     Raises:
         MVMError: If the name doesn't match the allowed pattern.
     """
-    if not _NAME_PATTERN.match(name):
-        raise MVMError(
-            f"Invalid {entity_type} name '{name}': must match [a-z0-9][a-z0-9._-]{{0,30}}"
-        )
-    return name
+    warnings.warn(
+        "validate_entity_name is deprecated, use CommonUtils.validate_entity_name()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return CommonUtils.validate_entity_name(name, entity_type=entity_type)
 
 
-def validate_boot_arg_component(value: str, component_name: str) -> str:
-    """Validate a kernel boot argument component has no injection characters.
+def validate_boot_arg_component(
+    value: str, component_name: str = "boot arg"
+) -> str:
+    """Deprecated: Use VMValidator.validate_boot_arg_component()."""
+    warnings.warn(
+        "validate_boot_arg_component is deprecated, use VMValidator.validate_boot_arg_component()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.utils._vm_validator import VMValidator
 
-    Args:
-        value: The value to validate.
-        component_name: Label for error messages.
-
-    Returns:
-        The validated value.
-
-    Raises:
-        MVMError: If the value contains spaces or shell metacharacters.
-    """
-    if re.search(r"[\s;|&$`\\\"']", value):
-        raise MVMError(
-            f"Invalid {component_name} '{value}': must not contain spaces or shell metacharacters"
-        )
-    return value
+    return VMValidator.validate_boot_arg_component(value, component_name)
 
 
 def is_ip_address(value: str) -> bool:
-    """Validate that the given string is a valid IPv4 or IPv6 address.
-
-    Uses the ipaddress module for proper validation instead of regex,
-    which can accept invalid IPs like "999.999.999.999".
-
-    Args:
-        value: The string to validate as an IP address.
-
-    Returns:
-        True if the value is a valid IP address, False otherwise.
-    """
-    try:
-        ipaddress.ip_address(value)
-        return True
-    except ValueError:
-        return False
+    """Deprecated: Use NetworkValidator.is_ip_address()."""
+    warnings.warn(
+        "is_ip_address is deprecated, use NetworkValidator.is_ip_address()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NetworkValidator.is_ip_address(value)
 
 
 def validate_fs_uuid(uuid: str | None, field_name: str = "fs_uuid") -> None:
-    """Validate filesystem UUID format.
-
-    Supports standard UUID formats:
-    - 11111111-2222-3333-4444-555555555555
-
-    Args:
-        uuid: UUID string to validate
-        field_name: Field name for error messages
-
-    Raises:
-        MVMError: If UUID format is invalid
-    """
-    if uuid is None:
-        return
-
-    # Standard UUID pattern: 8-4-4-4-12 hex digits
-    uuid_pattern = re.compile(
-        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    """Deprecated: Use ImageValidator.validate_fs_uuid()."""
+    warnings.warn(
+        "validate_fs_uuid is deprecated, use ImageValidator.validate_fs_uuid()",
+        DeprecationWarning,
+        stacklevel=2,
     )
+    from mvmctl.utils._image_validator import ImageValidator
 
-    if not uuid_pattern.match(uuid):
-        raise MVMError(
-            f"Invalid {field_name} format: '{uuid}'. "
-            "Expected format: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
-        )
+    ImageValidator.validate_fs_uuid(uuid, field_name)
 
 
 def validate_fs_type(fs_type: str | None, field_name: str = "fs_type") -> None:
-    """Validate filesystem type.
+    """Deprecated: Use ImageValidator.validate_fs_type()."""
+    warnings.warn(
+        "validate_fs_type is deprecated, use ImageValidator.validate_fs_type()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.utils._image_validator import ImageValidator
 
-    Args:
-        fs_type: Filesystem type string
-        field_name: Field name for error messages
-
-    Raises:
-        MVMError: If filesystem type is invalid
-    """
-    if fs_type is None:
-        return
-
-    supported_types = {"ext4", "btrfs", "xfs", "ext3", "ext2"}
-
-    if fs_type.lower() not in supported_types:
-        raise MVMError(
-            f"Invalid {field_name}: '{fs_type}'. "
-            f"Supported types: {', '.join(sorted(supported_types))}"
-        )
+    ImageValidator.validate_fs_type(fs_type, field_name)
 
 
 # ---------------------------------------------------------------------------
@@ -126,71 +89,24 @@ def validate_fs_type(fs_type: str | None, field_name: str = "fs_type") -> None:
 # Linux IFNAMSIZ limit for interface names
 IFNAMSIZ = 15
 
-# Shell metacharacters that must be rejected
-_SHELL_METACHARACTERS = set(";|&$`\\\"'\n\r\t<>{}[]()")
-
-# Path traversal characters
-_PATH_TRAVERSAL_CHARS = set("./~\\")
-
-# Null byte and control characters
-_CONTROL_CHARS = set(chr(i) for i in range(32)) | {chr(127)}
-
 
 def _contains_dangerous_chars(value: str) -> bool:
     """Check if value contains shell metacharacters, path traversal, or control chars."""
-    dangerous = _SHELL_METACHARACTERS | _PATH_TRAVERSAL_CHARS | _CONTROL_CHARS
-    return any(c in dangerous for c in value)
+    return CommonUtils.contains_dangerous_chars(value)
 
 
 def validate_interface_name(name: str, field_name: str = "interface") -> str:
-    """Validate network interface name for security.
-
-    Prevents command injection through interface names by rejecting:
-    - Shell metacharacters (;|&$` etc.)
-    - Path traversal characters (../~)
-    - Control characters and null bytes
-    - Spaces
-    - Leading hyphens
-
-    Args:
-        name: Interface name to validate
-        field_name: Field name for error messages
-
-    Returns:
-        The validated interface name
-
-    Raises:
-        MVMError: If the name is invalid or contains dangerous characters
-    """
-    if not name:
-        raise MVMError(f"Invalid {field_name}: name cannot be empty")
-
-    if len(name) > IFNAMSIZ:
+    """Deprecated: Use CommonUtils.validate_entity_name()."""
+    warnings.warn(
+        "validate_interface_name is deprecated, use CommonUtils.validate_entity_name()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    CommonUtils.validate_entity_name(name, entity_type=field_name)
+    if len(name) > 15:
         raise MVMError(
-            f"Invalid {field_name}: '{name}' exceeds maximum length of {IFNAMSIZ} characters"
+            f"Invalid {field_name}: '{name}' exceeds maximum length of 15 characters"
         )
-
-    if name.startswith("-"):
-        raise MVMError(
-            f"Invalid {field_name}: '{name}' cannot start with a hyphen"
-        )
-
-    if _contains_dangerous_chars(name):
-        raise MVMError(
-            f"Invalid {field_name}: '{name}' contains forbidden characters "
-            "(shell metacharacters, path traversal, or control characters)"
-        )
-
-    if " " in name:
-        raise MVMError(f"Invalid {field_name}: '{name}' cannot contain spaces")
-
-    # Allow alphanumeric, hyphen, underscore only
-    if not re.match(r"^[a-zA-Z0-9_-]+$", name):
-        raise MVMError(
-            f"Invalid {field_name}: '{name}' must contain only alphanumeric, "
-            "hyphen, and underscore characters"
-        )
-
     return name
 
 
@@ -209,7 +125,12 @@ def validate_bridge_name(name: str, field_name: str = "bridge") -> str:
     Raises:
         MVMError: If the name is invalid or contains dangerous characters
     """
-    return validate_interface_name(name, field_name)
+    warnings.warn(
+        "validate_bridge_name is deprecated, use NetworkValidator.validate_bridge_name()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NetworkValidator.validate_bridge_name(name)
 
 
 def validate_subnet(subnet: str, field_name: str = "SUBNET") -> str:
@@ -227,30 +148,12 @@ def validate_subnet(subnet: str, field_name: str = "SUBNET") -> str:
     Raises:
         MVMError: If the SUBNET is invalid
     """
-    if not subnet:
-        raise MVMError(f"Invalid {field_name}: SUBNET cannot be empty")
-
-    # Check for shell metacharacters and control characters (but allow . and /)
-    # SUBNET notation legitimately contains dots and slashes
-    dangerous_chars = _SHELL_METACHARACTERS | _CONTROL_CHARS
-    if any(c in dangerous_chars for c in subnet):
-        raise MVMError(
-            f"Invalid {field_name}: '{subnet}' contains forbidden characters "
-            "(shell metacharacters or control characters)"
-        )
-
-    if " " in subnet:
-        raise MVMError(
-            f"Invalid {field_name}: '{subnet}' cannot contain spaces"
-        )
-
-    try:
-        network = ipaddress.IPv4Network(subnet, strict=False)
-        return str(network)
-    except ValueError as e:
-        raise MVMError(
-            f"Invalid {field_name}: '{subnet}' is not a valid IPv4 CIDR: {e}"
-        ) from e
+    warnings.warn(
+        "validate_subnet is deprecated, use NetworkValidator.validate_subnet()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NetworkValidator.validate_subnet(subnet)
 
 
 def validate_ipv4_address(
@@ -260,67 +163,19 @@ def validate_ipv4_address(
     subnet: str | None = None,
     gateway: str | None = None,
 ) -> str:
-    """Validate IPv4 address and return sanitized version.
-
-    Args:
-        ip: IPv4 address string
-        field_name: Field name for error messages
-        require_private: If True, the IP must be a private/internal address
-        subnet: Optional CIDR subnet (e.g. "172.30.0.0/24"). IP must be within this range.
-        gateway: Optional gateway IP. IP must not equal this address.
-
-    Returns:
-        The validated IP address string
-
-    Raises:
-        MVMError: If the IP address is invalid
-    """
-    if not ip:
-        raise MVMError(f"Invalid {field_name}: IP address cannot be empty")
-
-    # Check for shell metacharacters and control characters (but allow .)
-    # IP addresses legitimately contain dots
-    dangerous_chars = _SHELL_METACHARACTERS | _CONTROL_CHARS
-    if any(c in dangerous_chars for c in ip):
-        raise MVMError(
-            f"Invalid {field_name}: '{ip}' contains forbidden characters "
-            "(shell metacharacters or control characters)"
-        )
-
-    if " " in ip:
-        raise MVMError(f"Invalid {field_name}: '{ip}' cannot contain spaces")
-
-    try:
-        addr = ipaddress.IPv4Address(ip)
-    except ValueError as e:
-        raise MVMError(
-            f"Invalid {field_name}: '{ip}' is not a valid IPv4 address: {e}"
-        ) from e
-
-    if require_private and not addr.is_private:
-        raise MVMError(
-            f"Invalid {field_name}: '{ip}' must be a private/internal address"
-        )
-
-    if subnet is not None:
-        network = ipaddress.IPv4Network(subnet, strict=False)
-        if addr not in network:
-            raise MVMError(
-                f"Invalid {field_name}: '{ip}' is not within subnet {subnet}"
-            )
-        if addr == network.network_address:
-            raise MVMError(
-                f"Invalid {field_name}: '{ip}' is the network address of {subnet}"
-            )
-
-    if gateway is not None:
-        gateway_addr = ipaddress.IPv4Address(gateway)
-        if addr == gateway_addr:
-            raise MVMError(
-                f"Invalid {field_name}: '{ip}' is the gateway address"
-            )
-
-    return str(addr)
+    """Deprecated: Use NetworkValidator.validate_ipv4_address()."""
+    warnings.warn(
+        "validate_ipv4_address is deprecated, use NetworkValidator.validate_ipv4_address()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NetworkValidator.validate_ipv4_address(
+        ip,
+        field_name=field_name,
+        require_private=require_private,
+        subnet=subnet,
+        gateway=gateway,
+    )
 
 
 def validate_nat_gateways(gateways_str: str) -> list[str]:
@@ -338,28 +193,12 @@ def validate_nat_gateways(gateways_str: str) -> list[str]:
     Raises:
         MVMError: If any interface name is invalid
     """
-    if not gateways_str or not gateways_str.strip():
-        raise MVMError("NAT gateways cannot be empty")
-
-    # Split by comma and strip whitespace
-    interfaces = [iface.strip() for iface in gateways_str.split(",")]
-
-    # Remove empty strings
-    interfaces = [iface for iface in interfaces if iface]
-
-    if not interfaces:
-        raise MVMError("NAT gateways cannot be empty")
-
-    # Validate each interface
-    validated: list[str] = []
-    for iface in interfaces:
-        try:
-            validated_iface = validate_interface_name(iface, "NAT gateway")
-            validated.append(validated_iface)
-        except MVMError as e:
-            raise MVMError(f"Invalid NAT gateway '{iface}': {e}") from e
-
-    return validated
+    warnings.warn(
+        "validate_nat_gateways is deprecated, use NetworkValidator.validate_nat_gateways()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return NetworkValidator.validate_nat_gateways(gateways_str.split(","))
 
 
 def sanitize_metadata_string(
@@ -420,71 +259,49 @@ def sanitize_metadata_string(
 
 
 def validate_mac(mac: str) -> None:
-    """Validate MAC address format."""
-    import re
+    """Deprecated: Use NetworkValidator.validate_mac()."""
+    warnings.warn(
+        "validate_mac is deprecated, use NetworkValidator.validate_mac()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    NetworkValidator.validate_mac(mac)
 
-    MAC_REGEX = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
-    if not MAC_REGEX.match(mac):
-        raise ValueError(f"Invalid MAC address format: {mac}")
 
-
-def validate_vm_name(name: str) -> None:
+def validate_vm_name(name: str) -> str:
     """Validate VM name format.
-
-    Rules:
-        - Must not be empty
-        - Must match pattern: [a-zA-Z0-9_-]+
-        - Must not exceed 64 characters
 
     Args:
         name: Name to validate
 
+    Returns:
+        The validated name.
+
     Raises:
         MVMError: If name is invalid
     """
-    if not name:
-        raise MVMError("Name cannot be empty")
+    warnings.warn(
+        "validate_vm_name is deprecated, use VMValidator.validate_name()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.utils._vm_validator import VMValidator
 
-    if len(name) > 64:
-        raise MVMError(f"Name too long (max 64 chars): {name!r}")
-
-    pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
-    if not pattern.match(name):
-        raise MVMError(
-            f"Invalid name: {name!r}. "
-            "Names must contain only letters, numbers, hyphens, and underscores"
-        )
+    return VMValidator.validate_name(name)
 
 
 def validate_boot_args(
     boot_args: str, root_uuid: str, guest_ip: str
 ) -> list[str]:
-    """Validate boot arguments.
+    """Deprecated: Use VMValidator.validate_boot_args()."""
+    warnings.warn(
+        "validate_boot_args is deprecated, use VMValidator.validate_boot_args()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.utils._vm_validator import VMValidator
 
-    Args:
-        boot_args: Kernel boot arguments
-        root_uuid: Root filesystem UUID
-        guest_ip: Guest IP address
-
-    Returns:
-        List of validation error messages (empty if valid)
-    """
-    errors: list[str] = []
-
-    if not root_uuid:
-        errors.append("root UUID is required")
-
-    if not guest_ip:
-        errors.append("guest IP is required")
-
-    if boot_args:
-        if "root_uuid" in boot_args and not re.match(
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-            root_uuid,
-        ):
-            errors.append(f"Invalid root UUID format: {root_uuid}")
-
-    return errors
+    return VMValidator.validate_boot_args(boot_args, root_uuid, guest_ip)
 
 
 def validate_file_exists(path: str | None, description: str) -> None:
@@ -508,18 +325,13 @@ def validate_file_exists(path: str | None, description: str) -> None:
 def validate_cidr(
     subnet: str, field_name: str = "subnet"
 ) -> ipaddress.IPv4Network:
-    """Validate a CIDR subnet string.
-
-    Args:
-        subnet: CIDR notation string (e.g., "192.168.1.0/24")
-        field_name: Field name for error messages
-
-    Returns:
-        The validated IPv4Network object
-
-    Raises:
-        MVMError: If subnet is invalid
-    """
+    """Deprecated: DO NOT USE. Use NetworkValidator.validate_subnet() instead."""
+    warnings.warn(
+        "validate_cidr is deprecated and should not be used. "
+        "Use NetworkValidator.validate_subnet() for subnet validation.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     try:
         return ipaddress.IPv4Network(subnet, strict=False)
     except ValueError as e:

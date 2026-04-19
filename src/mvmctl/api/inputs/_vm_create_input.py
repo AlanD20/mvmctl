@@ -50,12 +50,9 @@ from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.image import ImageItem
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkItem
+from mvmctl.utils._network_validator import NetworkValidator
+from mvmctl.utils._vm_validator import VMValidator
 from mvmctl.utils.disk_size import parse_disk_size
-from mvmctl.utils.network_validator import NetworkValidator
-from mvmctl.utils.validation import (
-    validate_boot_arg_component,
-    validate_mac,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +175,9 @@ class VMCreateRequest:
     def resolve(self) -> ResolvedVMCreateInput:
         """Resolve all inputs to explicit values."""
 
+        # Validate VM name early — before any DB or subprocess calls
+        VMValidator.validate_name(self._inputs.name)
+
         image = self._resolve_image()
         kernel = self._resolve_kernel()
         network = self._resolve_network()
@@ -274,7 +274,7 @@ class VMCreateRequest:
             )
 
         if self._result.requested_guest_mac is not None:
-            validate_mac(self._result.requested_guest_mac)
+            NetworkValidator.validate_mac(self._result.requested_guest_mac)
 
         if self._result.requested_guest_ip is not None:
             NetworkValidator.validate_ipv4_address(
@@ -343,10 +343,12 @@ class VMCreateRequest:
 
         if self._result.boot_args is not None:
             for component in self._result.boot_args.split():
-                validate_boot_arg_component(component, "boot_args")
+                VMValidator.validate_boot_arg_component(component, "boot_args")
 
         if self._result.lsm_flags is not None:
-            validate_boot_arg_component(self._result.lsm_flags, "lsm_flags")
+            VMValidator.validate_boot_arg_component(
+                self._result.lsm_flags, "lsm_flags"
+            )
 
     def _resolve_image(self) -> ImageItem:
         """Resolve image to path, ID, fs_uuid, and fs_type."""

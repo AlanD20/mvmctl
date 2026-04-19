@@ -10,8 +10,7 @@ from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import VMNotFoundError, VMRequestError
 from mvmctl.models.vm import VMInstanceItem
-from mvmctl.utils.network_validator import NetworkValidator
-from mvmctl.utils.validation import validate_mac
+from mvmctl.utils._network_validator import NetworkValidator
 
 if TYPE_CHECKING:
     pass
@@ -107,7 +106,7 @@ class VMRequest:
         """
         for mac in self._inputs.guest_mac:
             try:
-                validate_mac(mac)
+                NetworkValidator.validate_mac(mac)
             except ValueError as exc:
                 raise VMRequestError(
                     f"Invalid guest MAC address: {mac}"

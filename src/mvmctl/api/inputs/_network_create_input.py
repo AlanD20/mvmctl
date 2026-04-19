@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from mvmctl.core._internal._db import Database
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError
+from mvmctl.utils._network_validator import NetworkValidator
 from mvmctl.utils.full_hash import HashGenerator
 from mvmctl.utils.network import NetworkUtils
-from mvmctl.utils.network_validator import NetworkValidator
 
 __all__ = [
     "NetworkCreateInput",
@@ -107,7 +107,9 @@ class NetworkCreateRequest:
             ipv4_gateway=ipv4_gateway,
             bridge=bridge,
             nat_enabled=self._inputs.nat_enabled,
-            nat_gateways=self._inputs.nat_gateways,
+            nat_gateways=validator.validate_nat_gateways(
+                self._inputs.nat_gateways
+            ),
             network_id=network_id,
             created_at=created_at,
         )

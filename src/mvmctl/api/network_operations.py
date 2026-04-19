@@ -303,8 +303,7 @@ class NetworkOperation:
         # Create default network
         from mvmctl.api.inputs._network_create_input import NetworkCreateInput
 
-        service = NetworkService(repo)
-        outbound_iface = service.detect_outbound_interface()
+        outbound_iface = NetworkUtils.detect_outbound_interface()
         nat_gateways = [outbound_iface] if outbound_iface else []
 
         create_input = NetworkCreateInput(
