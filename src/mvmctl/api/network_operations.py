@@ -13,6 +13,7 @@ from mvmctl.core.network._service import NetworkService
 from mvmctl.exceptions import NetworkError
 from mvmctl.models.network import NetworkItem
 from mvmctl.utils.audit import log_audit
+from mvmctl.utils.network import NetworkUtils
 
 if TYPE_CHECKING:
     from mvmctl.api.inputs._network_create_input import NetworkCreateInput
@@ -86,7 +87,7 @@ class NetworkOperation:
             raise
 
         # Update bridge_active status
-        bridge_active = service.bridge_exists(resolved.bridge)
+        bridge_active = NetworkUtils.bridge_exists(resolved.bridge)
         repo.update_bridge_active(resolved.network_id, bridge_active)
 
         # Re-fetch the item to get updated state
@@ -155,11 +156,20 @@ class NetworkOperation:
         """List all networks.
 
         Returns:
-            List of all NetworkItem records.
+            List of all NetworkItem records with lease enrichment.
         """
         db = Database()
         repo = NetworkRepository(db)
-        return repo.list_all()
+        networks = repo.list_all()
+
+        if not networks:
+            return []
+
+        # Enrich with leases
+        from mvmctl.core.network._resolver import NetworkResolver
+
+        resolver = NetworkResolver(repo, include=["leases"])
+        return resolver._enrich(networks)
 
     @staticmethod
     def get(inputs: NetworkInput) -> NetworkItem:
@@ -212,8 +222,7 @@ class NetworkOperation:
         network = resolved.networks[0]
 
         # Update bridge_active status
-        service = NetworkService(repo)
-        bridge_active = service.bridge_exists(network.bridge)
+        bridge_active = NetworkUtils.bridge_exists(network.bridge)
         if bridge_active != network.bridge_active:
             repo.update_bridge_active(network.id, bridge_active)
 
@@ -285,7 +294,7 @@ class NetworkOperation:
                 logger.debug("Failed to materialize default network bridge/NAT")
 
             # Update bridge_active
-            bridge_active = service.bridge_exists(default_network.bridge)
+            bridge_active = NetworkUtils.bridge_exists(default_network.bridge)
             if bridge_active != default_network.bridge_active:
                 repo.update_bridge_active(default_network.id, bridge_active)
 
@@ -316,11 +325,10 @@ class NetworkOperation:
         """
         db = Database()
         repo = NetworkRepository(db)
-        service = NetworkService(repo)
 
         networks = repo.list_all()
         for network in networks:
-            bridge_active = service.bridge_exists(network.bridge)
+            bridge_active = NetworkUtils.bridge_exists(network.bridge)
             if bridge_active != network.bridge_active:
                 repo.update_bridge_active(network.id, bridge_active)
 

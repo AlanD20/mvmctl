@@ -19,6 +19,7 @@ from mvmctl.models.network import (
     IPTablesTarget,
     IPTablesWildcard,
 )
+from mvmctl.utils.network import NetworkUtils
 from mvmctl.utils.process import privileged_cmd as _privileged_cmd
 
 if TYPE_CHECKING:
@@ -77,152 +78,9 @@ class NetworkService:
                 position=1,
             )
 
-    @staticmethod
-    def _run_ip_batch(commands: list[str]) -> None:
-        """Execute a batch of ip commands atomically."""
-        batch = "\n".join(commands) + "\n"
-        subprocess.run(
-            _privileged_cmd(["ip", "-batch", "-"]),
-            input=batch,
-            text=True,
-            check=True,
-            capture_output=True,
-        )
-
-    def get_physical_interfaces(self) -> list[str]:
-        """Get available physical network interfaces."""
-        try:
-            net_path = Path("/sys/class/net")
-            if not net_path.exists():
-                raise NetworkError("Unable to access /sys/class/net")
-
-            interfaces: list[str] = []
-            for entry in net_path.iterdir():
-                name = entry.name
-                if name in _EXCLUDED_INTERFACES:
-                    continue
-                if any(
-                    name.startswith(prefix)
-                    for prefix in _EXCLUDED_VIRTUAL_INTERFACE_PREFIXES
-                ):
-                    continue
-                interfaces.append(name)
-
-            return sorted(interfaces)
-        except OSError as e:
-            logger.debug("Failed to list network interfaces", exc_info=True)
-            raise NetworkError("Failed to list network interfaces") from e
-
-    def detect_outbound_interface(self) -> str | None:
-        """Get the outbound (default route) network interface.
-
-        Returns:
-            The interface name (e.g., "eth0") or None if not found.
-        """
-        try:
-            result = subprocess.run(
-                ["ip", "route", "show", "default"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError:
-            logger.debug(
-                "Failed to detect outbound network interface", exc_info=True
-            )
-            return None
-
-        for line in result.stdout.splitlines():
-            parts = line.split()
-            if "dev" in parts:
-                dev_idx = parts.index("dev")
-                if dev_idx + 1 < len(parts):
-                    return parts[dev_idx + 1]
-
-        return None
-
     def detect_iptables_backend_conflict(self) -> tuple[bool, str]:
         """Detect mixed iptables backend conflict."""
-        result = subprocess.run(
-            ["iptables", "--version"],
-            capture_output=True,
-            text=True,
-        )
-        current_backend = "nft" if "nf_tables" in result.stderr else "legacy"
-
-        legacy_active = False
-        try:
-            legacy_result = subprocess.run(
-                _privileged_cmd(["iptables-legacy", "-L", "-n", "-v"]),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if legacy_result.returncode == 0:
-                for line in legacy_result.stdout.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        try:
-                            pkts = int(parts[0])
-                            if pkts > 0:
-                                legacy_active = True
-                                break
-                        except ValueError:
-                            continue
-        except Exception:
-            pass
-
-        nft_active = False
-        try:
-            nft_result = subprocess.run(
-                _privileged_cmd(["iptables", "-L", "-n", "-v"]),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if nft_result.returncode == 0:
-                for line in nft_result.stdout.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        try:
-                            pkts = int(parts[0])
-                            if pkts > 0:
-                                nft_active = True
-                                break
-                        except ValueError:
-                            continue
-        except Exception:
-            pass
-
-        has_conflict = legacy_active and nft_active
-        diagnosis = (
-            f"iptables backend: {current_backend}, "
-            f"legacy active: {legacy_active}, "
-            f"nft active: {nft_active}"
-        )
-        return has_conflict, diagnosis
-
-    def bridge_exists(self, bridge: str) -> bool:
-        """Return True if the bridge interface exists."""
-        result = subprocess.run(
-            ["ip", "link", "show", bridge],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return result.returncode == 0
-
-    def _bridge_has_subnet(self, bridge: str, subnet: str) -> bool:
-        """Return True if the bridge already has the given subnet assigned."""
-        result = subprocess.run(
-            ["ip", "-o", "addr", "show", bridge],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return False
-        return subnet in result.stdout
+        return NetworkUtils.detect_iptables_backend_conflict()
 
     def ensure_bridge(
         self,
@@ -230,19 +88,19 @@ class NetworkService:
         subnet: str,
     ) -> None:
         """Create and configure the bridge interface."""
-        if self.bridge_exists(bridge):
+        if NetworkUtils.bridge_exists(bridge):
             logger.debug("Bridge %s already exists, reconciling state", bridge)
             reconcile_cmds: list[str] = []
-            if not self._bridge_has_subnet(bridge, subnet):
+            if not NetworkUtils.bridge_has_subnet(bridge, subnet):
                 reconcile_cmds.append(f"addr add {subnet} dev {bridge}")
             reconcile_cmds.append(f"link set {bridge} up")
             try:
-                self._run_ip_batch(reconcile_cmds)
+                NetworkUtils._run_batch(reconcile_cmds)
             except subprocess.CalledProcessError as e:
                 raise NetworkError(f"Failed to setup bridge {bridge}") from e
         else:
             try:
-                self._run_ip_batch(
+                NetworkUtils._run_batch(
                     [
                         f"link add name {bridge} type bridge",
                         f"addr add {subnet} dev {bridge}",
@@ -286,13 +144,13 @@ class NetworkService:
         Args:
             bridge: Bridge interface name to remove.
         """
-        attached_taps = self.get_bridge_taps(bridge)
+        attached_taps = NetworkUtils.get_bridge_taps(bridge)
         for tap in attached_taps:
             logger.debug("Removing attached TAP %s from bridge %s", tap, bridge)
             self.remove_tap(tap, bridge)
 
         try:
-            self._run_ip_batch(
+            NetworkUtils._run_batch(
                 [f"link set {bridge} down", f"link delete {bridge} type bridge"]
             )
         except subprocess.CalledProcessError as e:
@@ -507,16 +365,6 @@ class NetworkService:
             effective_subnet,
         )
 
-    def tap_exists(self, tap: str) -> bool:
-        """Return True if the TAP device exists."""
-        result = subprocess.run(
-            ["ip", "link", "show", tap],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return result.returncode == 0
-
     def ensure_tap(self, tap: str, bridge: str) -> None:
         """Ensure a TAP device exists and is attached to the bridge with iptables rules.
 
@@ -533,8 +381,8 @@ class NetworkService:
         """
         tracker = IPTablesTracker(db=self._db)
 
-        if self.tap_exists(tap):
-            current_bridge = self._get_tap_bridge(tap)
+        if NetworkUtils.tap_exists(tap):
+            current_bridge = NetworkUtils.get_tap_bridge(tap)
             if current_bridge == bridge:
                 logger.debug(
                     "TAP device %s already attached to bridge %s", tap, bridge
@@ -548,7 +396,7 @@ class NetworkService:
                         bridge,
                     )
                     try:
-                        self._run_ip_batch(
+                        NetworkUtils._run_batch(
                             [
                                 f"link set {tap} down",
                                 f"link set {tap} master {bridge}",
@@ -561,7 +409,7 @@ class NetworkService:
                         ) from e
                 else:
                     try:
-                        self._run_ip_batch(
+                        NetworkUtils._run_batch(
                             [
                                 f"link set {tap} master {bridge}",
                                 f"link set {tap} up",
@@ -576,7 +424,7 @@ class NetworkService:
                 )
         else:
             try:
-                self._run_ip_batch(
+                NetworkUtils._run_batch(
                     [
                         f"tuntap add dev {tap} mode tap",
                         f"link set {tap} master {bridge}",
@@ -640,25 +488,6 @@ class NetworkService:
                 f"Failed to add FORWARD rule for TAP {tap} to bridge {bridge}: {result.error_message}"
             )
 
-    def _get_tap_bridge(self, tap: str) -> str | None:
-        """Get the bridge that a TAP device is attached to. Returns None if not attached."""
-        try:
-            result = subprocess.run(
-                ["ip", "link", "show", tap],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            for line in result.stdout.splitlines():
-                if "master" in line:
-                    parts = line.split()
-                    for i, part in enumerate(parts):
-                        if part == "master" and i + 1 < len(parts):
-                            return parts[i + 1]
-        except subprocess.CalledProcessError:
-            pass
-        return None
-
     def remove_tap(self, tap: str, bridge: str | None = None) -> None:
         """Remove a TAP device and its iptables forwarding rules.
 
@@ -669,12 +498,12 @@ class NetworkService:
             tap: TAP device name to remove.
             bridge: Bridge name the TAP is attached to. If None, attempts to detect.
         """
-        if not self.tap_exists(tap):
+        if not NetworkUtils.tap_exists(tap):
             logger.debug("TAP device %s does not exist, skipping removal", tap)
             return
 
         effective_bridge = (
-            bridge if bridge is not None else self._get_tap_bridge(tap)
+            bridge if bridge is not None else NetworkUtils.get_tap_bridge(tap)
         )
         if effective_bridge is None:
             logger.warning(
@@ -721,67 +550,13 @@ class NetworkService:
             tracker.remove_rule(forward_tap_to_bridge)
 
         try:
-            self._run_ip_batch([f"link set {tap} down", f"link delete {tap}"])
+            NetworkUtils._run_batch(
+                [f"link set {tap} down", f"link delete {tap}"]
+            )
         except subprocess.CalledProcessError as e:
             raise NetworkError(f"Failed to remove TAP {tap}") from e
 
         logger.info("TAP device %s removed", tap)
-
-    def get_bridge_taps(self, bridge: str) -> list[str]:
-        """List all TAP devices currently attached to the bridge."""
-        result = subprocess.run(
-            ["ip", "link", "show", "master", bridge],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return []
-
-        devices: list[str] = []
-        for line in result.stdout.splitlines():
-            parts = line.split()
-            if parts and parts[0][0].isdigit() and len(parts) >= 2:
-                iface = parts[1].rstrip(":")
-                devices.append(iface)
-
-        return devices
-
-    def get_tuntap_devices(self) -> list[str]:
-        """List all TUN/TAP devices."""
-        result = subprocess.run(
-            ["ip", "-o", "link", "show", "type", "tuntap"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return []
-
-        devices: list[str] = []
-        for line in result.stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= 2:
-                devices.append(parts[1].rstrip(":"))
-        return devices
-
-    def get_bridges(self) -> list[str]:
-        """List all bridge interfaces."""
-        result = subprocess.run(
-            ["ip", "-o", "link", "show", "type", "bridge"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return []
-
-        bridges: list[str] = []
-        for line in result.stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= 2:
-                bridges.append(parts[1].rstrip(":"))
-        return bridges
 
 
 __all__ = ["NetworkService"]

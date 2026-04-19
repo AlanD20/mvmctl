@@ -12,6 +12,7 @@ from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._resolver import NetworkResolver
 from mvmctl.exceptions import NetworkError
 from mvmctl.models.network import NetworkItem, NetworkLeaseItem
+from mvmctl.utils.network import NetworkUtils
 
 
 class LeaseService:
@@ -141,18 +142,13 @@ class LeaseService:
         """
         leases = self.get_leases()
         used_ips = {lease.ipv4 for lease in leases}
-        used_ips.add(self._network.ipv4_gateway)
-
-        network = ipaddress.IPv4Network(self._network.subnet, strict=False)
-        for host in network.hosts():
-            ip_str = str(host)
-            if ip_str == self._network.ipv4_gateway:
-                continue
-            if ip_str not in used_ips:
-                self._lease_repo.acquire(self._network.id, ip_str, vm_id)
-                return ip_str
-
-        raise NetworkError(f"No available IPs in subnet {self._network.subnet}")
+        allocated_ip = NetworkUtils.allocate_next_ip(
+            list(used_ips),
+            self._network.subnet,
+            self._network.ipv4_gateway,
+        )
+        self._lease_repo.acquire(self._network.id, allocated_ip, vm_id)
+        return allocated_ip
 
     def lease_specific(self, ip: str, vm_id: str) -> str:
         """Allocate a specific IP address from this network's subnet.

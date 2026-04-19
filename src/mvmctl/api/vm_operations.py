@@ -59,7 +59,7 @@ from mvmctl.models.firecracker import FirecrackerConfig
 from mvmctl.models.vm import VMInstanceItem, VMStatus
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
-from mvmctl.utils.network import generate_mac, generate_tap_name
+from mvmctl.utils.network import NetworkUtils
 from mvmctl.utils.signals import SigtermContext
 from src.mvmctl.core.console._controller import ConsoleController
 
@@ -229,9 +229,11 @@ class VMCreateContext:
         self.guest_mac = (
             self.resolved.requested_guest_mac
             if self.resolved.requested_guest_mac
-            else generate_mac()
+            else NetworkUtils.generate_mac()
         )
-        self.tap_name = generate_tap_name(self.resolved.network.name, self.name)
+        self.tap_name = NetworkUtils.generate_tap_name(
+            self.resolved.network.name, self.name
+        )
 
         secure_mkdir(self.vm_dir, self.resolved.name)
         self.mark_created("vm_dir")

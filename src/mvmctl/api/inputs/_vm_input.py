@@ -10,7 +10,8 @@ from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._resolver import VMResolver
 from mvmctl.exceptions import VMNotFoundError, VMRequestError
 from mvmctl.models.vm import VMInstanceItem
-from mvmctl.utils.validation import validate_ipv4_address, validate_mac
+from mvmctl.utils.network_validator import NetworkValidator
+from mvmctl.utils.validation import validate_mac
 
 if TYPE_CHECKING:
     pass
@@ -113,6 +114,6 @@ class VMRequest:
                 ) from exc
 
         for ip in self._inputs.guest_ip:
-            validate_ipv4_address(
+            NetworkValidator.validate_ipv4_address(
                 ip, field_name="guest IP", require_private=True
             )

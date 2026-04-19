@@ -1,152 +1,125 @@
+"""SHA256 hash generation for all domain resources."""
+
 from __future__ import annotations
 
 import hashlib
-import time
+import warnings
 from pathlib import Path
 
 
-def generate_vm_id(name: str) -> str:
-    data = f"{name}:{time.time()}"
-    return hashlib.sha256(data.encode()).hexdigest()[:16]
+class HashGenerator:
+    """Generate content-addressed SHA256 hashes for domain resources.
+
+    All methods return 64-character lowercase hexadecimal hashes.
+    """
+
+    @staticmethod
+    def image(file_path: Path, os_slug: str, timestamp: str) -> str:
+        """Generate 64-char SHA256 hash for an image."""
+        file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        data = f"{file_hash}:{os_slug}:{timestamp}"
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    @staticmethod
+    def kernel(file_path: Path, version: str, arch: str) -> str:
+        """Generate 64-char SHA256 hash for a kernel."""
+        file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        data = f"{file_hash}:{version}:{arch}"
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    @staticmethod
+    def binary(file_path: Path, name: str, version: str) -> str:
+        """Generate 64-char SHA256 hash for a binary."""
+        file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        data = f"{file_hash}:{name}:{version}"
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    @staticmethod
+    def vm(name: str, image_id: str, kernel_id: str, created_at: str) -> str:
+        """Generate 64-char SHA256 hash for a VM."""
+        data = f"{name}:{image_id}:{kernel_id}:{created_at}"
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    @staticmethod
+    def network(name: str, subnet: str, created_at: str) -> str:
+        """Generate 64-char SHA256 hash for a network."""
+        data = f"{name}:{subnet}:{created_at}"
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    @staticmethod
+    def shorten(full_hash: str, length: int = 12) -> str:
+        """Return first N characters of a hash for display."""
+        if len(full_hash) < length:
+            raise ValueError(
+                f"Hash '{full_hash}' is shorter than requested length {length}"
+            )
+        return full_hash[:length]
+
+
+# =====================================================================
+# DEPRECATED — Use HashGenerator instead
+# =====================================================================
 
 
 def generate_full_hash_image(
-    file_path: Path,
-    os_slug: str,
-    timestamp: str,
+    file_path: Path, os_slug: str, timestamp: str
 ) -> str:
-    """Generate 64-character SHA256 hash for an image.
-
-    Hash includes:
-    - File content hash (SHA256 of file bytes)
-    - OS slug (e.g., "alpine-3.21")
-    - Timestamp for uniqueness
-
-    Args:
-        file_path: Path to the image file on disk.
-        os_slug: Short OS identifier (e.g., "ubuntu-24.04").
-        timestamp: ISO format timestamp string for uniqueness.
-
-    Returns:
-        64-character lowercase hexadecimal SHA256 hash.
-    """
-    file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-    data = f"{file_hash}:{os_slug}:{timestamp}"
-    return hashlib.sha256(data.encode()).hexdigest()
+    """Deprecated: Use HashGenerator.image()."""
+    warnings.warn(
+        "generate_full_hash_image is deprecated, use HashGenerator.image()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return HashGenerator.image(file_path, os_slug, timestamp)
 
 
-def generate_full_hash_kernel(
-    file_path: Path,
-    version: str,
-    arch: str,
-) -> str:
-    """Generate 64-character SHA256 hash for a kernel.
-
-    Hash includes:
-    - File content hash
-    - Version string (e.g., "6.1.102")
-    - Architecture (e.g., "x86_64")
-
-    Args:
-        file_path: Path to the kernel file on disk.
-        version: Kernel version string.
-        arch: Target architecture.
-
-    Returns:
-        64-character lowercase hexadecimal SHA256 hash.
-    """
-    file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-    data = f"{file_hash}:{version}:{arch}"
-    return hashlib.sha256(data.encode()).hexdigest()
+def generate_full_hash_kernel(file_path: Path, version: str, arch: str) -> str:
+    """Deprecated: Use HashGenerator.kernel()."""
+    warnings.warn(
+        "generate_full_hash_kernel is deprecated, use HashGenerator.kernel()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return HashGenerator.kernel(file_path, version, arch)
 
 
-def generate_full_hash_binary(
-    file_path: Path,
-    name: str,
-    version: str,
-) -> str:
-    """Generate 64-character SHA256 hash for a binary.
-
-    Hash includes:
-    - File content hash
-    - Binary name (e.g., "firecracker")
-    - Version string (e.g., "1.15.0")
-
-    Args:
-        file_path: Path to the binary file on disk.
-        name: Binary name.
-        version: Binary version string.
-
-    Returns:
-        64-character lowercase hexadecimal SHA256 hash.
-    """
-    file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-    data = f"{file_hash}:{name}:{version}"
-    return hashlib.sha256(data.encode()).hexdigest()
+def generate_full_hash_binary(file_path: Path, name: str, version: str) -> str:
+    """Deprecated: Use HashGenerator.binary()."""
+    warnings.warn(
+        "generate_full_hash_binary is deprecated, use HashGenerator.binary()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return HashGenerator.binary(file_path, name, version)
 
 
 def generate_full_hash_vm(
-    name: str,
-    image_id: str,
-    kernel_id: str,
-    created_at: str,
+    name: str, image_id: str, kernel_id: str, created_at: str
 ) -> str:
-    """Generate 64-character SHA256 hash for a VM.
-
-    VM hash is content-addressed based on:
-    - VM name
-    - Image ID (full 64-char hash)
-    - Kernel ID (full 64-char hash)
-    - Creation timestamp (ISO format)
-
-    Args:
-        name: VM name.
-        image_id: Full 64-character SHA256 hash of the image.
-        kernel_id: Full 64-character SHA256 hash of the kernel.
-        created_at: ISO format creation timestamp.
-
-    Returns:
-        64-character lowercase hexadecimal SHA256 hash.
-    """
-    data = f"{name}:{image_id}:{kernel_id}:{created_at}"
-    return hashlib.sha256(data.encode()).hexdigest()
+    """Deprecated: Use HashGenerator.vm()."""
+    warnings.warn(
+        "generate_full_hash_vm is deprecated, use HashGenerator.vm()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return HashGenerator.vm(name, image_id, kernel_id, created_at)
 
 
-def generate_full_hash_network(
-    name: str,
-    subnet: str,
-    created_at: str,
-) -> str:
-    """Generate 64-character SHA256 hash for a network.
-
-    Args:
-        name: Network name (e.g., "default").
-        subnet: Network CIDR (e.g., "172.35.0.0/24").
-        created_at: ISO format creation timestamp.
-
-    Returns:
-        64-character lowercase hexadecimal SHA256 hash.
-    """
-    data = f"{name}:{subnet}:{created_at}"
-    return hashlib.sha256(data.encode()).hexdigest()
+def generate_full_hash_network(name: str, subnet: str, created_at: str) -> str:
+    """Deprecated: Use HashGenerator.network()."""
+    warnings.warn(
+        "generate_full_hash_network is deprecated, use HashGenerator.network()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return HashGenerator.network(name, subnet, created_at)
 
 
 def shorten_hash(full_hash: str, length: int = 12) -> str:
-    """Return the first N characters of a full hash for UI display.
-
-    The database always stores the full 64-character hash. This function
-    returns the shortened version used in CLI output.
-
-    Args:
-        full_hash: Full 64-character SHA256 hash.
-        length: Number of characters to display (default: 12).
-
-    Returns:
-        First `length` characters of the hash.
-
-    Raises:
-        ValueError: If full_hash is shorter than length.
-    """
-    if len(full_hash) < length:
-        raise ValueError(f"Hash '{full_hash}' is shorter than requested length {length}")
-    return full_hash[:length]
+    """Deprecated: Use HashGenerator.shorten()."""
+    warnings.warn(
+        "shorten_hash is deprecated, use HashGenerator.shorten()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return HashGenerator.shorten(full_hash, length)

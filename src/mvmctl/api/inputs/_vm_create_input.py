@@ -51,9 +51,9 @@ from mvmctl.models.image import ImageItem
 from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkItem
 from mvmctl.utils.disk_size import parse_disk_size
+from mvmctl.utils.network_validator import NetworkValidator
 from mvmctl.utils.validation import (
     validate_boot_arg_component,
-    validate_ipv4_address,
     validate_mac,
 )
 
@@ -277,7 +277,7 @@ class VMCreateRequest:
             validate_mac(self._result.requested_guest_mac)
 
         if self._result.requested_guest_ip is not None:
-            validate_ipv4_address(
+            NetworkValidator.validate_ipv4_address(
                 self._result.requested_guest_ip,
                 field_name="Guest IP",
                 require_private=True,

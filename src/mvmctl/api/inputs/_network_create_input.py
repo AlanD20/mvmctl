@@ -2,20 +2,14 @@
 
 from __future__ import annotations
 
-import ipaddress
 from dataclasses import dataclass, field
 
 from mvmctl.core._internal._db import Database
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError
-from mvmctl.models.network import NetworkItem
-from mvmctl.utils.network import bridge_name_for, ipv4_gateway_for_subnet
-from mvmctl.utils.validation import (
-    validate_bridge_name,
-    validate_entity_name,
-    validate_ipv4_address,
-    validate_subnet,
-)
+from mvmctl.utils.full_hash import HashGenerator
+from mvmctl.utils.network import NetworkUtils
+from mvmctl.utils.network_validator import NetworkValidator
 
 __all__ = [
     "NetworkCreateInput",
@@ -80,34 +74,31 @@ class NetworkCreateRequest:
 
     def resolve(self) -> ResolvedNetworkCreateRequest:
         """Resolve all inputs to explicit values and validate."""
+        validator = NetworkValidator()
 
-        # Validate name
-        name = validate_entity_name(self._inputs.name, "network")
+        # Validate name (no dots, lowercase only)
+        name = validator.validate_name(self._inputs.name)
 
-        # Validate subnet
-        subnet = validate_subnet(self._inputs.subnet)
+        # Validate and normalize subnet
+        subnet = validator.validate_subnet(self._inputs.subnet)
 
-        # Resolve or compute gateway
+        # Resolve or compute gateway — uses NORMALIZED subnet
         if self._inputs.ipv4_gateway is not None:
-            ipv4_gateway = validate_ipv4_address(
-                self._inputs.ipv4_gateway,
-                require_private=True,
-                subnet=self._inputs.subnet,
+            ipv4_gateway = validator.validate_ipv4_gateway(
+                self._inputs.ipv4_gateway, subnet=subnet
             )
         else:
-            ipv4_gateway = ipv4_gateway_for_subnet(subnet)
+            ipv4_gateway = NetworkUtils.compute_ipv4_gateway(subnet)
 
-        # Compute bridge name
-        bridge = bridge_name_for(name)
-        bridge = validate_bridge_name(bridge)
+        # Compute and validate bridge name
+        bridge = NetworkUtils.compute_bridge_name(name)
+        bridge = validator.validate_bridge_name(bridge)
 
         # Compute network ID
         from datetime import datetime, timezone
 
-        from mvmctl.utils.full_hash import generate_full_hash_network
-
         created_at = datetime.now(tz=timezone.utc).isoformat()
-        network_id = generate_full_hash_network(name, subnet, created_at)
+        network_id = HashGenerator.network(name, subnet, created_at)
 
         # Build result
         self._result = ResolvedNetworkCreateRequest(
@@ -139,6 +130,8 @@ class NetworkCreateRequest:
                 "Failed to resolve necessary dependencies to validate"
             )
 
+        validator = NetworkValidator()
+
         # Check if network already exists
         existing = self._network_repo.get_by_name(self._result.name)
         if existing is not None:
@@ -146,39 +139,11 @@ class NetworkCreateRequest:
 
         # Validate no subnet overlap
         existing_networks = self._network_repo.list_all()
-        self._validate_subnet_no_overlap(
+        validator.validate_subnet_no_overlap(
             self._result.subnet, existing_networks, self._result.name
         )
 
         # Validate no bridge conflict
-        self._validate_bridge_not_conflicting(
+        validator.validate_bridge_not_conflicting(
             self._result.bridge, existing_networks, self._result.name
         )
-
-    @staticmethod
-    def _validate_subnet_no_overlap(
-        subnet: str, existing: list[NetworkItem], exclude_name: str = ""
-    ) -> None:
-        """Check that subnet doesn't overlap with existing networks."""
-        new_net = ipaddress.IPv4Network(subnet, strict=False)
-        for item in existing:
-            if item.name == exclude_name:
-                continue
-            existing_net = ipaddress.IPv4Network(item.subnet, strict=False)
-            if new_net.overlaps(existing_net):
-                raise NetworkError(
-                    f"Subnet {subnet} overlaps with network '{item.name}' ({item.subnet})"
-                )
-
-    @staticmethod
-    def _validate_bridge_not_conflicting(
-        bridge: str, existing: list[NetworkItem], exclude_name: str = ""
-    ) -> None:
-        """Check that bridge name doesn't conflict with existing networks."""
-        for item in existing:
-            if item.name == exclude_name:
-                continue
-            if item.bridge == bridge:
-                raise NetworkError(
-                    f"Bridge name '{bridge}' conflicts with network '{item.name}'"
-                )
