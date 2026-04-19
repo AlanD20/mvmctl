@@ -61,7 +61,15 @@ def _get_git_version_info() -> str | None:
 
         # Check if current commit has a tag
         result = subprocess.run(
-            ["git", "-C", str(repo_dir), "describe", "--tags", "--exact-match", "HEAD"],
+            [
+                "git",
+                "-C",
+                str(repo_dir),
+                "describe",
+                "--tags",
+                "--exact-match",
+                "HEAD",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -115,18 +123,36 @@ class _LazyCommandSpec:
 
 
 _COMMAND_SPECS: dict[str, _LazyCommandSpec] = {
-    "vm": _LazyCommandSpec("mvmctl.cli.vm", "vm_app", "VM lifecycle management"),
-    "console": _LazyCommandSpec("mvmctl.cli.console", "console_app", "VM console access"),
-    "host": _LazyCommandSpec("mvmctl.cli.host", "host_app", "Host configuration"),
-    "network": _LazyCommandSpec("mvmctl.cli.network", "network_app", "Network management"),
+    "vm": _LazyCommandSpec(
+        "mvmctl.cli.vm", "vm_app", "VM lifecycle management"
+    ),
+    "console": _LazyCommandSpec(
+        "mvmctl.cli.console", "console_app", "VM console access"
+    ),
+    "host": _LazyCommandSpec(
+        "mvmctl.cli.host", "host_app", "Host configuration"
+    ),
+    "network": _LazyCommandSpec(
+        "mvmctl.cli.network", "network_app", "Network management"
+    ),
     "key": _LazyCommandSpec("mvmctl.cli.key", "key_app", "SSH key management"),
-    "config": _LazyCommandSpec("mvmctl.cli.config", "config_app", "Configuration commands"),
+    "config": _LazyCommandSpec(
+        "mvmctl.cli.config", "config_app", "Configuration commands"
+    ),
     "init": _LazyCommandSpec("mvmctl.cli.init", "init_app", "Initialize mvm"),
-    "kernel": _LazyCommandSpec("mvmctl.cli.kernel", "kernel_app", "Kernel management"),
-    "image": _LazyCommandSpec("mvmctl.cli.image", "image_app", "Image management"),
+    "kernel": _LazyCommandSpec(
+        "mvmctl.cli.kernel", "kernel_app", "Kernel management"
+    ),
+    "image": _LazyCommandSpec(
+        "mvmctl.cli.image", "image_app", "Image management"
+    ),
     "bin": _LazyCommandSpec("mvmctl.cli.bin", "bin_app", "Binary management"),
-    "cache": _LazyCommandSpec("mvmctl.cli.cache", "cache_app", "Cache management"),
-    "logs": _LazyCommandSpec("mvmctl.cli.logs", "logs_app", "VM log management"),
+    "cache": _LazyCommandSpec(
+        "mvmctl.cli.cache", "cache_app", "Cache management"
+    ),
+    "logs": _LazyCommandSpec(
+        "mvmctl.cli.logs", "logs_app", "VM log management"
+    ),
     "ssh": _LazyCommandSpec("mvmctl.cli.ssh", "ssh_app", "VM SSH access"),
 }
 
@@ -155,7 +181,9 @@ _COMMAND_ORDER = [
 ]
 
 
-def _version_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+def _version_callback(
+    ctx: click.Context, _param: click.Parameter, value: bool
+) -> None:
     if not value or ctx.resilient_parsing:
         return
     click.echo(f"{_get_cli_name()} {_get_version()}")
@@ -193,23 +221,6 @@ def _warn_if_running_as_root() -> None:
     )
 
 
-def _reconcile_networks() -> None:
-    """Reconcile network metadata with kernel state.
-
-    This is intentionally metadata-only. We detect and report stale networks
-    but do NOT auto-repair them. Repair happens explicitly via:
-    - `mvm init` (default network)
-    - `mvm network create` (named networks)
-    - `mvm host init` (full host setup)
-    """
-    try:
-        from mvmctl.api.network import reconcile_networks
-
-        reconcile_networks()
-    except Exception:
-        pass
-
-
 class LazyMVMGroup(click.Group):
     _add_completion: bool = False
     registered_callback: typer.models.TyperInfo | None = None
@@ -219,7 +230,9 @@ class LazyMVMGroup(click.Group):
     def list_commands(self, ctx: click.Context) -> list[str]:
         return list(_COMMAND_ORDER)
 
-    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+    def get_command(
+        self, ctx: click.Context, cmd_name: str
+    ) -> click.Command | None:
         if cmd_name == "version":
             return version_cmd
         if cmd_name == "help":
@@ -238,7 +251,9 @@ class LazyMVMGroup(click.Group):
 
         return get_typer_command(command)
 
-    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+    def format_commands(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
         rows = [
             (command_name, _STATIC_COMMAND_HELP[command_name])
             for command_name in self.list_commands(ctx)
@@ -254,7 +269,9 @@ class LazyMVMGroup(click.Group):
     invoke_without_command=True,
     help="MicroVM Manager - Container speed, VM Isolation",
 )
-@click.option("--verbose", "verbose", is_flag=True, help="Enable verbose output")
+@click.option(
+    "--verbose", "verbose", is_flag=True, help="Enable verbose output"
+)
 @click.option("--debug", is_flag=True, help="Enable debug mode")
 @click.option(
     "--version",
@@ -281,21 +298,6 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
 
     _warn_if_running_as_root()
     _configure_logging(verbose=verbose, debug=debug)
-    # Only reconcile networks for commands that need it
-    if ctx.invoked_subcommand not in {
-        "help",
-        "version",
-        "init",
-        "config",
-        "bin",
-        "kernel",
-        "image",
-        "key",
-        "cache",
-        "logs",
-        "ssh",
-    }:
-        _reconcile_networks()
 
 
 @click.command(name="version", help="Show the version and exit")

@@ -63,9 +63,6 @@ from mvmctl.utils.network import NetworkUtils
 from mvmctl.utils.signals import SigtermContext
 from src.mvmctl.core.console._controller import ConsoleController
 
-if TYPE_CHECKING:
-    from mvmctl.api.inputs import NetworkConfig
-
 logger = logging.getLogger(__name__)
 
 
@@ -473,10 +470,10 @@ class VMOperation:
         ctx = VMCreateContext(name=inputs.name)
 
         # Sanitized - use resolved inputs
-        resolver = VMCreateRequest(
+        request = VMCreateRequest(
             vm_id=ctx.vm_id, vm_dir=ctx.vm_dir, inputs=inputs, db=db
         )
-        resolved = resolver.resolve()
+        resolved = request.resolve()
         ctx.set_resolved(resolved)
 
         with SigtermContext(lambda: ctx.cleanup()):

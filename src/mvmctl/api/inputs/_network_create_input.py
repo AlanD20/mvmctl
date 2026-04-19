@@ -145,7 +145,4 @@ class NetworkCreateRequest:
             self._result.subnet, existing_networks, self._result.name
         )
 
-        # Validate no bridge conflict
-        validator.validate_bridge_not_conflicting(
-            self._result.bridge, existing_networks, self._result.name
-        )
+

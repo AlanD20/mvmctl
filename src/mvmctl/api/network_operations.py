@@ -331,7 +331,7 @@ class NetworkOperation:
             if bridge_active != network.bridge_active:
                 repo.update_bridge_active(network.id, bridge_active)
 
-        return repo.list_all()
+        return networks
 
     @staticmethod
     def restore() -> list[str]:

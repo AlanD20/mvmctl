@@ -179,28 +179,28 @@ def _require_str_tuple(path: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _require_chain_list(path: tuple[str, ...]) -> list[tuple[str, str, str]]:
-    """Load list of iptables chains from defaults.yaml.
+    """Load list of iptables chains from defaults.
 
-    Each chain is a dict with 'name', 'table', and 'built_in' keys.
-    Returns list of (name, table, built_in) tuples.
+    Each chain is a dict with 'name', 'table', and 'jump_from' keys.
+    Returns list of (name, table, jump_from) tuples.
     """
     value = _get_required(path)
     if isinstance(value, list):
         result: list[tuple[str, str, str]] = []
         for item in value:
             if isinstance(item, dict) and all(
-                k in item for k in ("name", "table", "built_in")
+                k in item for k in ("name", "table", "jump_from")
             ):
                 result.append(
                     (
                         str(item["name"]),
                         str(item["table"]),
-                        str(item["built_in"]),
+                        str(item["jump_from"]),
                     )
                 )
             else:
                 raise RuntimeError(
-                    f"defaults key must be list of dicts with name/table/built_in: {_format_path(path)}"
+                    f"defaults key must be list of dicts with name/table/jump_from: {_format_path(path)}"
                 )
         return result
     raise RuntimeError(
@@ -300,7 +300,7 @@ def config_filename() -> str:
 # iptables chain names for MVM rules
 
 # Centralized registry of all iptables chains created by mvmctl
-# Each tuple is (chain_name, table_name, built_in_chain)
+# Each tuple is (chain_name, table_name, jump_from_chain)
 # Used for cleanup, validation, and bulk operations on MVM network rules
 IPTABLES_CHAINS: Final[list[tuple[str, str, str]]] = _require_chain_list(
     ("host", "system_files", "iptables_chains")
@@ -518,9 +518,6 @@ DEFAULT_CLOUD_INIT_ISO_NAME: Final[str] = _require_str(
 )
 DEFAULT_CLOUD_INIT_ISO_VOLUME_LABEL: Final[str] = _require_str(
     ("vm", "cloud_init", "iso_volume_label")
-)
-DEFAULT_CLOUD_INIT_DRIVE_ID: Final[str] = _require_str(
-    ("vm", "cloud_init", "drive_id")
 )
 REQUIRED_ISO_TOOL: Final[str] = _require_str(
     ("vm", "cloud_init", "required_iso_tool")

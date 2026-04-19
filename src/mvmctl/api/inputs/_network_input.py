@@ -40,6 +40,8 @@ class ResolvedNetworkInput:
 
     networks: list[NetworkItem]
 
+    force: bool | None = None
+
 
 class NetworkRequest:
     """Resolve network identifiers to DB records and validate.

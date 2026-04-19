@@ -48,7 +48,7 @@ class NetworkUtils:
     @staticmethod
     def compute_bridge_name(network_name: str) -> str:
         """Compute bridge name from network name."""
-        return f"br-{network_name}"
+        return f"{CLI_NAME}-{network_name}"
 
     # --- Naming & Generation ---
 

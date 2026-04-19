@@ -253,6 +253,10 @@ class NetworkValidator:
                 "alphanumeric, hyphen, and underscore characters"
             )
 
+        # Check if bridge already exists on host (non-mvm interface)
+        if NetworkUtils.bridge_exists(bridge):
+            raise MVMError(f"Bridge '{bridge}' already exists on this host")
+
         return bridge
 
     @staticmethod
@@ -358,28 +362,4 @@ class NetworkValidator:
             if new_net.overlaps(existing_net):
                 raise MVMError(
                     f"Subnet {subnet} overlaps with network '{item.name}' ({item.subnet})"
-                )
-
-    @staticmethod
-    def validate_bridge_not_conflicting(
-        bridge: str,
-        existing: list[Any],
-        exclude_name: str = "",
-    ) -> None:
-        """Check that bridge name doesn't conflict with existing networks.
-
-        Args:
-            bridge: Bridge name to check.
-            existing: List of objects with `.name` and `.bridge` attributes.
-            exclude_name: Network name to skip (for updates).
-
-        Raises:
-            MVMError: If bridge name conflicts.
-        """
-        for item in existing:
-            if item.name == exclude_name:
-                continue
-            if item.bridge == bridge:
-                raise MVMError(
-                    f"Bridge name '{bridge}' conflicts with network '{item.name}'"
                 )
