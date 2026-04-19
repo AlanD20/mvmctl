@@ -10,7 +10,7 @@ from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._service import NetworkService
-from mvmctl.exceptions import NetworkError
+from mvmctl.exceptions import NetworkError, NetworkNotFoundError
 from mvmctl.models.network import NetworkItem
 from mvmctl.utils.audit import log_audit
 from mvmctl.utils.network import NetworkUtils
@@ -123,6 +123,7 @@ class NetworkOperation:
             active_vm_leases = [
                 lease for lease in leases if lease.vm_id is not None
             ]
+            # IMPROVEMENTS: maybe handle force to delete all related VMs
             if active_vm_leases:
                 raise NetworkError(
                     f"Network '{network.name}' has {len(active_vm_leases)} active VM leases. "
@@ -262,46 +263,61 @@ class NetworkOperation:
 
     @staticmethod
     def ensure_default() -> NetworkItem:
-        """Ensure the default network exists and is materialized.
+        """Ensure the default network is materialized (bridge/NAT up).
+
+        Does NOT create the default network if it doesn't exist.
+        Use create_internal_default() to create the MVM internal default network.
 
         Returns:
             The default NetworkItem.
+
+        Raises:
+            NetworkNotFoundError: If no default network exists in the database.
         """
+        db = Database()
+        repo = NetworkRepository(db)
+
+        default_network = repo.get_default()
+        if default_network is None:
+            raise NetworkNotFoundError("No default network found in database")
+
+        # Ensure bridge is materialized
+        service = NetworkService(repo)
+        try:
+            service.ensure_bridge(
+                default_network.bridge, default_network.subnet
+            )
+            if default_network.nat_enabled:
+                service.ensure_nat(
+                    default_network.bridge,
+                    default_network.nat_gateways_list,
+                    subnet=default_network.subnet,
+                )
+        except NetworkError:
+            logger.debug("Failed to materialize default network bridge/NAT")
+
+        # Update bridge_active
+        bridge_active = NetworkUtils.bridge_exists(default_network.bridge)
+        if bridge_active != default_network.bridge_active:
+            repo.update_bridge_active(default_network.id, bridge_active)
+
+        return repo.get_default() or default_network
+
+    @staticmethod
+    def create_internal_default() -> NetworkItem:
+        """Create the internal MVM default network.
+
+        This creates the default network with DEFAULT_NETWORK_NAME,
+        DEFAULT_NETWORK_SUBNET, and auto-detected outbound interface for NAT.
+
+        Returns:
+            The created default NetworkItem.
+        """
+        from mvmctl.api.inputs._network_create_input import NetworkCreateInput
         from mvmctl.constants import (
             DEFAULT_NETWORK_NAME,
             DEFAULT_NETWORK_SUBNET,
         )
-
-        db = Database()
-        repo = NetworkRepository(db)
-
-        # Check if default network exists
-        default_network = repo.get_default()
-        if default_network is not None:
-            # Ensure bridge is materialized
-            service = NetworkService(repo)
-            try:
-                service.ensure_bridge(
-                    default_network.bridge, default_network.subnet
-                )
-                if default_network.nat_enabled:
-                    service.ensure_nat(
-                        default_network.bridge,
-                        default_network.nat_gateways_list,
-                        subnet=default_network.subnet,
-                    )
-            except NetworkError:
-                logger.debug("Failed to materialize default network bridge/NAT")
-
-            # Update bridge_active
-            bridge_active = NetworkUtils.bridge_exists(default_network.bridge)
-            if bridge_active != default_network.bridge_active:
-                repo.update_bridge_active(default_network.id, bridge_active)
-
-            return repo.get_default() or default_network
-
-        # Create default network
-        from mvmctl.api.inputs._network_create_input import NetworkCreateInput
 
         outbound_iface = NetworkUtils.detect_outbound_interface()
         nat_gateways = [outbound_iface] if outbound_iface else []
@@ -309,10 +325,13 @@ class NetworkOperation:
         create_input = NetworkCreateInput(
             name=DEFAULT_NETWORK_NAME,
             subnet=DEFAULT_NETWORK_SUBNET,
-            nat_enabled=True,
+            nat_enabled=len(nat_gateways) > 0,
             nat_gateways=nat_gateways,
         )
 
+        log_audit(
+            "network.create_internal_default", f"name={DEFAULT_NETWORK_NAME}"
+        )
         return NetworkOperation.create(create_input)
 
     @staticmethod

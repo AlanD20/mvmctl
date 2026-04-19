@@ -13,8 +13,8 @@ from mvmctl.api.inputs._network_input import NetworkInput
 from mvmctl.api.network_operations import NetworkOperation
 from mvmctl.exceptions import NetworkError
 from mvmctl.utils.cli import CliUtils
+from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.console import (
-    format_timestamp,
     print_error,
     print_info,
     print_inspect_header,
@@ -85,7 +85,7 @@ def network_ls(
                 n.bridge,
                 "yes" if n.nat_enabled else "no",
                 str(vm_count),
-                format_timestamp(n.created_at) if n.created_at else "-",
+                CommonUtils.human_readable_datetime(n.created_at),
             ]
         )
     print_table(
@@ -122,7 +122,7 @@ def network_set_default(
     print_success(f"Default network set to '{name}'")
 
 
-def _resolve_nat_gateways() -> str:
+def _resolve_user_nat_gateways() -> str:
     interfaces = NetworkUtils.get_physical_interfaces()
     if not interfaces:
         print_error("No network interfaces found")
@@ -209,8 +209,8 @@ def network_create(
         print_error("Missing required option '--subnet'")
         raise typer.Exit(code=1)
 
-    if nat_gateways is None:
-        nat_gateways = _resolve_nat_gateways()
+    if nat_gateways is None and not no_nat:
+        nat_gateways = _resolve_user_nat_gateways()
 
     nat_gateways_list = (
         [g.strip() for g in nat_gateways.split(",") if g.strip()]
@@ -303,7 +303,9 @@ def network_inspect(
     print_key_value("IPv4 Gateway", info.ipv4_gateway or "-")
     print_key_value("Bridge", info.bridge)
     print_key_value("NAT", "enabled" if info.nat_enabled else "disabled")
-    print_key_value("Created", format_timestamp(info.created_at))
+    print_key_value(
+        "Created", CommonUtils.human_readable_datetime(info.created_at)
+    )
 
     print_section_header("RESOURCES")
     leases: list[NetworkLeaseItem] = info.leases or []

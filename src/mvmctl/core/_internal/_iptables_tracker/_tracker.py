@@ -24,6 +24,7 @@ from mvmctl.models.network import (
     IPTablesTable,
     IPTablesWildcard,
 )
+from mvmctl.utils.network import NetworkUtils
 from mvmctl.utils.process import privileged_cmd
 
 from ._repository import IPTablesRuleRepository
@@ -481,16 +482,56 @@ class IPTablesTracker:
 
         return True
 
-    def cleanup_inactive_rules(self) -> int:
-        """Hard delete all inactive iptables rules from database.
+    def remove_chain(
+        self,
+        chain_name: IPTablesChain,
+        table: IPTablesTable = IPTablesTable.FILTER,
+    ) -> bool:
+        """Delete an iptables chain and mark its rules as deleted in DB.
 
-        This is a maintenance operation to clean up soft-deleted records
-        that are no longer needed for audit purposes.
+        Args:
+            chain_name: Name of the chain to delete.
+            table: Table name. Default is filter.
 
         Returns:
-            Number of records permanently deleted.
+            True if the chain was deleted, False if chain doesn't exist.
+
+        Raises:
+            IPTablesTrackerError: If delete operation fails unexpectedly.
         """
-        return self._repo.delete_inactive()
+        chain_name_str = chain_name.value
+
+        # Check if chain exists
+        if not NetworkUtils.chain_exists(chain_name_str, table.value):
+            logger.debug(
+                "Chain %s doesn't exist, nothing to remove", chain_name_str
+            )
+            return False
+
+        # Mark all rules for this chain as deleted in database
+        # (iptables -X will automatically remove rules when chain is deleted)
+        deleted_count = self._repo.mark_deleted_by_table_chain_name(
+            table, chain_name
+        )
+        logger.debug(
+            "Marked %d rules as deleted for chain %s",
+            deleted_count,
+            chain_name_str,
+        )
+
+        # Delete the chain (iptables automatically removes rules)
+        cmd_delete = ["iptables", "-t", table.value, "-X", chain_name_str]
+        try:
+            subprocess.run(
+                privileged_cmd(cmd_delete), check=True, capture_output=True
+            )
+            logger.debug("Deleted chain %s", chain_name_str)
+        except subprocess.CalledProcessError as e:
+            raise IPTablesTrackerError(
+                f"Failed to delete {chain_name_str} chain: {e.stderr.decode() if e.stderr else e}"
+            ) from e
+
+        return True
 
 
 __all__ = ["IPTablesTracker", "IPTablesRuleResult"]

@@ -11,6 +11,25 @@ def _strip_markup(text: str) -> str:
     return re.sub(r"\[/?[a-zA-Z][^\[\]]*\]", "", text)
 
 
+def format_timestamp(iso_timestamp: str | None) -> str:
+    """Format ISO timestamp to 'YYYY/MM/DD HH:MM:SS'.
+
+    .. deprecated::
+        Use :func:`mvmctl.utils.common.CommonUtils.human_readable_datetime` instead.
+    """
+    import warnings
+
+    warnings.warn(
+        "format_timestamp is deprecated — use "
+        "CommonUtils.human_readable_datetime instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from mvmctl.utils.common import CommonUtils
+
+    return CommonUtils.human_readable_datetime(iso_timestamp)
+
+
 class _PlainConsole:
     """Minimal drop-in shim for the Rich Console API; emits plain text only."""
 
@@ -30,7 +49,9 @@ class _PlainConsole:
 console = _PlainConsole()
 
 
-def print_table(columns: list[str], rows: list[list[str]], title: str | None = None) -> None:
+def print_table(
+    columns: list[str], rows: list[list[str]], title: str | None = None
+) -> None:
     """Print a plain-text, column-aligned table."""
     if title:
         print(title)
@@ -44,7 +65,9 @@ def print_table(columns: list[str], rows: list[list[str]], title: str | None = N
 
     def _fmt_row(cells: list[str]) -> str:
         return "  ".join(
-            str(cells[i]).ljust(col_widths[i]) if i < len(cells) else " " * col_widths[i]
+            str(cells[i]).ljust(col_widths[i])
+            if i < len(cells)
+            else " " * col_widths[i]
             for i in range(len(columns))
         )
 
@@ -75,7 +98,9 @@ def print_section_header(title: str) -> None:
     print(f"\n{title}")
 
 
-def print_key_value(key: str, value: str, indent: int = 2, key_width: int = 12) -> None:
+def print_key_value(
+    key: str, value: str, indent: int = 2, key_width: int = 12
+) -> None:
     """Print a key-value pair with consistent padding.
 
     Args:
@@ -85,19 +110,6 @@ def print_key_value(key: str, value: str, indent: int = 2, key_width: int = 12) 
         key_width: Width for key column, left-aligned (default 12)
     """
     print(f"{' ' * indent}{key + ':':<{key_width}} {value}")
-
-
-def format_timestamp(iso_timestamp: str | None) -> str:
-    """Format ISO timestamp to 'YYYY/MM/DD HH:MM:SS'."""
-    from datetime import datetime
-
-    if not iso_timestamp:
-        return "-"
-    try:
-        dt = datetime.fromisoformat(str(iso_timestamp).replace("Z", "+00:00"))
-        return dt.strftime("%Y/%m/%d %H:%M:%S")
-    except (ValueError, AttributeError):
-        return str(iso_timestamp)
 
 
 def print_inspect_header(title: str, subtitle: str = "") -> None:

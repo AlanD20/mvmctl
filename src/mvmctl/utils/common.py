@@ -170,3 +170,25 @@ class CommonUtils:
             for c in value
             if c not in _CONTROL_CHARS and c not in _ZERO_WIDTH_CHARS
         )
+
+    @staticmethod
+    def human_readable_datetime(iso_timestamp: str | None) -> str:
+        """Format ISO timestamp to 'YYYY/MM/DD HH:MM:SS'.
+
+        Args:
+            iso_timestamp: ISO format timestamp string (e.g. from datetime.now().isoformat()).
+
+        Returns:
+            Formatted string 'YYYY/MM/DD HH:MM:SS', or "-" if input is empty/None.
+        """
+        from datetime import datetime
+
+        if not iso_timestamp:
+            return "-"
+        try:
+            dt = datetime.fromisoformat(
+                str(iso_timestamp).replace("Z", "+00:00")
+            )
+            return dt.strftime("%Y/%m/%d %H:%M:%S")
+        except (ValueError, AttributeError):
+            return str(iso_timestamp)

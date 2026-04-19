@@ -5,7 +5,10 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.core._internal._iptables_tracker import IPTablesTracker
+from mvmctl.core._internal._iptables_tracker import (
+    IPTablesRuleRepository,
+    IPTablesTracker,
+)
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError
 from mvmctl.models.network import (
@@ -27,21 +30,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Excluded virtual interface prefixes when listing physical network interfaces
-_EXCLUDED_VIRTUAL_INTERFACE_PREFIXES = (
-    "mvm-",
-    "tap",
-    "br-",
-    "virbr",
-    "docker",
-    "veth",
-)
-_EXCLUDED_INTERFACES = ("lo",)
-
 # MVM iptables chains configuration: (chain_enum, table_enum, jump_from_chain)
 _MVM_CHAINS_CONFIG: list[tuple[IPTablesChain, IPTablesTable, str]] = [
     (IPTablesChain.MVM_FORWARD, IPTablesTable.FILTER, "FORWARD"),
     (IPTablesChain.MVM_POSTROUTING, IPTablesTable.NAT, "POSTROUTING"),
+    (IPTablesChain.MVM_NOCLOUDNET_INPUT, IPTablesTable.FILTER, "INPUT"),
 ]
 
 
@@ -53,29 +46,59 @@ class NetworkService:
     """
 
     def __init__(self, repo: NetworkRepository) -> None:
-        """Initialize NetworkService with optional database instance.
+        """Initialize NetworkService.
 
         Args:
-            db: Optional Database instance. If not provided, IPTablesTracker
-                instances will create their own.
+            repo: NetworkRepository instance for network DB operations.
         """
         self._repo = repo
+        self._iptables_repo = IPTablesRuleRepository(repo.db)
+        self._tracker = IPTablesTracker(repo=self._iptables_repo)
+
+    @property
+    def tracker(self) -> IPTablesTracker:
+        """Create an IPTablesTracker with the shared repository."""
+        return self._tracker
+
+    def ensure_mvm_chains(self) -> None:
+        """Ensure MVM iptables chains exist with proper jump rules.
+
+        Idempotent operation - safe to call multiple times.
+        Creates MVM chains and sets up jump rules from standard chains.
+
+        Creates three chains:
+        - MVM-FORWARD (filter table, jumped from FORWARD)
+        - MVM-POSTROUTING (nat table, jumped from POSTROUTING)
+        - MVM-NOCLOUDNET-INPUT (filter table, jumped from INPUT)
+        """
+
+        for chain_enum, table_enum, jump_from in _MVM_CHAINS_CONFIG:
+            self._tracker.ensure_chain(
+                chain_name=chain_enum,
+                table=table_enum,
+                auto_jump_from=jump_from,
+                position=1,
+            )
+
+    def remove_mvm_chains(self) -> None:
+        """Remove all MVM iptables chains and their rules.
+
+        This deletes the custom MVM chains and all their rules.
+        Use with caution - this removes all MVM firewall rules.
+        """
+        for chain_enum, table_enum, _ in _MVM_CHAINS_CONFIG:
+            self._tracker.remove_chain(chain_name=chain_enum, table=table_enum)
 
     def initialize(self) -> None:
         """Initialize MVM iptables chains with proper jump rules.
 
         Idempotent operation - safe to call multiple times.
         Creates MVM chains and sets up jump rules from standard chains.
-        """
-        tracker = IPTablesTracker(db=self._db)
 
-        for chain_enum, table_enum, jump_from in _MVM_CHAINS_CONFIG:
-            tracker.ensure_chain(
-                chain_name=chain_enum,
-                table=table_enum,
-                auto_jump_from=jump_from,
-                position=1,
-            )
+        .. deprecated::
+            Use :meth:`ensure_mvm_chains` instead.
+        """
+        self.ensure_mvm_chains()
 
     def detect_iptables_backend_conflict(self) -> tuple[bool, str]:
         """Detect mixed iptables backend conflict."""
@@ -172,8 +195,6 @@ class NetworkService:
         # Ensure MVM chains exist before adding rules
         self.initialize()
 
-        tracker = IPTablesTracker(db=self._db)
-
         for gateway_iface in nat_gateways:
             context = f"{bridge}:{gateway_iface}"
 
@@ -194,7 +215,7 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            result = tracker.ensure_rule(masquerade_rule, context=context)
+            result = self._tracker.ensure_rule(masquerade_rule, context=context)
             if not result.success:
                 raise NetworkError(
                     f"Failed to add MASQUERADE rule for {bridge} via {gateway_iface}: {result.error_message}"
@@ -217,7 +238,9 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            result = tracker.ensure_rule(forward_out_rule, context=context)
+            result = self._tracker.ensure_rule(
+                forward_out_rule, context=context
+            )
             if not result.success:
                 raise NetworkError(
                     f"Failed to add FORWARD out rule for {bridge} via {gateway_iface}: {result.error_message}"
@@ -240,7 +263,7 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            result = tracker.ensure_rule(forward_in_rule, context=context)
+            result = self._tracker.ensure_rule(forward_in_rule, context=context)
             if not result.success:
                 raise NetworkError(
                     f"Failed to add FORWARD in rule for {bridge} via {gateway_iface}: {result.error_message}"
@@ -300,7 +323,15 @@ class NetworkService:
                 f"Provide subnet explicitly or ensure network exists in database."
             )
 
-        tracker = IPTablesTracker(db=self._db)
+        # Check for attached TAPs — log warning but continue with removal
+        attached_taps = NetworkUtils.get_bridge_taps(bridge)
+        if attached_taps:
+            logger.warning(
+                "Removing NAT for bridge %s but %d TAP(s) still attached: %s",
+                bridge,
+                len(attached_taps),
+                ", ".join(attached_taps),
+            )
 
         for gateway_iface in effective_nat_gateways:
             masquerade_rule = IPTablesRuleItem(
@@ -319,7 +350,7 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            tracker.remove_rule(masquerade_rule)
+            self._tracker.remove_rule(masquerade_rule)
 
             forward_out_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
@@ -337,7 +368,7 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            tracker.remove_rule(forward_out_rule)
+            self._tracker.remove_rule(forward_out_rule)
 
             forward_in_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
@@ -355,7 +386,7 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            tracker.remove_rule(forward_in_rule)
+            self._tracker.remove_rule(forward_in_rule)
 
         logger.info(
             "NAT rules removed for bridge %s via %s (source %s)",
@@ -378,8 +409,6 @@ class NetworkService:
         - "OUT" = leaving the bridge toward the TAP
         - "IN" = entering the bridge from the TAP
         """
-        tracker = IPTablesTracker(db=self._db)
-
         if NetworkUtils.tap_exists(tap):
             current_bridge = NetworkUtils.get_tap_bridge(tap)
             if current_bridge == bridge:
@@ -454,7 +483,7 @@ class NetworkService:
             is_active=True,
             network_name=bridge,
         )
-        result = tracker.ensure_rule(
+        result = self._tracker.ensure_rule(
             forward_bridge_to_tap, context=f"tap:{tap}"
         )
         if not result.success:
@@ -478,11 +507,11 @@ class NetworkService:
             is_active=True,
             network_name=bridge,
         )
-        result = tracker.ensure_rule(
+        result = self._tracker.ensure_rule(
             forward_tap_to_bridge, context=f"tap:{tap}"
         )
         if not result.success:
-            tracker.remove_rule(forward_bridge_to_tap)
+            self._tracker.remove_rule(forward_bridge_to_tap)
             raise NetworkError(
                 f"Failed to add FORWARD rule for TAP {tap} to bridge {bridge}: {result.error_message}"
             )
@@ -510,8 +539,6 @@ class NetworkService:
                 tap,
             )
         else:
-            tracker = IPTablesTracker(db=self._db)
-
             forward_bridge_to_tap = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
                 chain_name=IPTablesChain.MVM_FORWARD,
@@ -528,7 +555,7 @@ class NetworkService:
                 is_active=True,
                 network_name=effective_bridge,
             )
-            tracker.remove_rule(forward_bridge_to_tap)
+            self._tracker.remove_rule(forward_bridge_to_tap)
 
             forward_tap_to_bridge = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
@@ -546,7 +573,7 @@ class NetworkService:
                 is_active=True,
                 network_name=effective_bridge,
             )
-            tracker.remove_rule(forward_tap_to_bridge)
+            self._tracker.remove_rule(forward_tap_to_bridge)
 
         try:
             NetworkUtils._run_batch(
