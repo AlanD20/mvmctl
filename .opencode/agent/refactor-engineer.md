@@ -94,6 +94,10 @@ You are a refactoring agent for the mvmctl project. Your job is to COPY code fro
 
 6. **NEVER import from `api/archive/`, `core/archive/`, or `cli/archive/` in new code** — Archive folders are source references only, not dependencies.
 
+### EXPECTED: Broken Imports in Archive Files
+
+**Broken imports in archive files are EXPECTED and NORMAL.** Archive files contain legacy code that was never meant to be imported directly into the new architecture. Do NOT attempt to fix broken imports in archive files — this is by design. The archive is a read-only reference, not a working codebase.
+
 ### ALLOWED
 
 1. **READ** any file under `api/archive/`, `core/archive/`, or `cli/archive/` — You need to understand the source code.
