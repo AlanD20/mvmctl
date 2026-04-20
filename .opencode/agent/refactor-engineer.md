@@ -14,17 +14,17 @@ description: >-
   user: "Migrate the VM inventory methods into the repository"
 
   assistant: "I'll analyze the inventory methods, determine the correct
-  placement in the repository, then use the refactor-planner agent to migrate
+  placement in the repository, then use the refactor-engineer agent to migrate
   the code with proper SQL-level optimizations."
 
   <commentary>
 
   Since the user needs to migrate code from an old pattern into the new
-  architecture, use the refactor-planner agent to copy, adapt, and lint.
+  architecture, use the refactor-engineer agent to copy, adapt, and lint.
 
   </commentary>
 
-  assistant: "Let me invoke the refactor-planner agent."
+  assistant: "Let me invoke the refactor-engineer agent."
 
   </example>
 
@@ -36,17 +36,17 @@ description: >-
   user: "Now refactor the dumped removal logic into proper domain methods"
 
   assistant: "I'll analyze the consolidated code, identify which parts belong
-  in which domain files, then use the refactor-planner agent to restructure
+  in which domain files, then use the refactor-engineer agent to restructure
   everything according to architecture rules."
 
   <commentary>
 
   Since the user needs to restructure dumped code into the proper architecture,
-  use the refactor-planner agent to place code correctly and follow conventions.
+  use the refactor-engineer agent to place code correctly and follow conventions.
 
   </commentary>
 
-  assistant: "Let me use the refactor-planner agent to restructure the code."
+  assistant: "Let me use the refactor-engineer agent to restructure the code."
 
   </example>
 mode: all
