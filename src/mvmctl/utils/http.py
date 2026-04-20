@@ -28,7 +28,7 @@ from mvmctl.constants import (
     HTTP_USER_AGENT,
 )
 from mvmctl.exceptions import ChecksumMismatchError, MVMError
-from mvmctl.utils.fs import get_temp_dir
+from mvmctl.utils.common import CacheUtils
 
 __all__ = ["download_file", "urlopen"]
 
@@ -54,7 +54,11 @@ def _with_retry(
     max_retries: int = CONST_DOWNLOAD_MAX_RETRIES,
     retry_delay: float = CONST_DOWNLOAD_RETRY_DELAY,
     backoff: float = CONST_DOWNLOAD_RETRY_BACKOFF,
-    retryable_exceptions: tuple[type[Exception], ...] = (URLError, HTTPError, IOError),
+    retryable_exceptions: tuple[type[Exception], ...] = (
+        URLError,
+        HTTPError,
+        IOError,
+    ),
 ) -> Callable[[F], F]:
     """Decorator that adds retry logic with exponential backoff."""
 
@@ -88,7 +92,11 @@ def _with_retry(
                             e,
                         )
 
-            raise last_exception if last_exception else MVMError("Download failed")
+            raise (
+                last_exception
+                if last_exception
+                else MVMError("Download failed")
+            )
 
         return wrapper  # type: ignore[return-value]
 
@@ -138,7 +146,9 @@ def download_file(
             from mvmctl.utils.console import print_warning
 
             print_warning(f"Warning: No checksum available for {url}")
-            print_warning("Integrity cannot be verified. This is a potential security risk.")
+            print_warning(
+                "Integrity cannot be verified. This is a potential security risk."
+            )
             if not sys.stdin.isatty():
                 raise MVMError(
                     f"No checksum provided for download: {url}. "
@@ -147,13 +157,17 @@ def download_file(
                 )
             import typer
 
-            if not typer.confirm("Proceed with download anyway?", default=False):
-                raise MVMError(f"Download cancelled: {url} (no checksum provided)")
+            if not typer.confirm(
+                "Proceed with download anyway?", default=False
+            ):
+                raise MVMError(
+                    f"Download cancelled: {url} (no checksum provided)"
+                )
 
     temp_path: Path | None = None
     try:
         temp_fd, temp_str = tempfile.mkstemp(
-            dir=get_temp_dir(), prefix=f"{dest.stem}-", suffix=".tmp"
+            dir=CacheUtils.get_temp_dir(), prefix=f"{dest.stem}-", suffix=".tmp"
         )
         os.close(temp_fd)
         temp_path = Path(temp_str)

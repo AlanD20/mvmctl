@@ -58,7 +58,7 @@ from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.firecracker import FirecrackerConfig
 from mvmctl.models.vm import VMInstanceItem, VMStatus
 from mvmctl.utils.audit import log_audit
-from mvmctl.utils.fs import get_cache_dir, get_vm_dir_by_hash
+from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.network import NetworkUtils
 from mvmctl.utils.signals import SigtermContext
 from src.mvmctl.core.console._controller import ConsoleController
@@ -96,7 +96,7 @@ class VMCreateContext:
         """Initialize the resolver with database and sub-resolvers."""
         created_at = datetime.now()
         self.vm_id = self._generate_vm_id(name, created_at)
-        self.vm_dir = Path(get_vm_dir_by_hash(self.vm_id))
+        self.vm_dir = Path(CacheUtils.get_vm_dir(self.vm_id))
         self._db = db if db is not None else Database()
 
     @staticmethod
@@ -644,7 +644,7 @@ class VMOperation:
         if not vm:
             raise VMNotFoundError(f"VM '{name}' not found")
 
-        vm_dir = get_vm_dir_by_hash(vm.id)
+        vm_dir = CacheUtils.get_vm_dir(vm.id)
         # Get network name from network_id
         db_net = (
             MVMDatabase().get_network(vm.network_id) if vm.network_id else None
@@ -686,13 +686,12 @@ class VMOperation:
         from mvmctl.core.mvm_db import MVMDatabase
 
         from mvmctl.core.network import delete_tap
-        from mvmctl.utils.fs import get_vm_dir_by_hash
 
         fm = FirewallManager()
         nm = NocloudManager()
 
         for vm in targets:
-            vm_dir = get_vm_dir_by_hash(vm.id) if vm.id else None
+            vm_dir = CacheUtils.get_vm_dir(vm.id) if vm.id else None
 
             # Stop nocloud server
             if vm.nocloud_net_port is not None and vm.ipv4 is not None:
@@ -769,7 +768,6 @@ class VMOperation:
         )
         from mvmctl.exceptions import NetworkError
         from mvmctl.services.nocloud_server import NoCloudNetServerManager
-        from mvmctl.utils.fs import get_cache_dir
 
         log = logging.getLogger(__name__)
 
@@ -783,7 +781,7 @@ class VMOperation:
         if dry_run or not targets:
             return targets
 
-        cache_dir = Path(get_cache_dir())
+        cache_dir = Path(CacheUtils.get_cache_dir())
 
         for v in targets:
             vm_dir = vm_cache_dir(v) if v.id else None
@@ -1158,9 +1156,7 @@ class VMOperation:
         if self._vm.config_path:
             return Path(self._vm.config_path).parent
         elif self._vm.id:
-            from mvmctl.utils.fs import get_vm_dir_by_hash
-
-            return get_vm_dir_by_hash(self._vm.id)
+            return CacheUtils.get_vm_dir(self._vm.id)
         return None
 
 
@@ -1376,7 +1372,7 @@ def remove_vm(
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
 
-    vm_dir = get_vm_dir_by_hash(vm.id)
+    vm_dir = CacheUtils.get_vm_dir(vm.id)
     # Get network name from network_id
     db_net = Database().get_network(vm.network_id) if vm.network_id else None
     net_name = db_net.name if db_net else DEFAULT_NETWORK_NAME
@@ -1419,13 +1415,12 @@ def _perform_bulk_cleanup(
     from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
 
     from mvmctl.core.network._service import NetworkService
-    from mvmctl.utils.fs import get_vm_dir_by_hash
 
     fm = FirewallManager()
     nm = NocloudManager()
 
     for vm in targets:
-        vm_dir = get_vm_dir_by_hash(vm.id) if vm.id else None
+        vm_dir = CacheUtils.get_vm_dir(vm.id) if vm.id else None
 
         # Stop nocloud server
         if vm.nocloud_net_port is not None and vm.ipv4 is not None:
@@ -1508,7 +1503,7 @@ def cleanup_vms(
     if dry_run or not targets:
         return targets
 
-    cache_dir = Path(get_cache_dir())
+    cache_dir = Path(CacheUtils.get_cache_dir())
 
     # Create bulk cleanup context (pure state tracker)
     ctx = VMBulkCleanupContext(manager=manager, cache_dir=cache_dir)
@@ -1550,7 +1545,6 @@ def export_vm_config(name: str) -> "VMExportConfig":
         VMExportKernelConfig,
         VMExportNetworkConfig,
     )
-    from mvmctl.utils.fs import get_cache_dir
 
     resolver = VMResolver()
 
@@ -1568,7 +1562,7 @@ def export_vm_config(name: str) -> "VMExportConfig":
     image_os_slug = ""
     image_arch = ""
     if vm.image_id:
-        cache_dir = get_cache_dir()
+        cache_dir = CacheUtils.get_cache_dir()
         try:
             image_matches = find_images_by_id_prefix(cache_dir, vm.image_id)
             if image_matches:
@@ -1603,7 +1597,7 @@ def export_vm_config(name: str) -> "VMExportConfig":
     kernel_arch: str | None = None
     kernel_type: str | None = None
     if vm.kernel_id:
-        cache_dir = get_cache_dir()
+        cache_dir = CacheUtils.get_cache_dir()
         try:
             kernel_matches = find_kernels_by_id_prefix(cache_dir, vm.kernel_id)
             if kernel_matches:
@@ -1642,7 +1636,7 @@ def export_vm_config(name: str) -> "VMExportConfig":
     try:
         from mvmctl.core.metadata import list_binary_entries
 
-        cache_dir = get_cache_dir()
+        cache_dir = CacheUtils.get_cache_dir()
         all_binaries = list_binary_entries(cache_dir)
         for bin_name, entries in all_binaries.items():
             for meta in entries:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Generator
 
 from mvmctl.exceptions import MigrationError
-from mvmctl.utils.fs import get_mvm_db_path
+from mvmctl.utils.common import CacheUtils
 
 
 class Database:
@@ -34,7 +34,9 @@ class Database:
         Args:
             db_path: Custom database path. Uses default if not provided.
         """
-        self._db_path = Path(db_path) if db_path else get_mvm_db_path()
+        self._db_path = (
+            Path(db_path) if db_path else CacheUtils.get_mvm_db_path()
+        )
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -126,7 +128,11 @@ class Database:
                     f"Cannot have gaps in version sequence."
                 )
 
-        return [m for m in all_migrations if self._extract_version(m) > current_version]
+        return [
+            m
+            for m in all_migrations
+            if self._extract_version(m) > current_version
+        ]
 
     def _ensure_migrations_table(self, conn: sqlite3.Connection) -> None:
         """Ensure db_migrations tracking table exists."""

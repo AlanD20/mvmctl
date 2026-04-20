@@ -18,7 +18,7 @@ from mvmctl.core._internal._db import Database
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.exceptions import MVMKeyError
 from mvmctl.models.key import SSHKeyItem
-from mvmctl.utils.fs import get_config_dir
+from mvmctl.utils.common import CacheUtils
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class KeyService:
     @staticmethod
     def _get_keys_config_dir() -> Path:
         """Return the directory for SSH key management (in config dir)."""
-        return get_config_dir() / "keys"
+        return CacheUtils.get_keys_dir()
 
     @staticmethod
     def _generate_keypair(

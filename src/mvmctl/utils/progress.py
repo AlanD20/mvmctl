@@ -24,7 +24,7 @@ from mvmctl.constants import (
 )
 from mvmctl.exceptions import ChecksumMismatchError, MVMError
 from mvmctl.utils import http
-from mvmctl.utils.fs import get_temp_dir
+from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.http import _with_retry
 
 
@@ -37,7 +37,9 @@ class ASCIIProgressBar:
     Works in both TTY and non-TTY environments.
     """
 
-    def __init__(self, total: int, width: int = 40, title: str = "Downloading") -> None:
+    def __init__(
+        self, total: int, width: int = 40, title: str = "Downloading"
+    ) -> None:
         """Initialize the progress bar.
 
         Args:
@@ -133,7 +135,7 @@ def download_with_progress(
 
     try:
         temp_fd, temp_str = tempfile.mkstemp(
-            dir=get_temp_dir(), prefix=f"{dest.stem}-", suffix=".tmp"
+            dir=CacheUtils.get_temp_dir(), prefix=f"{dest.stem}-", suffix=".tmp"
         )
         os.close(temp_fd)
         temp_path = Path(temp_str)
@@ -141,7 +143,9 @@ def download_with_progress(
         progress: Optional[ASCIIProgressBar] = None
         req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
         with http.urlopen(req, timeout=timeout) as response:
-            total_size = int(cl) if (cl := response.headers.get("Content-Length")) else 0
+            total_size = (
+                int(cl) if (cl := response.headers.get("Content-Length")) else 0
+            )
             progress = ASCIIProgressBar(total=total_size, title=title)
             with temp_path.open("wb") as f:
                 while True:

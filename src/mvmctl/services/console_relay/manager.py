@@ -159,7 +159,9 @@ class ConsoleRelayManager:
                     pass_fds=[pty_controller_fd],
                 )
             except OSError as e:
-                raise ConsoleRelayProcessError(f"Failed to spawn console relay process: {e}") from e
+                raise ConsoleRelayProcessError(
+                    f"Failed to spawn console relay process: {e}"
+                ) from e
 
             self._pid = proc.pid
 
@@ -177,10 +179,14 @@ class ConsoleRelayManager:
             os.kill(pid, sig)
             return True
         except ProcessLookupError:
-            logger.debug("Console relay process (PID: %d) already terminated", pid)
+            logger.debug(
+                "Console relay process (PID: %d) already terminated", pid
+            )
             return False
         except PermissionError:
-            logger.warning("Cannot signal console relay (PID: %d) - permission denied", pid)
+            logger.warning(
+                "Cannot signal console relay (PID: %d) - permission denied", pid
+            )
             return False
 
     def _cleanup_files(self) -> None:
@@ -248,7 +254,12 @@ class ConsoleRelayManager:
                     pid = int(self._pid_path.read_text().strip())
                     os.kill(pid, 0)
                     return pid
-                except (ValueError, OSError, ProcessLookupError, PermissionError):
+                except (
+                    ValueError,
+                    OSError,
+                    ProcessLookupError,
+                    PermissionError,
+                ):
                     pass
             return None
 
@@ -268,11 +279,11 @@ class ConsoleRelayManager:
         relays remain. It scans for console.pid files where the
         associated processes are no longer running and cleans them up.
         """
-        from mvmctl.utils.fs import get_cache_dir
+        from mvmctl.utils.common import CacheUtils
 
         logger.debug("Running console relay orphan cleanup check")
 
-        vms_dir = get_cache_dir() / "vms"
+        vms_dir = CacheUtils.get_vms_dir()
         if not vms_dir.exists():
             return
 
@@ -293,7 +304,12 @@ class ConsoleRelayManager:
                     id,
                     pid,
                 )
-            except (ValueError, OSError, ProcessLookupError, PermissionError) as e:
+            except (
+                ValueError,
+                OSError,
+                ProcessLookupError,
+                PermissionError,
+            ) as e:
                 if isinstance(e, ProcessLookupError):
                     # Process terminated - clean up stale PID file and socket
                     try:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 
 from mvmctl.exceptions import MVMError
@@ -54,6 +55,172 @@ _MAX_NAME_LENGTH = 63
 # alphanumeric, dot, hyphen, underscore. After first char, allows 62 more
 # (for max total length of 63).
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+
+
+def _get_real_home() -> Path:
+    """Return the real user's home directory.
+
+    When running under ``sudo``, ``SUDO_USER`` is set to the invoking user.
+    Use that user's home so that state files are written to the invoking
+    user's cache dir rather than root's.
+    """
+    import os
+    import pwd
+
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        try:
+            return Path(pwd.getpwnam(sudo_user).pw_dir)
+        except KeyError:
+            pass
+    return Path.home()
+
+
+class CacheUtils:
+    """Shared cache/temp directory utilities for VM images and ready pools.
+
+    All methods are static — no instance state needed.
+    """
+
+    @staticmethod
+    def get_warm_image_dir(tmp_path: Path | None = None) -> Path:
+        """Get the tmpfs ready pool directory for fast clones.
+
+        This is the directory where decompressed images are cached for
+        fast reflink copies during VM creation.
+
+        Args:
+            tmp_path: Optional override for the base temp directory.
+                      If None, uses tempfile.gettempdir().
+
+        Returns:
+            Path to the warm image directory (e.g. /dev/shm/mvm/ready).
+        """
+        from mvmctl.constants import CLI_NAME
+
+        base = tmp_path if tmp_path is not None else Path(tempfile.gettempdir())
+        cache_dir = base / CLI_NAME / "ready"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+
+    @staticmethod
+    def get_cache_dir() -> Path:
+        """Return the MVM cache root directory.
+
+        Checks MVM_CACHE_DIR env var first, then falls back to
+        ~/.cache/<project-name>.  When running under sudo, uses the invoking
+        user's home directory so state is shared with the non-root user.
+        """
+        import os
+
+        from mvmctl.constants import PROJECT_NAME, env_var
+        from mvmctl.exceptions import MVMError
+
+        override = os.environ.get(env_var("CACHE_DIR"))
+        if override:
+            resolved = Path(override).resolve()
+            home = Path.home().resolve()
+            tmp = Path("/tmp").resolve()
+            var_tmp = Path("/var/tmp").resolve()
+            under_home = resolved.is_relative_to(home)
+            under_tmp = resolved.is_relative_to(tmp)
+            under_var_tmp = resolved.is_relative_to(var_tmp)
+            if not (under_home or under_tmp or under_var_tmp):
+                raise MVMError(
+                    f"Unsafe {env_var('CACHE_DIR')} path '{override}': "
+                    f"must be under $HOME ({home}), /tmp, or /var/tmp"
+                )
+            return resolved
+        return _get_real_home() / ".cache" / str(PROJECT_NAME)
+
+    @staticmethod
+    def get_config_dir() -> Path:
+        """Return the MVM config directory.
+
+        Checks MVM_CONFIG_DIR env var first, then falls back to
+        ~/.config/<project-name>.
+        """
+        import os
+
+        from mvmctl.constants import PROJECT_NAME, env_var
+        from mvmctl.exceptions import MVMError
+
+        override = os.environ.get(env_var("CONFIG_DIR"))
+        if override:
+            resolved = Path(override).resolve()
+            home = Path.home().resolve()
+            tmp = Path("/tmp").resolve()
+            var_tmp = Path("/var/tmp").resolve()
+            under_home = resolved.is_relative_to(home)
+            under_tmp = resolved.is_relative_to(tmp)
+            under_var_tmp = resolved.is_relative_to(var_tmp)
+            if not (under_home or under_tmp or under_var_tmp):
+                raise MVMError(
+                    f"Unsafe {env_var('CONFIG_DIR')} path '{override}': "
+                    f"must be under $HOME ({home}), /tmp, or /var/tmp"
+                )
+            return resolved
+        return _get_real_home() / ".config" / str(PROJECT_NAME)
+
+    @staticmethod
+    def get_config_path() -> Path:
+        """Return the path to the MVM config file (config.json)."""
+        return CacheUtils.get_config_dir() / "config.json"
+
+    @staticmethod
+    def get_mvm_db_path() -> Path:
+        """Return the path to the SQLite database file.
+
+        The database lives in the MVM cache directory as ``mvmdb.db``.
+        """
+        from mvmctl.constants import MVM_DB_FILENAME
+
+        return CacheUtils.get_cache_dir() / MVM_DB_FILENAME
+
+    @staticmethod
+    def get_temp_dir() -> Path:
+        """Return the temp directory for microVMs."""
+        from mvmctl.constants import PROJECT_NAME, env_var
+
+        override = os.environ.get(env_var("TEMP_DIR"))
+        result = Path(override) if override else Path("/tmp") / PROJECT_NAME
+        result.mkdir(parents=True, exist_ok=True)
+        return result
+
+    @staticmethod
+    def get_vms_dir() -> Path:
+        """Return the directory that holds VM state and per-VM dirs."""
+        return CacheUtils.get_cache_dir() / "vms"
+
+    @staticmethod
+    def get_vm_dir(id: str) -> Path:
+        """Return the directory for a specific VM by its hash."""
+        return CacheUtils.get_vms_dir() / id
+
+    @staticmethod
+    def get_images_dir() -> Path:
+        """Return the directory for cached images."""
+        return CacheUtils.get_cache_dir() / "images"
+
+    @staticmethod
+    def get_kernels_dir() -> Path:
+        """Return the directory for cached kernels."""
+        return CacheUtils.get_cache_dir() / "kernels"
+
+    @staticmethod
+    def get_keys_dir() -> Path:
+        """Return the directory for SSH key management (in config dir)."""
+        return CacheUtils.get_config_dir() / "keys"
+
+    @staticmethod
+    def get_bin_dir() -> Path:
+        """Return the directory for cached Firecracker binaries."""
+        return CacheUtils.get_cache_dir() / "bin"
+
+    @staticmethod
+    def get_logs_dir() -> Path:
+        """Return the directory for VM and process log files."""
+        return CacheUtils.get_cache_dir() / "logs"
 
 
 class CommonUtils:

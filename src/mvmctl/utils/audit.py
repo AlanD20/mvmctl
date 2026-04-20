@@ -4,11 +4,11 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mvmctl.utils.fs import get_cache_dir
+from mvmctl.utils.common import CacheUtils
 
 
 def _get_audit_log_path() -> Path:
-    return get_cache_dir() / "audit.log"
+    return CacheUtils.get_cache_dir() / "audit.log"
 
 
 def _audit_logger() -> logging.Logger:
@@ -23,7 +23,9 @@ def _audit_logger() -> logging.Logger:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
         handler.setFormatter(
-            logging.Formatter("%(asctime)s UTC %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
+            logging.Formatter(
+                "%(asctime)s UTC %(message)s", datefmt="%Y-%m-%dT%H:%M:%S"
+            )
         )
         audit.addHandler(handler)
     except OSError:
