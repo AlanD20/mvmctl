@@ -184,6 +184,10 @@ class BinaryError(MVMError):
     """Firecracker/jailer binary management failure."""
 
 
+class BinaryAlreadyExistsError(BinaryError):
+    """Raised when a binary version already exists and re-download was not requested."""
+
+
 class MVMKeyError(MVMError):
     """SSH key management failure."""
 

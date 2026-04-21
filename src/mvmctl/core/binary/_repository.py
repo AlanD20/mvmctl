@@ -72,8 +72,8 @@ class BinaryRepository:
                 """
                 INSERT INTO binaries (
                     id, name, version, full_version, ci_version, path,
-                    is_default, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_default, is_present, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     version = excluded.version,
@@ -81,6 +81,7 @@ class BinaryRepository:
                     ci_version = excluded.ci_version,
                     path = excluded.path,
                     is_default = excluded.is_default,
+                    is_present = excluded.is_present,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -91,6 +92,7 @@ class BinaryRepository:
                     binary.ci_version,
                     binary.path,
                     int(binary.is_default),
+                    int(binary.is_present),
                     binary.created_at,
                     binary.updated_at,
                 ),
@@ -137,3 +139,16 @@ class BinaryRepository:
         if row is None:
             return None
         return BinaryItem(**dict(row))
+
+    def update_many_is_present(
+        self, binary_ids: list[str], is_present: bool
+    ) -> None:
+        """Bulk update is_present flag for multiple binaries."""
+        if not binary_ids:
+            return
+        with self._db.connect() as conn:
+            placeholders = ",".join("?" for _ in binary_ids)
+            conn.execute(
+                f"UPDATE binaries SET is_present = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                [int(is_present)] + list(binary_ids),
+            )

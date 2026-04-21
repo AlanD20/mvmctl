@@ -27,6 +27,7 @@ from mvmctl.constants import (
 from mvmctl.core._internal._db import Database
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.binary._resolver import BinaryResolver
+from mvmctl.core.binary._service import BinaryService
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
 from mvmctl.core.kernel._repository import KernelRepository
@@ -414,11 +415,12 @@ class VMCreateRequest:
     def _resolve_binary(self) -> BinaryItem:
         """Resolve firecracker binary to path and ID."""
 
-        fc_binary = (
-            self._binary_resolver.get_default("firecracker")
-            if self._inputs.binary_id is None
-            else self._binary_resolver.resolve(self._inputs.binary_id)
-        )
+        fc_binary: BinaryItem | None
+        if self._inputs.binary_id is not None:
+            fc_binary = self._binary_resolver.resolve(self._inputs.binary_id)
+        else:
+            binary_service = BinaryService(BinaryRepository(self._db))
+            fc_binary = binary_service.get_default_firecracker()
 
         if fc_binary is None:
             raise BinaryNotFoundError(

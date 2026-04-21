@@ -7,6 +7,16 @@ and portable export configurations.
 
 from __future__ import annotations
 
+from mvmctl.api.inputs._binary_fetch_input import (
+    BinaryFetchInput,
+    BinaryFetchRequest,
+    ResolvedBinaryFetchInput,
+)
+from mvmctl.api.inputs._binary_input import (
+    BinaryInput,
+    BinaryRequest,
+    ResolvedBinaryInput,
+)
 from mvmctl.api.inputs._image_input import (
     ImageFetchInput,
     ImageImportInput,
@@ -47,6 +57,10 @@ from mvmctl.api.inputs._vm_input import (
 )
 
 __all__ = [
+    "BinaryFetchInput",
+    "BinaryFetchRequest",
+    "BinaryInput",
+    "BinaryRequest",
     "CloudInitModeResolved",
     "ImageFetchInput",
     "ImageImportInput",
@@ -56,6 +70,8 @@ __all__ = [
     "NetworkCreateRequest",
     "NetworkInput",
     "NetworkRequest",
+    "ResolvedBinaryFetchInput",
+    "ResolvedBinaryInput",
     "ResolvedNetworkCreateRequest",
     "ResolvedNetworkInput",
     "ResolvedVMCreateInput",

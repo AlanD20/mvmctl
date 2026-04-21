@@ -224,7 +224,7 @@ class VMCreateContext:
         if self.resolved is None:
             raise VMCreateError("Failed to resolve necessary dependencies")
 
-        from mvmctl.utils.fs import secure_mkdir
+        from mvmctl.utils.fs import FsUtils
 
         self.guest_mac = (
             self.resolved.requested_guest_mac
@@ -235,7 +235,7 @@ class VMCreateContext:
             self.resolved.network.name, self.name
         )
 
-        secure_mkdir(self.vm_dir, self.resolved.name)
+        FsUtils.secure_mkdir(self.vm_dir, self.resolved.name)
         self.mark_created("vm_dir")
 
         # IP Lease
