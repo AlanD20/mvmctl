@@ -14,10 +14,9 @@ class HashGenerator:
     """
 
     @staticmethod
-    def image(file_path: Path, os_slug: str, timestamp: str) -> str:
+    def image(os_slug: str, source: str, timestamp: str) -> str:
         """Generate 64-char SHA256 hash for an image."""
-        file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-        data = f"{file_hash}:{os_slug}:{timestamp}"
+        data = f"{os_slug}:{source}:{timestamp}"
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod
@@ -61,16 +60,14 @@ class HashGenerator:
 # =====================================================================
 
 
-def generate_full_hash_image(
-    file_path: Path, os_slug: str, timestamp: str
-) -> str:
+def generate_full_hash_image(os_slug: str, source: str, timestamp: str) -> str:
     """Deprecated: Use HashGenerator.image()."""
     warnings.warn(
         "generate_full_hash_image is deprecated, use HashGenerator.image()",
         DeprecationWarning,
         stacklevel=2,
     )
-    return HashGenerator.image(file_path, os_slug, timestamp)
+    return HashGenerator.image(os_slug, source, timestamp)
 
 
 def generate_full_hash_kernel(file_path: Path, version: str, arch: str) -> str:

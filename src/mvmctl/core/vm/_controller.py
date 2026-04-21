@@ -25,7 +25,7 @@ from mvmctl.models import ConsoleInfo, ConsoleState, VMStatus
 from mvmctl.models.vm import VMInstanceItem
 from mvmctl.services.console_relay import ConsoleRelayManager
 from mvmctl.utils.audit import log_audit
-from mvmctl.utils.fs import get_vm_dir_by_hash
+from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.process_signals import ProcessSignalHandler
 
 logger = logging.getLogger(__name__)
@@ -302,7 +302,7 @@ class VMController:
             VMNotFoundError: If VM directory does not exist
             MVMError: If log type is unknown or log file not found
         """
-        vm_dir = get_vm_dir_by_hash(vm_hash)
+        vm_dir = CacheUtils.get_vm_dir(vm_hash)
 
         if not vm_dir.exists():
             raise VMNotFoundError(f"VM directory not found at {vm_dir}")

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mvmctl.core.key_manager import KeyInfo
-from mvmctl.core.vm_manager import VMManager
+from mvmctl.core.archive.key_manager import KeyInfo
+from mvmctl.core.archive.vm_manager import VMManager
 from mvmctl.models.vm import VMConfig, VMInstance, VMStatus
 
 

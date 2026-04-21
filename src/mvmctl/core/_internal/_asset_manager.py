@@ -56,7 +56,7 @@ class AssetManager:
                 f"Error: {exc}"
             ) from exc
 
-    def get_file(self, *path_parts: str) -> "Traversable":
+    def get_file(self, *path_parts: str) -> Traversable:
         """Return a traversable path to a bundled asset file.
 
         Supports nested paths by passing multiple path components.
@@ -118,9 +118,13 @@ class AssetManager:
         try:
             return self.get_file(*path_parts).read_text()
         except FileNotFoundError as exc:
-            raise BundledAssetNotFoundError(f"Asset file not found: '{path_str}'") from exc
+            raise BundledAssetNotFoundError(
+                f"Asset file not found: '{path_str}'"
+            ) from exc
         except (OSError, ValueError, PermissionError) as exc:
-            raise BundledAssetError(f"Failed to read asset file '{path_str}': {exc}") from exc
+            raise BundledAssetError(
+                f"Failed to read asset file '{path_str}': {exc}"
+            ) from exc
 
     def read_bytes(self, *path_parts: str) -> bytes:
         """Read and return the contents of a bundled asset file as bytes.
@@ -147,9 +151,13 @@ class AssetManager:
         try:
             return self.get_file(*path_parts).read_bytes()
         except FileNotFoundError as exc:
-            raise BundledAssetNotFoundError(f"Asset file not found: '{path_str}'") from exc
+            raise BundledAssetNotFoundError(
+                f"Asset file not found: '{path_str}'"
+            ) from exc
         except (OSError, ValueError, PermissionError) as exc:
-            raise BundledAssetError(f"Failed to read asset file '{path_str}': {exc}") from exc
+            raise BundledAssetError(
+                f"Failed to read asset file '{path_str}': {exc}"
+            ) from exc
 
     def file_exists(self, *path_parts: str) -> bool:
         """Check if a bundled asset file exists.
@@ -186,6 +194,8 @@ class AssetManager:
             # Returns: ['cloud-init.template.yaml', 'firecracker.template.json', ...]
         """
         try:
-            return [item.name for item in self._base.iterdir() if item.is_file()]
+            return [
+                item.name for item in self._base.iterdir() if item.is_file()
+            ]
         except (OSError, ValueError):
             return []

@@ -40,6 +40,7 @@ skip-magic-trailing-comma = false
 [tool.mypy]
 python_version = "3.13"
 strict = true
+mypy_path = ["stubs"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*", "tests"]
@@ -47,6 +48,12 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false
 disable_error_code = ["no-untyped-def", "no-untyped-call", "arg-type", "attr-defined"]
+
+[[tool.mypy.overrides]]
+module = ["guestfs"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disable_error_code = ["no-untyped-def", "type-arg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

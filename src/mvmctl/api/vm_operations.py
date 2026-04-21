@@ -18,7 +18,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from mvmctl.api.inputs import (
     ResolvedVMCreateInput,
@@ -33,18 +32,18 @@ from mvmctl.constants import (
     MAX_VMS,
 )
 from mvmctl.core._internal._db import Database
+from mvmctl.core._internal._guestfs import GuestfsProvisioner
 from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisionConfig,
     CloudInitProvisioner,
     CloudInitProvisionResult,
 )
 from mvmctl.core.host._helper import HostPrivilegeHelper
-from mvmctl.core.image._controller import ImageController
+from mvmctl.core.image._service import ImageService
 from mvmctl.core.network._lease_service import LeaseService
 from mvmctl.core.network._service import NetworkService
 from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._firecracker import FirecrackerSpawner
-from mvmctl.core.vm._guestfs import GuestfsProvisioner
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.core.vm._service import VMService
 from mvmctl.exceptions import (
@@ -120,9 +119,13 @@ class VMCreateContext:
             f"{self.vm_dir}/rootfs.{self.resolved.image.fs_type}"
         )
 
-        image_controller = ImageController(self.resolved.image, self._db)
-        image_controller.ensure_cached()
-        image_controller.copy_cached_to(vm_rootfs_path)
+        image_service = ImageService(self._db)
+        image_service.ensure_cached([self.resolved.image])
+        image_service.materialize_to(
+            image_id=self.resolved.image.id,
+            fs_type=self.resolved.image.fs_type,
+            output_path=vm_rootfs_path,
+        )
 
         self.rootfs_path = vm_rootfs_path
 

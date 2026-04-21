@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
+from pathlib import Path
 
 from mvmctl.exceptions import MVMError
 
@@ -190,37 +192,51 @@ class CacheUtils:
     @staticmethod
     def get_vms_dir() -> Path:
         """Return the directory that holds VM state and per-VM dirs."""
-        return CacheUtils.get_cache_dir() / "vms"
+        result = CacheUtils.get_cache_dir() / "vms"
+        result.mkdir(parents=True, exist_ok=True)
+        return result
 
     @staticmethod
     def get_vm_dir(id: str) -> Path:
         """Return the directory for a specific VM by its hash."""
-        return CacheUtils.get_vms_dir() / id
+        result = CacheUtils.get_vms_dir() / id
+        result.mkdir(parents=True, exist_ok=True)
+        return result
 
     @staticmethod
     def get_images_dir() -> Path:
         """Return the directory for cached images."""
-        return CacheUtils.get_cache_dir() / "images"
+        result = CacheUtils.get_cache_dir() / "images"
+        result.mkdir(parents=True, exist_ok=True)
+        return result
 
     @staticmethod
     def get_kernels_dir() -> Path:
         """Return the directory for cached kernels."""
-        return CacheUtils.get_cache_dir() / "kernels"
+        result = CacheUtils.get_cache_dir() / "kernels"
+        result.mkdir(parents=True, exist_ok=True)
+        return result
 
     @staticmethod
     def get_keys_dir() -> Path:
         """Return the directory for SSH key management (in config dir)."""
-        return CacheUtils.get_config_dir() / "keys"
+        result = CacheUtils.get_config_dir() / "keys"
+        result.mkdir(parents=True, exist_ok=True)
+        return result
 
     @staticmethod
     def get_bin_dir() -> Path:
         """Return the directory for cached Firecracker binaries."""
-        return CacheUtils.get_cache_dir() / "bin"
+        result = CacheUtils.get_cache_dir() / "bin"
+        result.mkdir(parents=True, exist_ok=True)
+        return result
 
     @staticmethod
     def get_logs_dir() -> Path:
         """Return the directory for VM and process log files."""
-        return CacheUtils.get_cache_dir() / "logs"
+        result = CacheUtils.get_cache_dir() / "logs"
+        result.mkdir(parents=True, exist_ok=True)
+        return result
 
 
 class CommonUtils:
@@ -359,3 +375,25 @@ class CommonUtils:
             return dt.strftime("%Y/%m/%d %H:%M:%S")
         except (ValueError, AttributeError):
             return str(iso_timestamp)
+
+
+def safe_int(value: object, default: int = 0) -> int:
+    """Safely extract an integer from a value.
+
+    Args:
+        value: The value to convert (int, float, str, or other).
+        default: Default to return if conversion fails.
+
+    Returns:
+        The integer value, or default if conversion fails.
+    """
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default

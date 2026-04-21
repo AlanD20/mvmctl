@@ -6,6 +6,7 @@ in CI/script environments.
 """
 
 import hashlib
+import logging
 import os
 import shutil
 import sys
@@ -26,6 +27,8 @@ from mvmctl.exceptions import ChecksumMismatchError, MVMError
 from mvmctl.utils import http
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.http import _with_retry
+
+logger = logging.getLogger(__name__)
 
 
 class ASCIIProgressBar:
@@ -159,6 +162,21 @@ def download_with_progress(
 
         if progress:
             progress.finish()
+
+        if not expected_sha256:
+            if not allow_missing_checksum:
+                temp_path.unlink(missing_ok=True)
+                raise MVMError(
+                    f"No SHA256 checksum provided for {url}. "
+                    "Provide a sha256 in the images.yaml or use --no-verify."
+                )
+            if not silent_missing_checksum:
+                logger.warning(
+                    "No SHA256 checksum provided for %s — download integrity not verified.",
+                    url,
+                )
+            shutil.move(str(temp_path), str(dest))
+            return True
 
         if expected_sha256 and sha256_hash:
             actual_sha256 = sha256_hash.hexdigest()

@@ -21,6 +21,7 @@ class VMService:
     """
 
     def __init__(self, db: Database) -> None:
+        # FIXME: take vm repo instead of db
         self._db = db
         self._repo = VMRepository(self._db)
         self._executor = ParallelExecutor()
