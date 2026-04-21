@@ -5,28 +5,11 @@ non-TTY environments. It avoids Rich Progress API for lightweight operation
 in CI/script environments.
 """
 
-import hashlib
 import logging
-import os
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 from typing import Optional
-from urllib.error import URLError
-from urllib.request import Request
-
-from mvmctl.constants import (
-    CONST_DOWNLOAD_CHUNK_SIZE,
-    CONST_DOWNLOAD_MAX_RETRIES,
-    CONST_DOWNLOAD_RETRY_BACKOFF,
-    CONST_DOWNLOAD_RETRY_DELAY,
-    HTTP_USER_AGENT,
-)
-from mvmctl.exceptions import ChecksumMismatchError, MVMError
-from mvmctl.utils import http
-from mvmctl.utils.common import CacheUtils
-from mvmctl.utils.http import _with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -117,11 +100,6 @@ class ASCIIProgressBar:
         print(f"{self.title} complete.")
 
 
-@_with_retry(
-    max_retries=CONST_DOWNLOAD_MAX_RETRIES,
-    retry_delay=CONST_DOWNLOAD_RETRY_DELAY,
-    backoff=CONST_DOWNLOAD_RETRY_BACKOFF,
-)
 def download_with_progress(
     url: str,
     dest: Path,
@@ -131,74 +109,20 @@ def download_with_progress(
     allow_missing_checksum: bool = False,
     silent_missing_checksum: bool = False,
 ) -> bool:
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    """Download a file with an ASCII progress bar.
 
-    sha256_hash = hashlib.sha256() if expected_sha256 else None
-    temp_path: Optional[Path] = None
+    .. deprecated::
+        Use :meth:`mvmctl.utils.http.HttpDownload.download_file` instead.
+    """
+    from mvmctl.utils.http import HttpDownload
 
-    try:
-        temp_fd, temp_str = tempfile.mkstemp(
-            dir=CacheUtils.get_temp_dir(), prefix=f"{dest.stem}-", suffix=".tmp"
-        )
-        os.close(temp_fd)
-        temp_path = Path(temp_str)
-
-        progress: Optional[ASCIIProgressBar] = None
-        req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
-        with http.urlopen(req, timeout=timeout) as response:
-            total_size = (
-                int(cl) if (cl := response.headers.get("Content-Length")) else 0
-            )
-            progress = ASCIIProgressBar(total=total_size, title=title)
-            with temp_path.open("wb") as f:
-                while True:
-                    chunk = response.read(CONST_DOWNLOAD_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    progress.update(len(chunk))
-                    if sha256_hash:
-                        sha256_hash.update(chunk)
-
-        if progress:
-            progress.finish()
-
-        if not expected_sha256:
-            if not allow_missing_checksum:
-                temp_path.unlink(missing_ok=True)
-                raise MVMError(
-                    f"No SHA256 checksum provided for {url}. "
-                    "Provide a sha256 in the images.yaml or use --no-verify."
-                )
-            if not silent_missing_checksum:
-                logger.warning(
-                    "No SHA256 checksum provided for %s — download integrity not verified.",
-                    url,
-                )
-            shutil.move(str(temp_path), str(dest))
-            return True
-
-        if expected_sha256 and sha256_hash:
-            actual_sha256 = sha256_hash.hexdigest()
-            if actual_sha256.lower() != expected_sha256.lower():
-                temp_path.unlink(missing_ok=True)
-                raise ChecksumMismatchError(
-                    f"Checksum mismatch! Expected {expected_sha256}, got {actual_sha256}"
-                )
-
-        shutil.move(str(temp_path), str(dest))
-        temp_path = None
-        return True
-
-    except URLError as e:
-        raise MVMError(f"Download failed: {e}") from e
-    except OSError as e:
-        if e.errno == 122:
-            raise MVMError(
-                "No storage available: insufficient space in /tmp. "
-                "Clear temporary files or increase disk space to continue."
-            ) from e
-        raise MVMError(f"I/O error: {e}") from e
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+    return HttpDownload.download_file(
+        url=url,
+        dest=dest,
+        expected_sha256=expected_sha256,
+        timeout=timeout,
+        progress_bar=True,
+        allow_missing_checksum=allow_missing_checksum,
+        silent_missing_checksum=silent_missing_checksum,
+        title=title,
+    )

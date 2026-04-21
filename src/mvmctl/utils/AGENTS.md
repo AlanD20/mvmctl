@@ -66,10 +66,11 @@ Cache/config path resolution with SUDO_USER awareness.
 
 ### http.py
 Resumable HTTP downloads with SHA256 verification.
-- `download_file(url, dest, sha256, progress)` — resumable download; raises on checksum mismatch
+- `HttpDownload.with_download(url, dest, timeout, progress_callback)` — pure transport; atomic `os.replace`; retries via `@_with_retry`
+- `HttpDownload.download_file(url, dest, sha256, progress_bar)` — orchestration wrapper with SHA256 verify + ASCII progress bar
+- `HttpDownload._parse_content_length()` — Content-Length parsing
 - `urlopen()` — HTTP opener with keep-alive
 - `_with_retry()` — Retry decorator with exponential backoff
-- `_parse_content_length()` — Content-Length parsing
 - Sets `User-Agent: mvmctl/{version}`
 - Uses Typer for interactive confirmation when no checksum provided
 - Used by `image.py`, `kernel.py`, `binary_manager.py` for all asset downloads

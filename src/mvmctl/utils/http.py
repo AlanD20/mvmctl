@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
-import re
-import shutil
 import tempfile
 import time
 from functools import wraps
@@ -27,15 +26,60 @@ from mvmctl.constants import (
     CONST_DOWNLOAD_RETRY_DELAY,
     HTTP_USER_AGENT,
 )
-from mvmctl.exceptions import ChecksumMismatchError, MVMError
-from mvmctl.utils.common import CacheUtils
+from mvmctl.exceptions import ChecksumMismatchError, HttpDownloadError
 
-__all__ = ["download_file", "urlopen"]
+__all__ = ["HttpDownload"]
 
 logger = logging.getLogger(__name__)
-_CONTENT_RANGE_PATTERN = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+|\*)$")
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+DEFAULT_CACHE_TTL_SECONDS: int = 300
+DEFAULT_CACHE_DIR = "http"
+
+
+class HttpCache:
+    """File-based HTTP response cache for small remote resources."""
+
+    @staticmethod
+    def _cache_key(url: str) -> str:
+        return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _cache_path(url: str) -> Path:
+        from mvmctl.utils.common import CacheUtils
+
+        cache_dir = CacheUtils.get_temp_dir() / DEFAULT_CACHE_DIR
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / HttpCache._cache_key(url)
+
+    @staticmethod
+    def is_valid(cache_path: Path, ttl_seconds: int) -> bool:
+        if not cache_path.exists():
+            return False
+        age = time.time() - cache_path.stat().st_mtime
+        return age < ttl_seconds
+
+    @staticmethod
+    def read(cache_path: Path) -> bytes:
+        return cache_path.read_bytes()
+
+    @staticmethod
+    def write(cache_path: Path, data: bytes) -> None:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(
+            dir=cache_path.parent,
+            prefix=f"{cache_path.stem}-",
+            suffix=".tmp",
+        )
+        try:
+            os.write(fd, data)
+            os.close(fd)
+            os.replace(temp_path, cache_path)
+        except Exception:
+            os.close(fd)
+            Path(temp_path).unlink(missing_ok=True)
+            raise
 
 
 # Shared opener with HTTP keep-alive for connection reuse
@@ -44,10 +88,6 @@ _http_opener = build_opener(
     HTTPSHandler(),
 )
 _http_opener.addheaders = [("User-Agent", HTTP_USER_AGENT)]
-
-
-def urlopen(req: Any, timeout: int = 300) -> Any:
-    return _http_opener.open(req, timeout=timeout)
 
 
 def _with_retry(
@@ -95,7 +135,7 @@ def _with_retry(
             raise (
                 last_exception
                 if last_exception
-                else MVMError("Download failed")
+                else HttpDownloadError("Download failed")
             )
 
         return wrapper  # type: ignore[return-value]
@@ -103,123 +143,341 @@ def _with_retry(
     return decorator
 
 
-def _parse_content_length(response_headers: Any) -> int | None:
-    if not hasattr(response_headers, "get"):
-        return None
-    content_length = response_headers.get("Content-Length")
-    if content_length is None:
-        return None
-    try:
-        return int(content_length)
-    except (TypeError, ValueError):
-        return None
+class HttpDownload:
+    """Lightweight HTTP helpers for fetching remote resources."""
 
+    @staticmethod
+    def _urlopen(req: Any, timeout: int = 300) -> Any:
+        return _http_opener.open(req, timeout=timeout)
 
-@_with_retry(
-    max_retries=CONST_DOWNLOAD_MAX_RETRIES,
-    retry_delay=CONST_DOWNLOAD_RETRY_DELAY,
-    backoff=CONST_DOWNLOAD_RETRY_BACKOFF,
-)
-def download_file(
-    url: str,
-    dest: Path,
-    expected_sha256: str | None = None,
-    show_progress: bool = True,
-    timeout: int = 300,
-    allow_missing_checksum: bool = False,
-    silent_missing_checksum: bool = False,
-) -> bool:
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    @staticmethod
+    def _parse_content_length(response_headers: Any) -> int | None:
+        if not hasattr(response_headers, "get"):
+            return None
+        content_length = response_headers.get("Content-Length")
+        if content_length is None:
+            return None
+        try:
+            return int(content_length)
+        except (TypeError, ValueError):
+            return None
 
-    if expected_sha256 is None:
-        if silent_missing_checksum:
-            pass
-        elif not allow_missing_checksum:
-            raise MVMError(
-                f"No checksum provided for download: {url}. "
-                "Checksum verification is mandatory for security. "
-                "Provide expected_sha256 or use allow_missing_checksum=True with confirmation."
-            )
-        else:
-            import sys
+    @staticmethod
+    def _download(
+        url: str,
+        timeout: int = 30,
+        headers: dict[str, str] | None = None,
+        use_cache: bool = False,
+        cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
+    ) -> bytes:
+        """Fetch a URL and return the raw response bytes.
 
-            from mvmctl.utils.console import print_warning
+        Args:
+            url: The URL to fetch.
+            timeout: Request timeout in seconds.
+            headers: Optional extra headers to send with the request.
+            use_cache: If True, cache the response and serve from cache when valid.
+            cache_ttl_seconds: Time-to-live for cached responses in seconds.
 
-            print_warning(f"Warning: No checksum available for {url}")
-            print_warning(
-                "Integrity cannot be verified. This is a potential security risk."
-            )
-            if not sys.stdin.isatty():
-                raise MVMError(
-                    f"No checksum provided for download: {url}. "
-                    "Cannot prompt for confirmation in non-interactive mode. "
-                    "Provide expected_sha256 or run in an interactive terminal."
-                )
-            import typer
+        Returns:
+            The raw response body as bytes.
 
-            if not typer.confirm(
-                "Proceed with download anyway?", default=False
-            ):
-                raise MVMError(
-                    f"Download cancelled: {url} (no checksum provided)"
-                )
+        Raises:
+            HttpDownloadError: If the download fails.
+        """
+        if use_cache:
+            cache_file = HttpCache._cache_path(url)
+            if HttpCache.is_valid(cache_file, cache_ttl_seconds):
+                return HttpCache.read(cache_file)
 
-    temp_path: Path | None = None
-    try:
-        temp_fd, temp_str = tempfile.mkstemp(
-            dir=CacheUtils.get_temp_dir(), prefix=f"{dest.stem}-", suffix=".tmp"
+        default_headers = {"User-Agent": HTTP_USER_AGENT}
+        if headers:
+            default_headers.update(headers)
+
+        req = Request(url, headers=default_headers)
+
+        try:
+            with HttpDownload._urlopen(req, timeout=timeout) as response:
+                data: bytes = response.read()
+                if use_cache:
+                    HttpCache.write(cache_file, data)
+                return data
+        except (URLError, HTTPError, OSError) as exc:
+            raise HttpDownloadError(f"Failed to fetch {url}: {exc}") from exc
+
+    @staticmethod
+    def read_raw_content(
+        url: str,
+        timeout: int = 30,
+        headers: dict[str, str] | None = None,
+        use_cache: bool = False,
+        cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
+    ) -> str:
+        """Download a URL and return its raw content as a string.
+
+        This is a lightweight helper for fetching small text resources
+        (like SHA256 sidecar files) where writing to disk is unnecessary.
+
+        Args:
+            url: The URL to fetch.
+            timeout: Request timeout in seconds.
+            headers: Optional extra headers to send with the request.
+            use_cache: If True, cache the response and serve from cache when valid.
+            cache_ttl_seconds: Time-to-live for cached responses in seconds.
+
+        Returns:
+            The decoded response body as a string.
+
+        Raises:
+            HttpDownloadError: If the download fails.
+        """
+        default_headers = {"Accept": "text/plain"}
+        if headers:
+            default_headers.update(headers)
+
+        data = HttpDownload._download(
+            url,
+            timeout=timeout,
+            headers=default_headers,
+            use_cache=use_cache,
+            cache_ttl_seconds=cache_ttl_seconds,
         )
-        os.close(temp_fd)
-        temp_path = Path(temp_str)
+        return data.decode()
 
-        req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
+    @staticmethod
+    def read_json_content(
+        url: str,
+        timeout: int = 30,
+        headers: dict[str, str] | None = None,
+        use_cache: bool = False,
+        cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
+    ) -> dict[str, Any] | list[Any]:
+        """Download a URL and return its JSON content as a parsed object.
 
-        if show_progress:
-            logger.info("Downloading %s", url)
+        Args:
+            url: The URL to fetch.
+            timeout: Request timeout in seconds.
+            headers: Optional extra headers to send with the request.
+            use_cache: If True, cache the response and serve from cache when valid.
+            cache_ttl_seconds: Time-to-live for cached responses in seconds.
 
-        with urlopen(req, timeout=timeout) as response:
-            total_size = _parse_content_length(response.headers)
-            sha256_hash = hashlib.sha256() if expected_sha256 else None
-            downloaded = 0
+        Returns:
+            The parsed JSON response (dict or list).
 
-            with temp_path.open("wb") as f:
-                while True:
-                    chunk = response.read(CONST_DOWNLOAD_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if sha256_hash:
-                        sha256_hash.update(chunk)
-                    if show_progress and total_size:
-                        try:
-                            percent = (downloaded / total_size) * 100
-                            logger.debug("Progress: %.1f%%", percent)
-                        except ZeroDivisionError:
-                            pass
+        Raises:
+            HttpDownloadError: If the download or JSON parsing fails.
+        """
+        default_headers = {"Accept": "application/json"}
+        if headers:
+            default_headers.update(headers)
+
+        data = HttpDownload._download(
+            url,
+            timeout=timeout,
+            headers=default_headers,
+            use_cache=use_cache,
+            cache_ttl_seconds=cache_ttl_seconds,
+        )
+        try:
+            result: dict[str, Any] | list[Any] = json.loads(data.decode())
+            return result
+        except json.JSONDecodeError as exc:
+            raise HttpDownloadError(
+                f"Failed to parse JSON from {url}: {exc}"
+            ) from exc
+
+    @staticmethod
+    @_with_retry(
+        max_retries=CONST_DOWNLOAD_MAX_RETRIES,
+        retry_delay=CONST_DOWNLOAD_RETRY_DELAY,
+        backoff=CONST_DOWNLOAD_RETRY_BACKOFF,
+    )
+    def with_download(
+        url: str,
+        dest: Path,
+        timeout: int = 300,
+        progress_callback: Callable[[bytes], None] | None = None,
+        on_start: Callable[[int | None], None] | None = None,
+    ) -> int | None:
+        """Download a remote file to *dest* with an optional progress callback.
+
+        This is the **pure transport** entry point: it handles only HTTP
+        mechanics, retries, and atomic placement.  No checksum logic or
+        progress-bar rendering lives here.
+
+        The file is downloaded to a temporary sibling of *dest* and then
+        atomically promoted with :func:`os.replace`, so readers never see
+        a partially-written file.
+
+        Args:
+            url: URL to download.
+            dest: Final destination path on disk.
+            timeout: Request timeout in seconds.
+            progress_callback: Optional callable that receives each chunk of
+                raw bytes as it is written to disk.
+            on_start: Optional callable invoked once before the first chunk
+                is read, receiving the reported Content-Length (or None).
+
+        Returns:
+            The total Content-Length if the server reported one, else None.
+
+        Raises:
+            HttpDownloadError: On network or I/O failure.
+        """
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        temp_path: Path | None = None
+        total_size: int | None = None
+        try:
+            temp_fd, temp_str = tempfile.mkstemp(
+                dir=dest.parent,
+                prefix=f"{dest.stem}-",
+                suffix=".tmp",
+            )
+            os.close(temp_fd)
+            temp_path = Path(temp_str)
+
+            req = Request(url, headers={"User-Agent": HTTP_USER_AGENT})
+
+            with HttpDownload._urlopen(req, timeout=timeout) as response:
+                total_size = HttpDownload._parse_content_length(
+                    response.headers
+                )
+                if on_start is not None:
+                    on_start(total_size)
+                with temp_path.open("wb") as f:
+                    while True:
+                        chunk = response.read(CONST_DOWNLOAD_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        if progress_callback is not None:
+                            progress_callback(chunk)
+
+            os.replace(temp_path, dest)
+            temp_path = None
+            return total_size
+
+        except URLError as e:
+            raise HttpDownloadError(f"Download failed: {e}") from e
+        except OSError as e:
+            if e.errno == 122:
+                raise HttpDownloadError(
+                    "No storage available: insufficient space in /tmp. "
+                    "Clear temporary files or increase disk space to continue."
+                ) from e
+            raise HttpDownloadError(f"I/O error: {e}") from e
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def download_file(
+        url: str,
+        dest: Path,
+        expected_sha256: str | None = None,
+        timeout: int = 300,
+        progress_bar: bool = True,
+        allow_missing_checksum: bool = False,
+        silent_missing_checksum: bool = False,
+        title: str = "Downloading",
+    ) -> bool:
+        """Download a file with optional SHA256 verification and progress bar.
+
+        This is the **orchestration** entry point: it delegates the actual
+        HTTP transfer to :meth:`with_download` and then handles checksum
+        verification and user interaction for missing checksums.
+
+        Args:
+            url: URL to download.
+            dest: Destination path on disk.
+            expected_sha256: Optional SHA256 hex string for verification.
+            timeout: Request timeout in seconds.
+            progress_bar: If True, display an ASCII progress bar during download.
+            allow_missing_checksum: If True, allow download without checksum.
+            silent_missing_checksum: If True, skip warnings for missing checksum.
+            title: Title shown in the progress bar.
+
+        Returns:
+            True on success.
+
+        Raises:
+            HttpDownloadError: On download or checksum failure.
+            ChecksumMismatchError: If SHA256 verification fails.
+        """
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        if expected_sha256 is None:
+            if silent_missing_checksum:
+                pass
+            elif not allow_missing_checksum:
+                raise HttpDownloadError(
+                    f"No checksum provided for download: {url}. "
+                    "Checksum verification is mandatory for security. "
+                    "Provide expected_sha256 or use allow_missing_checksum=True with confirmation."
+                )
+            else:
+                import sys
+
+                from mvmctl.utils.console import print_warning
+
+                print_warning(f"Warning: No checksum available for {url}")
+                print_warning(
+                    "Integrity cannot be verified. This is a potential security risk."
+                )
+                if not sys.stdin.isatty():
+                    raise HttpDownloadError(
+                        f"No checksum provided for download: {url}. "
+                        "Cannot prompt for confirmation in non-interactive mode. "
+                        "Provide expected_sha256 or run in an interactive terminal."
+                    )
+                import typer
+
+                if not typer.confirm(
+                    "Proceed with download anyway?", default=False
+                ):
+                    raise HttpDownloadError(
+                        f"Download cancelled: {url} (no checksum provided)"
+                    )
+
+        sha256_hash = hashlib.sha256() if expected_sha256 else None
+        progress: Any | None = None
+
+        if progress_bar:
+            from mvmctl.utils.progress import ASCIIProgressBar
+
+            progress = ASCIIProgressBar(total=0, title=title)
+
+        def _on_start(total_size: int | None) -> None:
+            if progress is not None:
+                progress.total = total_size or 0
+
+        def _progress_callback(chunk: bytes) -> None:
+            if progress is not None:
+                progress.update(len(chunk))
+            if sha256_hash is not None:
+                sha256_hash.update(chunk)
+
+        HttpDownload.with_download(
+            url,
+            dest,
+            timeout=timeout,
+            progress_callback=_progress_callback
+            if progress_bar or sha256_hash
+            else None,
+            on_start=_on_start,
+        )
+
+        if progress is not None:
+            progress.finish()
 
         if expected_sha256 and sha256_hash:
             actual_sha256 = sha256_hash.hexdigest()
             if actual_sha256.lower() != expected_sha256.lower():
-                temp_path.unlink(missing_ok=True)
+                dest.unlink(missing_ok=True)
                 raise ChecksumMismatchError(
                     f"Checksum mismatch! Expected {expected_sha256}, got {actual_sha256}"
                 )
             logger.info("Checksum verified")
 
-        shutil.move(str(temp_path), str(dest))
-        temp_path = None
         return True
-
-    except URLError as e:
-        raise MVMError(f"Download failed: {e}") from e
-    except OSError as e:
-        if e.errno == 122:
-            raise MVMError(
-                "No storage available: insufficient space in /tmp. "
-                "Clear temporary files or increase disk space to continue."
-            ) from e
-        raise MVMError(f"I/O error: {e}") from e
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)

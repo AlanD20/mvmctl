@@ -304,6 +304,12 @@ class DownloadError(MVMError):
     pass
 
 
+class HttpDownloadError(MVMError):
+    """Raised when an HTTP download operation fails."""
+
+    pass
+
+
 def format_exception_debug(exc: Exception, debug: bool = False) -> str:
     """Format an exception for display, with optional debug details.
 
