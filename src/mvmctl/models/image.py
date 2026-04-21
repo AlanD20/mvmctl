@@ -43,3 +43,6 @@ class ImageSpec:
     sha256_url: str | None = None
     list_url_template: str | None = None
     source_base: str | None = None
+
+
+

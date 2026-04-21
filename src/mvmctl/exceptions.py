@@ -48,6 +48,43 @@ class ImageError(MVMError):
     """Image download or conversion failure."""
 
 
+class ImageCompressionError(ImageError):
+    """Image compression failure.
+
+    Common messages:
+    - Cannot compress: source file does not exist: {path}
+    - Cannot compress: source file is empty: {path}
+    - Compression failed: output not created: {path}
+    - Compression failed: output is empty (source was {size} bytes)
+    """
+
+
+class ImageDecompressionError(ImageError):
+    """Image decompression failure.
+
+    Common messages:
+    - Compressed file not found: {path}
+    - Decompression failed: {details}
+    """
+
+
+class ImageCorruptError(ImageError):
+    """Image file appears corrupted.
+
+    Common messages:
+    - Source file appears to be all zeros: {path}. File may be corrupted.
+    """
+
+
+class ImageEmptyError(ImageError):
+    """Image file is empty.
+
+    Common messages:
+    - Cannot compress: source file is empty: {path}
+    - Downloaded file is empty
+    """
+
+
 class ChecksumMismatchError(ImageError):
     """Downloaded file checksum does not match expected."""
 
