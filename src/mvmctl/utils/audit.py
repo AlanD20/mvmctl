@@ -1,14 +1,12 @@
-import getpass
 import logging
-import os
-from datetime import datetime, timezone
 from pathlib import Path
 
+from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
 
 
 def _get_audit_log_path() -> Path:
-    return CacheUtils.get_cache_dir() / "audit.log"
+    return CacheUtils.get_audit_log_path()
 
 
 def _audit_logger() -> logging.Logger:
@@ -36,16 +34,16 @@ def _audit_logger() -> logging.Logger:
 def log_audit(operation: str, detail: str = "") -> None:
     """Write a structured audit log entry for the given operation.
 
+    .. deprecated::
+        Use :class:`AuditLog` directly. This function is kept for backward
+        compatibility during migration.
+
     Args:
         operation: Short identifier for the operation performed (e.g. ``host.init``).
         detail: Optional additional context appended to the log entry.
     """
-    try:
-        user = getpass.getuser()
-    except Exception:
-        user = str(os.getuid())
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    msg = f"[{ts}] user={user} op={operation}"
+    # Backward-compatible delegation to the new AuditLog class
     if detail:
-        msg += f" detail={detail!r}"
-    _audit_logger().info(msg)
+        AuditLog.log(operation, context=detail)
+    else:
+        AuditLog.log(operation)

@@ -85,6 +85,19 @@ class CacheUtils:
     """
 
     @staticmethod
+    def resolve_dir(path: Path) -> Path:
+        """Ensure a directory exists, creating parents if necessary.
+
+        Args:
+            path: Directory path to resolve.
+
+        Returns:
+            The resolved directory path.
+        """
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @staticmethod
     def get_warm_image_dir(tmp_path: Path | None = None) -> Path:
         """Get the tmpfs ready pool directory for fast clones.
 
@@ -101,7 +114,7 @@ class CacheUtils:
         from mvmctl.constants import CLI_NAME
 
         base = tmp_path if tmp_path is not None else Path(tempfile.gettempdir())
-        cache_dir = base / CLI_NAME / "ready"
+        cache_dir = Path(base / CLI_NAME / "ready")
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir
 
@@ -168,6 +181,11 @@ class CacheUtils:
     def get_config_path() -> Path:
         """Return the path to the MVM config file (config.json)."""
         return CacheUtils.get_config_dir() / "config.json"
+
+    @staticmethod
+    def get_auditlog_path() -> Path:
+        """Return the path to the MVM config file (config.json)."""
+        return CacheUtils.get_cache_dir() / "audit.log"
 
     @staticmethod
     def get_mvm_db_path() -> Path:
@@ -237,6 +255,11 @@ class CacheUtils:
         result = CacheUtils.get_cache_dir() / "logs"
         result.mkdir(parents=True, exist_ok=True)
         return result
+
+    @staticmethod
+    def get_audit_log_path() -> Path:
+        """Return the path to the audit log file."""
+        return CacheUtils.get_cache_dir() / "audit.log"
 
 
 class CommonUtils:
