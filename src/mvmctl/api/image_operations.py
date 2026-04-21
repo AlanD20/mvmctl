@@ -8,13 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Import from archive during migration — will be moved to proper location
-from mvmctl.api.archive.metadata import get_default_binary_entry
 from mvmctl.api.inputs._image_input import (
     ImageFetchInput,
     ImageImportInput,
     ImageInput,
 )
+from mvmctl.constants import DEFAULT_FIRECRACKER_CI_VERSION
 from mvmctl.core._internal._db import Database
+from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
 from mvmctl.exceptions import (
@@ -23,7 +24,7 @@ from mvmctl.exceptions import (
     TieDetectedError,
 )
 from mvmctl.models.image import ImageItem, ImageSpec
-from mvmctl.utils.audit import log_audit
+from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.full_hash import HashGenerator
 
@@ -60,6 +61,7 @@ class ImageOperation:
         Raises:
             ImageError: If fetch fails or partition detection fails (when no_prompt).
         """
+        from mvmctl.core.binary._service import BinaryService
         from mvmctl.core.image._service import ImageService
 
         db = Database()
@@ -69,29 +71,26 @@ class ImageOperation:
         # Resolve spec
         spec = image_service.get_specs_for([inputs.spec.id])[0]
 
-        # Generate image ID
-        timestamp = datetime.now(tz=timezone.utc).isoformat()
-        image_id = HashGenerator.image(spec.id, spec.source, timestamp)
-
         # Check existing
         if not inputs.force:
-            existing = ImageOperation._find_existing_image(
+            existing = ImageOperation.find_existing_image(
                 spec, inputs.output_dir, repo
             )
             if existing is not None:
                 logger.info("Image already exists: %s", existing.path)
                 return ImageFetchResult(result=existing)
 
+        binary_service = BinaryService(BinaryRepository(db))
+        default_firecracker = binary_service.get_default_firecracker()
+
         # Get CI version for template resolution
-        ci_version = ""
-        try:
-            default_binary = get_default_binary_entry()
-            if default_binary is not None and isinstance(
-                default_binary.ci_version, str
-            ):
-                ci_version = default_binary.ci_version
-        except Exception:
-            pass
+        ci_version = DEFAULT_FIRECRACKER_CI_VERSION
+        if default_firecracker and default_firecracker.ci_version:
+            ci_version = default_firecracker.ci_version
+
+        # Generate image ID
+        timestamp = datetime.now(tz=timezone.utc).isoformat()
+        image_id = HashGenerator.image(spec.id, spec.source, timestamp)
 
         # ORCHESTRATION: download → extract → optimize
         try:
@@ -167,7 +166,7 @@ class ImageOperation:
 
         # Check existing
         if not inputs.force:
-            existing = ImageOperation._find_existing_image(
+            existing = ImageOperation.find_existing_image(
                 spec, inputs.output_dir, repo
             )
             if existing is not None:
@@ -248,7 +247,7 @@ class ImageOperation:
 
             repo.delete(full_key)
 
-            log_audit("image.remove", f"id={full_key[:6]}")
+            AuditLog.log("image.remove", changes={"id": full_key[:6]})
 
     @staticmethod
     def list(
@@ -346,7 +345,7 @@ class ImageOperation:
         image_item = resolved.items[0]
         repo.set_default(image_item.id)
 
-        log_audit("image.set_default", f"id={image_item.id[:6]}")
+        AuditLog.log("image.set_default", changes={"id": image_item.id[:6]})
 
     @staticmethod
     def set_default_by_id(image_id: str) -> None:
@@ -364,7 +363,7 @@ class ImageOperation:
 
         repo.set_default(image_item.id)
 
-        log_audit("image.set_default_by_id", f"id={image_id[:6]}")
+        AuditLog.log("image.set_default_by_id", changes={"id": image_id[:6]})
 
     @staticmethod
     def warm(image_selector: str) -> Path:
@@ -489,7 +488,7 @@ class ImageOperation:
         )
 
     @staticmethod
-    def _find_existing_image(
+    def find_existing_image(
         spec: ImageSpec | ImageImportInput,
         images_dir: Path,
         repo: ImageRepository,

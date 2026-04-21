@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import struct
 import subprocess
+import tarfile
 import tempfile
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-from urllib.error import URLError
 
 from mvmctl.constants import (
     CONST_MEBIBYTE_BYTES,
@@ -23,7 +23,6 @@ from mvmctl.constants import (
     CONST_SHRINK_SAFETY_MARGIN,
     DEFAULT_IMAGE_ARCH,
     HTTP_TIMEOUT_SHA256_FETCH_S,
-    HTTP_USER_AGENT,
 )
 from mvmctl.core._internal._guestfs import OptimizedGuestfs
 from mvmctl.core.image._repository import ImageRepository
@@ -35,10 +34,11 @@ from mvmctl.exceptions import (
     ImageDecompressionError,
     ImageEmptyError,
     ImageError,
+    ImageValidationError,
 )
 from mvmctl.models.image import ImageItem, ImageSpec
 from mvmctl.utils.common import safe_int
-from mvmctl.utils.progress import download_with_progress
+from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
@@ -899,60 +899,59 @@ class ImageService:
     def _handle_qcow2(
         self,
         *,
-        download_path: Path,
+        input_path: Path,
         final_path: Path,
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
     ) -> Path:
         """Handle qcow2 format."""
-        raw_path = download_path.with_suffix(".raw")
-        self.convert_qcow2_to_raw(download_path, raw_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            raw_path = Path(tmpdir) / "intermediate.raw"
+            self.convert_qcow2_to_raw(input_path, raw_path)
 
-        # Try guestfs-based extraction first (more reliable)
-        actual_path = OptimizedGuestfs.extract_partition(
-            raw_path, final_path.with_suffix(".img"), partition
-        )
-        if actual_path is not None:
-            raw_path.unlink(missing_ok=True)
+            # Try guestfs-based extraction first (more reliable)
+            actual_path = OptimizedGuestfs.extract_partition(
+                raw_path, final_path.with_suffix(".img"), partition
+            )
+            if actual_path is not None:
+                return actual_path
+
+            # Fall back to sfdisk/fdisk parsing
+            logger.info(
+                "Guestfs extraction unavailable, falling back to manual partition parsing"
+            )
+            actual_path = self.extract_partition(
+                raw_path,
+                final_path.with_suffix(".img"),
+                partition=partition,
+                disabled_detectors=disabled_detectors,
+            )
             return actual_path
-
-        # Fall back to sfdisk/fdisk parsing
-        logger.info(
-            "Guestfs extraction unavailable, falling back to manual partition parsing"
-        )
-        actual_path = self.extract_partition(
-            raw_path,
-            final_path.with_suffix(".img"),
-            partition=partition,
-            disabled_detectors=disabled_detectors,
-        )
-        raw_path.unlink(missing_ok=True)
-        return actual_path
 
     def _handle_tar_rootfs(
         self,
         *,
-        download_path: Path,
+        input_path: Path,
         final_path: Path,
         minimum_rootfs_size: int | str,
     ) -> Path:
         """Handle tar-rootfs format."""
         self.create_ext4_from_tar(
-            download_path, final_path, minimum_rootfs_mib=minimum_rootfs_size
+            input_path, final_path, minimum_rootfs_mib=minimum_rootfs_size
         )
         return final_path
 
     def _handle_raw(
         self,
         *,
-        download_path: Path,
+        input_path: Path,
         final_path: Path,
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
     ) -> Path:
         """Handle raw format."""
         return self.extract_partition(
-            download_path,
+            input_path,
             final_path.with_suffix(".img"),
             partition=partition,
             disabled_detectors=disabled_detectors,
@@ -961,7 +960,7 @@ class ImageService:
     def _handle_squashfs(
         self,
         *,
-        download_path: Path,
+        input_path: Path,
         final_path: Path,
         minimum_rootfs_size: int | str,
     ) -> Path:
@@ -972,7 +971,7 @@ class ImageService:
 
             try:
                 subprocess.run(
-                    ["unsquashfs", "-d", str(extract_dir), str(download_path)],
+                    ["unsquashfs", "-d", str(extract_dir), str(input_path)],
                     capture_output=True,
                     check=True,
                 )
@@ -1041,7 +1040,7 @@ class ImageService:
     def _handle_vhd(
         self,
         *,
-        download_path: Path,
+        input_path: Path,
         final_path: Path,
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
@@ -1051,31 +1050,30 @@ class ImageService:
         Tries guestfs-based extraction first for reliability with non-standard
         VHD images (e.g., Alpine), falls back to sfdisk/fdisk parsing.
         """
-        raw_path = download_path.with_suffix(".raw")
-        self.convert_vhd_to_raw(download_path, raw_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            raw_path = Path(tmpdir) / "intermediate.raw"
+            self.convert_vhd_to_raw(input_path, raw_path)
 
-        # Try guestfs-based extraction first (more reliable for VHD)
-        actual_path = OptimizedGuestfs.extract_partition(
-            raw_path, final_path.with_suffix(".img"), partition
-        )
-        if actual_path is not None:
-            raw_path.unlink(missing_ok=True)
+            # Try guestfs-based extraction first (more reliable for VHD)
+            actual_path = OptimizedGuestfs.extract_partition(
+                raw_path, final_path.with_suffix(".img"), partition
+            )
+            if actual_path is not None:
+                return actual_path
+
+            # Fall back to sfdisk/fdisk parsing
+            logger.info(
+                "Guestfs extraction unavailable, falling back to manual partition parsing"
+            )
+            actual_path = self.extract_partition(
+                raw_path,
+                final_path.with_suffix(".img"),
+                partition=partition,
+                disabled_detectors=disabled_detectors,
+            )
+            if actual_path is None:
+                raise ImageError("Failed to extract partition from VHD")
             return actual_path
-
-        # Fall back to sfdisk/fdisk parsing
-        logger.info(
-            "Guestfs extraction unavailable, falling back to manual partition parsing"
-        )
-        actual_path = self.extract_partition(
-            raw_path,
-            final_path.with_suffix(".img"),
-            partition=partition,
-            disabled_detectors=disabled_detectors,
-        )
-        if actual_path is None:
-            raise ImageError("Failed to extract partition from VHD")
-        raw_path.unlink(missing_ok=True)
-        return actual_path
 
     # =====================================================================
     # Format Handler Dictionary (as class property)
@@ -1110,9 +1108,7 @@ class ImageService:
         return {k: str(v) for k, v in variables.items()}
 
     def _resolve_source_template(
-        self,
-        spec: ImageSpec,
-        ci_version: str,
+        self, spec: ImageSpec, template_vars: dict[str, str]
     ) -> str:
         """Resolve source URL by fetching and parsing CI image list."""
         if not spec.list_url_template:
@@ -1124,17 +1120,10 @@ class ImageService:
                 f"Missing 'source_base' in images.yaml for {spec.id}"
             )
 
-        template_vars = self._get_template_variables(spec, ci_version)
         list_url = render_template(spec.list_url_template, template_vars)
 
         try:
-            req = urllib.request.Request(
-                list_url, headers={"User-Agent": HTTP_USER_AGENT}
-            )
-            with urllib.request.urlopen(
-                req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S
-            ) as resp:
-                xml_content = resp.read().decode("utf-8")
+            xml_content = HttpDownload.read_raw_content(list_url)
         except Exception as e:
             logger.debug(
                 "Failed to list Firecracker CI ubuntu images from %s",
@@ -1167,15 +1156,13 @@ class ImageService:
         source_filename: str | None = None,
     ) -> str | None:
         """Fetch SHA256 checksum from URL."""
+        from mvmctl.exceptions import HttpDownloadError
+
         try:
-            req = urllib.request.Request(
-                sha256_url, headers={"User-Agent": HTTP_USER_AGENT}
-            )
-            with urllib.request.urlopen(
-                req, timeout=HTTP_TIMEOUT_SHA256_FETCH_S
-            ) as resp:
-                content = resp.read().decode().strip()
-        except (URLError, OSError):
+            content = HttpDownload.read_raw_content(
+                sha256_url, timeout=HTTP_TIMEOUT_SHA256_FETCH_S
+            ).strip()
+        except HttpDownloadError:
             return None
 
         if source_filename is None:
@@ -1208,48 +1195,170 @@ class ImageService:
         downloaded_path: Path,
         image_format: str,
     ) -> None:
-        """Validate downloaded file is valid for its format."""
+        """Validate downloaded file is valid for its format.
+
+        Uses Python-only header checks — no external tools.
+        Unlinks the file on validation failure.
+        """
         if not downloaded_path.exists():
-            raise ImageError("Downloaded file not found")
+            raise ImageValidationError("Downloaded file not found")
 
         file_size = downloaded_path.stat().st_size
         if file_size == 0:
             downloaded_path.unlink(missing_ok=True)
-            raise ImageError("Downloaded file is empty")
+            raise ImageValidationError("Downloaded file is empty")
 
-        if image_format == "tar-rootfs":
-            try:
-                subprocess.run(
-                    ["tar", "-tf", str(downloaded_path)],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as e:
-                downloaded_path.unlink(missing_ok=True)
-                raise ImageError(
-                    "Invalid tar file: tar validation failed"
-                ) from e
-            except FileNotFoundError as e:
-                downloaded_path.unlink(missing_ok=True)
-                raise ImageError("tar command not found") from e
-
+        if image_format == "qcow2":
+            self._validate_qcow2(downloaded_path)
+        elif image_format == "vhd":
+            self._validate_vhd(downloaded_path, file_size)
+        elif image_format == "raw":
+            self._validate_raw(downloaded_path, file_size)
         elif image_format == "squashfs":
-            try:
-                subprocess.run(
-                    ["unsquashfs", "-l", str(downloaded_path)],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as e:
-                downloaded_path.unlink(missing_ok=True)
-                raise ImageError(
-                    "Invalid squashfs file: unsquashfs validation failed"
-                ) from e
-            except FileNotFoundError as e:
-                downloaded_path.unlink(missing_ok=True)
-                raise ImageError("unsquashfs command not found") from e
+            self._validate_squashfs(downloaded_path)
+        elif image_format == "tar-rootfs":
+            self._validate_tar(downloaded_path)
+        else:
+            downloaded_path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                f"Unknown format for validation: {image_format}"
+            )
+
+    def _validate_qcow2(self, path: Path) -> None:
+        """Validate qcow2 by magic number, version, and size."""
+        try:
+            with open(path, "rb") as f:
+                magic = f.read(4)
+                if magic != b"QFI\xfb":
+                    path.unlink(missing_ok=True)
+                    raise ImageValidationError(
+                        "Invalid qcow2 file: wrong magic number"
+                    )
+
+                version = struct.unpack(">I", f.read(4))[0]
+                if version not in (2, 3):
+                    path.unlink(missing_ok=True)
+                    raise ImageValidationError(
+                        f"Unsupported qcow2 version: {version} (expected 2 or 3)"
+                    )
+
+                f.seek(24)
+                size = struct.unpack(">Q", f.read(8))[0]
+                if size == 0:
+                    path.unlink(missing_ok=True)
+                    raise ImageValidationError(
+                        "Invalid qcow2 file: zero virtual size"
+                    )
+        except (OSError, struct.error) as e:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                f"Failed to validate qcow2 file: {e}"
+            ) from e
+
+    def _validate_vhd(self, path: Path, file_size: int) -> None:
+        """Validate VHD by footer cookie and basic fields."""
+        if file_size < 512:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError("Invalid VHD file: too small")
+
+        try:
+            with open(path, "rb") as f:
+                # Try 512-byte footer first (standard)
+                f.seek(file_size - 512)
+                footer = f.read(512)
+                if footer[:8] != b"conectix":
+                    # Fallback: pre-2004 511-byte footer
+                    if file_size >= 511:
+                        f.seek(file_size - 511)
+                        footer = f.read(511)
+                    if footer[:8] != b"conectix":
+                        path.unlink(missing_ok=True)
+                        raise ImageValidationError(
+                            "Invalid VHD file: missing conectix cookie"
+                        )
+
+                features = struct.unpack(">I", footer[8:12])[0]
+                if not (features & 0x00000002):
+                    path.unlink(missing_ok=True)
+                    raise ImageValidationError(
+                        "Invalid VHD file: reserved bit not set"
+                    )
+
+                disk_type = struct.unpack(">I", footer[60:64])[0]
+                if disk_type not in (2, 3, 4):
+                    path.unlink(missing_ok=True)
+                    raise ImageValidationError(
+                        f"Invalid VHD file: unknown disk type {disk_type}"
+                    )
+        except (OSError, struct.error) as e:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                f"Failed to validate VHD file: {e}"
+            ) from e
+
+    def _validate_raw(self, path: Path, file_size: int) -> None:
+        """Validate raw image by size and non-zero content."""
+        if file_size < _SECTOR_SIZE:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError("Invalid raw image: too small")
+
+        if file_size % _SECTOR_SIZE != 0:
+            logger.warning("Raw image size %d is not sector-aligned", file_size)
+
+        try:
+            with open(path, "rb") as f:
+                first_kb = f.read(1024)
+                if first_kb == b"\x00" * len(first_kb):
+                    path.unlink(missing_ok=True)
+                    raise ImageValidationError(
+                        "Invalid raw image: file appears to be all zeros"
+                    )
+        except OSError as e:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                f"Failed to validate raw image: {e}"
+            ) from e
+
+    def _validate_squashfs(self, path: Path) -> None:
+        """Validate squashfs by magic number and version."""
+        try:
+            with open(path, "rb") as f:
+                magic = struct.unpack("<I", f.read(4))[0]
+                if magic != 0x73717368:
+                    path.unlink(missing_ok=True)
+                    raise ImageValidationError(
+                        "Invalid squashfs file: wrong magic number"
+                    )
+
+                f.seek(28)
+                major = struct.unpack("<H", f.read(2))[0]
+                minor = struct.unpack("<H", f.read(2))[0]
+                if major != 4:
+                    path.unlink(missing_ok=True)
+                    raise ImageValidationError(
+                        f"Unsupported squashfs version: {major}.{minor} (expected 4.x)"
+                    )
+        except (OSError, struct.error) as e:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                f"Failed to validate squashfs file: {e}"
+            ) from e
+
+    def _validate_tar(self, path: Path) -> None:
+        """Validate tar archive using Python's tarfile module."""
+        try:
+            with tarfile.open(path, "r:*") as tf:
+                # Just iterate headers to validate structure
+                for _member in tf:
+                    pass
+        except tarfile.TarError as e:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(f"Invalid tar file: {e}") from e
+        except OSError as e:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                f"Failed to validate tar file: {e}"
+            ) from e
 
     # =====================================================================
     # Phase Methods
@@ -1272,7 +1381,7 @@ class ImageService:
         template_vars = self._get_template_variables(spec, ci_version)
         source = spec.source
         if "{" in spec.source:
-            source = self._resolve_source_template(spec, ci_version)
+            source = self._resolve_source_template(spec, template_vars)
 
         resolved_sha256 = (
             spec.sha256.lower() if spec.sha256 is not None else None
@@ -1284,13 +1393,14 @@ class ImageService:
                 sha256_url, source_filename=source_basename
             )
 
-        download_with_progress(
+        HttpDownload.download_file(
             source,
             download_path,
-            title=f"Downloading image: '{spec.id}'",
             expected_sha256=resolved_sha256,
             timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
+            progress_bar=True,
             allow_missing_checksum=resolved_sha256 is None,
+            title=f"Downloading image: '{spec.id}'",
         )
         self._validate_downloaded_file(download_path, spec.format)
 
@@ -1312,7 +1422,7 @@ class ImageService:
             raise ImageError(f"Unknown format: {spec.format}")
 
         actual_path = handler(
-            download_path=download_path,
+            input_path=download_path,
             final_path=output_dir / f"{image_id}.{spec.convert_to}",
             minimum_rootfs_size="dynamic",
             partition=partition,
@@ -1335,8 +1445,6 @@ class ImageService:
         disabled_detectors: list[str] | None,
     ) -> Path:
         """Extract/convert imported local image. Returns extracted path."""
-        final_path = output_dir / f"{image_id}.{convert_to}"
-
         logger.info(
             "Importing %s as '%s' (format: %s)...",
             source_path.name,
@@ -1344,39 +1452,22 @@ class ImageService:
             format,
         )
 
-        if format == "qcow2":
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir_path = Path(tmpdir)
-                raw_path = tmpdir_path / f"{image_id}.raw"
-                extracted_path = tmpdir_path / f"{image_id}.img"
-                self.convert_qcow2_to_raw(source_path, raw_path)
-                actual_path = self.extract_partition(
-                    raw_path,
-                    extracted_path,
-                    partition=partition,
-                    disabled_detectors=disabled_detectors,
-                )
-
-                destination_path = (
-                    output_dir / f"{image_id}{actual_path.suffix}"
-                )
-                actual_path.replace(destination_path)
-                return destination_path
-
-        elif format == "raw":
-            shutil.copy2(source_path, final_path)
-            return final_path
-
-        elif format == "tar-rootfs":
-            self.create_ext4_from_tar(
-                source_path,
-                final_path,
-                minimum_rootfs_mib="dynamic",
-            )
-            return final_path
-
-        else:
+        handler = self._format_handlers.get(format)
+        if handler is None:
             raise ImageError(f"Unsupported import format: {format}")
+
+        actual_path = handler(
+            input_path=source_path,
+            final_path=output_dir / f"{image_id}.{convert_to}",
+            minimum_rootfs_size="dynamic",
+            partition=partition,
+            disabled_detectors=disabled_detectors,
+        )
+
+        if actual_path is None:
+            raise ImageError("Failed to determine image path")
+
+        return actual_path
 
     def _resolve_fs_type(self, image_path: Path) -> str:
         """Detect filesystem type via blkid or file extension. Never returns empty."""

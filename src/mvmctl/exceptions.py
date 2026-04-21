@@ -85,6 +85,15 @@ class ImageEmptyError(ImageError):
     """
 
 
+class ImageValidationError(ImageError):
+    """Downloaded image file failed format validation.
+
+    Common messages:
+    - Invalid {format} file: {reason}
+    - Unknown format for validation: {format}
+    """
+
+
 class ChecksumMismatchError(ImageError):
     """Downloaded file checksum does not match expected."""
 
