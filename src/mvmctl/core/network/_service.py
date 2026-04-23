@@ -20,6 +20,7 @@ from mvmctl.models.network import (
     IPTablesTable,
     IPTablesTarget,
     IPTablesWildcard,
+    NetworkItem,
 )
 from mvmctl.utils.network import NetworkUtils
 from mvmctl.utils.process import privileged_cmd as _privileged_cmd
@@ -59,6 +60,31 @@ class NetworkService:
     def tracker(self) -> IPTablesTracker:
         """Create an IPTablesTracker with the shared repository."""
         return self._tracker
+
+    def list_all(self, verify: bool = True) -> list[NetworkItem]:
+        """List all networks, syncing is_present flag with bridge state.
+
+        Checks each network's bridge on the host and bulk-updates is_present
+        for any that are missing. Returns the full list with updated state.
+
+        Args:
+            verify: If True (default), check bridge existence and update DB.
+                   If False, return DB records as-is.
+        """
+        networks = self._repo.list_all()
+        if not verify:
+            return networks
+
+        missing_ids: list[str] = []
+        for network in networks:
+            if not NetworkUtils.bridge_exists(network.bridge):
+                missing_ids.append(network.id)
+
+        if missing_ids:
+            self._repo.update_many_is_present(missing_ids, False)
+            networks = self._repo.list_all()
+
+        return networks
 
     def ensure_mvm_chains(self) -> None:
         """Ensure MVM iptables chains exist with proper jump rules.

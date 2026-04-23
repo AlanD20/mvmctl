@@ -61,8 +61,9 @@ class NetworkRepository:
                 """
                 INSERT INTO networks (
                     id, name, subnet, bridge, ipv4_gateway, bridge_active,
-                    nat_gateways, nat_enabled, is_default, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    nat_gateways, nat_enabled, is_default, is_present,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     subnet = excluded.subnet,
                     bridge = excluded.bridge,
@@ -71,6 +72,7 @@ class NetworkRepository:
                     nat_gateways = excluded.nat_gateways,
                     nat_enabled = excluded.nat_enabled,
                     is_default = excluded.is_default,
+                    is_present = excluded.is_present,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -83,6 +85,7 @@ class NetworkRepository:
                     network.nat_gateways,
                     int(network.nat_enabled),
                     int(network.is_default),
+                    int(network.is_present),
                     network.created_at,
                     network.updated_at,
                 ),
@@ -115,6 +118,19 @@ class NetworkRepository:
         if row is None:
             return None
         return NetworkItem(**dict(row))
+
+    def update_many_is_present(
+        self, network_ids: list[str], is_present: bool
+    ) -> None:
+        """Bulk update is_present flag for multiple networks."""
+        if not network_ids:
+            return
+        placeholders = ",".join("?" * len(network_ids))
+        with self._db.connect() as conn:
+            conn.execute(
+                f"UPDATE networks SET is_present = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                [int(is_present)] + list(network_ids),
+            )
 
     def delete(self, network_id: str) -> None:
         """Delete a network by ID. No-op if not found."""

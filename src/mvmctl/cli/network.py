@@ -36,6 +36,11 @@ network_app = typer.Typer(
 )
 
 
+@network_app.callback()
+def network_callback(ctx: typer.Context) -> None:
+    pass
+
+
 @network_app.command(name="help", hidden=True)
 def help_cmd(ctx: typer.Context) -> None:
     """Show help for the network command group."""
@@ -69,10 +74,9 @@ def network_ls(
 
     rows = []
     for n in networks:
-        is_bridge_missing = not NetworkUtils.bridge_exists(n.bridge)
         is_default = n.is_default
         name_col = CommonUtils._get_combined_marker(
-            is_default, is_bridge_missing
+            is_default, not n.is_present
         ) + n.name
         vm_count = len(n.leases) if n.leases else 0
         rows.append(
@@ -224,7 +228,8 @@ def network_create(
             nat_enabled=not no_nat,
             nat_gateways=nat_gateways_list,
         )
-        config = NetworkOperation.create(create_input)
+        result = NetworkOperation.create(create_input)
+        config = result.result
     except NetworkError as e:
         _print_create_error(str(e), name)
         raise typer.Exit(code=1)
@@ -283,12 +288,14 @@ def network_inspect(
     """Show detailed information about a network."""
     name = CliUtils.check_name_arg(ctx, name)
     try:
-        info = NetworkOperation.inspect(NetworkInput(name=[name]))
+        info = NetworkOperation.inspect(
+            NetworkInput(name=[name]), is_json=json_output
+        )
     except NetworkError as e:
         print_error(str(e))
         raise typer.Exit(code=1)
 
-    if json_output:
+    if isinstance(info, dict):
         typer.echo(json.dumps(info, indent=2, default=str))
         return
 

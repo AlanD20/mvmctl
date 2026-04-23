@@ -70,6 +70,7 @@ class NetworkItem:
     bridge_active: bool
     nat_enabled: bool
     is_default: bool
+    is_present: bool
     created_at: str
     updated_at: str
 

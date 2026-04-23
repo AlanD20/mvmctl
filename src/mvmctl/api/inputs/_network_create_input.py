@@ -8,7 +8,6 @@ from mvmctl.core._internal._db import Database
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkError
 from mvmctl.utils._network_validator import NetworkValidator
-from mvmctl.utils.full_hash import HashGenerator
 from mvmctl.utils.network import NetworkUtils
 
 __all__ = [
@@ -46,8 +45,6 @@ class ResolvedNetworkCreateRequest:
     bridge: str
     nat_enabled: bool
     nat_gateways: list[str]
-    network_id: str
-    created_at: str
 
 
 class NetworkCreateRequest:
@@ -73,45 +70,31 @@ class NetworkCreateRequest:
         return self._result
 
     def resolve(self) -> ResolvedNetworkCreateRequest:
-        """Resolve all inputs to explicit values and validate."""
-        validator = NetworkValidator()
+        """Resolve all inputs to explicit values.
 
-        # Validate name (no dots, lowercase only)
-        name = validator.validate_name(self._inputs.name)
-
-        # Validate and normalize subnet
-        subnet = validator.validate_subnet(self._inputs.subnet)
-
-        # Resolve or compute gateway — uses NORMALIZED subnet
+        This method resolves DB-backed defaults and computes derived values
+        (gateway, bridge name). It does NOT validate —
+        validation happens in ensure_validate().
+        """
+        # Resolve or compute gateway
         if self._inputs.ipv4_gateway is not None:
-            ipv4_gateway = validator.validate_ipv4_gateway(
-                self._inputs.ipv4_gateway, subnet=subnet
-            )
+            ipv4_gateway = self._inputs.ipv4_gateway
         else:
-            ipv4_gateway = NetworkUtils.compute_ipv4_gateway(subnet)
+            ipv4_gateway = NetworkUtils.compute_ipv4_gateway(
+                self._inputs.subnet
+            )
 
-        # Compute and validate bridge name
-        bridge = NetworkUtils.compute_bridge_name(name)
-        bridge = validator.validate_bridge_name(bridge)
-
-        # Compute network ID
-        from datetime import datetime, timezone
-
-        created_at = datetime.now(tz=timezone.utc).isoformat()
-        network_id = HashGenerator.network(name, subnet, created_at)
+        # Compute bridge name
+        bridge = NetworkUtils.compute_bridge_name(self._inputs.name)
 
         # Build result
         self._result = ResolvedNetworkCreateRequest(
-            name=name,
-            subnet=subnet,
+            name=self._inputs.name,
+            subnet=self._inputs.subnet,
             ipv4_gateway=ipv4_gateway,
             bridge=bridge,
             nat_enabled=self._inputs.nat_enabled,
-            nat_gateways=validator.validate_nat_gateways(
-                self._inputs.nat_gateways
-            ),
-            network_id=network_id,
-            created_at=created_at,
+            nat_gateways=self._inputs.nat_gateways,
         )
 
         # Validate
@@ -123,9 +106,12 @@ class NetworkCreateRequest:
         """Validate resolved network creation inputs.
 
         Validates:
+        - Network name format
+        - Subnet format and overlap with existing networks
+        - Gateway format and membership in subnet
+        - Bridge name format and conflicts
+        - NAT gateways format and interface existence
         - Network name doesn't already exist
-        - Subnet doesn't overlap with existing networks
-        - Bridge name doesn't conflict with existing networks
         """
         if self._result is None:
             raise NetworkError(
@@ -133,6 +119,24 @@ class NetworkCreateRequest:
             )
 
         validator = NetworkValidator()
+
+        # Validate name (no dots, lowercase only)
+        validator.validate_name(self._result.name)
+
+        # Validate and normalize subnet
+        validator.validate_subnet(self._result.subnet)
+
+        # Validate gateway is in subnet
+        validator.validate_ipv4_gateway(
+            self._result.ipv4_gateway, subnet=self._result.subnet
+        )
+
+        # Validate bridge name
+        validator.validate_bridge_name(self._result.bridge)
+
+        # Validate NAT gateways
+        if self._result.nat_gateways:
+            validator.validate_nat_gateways(self._result.nat_gateways)
 
         # Check if network already exists
         existing = self._network_repo.get_by_name(self._result.name)
@@ -144,5 +148,3 @@ class NetworkCreateRequest:
         validator.validate_subnet_no_overlap(
             self._result.subnet, existing_networks, self._result.name
         )
-
-

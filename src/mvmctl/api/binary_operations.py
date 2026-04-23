@@ -8,6 +8,7 @@ operation class.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from mvmctl.api.inputs._binary_fetch_input import (
     BinaryFetchInput,
@@ -32,11 +33,18 @@ from mvmctl.utils.auditlog import AuditLog
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class BinaryFetchResult:
+    """Result of binary fetch operation — contains firecracker and jailer binaries."""
+
+    result: list[BinaryItem]
+
+
 class BinaryOperation:
     """Binary management orchestration."""
 
     @staticmethod
-    def fetch(inputs: BinaryFetchInput) -> list[BinaryItem]:
+    def fetch(inputs: BinaryFetchInput) -> BinaryFetchResult:
         """Download a binary version.
 
         Flow:
@@ -46,13 +54,13 @@ class BinaryOperation:
         4. Download via BinaryService.download()
         5. Upsert to DB via BinaryRepository
         6. If set_as_default, mark as default
-        7. Return BinaryItem list
+        7. Return BinaryFetchResult
 
         Args:
             inputs: BinaryFetchInput with version and set_as_default flag.
 
         Returns:
-            list[BinaryItem] with firecracker and jailer entries.
+            BinaryFetchResult with firecracker and jailer entries.
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -71,7 +79,7 @@ class BinaryOperation:
             # Early exit: return existing binaries without downloading
             assert fc_exists is not None
             assert jl_exists is not None
-            return [fc_exists, jl_exists]
+            return BinaryFetchResult(result=[fc_exists, jl_exists])
 
         # Download (override or first-time)
         no_default = repo.get_default("firecracker") is None
@@ -89,7 +97,7 @@ class BinaryOperation:
 
         AuditLog.log("binary.fetch", changes={"version": resolved.version})
 
-        return binaries
+        return BinaryFetchResult(result=binaries)
 
     @staticmethod
     def remove(inputs: BinaryInput) -> None:
@@ -223,4 +231,4 @@ class BinaryOperation:
         )
 
 
-__all__ = ["BinaryOperation"]
+__all__ = ["BinaryOperation", "BinaryFetchResult"]

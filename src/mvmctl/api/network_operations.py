@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from mvmctl.core._internal._db import Database
 from mvmctl.core.network._controller import NetworkController
@@ -12,7 +14,8 @@ from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._service import NetworkService
 from mvmctl.exceptions import NetworkError, NetworkNotFoundError
 from mvmctl.models.network import NetworkItem
-from mvmctl.utils.audit import log_audit
+from mvmctl.utils.auditlog import AuditLog
+from mvmctl.utils.full_hash import HashGenerator
 from mvmctl.utils.network import NetworkUtils
 
 if TYPE_CHECKING:
@@ -24,6 +27,13 @@ logger = logging.getLogger(__name__)
 __all__ = ["NetworkOperation"]
 
 
+@dataclass
+class NetworkCreateResult:
+    """Result of network create operation."""
+
+    result: NetworkItem
+
+
 class NetworkOperation:
     """Orchestration layer for network operations.
 
@@ -32,14 +42,14 @@ class NetworkOperation:
     """
 
     @staticmethod
-    def create(inputs: NetworkCreateInput) -> NetworkItem:
+    def create(inputs: NetworkCreateInput) -> NetworkCreateResult:
         """Create a new network.
 
         Args:
             inputs: NetworkCreateInput with name, subnet, etc.
 
         Returns:
-            The created NetworkItem.
+            NetworkCreateResult with the created NetworkItem.
         """
         from mvmctl.api.inputs._network_create_input import NetworkCreateRequest
 
@@ -50,9 +60,15 @@ class NetworkOperation:
         request = NetworkCreateRequest(inputs=inputs, db=db)
         resolved = request.resolve()
 
+        # Compute network ID and timestamp right before creation
+        created_at = datetime.now(tz=timezone.utc).isoformat()
+        network_id = HashGenerator.network(
+            resolved.name, resolved.subnet, created_at
+        )
+
         # Build NetworkItem from resolved inputs
         network_item = NetworkItem(
-            id=resolved.network_id,
+            id=network_id,
             name=resolved.name,
             subnet=resolved.subnet,
             bridge=resolved.bridge,
@@ -63,8 +79,9 @@ class NetworkOperation:
             if resolved.nat_gateways
             else None,
             is_default=False,
-            created_at=resolved.created_at,
-            updated_at=resolved.created_at,
+            is_present=True,
+            created_at=created_at,
+            updated_at=created_at,
         )
 
         # Persist to DB so that we have the record to ensure creation
@@ -83,12 +100,12 @@ class NetworkOperation:
                 )
         except NetworkError:
             # If infrastructure setup fails, clean up DB record
-            repo.delete(resolved.network_id)
+            repo.delete(network_id)
             raise
 
         # Update bridge_active status
         bridge_active = NetworkUtils.bridge_exists(resolved.bridge)
-        repo.update_bridge_active(resolved.network_id, bridge_active)
+        repo.update_bridge_active(network_id, bridge_active)
 
         # Re-fetch the item to get updated state
         updated_item = repo.get_by_name(resolved.name)
@@ -97,8 +114,8 @@ class NetworkOperation:
                 f"Failed to fetch created network '{resolved.name}'"
             )
 
-        log_audit("network.create", f"name={resolved.name}")
-        return updated_item
+        AuditLog.log("network.create", changes={"name": resolved.name})
+        return NetworkCreateResult(result=updated_item)
 
     @staticmethod
     def remove(inputs: NetworkInput) -> None:
@@ -150,7 +167,7 @@ class NetworkOperation:
             # Delete from DB
             repo.delete(network.id)
 
-            log_audit("network.remove", f"name={network.name}")
+            AuditLog.log("network.remove", changes={"name": network.name})
 
     @staticmethod
     def list_all() -> list[NetworkItem]:
@@ -161,7 +178,8 @@ class NetworkOperation:
         """
         db = Database()
         repo = NetworkRepository(db)
-        networks = repo.list_all()
+        service = NetworkService(repo)
+        networks = service.list_all(verify=True)
 
         if not networks:
             return []
@@ -197,14 +215,42 @@ class NetworkOperation:
         return resolved.networks[0]
 
     @staticmethod
-    def inspect(inputs: NetworkInput) -> NetworkItem:
+    def _network_to_dict(network: NetworkItem) -> dict[str, Any]:
+        """Convert NetworkItem to dictionary for JSON output."""
+        return {
+            "name": network.name,
+            "subnet": network.subnet,
+            "ipv4_gateway": network.ipv4_gateway,
+            "bridge": network.bridge,
+            "nat_enabled": network.nat_enabled,
+            "bridge_active": network.bridge_active,
+            "is_default": network.is_default,
+            "created_at": network.created_at,
+            "updated_at": network.updated_at,
+            "leases": [
+                {
+                    "vm_id": lease.vm_id,
+                    "ipv4": lease.ipv4,
+                    "leased_at": lease.leased_at,
+                    "expires_at": lease.expires_at,
+                }
+                for lease in (network.leases or [])
+            ],
+            "nat_gateways": network.nat_gateways_list or [],
+        }
+
+    @staticmethod
+    def inspect(
+        inputs: NetworkInput, is_json: bool = False
+    ) -> NetworkItem | dict[str, Any]:
         """Inspect a network with enriched data (leases, bridge state).
 
         Args:
             inputs: NetworkInput with name/id identifiers.
+            is_json: If True, return a dict suitable for JSON serialization.
 
         Returns:
-            NetworkItem with enriched lease data.
+            NetworkItem or dict representation depending on is_json.
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
 
@@ -234,6 +280,8 @@ class NetworkOperation:
                 f"Network '{network.name}' not found after update"
             )
 
+        if is_json:
+            return NetworkOperation._network_to_dict(updated)
         return updated
 
     @staticmethod
@@ -259,7 +307,7 @@ class NetworkOperation:
         controller = NetworkController(resolved.networks[0], repo)
         controller.set_default()
 
-        log_audit("network.set_default", f"name={resolved.networks[0].name}")
+        AuditLog.log("network.set_default", changes={"name": resolved.networks[0].name})
 
     @staticmethod
     def ensure_default() -> NetworkItem:
@@ -329,10 +377,11 @@ class NetworkOperation:
             nat_gateways=nat_gateways,
         )
 
-        log_audit(
-            "network.create_internal_default", f"name={DEFAULT_NETWORK_NAME}"
+        AuditLog.log(
+            "network.create_internal_default",
+            changes={"name": DEFAULT_NETWORK_NAME},
         )
-        return NetworkOperation.create(create_input)
+        return NetworkOperation.create(create_input).result
 
     @staticmethod
     def reconcile() -> list[NetworkItem]:

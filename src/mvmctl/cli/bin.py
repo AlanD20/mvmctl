@@ -140,7 +140,8 @@ def bin_fetch(
             set_as_default=set_default,
             download_override=download_override,
         )
-        binaries = BinaryOperation.fetch(inputs)
+        result = BinaryOperation.fetch(inputs)
+        binaries = result.result
     except BinaryError as exc:
         print_error(str(exc))
         raise typer.Exit(code=1)
