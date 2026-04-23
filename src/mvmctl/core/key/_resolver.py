@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mvmctl.core._internal._enrichment import RelationEnricher
+from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.exceptions import KeyNotFoundError, MVMKeyError
 from mvmctl.models.key import SSHKeyItem
@@ -30,7 +30,7 @@ class KeyResolveResult:
 class KeyResolver:
     """Resolver for SSH key resources using database storage."""
 
-    RELATIONS: dict[str, tuple[str, type, str]] = {}
+    RELATIONS: dict[str, RelationSpec] = {}
 
     def __init__(
         self,
@@ -45,7 +45,7 @@ class KeyResolver:
         """Enrich keys with relations if include is set."""
         if self._include and keys:
             RelationEnricher().enrich(
-                keys, self._include, self.RELATIONS, self._repo._db
+                keys, self._include, self.RELATIONS
             )
         return keys
 
@@ -130,3 +130,8 @@ class KeyResolver:
 
         exit_code = 1 if errors and not items else 0
         return KeyResolveResult(items=items, errors=errors, exit_code=exit_code)
+
+
+from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+
+register("key", lambda: KeyResolver)

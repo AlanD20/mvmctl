@@ -251,6 +251,23 @@ class VMRepository:
         with self._db.connect() as conn:
             conn.execute("DELETE FROM vm_instances WHERE id = ?", (vm_id,))
 
+    def get_by_image_ids(self, image_ids: list[str]) -> list[VMInstanceItem]:
+        """Return all VMs referencing any of the given image IDs.
+
+        Args:
+            image_ids: List of full image IDs to query.
+
+        Returns:
+            List of VMInstanceItem records.
+        """
+        if not image_ids:
+            return []
+        placeholders = ",".join("?" * len(image_ids))
+        query = f"SELECT * FROM vm_instances WHERE image_id IN ({placeholders})"
+        with self._db.connect() as conn:
+            rows = conn.execute(query, image_ids).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
+
     def delete_many(self, vm_ids: list[str]) -> int:
         """Delete multiple VMs by ID.
 

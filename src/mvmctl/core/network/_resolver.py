@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher
-from mvmctl.core._internal._iptables_tracker import IPTablesRuleResolver
-from mvmctl.core.network._lease_resolver import NetworkLeaseResolver
+from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.exceptions import NetworkNotFoundError
 from mvmctl.models.network import NetworkItem
@@ -27,9 +25,23 @@ class NetworkResolveResult:
 class NetworkResolver:
     """Resolver for network configuration."""
 
-    RELATIONS: dict[str, tuple[str, type, str]] = {
-        "leases": ("id", NetworkLeaseResolver, "list_by_network_id"),
-        "iptables_rules": ("id", IPTablesRuleResolver, "list_by_network_id"),
+    RELATIONS: dict[str, RelationSpec] = {
+        "leases": RelationSpec(
+            fk_field="id",
+            resolver="network_lease",
+            method="list_by_network_id",
+            relation_name="leases",
+            is_reverse=True,
+            batch_method="list_by_network_id_batch",
+        ),
+        "iptables_rules": RelationSpec(
+            fk_field="id",
+            resolver="iptables_rule",
+            method="list_by_network_id",
+            relation_name="iptables_rules",
+            is_reverse=True,
+            batch_method="list_by_network_id_batch",
+        ),
     }
 
     def __init__(
@@ -45,7 +57,7 @@ class NetworkResolver:
         """Enrich networks with relations if include is set."""
         if self._include and networks:
             RelationEnricher().enrich(
-                networks, self._include, self.RELATIONS, self._repo._db
+                networks, self._include, self.RELATIONS
             )
         return networks
 
@@ -109,3 +121,8 @@ class NetworkResolver:
         return NetworkResolveResult(
             items=items, errors=errors, exit_code=exit_code
         )
+
+
+from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+
+register("network", lambda: NetworkResolver)

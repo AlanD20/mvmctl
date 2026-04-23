@@ -43,6 +43,18 @@ class IPTablesRuleRepository:
             ).fetchall()
         return [self._row_to_item(row) for row in rows]
 
+    def list_by_network_id_batch(
+        self, network_ids: list[str]
+    ) -> list[IPTablesRuleItem]:
+        """List all iptables rules for multiple networks."""
+        if not network_ids:
+            return []
+        placeholders = ",".join("?" * len(network_ids))
+        query = f"SELECT * FROM iptables_rules WHERE network_id IN ({placeholders}) ORDER BY id"
+        with self._db.connect() as conn:
+            rows = conn.execute(query, network_ids).fetchall()
+        return [self._row_to_item(row) for row in rows]
+
     def get(self, rule_id: int) -> IPTablesRuleItem | None:
         """Get a specific rule by ID."""
         with self._db.connect() as conn:

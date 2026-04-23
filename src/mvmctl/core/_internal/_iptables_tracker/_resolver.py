@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.core._internal._enrichment import RelationEnricher
+from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core._internal._iptables_tracker import IPTablesRuleRepository
 from mvmctl.models.network import IPTablesRuleItem
 
@@ -12,7 +12,7 @@ __all__ = ["IPTablesRuleResolver"]
 class IPTablesRuleResolver:
     """Resolver for iptables rules."""
 
-    RELATIONS: dict[str, tuple[str, type, str]] = {}
+    RELATIONS: dict[str, RelationSpec] = {}
 
     def __init__(
         self,
@@ -27,7 +27,7 @@ class IPTablesRuleResolver:
         """Enrich rules with relations if include is set."""
         if self._include and rules:
             RelationEnricher().enrich(
-                rules, self._include, self.RELATIONS, self._repo._db
+                rules, self._include, self.RELATIONS
             )
         return rules
 
@@ -35,6 +35,19 @@ class IPTablesRuleResolver:
         """List all iptables rules for a network."""
         rules = self._repo.list_by_network_id(network_id)
         return self._enrich(rules)
+
+    def list_by_network_id_batch(
+        self, network_ids: list[str]
+    ) -> dict[str, list[IPTablesRuleItem]]:
+        """Batch-resolve iptables rules by network IDs."""
+        rules = self._repo.list_by_network_id_batch(network_ids)
+        results: dict[str, list[IPTablesRuleItem]] = {
+            nid: [] for nid in network_ids
+        }
+        for rule in rules:
+            if rule.network_id in results:
+                results[rule.network_id].append(rule)
+        return results
 
     def get(self, rule_id: int) -> IPTablesRuleItem | None:
         """Get a specific rule by ID."""
@@ -47,3 +60,8 @@ class IPTablesRuleResolver:
         """List all iptables rules."""
         rules = self._repo.list_all()
         return self._enrich(rules)
+
+
+from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+
+register("iptables_rule", lambda: IPTablesRuleResolver)

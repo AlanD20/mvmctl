@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher
+from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core.binary._repository import BinaryRepository
 from mvmctl.exceptions import BinaryNotFoundError
 from mvmctl.models.binary import BinaryItem
@@ -25,7 +25,7 @@ class BinaryResolveResult:
 class BinaryResolver:
     """Resolver for firecracker binary."""
 
-    RELATIONS: dict[str, tuple[str, type, str]] = {}
+    RELATIONS: dict[str, RelationSpec] = {}
 
     def __init__(
         self,
@@ -40,7 +40,7 @@ class BinaryResolver:
         """Enrich binaries with relations if include is set."""
         if self._include and binaries:
             RelationEnricher().enrich(
-                binaries, self._include, self.RELATIONS, self._repo._db
+                binaries, self._include, self.RELATIONS
             )
         return binaries
 
@@ -115,3 +115,8 @@ class BinaryResolver:
         return BinaryResolveResult(
             items=items, errors=errors, exit_code=exit_code
         )
+
+
+from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+
+register("binary", lambda: BinaryResolver)

@@ -7,9 +7,39 @@ all FK values and resolving them in a single query per relation.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
+from mvmctl.core._internal._resolver_registry import get as get_resolver
+
 T = TypeVar("T")
+
+
+@dataclass
+class RelationSpec:
+    """Specification for a single relation enrichment.
+
+    Attributes:
+        fk_field: Field name on the source entity. For forward relations this
+            is the FK field (e.g., "image_id"). For reverse relations this is
+            the source entity's ID field (e.g., "id"). For nested relations
+            this is the parent attribute name (e.g., "network").
+        resolver: Registered resolver name (string, not class).
+        method: Resolver method name for single-value resolution.
+        relation_name: Explicit attribute name to set on the entity. If None,
+            defaults to fk_field with "_id" removed for forward relations,
+            or the path leaf for nested relations.
+        is_reverse: True for reverse relations (source.id -> list[targets]).
+        batch_method: Optional batch method name. If set, called with a list
+            of IDs instead of looping over single-value method calls.
+    """
+
+    fk_field: str
+    resolver: str
+    method: str
+    relation_name: str | None = None
+    is_reverse: bool = False
+    batch_method: str | None = None
 
 
 class RelationEnricher:
@@ -23,16 +53,14 @@ class RelationEnricher:
         self,
         entities: list[T],
         include: list[str],
-        registry: dict[str, tuple[str, type, str]],
-        db: Any,
+        registry: dict[str, RelationSpec],
     ) -> None:
         """Enrich entities in-place with resolved relations.
 
         Args:
             entities: List of entity instances to enrich (modified in-place).
             include: Relation paths to resolve (e.g., ["kernel", "network.leases"]).
-            registry: Resolver's RELATIONS dict mapping path → (fk_field, resolver_cls, method_name).
-            db: Database instance for creating resolver instances.
+            registry: Resolver's RELATIONS dict mapping path → RelationSpec.
 
         Raises:
             ValueError: If an include path is not in the registry.
@@ -40,18 +68,14 @@ class RelationEnricher:
         if not include:
             return
 
-        # 1. Validate all paths
         self._validate_paths(include, registry)
-
-        # 2. Sort by depth so parents resolve before children
         sorted_paths = sorted(include, key=lambda p: p.count("."))
 
-        # 3. Batch-resolve each relation
         for path in sorted_paths:
-            self._resolve_relation(entities, path, registry, db)
+            self._resolve_relation(entities, path, registry)
 
     def _validate_paths(
-        self, include: list[str], registry: dict[str, tuple[str, type, str]]
+        self, include: list[str], registry: dict[str, RelationSpec]
     ) -> None:
         for path in include:
             if path not in registry:
@@ -64,38 +88,29 @@ class RelationEnricher:
         self,
         entities: list[T],
         path: str,
-        registry: dict[str, tuple[str, type, str]],
-        db: Any,
+        registry: dict[str, RelationSpec],
     ) -> None:
-        fk_field, resolver_cls, method_name = registry[path]
-        parts = path.split(".")
+        spec = registry[path]
+        resolver_cls = get_resolver(spec.resolver)
+        resolver = resolver_cls()
 
-        if len(parts) == 1:
-            # Direct relation: VM → Kernel
-            # fk_field is the FK field on the entity (e.g., "kernel_id")
-            self._resolve_direct(
-                entities, fk_field, resolver_cls, method_name, db
-            )
+        if "." in path:
+            self._resolve_nested(entities, path, spec, resolver)
+        elif spec.is_reverse:
+            self._resolve_reverse(entities, spec, resolver)
         else:
-            # Nested relation: VM → Network → Leases
-            # fk_field is the parent attribute name (e.g., "network")
-            self._resolve_nested(
-                entities, path, fk_field, resolver_cls, method_name, db
-            )
+            self._resolve_forward(entities, spec, resolver)
 
-    def _resolve_direct(
+    def _resolve_forward(
         self,
         entities: list[T],
-        fk_field: str,
-        resolver_cls: type,
-        method_name: str,
-        db: Any,
+        spec: RelationSpec,
+        resolver: Any,
     ) -> None:
-        # Collect unique FK values, deduplicated
         fk_values: list[str] = []
         seen: set[str] = set()
         for entity in entities:
-            val = getattr(entity, fk_field, None)
+            val = getattr(entity, spec.fk_field, None)
             if val and val not in seen:
                 seen.add(val)
                 fk_values.append(val)
@@ -103,40 +118,66 @@ class RelationEnricher:
         if not fk_values:
             return
 
-        # Batch resolve using the resolver's method.
-        # Resolvers accept a repo parameter; pass None to use default repo/db.
-        resolver = resolver_cls()
-        results: dict[str, Any] = {}
-        for fk_val in fk_values:
-            method = getattr(resolver, method_name)
-            results[fk_val] = method(fk_val)
+        if spec.batch_method:
+            batch_fn = getattr(resolver, spec.batch_method)
+            results: dict[str, Any] = batch_fn(fk_values)
+        else:
+            results = {}
+            for fk_val in fk_values:
+                method = getattr(resolver, spec.method)
+                results[fk_val] = method(fk_val)
 
-        # Assign back to entities
-        # Attribute name is derived from FK field: "kernel_id" → "kernel"
-        attr_name = fk_field.removesuffix("_id")
+        relation_name = spec.relation_name or spec.fk_field.removesuffix("_id")
         for entity in entities:
-            val = getattr(entity, fk_field, None)
+            val = getattr(entity, spec.fk_field, None)
             if val:
-                setattr(entity, attr_name, results.get(val))
+                setattr(entity, relation_name, results.get(val))
+
+    def _resolve_reverse(
+        self,
+        entities: list[T],
+        spec: RelationSpec,
+        resolver: Any,
+    ) -> None:
+        source_ids: list[str] = []
+        seen: set[str] = set()
+        for entity in entities:
+            val = getattr(entity, spec.fk_field, None)
+            if val and val not in seen:
+                seen.add(val)
+                source_ids.append(val)
+
+        if not source_ids:
+            return
+
+        if spec.batch_method:
+            batch_fn = getattr(resolver, spec.batch_method)
+            results: dict[str, list[Any]] = batch_fn(source_ids)
+        else:
+            results = {}
+            for sid in source_ids:
+                method = getattr(resolver, spec.method)
+                results[sid] = method(sid)
+
+        relation_name = spec.relation_name or spec.fk_field
+        for entity in entities:
+            val = getattr(entity, spec.fk_field, None)
+            if val:
+                setattr(entity, relation_name, results.get(val, []))
 
     def _resolve_nested(
         self,
         entities: list[T],
         path: str,
-        parent_attr: str,
-        resolver_cls: type,
-        method_name: str,
-        db: Any,
+        spec: RelationSpec,
+        resolver: Any,
     ) -> None:
-        # For nested: parent_attr is the parent attribute on the entity (e.g., "network")
-        # We resolve children on the parent object
-        child_attr = path.rsplit(".", 1)[-1]  # "leases" from "network.leases"
+        child_attr = path.rsplit(".", 1)[-1]
 
-        # Collect unique parent IDs from resolved parent objects, deduplicated
         parent_ids: list[str] = []
         seen: set[str] = set()
         for entity in entities:
-            parent = getattr(entity, parent_attr, None)
+            parent = getattr(entity, spec.fk_field, None)
             if parent is not None:
                 parent_id = getattr(parent, "id", None)
                 if parent_id and parent_id not in seen:
@@ -146,20 +187,21 @@ class RelationEnricher:
         if not parent_ids:
             return
 
-        # Batch resolve for each parent
-        resolver = resolver_cls()
-        results: dict[str, Any] = {}
-        for parent_id in parent_ids:
-            method = getattr(resolver, method_name)
-            results[parent_id] = method(parent_id)
+        if spec.batch_method:
+            batch_fn = getattr(resolver, spec.batch_method)
+            results: dict[str, Any] = batch_fn(parent_ids)
+        else:
+            results = {}
+            for parent_id in parent_ids:
+                method = getattr(resolver, spec.method)
+                results[parent_id] = method(parent_id)
 
-        # Assign results to parent objects
         for entity in entities:
-            parent = getattr(entity, parent_attr, None)
+            parent = getattr(entity, spec.fk_field, None)
             if parent is not None:
                 parent_id = getattr(parent, "id", None)
                 if parent_id:
                     setattr(parent, child_attr, results.get(parent_id))
 
 
-__all__ = ["RelationEnricher"]
+__all__ = ["RelationEnricher", "RelationSpec"]

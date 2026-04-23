@@ -4,12 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher
-from mvmctl.core.binary._resolver import BinaryResolver
-from mvmctl.core.image._resolver import ImageResolver
-from mvmctl.core.kernel._resolver import KernelResolver
-from mvmctl.core.network._lease_resolver import NetworkLeaseResolver
-from mvmctl.core.network._resolver import NetworkResolver
+from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core.vm._repository import VMRepository
 from mvmctl.exceptions import VMNotFoundError
 from mvmctl.models.vm import VMInstanceItem
@@ -30,15 +25,36 @@ class VMResolveResult:
 class VMResolver:
     """Resolver for VM resources."""
 
-    RELATIONS: dict[str, tuple[str, type, str]] = {
-        "kernel": ("kernel_id", KernelResolver, "resolve"),
-        "image": ("image_id", ImageResolver, "resolve"),
-        "binary": ("binary_id", BinaryResolver, "resolve"),
-        "network": ("network_id", NetworkResolver, "resolve"),
-        "network.leases": (
-            "network",
-            NetworkLeaseResolver,
-            "list_by_network_id",
+    RELATIONS: dict[str, RelationSpec] = {
+        "kernel": RelationSpec(
+            fk_field="kernel_id",
+            resolver="kernel",
+            method="resolve",
+            relation_name="kernel",
+        ),
+        "image": RelationSpec(
+            fk_field="image_id",
+            resolver="image",
+            method="resolve",
+            relation_name="image",
+        ),
+        "binary": RelationSpec(
+            fk_field="binary_id",
+            resolver="binary",
+            method="resolve",
+            relation_name="binary",
+        ),
+        "network": RelationSpec(
+            fk_field="network_id",
+            resolver="network",
+            method="resolve",
+            relation_name="network",
+        ),
+        "network.leases": RelationSpec(
+            fk_field="network",
+            resolver="network_lease",
+            method="list_by_network_id",
+            relation_name="leases",
         ),
     }
 
@@ -55,7 +71,7 @@ class VMResolver:
         """Enrich VMs with relations if include is set."""
         if self._include and vms:
             RelationEnricher().enrich(
-                vms, self._include, self.RELATIONS, self._repo._db
+                vms, self._include, self.RELATIONS
             )
         return vms
 
@@ -89,6 +105,24 @@ class VMResolver:
         if vm is None:
             raise VMNotFoundError(f"No VM found with MAC: {mac}")
         return self._enrich([vm])[0]
+
+    def by_image_id(self, image_id: str) -> list[VMInstanceItem]:
+        """Resolve VMs by image ID."""
+        vms = self._repo.get_by_image_ids([image_id])
+        return self._enrich(vms)
+
+    def by_image_id_batch(
+        self, image_ids: list[str]
+    ) -> dict[str, list[VMInstanceItem]]:
+        """Batch-resolve VMs by image IDs. Returns dict mapping image_id -> VM list."""
+        vms = self._repo.get_by_image_ids(image_ids)
+        results: dict[str, list[VMInstanceItem]] = {
+            img_id: [] for img_id in image_ids
+        }
+        for vm in vms:
+            if vm.image_id in results:
+                results[vm.image_id].append(vm)
+        return results
 
     def resolve(self, identifier: str) -> VMInstanceItem:
         """Resolve VM by name, ip, mac, or id prefix."""
@@ -131,3 +165,8 @@ class VMResolver:
 
         exit_code = 1 if errors and not items else 0
         return VMResolveResult(items=items, errors=errors, exit_code=exit_code)
+
+
+from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+
+register("vm", lambda: VMResolver)

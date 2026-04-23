@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mvmctl.core._internal._enrichment import RelationEnricher
+from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core.network._repository import LeaseRepository
 from mvmctl.models.network import NetworkLeaseItem
 
@@ -12,7 +12,7 @@ __all__ = ["NetworkLeaseResolver"]
 class NetworkLeaseResolver:
     """Resolver for network IP leases."""
 
-    RELATIONS: dict[str, tuple[str, type, str]] = {}
+    RELATIONS: dict[str, RelationSpec] = {}
 
     def __init__(
         self,
@@ -27,7 +27,7 @@ class NetworkLeaseResolver:
         """Enrich leases with relations if include is set."""
         if self._include and leases:
             RelationEnricher().enrich(
-                leases, self._include, self.RELATIONS, self._repo._db
+                leases, self._include, self.RELATIONS
             )
         return leases
 
@@ -35,6 +35,19 @@ class NetworkLeaseResolver:
         """List all leases for a network."""
         leases = self._repo.list_all(network_id)
         return self._enrich(leases)
+
+    def list_by_network_id_batch(
+        self, network_ids: list[str]
+    ) -> dict[str, list[NetworkLeaseItem]]:
+        """Batch-resolve leases by network IDs."""
+        leases = self._repo.list_all_batch(network_ids)
+        results: dict[str, list[NetworkLeaseItem]] = {
+            nid: [] for nid in network_ids
+        }
+        for lease in leases:
+            if lease.network_id in results:
+                results[lease.network_id].append(lease)
+        return results
 
     def get(self, network_id: str, ipv4: str) -> NetworkLeaseItem | None:
         """Get a specific lease by network_id + ipv4."""
@@ -47,3 +60,8 @@ class NetworkLeaseResolver:
         """List all leases for a VM on a specific network."""
         leases = self._repo.list_by_vm(network_id, vm_id)
         return self._enrich(leases)
+
+
+from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+
+register("network_lease", lambda: NetworkLeaseResolver)

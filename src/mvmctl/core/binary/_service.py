@@ -39,13 +39,17 @@ class BinaryService:
     def __init__(self, repo: BinaryRepository) -> None:
         self._repo = repo
 
-    def list_local(self) -> list[BinaryItem]:
+    def list_local(self, verify: bool = True) -> list[BinaryItem]:
         """List all binaries, syncing is_present flag with filesystem.
 
-        Checks each binary's path on disk and bulk-updates is_present
-        for any that are missing. Returns the full list with updated state.
+        Args:
+            verify: If True (default), check filesystem and update DB.
+                   If False, return DB records as-is.
         """
         binaries = self._repo.list_all()
+        if not verify:
+            return binaries
+
         missing_ids: list[str] = []
         for binary in binaries:
             if not Path(binary.path).exists():
@@ -53,7 +57,6 @@ class BinaryService:
 
         if missing_ids:
             self._repo.update_many_is_present(missing_ids, False)
-            # Refresh the list after update
             binaries = self._repo.list_all()
 
         return binaries

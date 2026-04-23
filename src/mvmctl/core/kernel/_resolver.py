@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher
+from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.exceptions import KernelNotFoundError
 from mvmctl.models.kernel import KernelItem
@@ -25,7 +25,7 @@ class KernelResolveResult:
 class KernelResolver:
     """Resolver for kernel resources."""
 
-    RELATIONS: dict[str, tuple[str, type, str]] = {}
+    RELATIONS: dict[str, RelationSpec] = {}
 
     def __init__(
         self,
@@ -40,7 +40,7 @@ class KernelResolver:
         """Enrich kernels with relations if include is set."""
         if self._include and kernels:
             RelationEnricher().enrich(
-                kernels, self._include, self.RELATIONS, self._repo._db
+                kernels, self._include, self.RELATIONS
             )
         return kernels
 
@@ -115,3 +115,8 @@ class KernelResolver:
         return KernelResolveResult(
             items=items, errors=errors, exit_code=exit_code
         )
+
+
+from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+
+register("kernel", lambda: KernelResolver)

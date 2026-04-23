@@ -162,6 +162,16 @@ class LeaseRepository:
             ).fetchall()
         return [NetworkLeaseItem(**dict(row)) for row in rows]
 
+    def list_all_batch(self, network_ids: list[str]) -> list[NetworkLeaseItem]:
+        """Return all leases for multiple networks."""
+        if not network_ids:
+            return []
+        placeholders = ",".join("?" * len(network_ids))
+        query = f"SELECT * FROM network_leases WHERE network_id IN ({placeholders}) ORDER BY leased_at"
+        with self._db.connect() as conn:
+            rows = conn.execute(query, network_ids).fetchall()
+        return [NetworkLeaseItem(**dict(row)) for row in rows]
+
     def acquire(
         self, network_id: str, ipv4: str, vm_id: str | None = None
     ) -> NetworkLeaseItem:

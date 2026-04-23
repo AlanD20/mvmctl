@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mvmctl.core._internal._enrichment import RelationEnricher
+from mvmctl.core._internal._enrichment import RelationEnricher, RelationSpec
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.exceptions import ImageNotFoundError
 from mvmctl.models.image import ImageItem
@@ -25,7 +25,16 @@ class ImageResolveResult:
 class ImageResolver:
     """Resolver for image resources."""
 
-    RELATIONS: dict[str, tuple[str, type, str]] = {}
+    RELATIONS: dict[str, RelationSpec] = {
+        "vm": RelationSpec(
+            fk_field="id",
+            resolver="vm",
+            method="by_image_id",
+            relation_name="vms",
+            is_reverse=True,
+            batch_method="by_image_id_batch",
+        ),
+    }
 
     def __init__(
         self,
@@ -40,7 +49,7 @@ class ImageResolver:
         """Enrich images with relations if include is set."""
         if self._include and images:
             RelationEnricher().enrich(
-                images, self._include, self.RELATIONS, self._repo._db
+                images, self._include, self.RELATIONS
             )
         return images
 
@@ -104,3 +113,8 @@ class ImageResolver:
         return ImageResolveResult(
             items=items, errors=errors, exit_code=exit_code
         )
+
+
+from mvmctl.core._internal._resolver_registry import register  # noqa: E402
+
+register("image", lambda: ImageResolver)
