@@ -11,8 +11,7 @@ from rich.prompt import Prompt
 from mvmctl.api.inputs._network_create_input import NetworkCreateInput
 from mvmctl.api.inputs._network_input import NetworkInput
 from mvmctl.api.network_operations import NetworkOperation
-from mvmctl.exceptions import NetworkError
-from mvmctl.utils.cli import CliUtils
+from mvmctl.utils.cli import CliUtils, handle_errors
 from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.console import (
     print_error,
@@ -49,6 +48,7 @@ def help_cmd(ctx: typer.Context) -> None:
 
 
 @network_app.command(name="ls")
+@handle_errors
 def network_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
@@ -108,6 +108,7 @@ def network_ls(
     name="set-default",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def network_set_default(
     ctx: typer.Context,
     name: str | None = typer.Argument(
@@ -116,11 +117,7 @@ def network_set_default(
 ) -> None:
     """Set a network as the default for VM creation."""
     name = CliUtils.check_name_arg(ctx, name)
-    try:
-        NetworkOperation.set_default(NetworkInput(name=[name]))
-    except NetworkError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+    NetworkOperation.set_default(NetworkInput(name=[name]))
     print_success(f"Default network set to '{name}'")
 
 
@@ -184,6 +181,7 @@ def _print_create_error(error_msg: str, name: str) -> None:
     name="create",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def network_create(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
@@ -220,19 +218,15 @@ def network_create(
         else []
     )
 
-    try:
-        create_input = NetworkCreateInput(
-            name=name,
-            subnet=subnet,
-            ipv4_gateway=ipv4_gateway,
-            nat_enabled=not no_nat,
-            nat_gateways=nat_gateways_list,
-        )
-        result = NetworkOperation.create(create_input)
-        config = result.result
-    except NetworkError as e:
-        _print_create_error(str(e), name)
-        raise typer.Exit(code=1)
+    create_input = NetworkCreateInput(
+        name=name,
+        subnet=subnet,
+        ipv4_gateway=ipv4_gateway,
+        nat_enabled=not no_nat,
+        nat_gateways=nat_gateways_list,
+    )
+    result = NetworkOperation.create(create_input)
+    config = result.result
 
     print_success(f"Network '{config.name}' created")
     print_info(f"  SUBNET:    {config.subnet}")
@@ -248,19 +242,14 @@ def network_create(
     hidden=True,
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def network_remove(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
 ) -> None:
     """Remove a named network."""
     name = CliUtils.check_name_arg(ctx, name)
-
-    try:
-        NetworkOperation.remove(NetworkInput(name=[name]))
-    except NetworkError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-
+    NetworkOperation.remove(NetworkInput(name=[name]))
     print_success(f"Network '{name}' removed")
 
 
@@ -268,6 +257,7 @@ def network_remove(
     name="rm",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def network_rm(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
@@ -280,6 +270,7 @@ def network_rm(
     name="inspect",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def network_inspect(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
@@ -287,13 +278,9 @@ def network_inspect(
 ) -> None:
     """Show detailed information about a network."""
     name = CliUtils.check_name_arg(ctx, name)
-    try:
-        info = NetworkOperation.inspect(
-            NetworkInput(name=[name]), is_json=json_output
-        )
-    except NetworkError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+    info = NetworkOperation.inspect(
+        NetworkInput(name=[name]), is_json=json_output
+    )
 
     if isinstance(info, dict):
         typer.echo(json.dumps(info, indent=2, default=str))

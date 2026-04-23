@@ -10,7 +10,7 @@ import typer
 from mvmctl.api.binary_operations import BinaryOperation
 from mvmctl.api.inputs._binary_fetch_input import BinaryFetchInput
 from mvmctl.api.inputs._binary_input import BinaryInput
-from mvmctl.exceptions import AssetNotFoundError, BinaryError
+from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.console import (
     print_error,
     print_info,
@@ -36,6 +36,7 @@ def bin_callback(ctx: typer.Context) -> None:
 
 
 @bin_app.command(name="ls")
+@handle_errors
 def bin_ls(
     remote: bool = typer.Option(
         False, "--remote", "-r", help="Also show remote versions"
@@ -66,11 +67,7 @@ def bin_ls(
     rows: list[list[str]] = []
 
     if remote:
-        try:
-            remote_versions = BinaryOperation.list_remote(limit=limit)
-        except BinaryError as exc:
-            print_error(str(exc))
-            raise typer.Exit(code=1)
+        remote_versions = BinaryOperation.list_remote(limit=limit)
 
         for ver in remote_versions:
             cached = "✓" if ver in local_versions else " "
@@ -98,6 +95,7 @@ def bin_ls(
 
 
 @bin_app.command(name="fetch")
+@handle_errors
 def bin_fetch(
     version: str = typer.Argument(
         ..., help="Version to download (e.g. 1.15.0)"
@@ -134,17 +132,13 @@ def bin_fetch(
             raise typer.Exit(code=0)
         download_override = True
 
-    try:
-        inputs = BinaryFetchInput(
-            version=version,
-            set_as_default=set_default,
-            download_override=download_override,
-        )
-        result = BinaryOperation.fetch(inputs)
-        binaries = result.result
-    except BinaryError as exc:
-        print_error(str(exc))
-        raise typer.Exit(code=1)
+    inputs = BinaryFetchInput(
+        version=version,
+        set_as_default=set_default,
+        download_override=download_override,
+    )
+    result = BinaryOperation.fetch(inputs)
+    binaries = result.result
 
     for binary in binaries:
         short_id = HashGenerator.shorten(binary.id)
@@ -163,6 +157,7 @@ def bin_fetch(
     name="rm",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def bin_rm(
     identifiers: Optional[list[str]] = typer.Argument(
         None, help="Binary ID(s) to remove (6-char prefix accepted)"
@@ -176,43 +171,29 @@ def bin_rm(
     """Remove one or more binaries. Use --version to remove by version pair."""
     if version is not None:
         # Remove by version
-        try:
-            BinaryOperation.remove_by_version(version)
-            print_success(f"Removed binaries for v{version}")
-        except AssetNotFoundError as exc:
-            print_error(str(exc))
-            raise typer.Exit(code=1)
+        BinaryOperation.remove_by_version(version)
+        print_success(f"Removed binaries for v{version}")
 
     effective_ids: list[str] = list(identifiers) if identifiers else []
     if not effective_ids:
         print_error("Provide at least one binary ID to remove or use --version")
         raise typer.Exit(code=1)
 
-    exit_code = 0
-    try:
-        inputs = BinaryInput(id=effective_ids)
-        BinaryOperation.remove(inputs)
-        print_success(f"Removed binary(s): {' '.join(effective_ids)}")
-    except (BinaryError, AssetNotFoundError) as exc:
-        print_error(str(exc))
-        exit_code = 1
-
-    raise typer.Exit(code=exit_code)
+    inputs = BinaryInput(id=effective_ids)
+    BinaryOperation.remove(inputs)
+    print_success(f"Removed binary(s): {' '.join(effective_ids)}")
 
 
 @bin_app.command(name="default")
+@handle_errors
 def bin_default(
     identifier: str = typer.Argument(
         ..., help="Binary ID to set as default (6-char prefix accepted)"
     ),
 ) -> None:
     """Set a binary as the active default."""
-    try:
-        inputs = BinaryInput(id=[identifier])
-        BinaryOperation.set_default(inputs)
-    except (BinaryError, AssetNotFoundError) as exc:
-        print_error(str(exc))
-        raise typer.Exit(code=1)
+    inputs = BinaryInput(id=[identifier])
+    BinaryOperation.set_default(inputs)
 
     print_success(f"Default binary set to: {identifier}")
     raise typer.Exit(code=0)

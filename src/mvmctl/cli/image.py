@@ -18,8 +18,8 @@ from mvmctl.constants import (
     DEFAULT_IMAGE_IMPORT_FORMAT,
     IMAGE_IMPORT_FORMAT_MAP,
 )
-from mvmctl.exceptions import ImageError
 from mvmctl.models.image import ImageItem, ImageSpec
+from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.console import (
     print_error,
@@ -50,6 +50,7 @@ def image_callback(ctx: typer.Context) -> None:
 
 
 @image_app.command(name="ls")
+@handle_errors
 def image_ls(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     remote: bool = typer.Option(
@@ -57,19 +58,15 @@ def image_ls(
     ),
 ) -> None:
     """List cached images (or available remote images with --remote)."""
-    try:
-        result = ImageOperation.list_(remote=remote)
-        if remote:
-            _list_remote_images(
-                cast(list[ImageSpec], result), json_output=json_output
-            )
-        else:
-            _list_local_images(
-                cast(list[ImageItem], result), json_output=json_output
-            )
-    except ImageError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+    result = ImageOperation.list_(remote=remote)
+    if remote:
+        _list_remote_images(
+            cast(list[ImageSpec], result), json_output=json_output
+        )
+    else:
+        _list_local_images(
+            cast(list[ImageItem], result), json_output=json_output
+        )
 
 
 def _list_remote_images(images: list[ImageSpec], *, json_output: bool) -> None:
@@ -206,32 +203,27 @@ def image_fetch(
         else []
     )
 
-    try:
-        fetch_input = ImageFetchInput(
-            os_slug=image_selector,
-            type=image_type or image_selector,
-            version=version,
-            arch=arch,
-            force=force,
-            skip_optimization=skip_optimization,
-            disabled_detectors=disabled_detectors,
-            set_default=set_default,
-        )
-        spinner = Spinner("Processing")
+    fetch_input = ImageFetchInput(
+        os_slug=image_selector,
+        type=image_type or image_selector,
+        version=version,
+        arch=arch,
+        force=force,
+        skip_optimization=skip_optimization,
+        disabled_detectors=disabled_detectors,
+        set_default=set_default,
+    )
+    spinner = Spinner("Processing")
 
-        def _phase_callback(phase: str) -> None:
-            if phase == "extracting":
-                spinner.start()
-            elif phase in ("complete", "optimizing"):
-                spinner.stop()
+    def _phase_callback(phase: str) -> None:
+        if phase == "extracting":
+            spinner.start()
+        elif phase in ("complete", "optimizing"):
+            spinner.stop()
 
-        result = ImageOperation.fetch(
-            fetch_input, phase_callback=_phase_callback
-        )
-    except ImageError as e:
-        spinner.stop()
-        print_error(str(e))
-        raise typer.Exit(code=1)
+    result = ImageOperation.fetch(
+        fetch_input, phase_callback=_phase_callback
+    )
 
     if result is None:
         print_error(f"Failed to download image '{image_selector}'")
@@ -247,16 +239,12 @@ def image_fetch(
 
 
 @image_app.command(name="set-default")
+@handle_errors
 def image_set_default(
     prefix: str = typer.Argument(..., help="Image ID prefix to set as default"),
 ) -> None:
     """Set the default image for VM creation."""
-    try:
-        ImageOperation.set_default(ImageInput(id=[prefix]))
-    except ImageError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-
+    ImageOperation.set_default(ImageInput(id=[prefix]))
     print_success(f"Default image set to: {prefix}")
 
 
@@ -264,6 +252,7 @@ def image_set_default(
     name="rm",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
+@handle_errors
 def image_rm(
     prefixes: Optional[list[str]] = typer.Argument(
         None, help="Image ID prefixes to remove"
@@ -283,21 +272,13 @@ def image_rm(
         print_error("Provide at least one image ID prefix")
         raise typer.Exit(code=1)
 
-    exit_code = 0
-
     for prefix in effective_ids:
-        try:
-            ImageOperation.remove(ImageInput(id=[prefix]), force)
-            print_success(f"Removed image: {prefix}")
-        except ImageError as e:
-            print_error(str(e))
-            exit_code = 1
-            break
-
-    raise typer.Exit(code=exit_code)
+        ImageOperation.remove(ImageInput(id=[prefix]), force)
+        print_success(f"Removed image: {prefix}")
 
 
 @image_app.command(name="inspect")
+@handle_errors
 def image_inspect(
     prefix: str = typer.Argument(..., help="Image ID prefix to inspect"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -310,13 +291,9 @@ def image_inspect(
         mvm image inspect abc123 --json
         mvm image inspect abc123 --tree
     """
-    try:
-        info = ImageOperation.inspect(
-            ImageInput(id=[prefix]), is_json=json_output
-        )
-    except ImageError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+    info = ImageOperation.inspect(
+        ImageInput(id=[prefix]), is_json=json_output
+    )
 
     if isinstance(info, dict):
         typer.echo(json.dumps(info, indent=2, default=str))
@@ -438,6 +415,7 @@ def _print_image_details_tree(info: ImageItem) -> None:
 
 
 @image_app.command(name="import")
+@handle_errors
 def image_import(
     name: str = typer.Argument(..., help="Display name for the imported image"),
     source_path: Path = typer.Argument(..., help="Path to local image file"),
@@ -515,11 +493,7 @@ def image_import(
         force=force,
     )
 
-    try:
-        result = ImageOperation.import_(spec)
-    except ImageError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
+    result = ImageOperation.import_(spec)
 
     short_id = HashGenerator.shorten(result.result.id)
     print_success(f"Image imported: {result.result.path}")
@@ -533,6 +507,7 @@ def image_import(
 
 
 @image_app.command(name="warm")
+@handle_errors
 def image_warm(
     image_id: str = typer.Argument(
         ...,
@@ -552,19 +527,12 @@ def image_warm(
         # Warm by image ID prefix:
         mvm image warm abc123
     """
-    try:
-        warmed_paths = ImageOperation.warm(ImageInput(id=[image_id]))
-        for path in warmed_paths:
-            size_str = CommonUtils.format_bytes_human_readable(
-                path.stat().st_size
-            )
-            print_success(f"Image warmed successfully: {image_id}")
-            print_info(f"  Path: {path}")
-            print_info(f"  Size: {size_str}")
-        print_info("  Ready for fast VM creation!")
-    except ImageError as e:
-        print_error(str(e))
-        raise typer.Exit(code=1)
-    except Exception as e:
-        print_error(f"Failed to warm image: {e}")
-        raise typer.Exit(code=1)
+    warmed_paths = ImageOperation.warm(ImageInput(id=[image_id]))
+    for path in warmed_paths:
+        size_str = CommonUtils.format_bytes_human_readable(
+            path.stat().st_size
+        )
+        print_success(f"Image warmed successfully: {image_id}")
+        print_info(f"  Path: {path}")
+        print_info(f"  Size: {size_str}")
+    print_info("  Ready for fast VM creation!")
