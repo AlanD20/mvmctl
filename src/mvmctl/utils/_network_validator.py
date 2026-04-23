@@ -75,11 +75,6 @@ class NetworkValidator:
         if not subnet:
             raise MVMError("Invalid subnet: cannot be empty")
 
-        if CommonUtils.contains_dangerous_chars(subnet):
-            raise MVMError(
-                f"Invalid subnet: '{subnet}' contains forbidden characters"
-            )
-
         if " " in subnet:
             raise MVMError(f"Invalid subnet: '{subnet}' cannot contain spaces")
 
@@ -107,11 +102,6 @@ class NetworkValidator:
         """
         if not gateway:
             raise MVMError("Invalid gateway: cannot be empty")
-
-        if CommonUtils.contains_dangerous_chars(gateway):
-            raise MVMError(
-                f"Invalid gateway: '{gateway}' contains forbidden characters"
-            )
 
         if " " in gateway:
             raise MVMError(
@@ -169,11 +159,6 @@ class NetworkValidator:
         """
         if not ip:
             raise MVMError(f"Invalid {field_name}: cannot be empty")
-
-        if CommonUtils.contains_dangerous_chars(ip):
-            raise MVMError(
-                f"Invalid {field_name}: '{ip}' contains forbidden characters"
-            )
 
         if " " in ip:
             raise MVMError(

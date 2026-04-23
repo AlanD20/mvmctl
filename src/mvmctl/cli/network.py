@@ -71,11 +71,9 @@ def network_ls(
     for n in networks:
         is_bridge_missing = not NetworkUtils.bridge_exists(n.bridge)
         is_default = n.is_default
-        # Prioritize default marker (*) over missing marker (X) for consistent UX
-        if is_default:
-            name_col = "* " + n.name
-        else:
-            name_col = ("X " if is_bridge_missing else "  ") + n.name
+        name_col = CommonUtils._get_combined_marker(
+            is_default, is_bridge_missing
+        ) + n.name
         vm_count = len(n.leases) if n.leases else 0
         rows.append(
             [

@@ -134,7 +134,7 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
 
     rows: list[list[str]] = []
     for img in images:
-        display_id = _get_combined_marker(
+        display_id = CommonUtils._get_combined_marker(
             img.is_default, not img.is_present
         ) + HashGenerator.shorten(img.id)
         size = img.compressed_size or 0
@@ -159,18 +159,6 @@ def _list_local_images(images: list[ImageItem], *, json_output: bool) -> None:
         columns=["ID", "OS Name", "FS Type", "Size", "Added"],
         rows=rows,
     )
-
-
-def _get_combined_marker(is_default: bool, is_missing: bool) -> str:
-    """Get combined default and existence marker."""
-    if is_default and is_missing:
-        return "*X "
-    elif is_missing:
-        return " X "
-    elif is_default:
-        return "*  "
-    else:
-        return "   "
 
 
 @image_app.command(name="fetch")

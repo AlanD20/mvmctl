@@ -411,6 +411,18 @@ class CommonUtils:
                 return f"{size_float:.1f} {unit}"
         return f"{size_float:.1f} TiB"
 
+    @staticmethod
+    def _get_combined_marker(is_default: bool, is_missing: bool) -> str:
+        """Get combined default and existence marker."""
+        if is_default and is_missing:
+            return "*X "
+        elif is_missing:
+            return " X "
+        elif is_default:
+            return "*  "
+        else:
+            return "   "
+
 
 def safe_int(value: object, default: int = 0) -> int:
     """Safely extract an integer from a value.
