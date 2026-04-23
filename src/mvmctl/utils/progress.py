@@ -8,6 +8,8 @@ in CI/script environments.
 import logging
 import shutil
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -98,6 +100,55 @@ class ASCIIProgressBar:
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
         print(f"{self.title} complete.")
+
+
+class Spinner:
+    """Threaded ASCII spinner for indeterminate progress.
+
+    Displays a rotating character with a message on a single line.
+    Runs in a background thread so the main thread can do the actual work.
+    """
+
+    _frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self, message: str = "Processing") -> None:
+        self.message = message
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_line = ""
+
+    def _run(self) -> None:
+        idx = 0
+        while not self._stop_event.is_set():
+            frame = self._frames[idx % len(self._frames)]
+            line = f"{frame} {self.message}..."
+            sys.stdout.write(f"\r\033[K{line}")
+            sys.stdout.flush()
+            self._last_line = line
+            idx += 1
+            time.sleep(0.1)
+
+    def start(self) -> None:
+        """Start the spinner in a background thread."""
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self, done_message: str | None = None) -> None:
+        """Stop the spinner and optionally print a completion message."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=0.2)
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+        if done_message:
+            print(done_message)
+
+    def __enter__(self) -> "Spinner":
+        self.start()
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.stop()
 
 
 def download_with_progress(
