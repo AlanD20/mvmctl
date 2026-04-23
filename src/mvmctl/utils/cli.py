@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 from functools import wraps
 from typing import Callable, TypeVar
 
 import typer
+from rich.console import Console
 
 from mvmctl.exceptions import MVMError
-from mvmctl.utils.console import print_error
+from mvmctl.utils.logging import get_logger, log_exception
 
-logger = logging.getLogger(__name__)
+_err_console = Console(stderr=True)
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -32,17 +32,26 @@ def handle_errors(func: F) -> F:
 
     @wraps(func)
     def wrapper(*args: object, **kwargs: object) -> object:
+        logger = get_logger(func.__module__)
         try:
             return func(*args, **kwargs)
         except MVMError as e:
-            print_error(str(e))
+            _print_error(str(e))
             raise typer.Exit(code=1) from e
         except Exception as e:
-            logger.exception("Unexpected error in CLI command")
-            print_error(f"Unexpected error: {e}")
+            log_exception(logger, "Unexpected error in CLI command", e)
+            _print_error(f"Unexpected error: {e}", is_unexpected=True)
             raise typer.Exit(code=1) from e
 
     return wrapper  # type: ignore[return-value]
+
+
+def _print_error(message: str, *, is_unexpected: bool = False) -> None:
+    """Print a colored single-line error to stderr."""
+    emoji = "⚠" if is_unexpected else "✗"
+    color = "yellow" if is_unexpected else "red"
+    title = "Unexpected Error" if is_unexpected else "Error"
+    _err_console.print(f"[{color}]{emoji} {title}:[/] {message}")
 
 
 class CliUtils:

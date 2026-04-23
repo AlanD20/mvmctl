@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import importlib
-import logging
 import os
 import subprocess
 from dataclasses import dataclass
@@ -190,21 +189,6 @@ def _version_callback(
     ctx.exit()
 
 
-def _configure_logging(*, verbose: bool, debug: bool) -> None:
-    if debug:
-        level = logging.DEBUG
-    elif verbose:
-        level = logging.INFO
-    else:
-        env_level = os.environ.get(_get_env_var("LOG_LEVEL"), "WARNING").upper()
-        level = getattr(logging, env_level, logging.WARNING)
-
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s: %(name)s: %(message)s",
-    )
-
-
 def _warn_if_running_as_root() -> None:
     if os.getuid() != 0:
         return
@@ -297,7 +281,9 @@ def app(ctx: click.Context, verbose: bool, debug: bool) -> None:
         return
 
     _warn_if_running_as_root()
-    _configure_logging(verbose=verbose, debug=debug)
+    from mvmctl.utils.logging import setup_logging
+
+    setup_logging(verbose=verbose, debug=debug)
 
 
 @click.command(name="version", help="Show the version and exit")
