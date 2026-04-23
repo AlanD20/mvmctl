@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import struct
 import subprocess
 import tarfile
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 
 from mvmctl.constants import (
@@ -23,11 +23,12 @@ from mvmctl.constants import (
     CONST_SHRINK_SAFETY_MARGIN,
     DEFAULT_IMAGE_ARCH,
     HTTP_TIMEOUT_SHA256_FETCH_S,
+    SUPPORTED_IMAGE_EXTENSIONS,
 )
+from mvmctl.core._internal._asset_manager import AssetManager
 from mvmctl.core._internal._guestfs import OptimizedGuestfs
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.exceptions import (
-    ConfigError,
     GuestfsNotAvailableError,
     ImageCompressionError,
     ImageCorruptError,
@@ -37,14 +38,13 @@ from mvmctl.exceptions import (
     ImageValidationError,
 )
 from mvmctl.models.image import ImageItem, ImageSpec
-from mvmctl.utils.common import safe_int
+from mvmctl.utils.common import CacheUtils, safe_int
 from mvmctl.utils.http import HttpDownload
 from mvmctl.utils.template import render_optional_template, render_template
 
 logger = logging.getLogger(__name__)
 
 _SECTOR_SIZE = CONST_SECTOR_SIZE_BYTES
-_COPY_CHUNK_SIZE = CONST_MEBIBYTE_BYTES  # 1 MiB
 
 
 class _NoPartitionTable:
@@ -69,11 +69,517 @@ class ImageService:
         """
         self._repo = repo
 
-    # =====================================================================
-    # Spec Resolution
-    # =====================================================================
+    def _process_format(
+        self,
+        fmt: str,
+        input_path: Path,
+        final_path: Path,
+        minimum_rootfs_size: int | str = "dynamic",
+        partition: int | None = None,
+        disabled_detectors: list[str] | None = None,
+    ) -> Path:
+        """Route to the appropriate format handler.
 
-    def get_specs_for(self, os_slugs: list[str]) -> list[ImageSpec]:
+        Each handler receives only the parameters it needs.
+        """
+        if fmt == "qcow2":
+            return self._handle_qcow2(
+                input_path, final_path, partition, disabled_detectors
+            )
+        elif fmt == "tar-rootfs":
+            return self._handle_tar_rootfs(
+                input_path, final_path, minimum_rootfs_size
+            )
+        elif fmt == "raw":
+            return self._handle_raw(
+                input_path, final_path, partition, disabled_detectors
+            )
+        elif fmt == "squashfs":
+            return self._handle_squashfs(
+                input_path,
+                final_path,
+                minimum_rootfs_size,
+            )
+        elif fmt == "vhd":
+            return self._handle_vhd(
+                input_path, final_path, partition, disabled_detectors
+            )
+        elif fmt == "vhdx":
+            return self._handle_vhdx(
+                input_path, final_path, partition, disabled_detectors
+            )
+        else:
+            raise ImageError(f"Unknown format: {fmt}")
+
+    def remove_many(self, images: list[ImageItem], force: bool = False) -> None:
+        """Remove multiple images, enriching with VM references first.
+
+        Uses a single batch query to enrich all images with their VMs,
+        then creates a controller per image to handle removal.
+        """
+        from mvmctl.core.image._controller import ImageController
+        from mvmctl.core.image._resolver import ImageResolver
+
+        # Enrich with VMs (single batch query via resolver)
+        resolver = ImageResolver(self._repo, include=["vm"])
+        enriched = resolver._enrich(images)
+
+        for image in enriched:
+            controller = ImageController(image, self._repo)
+            controller.remove(force=force)
+
+    def remove_many_paths(self, images: list[ImageItem]) -> list[str]:
+        """Remove files for multiple images from disk. No DB changes.
+
+        Creates a controller per image to handle file removal.
+
+        Args:
+            images: List of ImageItems whose files should be removed.
+
+        Returns:
+            Flat list of all removed filenames.
+        """
+        from mvmctl.core.image._controller import ImageController
+
+        removed: list[str] = []
+        for image in images:
+            controller = ImageController(image, self._repo)
+            removed.extend(controller.remove_path())
+        return removed
+
+    def list_local(self, verify: bool = True) -> list[ImageItem]:
+        """List all images, syncing is_present flag with filesystem.
+
+        Checks each image's path on disk and bulk-updates is_present
+        for any that are missing. Returns the full list with updated state.
+
+        Args:
+            verify: If True (default), check filesystem and update DB.
+                   If False, return DB records as-is.
+        """
+        images = self._repo.list_all()
+        if not verify:
+            return images
+
+        missing_ids: list[str] = []
+        images_dir = CacheUtils.get_images_dir()
+        for image in images:
+            resolved = self._resolve_image_path(images_dir, image)
+            if resolved is None or not resolved.exists():
+                missing_ids.append(image.id)
+
+        if missing_ids:
+            self._repo.update_many_is_present(missing_ids, False)
+            images = self._repo.list_all()
+
+        return images
+
+    def _resolve_image_path(
+        self, images_dir: Path, image: ImageItem
+    ) -> Path | None:
+        """Resolve the actual filesystem path for an image.
+
+        Tries the stored path first, then known extensions.
+        Returns None if no file found.
+        """
+        filename = image.path
+        if filename:
+            candidate = images_dir / filename
+            if candidate.exists():
+                return candidate
+        for ext in SUPPORTED_IMAGE_EXTENSIONS:
+            candidate = images_dir / f"{image.id}{ext}"
+            if candidate.exists():
+                return candidate
+        return None
+
+    def extract_partition(
+        self,
+        raw_path: Path,
+        output_path: Path,
+        partition: int | None = None,
+        disabled_detectors: list[str] | None = None,
+    ) -> Path:
+        """Extract root partition from raw disk image."""
+        from mvmctl.utils.partition_detection import RootPartitionDetector
+
+        try:
+            # Check if the image is a direct filesystem (superfloppy) using blkid
+            fs_type = self.detect_filesystem_type(raw_path)
+            if fs_type in ("ext4", "ext3", "ext2", "btrfs", "xfs"):
+                logger.info("Image is %s filesystem, using as-is", fs_type)
+                try:
+                    subprocess.run(
+                        [
+                            "cp",
+                            "--sparse=always",
+                            str(raw_path),
+                            str(output_path),
+                        ],
+                        check=True,
+                        capture_output=True,
+                    )
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    self._copy_with_dd(raw_path, output_path, sparse=True)
+                ext_map = {
+                    "ext4": ".ext4",
+                    "ext3": ".ext4",
+                    "ext2": ".ext4",
+                    "btrfs": ".btrfs",
+                    "xfs": ".xfs",
+                }
+                ext = ext_map.get(fs_type, ".img")
+                final_path = output_path.with_suffix(ext)
+                output_path.rename(final_path)
+                return final_path
+
+            parsed = self._parse_partitions_sfdisk(raw_path, partition)
+            if parsed is None:
+                parsed = self._parse_partitions_parted(raw_path, partition)
+
+            if parsed is None:
+                raise ImageError(
+                    "Failed to parse partition table: neither sfdisk nor parted is available or succeeded"
+                )
+
+            if isinstance(parsed, _NoPartitionTable):
+                logger.info("No partition table found, using image as-is")
+                shutil.move(str(raw_path), str(output_path))
+                return output_path
+
+            if not isinstance(parsed, tuple):
+                raise ImageError(
+                    f"Unexpected parse result type: {type(parsed).__name__}"
+                )
+
+            partitions, requested_partition = parsed
+
+            if len(partitions) == 0:
+                logger.info("No partitions found, using image as-is")
+                shutil.move(str(raw_path), str(output_path))
+                return output_path
+
+            # Determine which partition to extract
+            if len(partitions) > 1 and requested_partition is None:
+                logger.info("Found %d partitions:", len(partitions))
+                for i, p in enumerate(partitions, 1):
+                    logger.debug(
+                        "  %d: start=%s size=%s type=%s",
+                        i,
+                        p.get("start"),
+                        p.get("size"),
+                        p.get("type", "?"),
+                    )
+                detector = RootPartitionDetector(
+                    disabled_detectors=disabled_detectors
+                )
+                chosen_idx = detector.detect(partitions)
+                logger.info(
+                    "Detector selected partition %d as root", chosen_idx
+                )
+                chosen = partitions[chosen_idx - 1]
+                partition_num = chosen_idx
+            elif requested_partition is not None:
+                if requested_partition < 1 or requested_partition > len(
+                    partitions
+                ):
+                    raise ImageError(
+                        f"Partition {requested_partition} out of range (1-{len(partitions)})"
+                    )
+                logger.info("Found %d partitions:", len(partitions))
+                logger.info("Using partition %d as root", requested_partition)
+                chosen = partitions[requested_partition - 1]
+                partition_num = requested_partition
+            else:
+                chosen = partitions[0]
+                partition_num = 1
+
+            start_sector = safe_int(chosen.get("start"), 0)
+            size_val = chosen.get("size")
+            sector_count: int | None = (
+                safe_int(size_val, 0) if size_val else None
+            )
+
+            skip_bytes = start_sector * _SECTOR_SIZE
+            count_bytes = sector_count * _SECTOR_SIZE if sector_count else None
+
+            # Validate extraction is within file bounds
+            raw_file_size = raw_path.stat().st_size
+            if skip_bytes >= raw_file_size:
+                raise ImageError(
+                    f"Partition {partition_num} start sector ({start_sector}) "
+                    f"offset ({skip_bytes} bytes) exceeds file size ({raw_file_size} bytes). "
+                    f"Partition table may be corrupted or in unsupported format."
+                )
+
+            logger.info(
+                "Extracting partition %d (start=%d, offset=%d bytes)...",
+                partition_num,
+                start_sector,
+                skip_bytes,
+            )
+
+            self._copy_bytes_dd(raw_path, output_path, skip_bytes, count_bytes)
+
+            output_path = self._detect_and_rename_fs(output_path)
+
+            logger.info("Extracted to %s", output_path.name)
+            return output_path
+
+        except OSError as e:
+            raise ImageError("Extraction failed") from e
+        except (IndexError, ValueError) as e:
+            raise ImageError("Failed to parse partition table") from e
+
+    def optimize_image(
+        self,
+        image_path: Path,
+        image_id: str,
+        spec: ImageSpec,
+        timestamp: str,
+        skip_optimization: bool = False,
+    ) -> ImageItem:
+        """Shrink and compress image. Returns fully constructed ImageItem."""
+        import time
+
+        t0 = time.monotonic()
+        fs_type = self._resolve_fs_type(image_path)
+        fs_uuid = self.get_filesystem_uuid(image_path)
+        t1 = time.monotonic()
+        logger.info("  fs detect: %.2fs", t1 - t0)
+
+        if skip_optimization:
+            logger.info("Skipping optimization (shrink and compression)")
+            actual_size = image_path.stat().st_size
+            return ImageItem(
+                id=image_id,
+                os_slug=spec.id,
+                os_name=spec.name,
+                arch=spec.arch,
+                path=str(image_path.name),
+                fs_type=fs_type,
+                minimum_rootfs_size_mib=actual_size // CONST_MEBIBYTE_BYTES,
+                original_size=actual_size,
+                is_default=False,
+                is_present=True,
+                pulled_at=timestamp,
+                created_at=timestamp,
+                updated_at=timestamp,
+                fs_uuid=fs_uuid,
+                compressed_size=None,
+                compression_ratio=None,
+                compressed_format=None,
+            )
+
+        if not image_path.exists():
+            raise ImageError(
+                f"Image processing failed: output file not created at {image_path}"
+            )
+
+        shrunk_path, pre_shrink_size, post_shrink_size = (
+            self.shrink_with_guestfs(image_path)
+        )
+        t2 = time.monotonic()
+        logger.info("  shrink: %.2fs", t2 - t1)
+        shrink_successful = (
+            pre_shrink_size and post_shrink_size and pre_shrink_size > 0
+        )
+        if shrink_successful:
+            logger.info(
+                "Image shrunk: %.1f MiB → %.1f MiB (%.1f%% reduction)",
+                pre_shrink_size / CONST_MEBIBYTE_BYTES,
+                post_shrink_size / CONST_MEBIBYTE_BYTES,
+                (pre_shrink_size - post_shrink_size)
+                / pre_shrink_size
+                * CONST_PERCENT,
+            )
+        else:
+            logger.debug(
+                "Image shrinking not performed (filesystem type may be unsupported or detection failed)"
+            )
+
+        compressed_path = self.compress(shrunk_path)
+        t3 = time.monotonic()
+        logger.info("  compress: %.2fs", t3 - t2)
+        compressed_size = compressed_path.stat().st_size
+        compression_ratio = (
+            pre_shrink_size / compressed_size
+            if compressed_size > 0
+            else CONST_RATIO_MIN
+        )
+
+        minimum_rootfs_size_mib = (
+            post_shrink_size // CONST_MEBIBYTE_BYTES
+        ) + CONST_RUNTIME_BUFFER_MB
+
+        logger.info("Optimization complete (total: %.2fs)", t3 - t0)
+
+        return ImageItem(
+            id=image_id,
+            os_slug=spec.id,
+            os_name=spec.name,
+            arch=spec.arch,
+            path=str(compressed_path.name),
+            fs_type=fs_type,
+            minimum_rootfs_size_mib=minimum_rootfs_size_mib,
+            original_size=pre_shrink_size,
+            is_default=False,
+            is_present=True,
+            pulled_at=timestamp,
+            created_at=timestamp,
+            updated_at=timestamp,
+            fs_uuid=fs_uuid,
+            compressed_size=compressed_size,
+            compression_ratio=compression_ratio,
+            compressed_format="zst",
+        )
+
+    def download_image(
+        self,
+        spec: ImageSpec,
+        image_id: str,
+        output_dir: Path,
+        force: bool,
+        ci_version: str,
+    ) -> Path:
+        """Download image from remote source. Returns path to downloaded file."""
+        download_path = output_dir / f"{image_id}.download"
+
+        if force and download_path.exists():
+            download_path.unlink()
+
+        template_vars = self._get_template_variables(spec, ci_version)
+        source = spec.source
+        if "{" in spec.source:
+            source = self._resolve_source_template(spec, template_vars)
+
+        resolved_sha256 = (
+            spec.sha256.lower() if spec.sha256 is not None else None
+        )
+        sha256_url = render_optional_template(spec.sha256_url, template_vars)
+        if resolved_sha256 is None and sha256_url is not None:
+            source_basename = source.rsplit("/", 1)[-1] if source else None
+            resolved_sha256 = self._fetch_sha256_from_url(
+                sha256_url, source_filename=source_basename
+            )
+
+        HttpDownload.download_file(
+            source,
+            download_path,
+            expected_sha256=resolved_sha256,
+            timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
+            progress_bar=True,
+            allow_missing_checksum=resolved_sha256 is None,
+            silent_missing_checksum=resolved_sha256 is None,
+            title=f"Downloading image: '{spec.id}'",
+        )
+        self._validate_downloaded_file(download_path, spec.format)
+
+        return download_path
+
+    def extract_downloaded_image(
+        self,
+        download_path: Path,
+        spec: ImageSpec,
+        image_id: str,
+        output_dir: Path,
+        partition: int | None,
+        disabled_detectors: list[str] | None = None,
+    ) -> Path:
+        """Extract/convert downloaded image to final format. Returns extracted path."""
+        logger.info("Preparing & optimizing image...")
+        actual_path = self._process_format(
+            spec.format,
+            input_path=download_path,
+            final_path=output_dir / f"{image_id}.img",
+            partition=partition,
+            disabled_detectors=disabled_detectors,
+        )
+
+        if actual_path is None:
+            raise ImageError("Failed to determine image path")
+
+        return actual_path
+
+    def extract_import_image(
+        self,
+        source_path: Path,
+        image_id: str,
+        output_dir: Path,
+        format: str,
+        partition: int | None,
+        disabled_detectors: list[str] | None,
+    ) -> Path:
+        """Extract/convert imported local image. Returns extracted path."""
+        logger.info(
+            "Importing %s as '%s' (format: %s)...",
+            source_path.name,
+            image_id,
+            format,
+        )
+
+        actual_path = self._process_format(
+            format,
+            input_path=source_path,
+            final_path=output_dir / f"{image_id}.img",
+            partition=partition,
+            disabled_detectors=disabled_detectors,
+        )
+
+        if actual_path is None:
+            raise ImageError("Failed to determine image path")
+
+        return actual_path
+
+    def materialize_to(
+        self, image_id: str, fs_type: str, output_path: Path
+    ) -> None:
+        """Fast durable copy from tmpfs cache to destination.
+
+        Uses reflink (CoW) + sparse detection for maximum speed on btrfs/xfs.
+        Falls back to dd conv=sparse,fsync on non-CoW filesystems.
+        After copy, fdatasync() ensures data durability without flushing
+        non-critical metadata (timestamps).
+
+        Args:
+            image_id: Image ID to materialize.
+            fs_type: Filesystem type suffix for cache lookup.
+            output_path: Destination path for the VM rootfs.
+
+        Raises:
+            ImageError: If the image is not in the cache or copy fails.
+        """
+        cached_path = CacheUtils.get_warm_image_dir() / f"{image_id}.{fs_type}"
+
+        if not cached_path.exists():
+            raise ImageError(f"Image not in cache: {image_id}")
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            subprocess.run(
+                [
+                    "cp",
+                    "--reflink=auto",
+                    "--sparse=always",
+                    str(cached_path),
+                    str(output_path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            self._copy_with_dd(cached_path, output_path, sparse=True)
+
+        with open(output_path, "rb") as f:
+            os.fdatasync(f.fileno())
+
+        logger.info("Copied image to: %s", output_path.name)
+
+    @classmethod
+    def get_specs_for(
+        cls, os_slugs: list[str], version: str | None
+    ) -> list[ImageSpec]:
         """Resolve ImageSpecs from the bundled images.yaml by os_slugs.
 
         Args:
@@ -85,11 +591,7 @@ class ImageService:
         Raises:
             ImageError: If any image is not found in the catalog.
         """
-        from mvmctl.core._internal._asset_manager import AssetManager
-
-        manager = AssetManager()
-        yaml_path = manager.get_file("images.yaml")
-        all_specs = self.load_available_images(Path(str(yaml_path)))
+        all_specs = cls.load_available_images()
 
         spec_map = {spec.id: spec for spec in all_specs}
         results: list[ImageSpec] = []
@@ -97,56 +599,34 @@ class ImageService:
 
         for os_slug in os_slugs:
             spec = spec_map.get(os_slug)
-            if spec is not None:
+            if spec is not None and (
+                version is None or spec.version == version
+            ):
                 results.append(spec)
             else:
                 missing.append(os_slug)
 
         if missing:
             available = ", ".join(spec_map.keys())
+            if version:
+                raise ImageError(
+                    f"Image(s) not found for version '{version}': "
+                    f"{', '.join(missing)}. Available: {available}"
+                )
             raise ImageError(
                 f"Image(s) not found: {', '.join(missing)}. Available: {available}"
             )
 
         return results
 
-    # =====================================================================
-    # Image Path Validation
-    # =====================================================================
-
-    def _validate_image_path(self, image_path: Path) -> Path:
-        """Validate that an image path exists.
-
-        Args:
-            image_path: Path to validate
-
-        Returns:
-            The validated path
-
-        Raises:
-            ImageError: If path does not exist
-        """
-        if not image_path.exists():
-            raise ImageError(f"Image file not found: {image_path}")
-
-        try:
-            current_size = image_path.stat().st_size
-        except (OSError, AttributeError):
-            raise ImageError("Failed to get image size") from None
-
-        if current_size == 0:
-            raise ImageEmptyError(f"Image file is empty: {image_path}")
-
-        return image_path
-
     def compress(
-        self, image_path: Path, level: int = 6, keep_source: bool = False
+        self, image_path: Path, level: int = 3, keep_source: bool = False
     ) -> Path:
         """Compress the image using zstd.
 
         Args:
             image_path: Path to the image file to compress.
-            level: Compression level (1-22, default 6 for speed/size balance)
+            level: Compression level (1-22, default 3 for fast multi-threaded compression)
             keep_source: If True, keep the source file after successful
                          compression. Default False (source is deleted).
 
@@ -178,7 +658,7 @@ class ImageService:
         compressed_path = image_path.with_suffix(".zst")
 
         try:
-            compressor = zstd.ZstdCompressor(level=level)
+            compressor = zstd.ZstdCompressor(level=level, threads=-1)
             with (
                 open(image_path, "rb") as src,
                 open(compressed_path, "wb") as dst,
@@ -299,7 +779,8 @@ class ImageService:
 
             fmt = image.compressed_format or "zst"
             suffix = f".{fmt}" if not fmt.startswith(".") else fmt
-            compressed_path = Path(image.path).with_suffix(suffix)
+            images_dir = CacheUtils.get_images_dir()
+            compressed_path = images_dir / Path(image.path).with_suffix(suffix)
 
             logger.info("Decompressing to cache: %s", cached_path.name)
             self.decompress(compressed_path, cached_path, compressed_format=fmt)
@@ -307,9 +788,50 @@ class ImageService:
 
         return results
 
-    # =====================================================================
-    # Shrinking
-    # =====================================================================
+    def _has_significant_free_space(
+        self, image_path: Path, threshold: float = 0.02
+    ) -> bool:
+        """Check if ext4 image has >threshold free space using dumpe2fs.
+
+        Uses dumpe2fs to check block usage without mounting or booting
+        a guestfs appliance. Returns True if there's significant free
+        space that would benefit from shrinking.
+
+        Args:
+            image_path: Path to the ext4 image.
+            threshold: Minimum free ratio to consider "significant".
+                       Default 0.02 (2%). Ext4 reserves ~5% for root by
+                       default, so threshold must account for that.
+
+        Returns:
+            True if free space > threshold, False otherwise.
+            Returns True on any error (safe fallback: shrink anyway).
+        """
+        try:
+            result = subprocess.run(
+                ["dumpe2fs", "-h", str(image_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                return True  # Can't determine → safe to shrink
+
+            block_count = 0
+            free_blocks = 0
+            for line in result.stdout.splitlines():
+                if line.startswith("Block count:"):
+                    block_count = int(line.split(":", 1)[1].strip())
+                elif line.startswith("Free blocks:"):
+                    free_blocks = int(line.split(":", 1)[1].strip())
+
+            if block_count > 0:
+                free_ratio = free_blocks / block_count
+                return free_ratio > threshold
+        except (FileNotFoundError, ValueError, IndexError):
+            pass
+
+        return True  # Safe fallback: shrink if we can't determine
 
     def shrink_with_guestfs(self, image_path: Path) -> tuple[Path, int, int]:
         """Shrink an image to its minimum size using libguestfs."""
@@ -326,6 +848,17 @@ class ImageService:
         self._validate_image_path(image_path)
 
         original_size = image_path.stat().st_size
+
+        # Skip shrink if filesystem already has minimal free space
+        if (
+            image_path.suffix == ".ext4"
+            and not self._has_significant_free_space(image_path)
+        ):
+            logger.debug(
+                "Filesystem has <2%% free space, skipping shrink for %s",
+                image_path.name,
+            )
+            return image_path, original_size, original_size
 
         try:
             with og:
@@ -421,10 +954,6 @@ class ImageService:
         except Exception as exc:
             raise ImageError(f"Failed to grow rootfs: {exc}") from exc
 
-    # =====================================================================
-    # Format Conversion
-    # =====================================================================
-
     def convert_qcow2_to_raw(
         self,
         qcow2_path: Path,
@@ -507,6 +1036,47 @@ class ImageService:
         except FileNotFoundError as e:
             raise ImageError("qemu-img not found. Install qemu-utils.") from e
 
+    def convert_vhdx_to_raw(
+        self,
+        vhdx_path: Path,
+        raw_path: Path,
+    ) -> bool:
+        """Convert VHDX to raw using qemu-img."""
+        try:
+            logger.info("Converting %s to raw...", vhdx_path.name)
+
+            subprocess.run(
+                [
+                    "qemu-img",
+                    "convert",
+                    "-m",
+                    "16",
+                    "-f",
+                    "vhdx",
+                    "-O",
+                    "raw",
+                    "-t",
+                    "none",
+                    "-T",
+                    "none",
+                    "-W",
+                    str(vhdx_path),
+                    str(raw_path),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            logger.info("Converted to %s", raw_path.name)
+            return True
+
+        except subprocess.CalledProcessError as e:
+            detail = e.stderr.strip() if e.stderr else "no details"
+            raise ImageError(f"qemu-img conversion failed: {detail}") from e
+        except FileNotFoundError as e:
+            raise ImageError("qemu-img not found. Install qemu-utils.") from e
+
     def create_ext4_from_tar(
         self,
         tar_path: Path,
@@ -514,12 +1084,16 @@ class ImageService:
         minimum_rootfs_mib: int | str,
     ) -> bool:
         """Create ext4 image from tar archive."""
-        import tempfile
+        import time
 
         try:
             logger.info("Creating ext4 image from %s...", tar_path.name)
+            t0 = time.monotonic()
 
-            with tempfile.TemporaryDirectory() as tmpdir:
+            with tempfile.TemporaryDirectory(
+                dir=CacheUtils.get_temp_dir()
+            ) as tmpdir:
+                t1 = time.monotonic()
                 logger.debug("Extracting tar to %s...", tmpdir)
 
                 cmd = [
@@ -533,12 +1107,16 @@ class ImageService:
                     "--no-same-permissions",
                 ]
                 subprocess.run(cmd, capture_output=True, check=True)
+                t2 = time.monotonic()
+                logger.info("  tar extract: %.2fs", t2 - t1)
 
                 subprocess.run(
                     ["chmod", "-R", "u+rwx", tmpdir],
                     capture_output=True,
                     check=False,
                 )
+                t3 = time.monotonic()
+                logger.info("  chmod: %.2fs", t3 - t2)
 
                 du_result = subprocess.run(
                     ["du", "-sb", tmpdir], capture_output=True, text=True
@@ -549,18 +1127,17 @@ class ImageService:
                     )
 
                 actual_bytes = int(du_result.stdout.split()[0])
-                actual_mib = actual_bytes / CONST_MEBIBYTE_BYTES
+                t4 = time.monotonic()
+                logger.info(
+                    "  du: %.2fs (size=%d bytes)", t4 - t3, actual_bytes
+                )
 
                 if minimum_rootfs_mib == "dynamic":
-                    calculated_mib = int(
-                        actual_mib * CONST_ROOTFS_HEADROOM_FACTOR
+                    raw_size_mb = self._calculate_minimum_image_size_mb(
+                        actual_bytes
                     )
-                    raw_size_mb = max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mib)
                 else:
-                    calculated_mib = int(
-                        int(minimum_rootfs_mib) * CONST_ROOTFS_HEADROOM_FACTOR
-                    )
-                    raw_size_mb = max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mib)
+                    raw_size_mb = int(minimum_rootfs_mib)
 
                 logger.info("Creating ext4 image (%d MiB)...", raw_size_mb)
 
@@ -569,14 +1146,18 @@ class ImageService:
                     capture_output=True,
                     check=True,
                 )
+                t5 = time.monotonic()
+                logger.info("  truncate: %.2fs", t5 - t4)
 
                 subprocess.run(
                     ["mkfs.ext4", "-d", tmpdir, "-F", str(output_path)],
                     capture_output=True,
                     check=True,
                 )
+                t6 = time.monotonic()
+                logger.info("  mkfs.ext4: %.2fs", t6 - t5)
 
-            logger.info("Created %s", output_path.name)
+            logger.info("Created %s (total: %.2fs)", output_path.name, t6 - t0)
             return True
 
         except subprocess.CalledProcessError as e:
@@ -593,121 +1174,6 @@ class ImageService:
             raise ImageError(
                 "Required tool not found: tar, truncate, or mkfs.ext4"
             ) from e
-
-    # =====================================================================
-    # Partition & Filesystem Helpers
-    # =====================================================================
-
-    def extract_partition(
-        self,
-        raw_path: Path,
-        output_path: Path,
-        partition: int | None = None,
-        disabled_detectors: list[str] | None = None,
-    ) -> Path:
-        """Extract root partition from raw disk image."""
-        from mvmctl.utils.partition_detection import RootPartitionDetector
-
-        try:
-            # Check if the image is a direct filesystem (superfloppy) using blkid
-            fs_type = self.detect_filesystem_type(raw_path)
-            if fs_type in ("ext4", "ext3", "ext2", "btrfs", "xfs"):
-                logger.info("Image is %s filesystem, using as-is", fs_type)
-                shutil.copy2(raw_path, output_path)
-                return output_path
-
-            parsed = self._parse_partitions_sfdisk(raw_path, partition)
-            if parsed is None:
-                parsed = self._parse_partitions_fdisk(raw_path, partition)
-
-            if isinstance(parsed, _NoPartitionTable):
-                logger.info("No partition table found, using image as-is")
-                raw_path.rename(output_path)
-                return output_path
-
-            if not isinstance(parsed, tuple):
-                raise ImageError(
-                    f"Unexpected parse result type: {type(parsed).__name__}"
-                )
-
-            partitions, requested_partition = parsed
-
-            if len(partitions) == 0:
-                logger.info("No partitions found, using image as-is")
-                raw_path.rename(output_path)
-                return output_path
-
-            # Determine which partition to extract
-            if len(partitions) > 1 and requested_partition is None:
-                logger.info("Found %d partitions:", len(partitions))
-                for i, p in enumerate(partitions, 1):
-                    logger.debug(
-                        "  %d: start=%s size=%s type=%s",
-                        i,
-                        p.get("start"),
-                        p.get("size"),
-                        p.get("type", "?"),
-                    )
-                detector = RootPartitionDetector(
-                    disabled_detectors=disabled_detectors
-                )
-                chosen_idx = detector.detect(partitions)
-                logger.info(
-                    "Detector selected partition %d as root", chosen_idx
-                )
-                chosen = partitions[chosen_idx - 1]
-                partition_num = chosen_idx
-            elif requested_partition is not None:
-                if requested_partition < 1 or requested_partition > len(
-                    partitions
-                ):
-                    raise ImageError(
-                        f"Partition {requested_partition} out of range (1-{len(partitions)})"
-                    )
-                logger.info("Found %d partitions:", len(partitions))
-                logger.info("Using partition %d as root", requested_partition)
-                chosen = partitions[requested_partition - 1]
-                partition_num = requested_partition
-            else:
-                chosen = partitions[0]
-                partition_num = 1
-
-            start_sector = safe_int(chosen.get("start"), 0)
-            size_val = chosen.get("size")
-            sector_count: int | None = (
-                safe_int(size_val, 0) if size_val else None
-            )
-
-            skip_bytes = start_sector * _SECTOR_SIZE
-            count_bytes = sector_count * _SECTOR_SIZE if sector_count else None
-
-            # Validate extraction is within file bounds
-            raw_file_size = raw_path.stat().st_size
-            if skip_bytes >= raw_file_size:
-                raise ImageError(
-                    f"Partition {partition_num} start sector ({start_sector}) "
-                    f"offset ({skip_bytes} bytes) exceeds file size ({raw_file_size} bytes). "
-                    f"Partition table may be corrupted or in unsupported format."
-                )
-
-            logger.info(
-                "Extracting partition %d (start=%d, offset=%d bytes)...",
-                partition_num,
-                start_sector,
-                skip_bytes,
-            )
-
-            self._copy_bytes(raw_path, output_path, skip_bytes, count_bytes)
-
-            output_path = self._detect_and_rename_fs(output_path)
-
-            logger.info("Extracted to %s", output_path.name)
-            return output_path
-
-        except OSError as e:
-            raise ImageError("Extraction failed") from e
-        except (IndexError, ValueError) as e:
-            raise ImageError("Failed to parse partition table") from e
 
     def detect_filesystem_type(self, image_path: Path) -> str | None:
         """Detect filesystem type using blkid."""
@@ -738,26 +1204,120 @@ class ImageService:
         fs_uuid = blkid_result.stdout.strip()
         return fs_uuid if fs_uuid else None
 
-    def _detect_and_rename_fs(self, output_path: Path) -> Path:
-        """Detect filesystem type via blkid and rename output file accordingly."""
-        try:
-            blkid_result = subprocess.run(
-                ["blkid", "-o", "value", "-s", "TYPE", str(output_path)],
-                capture_output=True,
-                text=True,
-                check=False,
+    @classmethod
+    def detect_image_format(cls, path: Path) -> str | None:
+        """Detect container format from magic bytes. Returns None if unknown.
+
+        This is a pure probe: it never modifies or deletes the file.
+        """
+        if not path.exists():
+            return None
+
+        file_size = path.stat().st_size
+        if file_size == 0:
+            return None
+
+        if cls._is_qcow2(path):
+            return "qcow2"
+        if cls._is_vhd(path, file_size):
+            return "vhd"
+        if cls._is_vhdx(path):
+            return "vhdx"
+        if cls._is_squashfs(path):
+            return "squashfs"
+        if cls._is_tar(path):
+            return "tar-rootfs"
+        if cls._is_raw(path, file_size):
+            return "raw"
+        return None
+
+    @classmethod
+    def resolve_remote_sizes(
+        cls, specs: list[ImageSpec], ci_version
+    ) -> list[ImageSpec]:
+        """Resolve remote image sizes via HEAD requests with HTTP caching.
+
+        Uses the same template resolution and S3 listing logic as fetch
+        so ls -r shows sizes for the same version that would be downloaded.
+
+        Args:
+            specs: List of ImageSpec to enrich with sizes.
+
+        Returns:
+            The same list with size fields populated where available.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        from mvmctl.utils.http import HttpDownload
+
+        def _resolve(spec: ImageSpec) -> None:
+            if spec.list_url_template:
+                # Dynamic image: use S3 listing to pick the latest version
+                template_vars = cls._get_template_variables(spec, ci_version)
+                try:
+                    source = cls._resolve_source_template(spec, template_vars)
+                except Exception:
+                    return
+            else:
+                # Static image: resolve template variables directly on source
+                source = spec.source
+                if "{" in source:
+                    from mvmctl.utils.template import render_template
+
+                    try:
+                        source = render_template(
+                            source,
+                            {
+                                "ci_version": ci_version,
+                                "arch": spec.arch,
+                                "image_type": spec.image_type,
+                                "version": spec.version,
+                                "image_version": spec.version,
+                                "ubuntu_version": spec.version,
+                            },
+                        )
+                    except Exception:
+                        return
+
+            size = HttpDownload.head_size(source)
+            if size is not None:
+                spec.size = size
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(_resolve, specs)
+
+        return specs
+
+    @staticmethod
+    def load_available_images() -> list[ImageSpec]:
+        """Load image specifications from YAML config file."""
+        import yaml
+
+        asset = AssetManager()
+        remote_images_path = asset.get_file("images.yaml")
+        with open(str(remote_images_path)) as f:
+            data = yaml.safe_load(f)
+
+        arch = DEFAULT_IMAGE_ARCH
+        images = []
+        for img in data.get("images", []):
+            image_id = img["id"]
+            images.append(
+                ImageSpec(
+                    id=image_id,
+                    image_type=img.get("type", image_id),
+                    version=str(img.get("version", image_id)),
+                    arch=img.get("arch", arch),
+                    name=img.get("name", image_id),
+                    source=img["source"],
+                    format=img["format"],
+                    sha256=img.get("sha256"),
+                    sha256_url=img.get("sha256_url"),
+                    list_url_template=img.get("list_url_template"),
+                )
             )
-            fs_type = blkid_result.stdout.strip()
-            if fs_type:
-                ext_map = {"ext4": ".ext4", "btrfs": ".btrfs", "xfs": ".xfs"}
-                ext = ext_map.get(fs_type, ".img")
-                final_path = output_path.with_suffix(ext)
-                output_path.rename(final_path)
-                output_path = final_path
-                logger.info("Detected filesystem: %s", fs_type)
-        except FileNotFoundError:
-            pass
-        return output_path
+
+        return images
 
     def _parse_partitions_sfdisk(
         self,
@@ -809,103 +1369,232 @@ class ImageService:
         ):
             return None
 
-    def _parse_partitions_fdisk(
+    def _parse_partitions_parted(
         self,
         raw_path: Path,
         partition: int | None,
-    ) -> tuple[list[dict[str, object]], int | None] | _NoPartitionTable:
-        """Parse partition table using fdisk (fallback when sfdisk unavailable)."""
-        result = subprocess.run(
-            ["fdisk", "-l", str(raw_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+    ) -> tuple[list[dict[str, object]], int | None] | _NoPartitionTable | None:
+        """Parse partition table using parted (fallback when sfdisk unavailable)."""
+        try:
+            result = subprocess.run(
+                ["parted", "-sm", str(raw_path), "unit", "B", "print"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return None
 
-        partition_lines = [
-            line
-            for line in result.stdout.split("\n")
-            if re.match(rf"^{re.escape(str(raw_path))}p?\d", line)
-        ]
-
-        if not partition_lines:
-            return _NO_PARTITION_TABLE
+        lines = result.stdout.strip().split("\n")
+        if not lines or lines[0] != "BYT;":
+            return None
 
         partitions: list[dict[str, object]] = []
-        for line in partition_lines:
-            parts = line.split()
-            if len(parts) >= 6:
-                try:
-                    start = int(parts[3])
-                    size = int(parts[4])
-                    part_type = parts[5] if len(parts) > 5 else ""
-                    partitions.append(
-                        {
-                            "start": start,
-                            "size": size,
-                            "type": part_type,
-                        }
-                    )
-                except (ValueError, IndexError):
-                    raise ImageError(
-                        "Failed to parse fdisk output for partition sectors"
-                    )
+        for line in lines[2:]:
+            line = line.rstrip(";")
+            if not line:
+                continue
+            parts = line.split(":")
+            if len(parts) < 6:
+                continue
+            try:
+                number = parts[0]
+                start_bytes = int(parts[1].rstrip("B"))
+                size_bytes = int(parts[3].rstrip("B"))
+                filesystem = parts[4]
+                part_type = parts[5]
+            except (ValueError, IndexError):
+                return None
+
+            start_sector = start_bytes // _SECTOR_SIZE
+            size_sector = size_bytes // _SECTOR_SIZE
+            partitions.append(
+                {
+                    "start": start_sector,
+                    "size": size_sector,
+                    "type": part_type,
+                    "node": number,
+                    "fstype": filesystem,
+                }
+            )
 
         if not partitions:
             return _NO_PARTITION_TABLE
 
         return partitions, partition
 
-    def _copy_bytes(
+    def _copy_bytes_dd(
         self,
         src: Path,
         dst: Path,
-        offset: int,
-        count: int | None,
+        skip_bytes: int,
+        count_bytes: int | None,
     ) -> None:
-        """Copy bytes from *src* starting at *offset* into *dst*."""
-        with open(src, "rb") as fin, open(dst, "wb") as fout:
-            fin.seek(offset)
-            remaining = count
-            while True:
-                chunk_size = _COPY_CHUNK_SIZE
-                if remaining is not None:
-                    chunk_size = min(chunk_size, remaining)
-                data = fin.read(chunk_size)
-                if not data:
-                    break
-                fout.write(data)
-                if remaining is not None:
-                    remaining -= len(data)
-                    if remaining <= 0:
-                        break
+        """Copy bytes from *src* starting at *skip_bytes* into *dst* using dd."""
+        cmd = [
+            "dd",
+            f"if={src}",
+            f"of={dst}",
+            "bs=1M",
+            f"skip={skip_bytes}",
+            "iflag=skip_bytes,count_bytes",
+            "conv=sparse,fsync",
+            "status=none",
+        ]
+        if count_bytes is not None:
+            cmd.append(f"count={count_bytes}")
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            stderr = (
+                e.stderr.decode()
+                if isinstance(e.stderr, bytes)
+                else (e.stderr if e.stderr else "")
+            )
+            raise ImageError(f"dd failed: {stderr}") from e
+        except FileNotFoundError:
+            raise ImageError("dd not found. Install coreutils.") from None
+
+    def _copy_with_dd(
+        self, src: Path, dst: Path, *, sparse: bool = False
+    ) -> None:
+        """Copy file from *src* to *dst* using dd."""
+        conv = "sparse,fsync" if sparse else "fsync"
+        try:
+            subprocess.run(
+                [
+                    "dd",
+                    f"if={src}",
+                    f"of={dst}",
+                    "bs=1M",
+                    f"conv={conv}",
+                    "status=none",
+                ],
+                check=True,
+                capture_output=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            raise ImageError(f"dd copy failed: {e}") from e
+
+    def _validate_downloaded_file(
+        self,
+        downloaded_path: Path,
+        image_format: str,
+    ) -> None:
+        """Validate downloaded file is valid for its format.
+
+        Uses Python-only header checks — no external tools.
+        Unlinks the file on validation failure.
+        """
+        if not downloaded_path.exists():
+            raise ImageValidationError("Downloaded file not found")
+
+        file_size = downloaded_path.stat().st_size
+        if file_size == 0:
+            downloaded_path.unlink(missing_ok=True)
+            raise ImageValidationError("Downloaded file is empty")
+
+        if image_format == "qcow2":
+            self._validate_qcow2(downloaded_path)
+        elif image_format == "vhd":
+            self._validate_vhd(downloaded_path, file_size)
+        elif image_format == "vhdx":
+            self._validate_vhdx(downloaded_path, file_size)
+        elif image_format == "raw":
+            self._validate_raw(downloaded_path, file_size)
+        elif image_format == "squashfs":
+            self._validate_squashfs(downloaded_path)
+        elif image_format == "tar-rootfs":
+            self._validate_tar(downloaded_path)
+        else:
+            downloaded_path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                f"Unknown format for validation: {image_format}"
+            )
+
+    def _resolve_fs_type(self, image_path: Path) -> str:
+        """Detect filesystem type via blkid or file extension. Never returns empty."""
+        fs_type = self.detect_filesystem_type(image_path)
+        if fs_type:
+            return fs_type
+
+        # Fall back to file extension
+        ext_map = {".ext4": "ext4", ".btrfs": "btrfs", ".xfs": "xfs"}
+        ext = image_path.suffix.lower()
+        if ext in ext_map:
+            return ext_map[ext]
+
+        raise ImageError(
+            f"Could not detect filesystem type for {image_path}. "
+            "Ensure the image has a valid filesystem."
+        )
+
+    def _detect_and_rename_fs(self, output_path: Path) -> Path:
+        """Detect filesystem type via blkid and rename output file accordingly."""
+        try:
+            blkid_result = subprocess.run(
+                ["blkid", "-o", "value", "-s", "TYPE", str(output_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            fs_type = blkid_result.stdout.strip()
+            if fs_type:
+                ext_map = {"ext4": ".ext4", "btrfs": ".btrfs", "xfs": ".xfs"}
+                ext = ext_map.get(fs_type, ".img")
+                final_path = output_path.with_suffix(ext)
+                output_path.rename(final_path)
+                output_path = final_path
+                logger.info("Detected filesystem: %s", fs_type)
+        except FileNotFoundError:
+            pass
+        return output_path
+
+    def _validate_image_path(self, image_path: Path) -> Path:
+        """Validate that an image path exists.
+
+        Args:
+            image_path: Path to validate
+
+        Returns:
+            The validated path
+
+        Raises:
+            ImageError: If path does not exist
+        """
+        if not image_path.exists():
+            raise ImageError(f"Image file not found: {image_path}")
+
+        try:
+            current_size = image_path.stat().st_size
+        except (OSError, AttributeError):
+            raise ImageError("Failed to get image size") from None
+
+        if current_size == 0:
+            raise ImageEmptyError(f"Image file is empty: {image_path}")
+
+        return image_path
 
     def _calculate_minimum_image_size_mb(self, content_bytes: int) -> int:
         """Calculate minimum image size in MiB based on actual content bytes.
 
-        Uses decimal MB (1,000,000 bytes) for calculation with headroom factor,
-        then converts to MiB for filesystem operations.
+        Uses binary MiB (1,048,576 bytes) for calculation with headroom factor.
         """
-        from mvmctl.constants import CONST_MEGABYTE_BYTES
-
-        content_mb_decimal = content_bytes / CONST_MEGABYTE_BYTES
-        calculated_mb = int(content_mb_decimal * CONST_ROOTFS_HEADROOM_FACTOR)
-        return max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mb)
-
-    # =====================================================================
-    # Format Handlers
-    # =====================================================================
+        content_mib = content_bytes / CONST_MEBIBYTE_BYTES
+        calculated_mib = int(content_mib * CONST_ROOTFS_HEADROOM_FACTOR)
+        return max(CONST_MIN_ROOTFS_SIZE_MIB, calculated_mib)
 
     def _handle_qcow2(
         self,
-        *,
         input_path: Path,
         final_path: Path,
         partition: int | None = None,
         disabled_detectors: list[str] | None = None,
     ) -> Path:
         """Handle qcow2 format."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(
+            dir=CacheUtils.get_temp_dir()
+        ) as tmpdir:
             raw_path = Path(tmpdir) / "intermediate.raw"
             self.convert_qcow2_to_raw(input_path, raw_path)
 
@@ -930,20 +1619,16 @@ class ImageService:
 
     def _handle_tar_rootfs(
         self,
-        *,
         input_path: Path,
         final_path: Path,
         minimum_rootfs_size: int | str,
     ) -> Path:
         """Handle tar-rootfs format."""
-        self.create_ext4_from_tar(
-            input_path, final_path, minimum_rootfs_mib=minimum_rootfs_size
-        )
+        self.create_ext4_from_tar(input_path, final_path, minimum_rootfs_size)
         return final_path
 
     def _handle_raw(
         self,
-        *,
         input_path: Path,
         final_path: Path,
         partition: int | None = None,
@@ -953,19 +1638,20 @@ class ImageService:
         return self.extract_partition(
             input_path,
             final_path.with_suffix(".img"),
-            partition=partition,
-            disabled_detectors=disabled_detectors,
+            partition,
+            disabled_detectors,
         )
 
     def _handle_squashfs(
         self,
-        *,
         input_path: Path,
         final_path: Path,
         minimum_rootfs_size: int | str,
     ) -> Path:
         """Handle squashfs format."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(
+            dir=CacheUtils.get_temp_dir()
+        ) as tmpdir:
             tmpdir_path = Path(tmpdir)
             extract_dir = tmpdir_path / "squashfs-root"
 
@@ -1039,7 +1725,6 @@ class ImageService:
 
     def _handle_vhd(
         self,
-        *,
         input_path: Path,
         final_path: Path,
         partition: int | None = None,
@@ -1050,7 +1735,9 @@ class ImageService:
         Tries guestfs-based extraction first for reliability with non-standard
         VHD images (e.g., Alpine), falls back to sfdisk/fdisk parsing.
         """
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(
+            dir=CacheUtils.get_temp_dir()
+        ) as tmpdir:
             raw_path = Path(tmpdir) / "intermediate.raw"
             self.convert_vhd_to_raw(input_path, raw_path)
 
@@ -1075,26 +1762,48 @@ class ImageService:
                 raise ImageError("Failed to extract partition from VHD")
             return actual_path
 
-    # =====================================================================
-    # Format Handler Dictionary (as class property)
-    # =====================================================================
+    def _handle_vhdx(
+        self,
+        input_path: Path,
+        final_path: Path,
+        partition: int | None = None,
+        disabled_detectors: list[str] | None = None,
+    ) -> Path:
+        """Handle VHDX format.
 
-    @property
-    def _format_handlers(self) -> dict[str, Callable[..., Path]]:
-        return {
-            "qcow2": self._handle_qcow2,
-            "tar-rootfs": self._handle_tar_rootfs,
-            "raw": self._handle_raw,
-            "squashfs": self._handle_squashfs,
-            "vhd": self._handle_vhd,
-        }
+        Tries guestfs-based extraction first for reliability with VHDX images,
+        falls back to sfdisk/fdisk parsing.
+        """
+        with tempfile.TemporaryDirectory(
+            dir=CacheUtils.get_temp_dir()
+        ) as tmpdir:
+            raw_path = Path(tmpdir) / "intermediate.raw"
+            self.convert_vhdx_to_raw(input_path, raw_path)
 
-    # =====================================================================
-    # Fetch / Import Orchestration
-    # =====================================================================
+            # Try guestfs-based extraction first (more reliable for VHDX)
+            actual_path = OptimizedGuestfs.extract_partition(
+                raw_path, final_path.with_suffix(".img"), partition
+            )
+            if actual_path is not None:
+                return actual_path
 
+            # Fall back to sfdisk/fdisk parsing
+            logger.info(
+                "Guestfs extraction unavailable, falling back to manual partition parsing"
+            )
+            actual_path = self.extract_partition(
+                raw_path,
+                final_path.with_suffix(".img"),
+                partition=partition,
+                disabled_detectors=disabled_detectors,
+            )
+            if actual_path is None:
+                raise ImageError("Failed to extract partition from VHDX")
+            return actual_path
+
+    @staticmethod
     def _get_template_variables(
-        self, spec: ImageSpec, ci_version: str
+        spec: ImageSpec, ci_version: str
     ) -> dict[str, str]:
         """Build template variables dict from ImageSpec."""
         variables = {
@@ -1107,17 +1816,14 @@ class ImageService:
         }
         return {k: str(v) for k, v in variables.items()}
 
+    @staticmethod
     def _resolve_source_template(
-        self, spec: ImageSpec, template_vars: dict[str, str]
+        spec: ImageSpec, template_vars: dict[str, str]
     ) -> str:
         """Resolve source URL by fetching and parsing CI image list."""
         if not spec.list_url_template:
             raise ImageError(
                 f"Missing 'list_url_template' in images.yaml for {spec.id}"
-            )
-        if not spec.source_base:
-            raise ImageError(
-                f"Missing 'source_base' in images.yaml for {spec.id}"
             )
 
         list_url = render_template(spec.list_url_template, template_vars)
@@ -1148,7 +1854,16 @@ class ImageService:
 
         keys.sort()
         chosen_key = keys[-1]
-        return f"{spec.source_base}/{chosen_key}"
+
+        # Derive base URL from source (scheme + host + bucket/root path)
+        from urllib.parse import urlparse
+
+        source_resolved = render_template(spec.source, template_vars)
+        parsed = urlparse(source_resolved)
+        path_parts = parsed.path.strip("/").split("/")
+        bucket = path_parts[0] if path_parts else ""
+        base = f"{parsed.scheme}://{parsed.netloc}/{bucket}"
+        return f"{base}/{chosen_key}"
 
     def _fetch_sha256_from_url(
         self,
@@ -1190,51 +1905,93 @@ class ImageService:
                 return line_parts[0].lower()
         return None
 
-    def _validate_downloaded_file(
-        self,
-        downloaded_path: Path,
-        image_format: str,
-    ) -> None:
-        """Validate downloaded file is valid for its format.
+    @staticmethod
+    def _is_qcow2(path: Path) -> bool:
+        """Check for QCOW2 magic number 'QFI\xfb' in first 4 bytes."""
+        try:
+            with open(path, "rb") as f:
+                return f.read(4) == b"QFI\xfb"
+        except (OSError, struct.error):
+            return False
 
-        Uses Python-only header checks — no external tools.
-        Unlinks the file on validation failure.
+    @staticmethod
+    def _is_vhd(path: Path, file_size: int) -> bool:
+        """Check for VHD footer cookie 'conectix' in last 512 bytes."""
+        if file_size < 512:
+            return False
+        try:
+            with open(path, "rb") as f:
+                f.seek(file_size - 512)
+                return f.read(8) == b"conectix"
+        except (OSError, struct.error):
+            return False
+
+    @staticmethod
+    def _is_squashfs(path: Path) -> bool:
+        """Check for SquashFS magic number 0x73717368 ('hsqs' on disk) in first 4 bytes."""
+        try:
+            with open(path, "rb") as f:
+                magic: int = struct.unpack("<I", f.read(4))[0]
+                return magic == 0x73717368
+        except (OSError, struct.error):
+            return False
+
+    @staticmethod
+    def _is_tar(path: Path) -> bool:
+        """Check if Python's tarfile can read at least one member header."""
+        try:
+            with tarfile.open(path, "r:*") as tf:
+                for _ in tf:
+                    return True
+                return False
+        except (tarfile.TarError, OSError):
+            return False
+
+    @staticmethod
+    def _is_raw(path: Path, file_size: int) -> bool:
+        """Check if file looks like a raw disk image.
+
+        Requires sector alignment and evidence of a partition table
+        (MBR signature at offset 510, or GPT at offset 512) or
+        non-zero content in the first 1 KiB.
         """
-        if not downloaded_path.exists():
-            raise ImageValidationError("Downloaded file not found")
+        if file_size < _SECTOR_SIZE or file_size % _SECTOR_SIZE != 0:
+            return False
+        try:
+            with open(path, "rb") as f:
+                first_kb = f.read(1024)
+                if first_kb == b"\x00" * len(first_kb):
+                    return False
+                # MBR boot signature at offset 510
+                if len(first_kb) > 512 and first_kb[510:512] == b"\x55\xaa":
+                    return True
+                # GPT signature at offset 512
+                if len(first_kb) > 520 and first_kb[512:520] == b"EFI PART":
+                    return True
+                # Fallback: non-zero content (less reliable, but catches
+                # raw filesystem images without partition tables)
+                return True
+        except OSError:
+            return False
 
-        file_size = downloaded_path.stat().st_size
-        if file_size == 0:
-            downloaded_path.unlink(missing_ok=True)
-            raise ImageValidationError("Downloaded file is empty")
-
-        if image_format == "qcow2":
-            self._validate_qcow2(downloaded_path)
-        elif image_format == "vhd":
-            self._validate_vhd(downloaded_path, file_size)
-        elif image_format == "raw":
-            self._validate_raw(downloaded_path, file_size)
-        elif image_format == "squashfs":
-            self._validate_squashfs(downloaded_path)
-        elif image_format == "tar-rootfs":
-            self._validate_tar(downloaded_path)
-        else:
-            downloaded_path.unlink(missing_ok=True)
-            raise ImageValidationError(
-                f"Unknown format for validation: {image_format}"
-            )
+    @staticmethod
+    def _is_vhdx(path: Path) -> bool:
+        """Check for VHDX signature 'vhdxfile' in first 8 bytes."""
+        try:
+            with open(path, "rb") as f:
+                return f.read(8) == b"vhdxfile"
+        except (OSError, struct.error):
+            return False
 
     def _validate_qcow2(self, path: Path) -> None:
         """Validate qcow2 by magic number, version, and size."""
+        if not self._is_qcow2(path):
+            path.unlink(missing_ok=True)
+            raise ImageValidationError("Invalid qcow2 file: wrong magic number")
+
         try:
             with open(path, "rb") as f:
-                magic = f.read(4)
-                if magic != b"QFI\xfb":
-                    path.unlink(missing_ok=True)
-                    raise ImageValidationError(
-                        "Invalid qcow2 file: wrong magic number"
-                    )
-
+                f.read(4)  # skip magic already checked
                 version = struct.unpack(">I", f.read(4))[0]
                 if version not in (2, 3):
                     path.unlink(missing_ok=True)
@@ -1261,22 +2018,16 @@ class ImageService:
             path.unlink(missing_ok=True)
             raise ImageValidationError("Invalid VHD file: too small")
 
+        if not self._is_vhd(path, file_size):
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                "Invalid VHD file: missing conectix cookie"
+            )
+
         try:
             with open(path, "rb") as f:
-                # Try 512-byte footer first (standard)
                 f.seek(file_size - 512)
                 footer = f.read(512)
-                if footer[:8] != b"conectix":
-                    # Fallback: pre-2004 511-byte footer
-                    if file_size >= 511:
-                        f.seek(file_size - 511)
-                        footer = f.read(511)
-                    if footer[:8] != b"conectix":
-                        path.unlink(missing_ok=True)
-                        raise ImageValidationError(
-                            "Invalid VHD file: missing conectix cookie"
-                        )
-
                 features = struct.unpack(">I", footer[8:12])[0]
                 if not (features & 0x00000002):
                     path.unlink(missing_ok=True)
@@ -1296,6 +2047,18 @@ class ImageService:
                 f"Failed to validate VHD file: {e}"
             ) from e
 
+    def _validate_vhdx(self, path: Path, file_size: int) -> None:
+        """Validate VHDX by signature and minimum size."""
+        if file_size < 65536:
+            path.unlink(missing_ok=True)
+            raise ImageValidationError("Invalid VHDX file: too small")
+
+        if not self._is_vhdx(path):
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                "Invalid VHDX file: missing vhdxfile signature"
+            )
+
     def _validate_raw(self, path: Path, file_size: int) -> None:
         """Validate raw image by size and non-zero content."""
         if file_size < _SECTOR_SIZE:
@@ -1305,31 +2068,22 @@ class ImageService:
         if file_size % _SECTOR_SIZE != 0:
             logger.warning("Raw image size %d is not sector-aligned", file_size)
 
-        try:
-            with open(path, "rb") as f:
-                first_kb = f.read(1024)
-                if first_kb == b"\x00" * len(first_kb):
-                    path.unlink(missing_ok=True)
-                    raise ImageValidationError(
-                        "Invalid raw image: file appears to be all zeros"
-                    )
-        except OSError as e:
+        if not self._is_raw(path, file_size):
             path.unlink(missing_ok=True)
             raise ImageValidationError(
-                f"Failed to validate raw image: {e}"
-            ) from e
+                "Invalid raw image: file appears to be all zeros"
+            )
 
     def _validate_squashfs(self, path: Path) -> None:
         """Validate squashfs by magic number and version."""
+        if not self._is_squashfs(path):
+            path.unlink(missing_ok=True)
+            raise ImageValidationError(
+                "Invalid squashfs file: wrong magic number"
+            )
+
         try:
             with open(path, "rb") as f:
-                magic = struct.unpack("<I", f.read(4))[0]
-                if magic != 0x73717368:
-                    path.unlink(missing_ok=True)
-                    raise ImageValidationError(
-                        "Invalid squashfs file: wrong magic number"
-                    )
-
                 f.seek(28)
                 major = struct.unpack("<H", f.read(2))[0]
                 minor = struct.unpack("<H", f.read(2))[0]
@@ -1346,10 +2100,13 @@ class ImageService:
 
     def _validate_tar(self, path: Path) -> None:
         """Validate tar archive using Python's tarfile module."""
+        if not self._is_tar(path):
+            path.unlink(missing_ok=True)
+            raise ImageValidationError("Invalid tar file")
+
         try:
             with tarfile.open(path, "r:*") as tf:
-                # Just iterate headers to validate structure
-                for _member in tf:
+                for _ in tf:
                     pass
         except tarfile.TarError as e:
             path.unlink(missing_ok=True)
@@ -1359,259 +2116,6 @@ class ImageService:
             raise ImageValidationError(
                 f"Failed to validate tar file: {e}"
             ) from e
-
-    # =====================================================================
-    # Phase Methods
-    # =====================================================================
-
-    def download_image(
-        self,
-        spec: ImageSpec,
-        image_id: str,
-        output_dir: Path,
-        force: bool,
-        ci_version: str,
-    ) -> Path:
-        """Download image from remote source. Returns path to downloaded file."""
-        download_path = output_dir / f"{image_id}.download"
-
-        if force and download_path.exists():
-            download_path.unlink()
-
-        template_vars = self._get_template_variables(spec, ci_version)
-        source = spec.source
-        if "{" in spec.source:
-            source = self._resolve_source_template(spec, template_vars)
-
-        resolved_sha256 = (
-            spec.sha256.lower() if spec.sha256 is not None else None
-        )
-        sha256_url = render_optional_template(spec.sha256_url, template_vars)
-        if resolved_sha256 is None and sha256_url is not None:
-            source_basename = source.rsplit("/", 1)[-1] if source else None
-            resolved_sha256 = self._fetch_sha256_from_url(
-                sha256_url, source_filename=source_basename
-            )
-
-        HttpDownload.download_file(
-            source,
-            download_path,
-            expected_sha256=resolved_sha256,
-            timeout=HTTP_TIMEOUT_SHA256_FETCH_S,
-            progress_bar=True,
-            allow_missing_checksum=resolved_sha256 is None,
-            title=f"Downloading image: '{spec.id}'",
-        )
-        self._validate_downloaded_file(download_path, spec.format)
-
-        return download_path
-
-    def extract_downloaded_image(
-        self,
-        download_path: Path,
-        spec: ImageSpec,
-        image_id: str,
-        output_dir: Path,
-        partition: int | None,
-        disabled_detectors: list[str] | None = None,
-    ) -> Path:
-        """Extract/convert downloaded image to final format. Returns extracted path."""
-        logger.info("Preparing & optimizing image...")
-        handler = self._format_handlers.get(spec.format)
-        if handler is None:
-            raise ImageError(f"Unknown format: {spec.format}")
-
-        actual_path = handler(
-            input_path=download_path,
-            final_path=output_dir / f"{image_id}.{spec.convert_to}",
-            minimum_rootfs_size="dynamic",
-            partition=partition,
-            disabled_detectors=disabled_detectors,
-        )
-
-        if actual_path is None:
-            raise ImageError("Failed to determine image path")
-
-        return actual_path
-
-    def extract_import_image(
-        self,
-        source_path: Path,
-        image_id: str,
-        output_dir: Path,
-        format: str,
-        convert_to: str,
-        partition: int | None,
-        disabled_detectors: list[str] | None,
-    ) -> Path:
-        """Extract/convert imported local image. Returns extracted path."""
-        logger.info(
-            "Importing %s as '%s' (format: %s)...",
-            source_path.name,
-            image_id,
-            format,
-        )
-
-        handler = self._format_handlers.get(format)
-        if handler is None:
-            raise ImageError(f"Unsupported import format: {format}")
-
-        actual_path = handler(
-            input_path=source_path,
-            final_path=output_dir / f"{image_id}.{convert_to}",
-            minimum_rootfs_size="dynamic",
-            partition=partition,
-            disabled_detectors=disabled_detectors,
-        )
-
-        if actual_path is None:
-            raise ImageError("Failed to determine image path")
-
-        return actual_path
-
-    def _resolve_fs_type(self, image_path: Path) -> str:
-        """Detect filesystem type via blkid or file extension. Never returns empty."""
-        fs_type = self.detect_filesystem_type(image_path)
-        if fs_type:
-            return fs_type
-
-        # Fall back to file extension
-        ext_map = {".ext4": "ext4", ".btrfs": "btrfs", ".xfs": "xfs"}
-        ext = image_path.suffix.lower()
-        if ext in ext_map:
-            return ext_map[ext]
-
-        raise ImageError(
-            f"Could not detect filesystem type for {image_path}. "
-            "Ensure the image has a valid filesystem."
-        )
-
-    def optimize_image(
-        self,
-        image_path: Path,
-        image_id: str,
-        spec: ImageSpec,
-        timestamp: str,
-        skip_optimization: bool = False,
-    ) -> ImageItem:
-        """Shrink and compress image. Returns fully constructed ImageItem."""
-        fs_type = self._resolve_fs_type(image_path)
-        fs_uuid = self.get_filesystem_uuid(image_path)
-
-        if skip_optimization:
-            logger.info("Skipping optimization (shrink and compression)")
-            actual_size = image_path.stat().st_size
-            return ImageItem(
-                id=image_id,
-                os_slug=spec.id,
-                os_name=spec.name,
-                arch=spec.arch,
-                path=str(image_path.name),
-                fs_type=fs_type,
-                minimum_rootfs_size_mib=actual_size // CONST_MEBIBYTE_BYTES,
-                original_size=actual_size,
-                is_default=False,
-                pulled_at=timestamp,
-                created_at=timestamp,
-                updated_at=timestamp,
-                fs_uuid=fs_uuid,
-                compressed_size=None,
-                compression_ratio=None,
-                compressed_format=None,
-            )
-
-        if not image_path.exists():
-            raise ImageError(
-                f"Image processing failed: output file not created at {image_path}"
-            )
-
-        shrunk_path, pre_shrink_size, post_shrink_size = (
-            self.shrink_with_guestfs(image_path)
-        )
-        shrink_successful = (
-            pre_shrink_size and post_shrink_size and pre_shrink_size > 0
-        )
-        if shrink_successful:
-            logger.info(
-                "Image shrunk: %.1f MiB → %.1f MiB (%.1f%% reduction)",
-                pre_shrink_size / CONST_MEBIBYTE_BYTES,
-                post_shrink_size / CONST_MEBIBYTE_BYTES,
-                (pre_shrink_size - post_shrink_size)
-                / pre_shrink_size
-                * CONST_PERCENT,
-            )
-        else:
-            logger.debug(
-                "Image shrinking not performed (filesystem type may be unsupported or detection failed)"
-            )
-
-        compressed_path = self.compress(shrunk_path)
-        compressed_size = compressed_path.stat().st_size
-        compression_ratio = (
-            pre_shrink_size / compressed_size
-            if compressed_size > 0
-            else CONST_RATIO_MIN
-        )
-
-        minimum_rootfs_size_mib = (
-            post_shrink_size // CONST_MEBIBYTE_BYTES
-        ) + CONST_RUNTIME_BUFFER_MB
-
-        return ImageItem(
-            id=image_id,
-            os_slug=spec.id,
-            os_name=spec.name,
-            arch=spec.arch,
-            path=str(compressed_path.name),
-            fs_type=fs_type,
-            minimum_rootfs_size_mib=minimum_rootfs_size_mib,
-            original_size=pre_shrink_size,
-            is_default=False,
-            pulled_at=timestamp,
-            created_at=timestamp,
-            updated_at=timestamp,
-            fs_uuid=fs_uuid,
-            compressed_size=compressed_size,
-            compression_ratio=compression_ratio,
-            compressed_format="zst",
-        )
-
-    # =====================================================================
-    # Config Loading
-    # =====================================================================
-
-    def load_available_images(self, config_path: Path) -> list[ImageSpec]:
-        """Load image specifications from YAML config file."""
-        import yaml
-
-        if not config_path.exists():
-            raise ConfigError("Config not found")
-
-        with open(config_path) as f:
-            data = yaml.safe_load(f)
-
-        arch = DEFAULT_IMAGE_ARCH
-        images = []
-        for img in data.get("images", []):
-            image_id = img["id"]
-            images.append(
-                ImageSpec(
-                    id=image_id,
-                    image_type=img.get("type", image_id),
-                    version=str(img.get("version", image_id)),
-                    arch=img.get("arch", arch),
-                    name=img.get("name", image_id),
-                    source=img["source"],
-                    format=img["format"],
-                    convert_to=img["convert_to"],
-                    sha256=img.get("sha256"),
-                    sha256_url=img.get("sha256_url"),
-                    list_url_template=img.get("list_url_template"),
-                    source_base=img.get("source_base"),
-                )
-            )
-
-        return images
 
 
 __all__ = ["ImageService"]

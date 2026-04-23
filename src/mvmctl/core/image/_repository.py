@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from mvmctl.core._internal._db import Database
 from mvmctl.models.image import ImageItem
 
@@ -31,7 +33,8 @@ class ImageRepository:
         """Return all images whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM images WHERE id LIKE ?", (f"{prefix}%",)
+                "SELECT * FROM images WHERE id LIKE ? AND deleted_at IS NULL",
+                (f"{prefix}%",),
             ).fetchall()
         return [ImageItem(**dict(row)) for row in rows]
 
@@ -39,7 +42,8 @@ class ImageRepository:
         """Return an image by its os_slug, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM images WHERE os_slug = ?", (os_slug,)
+                "SELECT * FROM images WHERE os_slug = ? AND deleted_at IS NULL",
+                (os_slug,),
             ).fetchone()
         if row is None:
             return None
@@ -49,7 +53,7 @@ class ImageRepository:
         """Return all images."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM images ORDER BY created_at"
+                "SELECT * FROM images WHERE deleted_at IS NULL ORDER BY created_at"
             ).fetchall()
         return [ImageItem(**dict(row)) for row in rows]
 
@@ -61,8 +65,8 @@ class ImageRepository:
                 INSERT INTO images (
                     id, os_slug, os_name, arch, path, fs_type, fs_uuid,
                     compressed_size, original_size, compression_ratio,
-                    compressed_format, minimum_rootfs_size_mib, pulled_at, is_default, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    compressed_format, minimum_rootfs_size_mib, pulled_at, is_default, is_present, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(os_slug) DO UPDATE SET
                     os_slug = excluded.os_slug,
                     os_name = excluded.os_name,
@@ -77,6 +81,7 @@ class ImageRepository:
                     minimum_rootfs_size_mib = excluded.minimum_rootfs_size_mib,
                     pulled_at = excluded.pulled_at,
                     is_default = excluded.is_default,
+                    is_present = excluded.is_present,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -94,9 +99,19 @@ class ImageRepository:
                     image.minimum_rootfs_size_mib,
                     image.pulled_at,
                     int(image.is_default),
+                    int(image.is_present),
                     image.created_at,
                     image.updated_at,
                 ),
+            )
+
+    def soft_delete(self, image_id: str) -> None:
+        """Soft-delete an image by setting deleted_at and is_present=0."""
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._db.connect() as conn:
+            conn.execute(
+                "UPDATE images SET deleted_at = ?, is_present = 0 WHERE id = ?",
+                (now, image_id),
             )
 
     def delete(self, image_id: str) -> None:
@@ -123,3 +138,16 @@ class ImageRepository:
         if row is None:
             return None
         return ImageItem(**dict(row))
+
+    def update_many_is_present(
+        self, image_ids: list[str], is_present: bool
+    ) -> None:
+        """Bulk update is_present flag for multiple images."""
+        if not image_ids:
+            return
+        placeholders = ",".join("?" * len(image_ids))
+        with self._db.connect() as conn:
+            conn.execute(
+                f"UPDATE images SET is_present = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                [int(is_present)] + list(image_ids),
+            )

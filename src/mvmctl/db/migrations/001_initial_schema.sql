@@ -7,7 +7,7 @@
 -- JSON mappings: internal_id -> os_slug, filename -> path
 CREATE TABLE images (
     id TEXT PRIMARY KEY,
-    os_slug TEXT NOT NULL UNIQUE,
+    os_slug TEXT NOT NULL,
     os_name TEXT NOT NULL,
     arch TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -20,8 +20,10 @@ CREATE TABLE images (
     minimum_rootfs_size_mib INTEGER NOT NULL,
     pulled_at TIMESTAMP NOT NULL,
     is_default INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
+    is_present INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0=file missing, 1=file exists
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP NULL
 );
 CREATE INDEX idx_images_os_slug ON images(os_slug);
 CREATE INDEX idx_images_name ON images(os_name);

@@ -17,7 +17,7 @@ from mvmctl.api.inputs._binary_input import (
     BinaryRequest,
     ResolvedBinaryInput,
 )
-from mvmctl.api.inputs._image_input import (
+from mvmctl.api.inputs._image_acquire_input import (
     ImageFetchInput,
     ImageImportInput,
 )

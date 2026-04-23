@@ -28,7 +28,9 @@ _SIZE_MULTIPLIERS: Final[dict[str, int]] = {
     "TB": 1024**4,
 }
 
-_SIZE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^(\d+(?:\.\d+)?)\s*([KMGT]?B?|[kmgt]?b?)?$")
+_SIZE_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^(\d+(?:\.\d+)?)\s*([KMGT]?B?|[kmgt]?b?)?$"
+)
 
 
 def parse_disk_size(size_str: str) -> int:
@@ -65,7 +67,9 @@ def parse_disk_size(size_str: str) -> int:
 
     multiplier = _SIZE_MULTIPLIERS.get(unit.upper())
     if multiplier is None:
-        raise MVMError(f"Unknown size unit: '{unit}'. Valid: B, K, KB, M, MB, G, GB, T, TB")
+        raise MVMError(
+            f"Unknown size unit: '{unit}'. Valid: B, K, KB, M, MB, G, GB, T, TB"
+        )
 
     bytes_count = int(number * multiplier)
 
@@ -75,7 +79,9 @@ def parse_disk_size(size_str: str) -> int:
     return bytes_count
 
 
-def format_sectors_human_readable(size_sectors: int, sector_size: int = 512) -> str:
+def format_sectors_human_readable(
+    size_sectors: int, sector_size: int = 512
+) -> str:
     """Convert size in sectors to human-readable format (MiB/GiB).
 
     Args:
@@ -92,18 +98,6 @@ def format_sectors_human_readable(size_sectors: int, sector_size: int = 512) -> 
     return f"{size_mib:.1f} MiB"
 
 
-def format_bytes_human_readable(size_bytes: int) -> str:
-    """Format bytes using binary (IEC) units — e.g. "512 B", "4.2 MiB", "1.5 GiB"."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    size_float = float(size_bytes)
-    for unit in ["KiB", "MiB", "GiB"]:
-        size_float /= 1024
-        if size_float < 1024:
-            return f"{size_float:.1f} {unit}"
-    return f"{size_float:.1f} TiB"
-
-
 def format_disk_size(bytes_count: int) -> str:
     """Format bytes to human-readable string.
 
@@ -113,7 +107,9 @@ def format_disk_size(bytes_count: int) -> str:
     Returns:
         Human-readable string like "1.5G", "512M"
     """
-    for unit, multiplier in sorted(_SIZE_MULTIPLIERS.items(), key=lambda x: x[1], reverse=True):
+    for unit, multiplier in sorted(
+        _SIZE_MULTIPLIERS.items(), key=lambda x: x[1], reverse=True
+    ):
         if unit in ("B", "KB", "MB", "GB", "TB"):  # Skip short forms for output
             continue
         if bytes_count >= multiplier:

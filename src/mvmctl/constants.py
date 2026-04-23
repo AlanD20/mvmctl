@@ -32,7 +32,7 @@ def _resolve_cli_name() -> str:
                 return ep.name
     except (IOError, ValueError):
         pass
-    return "mvm"
+    return "mvmctl"
 
 
 def _format_path(path: tuple[str, ...]) -> str:

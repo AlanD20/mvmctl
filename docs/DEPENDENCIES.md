@@ -28,6 +28,7 @@ These binaries are required for importing images, converting formats, and genera
 | :--- | :--- | :--- | :--- | :--- |
 | `qemu-img` | Image | Converting and resizing disk images | `qemu-utils` | `qemu-img` |
 | `sfdisk` | Image | Partition table manipulation | `util-linux` | `util-linux` |
+| `parted` | Image | Machine-parseable partition table reading | `parted` | `parted` |
 | `blkid` | Image | Detecting root partitions and UUIDs | `util-linux` | `util-linux` |
 | `mount` | Image | Mounting images for rootfs extraction | `util-linux` | `util-linux` |
 | `umount` | Image | Unmounting images | `util-linux` | `util-linux` |
@@ -154,7 +155,7 @@ This section maps specific `mvm` commands to the external binaries they invoke.
 | **`mvm network`** | `init`, `create` | `ip`, `iptables`, `iptables-restore`, `sysctl` |
 | | `ls`, `show`, `rm` | `ip`, `iptables` |
 | **`mvm bin`** | `fetch`, `ls`, `rm`, `use` | (Internal Python logic) |
-| **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
+| **`mvm image`** | `import` | `qemu-img`, `sfdisk`, `parted`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
 | | `ls`, `rm` | (Internal Python logic) |
 | **`mvm kernel`** | `download` | (Internal Python logic) |
 | | `build` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |

@@ -7,12 +7,10 @@ compression, and decompression for fast VM cloning.
 from __future__ import annotations
 
 import logging
-import subprocess
 from pathlib import Path
 
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
-from mvmctl.exceptions import ImageError
 from mvmctl.models.image import ImageItem
 from mvmctl.utils.common import CacheUtils
 
@@ -61,103 +59,67 @@ class ImageController:
         suffix = f".{fmt}" if not fmt.startswith(".") else fmt
         return Path(self.image_path).with_suffix(suffix)
 
-    def materialize_to(self, output_path: Path) -> None:
-        """Fast durable copy from tmpfs cache to destination.
+    def remove_path(self) -> list[str]:
+        """Remove all files for this controller's image from disk. No DB changes.
 
-        Uses reflink (CoW) + sparse detection for maximum speed on btrfs/xfs.
-        Falls back to a sparse-aware manual copy on non-CoW filesystems.
-        After copy, fdatasync() ensures data durability without flushing
-        non-critical metadata (timestamps).
+        Removes files matching self._image.id from:
+        - images directory (.zst, .img, .download, etc.)
+        - warm cache directory (.ext4, .btrfs, etc.)
+
+        Returns:
+            List of removed filenames for logging.
+        """
+        images_dir = CacheUtils.get_images_dir()
+        warm_dir = CacheUtils.get_warm_image_dir()
+        removed: list[str] = []
+
+        for candidate in images_dir.glob(f"{self._image.id}*"):
+            if candidate.is_file():
+                candidate.unlink(missing_ok=True)
+                removed.append(candidate.name)
+
+        for candidate in warm_dir.glob(f"{self._image.id}*"):
+            if candidate.is_file():
+                candidate.unlink(missing_ok=True)
+                removed.append(candidate.name)
+
+        return removed
+
+    def remove(self, force: bool = False) -> None:
+        """Remove image files and delete the DB record.
+
+        Hard-deletes when no VMs reference the image.
+        Soft-deletes only when VMs still reference it (to preserve history).
 
         Args:
-            output_path: Destination path for the VM rootfs
+            force: If True, remove even if referenced by VMs.
 
         Raises:
-            ImageError: If the image is not in the cache
+            ImageError: If image is referenced by VMs and force is False.
         """
-        import os
+        from mvmctl.exceptions import ImageError
+        from mvmctl.utils.auditlog import AuditLog
 
-        cached_path = (
-            CacheUtils.get_warm_image_dir()
-            / f"{self._image.id}.{self._image.fs_type}"
-        )
+        has_vms = bool(self._image.vms)
 
-        if not cached_path.exists():
-            raise ImageError(f"Image not in cache: {self._image.id}")
+        # 1. VM reference check
+        if has_vms and not force:
+            names = ", ".join(vm.name for vm in self._image.vms)
+            raise ImageError(f"Image is referenced by VMs: {names}")
 
-        # Ensure output directory exists
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # 2. Delete ALL related files from disk
+        removed = self.remove_path()
+        if removed:
+            logger.info("Removed image files: %s", ", ".join(removed))
 
-        try:
-            # --reflink=auto: CoW clone if filesystem supports it (btrfs/xfs)
-            # --sparse=always: detect zero regions and skip writing them
-            subprocess.run(
-                [
-                    "cp",
-                    "--reflink=auto",
-                    "--sparse=always",
-                    str(cached_path),
-                    str(output_path),
-                ],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError:
-            # cp failed entirely (binary missing, disk full, etc.)
-            # Fall back to sparse-aware Python copy
-            self._copy_sparse_fallback(cached_path, output_path)
+        # 3. Hard delete if no VMs, soft delete if VMs exist (with force)
+        if has_vms:
+            self._repo.soft_delete(self._image.id)
+        else:
+            self._repo.delete(self._image.id)
 
-        # Ensure durability: flush file data + critical metadata to disk.
-        # fdatasync() skips non-critical metadata (mtime/atime) which we don't need.
-        with open(output_path, "rb") as f:
-            os.fdatasync(f.fileno())
-
-        logger.info("Copied image to: %s", output_path.name)
-
-    @staticmethod
-    def _copy_sparse_fallback(src: Path, dst: Path) -> None:
-        """Sparse-aware fallback copy using lseek(SEEK_HOLE/SEEK_DATA).
-
-        Detects hole regions in the source file and creates holes in dst
-        instead of writing zeros. Much faster than shutil.copy2 for sparse
-        images (common for freshly decompressed ext4 rootfs images).
-
-        Args:
-            src: Source file path (in tmpfs cache)
-            dst: Destination file path (on physical disk)
-        """
-        import os
-
-        buf_size = 4 * 1024 * 1024  # 4 MiB chunks
-
-        with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
-            while True:
-                # Find next data region (non-hole)
-                pos = fsrc.tell()
-                data_start = os.lseek(fsrc.fileno(), pos, os.SEEK_HOLE)
-                if data_start == pos:
-                    # At a hole, find the next data region
-                    data_start = os.lseek(fsrc.fileno(), pos, os.SEEK_DATA)
-                    if data_start == pos:
-                        # No more data after this hole - we're done
-                        break
-
-                # Seek back to where we were and read the data chunk
-                fsrc.seek(pos)
-                remaining = data_start - pos
-                while remaining > 0:
-                    chunk_size = min(buf_size, remaining)
-                    chunk = fsrc.read(chunk_size)
-                    if not chunk:
-                        break
-                    fdst.write(chunk)
-                    remaining -= len(chunk)
-
-                if data_start == os.lseek(fsrc.fileno(), 0, os.SEEK_END):
-                    break
-
-            # Ensure correct file size (in case last region was a hole)
-            fdst.truncate(src.stat().st_size)
+        # 4. Audit log
+        AuditLog.log("image.remove", changes={"id": self._image.id})
 
     @staticmethod
     def prune_cached() -> int:

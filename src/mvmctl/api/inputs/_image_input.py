@@ -3,66 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from mvmctl.core._internal._db import Database
 from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._resolver import ImageResolver
 from mvmctl.exceptions import ImageNotFoundError
-from mvmctl.models.image import ImageItem, ImageSpec
+from mvmctl.models.image import ImageItem
 
 __all__ = [
     "ImageInput",
-    "ImageImportInput",
-    "ImageFetchInput",
     "ImageRequest",
     "ResolvedImageInput",
 ]
 
 
 @dataclass
-class ImageImportInput:
-    """Specification for importing a local image file."""
-
-    id: str
-    name: str
-    source_path: Path
-    output_dir: Path
-    format: str  # noqa: N816
-    convert_to: str = "ext4"
-    disabled_detectors: list[str] = field(default_factory=list)
-    force: bool = False
-    partition: int | None = None
-
-
-@dataclass
-class ImageFetchInput:
-    """Input model for image fetch and registration operations."""
-
-    spec: ImageSpec
-    output_dir: Path
-    force: bool = False
-    partition: int | None = None
-    skip_optimization: bool = False
-    disabled_detectors: list[str] = field(default_factory=list)
-
-
-# =====================================================================
-# COPIED FROM: api/inputs/_network_input.py — NetworkInput (lines 20-31)
-# =====================================================================
-
-
-@dataclass
 class ImageInput:
     """Identifiers for existing image actions (ls, rm, inspect, get)."""
 
-    id_prefix: list[str] = field(default_factory=list)
+    id: list[str] = field(default_factory=list)
     os_slug: list[str] = field(default_factory=list)
-
-
-# =====================================================================
-# COPIED FROM: api/inputs/_network_input.py — ResolvedNetworkInput (lines 34-43)
-# =====================================================================
 
 
 @dataclass(frozen=True)
@@ -70,11 +30,6 @@ class ResolvedImageInput:
     """Resolved image identifiers."""
 
     items: list[ImageItem]
-
-
-# =====================================================================
-# COPIED FROM: api/inputs/_network_input.py — NetworkRequest (lines 46-109)
-# =====================================================================
 
 
 class ImageRequest:
@@ -103,7 +58,7 @@ class ImageRequest:
         Raises:
             ImageNotFoundError: If any identifier cannot be resolved.
         """
-        identifiers = self._inputs.id_prefix + self._inputs.os_slug
+        identifiers = self._inputs.id + self._inputs.os_slug
 
         if not identifiers:
             raise ImageNotFoundError("No image identifiers provided")

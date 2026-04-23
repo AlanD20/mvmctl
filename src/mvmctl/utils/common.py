@@ -109,12 +109,12 @@ class CacheUtils:
                       If None, uses tempfile.gettempdir().
 
         Returns:
-            Path to the warm image directory (e.g. /dev/shm/mvm/ready).
+            Path to the warm image directory (e.g. /dev/shm/mvmctl/ready).
         """
-        from mvmctl.constants import CLI_NAME
+        from mvmctl.constants import PROJECT_NAME
 
         base = tmp_path if tmp_path is not None else Path(tempfile.gettempdir())
-        cache_dir = Path(base / CLI_NAME / "ready")
+        cache_dir = Path(base / PROJECT_NAME / "ready")
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir
 
@@ -398,6 +398,18 @@ class CommonUtils:
             return dt.strftime("%Y/%m/%d %H:%M:%S")
         except (ValueError, AttributeError):
             return str(iso_timestamp)
+
+    @staticmethod
+    def format_bytes_human_readable(size_bytes: int) -> str:
+        """Format bytes using binary (IEC) units — e.g. "512 B", "4.2 MiB", "1.5 GiB"."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        size_float = float(size_bytes)
+        for unit in ["KiB", "MiB", "GiB"]:
+            size_float /= 1024
+            if size_float < 1024:
+                return f"{size_float:.1f} {unit}"
+        return f"{size_float:.1f} TiB"
 
 
 def safe_int(value: object, default: int = 0) -> int:

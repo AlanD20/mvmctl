@@ -36,6 +36,10 @@ class ImageNotFoundError(MVMError):
     """Image does not exist in registry."""
 
 
+class ImageAcquireError(MVMError):
+    """Image fetch/import failure."""
+
+
 class NetworkError(MVMError):
     """Network setup/teardown failure."""
 

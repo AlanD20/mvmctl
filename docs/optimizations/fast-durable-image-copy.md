@@ -44,7 +44,7 @@ For a VM rootfs image, the data must survive a crash. The file's mtime doesn't m
 
 ## Fallback Path
 
-If `cp` fails entirely (binary missing, disk full, etc.), a sparse-aware Python fallback uses `lseek(SEEK_HOLE/SEEK_DATA)` directly to preserve holes instead of falling back to `shutil.copy2` which writes all bytes including zeros.
+If `cp` fails entirely (binary missing, disk full, etc.), the fallback is `dd conv=sparse,fsync` to preserve holes and ensure durability, instead of falling back to `shutil.copy2` which writes all bytes including zeros.
 
 ## Performance Characteristics
 
@@ -53,7 +53,7 @@ If `cp` fails entirely (binary missing, disk full, etc.), a sparse-aware Python 
 | btrfs/XFS destination | Reflink CoW (instant) | ~0ms + fdatasync metadata only |
 | ext4 with sparse image | `cp --sparse=always` | 2–5× faster than writing all bytes |
 | ext4 with non-sparse image | `cp` (no reflink) | Writes all bytes, ~I/O bound |
-| cp fails → fallback | Python sparse copy | Slower than cp but handles edge cases |
+| cp fails → fallback | dd conv=sparse,fsync | Slower than cp but handles edge cases |
 
 ## Why Not sync_file_range() Pipelining?
 
@@ -68,6 +68,5 @@ Only pursue this if profiling shows `fdatasync()` itself is measurably slow (>10
 
 ## Related Files
 
-- `src/mvmctl/core/image/_controller.py` — `materialize_to()` method
-- `src/mvmctl/core/image/_service.py` — `copy_from_pool()` (same pattern)
+- `src/mvmctl/core/image/_service.py` — `materialize_to()` method
 - `src/mvmctl/utils/common.py` — `CacheUtils.get_warm_image_dir()`

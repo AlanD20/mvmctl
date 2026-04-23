@@ -7,14 +7,12 @@ images:
     name: "Ubuntu 24.04 LTS (Noble)"
     source: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64-root.tar.xz
     format: tar-rootfs
-    convert_to: ext4
     sha256: null
     sha256_url: https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
 
   - id: ubuntu-24.04-minimal
     name: Ubuntu 24.04 Minimal
     format: tar-rootfs
-    convert_to: ext4
     source: https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz
     sha256_url: https://cloud-images.ubuntu.com/minimal/releases/noble/RELEASE/SHA256SUMS
 
@@ -24,7 +22,6 @@ images:
     name: "Ubuntu 22.04 LTS (Jammy)"
     source: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64-root.tar.xz
     format: tar-rootfs
-    convert_to: ext4
     sha256: null
     sha256_url: https://cloud-images.ubuntu.com/jammy/current/SHA256SUMS
 
@@ -34,7 +31,6 @@ images:
     name: "Arch Linux"
     source: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2
     format: qcow2
-    convert_to: btrfs
     sha256: null
     sha256_url: https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256
 
@@ -44,7 +40,6 @@ images:
     name: "Debian 12 (Bookworm)"
     source: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
     format: qcow2
-    convert_to: ext4
     sha256: null
     sha256_url: https://cloud.debian.org/images/cloud/bookworm/latest/SHA256SUMS
 
@@ -52,11 +47,9 @@ images:
     type: firecracker
     version: "24.04"
     name: "Ubuntu (Firecracker CI)"
-    source: "https://spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-24.04.squashfs"
+    source: "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/{ci_version}/{arch}/ubuntu-24.04.squashfs"
     list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/ubuntu-&list-type=2"
-    source_base: "https://s3.amazonaws.com/spec.ccfc.min"
     format: squashfs
-    convert_to: ext4
     sha256: null
     sha256_url: null
 
@@ -66,6 +59,5 @@ images:
     name: "Alpine Linux 3.21"
     source: https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/aws_alpine-3.21.4-x86_64-bios-cloudinit-r0.vhd
     format: vhd
-    convert_to: ext4
     sha256: null
     sha256_url: https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/cloud/aws_alpine-3.21.4-x86_64-bios-cloudinit-r0.vhd.sha512

@@ -206,6 +206,46 @@ class HttpDownload:
             raise HttpDownloadError(f"Failed to fetch {url}: {exc}") from exc
 
     @staticmethod
+    def head_size(
+        url: str,
+        timeout: int = 10,
+        use_cache: bool = True,
+        cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
+    ) -> int | None:
+        """Get remote file size via HEAD request with optional caching.
+
+        Args:
+            url: The URL to probe.
+            timeout: Request timeout in seconds.
+            use_cache: If True, cache the size and serve from cache when valid.
+            cache_ttl_seconds: Time-to-live for cached sizes.
+
+        Returns:
+            Content-Length in bytes, or None if unavailable.
+        """
+        if use_cache:
+            cache_file = HttpCache._cache_path(url)
+            if HttpCache.is_valid(cache_file, cache_ttl_seconds):
+                cached = HttpCache.read(cache_file)
+                if cached:
+                    return int(cached.decode())
+                return None
+
+        req = Request(url, method="HEAD", headers={"User-Agent": HTTP_USER_AGENT})
+
+        try:
+            with HttpDownload._urlopen(req, timeout=timeout) as response:
+                size = HttpDownload._parse_content_length(response.headers)
+                if use_cache:
+                    cache_file = HttpCache._cache_path(url)
+                    HttpCache.write(
+                        cache_file, str(size).encode() if size is not None else b""
+                    )
+                return size
+        except Exception:
+            return None
+
+    @staticmethod
     def read_raw_content(
         url: str,
         timeout: int = 30,
