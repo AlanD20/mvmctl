@@ -27,8 +27,8 @@ DEFAULTS: dict[str, object] = {
     "network": {
         "defaults": {
             "name": "default",
-            "subnet": "172.35.0.0/24",
-            "ipv4_gateway": "172.35.0.1",
+            "subnet": "172.27.0.0/24",
+            "ipv4_gateway": "172.27.0.1",
         },
     },
     "vm": {
@@ -147,9 +147,21 @@ DEFAULTS: dict[str, object] = {
             "sudoers_drop_in_template": "/etc/sudoers.d/{cli_name}",
             "iptables_rules_v4": "/etc/iptables/rules.v4",
             "iptables_chains": [
-                {"name": "MVM-FORWARD", "table": "filter", "jump_from": "FORWARD"},
-                {"name": "MVM-POSTROUTING", "table": "nat", "jump_from": "POSTROUTING"},
-                {"name": "MVM-NOCLOUDNET-INPUT", "table": "filter", "jump_from": "INPUT"},
+                {
+                    "name": "MVM-FORWARD",
+                    "table": "filter",
+                    "jump_from": "FORWARD",
+                },
+                {
+                    "name": "MVM-POSTROUTING",
+                    "table": "nat",
+                    "jump_from": "POSTROUTING",
+                },
+                {
+                    "name": "MVM-NOCLOUDNET-INPUT",
+                    "table": "filter",
+                    "jump_from": "INPUT",
+                },
             ],
         },
     },

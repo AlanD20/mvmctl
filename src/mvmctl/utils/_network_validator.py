@@ -117,7 +117,9 @@ class NetworkValidator:
 
         if not addr.is_private:
             raise MVMError(
-                f"Invalid gateway: '{gateway}' must be a private/internal address"
+                f"Invalid gateway: '{gateway}' must be a private/internal address. "
+                f"Use a subnet from RFC1918 ranges: "
+                f"10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16"
             )
 
         network = ipaddress.IPv4Network(subnet, strict=False)

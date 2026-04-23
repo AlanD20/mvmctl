@@ -85,8 +85,8 @@ class VMExportNetworkConfig:
     """
 
     name: str | None = None  # e.g. "default"
-    subnet: str | None = None  # e.g. "172.35.0.0/24"
-    ipv4_gateway: str | None = None  # e.g. "172.35.0.1"
+    subnet: str | None = None  # e.g. "172.27.0.0/24"
+    ipv4_gateway: str | None = None  # e.g. "172.27.0.1"
     nat_gateways: str | None = None  # comma-separated gateway list
     nat_enabled: bool | None = None
     ip: str | None = None  # assigned guest IP
