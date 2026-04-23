@@ -212,6 +212,7 @@ class NetworkService:
         nat_gateways: list[str],
         *,
         subnet: str,
+        network_id: str,
     ) -> None:
         """Ensure NAT rules exist for the bridge subnet.
 
@@ -230,7 +231,7 @@ class NetworkService:
                 chain_name=IPTablesChain.MVM_POSTROUTING,
                 rule_type=IPTablesRuleType.MASQUERADE,
                 target=IPTablesTarget.ACCEPT,
-                network_id=bridge,
+                network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=subnet,
                 destination=IPTablesWildcard.ANY_CIDR,
@@ -253,7 +254,7 @@ class NetworkService:
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_OUT,
                 target=IPTablesTarget.ACCEPT,
-                network_id=bridge,
+                network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=subnet,
                 destination=IPTablesWildcard.ANY_CIDR,
@@ -278,7 +279,7 @@ class NetworkService:
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_IN,
                 target=IPTablesTarget.ACCEPT,
-                network_id=bridge,
+                network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=IPTablesWildcard.ANY_CIDR,
                 destination=subnet,

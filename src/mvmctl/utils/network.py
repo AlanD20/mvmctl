@@ -40,8 +40,17 @@ class NetworkUtils:
 
     @staticmethod
     def compute_ipv4_gateway(subnet: str) -> str:
-        """Compute default gateway IP from subnet (first usable host)."""
+        """Compute default gateway IP from subnet (first usable host).
+
+        For /31 subnets (RFC 3021), both addresses are usable hosts, so we
+        return the second address to avoid colliding with the network address
+        in validation.
+        """
         network = ipaddress.IPv4Network(subnet, strict=False)
+        if network.prefixlen == 31:
+            # RFC 3021: both addresses are usable; use the second one
+            hosts = list(network.hosts())
+            return str(hosts[1]) if len(hosts) > 1 else str(hosts[0])
         hosts_iter = iter(network.hosts())
         return str(next(hosts_iter))
 

@@ -97,6 +97,7 @@ class NetworkOperation:
                     resolved.bridge,
                     resolved.nat_gateways,
                     subnet=resolved.subnet,
+                    network_id=network_id,
                 )
         except NetworkError:
             # If infrastructure setup fails, clean up DB record
@@ -135,7 +136,7 @@ class NetworkOperation:
 
         for network in resolved.networks:
             # Check for active leases
-            lease_service = LeaseService(network.id, LeaseRepository(db))
+            lease_service = LeaseService(network, LeaseRepository(db))
             leases = lease_service.get_leases()
             active_vm_leases = [
                 lease for lease in leases if lease.vm_id is not None
@@ -216,19 +217,28 @@ class NetworkOperation:
 
     @staticmethod
     def _network_to_dict(network: NetworkItem) -> dict[str, Any]:
-        """Convert NetworkItem to dictionary for JSON output."""
+        """Convert NetworkItem to dictionary for JSON output.
+
+        Includes every field from the model.
+        """
         return {
+            "id": network.id,
             "name": network.name,
             "subnet": network.subnet,
-            "ipv4_gateway": network.ipv4_gateway,
             "bridge": network.bridge,
-            "nat_enabled": network.nat_enabled,
+            "ipv4_gateway": network.ipv4_gateway,
             "bridge_active": network.bridge_active,
+            "nat_enabled": network.nat_enabled,
             "is_default": network.is_default,
+            "is_present": network.is_present,
             "created_at": network.created_at,
             "updated_at": network.updated_at,
+            "full_name": network.full_name,
+            "nat_gateways": network.nat_gateways_list or [],
             "leases": [
                 {
+                    "id": lease.id,
+                    "network_id": lease.network_id,
                     "vm_id": lease.vm_id,
                     "ipv4": lease.ipv4,
                     "leased_at": lease.leased_at,
@@ -236,7 +246,30 @@ class NetworkOperation:
                 }
                 for lease in (network.leases or [])
             ],
-            "nat_gateways": network.nat_gateways_list or [],
+            "iptables_rules": [
+                {
+                    "id": rule.id,
+                    "table_name": rule.table_name.value,
+                    "chain_name": rule.chain_name,
+                    "rule_type": rule.rule_type.value,
+                    "protocol": rule.protocol.value,
+                    "source": rule.source,
+                    "destination": rule.destination,
+                    "in_interface": rule.in_interface,
+                    "out_interface": rule.out_interface,
+                    "target": rule.target.value,
+                    "sport": rule.sport,
+                    "dport": rule.dport,
+                    "network_id": rule.network_id,
+                    "is_active": rule.is_active,
+                    "network_name": rule.network_name,
+                    "comment_tag": rule.comment_tag,
+                    "command_string": rule.command_string,
+                    "created_at": rule.created_at,
+                    "last_verified_at": rule.last_verified_at,
+                }
+                for rule in (network.iptables_rules or [])
+            ],
         }
 
     @staticmethod
@@ -340,6 +373,7 @@ class NetworkOperation:
                     default_network.bridge,
                     default_network.nat_gateways_list,
                     subnet=default_network.subnet,
+                    network_id=default_network.id,
                 )
         except NetworkError:
             logger.debug("Failed to materialize default network bridge/NAT")
@@ -423,6 +457,7 @@ class NetworkOperation:
                         network.bridge,
                         network.nat_gateways_list,
                         subnet=network.subnet,
+                        network_id=network.id,
                     )
                 repo.update_bridge_active(network.id, True)
                 restored.append(f"Restored network '{network.name}'")

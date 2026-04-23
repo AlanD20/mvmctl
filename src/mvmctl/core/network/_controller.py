@@ -40,6 +40,6 @@ class NetworkController:
     def get_leases(self) -> list[NetworkLeaseItem]:
         """Get all IP leases for this network."""
         lease_service = LeaseService(
-            self._network.id, LeaseRepository(self._repo._db)
+            self._network, LeaseRepository(self._repo._db)
         )
         return lease_service.get_leases()

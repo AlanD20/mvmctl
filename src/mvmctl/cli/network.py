@@ -22,6 +22,7 @@ from mvmctl.utils.console import (
     print_success,
     print_table,
 )
+from mvmctl.utils.full_hash import HashGenerator
 from mvmctl.utils.network import NetworkUtils
 
 if TYPE_CHECKING:
@@ -58,9 +59,9 @@ def network_ls(
     if json_output:
         data = [
             {
+                "id": n.id,
                 "name": n.name,
                 "subnet": n.subnet,
-                "ipv4_gateway": n.ipv4_gateway,
                 "bridge": n.bridge,
                 "nat_enabled": n.nat_enabled,
                 "created_at": n.created_at,
@@ -81,9 +82,9 @@ def network_ls(
         vm_count = len(n.leases) if n.leases else 0
         rows.append(
             [
+                HashGenerator.shorten(n.id),
                 name_col,
                 n.subnet,
-                n.ipv4_gateway,
                 n.bridge,
                 "yes" if n.nat_enabled else "no",
                 str(vm_count),
@@ -92,9 +93,9 @@ def network_ls(
         )
     print_table(
         columns=[
+            "ID",
             "Name",
             "Network",
-            "IPv4 Gateway",
             "Bridge",
             "NAT",
             "VMs",

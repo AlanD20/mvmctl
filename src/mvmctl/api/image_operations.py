@@ -351,39 +351,28 @@ class ImageOperation:
 
     @staticmethod
     def _image_to_dict(img: ImageItem) -> dict[str, Any]:
-        """Convert ImageItem to dictionary for JSON output."""
-        from mvmctl.utils.common import CommonUtils
+        """Convert ImageItem to dictionary for JSON output.
 
+        Includes every field from the model (except deleted_at).
+        """
         return {
             "id": img.id,
-            "name": img.os_name,
             "os_slug": img.os_slug,
+            "os_name": img.os_name,
             "arch": img.arch,
             "path": img.path,
             "fs_type": img.fs_type,
-            "fs_uuid": img.fs_uuid or "-",
-            "is_default": "Yes" if img.is_default else "No",
-            "is_present": img.is_present,
+            "fs_uuid": img.fs_uuid,
+            "compressed_size": img.compressed_size,
+            "original_size": img.original_size,
+            "compression_ratio": img.compression_ratio,
+            "compressed_format": img.compressed_format,
+            "minimum_rootfs_size_mib": img.minimum_rootfs_size_mib,
             "pulled_at": img.pulled_at,
+            "is_default": img.is_default,
+            "is_present": img.is_present,
             "created_at": img.created_at,
             "updated_at": img.updated_at,
-            "original_size": CommonUtils.format_bytes_human_readable(
-                img.original_size
-            )
-            if img.original_size
-            else "-",
-            "compressed_size": CommonUtils.format_bytes_human_readable(
-                img.compressed_size
-            )
-            if img.compressed_size
-            else "-",
-            "compression_ratio": f"{img.compression_ratio:.2f}x"
-            if img.compression_ratio
-            else "-",
-            "compressed_format": img.compressed_format or "-",
-            "minimum_rootfs_size": f"{img.minimum_rootfs_size_mib} MiB"
-            if img.minimum_rootfs_size_mib
-            else "-",
         }
 
     @staticmethod

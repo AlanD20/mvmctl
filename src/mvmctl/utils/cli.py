@@ -35,6 +35,8 @@ def handle_errors(func: F) -> F:
         logger = get_logger(func.__module__)
         try:
             return func(*args, **kwargs)
+        except typer.Exit:
+            raise
         except MVMError as e:
             _print_error(str(e))
             raise typer.Exit(code=1) from e

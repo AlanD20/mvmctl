@@ -264,6 +264,7 @@ class VMCreateContext:
                 self.resolved.network.bridge,
                 self.resolved.network.nat_gateways_list,
                 subnet=self.resolved.network.subnet,
+                network_id=self.resolved.network.id,
             )
 
         net_service.ensure_tap(self.tap_name, self.resolved.network.bridge)
