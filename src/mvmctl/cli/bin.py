@@ -159,7 +159,10 @@ def bin_fetch(
     raise typer.Exit(code=0)
 
 
-@bin_app.command(name="rm")
+@bin_app.command(
+    name="rm",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
 def bin_rm(
     identifiers: Optional[list[str]] = typer.Argument(
         None, help="Binary ID(s) to remove (6-char prefix accepted)"

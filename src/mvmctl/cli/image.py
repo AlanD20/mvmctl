@@ -260,7 +260,10 @@ def image_set_default(
     print_success(f"Default image set to: {prefix}")
 
 
-@image_app.command(name="rm")
+@image_app.command(
+    name="rm",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
 def image_rm(
     prefixes: Optional[list[str]] = typer.Argument(
         None, help="Image ID prefixes to remove"
