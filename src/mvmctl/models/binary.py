@@ -19,3 +19,4 @@ class BinaryItem:
     is_present: bool
     created_at: str
     updated_at: str
+    deleted_at: str | None = None

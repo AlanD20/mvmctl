@@ -55,9 +55,10 @@ CREATE TABLE binaries (
     ci_version TEXT,
     path TEXT NOT NULL,
     is_default INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
-    is_present INTEGER DEFAULT 1 NOT NULL,  -- Boolean: 0=file missing, 1=file exists
+    is_present INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0=file missing, 1=file exists
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP NULL
 );
 CREATE INDEX idx_binaries_name ON binaries(name);
 CREATE INDEX idx_binaries_version ON binaries(version);

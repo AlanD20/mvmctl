@@ -100,17 +100,17 @@ class BinaryOperation:
         return BinaryFetchResult(result=binaries)
 
     @staticmethod
-    def remove(inputs: BinaryInput) -> None:
+    def remove(inputs: BinaryInput, force: bool = False) -> None:
         """Remove binaries by ID (canonical method).
 
         Flow:
         1. Resolve inputs via BinaryRequest
-        2. For each binary:
-           a. Remove file via BinaryService.remove(name, version)
-           b. Delete from DB via BinaryRepository.delete(binary_id)
+        2. Delegate to BinaryService.remove_many() which handles
+           VM reference checks and soft/hard delete per binary.
 
         Args:
             inputs: BinaryInput with identifiers to remove.
+            force: If True, remove even if referenced by VMs.
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -120,24 +120,29 @@ class BinaryOperation:
         resolved = request.resolve()
 
         service = BinaryService(repo=repo)
-        removed = service.remove_many(resolved.binaries)
-        for binary in removed:
+        service.remove_many(resolved.binaries, force=force)
+
+        for binary in resolved.binaries:
             AuditLog.log(
                 "binary.remove",
-                changes={"id": binary.id, "name": binary.name},
+                changes={
+                    "id": binary.id,
+                    "name": binary.name,
+                    "version": binary.full_version,
+                },
             )
 
     @staticmethod
-    def remove_by_version(version: str) -> None:
+    def remove_by_version(version: str, force: bool = False) -> None:
         """Remove both firecracker and jailer for a version (convenience).
 
         Flow:
         1. Resolve to firecracker and jailer BinaryItems for version
-        2. Call BinaryService.remove() for each
-        3. Delete both from DB
+        2. Delegate to BinaryService.remove_many()
 
         Args:
             version: Version string to remove (e.g., "1.15.0").
+            force: If True, remove even if referenced by VMs.
         """
         db = Database()
         repo = BinaryRepository(db)
@@ -145,22 +150,28 @@ class BinaryOperation:
 
         normalized = version.removeprefix("v")
 
-        service = BinaryService(repo=repo)
+        binaries_to_remove: list[BinaryItem] = []
         for name in ("firecracker", "jailer"):
             try:
                 binary = resolver.by_name_version(name, normalized)
-                service.remove(binary)
+                binaries_to_remove.append(binary)
+            except BinaryNotFoundError:
+                logger.debug(
+                    "Binary %s v%s not found in DB, skipping", name, normalized
+                )
+
+        if binaries_to_remove:
+            service = BinaryService(repo=repo)
+            service.remove_many(binaries_to_remove, force=force)
+
+            for binary in binaries_to_remove:
                 AuditLog.log(
                     "binary.remove",
                     changes={
                         "id": binary.id,
-                        "name": name,
+                        "name": binary.name,
                         "version": normalized,
                     },
-                )
-            except BinaryNotFoundError:
-                logger.debug(
-                    "Binary %s v%s not found in DB, skipping", name, normalized
                 )
 
     @staticmethod

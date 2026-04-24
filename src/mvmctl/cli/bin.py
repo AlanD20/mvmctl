@@ -167,11 +167,14 @@ def bin_rm(
         "--version",
         help="Remove both firecracker and jailer for this version",
     ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Remove even if referenced by VMs"
+    ),
 ) -> None:
     """Remove one or more binaries. Use --version to remove by version pair."""
     if version is not None:
         # Remove by version
-        BinaryOperation.remove_by_version(version)
+        BinaryOperation.remove_by_version(version, force=force)
         print_success(f"Removed binaries for v{version}")
 
     effective_ids: list[str] = list(identifiers) if identifiers else []
@@ -180,7 +183,7 @@ def bin_rm(
         raise typer.Exit(code=1)
 
     inputs = BinaryInput(id=effective_ids)
-    BinaryOperation.remove(inputs)
+    BinaryOperation.remove(inputs, force=force)
     print_success(f"Removed binary(s): {' '.join(effective_ids)}")
 
 

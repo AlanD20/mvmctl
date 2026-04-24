@@ -20,7 +20,7 @@ from mvmctl.constants import (
     FIRECRACKER_GITHUB_RELEASES_API_URL,
 )
 from mvmctl.core.binary._repository import BinaryRepository
-from mvmctl.exceptions import AssetNotFoundError, BinaryError
+from mvmctl.exceptions import BinaryError
 from mvmctl.models.binary import BinaryItem
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.full_hash import HashGenerator
@@ -227,40 +227,40 @@ class BinaryService:
             ),
         ]
 
-    def remove(self, binary: BinaryItem) -> BinaryItem:
+    def remove(self, binary: BinaryItem, *, force: bool = False) -> BinaryItem:
         """Remove a specific binary by item.
+
+        Delegates to BinaryController for VM reference checks and
+        soft/hard delete logic.
 
         Args:
             binary: The BinaryItem to remove.
+            force: If True, remove even if referenced by VMs.
 
         Returns:
             The removed BinaryItem.
-
-        Raises:
-            AssetNotFoundError: If the binary is not found locally.
         """
-        path = Path(binary.path)
-        if not path.exists():
-            raise AssetNotFoundError(
-                f"Binary '{binary.name}' version '{binary.version}' not found locally. "
-                f"Run 'mvm bin fetch {binary.version}' to download it."
-            )
-        path.unlink(missing_ok=True)
-        self._repo.delete(binary.id)
+        from mvmctl.core.binary._controller import BinaryController
+
+        controller = BinaryController(binary, self._repo)
+        controller.remove(force=force)
         return binary
 
-    def remove_many(self, binaries: list[BinaryItem]) -> list[BinaryItem]:
+    def remove_many(
+        self, binaries: list[BinaryItem], *, force: bool = False
+    ) -> list[BinaryItem]:
         """Remove multiple binaries.
 
         Args:
             binaries: List of BinaryItem to remove.
+            force: If True, remove even if referenced by VMs.
 
         Returns:
             The removed BinaryItem list.
         """
         deleted: list[BinaryItem] = []
         for binary in binaries:
-            self.remove(binary)
+            self.remove(binary, force=force)
             deleted.append(binary)
         return deleted
 

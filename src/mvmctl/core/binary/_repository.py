@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
 from mvmctl.models.binary import BinaryItem
+from mvmctl.models.vm import VMInstanceItem
 
 
 class BinaryRepository:
@@ -21,7 +22,8 @@ class BinaryRepository:
         """Return a binary by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM binaries WHERE id = ?", (binary_id,)
+                "SELECT * FROM binaries WHERE id = ? AND deleted_at IS NULL",
+                (binary_id,),
             ).fetchone()
         if row is None:
             return None
@@ -31,15 +33,16 @@ class BinaryRepository:
         """Return all binaries whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM binaries WHERE id LIKE ?", (f"{prefix}%",)
+                "SELECT * FROM binaries WHERE id LIKE ? AND deleted_at IS NULL",
+                (f"{prefix}%",),
             ).fetchall()
         return [BinaryItem(**dict(row)) for row in rows]
 
     def list_all(self) -> list[BinaryItem]:
-        """Return all binaries."""
+        """Return all non-deleted binaries."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM binaries ORDER BY created_at"
+                "SELECT * FROM binaries WHERE deleted_at IS NULL ORDER BY created_at"
             ).fetchall()
         return [BinaryItem(**dict(row)) for row in rows]
 
@@ -47,7 +50,7 @@ class BinaryRepository:
         """Return all binaries with a given name."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM binaries WHERE name = ? ORDER BY created_at",
+                "SELECT * FROM binaries WHERE name = ? AND deleted_at IS NULL ORDER BY created_at",
                 (name,),
             ).fetchall()
         return [BinaryItem(**dict(row)) for row in rows]
@@ -58,7 +61,7 @@ class BinaryRepository:
         """Return a binary by its name and version, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM binaries WHERE name = ? AND version = ? LIMIT 1",
+                "SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL LIMIT 1",
                 (name, version),
             ).fetchone()
         if row is None:
@@ -72,8 +75,8 @@ class BinaryRepository:
                 """
                 INSERT INTO binaries (
                     id, name, version, full_version, ci_version, path,
-                    is_default, is_present, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_default, is_present, created_at, updated_at, deleted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     version = excluded.version,
@@ -82,7 +85,8 @@ class BinaryRepository:
                     path = excluded.path,
                     is_default = excluded.is_default,
                     is_present = excluded.is_present,
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = CURRENT_TIMESTAMP,
+                    deleted_at = excluded.deleted_at
                 """,
                 (
                     binary.id,
@@ -95,6 +99,7 @@ class BinaryRepository:
                     int(binary.is_present),
                     binary.created_at,
                     binary.updated_at,
+                    binary.deleted_at,
                 ),
             )
 
@@ -118,12 +123,13 @@ class BinaryRepository:
         with self._db.connect() as conn:
             conn.execute("BEGIN")
             conn.execute(
-                "UPDATE binaries SET is_default = 0 WHERE name = ?", (name,)
+                "UPDATE binaries SET is_default = 0 WHERE name = ? AND deleted_at IS NULL",
+                (name,),
             )
             conn.execute(
                 """
                 UPDATE binaries SET is_default = 1, updated_at = CURRENT_TIMESTAMP
-                WHERE name = ? AND version = ?
+                WHERE name = ? AND version = ? AND deleted_at IS NULL
                 """,
                 (name, version),
             )
@@ -133,12 +139,39 @@ class BinaryRepository:
         """Return the default binary entry for a given name, or None."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM binaries WHERE name = ? AND is_default = 1 LIMIT 1",
+                "SELECT * FROM binaries WHERE name = ? AND is_default = 1 AND deleted_at IS NULL LIMIT 1",
                 (name,),
             ).fetchone()
         if row is None:
             return None
         return BinaryItem(**dict(row))
+
+    def soft_delete(self, binary_id: str) -> None:
+        """Soft-delete a binary by setting deleted_at and is_present=0."""
+        from datetime import datetime, timezone
+
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._db.connect() as conn:
+            conn.execute(
+                "UPDATE binaries SET deleted_at = ?, is_present = 0 WHERE id = ?",
+                (now, binary_id),
+            )
+
+    def query_vms_by_binary(self, binary_id: str) -> list[VMInstanceItem]:
+        """Return all VMs that reference the given binary ID.
+
+        Args:
+            binary_id: Full binary ID to query.
+
+        Returns:
+            List of VMInstanceItem records referencing this binary.
+        """
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM vm_instances WHERE binary_id = ?",
+                (binary_id,),
+            ).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
 
     def update_many_is_present(
         self, binary_ids: list[str], is_present: bool
