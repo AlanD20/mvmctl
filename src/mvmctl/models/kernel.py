@@ -18,8 +18,10 @@ class KernelItem:
     type: str
     path: str
     is_default: bool
+    is_present: bool
     created_at: str
     updated_at: str
+    deleted_at: str | None = None
 
 
 @dataclass

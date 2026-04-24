@@ -20,10 +20,10 @@ class HashGenerator:
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod
-    def kernel(file_path: Path, version: str, arch: str) -> str:
+    def kernel(file_path: Path, version: str, arch: str, timestamp: str) -> str:
         """Generate 64-char SHA256 hash for a kernel."""
         file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-        data = f"{file_hash}:{version}:{arch}"
+        data = f"{file_hash}:{version}:{arch}:{timestamp}"
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod

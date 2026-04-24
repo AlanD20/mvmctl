@@ -21,7 +21,16 @@ from mvmctl.api.inputs._image_acquire_input import (
     ImageFetchInput,
     ImageImportInput,
 )
-from mvmctl.api.inputs._kernel_input import KernelFetchInput
+from mvmctl.api.inputs._kernel_fetch_input import (
+    KernelFetchInput,
+    KernelFetchRequest,
+    ResolvedKernelFetchRequest,
+)
+from mvmctl.api.inputs._kernel_input import (
+    KernelInput,
+    KernelRequest,
+    ResolvedKernelInput,
+)
 from mvmctl.api.inputs._key_input import KeyCreateInput
 from mvmctl.api.inputs._network_create_input import (
     NetworkCreateInput,
@@ -65,6 +74,9 @@ __all__ = [
     "ImageFetchInput",
     "ImageImportInput",
     "KernelFetchInput",
+    "KernelFetchRequest",
+    "KernelInput",
+    "KernelRequest",
     "KeyCreateInput",
     "NetworkCreateInput",
     "NetworkCreateRequest",
@@ -72,6 +84,8 @@ __all__ = [
     "NetworkRequest",
     "ResolvedBinaryFetchInput",
     "ResolvedBinaryInput",
+    "ResolvedKernelFetchRequest",
+    "ResolvedKernelInput",
     "ResolvedNetworkCreateRequest",
     "ResolvedNetworkInput",
     "ResolvedVMCreateInput",

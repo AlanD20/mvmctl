@@ -8,7 +8,7 @@ kernel-official:
   config_fragments:
     - https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config
   output_name: vmlinux-official
-  build_dir: /tmp/mvm/kernel-build
+  build_dir: /tmp/mvmctl/kernel-build
   parallel_jobs: null
   enabled_configs:
     # Filesystems
@@ -63,8 +63,8 @@ kernel-firecracker:
   source: "https://s3.amazonaws.com/spec.ccfc.min"
   list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-{version}&list-type=2"
   config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-{version}.config"
-  output_name: vmlinux-fc
-  build_dir: /tmp/mvm/kernel-build
+  output_name: vmlinux-firecracker
+  build_dir: /tmp/mvmctl/kernel-build
   sha256: null
   sha256_url: null
   config_fragments: []
