@@ -76,9 +76,10 @@ def network_ls(
     rows = []
     for n in networks:
         is_default = n.is_default
-        name_col = CommonUtils._get_combined_marker(
-            is_default, not n.is_present
-        ) + n.name
+        name_col = (
+            CommonUtils._get_combined_marker(is_default, not n.is_present)
+            + n.name
+        )
         vm_count = len(n.leases) if n.leases else 0
         rows.append(
             [
@@ -239,22 +240,6 @@ def network_create(
 
 
 @network_app.command(
-    name="remove",
-    hidden=True,
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-)
-@handle_errors
-def network_remove(
-    ctx: typer.Context,
-    name: str | None = typer.Argument(None, help="Network name"),
-) -> None:
-    """Remove a named network."""
-    name = CliUtils.check_name_arg(ctx, name)
-    NetworkOperation.remove(NetworkInput(name=[name]))
-    print_success(f"Network '{name}' removed")
-
-
-@network_app.command(
     name="rm",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
@@ -262,9 +247,14 @@ def network_remove(
 def network_rm(
     ctx: typer.Context,
     name: str | None = typer.Argument(None, help="Network name"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Remove even if referenced by VMs"
+    ),
 ) -> None:
     """Alias for remove."""
-    network_remove(ctx=ctx, name=name)
+    name = CliUtils.check_name_arg(ctx, name)
+    NetworkOperation.remove(NetworkInput(name=[name]), force=force)
+    print_success(f"Network '{name}' removed")
 
 
 @network_app.command(

@@ -182,7 +182,7 @@ class NetworkService:
                 logger.debug("Failed to enable IP forwarding", exc_info=True)
                 raise NetworkError("Failed to enable IP forwarding") from e
 
-    def remove_bridge(self, bridge: str) -> None:
+    def remove_bridge(self, bridge: str, *, network_id: str) -> None:
         """Remove the bridge interface and clean up attached TAPs.
 
         Idempotent operation - safe to call multiple times.
@@ -191,11 +191,12 @@ class NetworkService:
 
         Args:
             bridge: Bridge interface name to remove.
+            network_id: Network UUID for iptables rule tracking.
         """
         attached_taps = NetworkUtils.get_bridge_taps(bridge)
         for tap in attached_taps:
             logger.debug("Removing attached TAP %s from bridge %s", tap, bridge)
-            self.remove_tap(tap, bridge)
+            self.remove_tap(tap, bridge, network_id=network_id)
 
         try:
             NetworkUtils._run_batch(
@@ -312,6 +313,7 @@ class NetworkService:
         nat_gateways: list[str] | None = None,
         *,
         subnet: str | None = None,
+        network_id: str,
     ) -> None:
         """Remove NAT (MASQUERADE + FORWARD) rules for the bridge.
 
@@ -322,6 +324,7 @@ class NetworkService:
             bridge: Bridge interface name (also used as network name to query DB).
             subnet: Subnet CIDR (e.g., "10.0.0.0/24"). If None, queries from database.
             nat_gateways: List of gateway interfaces. If None, queries from database.
+            network_id: Network UUID for iptables rule tracking.
         """
         from mvmctl.core.network._resolver import NetworkResolver
 
@@ -366,7 +369,7 @@ class NetworkService:
                 chain_name=IPTablesChain.MVM_POSTROUTING,
                 rule_type=IPTablesRuleType.MASQUERADE,
                 target=IPTablesTarget.ACCEPT,
-                network_id=bridge,
+                network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=effective_subnet,
                 destination=IPTablesWildcard.ANY_CIDR,
@@ -384,7 +387,7 @@ class NetworkService:
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_OUT,
                 target=IPTablesTarget.ACCEPT,
-                network_id=bridge,
+                network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=effective_subnet,
                 destination=IPTablesWildcard.ANY_CIDR,
@@ -402,7 +405,7 @@ class NetworkService:
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_IN,
                 target=IPTablesTarget.ACCEPT,
-                network_id=bridge,
+                network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=IPTablesWildcard.ANY_CIDR,
                 destination=effective_subnet,
@@ -422,7 +425,7 @@ class NetworkService:
             effective_subnet,
         )
 
-    def ensure_tap(self, tap: str, bridge: str) -> None:
+    def ensure_tap(self, tap: str, bridge: str, *, network_id: str) -> None:
         """Ensure a TAP device exists and is attached to the bridge with iptables rules.
 
         Idempotent operation - safe to call multiple times.
@@ -435,6 +438,11 @@ class NetworkService:
         Rule types are named from the bridge's perspective:
         - "OUT" = leaving the bridge toward the TAP
         - "IN" = entering the bridge from the TAP
+
+        Args:
+            tap: TAP device name.
+            bridge: Bridge interface name.
+            network_id: Network UUID for iptables rule tracking.
         """
         if NetworkUtils.tap_exists(tap):
             current_bridge = NetworkUtils.get_tap_bridge(tap)
@@ -499,7 +507,7 @@ class NetworkService:
             chain_name=IPTablesChain.MVM_FORWARD,
             rule_type=IPTablesRuleType.FORWARD_OUT,
             target=IPTablesTarget.ACCEPT,
-            network_id=bridge,
+            network_id=network_id,
             protocol=IPTablesProtocol.ALL,
             source=IPTablesWildcard.ANY_CIDR,
             destination=IPTablesWildcard.ANY_CIDR,
@@ -523,7 +531,7 @@ class NetworkService:
             chain_name=IPTablesChain.MVM_FORWARD,
             rule_type=IPTablesRuleType.FORWARD_IN,
             target=IPTablesTarget.ACCEPT,
-            network_id=bridge,
+            network_id=network_id,
             protocol=IPTablesProtocol.ALL,
             source=IPTablesWildcard.ANY_CIDR,
             destination=IPTablesWildcard.ANY_CIDR,
@@ -543,7 +551,9 @@ class NetworkService:
                 f"Failed to add FORWARD rule for TAP {tap} to bridge {bridge}: {result.error_message}"
             )
 
-    def remove_tap(self, tap: str, bridge: str | None = None) -> None:
+    def remove_tap(
+        self, tap: str, bridge: str | None = None, *, network_id: str
+    ) -> None:
         """Remove a TAP device and its iptables forwarding rules.
 
         Idempotent operation - safe to call multiple times.
@@ -552,6 +562,7 @@ class NetworkService:
         Args:
             tap: TAP device name to remove.
             bridge: Bridge name the TAP is attached to. If None, attempts to detect.
+            network_id: Network UUID for iptables rule tracking.
         """
         if not NetworkUtils.tap_exists(tap):
             logger.debug("TAP device %s does not exist, skipping removal", tap)
@@ -571,7 +582,7 @@ class NetworkService:
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_OUT,
                 target=IPTablesTarget.ACCEPT,
-                network_id=effective_bridge,
+                network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=IPTablesWildcard.ANY_CIDR,
                 destination=IPTablesWildcard.ANY_CIDR,
@@ -589,7 +600,7 @@ class NetworkService:
                 chain_name=IPTablesChain.MVM_FORWARD,
                 rule_type=IPTablesRuleType.FORWARD_IN,
                 target=IPTablesTarget.ACCEPT,
-                network_id=effective_bridge,
+                network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=IPTablesWildcard.ANY_CIDR,
                 destination=IPTablesWildcard.ANY_CIDR,
@@ -610,6 +621,56 @@ class NetworkService:
             raise NetworkError(f"Failed to remove TAP {tap}") from e
 
         logger.info("TAP device %s removed", tap)
+
+    def remove(self, network: NetworkItem, *, force: bool = False) -> None:
+        """Remove a network's infrastructure and database record.
+
+        1. Tear down NAT rules if enabled
+        2. Remove bridge
+        3. Delegate DB removal to NetworkController
+
+        Args:
+            network: The NetworkItem to remove.
+            force: If True, remove even if referenced by VMs.
+
+        Raises:
+            NetworkError: If infrastructure teardown fails.
+        """
+        from mvmctl.core.network._controller import NetworkController
+
+        # 1. Tear down NAT
+        if network.nat_enabled:
+            try:
+                self.remove_nat(
+                    network.bridge,
+                    network.nat_gateways_list,
+                    subnet=network.subnet,
+                    network_id=network.id,
+                )
+            except NetworkError as e:
+                logger.debug("NAT teardown for %s: %s", network.bridge, e)
+
+        # 2. Remove bridge
+        try:
+            self.remove_bridge(network.bridge, network_id=network.id)
+        except NetworkError as e:
+            logger.debug("Bridge teardown for %s: %s", network.bridge, e)
+
+        # 3. Delegate DB removal to controller
+        controller = NetworkController(network, self._repo)
+        controller.remove(force=force)
+
+    def remove_many(
+        self, networks: list[NetworkItem], *, force: bool = False
+    ) -> None:
+        """Remove multiple networks.
+
+        Args:
+            networks: List of NetworkItem to remove.
+            force: If True, remove even if referenced by VMs.
+        """
+        for network in networks:
+            self.remove(network, force=force)
 
 
 __all__ = ["NetworkService"]

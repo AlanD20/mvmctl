@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from mvmctl.core._internal._db import Database
 from mvmctl.core.network._controller import NetworkController
-from mvmctl.core.network._lease_service import LeaseService
-from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
+from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._service import NetworkService
 from mvmctl.exceptions import NetworkError, NetworkNotFoundError
 from mvmctl.models.network import NetworkItem
@@ -119,56 +118,30 @@ class NetworkOperation:
         return NetworkCreateResult(result=updated_item)
 
     @staticmethod
-    def remove(inputs: NetworkInput) -> None:
+    def remove(inputs: NetworkInput, force: bool = False) -> None:
         """Remove a network.
 
         Args:
             inputs: NetworkInput with name/id identifiers.
+            force: If True, remove even if referenced by VMs.
         """
         from mvmctl.api.inputs._network_input import NetworkRequest
 
         db = Database()
         repo = NetworkRepository(db)
+        service = NetworkService(repo)
 
         # Resolve identifiers
         request = NetworkRequest(inputs=inputs, db=db)
         resolved = request.resolve()
 
+        service.remove_many(resolved.networks, force=force)
+
         for network in resolved.networks:
-            # Check for active leases
-            lease_service = LeaseService(network, LeaseRepository(db))
-            leases = lease_service.get_leases()
-            active_vm_leases = [
-                lease for lease in leases if lease.vm_id is not None
-            ]
-            # IMPROVEMENTS: maybe handle force to delete all related VMs
-            if active_vm_leases:
-                raise NetworkError(
-                    f"Network '{network.name}' has {len(active_vm_leases)} active VM leases. "
-                    f"Remove the VMs first."
-                )
-
-            # Teardown infrastructure
-            service = NetworkService(repo)
-            if network.nat_enabled:
-                try:
-                    service.remove_nat(
-                        network.bridge,
-                        network.nat_gateways_list,
-                        subnet=network.subnet,
-                    )
-                except NetworkError as e:
-                    logger.debug("NAT teardown for %s: %s", network.bridge, e)
-
-            try:
-                service.remove_bridge(network.bridge)
-            except NetworkError as e:
-                logger.debug("Bridge teardown for %s: %s", network.bridge, e)
-
-            # Delete from DB
-            repo.delete(network.id)
-
-            AuditLog.log("network.remove", changes={"name": network.name})
+            AuditLog.log(
+                "network.remove",
+                changes={"id": network.id, "name": network.name},
+            )
 
     @staticmethod
     def list_all() -> list[NetworkItem]:
@@ -340,7 +313,9 @@ class NetworkOperation:
         controller = NetworkController(resolved.networks[0], repo)
         controller.set_default()
 
-        AuditLog.log("network.set_default", changes={"name": resolved.networks[0].name})
+        AuditLog.log(
+            "network.set_default", changes={"name": resolved.networks[0].name}
+        )
 
     @staticmethod
     def ensure_default() -> NetworkItem:

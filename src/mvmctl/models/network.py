@@ -73,6 +73,7 @@ class NetworkItem:
     is_present: bool
     created_at: str
     updated_at: str
+    deleted_at: str | None = None
 
     full_name: str | None = None
     nat_gateways: str | None = None

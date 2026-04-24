@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mvmctl.core._internal._db import Database
 from mvmctl.models.network import NetworkItem, NetworkLeaseItem
+from mvmctl.models.vm import VMInstanceItem
 
 
 class NetworkRepository:
@@ -21,7 +22,8 @@ class NetworkRepository:
         """Return a network by its full 64-char ID, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM networks WHERE id = ?", (network_id,)
+                "SELECT * FROM networks WHERE id = ? AND deleted_at IS NULL",
+                (network_id,),
             ).fetchone()
         if row is None:
             return None
@@ -31,7 +33,8 @@ class NetworkRepository:
         """Return a network by name, or None if not found."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM networks WHERE name = ?", (name,)
+                "SELECT * FROM networks WHERE name = ? AND deleted_at IS NULL",
+                (name,),
             ).fetchone()
         if row is None:
             return None
@@ -41,16 +44,16 @@ class NetworkRepository:
         """Return all networks whose ID starts with prefix."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM networks WHERE id LIKE ?",
+                "SELECT * FROM networks WHERE id LIKE ? AND deleted_at IS NULL",
                 (f"{prefix}%",),
             ).fetchall()
         return [NetworkItem(**dict(row)) for row in rows]
 
     def list_all(self) -> list[NetworkItem]:
-        """Return all networks."""
+        """Return all non-deleted networks."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM networks ORDER BY created_at"
+                "SELECT * FROM networks WHERE deleted_at IS NULL ORDER BY created_at"
             ).fetchall()
         return [NetworkItem(**dict(row)) for row in rows]
 
@@ -62,8 +65,8 @@ class NetworkRepository:
                 INSERT INTO networks (
                     id, name, subnet, bridge, ipv4_gateway, bridge_active,
                     nat_gateways, nat_enabled, is_default, is_present,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, deleted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     subnet = excluded.subnet,
                     bridge = excluded.bridge,
@@ -73,7 +76,8 @@ class NetworkRepository:
                     nat_enabled = excluded.nat_enabled,
                     is_default = excluded.is_default,
                     is_present = excluded.is_present,
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = CURRENT_TIMESTAMP,
+                    deleted_at = excluded.deleted_at
                 """,
                 (
                     network.id,
@@ -88,6 +92,7 @@ class NetworkRepository:
                     int(network.is_present),
                     network.created_at,
                     network.updated_at,
+                    network.deleted_at,
                 ),
             )
 
@@ -103,9 +108,12 @@ class NetworkRepository:
         """Set one network as default, clearing all others atomically."""
         with self._db.connect() as conn:
             conn.execute("BEGIN")
-            conn.execute("UPDATE networks SET is_default = 0")
             conn.execute(
-                "UPDATE networks SET is_default = 1 WHERE id = ?", (network_id,)
+                "UPDATE networks SET is_default = 0 WHERE deleted_at IS NULL"
+            )
+            conn.execute(
+                "UPDATE networks SET is_default = 1 WHERE id = ? AND deleted_at IS NULL",
+                (network_id,),
             )
             conn.execute("COMMIT")
 
@@ -113,7 +121,7 @@ class NetworkRepository:
         """Return the default network entry, or None if not set."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM networks WHERE is_default = 1 LIMIT 1"
+                "SELECT * FROM networks WHERE is_default = 1 AND deleted_at IS NULL LIMIT 1"
             ).fetchone()
         if row is None:
             return None
@@ -131,6 +139,33 @@ class NetworkRepository:
                 f"UPDATE networks SET is_present = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
                 [int(is_present)] + list(network_ids),
             )
+
+    def soft_delete(self, network_id: str) -> None:
+        """Soft-delete a network by setting deleted_at and is_present=0."""
+        from datetime import datetime, timezone
+
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._db.connect() as conn:
+            conn.execute(
+                "UPDATE networks SET deleted_at = ?, is_present = 0 WHERE id = ?",
+                (now, network_id),
+            )
+
+    def query_vms_by_network(self, network_id: str) -> list[VMInstanceItem]:
+        """Return all VMs that reference the given network ID.
+
+        Args:
+            network_id: Full network ID to query.
+
+        Returns:
+            List of VMInstanceItem records referencing this network.
+        """
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM vm_instances WHERE network_id = ?",
+                (network_id,),
+            ).fetchall()
+        return [VMInstanceItem(**dict(row)) for row in rows]
 
     def delete(self, network_id: str) -> None:
         """Delete a network by ID. No-op if not found."""
