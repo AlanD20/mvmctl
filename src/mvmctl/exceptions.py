@@ -201,6 +201,10 @@ class BinaryAlreadyExistsError(BinaryError):
     """Raised when a binary version already exists and re-download was not requested."""
 
 
+class SSHError(MVMError):
+    """SSH connection or configuration failure."""
+
+
 class MVMKeyError(MVMError):
     """SSH key management failure."""
 

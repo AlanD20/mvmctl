@@ -24,7 +24,6 @@ from mvmctl.exceptions import ConfigError, MVMError, VMNotFoundError
 from mvmctl.models import ConsoleInfo, ConsoleState, VMStatus
 from mvmctl.models.vm import VMInstanceItem
 from mvmctl.services.console_relay import ConsoleRelayManager
-from mvmctl.utils.audit import log_audit
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.process_signals import ProcessSignalHandler
 
@@ -234,36 +233,6 @@ class VMController:
             client.load_snapshot(mem_in, state_in, effective_resume)
         finally:
             client.close()
-
-    def ssh(
-        self, user: str, key: Path | None = None, cmd: str | None = None
-    ) -> int:
-        """Open SSH session or execute command on the VM.
-
-        Args:
-            user: SSH user
-            key: Path to SSH private key
-            cmd: Optional command to execute
-
-        Returns:
-            Exit code from SSH session
-
-        Raises:
-            MVMError: If VM has no IP address
-        """
-        if not self._vm.ipv4:
-            raise MVMError(f"VM '{self._vm.name}' has no IP address")
-
-        log_audit("vm.ssh", f"name={self._vm.name},user={user}")
-
-        # TODO: Move to SSHSessionManager
-        return connect_to_vm(
-            ip=self._vm.ipv4,
-            user=user,
-            key_path=key,
-            command=cmd,
-            exec_mode=cmd is None,
-        )
 
     def get_logs(self, log_type: str, lines: int, follow: bool) -> list[str]:
         """View VM logs.

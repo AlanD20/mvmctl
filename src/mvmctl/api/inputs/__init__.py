@@ -51,6 +51,11 @@ from mvmctl.api.inputs._network_input import (
     NetworkRequest,
     ResolvedNetworkInput,
 )
+from mvmctl.api.inputs._ssh_input import (
+    ResolvedSSHInput,
+    SSHInput,
+    SSHRequest,
+)
 from mvmctl.api.inputs._vm_create_input import (
     CloudInitModeResolved,
     ResolvedVMCreateInput,
@@ -102,8 +107,11 @@ __all__ = [
     "ResolvedKeyInput",
     "ResolvedNetworkCreateRequest",
     "ResolvedNetworkInput",
+    "ResolvedSSHInput",
     "ResolvedVMCreateInput",
     "ResolvedVMInput",
+    "SSHInput",
+    "SSHRequest",
     "VMCreateInput",
     "VMCreateRequest",
     "VMExportBinaryConfig",
