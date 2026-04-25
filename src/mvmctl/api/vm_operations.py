@@ -9,11 +9,9 @@ It combines:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import shutil
-import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -22,13 +20,12 @@ from pathlib import Path
 from mvmctl.api.inputs import (
     ResolvedVMCreateInput,
     VMCreateRequest,
+    VMExportConfig,
 )
 from mvmctl.api.inputs._vm_create_input import VMCreateInput
 from mvmctl.api.inputs._vm_input import VMInput, VMRequest
 from mvmctl.constants import (
     DEFAULT_BRIDGE_NAME,
-    DEFAULT_FC_PID_FILENAME,
-    DEFAULT_NETWORK_NAME,
     MAX_VMS,
 )
 from mvmctl.core._internal._db import Database
@@ -38,9 +35,12 @@ from mvmctl.core.cloudinit._provisioner import (
     CloudInitProvisioner,
     CloudInitProvisionResult,
 )
+from mvmctl.core.console._controller import ConsoleController
 from mvmctl.core.host._helper import HostPrivilegeHelper
+from mvmctl.core.image._repository import ImageRepository
 from mvmctl.core.image._service import ImageService
 from mvmctl.core.network._lease_service import LeaseService
+from mvmctl.core.network._repository import LeaseRepository, NetworkRepository
 from mvmctl.core.network._service import NetworkService
 from mvmctl.core.vm._controller import VMController
 from mvmctl.core.vm._firecracker import FirecrackerSpawner
@@ -52,7 +52,6 @@ from mvmctl.exceptions import (
     VMCreateError,
     VMNotFoundError,
 )
-from mvmctl.models import VMInspectInfo
 from mvmctl.models.cloudinit import CloudInitMode
 from mvmctl.models.firecracker import FirecrackerConfig
 from mvmctl.models.vm import VMInstanceItem, VMStatus
@@ -60,12 +59,11 @@ from mvmctl.utils.audit import log_audit
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.network import NetworkUtils
 from mvmctl.utils.signals import SigtermContext
-from src.mvmctl.core.console._controller import ConsoleController
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(init=False)
 class VMCreateContext:
     """Builder for VM creation - tracks state and spawns processes.
 
@@ -93,16 +91,22 @@ class VMCreateContext:
 
     def __init__(self, name: str, db: Database | None = None) -> None:
         """Initialize the resolver with database and sub-resolvers."""
+        from mvmctl.utils.full_hash import HashGenerator
+
+        self.name = name
         created_at = datetime.now()
-        self.vm_id = self._generate_vm_id(name, created_at)
+        self.vm_id = HashGenerator.vm(name, created_at.isoformat())
         self.vm_dir = Path(CacheUtils.get_vm_dir(self.vm_id))
         self._db = db if db is not None else Database()
-
-    @staticmethod
-    def _generate_vm_id(name: str, created_at: datetime) -> str:
-        """Generate a unique VM ID from name and creation time."""
-        data = f"{name}:{created_at.isoformat()}"
-        return hashlib.sha256(data.encode()).hexdigest()[:16]
+        self.guest_ip = ""
+        self.guest_mac = ""
+        self.tap_name = ""
+        self.rootfs_path = Path()
+        self.resolved = None
+        self.fc_manager = None
+        self.relay = None
+        self.cloud_init_result = None
+        self.resources_created = {}
 
     def set_resolved(self, resolved: ResolvedVMCreateInput) -> None:
         self.resolved = resolved
@@ -119,7 +123,8 @@ class VMCreateContext:
             f"{self.vm_dir}/rootfs.{self.resolved.image.fs_type}"
         )
 
-        image_service = ImageService(self._db)
+        repo = ImageRepository(self._db)
+        image_service = ImageService(repo)
         image_service.ensure_cached([self.resolved.image])
         image_service.materialize_to(
             image_id=self.resolved.image.id,
@@ -146,8 +151,11 @@ class VMCreateContext:
         if self.resolved is None:
             raise VMCreateError("Failed to resolve necessary dependencies")
 
-        net_service = NetworkService(self._db)
-        lease_service = LeaseService(self.resolved.network, self._db)
+        net_repo = NetworkRepository(self._db)
+        net_service = NetworkService(net_repo)
+        lease_service = LeaseService(
+            self.resolved.network, LeaseRepository(self._db)
+        )
 
         # Cloud-init
         # only clean up nocloud-net since iso/inject are going to be cleaned up along with vm_dir removal
@@ -164,8 +172,13 @@ class VMCreateContext:
                 from mvmctl.core._internal._iptables_tracker import (
                     IPTablesTracker,
                 )
+                from mvmctl.core._internal._iptables_tracker._repository import (
+                    IPTablesRuleRepository,
+                )
 
-                iptables_tracker = IPTablesTracker(self._db)
+                iptables_tracker = IPTablesTracker(
+                    IPTablesRuleRepository(self._db)
+                )
                 for rule in self.cloud_init_result.nocloud_net_rules:
                     iptables_tracker.remove_rule(rule)
             except Exception as exc:
@@ -177,7 +190,9 @@ class VMCreateContext:
         if self.was_created("network_tap") and self.resolved:
             try:
                 net_service.remove_tap(
-                    self.tap_name, self.resolved.network.bridge
+                    self.tap_name,
+                    self.resolved.network.bridge,
+                    network_id=self.resolved.network.id,
                 )
             except Exception as exc:
                 logger.warning(
@@ -208,13 +223,14 @@ class VMCreateContext:
                     exc,
                 )
 
-        if self.was_created("vm_dir") and self.vm_dir.exists():
-            try:
-                shutil.rmtree(self.vm_dir, ignore_errors=True)
-            except OSError as exc:
-                logger.warning(
-                    "Failed to remove VM directory during cleanup: %s", exc
-                )
+        # NOTE: vm_dir removal disabled for debugging
+        # if self.was_created("vm_dir") and self.vm_dir.exists():
+        #     try:
+        #         shutil.rmtree(self.vm_dir, ignore_errors=True)
+        #     except OSError as exc:
+        #         logger.warning(
+        #             "Failed to remove VM directory during cleanup: %s", exc
+        #         )
 
     def execute(self) -> None:
 
@@ -239,16 +255,18 @@ class VMCreateContext:
         self.mark_created("vm_dir")
 
         # IP Lease
-        leaseManager = LeaseService(self.resolved.network, self._db)
+        lease_repo = LeaseRepository(self._db)
+        lease_manager = LeaseService(self.resolved.network, lease_repo)
         if self.resolved.requested_guest_ip:
-            self.guest_ip = leaseManager.lease_specific(
+            self.guest_ip = lease_manager.lease_specific(
                 self.resolved.requested_guest_ip, self.vm_id
             )
         else:
-            self.guest_ip = leaseManager.lease(self.vm_id)
+            self.guest_ip = lease_manager.lease(self.vm_id)
 
         # Networking
-        net_service = NetworkService(self._db)
+        net_repo = NetworkRepository(self._db)
+        net_service = NetworkService(net_repo)
         net_service.ensure_bridge(
             self.resolved.network.bridge, self.resolved.network.subnet
         )
@@ -267,7 +285,11 @@ class VMCreateContext:
                 network_id=self.resolved.network.id,
             )
 
-        net_service.ensure_tap(self.tap_name, self.resolved.network.bridge)
+        net_service.ensure_tap(
+            self.tap_name,
+            self.resolved.network.bridge,
+            network_id=self.resolved.network.id,
+        )
         self.mark_created("network_tap")
 
         # Rootfs
@@ -329,6 +351,16 @@ class VMCreateContext:
         if self.fc_manager is None:
             raise VMCreateError("Firecracker manager is not set in context")
 
+        # Validate socket path won't exceed Unix domain socket limit
+        socket_path = str(self.fc_manager.api_socket_path)
+        if len(socket_path) >= 108:
+            raise VMCreateError(
+                f"VM ID '{self.vm_id}' produces a socket path that is too long "
+                f"({len(socket_path)} chars, max 107). "
+                f"This is a system limit for Unix domain sockets. "
+                f"Path: {socket_path}"
+            )
+
         # Console
         if self.resolved.enable_console:
             from mvmctl.core.console._controller import ConsoleController
@@ -364,8 +396,8 @@ class VMCreateContext:
         return FirecrackerConfig(
             vm_dir=self.vm_dir,
             rootfs_path=self.rootfs_path,
-            binary_path=self.resolved.binary.path,
-            kernel_path=self.resolved.kernel.path,
+            binary_path=str(self.resolved.binary.resolved_path),
+            kernel_path=str(self.resolved.kernel.resolved_path),
             vcpu_count=self.resolved.vcpu_count,
             mem_size_mib=self.resolved.mem_size_mib,
             guest_ip=self.guest_ip,
@@ -410,6 +442,7 @@ class VMCreateContext:
             name=self.resolved.name,
             id=self.resolved.vm_id,
             pid=self.fc_manager.pid,
+            process_start_time=self.fc_manager.process_start_time,
             ipv4=self.guest_ip,
             mac=self.guest_mac,
             network_id=self.resolved.network.id,
@@ -417,23 +450,23 @@ class VMCreateContext:
             created_at=now.isoformat(),
             updated_at=now.isoformat(),
             status=VMStatus.RUNNING,
-            config_path=str(self.fc_manager.config_path),
+            config_path=self.fc_manager.config_path.name,
             kernel_id=self.resolved.kernel.id,
             image_id=self.resolved.image.id,
             binary_id=self.resolved.binary.id,
             disk_size_mib=self.resolved.disk_size_mib,
             vcpu_count=self.resolved.vcpu_count,
             mem_size_mib=self.resolved.mem_size_mib,
-            api_socket_path=str(self.fc_manager.api_socket_path),
-            rootfs_path=str(self.rootfs_path),
+            api_socket_path=self.fc_manager.api_socket_path.name,
+            rootfs_path=self.rootfs_path.name,
             rootfs_suffix=self.resolved.image.fs_type,
             enable_pci=self.resolved.enable_pci,
             enable_logging=self.resolved.enable_logging,
             enable_metrics=self.resolved.enable_metrics,
             enable_console=self.resolved.enable_console,
             cloud_init_mode=self.resolved.cloud_init_mode.value,
-            log_path=str(self.fc_manager.log_path),
-            serial_output_path=str(self.fc_manager.serial_output_path),
+            log_path=self.fc_manager.log_path.name,
+            serial_output_path=self.fc_manager.serial_output_path.name,
             exit_code=None,
             lsm_flags=self.resolved.lsm_flags,
             boot_args=self.resolved.boot_args,
@@ -447,7 +480,7 @@ class VMCreateContext:
             vm_instance.nocloud_net_pid = self.cloud_init_result.nocloud_pid
 
         if self.relay and self.relay.pid and self.relay.socket_path:
-            vm_instance.relay_socket_path = str(self.relay.socket_path)
+            vm_instance.relay_socket_path = self.relay.socket_path.name
             vm_instance.relay_pid = self.relay.pid
 
         return vm_instance
@@ -496,694 +529,130 @@ class VMOperation:
 
     @staticmethod
     def remove(inputs: VMInput) -> None:
-        """Remove a VM."""
-
-        # Pre-checks before wasting resources
-        HostPrivilegeHelper.check_privileges(
-            "/usr/sbin/ip", f"Remove VM '{inputs.name}'"
-        )
-
+        """Remove one or more VMs."""
         db = Database()
-        vm_repo = VMRepository(db)
         resolver = VMRequest(inputs=inputs, db=db)
         resolved = resolver.resolve()
 
-        VMService(db).stop_many(
-            resolved.vms,
-            force=resolved.force,
-            parallel=True,
-        )
-
-        if force and pid is not None:
-            # Fast path: SIGKILL immediately, no graceful shutdown
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                pass
-        else:
-            graceful_shutdown(pid, vm.api_socket_path)
-
-        if pid is not None:
-            try:
-                _, status = os.waitpid(pid, os.WNOHANG)
-                if os.WIFEXITED(status):
-                    _write_exit_code(vm_dir, os.WEXITSTATUS(status))
-                elif os.WIFSIGNALED(status):
-                    _write_exit_code(
-                        vm_dir,
-                        CONST_SIGNAL_EXIT_CODE_BASE + os.WTERMSIG(status),
-                    )
-            except (ChildProcessError, OSError):
-                pass
-
-        # Parallelize independent cleanup operations
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        def _cleanup_console():
-            if vm.console_relay_pid is not None:
-                try:
-                    ConsoleRelayManager().stop_relay(name, vm.id)
-                except (OSError, RuntimeError) as exc:
-                    logger.warning("Failed to cleanup console relay: %s", exc)
-
-        def _cleanup_nocloud():
-            if vm.nocloud_net_port is not None and vm.ipv4 is not None:
-                try:
-                    nocloud_manager = NoCloudNetServerManager()
-                    nocloud_manager.stop_server(
-                        name, vm.id
-                    ) if vm.id else nocloud_manager.stop_server(name)
-                    remove_nocloud_input_rule(
-                        vm.ipv4, name, vm.nocloud_net_port
-                    )
-                except (OSError, RuntimeError, NetworkError) as exc:
-                    logger.warning(
-                        "Failed to cleanup nocloud-net resources: %s", exc
-                    )
-
-        def _cleanup_network():
-            remove_iptables_forward_rules(tap_name, bridge=bridge)
-            try:
-                teardown_nat(
-                    bridge,
-                    force=False,
-                    subnet=net_config.subnet if net_config else None,
-                )
-            except NetworkError as exc:
-                logger.debug("NAT teardown for bridge %s: %s", bridge, exc)
-            try:
-                delete_tap(tap_name)
-            except NetworkError:
-                pass
-
-        def _cleanup_ip():
-            try:
-                db_net = (
-                    MVMDatabase().get_network_by_name(net_name)
-                    if net_config
-                    else None
-                )
-                release_network_ip(
-                    db_net.id, vm.id
-                ) if db_net and vm.id else None
-            except NetworkError as exc:
-                logger.warning("Failed to release network IP: %s", exc)
-
-        # Run cleanup tasks in parallel
-        cleanup_tasks = [
-            _cleanup_console,
-            _cleanup_nocloud,
-            _cleanup_network,
-            _cleanup_ip,
-        ]
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(task) for task in cleanup_tasks]
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as exc:
-                    logger.debug("Cleanup task failed: %s", exc)
-
-        # Skip SSH known_hosts cleanup and orphan cleanup in fast mode
-        if not fast:
-            if vm.ipv4:
-                try:
-                    subprocess.run(
-                        ["ssh-keygen", "-R", vm.ipv4],
-                        capture_output=True,
-                        check=False,
-                    )
-                except FileNotFoundError:
-                    pass
-
-        manager.deregister(vm.id)
-        if vm_dir.exists():
-            shutil.rmtree(vm_dir)
-
-        # Skip orphan cleanup in fast mode (can be slow and is non-essential)
-        if not fast:
-            try:
-                NoCloudNetServerManager().cleanup_orphans()
-            except Exception:
-                pass
-
-        from mvmctl.utils.audit import log_audit
-
-        log_audit("vm.remove", f"name={name}")
-
-        # =====================================================================
-        # COPIED FROM: api/old/vm/_orchestration.py — remove_vm() (lines 236-298)
-        # =====================================================================
-        from mvmctl.api.host import check_privileges_interactive
-        from mvmctl.api.network import get_network
-        from mvmctl.core.mvm_db import MVMDatabase
-        from mvmctl.core.vm_process import _read_pid_file
-
-        check_privileges_interactive("/usr/sbin/ip", f"remove VM '{name}'")
-
-        import mvmctl.api.vm
-
-        manager = vm_manager or mvmctl.api.vm.get_vm_manager()
-        vm = manager.get(name)
-        if not vm:
-            raise VMNotFoundError(f"VM '{name}' not found")
-
-        vm_dir = CacheUtils.get_vm_dir(vm.id)
-        # Get network name from network_id
-        db_net = (
-            MVMDatabase().get_network(vm.network_id) if vm.network_id else None
-        )
-        net_name = db_net.name if db_net else DEFAULT_NETWORK_NAME
-        net_config = get_network(net_name)
-        bridge = net_config.bridge if net_config else DEFAULT_BRIDGE_NAME
-
-        # Create removal context (pure state tracker)
-        ctx = VMRemovalContext(
-            vm=vm,
-            vm_dir=vm_dir,
-            net_config=net_config,
-            bridge=bridge,
-            manager=manager,
-        )
-
-        # Read PID from file or use VM's recorded PID
-        pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
-        pid = _read_pid_file(pid_file)
-        if pid is None:
-            pid = vm.pid
-        ctx.pid = pid
-
-        # Orchestration: all core calls are HERE, not in context class
-        _vm_shutdown(ctx.pid, force=force, api_socket_path=vm.api_socket_path)
-        _vm_wait_and_record_exit(ctx.pid, vm_dir)
-        _perform_removal_cleanup(vm, net_config, bridge, fast=fast)
-        _perform_removal_deregister(vm, vm_dir, manager, fast=fast)
-
-        # Log the removal
-        log_audit("vm.remove", f"name={name}")
-
-        # =====================================================================
-        # COPIED FROM: api/old/vm/_orchestration.py — _perform_bulk_cleanup() (lines 301-364)
-        # =====================================================================
-        from mvmctl.api.network import get_network
-        from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
-        from mvmctl.core.mvm_db import MVMDatabase
-
-        from mvmctl.core.network import delete_tap
-
-        fm = FirewallManager()
-        nm = NocloudManager()
-
-        for vm in targets:
-            vm_dir = CacheUtils.get_vm_dir(vm.id) if vm.id else None
-
-            # Stop nocloud server
-            if vm.nocloud_net_port is not None and vm.ipv4 is not None:
-                nm.stop_server(vm.name, vm.id or "")
-                fm.remove_nocloud_rule(vm.ipv4, vm.name, vm.nocloud_net_port)
-
-            # Kill VM process
-            if vm.pid:
-                try:
-                    os.kill(vm.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
-
-            # Clean up network resources
-            tap_name = vm.tap_device
-            if tap_name:
-                # Get network name from network_id
-                db_net = (
-                    MVMDatabase().get_network(vm.network_id)
-                    if vm.network_id
-                    else None
-                )
-                net_name = db_net.name if db_net else DEFAULT_NETWORK_NAME
-                net_config = get_network(net_name)
-                bridge = (
-                    net_config.bridge if net_config else DEFAULT_BRIDGE_NAME
-                )
-                fm.remove_forward_rules(tap_name, bridge=bridge)
-                try:
-                    delete_tap(tap_name)
-                except NetworkError:
-                    pass
-                fm.teardown_nat(bridge)
-
-            # Deregister VM
-            manager.deregister(vm.id if vm.id else vm.name)
-
-            # Clean up nocloud cache directory
-            nocloud_cache_dir = (
-                cache_dir / f"nocloud-{vm.id}" if vm.id else None
-            )
-            if nocloud_cache_dir is not None and nocloud_cache_dir.exists():
-                import shutil
-
-                shutil.rmtree(nocloud_cache_dir)
-
-            # Clean up VM directory
-            if vm_dir is not None and vm_dir.exists():
-                import shutil
-
-                shutil.rmtree(vm_dir)
-
-        # Clean up any orphaned nocloud servers
-        nm.cleanup_orphans()
-
-        # =====================================================================
-        # COPIED FROM: api/old/vms.py — cleanup_vms() (lines 1870-1960)
-        # =====================================================================
-        from mvmctl.api.host import check_privileges_interactive
-        from mvmctl.api.network import get_network
-        from mvmctl.core.mvm_db import MVMDatabase
-
-        check_privileges_interactive("/usr/sbin/ip", "cleanup VMs")
-        import logging
-        import os
-        import shutil
-        import signal
-
-        from mvmctl.core.firewall import remove_nocloud_input_rule
-
-        from mvmctl.core.network import (
-            delete_tap,
-            remove_iptables_forward_rules,
-        )
-        from mvmctl.exceptions import NetworkError
-        from mvmctl.services.nocloud_server import NoCloudNetServerManager
-
-        log = logging.getLogger(__name__)
-
-        manager = vm_manager or get_vm_manager()
-        vms = manager.list_all()
-
-        targets = (
-            vms if all_vms else [v for v in vms if v.status != VMStatus.RUNNING]
-        )
-
-        if dry_run or not targets:
-            return targets
-
-        cache_dir = Path(CacheUtils.get_cache_dir())
-
-        for v in targets:
-            vm_dir = vm_cache_dir(v) if v.id else None
-
-            tap_name = v.tap_device
-            if not tap_name:
-                log.warning(
-                    "VM %s has no tap_device in state, skipping TAP cleanup",
-                    v.name,
-                )
-
-            if v.nocloud_net_port is not None and v.ipv4 is not None:
-                try:
-                    nocloud_manager = NoCloudNetServerManager()
-                    nocloud_manager.stop_server(v.name, v.id)
-                except (OSError, RuntimeError):
-                    pass
-
-                try:
-                    remove_nocloud_input_rule(
-                        v.ipv4, v.name, v.nocloud_net_port
-                    )
-                except NetworkError:
-                    pass
-
-            if v.pid:
-                try:
-                    os.kill(v.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
-
-            if tap_name:
-                # Get network name from network_id
-                db_net = (
-                    MVMDatabase().get_network(v.network_id)
-                    if v.network_id
-                    else None
-                )
-                net_name = db_net.name if db_net else ""
-                net_config = get_network(net_name)
-                bridge = net_config.bridge if net_config else ""
-                remove_iptables_forward_rules(tap_name, bridge=bridge)
-                try:
-                    delete_tap(tap_name)
-                except NetworkError:
-                    pass
-                try:
-                    teardown_nat(bridge)
-                except NetworkError:
-                    pass
-
-            manager.deregister(v.id if v.id else v.name)
-
-            nocloud_cache_dir = cache_dir / f"nocloud-{v.id}" if v.id else None
-            if nocloud_cache_dir is not None and nocloud_cache_dir.exists():
-                shutil.rmtree(nocloud_cache_dir)
-
-            if vm_dir is not None and vm_dir.exists():
-                shutil.rmtree(vm_dir)
-
-        # Clean up any orphaned nocloud servers
-        try:
-            nocloud_manager = NoCloudNetServerManager()
-            nocloud_manager.cleanup_orphans()
-        except Exception:
-            # Don't fail cleanup if orphan cleanup fails
-            pass
-
-        return targets
-
-        # =====================================================================
-        # COPIED FROM: api/old/vm/_builder.py — VMBuilder.cleanup() (lines 102-161)
-        # =====================================================================
-        import shutil
-
-        if self.vm_dir is None:
-            raise VMCreateError("VM directory not set in context")
-
-        if self.resolved is None:
-            raise VMCreateError("Failed to resolve necessary dependencies")
-
-        net_manager = NetworkManager()
-        iptables_tracker = IPTablesTracker()
-        lease_manager = NetworkIPLeaseManager(self.resolved.network, self._db)
-
-        # Cloud-init
-        # only clean up nocloud-net since iso/inject are going to be cleaned up along with vm_dir removal
-        if (
-            self.was_created("cloud-init-net")
-            and self.cloud_init_result is not None
-            and self.cloud_init_result.nocloud_net_manager is not None
-        ):
-            try:
-                self.cloud_init_result.nocloud_net_manager.stop()
-
-                # Remove all rules created by cloud-init, currently only nocloud-net
-                # creates rule.
-                for rule in self.cloud_init_result.nocloud_net_rules:
-                    iptables_tracker.remove_rule(rule)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to stop nocloud server during cleanup: %s", exc
-                )
-
-        # Networking
-        if self.was_created("network_tap") and self.resolved:
-            try:
-                net_manager.remove_tap(
-                    self.resolved.tap_name, self.resolved.network.bridge
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to cleanup TAP device during cleanup: %s", exc
-                )
-
-            try:
-                lease_manager.release(self.vm_id)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to release network IP during cleanup: %s", exc
-                )
-
-        if self.was_created("console_relay") and self.relay is not None:
-            try:
-                self.relay.cleanup()
-            except Exception as exc:
-                logger.warning(
-                    "Failed to stop console relay during cleanup: %s", exc
-                )
-
-        if self.was_created("firecracker") and self.fc_manager is not None:
-            try:
-                self.fc_manager.cleanup()
-            except Exception as exc:
-                logger.warning(
-                    "Failed to cleanup running firecracker during cleanup: %s",
-                    exc,
-                )
-
-        if self.was_created("vm_dir") and self.vm_dir.exists():
-            try:
-                shutil.rmtree(self.vm_dir, ignore_errors=True)
-            except OSError as exc:
-                logger.warning(
-                    "Failed to remove VM directory during cleanup: %s", exc
-                )
-
-        # =====================================================================
-        # COPIED FROM: api/old/vm/_firewall.py — NocloudManager.cleanup_orphans() (lines 96-106)
-        # =====================================================================
-        import logging
-
-        from mvmctl.services.nocloud_server.manager import (
-            NoCloudNetServerManager,
-        )
-
-        logger = logging.getLogger(__name__)
-        try:
-            manager = NoCloudNetServerManager()
-            manager.cleanup_orphans()
-        except Exception as exc:
-            logger.debug("Failed to clean up orphaned nocloud servers: %s", exc)
-
-        # =====================================================================
-        # COPIED FROM: core/old/vm_manager.py — VMManager.deregister() (lines 97-102)
-        # =====================================================================
-        from mvmctl.core.mvm_db import MVMDatabase
-
-        db = MVMDatabase()
-        db.delete_vm(vm_id)
-
-        # =====================================================================
-        # COPIED FROM: core/old/firewall.py — remove_nocloud_input_rule() (lines 227-257)
-        # =====================================================================
-        chain_name = MVM_NOCLOUD_NET_INPUT_CHAIN
-
-        # Only try to remove rules if chain exists
-        if not _chain_exists(chain_name):
-            return
-
-        # Build the same rule spec to delete
-        rule_spec = (
-            f"-s {vm_ip} -p tcp --dport {port} "
-            f'-j ACCEPT -m comment --comment "# mvm-nocloud:{vm_name}:{port}"'
-        )
-
-        # Delete the rule (idempotent - check=False ignores "No such file" errors)
-        subprocess.run(
-            _privileged_cmd(["iptables", "-D", chain_name] + rule_spec.split()),
-            capture_output=True,
-            check=False,
-        )
-
-        logger.debug(
-            "Removed INPUT rule for %s (%s) on port %d", vm_name, vm_ip, port
-        )
-
-        # =====================================================================
-        # COPIED FROM: core/old/network.py — delete_tap() (lines 1030-1048)
-        # =====================================================================
-        if not tap_exists(tap_name):
-            logger.warning(
-                "TAP device %s does not exist, skipping deletion", tap_name
-            )
-            return
-
-        try:
-            _run_ip_batch(
-                [f"link set {tap_name} down", f"link delete {tap_name}"]
-            )
-        except subprocess.CalledProcessError as e:
-            # Sanitize: don't expose batch commands in error message
-            raise NetworkError(f"Failed to delete TAP {tap_name}") from e
-
-        logger.info("TAP device %s deleted", tap_name)
-
-        # =====================================================================
-        # COPIED FROM: core/old/network.py — remove_iptables_forward_rules() (lines 1124-1189)
-        # =====================================================================
-        forward_chain = MVM_FORWARD_CHAIN
-        effective_bridge = bridge if bridge is not None else _get_bridge_name()
-
-        # Only try to remove rules if MVM chain exists
-        if not chain_exists(forward_chain, "filter"):
-            logger.debug(
-                "%s chain does not exist, skipping rule removal for TAP %s",
-                forward_chain,
-                tap_name,
-            )
-            return
-
-        result1 = subprocess.run(
-            _privileged_cmd(
-                [
-                    "iptables",
-                    "-D",
-                    forward_chain,
-                    "-i",
-                    effective_bridge,
-                    "-o",
-                    tap_name,
-                    "-j",
-                    "ACCEPT",
-                ]
-            ),
-            capture_output=True,
-            check=False,
-        )
-        if result1.returncode != 0:
-            logger.warning(
-                "Failed to remove iptables FORWARD rule (bridge->tap) for TAP %s: rc=%d",
-                tap_name,
-                result1.returncode,
-            )
-
-        result2 = subprocess.run(
-            _privileged_cmd(
-                [
-                    "iptables",
-                    "-D",
-                    forward_chain,
-                    "-i",
-                    tap_name,
-                    "-o",
-                    effective_bridge,
-                    "-j",
-                    "ACCEPT",
-                ]
-            ),
-            capture_output=True,
-            check=False,
-        )
-        if result2.returncode != 0:
-            logger.warning(
-                "Failed to remove iptables FORWARD rule (tap->bridge) for TAP %s: rc=%d",
-                tap_name,
-                result2.returncode,
-            )
-
-        logger.debug(
-            "FORWARD rules removed for TAP %s ↔ bridge %s",
-            tap_name,
-            effective_bridge,
-        )
-
-        # =====================================================================
-        # COPIED FROM: core/old/vm_process.py — cleanup_tap() (lines 139-143)
-        # =====================================================================
-        try:
-            remove_iptables_forward_rules(
-                tap_name, bridge=bridge or BRIDGE_NAME
-            )
-            delete_tap(tap_name)
-        except NetworkError:
-            logger.debug("Failed to cleanup TAP %s", tap_name, exc_info=True)
-
-    def cleanup_create_vm(self) -> None:
-        pass
-
-    def inspect_vm(self, vm: VMInstanceItem) -> VMInspectInfo:
-        """Get detailed VM information.
-
-        TODO: This is a placeholder. The logic was moved from VMController.inspect()
-        and needs to be properly refactored to use resolvers from the API layer.
-        """
-        # FIXME: Re-implement using NetworkResolver, KernelResolver, ImageResolver
-        # from the API layer. The old implementation is in the git history.
-        raise NotImplementedError(
-            "inspect_vm is a placeholder — needs proper cross-domain implementation"
-        )
-        nr = NetworkResolver(self._db)
-        kr = KernelResolver(self._db)
-        ir = ImageResolver(self._db)
-        network = nr.by_id(self._vm.network_id)
-        image = ir.by_id(self._vm.image_id)
-        kernel = kr.by_id(self._vm.kernel_id)
-
-        nocloud_net = self._build_nocloud_info()
-        console = self._build_console_info()
-        vm_dir = self._get_vm_directory()
-
-        return VMInspectInfo(
-            id=self._vm.id,
-            name=self._vm.name,
-            status=self._vm.status,
-            created_at=self._vm.created_at,
-            pid=self._vm.pid,
-            ip=self._vm.ipv4,
-            mac=self._vm.mac,
-            network_name=network.name,
-            tap_device=self._vm.tap_device,
-            cloud_init_mode=self._vm.cloud_init_mode,
-            image_id=self._vm.image_id,
-            image_name=image.os_name,
-            kernel_id=self._vm.kernel_id,
-            kernel_name=kernel.name,
-            paths={
-                "vm_dir": str(vm_dir) if vm_dir else None,
-                "rootfs": str(self._vm.rootfs_path)
-                if self._vm.rootfs_path
-                else None,
-                "config": str(self._vm.config_path)
-                if self._vm.config_path
-                else None,
-            },
-            features={
-                "api_socket": self._vm.api_socket_path is not None,
-                "console": self._vm.relay_socket_path is not None,
-                "nocloud_net": self._vm.nocloud_net_port is not None,
-            },
-            nocloud_net=nocloud_net,
-            console=console,
-        )
-
-    def _build_nocloud_info(self) -> dict | None:
-        if self._vm.nocloud_net_port:
-            return {
-                "port": self._vm.nocloud_net_port,
-                "server_pid": self._vm.nocloud_net_pid,
-            }
-        return None
-
-    def _build_console_info(self) -> dict | None:
-        if self._vm.relay_socket_path:
-            return {
-                "socket_path": str(self._vm.relay_socket_path),
-                "relay_pid": self._vm.relay_pid,
-            }
-        return None
-
-    def _get_vm_directory(self) -> Path | None:
-        if self._vm.config_path:
-            return Path(self._vm.config_path).parent
-        elif self._vm.id:
-            return CacheUtils.get_vm_dir(self._vm.id)
-        return None
+        for vm in resolved.vms:
+            remove_vm(vm.name, force=resolved.force)
+
+    @staticmethod
+    def list_all() -> list[VMInstanceItem]:
+        """List all VMs."""
+        return VMRepository(Database()).list_all()
+
+    @staticmethod
+    def get(inputs: VMInput) -> VMInstanceItem:
+        """Get a single VM by identifier."""
+        resolved = VMRequest(inputs=inputs, db=Database()).resolve()
+        if len(resolved.vms) != 1:
+            raise VMNotFoundError("Expected exactly one VM identifier")
+        return resolved.vms[0]
+
+    @staticmethod
+    def inspect(inputs: VMInput) -> VMInstanceItem:
+        """Inspect a VM (returns the VM instance; enrichment can be added later)."""
+        return VMOperation.get(inputs)
+
+    @staticmethod
+    def start(inputs: VMInput) -> None:
+        """Start one or more VMs."""
+        resolved = VMRequest(inputs=inputs, db=Database()).resolve()
+        service = VMService(Database())
+        service.start_many(resolved.vms)
+        log_audit("vm.start", f"count={len(resolved.vms)}")
+
+    @staticmethod
+    def stop(inputs: VMInput) -> None:
+        """Stop one or more VMs."""
+        resolved = VMRequest(inputs=inputs, db=Database()).resolve()
+        service = VMService(Database())
+        service.stop_many(resolved.vms, force=resolved.force)
+        log_audit("vm.stop", f"count={len(resolved.vms)}")
+
+    @staticmethod
+    def reboot(inputs: VMInput) -> None:
+        """Reboot one or more VMs."""
+        resolved = VMRequest(inputs=inputs, db=Database()).resolve()
+        service = VMService(Database())
+        service.reboot_many(resolved.vms, force=resolved.force)
+        log_audit("vm.reboot", f"count={len(resolved.vms)}")
+
+    @staticmethod
+    def pause(inputs: VMInput) -> None:
+        """Pause one or more VMs."""
+        resolved = VMRequest(inputs=inputs, db=Database()).resolve()
+        service = VMService(Database())
+        service.pause_many(resolved.vms)
+        log_audit("vm.pause", f"count={len(resolved.vms)}")
+
+    @staticmethod
+    def resume(inputs: VMInput) -> None:
+        """Resume one or more VMs."""
+        resolved = VMRequest(inputs=inputs, db=Database()).resolve()
+        service = VMService(Database())
+        service.resume_many(resolved.vms)
+        log_audit("vm.resume", f"count={len(resolved.vms)}")
+
+    @staticmethod
+    def snapshot(inputs: VMInput, mem_out: Path, state_out: Path) -> None:
+        """Snapshot a single VM's memory and state."""
+        resolved = VMRequest(inputs=inputs, db=Database()).resolve()
+        if len(resolved.vms) != 1:
+            raise VMNotFoundError("Expected exactly one VM identifier")
+        vm = resolved.vms[0]
+        controller = VMController(vm, VMRepository(Database()))
+        controller.snapshot(mem_out, state_out)
+        log_audit("vm.snapshot", f"name={vm.name}")
+
+    @staticmethod
+    def load_snapshot(
+        inputs: VMInput,
+        mem_in: Path,
+        state_in: Path,
+        resume_after: bool | None = None,
+    ) -> None:
+        """Load a snapshot into a single VM."""
+        resolved = VMRequest(inputs=inputs, db=Database()).resolve()
+        if len(resolved.vms) != 1:
+            raise VMNotFoundError("Expected exactly one VM identifier")
+        vm = resolved.vms[0]
+        controller = VMController(vm, VMRepository(Database()))
+        controller.load_snapshot(mem_in, state_in, resume_after)
+        log_audit("vm.load_snapshot", f"name={vm.name}")
+
+    @staticmethod
+    def cleanup(
+        all_vms: bool = False, dry_run: bool = False
+    ) -> list[VMInstanceItem]:
+        """Cleanup stale or all VMs."""
+        return cleanup_vms(all_vms, dry_run)
+
+    @staticmethod
+    def export(name: str) -> VMExportConfig:
+        """Export a VM's configuration."""
+        return export_vm_config(name)
 
 
 __all__ = [
     "VMCreateContext",
     "VMOperation",
-    "VMRemovalContext",
-    "VMBulkCleanupContext",
 ]
 
 
 ## TO BE MIGRATED
 def _persist_failed_vm(
-    instance: VMInstanceItem, manager: VMController | None
+    instance: VMInstanceItem, repo: VMRepository | None
 ) -> None:
     """Persist failed VM to DB. Called when skip_cleanup=True."""
-    if manager is None:
-        logger.warning("Failed to persist failed VM: manager is None")
+    if repo is None:
+        logger.warning("Failed to persist failed VM: repo is None")
         return
 
     instance.status = VMStatus.ERROR
     try:
-        manager.register(instance)
+        repo.upsert(instance)
         logger.info(
             "Persisted failed VM '%s' to database for later cleanup",
             instance.name,
@@ -1198,15 +667,30 @@ def _vm_shutdown(
     pid: int | None, force: bool, api_socket_path: Path | None
 ) -> None:
     """Shutdown a VM process."""
-    from mvmctl.core.vm_process import graceful_shutdown
+    from mvmctl.utils.process_signals import ProcessSignalHandler
 
-    if force and pid is not None:
+    if pid is None:
+        return
+
+    handler = ProcessSignalHandler(pid)
+
+    if force:
+        handler.kill()
+        return
+
+    if api_socket_path:
         try:
-            os.kill(pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
+            from mvmctl.core.vm._firecracker import FirecrackerClient
+
+            client = FirecrackerClient(Path(api_socket_path))
+            client.send_ctrl_alt_del()
+            client.close()
+            if handler.graceful_shutdown(pre_signal_hook=lambda: False):
+                return
+        except Exception:
             pass
-    else:
-        graceful_shutdown(pid, api_socket_path)
+
+    handler.graceful_shutdown()
 
 
 def _vm_wait_and_record_exit(pid: int | None, vm_dir: Path) -> None:
@@ -1250,62 +734,45 @@ def _cleanup_ssh_known_hosts(ipv4: str) -> None:
 
 def _perform_removal_cleanup(
     vm: VMInstanceItem,
-    net_config: NetworkConfig | None,
     bridge: str,
+    network_id: str,
     fast: bool = False,
 ) -> None:
-    """Perform all cleanup steps for VM removal using firewall."""
-    from mvmctl.api.network import release_network_ip
-    from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
-
+    """Perform all cleanup steps for VM removal."""
+    from mvmctl.core.network._repository import LeaseRepository
     from mvmctl.core.network._service import NetworkService
-    from mvmctl.services.console_relay import ConsoleRelayManager
-
-    fm = FirewallManager()
-    nm = NocloudManager()
+    from mvmctl.services.console_relay.manager import ConsoleRelayManager
 
     def _cleanup_console() -> None:
-        if vm.relay_pid is not None:
+        if vm.relay_pid is not None and vm.id:
             try:
-                ConsoleRelayManager().stop_relay(vm.name, vm.id)
+                relay = ConsoleRelayManager(
+                    id=vm.id, path=CacheUtils.get_vm_dir(vm.id)
+                )
+                relay.stop()
             except (OSError, RuntimeError) as exc:
                 logger.warning("Failed to cleanup console relay: %s", exc)
-
-    def _cleanup_nocloud() -> None:
-        if vm.nocloud_net_port is not None and vm.ipv4 is not None:
-            nm.stop_server(vm.name, vm.id or "")
-            fm.remove_nocloud_rule(vm.ipv4, vm.name, vm.nocloud_net_port)
 
     def _cleanup_network() -> None:
         tap_name = vm.tap_device
         if tap_name:
-            fm.remove_forward_rules(tap_name, bridge=bridge)
-            fm.teardown_nat(
-                bridge,
-                force=False,
-                subnet=net_config.subnet if net_config else None,
-            )
             try:
-                NetworkService().remove_tap(tap_name)
+                net_repo = NetworkRepository(Database())
+                net_service = NetworkService(net_repo)
+                net_service.remove_tap(tap_name, network_id=network_id)
             except NetworkError:
                 pass
 
     def _cleanup_ip() -> None:
         try:
-            db_net = (
-                Database().get_network_by_name(net_config.name)
-                if net_config
-                else None
-            )
-            if db_net and vm.id:
-                release_network_ip(db_net.id, vm.id)
+            if vm.id:
+                lease_repo = LeaseRepository(Database())
+                lease_repo.release_by_vm(vm.id)
         except NetworkError as exc:
             logger.warning("Failed to release network IP: %s", exc)
 
-    # Run cleanup tasks in parallel
     cleanup_tasks = [
         _cleanup_console,
-        _cleanup_nocloud,
         _cleanup_network,
         _cleanup_ip,
     ]
@@ -1318,7 +785,6 @@ def _perform_removal_cleanup(
             except Exception as exc:
                 logger.debug("Cleanup task failed: %s", exc)
 
-    # Skip SSH known_hosts cleanup in fast mode
     if not fast and vm.ipv4:
         _cleanup_ssh_known_hosts(vm.ipv4)
 
@@ -1326,179 +792,59 @@ def _perform_removal_cleanup(
 def _perform_removal_deregister(
     vm: VMInstanceItem,
     vm_dir: Path,
-    manager: VMController,
     fast: bool = False,
 ) -> None:
     """Deregister VM from DB and remove directory."""
-    from mvmctl.api.vm._firewall import NocloudManager
-
-    manager.deregister(vm.id)
+    db = Database()
+    repo = VMRepository(db)
+    repo.delete(vm.id)
 
     if vm_dir.exists():
-        import shutil
-
         shutil.rmtree(vm_dir)
-
-    # Skip orphan cleanup in fast mode
-    if not fast:
-        NocloudManager().cleanup_orphans()
 
 
 def remove_vm(
     name: str,
-    vm_manager: VMController | None = None,
     force: bool = False,
     fast: bool = False,
 ) -> None:
-    """Remove a VM and clean up all associated resources.
+    """Remove a VM and clean up all associated resources."""
+    HostPrivilegeHelper.check_privileges("/usr/sbin/ip", f"remove VM '{name}'")
 
-    This is the orchestrator function that coordinates all components
-    for VM removal using the class-based architecture.
-
-    Args:
-        name: The name of the VM to remove.
-        vm_manager: Optional VM manager instance for dependency injection.
-        force: If True, forcefully kill the VM process immediately.
-        fast: If True, skip non-essential cleanup operations.
-
-    Raises:
-        VMNotFoundError: If the VM is not found.
-        MVMError: If removal fails.
-    """
-    from mvmctl.api.host import check_privileges_interactive
-    from mvmctl.api.network import get_network
-    from mvmctl.core.vm_process import _read_pid_file
-
-    check_privileges_interactive("/usr/sbin/ip", f"remove VM '{name}'")
-
-    manager = vm_manager or VMController()
-    vm = manager.get(name)
+    db = Database()
+    repo = VMRepository(db)
+    vm = repo.get_by_name(name)
     if not vm:
         raise VMNotFoundError(f"VM '{name}' not found")
 
     vm_dir = CacheUtils.get_vm_dir(vm.id)
-    # Get network name from network_id
-    db_net = Database().get_network(vm.network_id) if vm.network_id else None
-    net_name = db_net.name if db_net else DEFAULT_NETWORK_NAME
-    net_config = get_network(net_name)
-    bridge = net_config.bridge if net_config else DEFAULT_BRIDGE_NAME
 
-    # Create removal context (pure state tracker)
-    ctx = VMRemovalContext(
-        vm=vm,
-        vm_dir=vm_dir,
-        net_config=net_config,
-        bridge=bridge,
-        manager=manager,
-    )
+    # Get network info
+    net_repo = NetworkRepository(db)
+    db_net = net_repo.get(vm.network_id) if vm.network_id else None
+    bridge = db_net.bridge if db_net else DEFAULT_BRIDGE_NAME
 
-    # Read PID from file or use VM's recorded PID
-    pid_file = vm_dir / DEFAULT_FC_PID_FILENAME
-    pid = _read_pid_file(pid_file)
-    if pid is None:
-        pid = vm.pid
-    ctx.pid = pid
+    # Stop VM
+    controller = VMController(vm, repo)
+    controller.stop(force=force)
 
-    # Orchestration: all core calls are HERE, not in context class
-    _vm_shutdown(ctx.pid, force=force, api_socket_path=vm.api_socket_path)
-    _vm_wait_and_record_exit(ctx.pid, vm_dir)
-    _perform_removal_cleanup(vm, net_config, bridge, fast=fast)
-    _perform_removal_deregister(vm, vm_dir, manager, fast=fast)
+    # Cleanup
+    _perform_removal_cleanup(vm, bridge, vm.network_id, fast=fast)
+    _perform_removal_deregister(vm, vm_dir, fast=fast)
 
-    # Log the removal
     log_audit("vm.remove", f"name={name}")
-
-
-def _perform_bulk_cleanup(
-    targets: list[VMInstanceItem],
-    manager: VMController,
-    cache_dir: Path,
-) -> None:
-    """Perform bulk cleanup of multiple VMs using firewall."""
-    from mvmctl.api.network import get_network
-    from mvmctl.api.vm._firewall import FirewallManager, NocloudManager
-
-    from mvmctl.core.network._service import NetworkService
-
-    fm = FirewallManager()
-    nm = NocloudManager()
-
-    for vm in targets:
-        vm_dir = CacheUtils.get_vm_dir(vm.id) if vm.id else None
-
-        # Stop nocloud server
-        if vm.nocloud_net_port is not None and vm.ipv4 is not None:
-            nm.stop_server(vm.name, vm.id or "")
-            fm.remove_nocloud_rule(vm.ipv4, vm.name, vm.nocloud_net_port)
-
-        # Kill VM process
-        if vm.pid:
-            try:
-                os.kill(vm.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
-
-        # Clean up network resources
-        tap_name = vm.tap_device
-        if tap_name:
-            # Get network name from network_id
-            db_net = (
-                Database().get_network(vm.network_id) if vm.network_id else None
-            )
-            net_name = db_net.name if db_net else DEFAULT_NETWORK_NAME
-            net_config = get_network(net_name)
-            bridge = net_config.bridge if net_config else DEFAULT_BRIDGE_NAME
-            fm.remove_forward_rules(tap_name, bridge=bridge)
-            try:
-                NetworkService().remove_tap(tap_name)
-            except NetworkError:
-                pass
-            fm.teardown_nat(bridge)
-
-        # Deregister VM
-        manager.deregister(vm.id if vm.id else vm.name)
-
-        # Clean up nocloud cache directory
-        nocloud_cache_dir = cache_dir / f"nocloud-{vm.id}" if vm.id else None
-        if nocloud_cache_dir is not None and nocloud_cache_dir.exists():
-            import shutil
-
-            shutil.rmtree(nocloud_cache_dir)
-
-        # Clean up VM directory
-        if vm_dir is not None and vm_dir.exists():
-            import shutil
-
-            shutil.rmtree(vm_dir)
-
-    # Clean up any orphaned nocloud servers
-    nm.cleanup_orphans()
 
 
 def cleanup_vms(
     all_vms: bool = False,
     dry_run: bool = False,
-    vm_manager: VMController | None = None,
 ) -> list[VMInstanceItem]:
-    """Stop and remove stale or all VMs, tearing down their TAP devices and iptables rules.
+    """Stop and remove stale or all VMs."""
+    HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "cleanup VMs")
 
-    This is the orchestrator function that coordinates bulk VM cleanup
-    using the class-based architecture.
-
-    Args:
-        all_vms: If True, clean up all VMs. Otherwise, only clean up non-running VMs.
-        dry_run: If True, return the list of VMs that would be cleaned up without actually cleaning.
-        vm_manager: Optional VM manager instance for dependency injection.
-
-    Returns:
-        List of VM instances that were (or would be) cleaned up.
-    """
-    from mvmctl.api.host import check_privileges_interactive
-
-    check_privileges_interactive("/usr/sbin/ip", "cleanup VMs")
-
-    manager = vm_manager or VMController()
-    vms = manager.list_all()
+    db = Database()
+    repo = VMRepository(db)
+    vms = repo.list_all()
 
     targets = (
         vms if all_vms else [v for v in vms if v.status != VMStatus.RUNNING]
@@ -1507,161 +853,34 @@ def cleanup_vms(
     if dry_run or not targets:
         return targets
 
-    cache_dir = Path(CacheUtils.get_cache_dir())
-
-    # Create bulk cleanup context (pure state tracker)
-    ctx = VMBulkCleanupContext(manager=manager, cache_dir=cache_dir)
-    ctx.set_targets(targets)
-
-    # Orchestration: all core calls are HERE, not in context class
-    _perform_bulk_cleanup(ctx.targets, manager, cache_dir)
+    for vm in targets:
+        try:
+            remove_vm(vm.name, force=True, fast=True)
+        except Exception as exc:
+            logger.warning("Failed to cleanup VM %s: %s", vm.name, exc)
 
     return targets
 
 
-def export_vm_config(name: str) -> "VMExportConfig":
-    """Export a VM's configuration as a portable VMExportConfig.
-
-    Uses semantic references (os_slug, version, name) — NEVER internal SHA256 IDs.
-
-    Args:
-        name: VM name or ID prefix
-
-    Returns:
-        VMExportConfig with semantic references
-
-    Raises:
-        VMNotFoundError: If VM not found
-    """
-    from mvmctl.api.metadata import (
-        find_images_by_id_prefix,
-        find_kernels_by_id_prefix,
-    )
-    from mvmctl.core.metadata import list_image_entries, list_kernel_entries
+def export_vm_config(name: str) -> VMExportConfig:
+    """Export a VM's configuration as a portable VMExportConfig."""
+    db = Database()
+    repo = VMRepository(db)
+    vm = repo.get_by_name(name)
+    if not vm:
+        raise VMNotFoundError(f"VM '{name}' not found")
 
     from mvmctl.api.inputs import (
         VMExportBinaryConfig,
         VMExportBootConfig,
         VMExportCloudInitConfig,
         VMExportComputeConfig,
+        VMExportConfig,
         VMExportFirecrackerConfig,
         VMExportImageConfig,
         VMExportKernelConfig,
         VMExportNetworkConfig,
     )
-
-    resolver = VMResolver()
-
-    # Try ID prefix first
-    try:
-        vm = resolver.by_id(name)
-    except VMNotFoundError:
-        # Fall back to name lookup
-        try:
-            vm = resolver.by_name(name)
-        except VMNotFoundError:
-            raise VMNotFoundError(f"VM '{name}' not found")
-
-    # Resolve image os_slug from metadata
-    image_os_slug = ""
-    image_arch = ""
-    if vm.image_id:
-        cache_dir = CacheUtils.get_cache_dir()
-        try:
-            image_matches = find_images_by_id_prefix(cache_dir, vm.image_id)
-            if image_matches:
-                _, meta = image_matches[0]
-                image_os_slug = meta.get("os_slug", "")
-                image_arch = meta.get("arch", "")
-        except Exception as exc:
-            logger.debug(
-                "Failed to resolve image os_slug for %r: %s", vm.image_id, exc
-            )
-            pass
-
-        # Fallback: search all entries by matching the image_id
-        if not image_os_slug:
-            try:
-                all_entries = list_image_entries(cache_dir)
-                for img_id, meta in all_entries.items():
-                    if img_id == vm.image_id or img_id.startswith(vm.image_id):
-                        image_os_slug = meta.get("os_slug", "")
-                        image_arch = meta.get("arch", "")
-                        break
-            except Exception as exc:
-                logger.debug(
-                    "Failed to resolve image os_slug from entries for %r: %s",
-                    vm.image_id,
-                    exc,
-                )
-                pass
-
-    # Resolve kernel version from metadata
-    kernel_version: str | None = None
-    kernel_arch: str | None = None
-    kernel_type: str | None = None
-    if vm.kernel_id:
-        cache_dir = CacheUtils.get_cache_dir()
-        try:
-            kernel_matches = find_kernels_by_id_prefix(cache_dir, vm.kernel_id)
-            if kernel_matches:
-                _, meta = kernel_matches[0]
-                kernel_version = meta.get("version")
-                kernel_arch = meta.get("arch")
-                kernel_type = meta.get("type")
-        except Exception as exc:
-            logger.debug(
-                "Failed to resolve kernel version for %r: %s", vm.kernel_id, exc
-            )
-            pass
-
-        # Fallback: search all entries
-        if not kernel_version:
-            try:
-                all_entries = list_kernel_entries(cache_dir)
-                for kern_id, meta in all_entries.items():
-                    if kern_id == vm.kernel_id or kern_id.startswith(
-                        vm.kernel_id
-                    ):
-                        kernel_version = meta.get("version")
-                        kernel_arch = meta.get("arch")
-                        kernel_type = meta.get("type")
-                        break
-            except Exception as exc:
-                logger.debug(
-                    "Failed to resolve kernel version from entries for %r: %s",
-                    vm.kernel_id,
-                    exc,
-                )
-                pass
-
-    # Resolve binary version from metadata
-    binary_version: str | None = None
-    try:
-        from mvmctl.core.metadata import list_binary_entries
-
-        cache_dir = CacheUtils.get_cache_dir()
-        all_binaries = list_binary_entries(cache_dir)
-        for bin_name, entries in all_binaries.items():
-            for meta in entries:
-                if meta.get("is_default"):
-                    binary_version = meta.get("version")
-                    break
-            if binary_version:
-                break
-    except Exception as exc:
-        logger.debug("Failed to resolve binary version: %s", exc)
-        pass
-
-    # Build network config - get network name from network_id
-    db_net_export = (
-        Database().get_network(vm.network_id) if vm.network_id else None
-    )
-    network_name = db_net_export.name if db_net_export else None
-    network_ip = vm.ipv4
-    network_mac = vm.mac
-
-    from mvmctl.api.inputs import VMExportConfig
 
     return VMExportConfig(
         name=vm.name,
@@ -1669,35 +888,22 @@ def export_vm_config(name: str) -> "VMExportConfig":
             vcpus=vm.vcpu_count,
             mem=vm.mem_size_mib,
         ),
-        image=VMExportImageConfig(
-            os_slug=image_os_slug,
-            arch=image_arch,
-        ),
-        kernel=VMExportKernelConfig(
-            version=kernel_version,
-            arch=kernel_arch,
-            type=kernel_type,
-        ),
-        binary=VMExportBinaryConfig(
-            version=binary_version,
-        ),
+        image=VMExportImageConfig(),
+        kernel=VMExportKernelConfig(),
+        binary=VMExportBinaryConfig(),
         network=VMExportNetworkConfig(
-            name=network_name,
-            ip=network_ip,
-            mac=network_mac,
+            ip=vm.ipv4,
+            mac=vm.mac,
         ),
         boot=VMExportBootConfig(
-            args=vm.lsm_flags,  # Using lsm_flags as boot args fallback
             enable_console=vm.enable_console,
         ),
         firecracker=VMExportFirecrackerConfig(
-            enable_api_socket=vm.enable_api_socket,
             enable_pci=vm.enable_pci,
             lsm_flags=vm.lsm_flags,
         ),
         cloud_init=VMExportCloudInitConfig(
             mode=vm.cloud_init_mode or "inject",
-            user=vm.name,  # VM name doubles as default user
-            keep_iso=False,  # Default value
+            user=vm.name,
         ),
     )

@@ -34,10 +34,15 @@ class HashGenerator:
         return hashlib.sha256(data.encode()).hexdigest()
 
     @staticmethod
-    def vm(name: str, image_id: str, kernel_id: str, created_at: str) -> str:
-        """Generate 64-char SHA256 hash for a VM."""
-        data = f"{name}:{image_id}:{kernel_id}:{created_at}"
-        return hashlib.sha256(data.encode()).hexdigest()
+    def vm(name: str, created_at: str) -> str:
+        """Generate 32-char SHA256 hash for a VM.
+
+        VM IDs are truncated to 32 characters (instead of the usual 64) so
+        that filesystem paths derived from the ID stay well under the Unix
+        domain socket path limit (SUN_LEN ≈108 bytes).
+        """
+        data = f"{name}:{created_at}"
+        return hashlib.sha256(data.encode()).hexdigest()[:32]
 
     @staticmethod
     def network(name: str, subnet: str, created_at: str) -> str:
@@ -88,18 +93,6 @@ def generate_full_hash_binary(file_path: Path, name: str, version: str) -> str:
         stacklevel=2,
     )
     return HashGenerator.binary(file_path, name, version)
-
-
-def generate_full_hash_vm(
-    name: str, image_id: str, kernel_id: str, created_at: str
-) -> str:
-    """Deprecated: Use HashGenerator.vm()."""
-    warnings.warn(
-        "generate_full_hash_vm is deprecated, use HashGenerator.vm()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return HashGenerator.vm(name, image_id, kernel_id, created_at)
 
 
 def generate_full_hash_network(name: str, subnet: str, created_at: str) -> str:

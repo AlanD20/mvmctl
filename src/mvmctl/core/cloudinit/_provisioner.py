@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mvmctl.constants import CONST_DIR_PERMS_CACHE, DEFAULT_CLOUD_INIT_ISO_NAME
 from mvmctl.core._internal._iptables_tracker import IPTablesTracker
-from mvmctl.core.cloudinit._manager import CloudInitManager
 from mvmctl.exceptions import CloudInitError, MVMError
 from mvmctl.models.network import (
     IPTablesChain,
@@ -63,7 +62,7 @@ class CloudInitProvisionResult:
     nocloud_port: int = 0
     nocloud_pid: int | None = None
     nocloud_net_manager: NoCloudNetServerManager | None = None
-    nocloud_net_rules: list[IPTablesRuleItem] = []
+    nocloud_net_rules: list[IPTablesRuleItem] = field(default_factory=list)
 
 
 class CloudInitProvisioner:
@@ -73,6 +72,8 @@ class CloudInitProvisioner:
 
     def __init__(self, config: CloudInitProvisionConfig) -> None:
         """Initialize the CloudInitProvisioner."""
+        from mvmctl.core.cloudinit._manager import CloudInitManager
+
         self._config = config
         self._manager = CloudInitManager(config)
 

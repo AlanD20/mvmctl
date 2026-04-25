@@ -81,7 +81,9 @@ class VMController:
             if not force and self._vm.api_socket_path:
                 # Try graceful shutdown via Firecracker API first
                 try:
-                    client = FirecrackerClient(Path(self._vm.api_socket_path))
+                    client = FirecrackerClient(
+                        self._vm.vm_dir / self._vm.api_socket_path
+                    )
                     client.send_ctrl_alt_del()
                     client.close()
                     # Wait for guest OS shutdown via pre_signal_hook
@@ -125,7 +127,7 @@ class VMController:
             )
         if not self._vm.api_socket_path:
             raise MVMError(f"VM '{name}' has no API socket enabled")
-        client = FirecrackerClient(Path(self._vm.api_socket_path))
+        client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
             client.pause_vm()
             self._repo.update_status(self._vm.id, VMStatus.PAUSED.value)
@@ -145,7 +147,7 @@ class VMController:
             )
         if not self._vm.api_socket_path:
             raise MVMError(f"VM '{name}' has no API socket enabled")
-        client = FirecrackerClient(Path(self._vm.api_socket_path))
+        client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
             client.resume_vm()
             self._repo.update_status(self._vm.id, VMStatus.RUNNING.value)
@@ -166,7 +168,7 @@ class VMController:
         if not self._vm.api_socket_path:
             raise MVMError(f"VM '{name}' has no API socket enabled")
 
-        client = FirecrackerClient(Path(self._vm.api_socket_path))
+        client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
             client.start_instance()
             self._repo.update_status(self._vm.id, VMStatus.RUNNING.value)
@@ -199,8 +201,7 @@ class VMController:
             raise MVMError(
                 f"Socket not found for VM '{self._vm.name}'. Must be running with --enable-api-socket"
             )
-        socket_path = Path(self._vm.api_socket_path)
-        client = FirecrackerClient(socket_path)
+        client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
             client.create_snapshot(mem_out, state_out)
         finally:
@@ -228,8 +229,7 @@ class VMController:
             raise MVMError(
                 f"Socket not found for VM '{self._vm.name}'. Must be running with --enable-api-socket"
             )
-        socket_path = Path(self._vm.api_socket_path)
-        client = FirecrackerClient(socket_path)
+        client = FirecrackerClient(self._vm.vm_dir / self._vm.api_socket_path)
         try:
             client.load_snapshot(mem_in, state_in, effective_resume)
         finally:

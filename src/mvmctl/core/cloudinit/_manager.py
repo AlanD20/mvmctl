@@ -13,10 +13,14 @@ from typing import Any
 
 from passlib.hash import bcrypt, sha512_crypt
 
-from mvmctl.api._internal._asset_manager import AssetManager
 from mvmctl.constants import DEFAULT_VM_USER_PASSWORD, REQUIRED_ISO_TOOL
+from mvmctl.core._internal._asset_manager import AssetManager
 from mvmctl.core.cloudinit._provisioner import CloudInitProvisionConfig
-from mvmctl.exceptions import CloudInitError, CloudInitProvisionError, ConfigError, ProcessError
+from mvmctl.exceptions import (
+    CloudInitError,
+    CloudInitProvisionError,
+    ProcessError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +59,22 @@ class CloudInitManager:
 
         rendered = self._render_cloud_init_template()
 
-        (self._config.cloud_init_dir / "meta-data").write_text(rendered["meta_data"])
+        (self._config.cloud_init_dir / "meta-data").write_text(
+            rendered["meta_data"]
+        )
 
         if not self._config.skip_network_config:
-            (self._config.cloud_init_dir / "network-config").write_text(rendered["network_config"])
+            (self._config.cloud_init_dir / "network-config").write_text(
+                rendered["network_config"]
+            )
 
         # Custom user-data loader
         if self._config.custom_user_data_path is not None:
             self._parse_custom_user_data()
         else:
-            (self._config.cloud_init_dir / "user-data").write_text(rendered["user_data"])
+            (self._config.cloud_init_dir / "user-data").write_text(
+                rendered["user_data"]
+            )
 
     def _parse_custom_user_data(self) -> None:
         """Process custom user data provided to the API."""
@@ -76,7 +86,10 @@ class CloudInitManager:
 
         custom_userdata: dict[str, Any] = {}
         content = self._config.custom_user_data_path.read_text()
-        if not (content.startswith("#cloud-config") or content.startswith("Content-Type:")):
+        if not (
+            content.startswith("#cloud-config")
+            or content.startswith("Content-Type:")
+        ):
             logger.warning(
                 "user-data file does not start with '#cloud-config' or MIME boundary header"
             )
@@ -90,7 +103,9 @@ class CloudInitManager:
                     "Custom user-data must parse to a YAML mapping/object"
                 )
         except yaml.YAMLError as exc:
-            raise CloudInitProvisionError(f"Invalid YAML in user-data file: {exc}") from exc
+            raise CloudInitProvisionError(
+                f"Invalid YAML in user-data file: {exc}"
+            ) from exc
 
         if self._config.ssh_pubkeys:
             if "users" not in custom_userdata:
@@ -105,8 +120,13 @@ class CloudInitManager:
                 if isinstance(users_list, list):
                     user_found = False
                     for u in users_list:
-                        if isinstance(u, dict) and u.get("name") == self._config.user:
-                            existing_keys: list[str] = u.setdefault("ssh-authorized-keys", [])
+                        if (
+                            isinstance(u, dict)
+                            and u.get("name") == self._config.user
+                        ):
+                            existing_keys: list[str] = u.setdefault(
+                                "ssh-authorized-keys", []
+                            )
                             for k in self._config.ssh_pubkeys:
                                 if k not in existing_keys:
                                     existing_keys.append(k)
@@ -116,7 +136,9 @@ class CloudInitManager:
                         users_list.append(
                             {
                                 "name": self._config.user,
-                                "ssh-authorized-keys": list(self._config.ssh_pubkeys),
+                                "ssh-authorized-keys": list(
+                                    self._config.ssh_pubkeys
+                                ),
                             }
                         )
         if "network" in custom_userdata:
@@ -127,7 +149,8 @@ class CloudInitManager:
             )
 
         (self._config.cloud_init_dir / "user-data").write_text(
-            "#cloud-config\n" + yaml.dump(custom_userdata, default_flow_style=False)
+            "#cloud-config\n"
+            + yaml.dump(custom_userdata, default_flow_style=False)
         )
 
     def create_seed_iso(self, cloud_init_dir: Path, output_iso: Path) -> None:
@@ -145,7 +168,9 @@ class CloudInitManager:
         for filename in required_files:
             filepath = cloud_init_dir / filename
             if not filepath.exists():
-                raise CloudInitError(f"Missing required cloud-init file: {filename}")
+                raise CloudInitError(
+                    f"Missing required cloud-init file: {filename}"
+                )
 
         network_config_path = cloud_init_dir / "network-config"
         has_network_config = network_config_path.exists()
@@ -183,7 +208,9 @@ class CloudInitManager:
             ConfigError: If dangerous directives are found without proper safeguards.
         """
         dangerous_directives = [
-            directive for directive in _DANGEROUS_CLOUD_INIT_DIRECTIVES if directive in user_data
+            directive
+            for directive in _DANGEROUS_CLOUD_INIT_DIRECTIVES
+            if directive in user_data
         ]
         if not dangerous_directives:
             return
@@ -197,7 +224,9 @@ class CloudInitManager:
             f"{', '.join(dangerous_directives)}. {details}"
         )
 
-    def generate_password_hash(self, password: str, algorithm: str = "sha512") -> str:
+    def generate_password_hash(
+        self, password: str, algorithm: str = "sha512"
+    ) -> str:
         """Generate Unix password hash for cloud-init.
 
         Args:
@@ -217,7 +246,9 @@ class CloudInitManager:
 
         hasher = algorithms.get(algorithm.lower())
         if hasher is None:
-            raise ValueError(f"Unsupported algorithm: {algorithm}. Use: {list(algorithms.keys())}")
+            raise ValueError(
+                f"Unsupported algorithm: {algorithm}. Use: {list(algorithms.keys())}"
+            )
 
         return hasher.hash(password)
 
@@ -251,7 +282,12 @@ class CloudInitManager:
         current_content: list[str] = []
 
         # Top-level section headers in the template (not nested ones like write_files content)
-        _SECTION_HEADERS = {"user_data", "meta_data", "network_config", "nocloud_cfg"}
+        _SECTION_HEADERS = {
+            "user_data",
+            "meta_data",
+            "network_config",
+            "nocloud_cfg",
+        }
 
         for line in rendered.splitlines():
             # Only treat unindented lines with known section names as section headers
@@ -260,7 +296,11 @@ class CloudInitManager:
             if (
                 not line.startswith(" ")
                 and not line.startswith("\t")
-                and (line.endswith(": |") or line.endswith(":|>") or line.endswith(":|-"))
+                and (
+                    line.endswith(": |")
+                    or line.endswith(":|>")
+                    or line.endswith(":|-")
+                )
             ):
                 section_name = line.rsplit(":", 1)[0]
                 if section_name in _SECTION_HEADERS:

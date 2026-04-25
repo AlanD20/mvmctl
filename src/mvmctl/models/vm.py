@@ -72,6 +72,13 @@ class VMInstanceItem:
     binary: BinaryItem | None = None
     network: NetworkItem | None = None
 
+    @property
+    def vm_dir(self) -> Path:
+        """Absolute VM directory path."""
+        from mvmctl.utils.common import CacheUtils
+
+        return CacheUtils.get_vm_dir(self.id)
+
 
 @dataclass
 class ConsoleInfo:

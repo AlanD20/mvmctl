@@ -98,6 +98,7 @@ class FirecrackerSpawner:
     """Manage Firecracker."""
 
     pid: int | None = None
+    process_start_time: int | None = None
     fc_log_fp: TextIO | None = None
     serial_output_fp: TextIO | None = None
 
@@ -199,6 +200,12 @@ class FirecrackerSpawner:
         # Close file pointers since the firecracker process is managing them
         self._close_filepointers()
 
+        self.pid = fc_proc.pid
+        from mvmctl.utils.process_signals import ProcessSignalHandler
+
+        self.process_start_time = ProcessSignalHandler._get_process_start_time(
+            fc_proc.pid
+        )
         write_pid_file(self._pid_path, fc_proc.pid)
 
     def cleanup(self) -> None:
@@ -431,38 +438,18 @@ class FirecrackerSpawner:
     def _set_boot_arg(
         self, boot_args_dict: dict[str, list[str] | None], key: str, value: str
     ) -> None:
-        """Set or append a boot argument value in the dictionary.
+        """Set (overwrite) a boot argument value in the dictionary.
 
-        If the key exists with a list, appends to the list.
-        If the key exists with None (flag), converts to single-element list.
-        If the key doesn't exist, creates a new single-element list.
+        If the key exists, its value is replaced.  This ensures that
+        arguments such as ``root=`` or ``pci=`` only appear once in the
+        generated command line.
 
         Args:
             boot_args_dict: The boot arguments dictionary to modify.
             key: The boot argument key (e.g., "pci", "systemd.mask").
             value: The value to set.
-
-        Examples:
-            >>> args = {"pci": ["on"]}
-            >>> self._set_boot_arg(args, "pci", "off")  # Override
-            >>> args
-            {"pci": ["on", "off"]}  # Appended!
-            >>> self._set_boot_arg(args, "quiet", None)  # Flag
-            >>> args
-            {"pci": ["on", "off"], "quiet": None}
-            >>> self._set_boot_arg(args, "systemd.mask", "s1")
-            >>> self._set_boot_arg(args, "systemd.mask", "s2")
-            >>> args
-            {"systemd.mask": ["s1", "s2"]}
         """
-        if key in boot_args_dict:
-            current = boot_args_dict[key]
-            if current is None:
-                boot_args_dict[key] = [value]
-            else:
-                current.append(value)
-        else:
-            boot_args_dict[key] = [value]
+        boot_args_dict[key] = [value]
 
     def _build_network_config(self) -> list[NetworkInterfaceConfig]:
 

@@ -41,6 +41,11 @@ Chain MVM-FORWARD (1 references)
 - [ ] enable verbosity for every utility commands being used if we use --debug on the cli. for example mvm --debug ssh my-vm should add -v to the ssh command under the hood so that everything propagated properly with debugging scenarios!!! 
 - [ ] rename configure.py to init.py
 
+## Security
+
+- change the db to user only and read for group only
+- change cache folder permission!
+
 ---
 
 ## Notes

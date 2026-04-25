@@ -53,6 +53,7 @@ from mvmctl.models.kernel import KernelItem
 from mvmctl.models.network import NetworkItem
 from mvmctl.utils._network_validator import NetworkValidator
 from mvmctl.utils._vm_validator import VMValidator
+from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.disk_size import parse_disk_size
 
 logger = logging.getLogger(__name__)
@@ -66,16 +67,16 @@ class VMCreateInput:
 
     # Required fields (no defaults)
     name: str
-    vcpu_count: int
-    mem_size_mib: int
     ssh_keys: list[str]
 
-    # Optional fields (DB-backed at API layer)
-    user: str | None
-    enable_pci: bool | None
-    enable_console: bool | None
-    enable_logging: bool | None
-    enable_metrics: bool | None
+    # Optional fields with CLI-layer defaults resolved in VMCreateRequest
+    vcpu_count: int | None = None
+    mem_size_mib: int | None = None
+    user: str | None = None
+    enable_pci: bool | None = None
+    enable_console: bool | None = None
+    enable_logging: bool | None = None
+    enable_metrics: bool | None = None
     firecracker_bin: str | None = None
     image: str | None = None
     kernel_id: str | None = None
@@ -93,7 +94,7 @@ class VMCreateInput:
     cloud_init_mode: str | None = None
     cloud_init_iso_path: Path | None = None
     keep_cloud_init_iso: bool = False
-    nocloud_net_port: int = 0
+    nocloud_net_port: int | None = None
     skip_cleanup: bool = False
 
 
@@ -189,17 +190,14 @@ class VMCreateRequest:
         network_prefix_len = ipv4_net.prefixlen
         network_netmask = ipv4_net.netmask
 
-        rootfs_disk_size_bytes = (
-            image.minimum_rootfs_size_mib * CONST_MEBIBYTE_BYTES
-        )
         if self._inputs.disk_size is not None:
-            rootfs_disk_size_bytes = (
-                parse_disk_size(self._inputs.disk_size) * CONST_MEBIBYTE_BYTES
+            rootfs_disk_size_mib = (
+                parse_disk_size(self._inputs.disk_size) // CONST_MEBIBYTE_BYTES
             )
+        else:
+            rootfs_disk_size_mib = image.minimum_rootfs_size_mib
 
-        rootfs_disk_size_mib = (
-            image.minimum_rootfs_size_mib // CONST_MEBIBYTE_BYTES
-        )
+        rootfs_disk_size_bytes = rootfs_disk_size_mib * CONST_MEBIBYTE_BYTES
 
         ci_mode_result = self._resolve_cloud_init_mode()
 
@@ -208,13 +206,13 @@ class VMCreateRequest:
             vm_id=self._vm_id,
             vm_dir=self._vm_dir,
             vcpu_count=self._inputs.vcpu_count
-            if self._inputs.vcpu_count != 0
+            if self._inputs.vcpu_count is not None
             else DEFAULT_VM_VCPU_COUNT,
             mem_size_mib=self._inputs.mem_size_mib
-            if self._inputs.mem_size_mib != 0
+            if self._inputs.mem_size_mib is not None
             else DEFAULT_VM_MEM_MIB,
             user=self._inputs.user
-            if self._inputs.user
+            if self._inputs.user is not None
             else DEFAULT_VM_SSH_USER,
             network=network,
             image=image,
@@ -301,16 +299,14 @@ class VMCreateRequest:
                 f"Invalid mem_size_mib={self._result.mem_size_mib}: must be between 128 and 65536"
             )
 
-        if not Path(self._result.kernel.path).exists():
-            raise VMCreateError(f"Kernel not found: {self._result.kernel.path}")
-
-        fc_bin_path = Path(self._result.binary.path)
-        if (fc_bin_path.is_absolute() or "/" in self._result.binary.path) and (
-            not fc_bin_path.exists() or not os.access(fc_bin_path, os.X_OK)
-        ):
+        if not self._result.kernel.resolved_path.exists():
             raise VMCreateError(
-                f"Firecracker binary not found: {self._result.binary.path}"
+                f"Kernel not found: {self._result.kernel.resolved_path}"
             )
+
+        fc_bin_path = self._result.binary.resolved_path
+        if not fc_bin_path.exists() or not os.access(fc_bin_path, os.X_OK):
+            raise VMCreateError(f"Firecracker binary not found: {fc_bin_path}")
 
         if (
             self._result.custom_user_data_path is not None
@@ -440,7 +436,9 @@ class VMCreateRequest:
             else self._key_resolver.resolve_many(self._inputs.ssh_keys).items
         )
 
-        return KeyService.get_pubkeys(ssh_keys, self._db)
+        key_service = KeyService(KeyRepository(self._db))
+        keys_dir = CacheUtils.get_keys_dir()
+        return key_service.get_pubkeys(ssh_keys, keys_dir)
 
     def _resolve_cloud_init_mode(self) -> CloudInitModeResolved:
 

@@ -216,10 +216,12 @@ class CacheUtils:
 
     @staticmethod
     def get_vm_dir(id: str) -> Path:
-        """Return the directory for a specific VM by its hash."""
-        result = CacheUtils.get_vms_dir() / id
-        result.mkdir(parents=True, exist_ok=True)
-        return result
+        """Return the directory path for a specific VM by its hash.
+
+        Does NOT create the directory — callers must create it explicitly
+        via FsUtils.secure_mkdir() when appropriate.
+        """
+        return CacheUtils.get_vms_dir() / id
 
     @staticmethod
     def get_images_dir() -> Path:

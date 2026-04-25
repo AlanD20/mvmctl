@@ -135,6 +135,7 @@ CREATE TABLE vm_instances (
     enable_logging INTEGER NOT NULL,  -- Boolean: 0 or 1
     enable_metrics INTEGER NOT NULL,  -- Boolean: 0 or 1
     enable_console INTEGER NOT NULL,  -- Boolean: 0 or 1
+    boot_args TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE RESTRICT,
