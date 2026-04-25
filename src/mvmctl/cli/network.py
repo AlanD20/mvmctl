@@ -152,33 +152,6 @@ def _resolve_user_nat_gateways() -> str:
     return ",".join(selected_interfaces)
 
 
-def _print_create_error(error_msg: str, name: str) -> None:
-    print_error(error_msg)
-    print_info("")
-    lowered = error_msg.lower()
-    if "already exists" in lowered:
-        print_info("To view existing networks:")
-        print_info("  mvm network ls")
-        print_info("")
-        print_info("To remove the existing network:")
-        print_info(f"  mvm network rm {name}")
-    elif "overlaps" in lowered:
-        print_info(
-            "Choose a different SUBNET that doesn't conflict with existing networks."
-        )
-        print_info("Common private ranges:")
-        print_info("  10.0.0.0/8     (very large)")
-        print_info("  172.16.0.0/12  (large)")
-        print_info("  192.168.0.0/16 (medium)")
-        print_info("  192.168.100.0/24 (small, good for testing)")
-    elif "bridge" in lowered and "conflicts" in lowered:
-        print_info("Try using a different network name.")
-    elif "privilege" in lowered or "permission" in lowered:
-        print_info("Run with sudo or configure persistent access:")
-        print_info("  sudo mvm host init")
-        print_info("  (then log out and back in)")
-
-
 @network_app.command(
     name="create",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
@@ -245,16 +218,20 @@ def network_create(
 )
 @handle_errors
 def network_rm(
-    ctx: typer.Context,
-    name: str | None = typer.Argument(None, help="Network name"),
+    names: list[str] = typer.Argument(None, help="Network names to remove"),
     force: bool = typer.Option(
         False, "--force", "-f", help="Remove even if referenced by VMs"
     ),
 ) -> None:
-    """Alias for remove."""
-    name = CliUtils.check_name_arg(ctx, name)
-    NetworkOperation.remove(NetworkInput(name=[name]), force=force)
-    print_success(f"Network '{name}' removed")
+    """Remove one or more networks by name."""
+    effective_names = list(names) if names else []
+    if not effective_names:
+        print_error("Provide at least one network name")
+        raise typer.Exit(code=1)
+
+    NetworkOperation.remove(NetworkInput(name=effective_names), force=force)
+    for name in effective_names:
+        print_success(f"Network '{name}' removed")
 
 
 @network_app.command(
