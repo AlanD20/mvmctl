@@ -123,7 +123,7 @@ class KernelOperation:
         # Parse filename for base_name
         parsed = KernelService.parse_filename(fetch_result.path.name)
 
-        # Build KernelItem
+        # Build KernelItem (path is relative — filename only)
         kernel_item = KernelItem(
             id=kernel_id,
             name=fetch_result.path.name,
@@ -131,7 +131,7 @@ class KernelOperation:
             version=fetch_result.version,
             arch=resolved.arch,
             type=resolved.kernel_type,
-            path=str(fetch_result.path),
+            path=fetch_result.path.name,
             is_default=resolved.set_default,
             is_present=True,
             created_at=timestamp,
@@ -142,7 +142,7 @@ class KernelOperation:
 
         # Clean up old kernel file if ID changed
         if existing is not None and existing.id != kernel_item.id:
-            old_path = Path(existing.path)
+            old_path = existing.resolved_path
             if old_path.exists():
                 old_path.unlink()
                 logger.info(
@@ -315,10 +315,10 @@ class KernelOperation:
             raise KernelError("No default kernel found in database")
 
         # Verify file exists on disk
-        kernel_path = Path(default_kernel.path)
+        kernel_path = default_kernel.resolved_path
         if not kernel_path.exists():
             raise KernelError(
-                f"Default kernel file not found: {default_kernel.path}"
+                f"Default kernel file not found: {kernel_path}"
             )
 
         return default_kernel

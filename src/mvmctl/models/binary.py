@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
 class BinaryItem:
-    """Binary record — maps to binaries table."""
+    """Binary record — maps to binaries table.
+
+    The ``path`` field stores a *relative* filename (e.g.
+    ``"firecracker-v1.15.1"``).  Use :attr:`resolved_path` when you need
+    the absolute filesystem location.
+    """
 
     id: str
     name: str
@@ -20,3 +26,10 @@ class BinaryItem:
     created_at: str
     updated_at: str
     deleted_at: str | None = None
+
+    @property
+    def resolved_path(self) -> Path:
+        """Absolute path resolved against the binaries cache directory."""
+        from mvmctl.utils.common import CacheUtils
+
+        return CacheUtils.get_bin_dir() / self.path

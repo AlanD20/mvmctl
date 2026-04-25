@@ -52,7 +52,7 @@ class BinaryService:
 
         missing_ids: list[str] = []
         for binary in binaries:
-            if not Path(binary.path).exists():
+            if not binary.resolved_path.exists():
                 missing_ids.append(binary.id)
 
         if missing_ids:
@@ -338,7 +338,7 @@ class BinaryService:
             version=version,
             full_version=f"v{version}",
             ci_version=ci_ver,
-            path=str(path),
+            path=path.name,
             is_default=False,
             is_present=True,
             created_at=now,

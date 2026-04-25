@@ -8,7 +8,12 @@ from pathlib import Path
 
 @dataclass
 class KernelItem:
-    """Kernel record — maps to kernels table."""
+    """Kernel record — maps to kernels table.
+
+    The ``path`` field stores a *relative* filename (e.g.
+    ``"vmlinux-firecracker-6.1.155-x86_64"``).  Use :attr:`resolved_path`
+    when you need the absolute filesystem location.
+    """
 
     id: str
     name: str
@@ -22,6 +27,13 @@ class KernelItem:
     created_at: str
     updated_at: str
     deleted_at: str | None = None
+
+    @property
+    def resolved_path(self) -> Path:
+        """Absolute path resolved against the kernels cache directory."""
+        from mvmctl.utils.common import CacheUtils
+
+        return CacheUtils.get_kernels_dir() / self.path
 
 
 @dataclass

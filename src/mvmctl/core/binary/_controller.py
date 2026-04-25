@@ -54,8 +54,6 @@ class BinaryController:
         Raises:
             BinaryError: If binary is referenced by VMs and force is False.
         """
-        from pathlib import Path
-
         from mvmctl.exceptions import BinaryError
 
         vms = self._repo.query_vms_by_binary(self._binary.id)
@@ -68,7 +66,7 @@ class BinaryController:
             )
 
         # 2. Delete file from disk
-        binary_path = Path(self._binary.path)
+        binary_path = self._binary.resolved_path
         if binary_path.exists():
             binary_path.unlink()
 

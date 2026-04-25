@@ -143,7 +143,7 @@ def bin_fetch(
     for binary in binaries:
         short_id = HashGenerator.shorten(binary.id)
         print_success(
-            f"Downloaded {binary.name} v{binary.version}: {binary.path}"
+            f"Downloaded {binary.name} v{binary.version}: {binary.resolved_path}"
         )
         print_info(f"  ID: {short_id}")
 

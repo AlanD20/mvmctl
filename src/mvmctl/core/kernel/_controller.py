@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from mvmctl.core.kernel._repository import KernelRepository
 from mvmctl.core.kernel._resolver import KernelResolver
 from mvmctl.exceptions import KernelError
@@ -59,7 +57,7 @@ class KernelController:
             )
 
         # 2. Delete file from disk
-        kernel_path = Path(self._kernel.path)
+        kernel_path = self._kernel.resolved_path
         if kernel_path.exists():
             kernel_path.unlink()
 

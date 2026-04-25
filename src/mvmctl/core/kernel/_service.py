@@ -110,7 +110,7 @@ class KernelService:
 
         missing_ids: list[str] = []
         for kernel in kernels:
-            if not Path(kernel.path).exists():
+            if not kernel.resolved_path.exists():
                 missing_ids.append(kernel.id)
 
         if missing_ids:
