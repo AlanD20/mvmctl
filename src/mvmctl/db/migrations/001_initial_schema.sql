@@ -240,6 +240,7 @@ CREATE TABLE ssh_keys (
     private_key_path TEXT NULL,
     public_key_path TEXT NOT NULL,
     is_default INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
+    is_present INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0=file missing, 1=file exists
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

@@ -205,6 +205,18 @@ class MVMKeyError(MVMError):
     """SSH key management failure."""
 
 
+class KeyExportError(MVMKeyError):
+    """SSH key export failure."""
+
+
+class KeyDependencyError(MVMKeyError):
+    """SSH key dependency (e.g. ssh-keygen) missing."""
+
+
+class KeyFileError(MVMKeyError):
+    """SSH key file read/write failure."""
+
+
 class CloudInitError(MVMError):
     """Cloud-init ISO creation failure.
 

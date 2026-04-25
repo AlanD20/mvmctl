@@ -16,6 +16,7 @@ class SSHKeyItem:
     comment: str
     public_key_path: str
     is_default: bool
+    is_present: bool
     created_at: str
     updated_at: str
 

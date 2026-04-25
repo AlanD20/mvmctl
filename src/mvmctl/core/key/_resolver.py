@@ -50,13 +50,24 @@ class KeyResolver:
         return keys
 
     def by_id(self, key_id: str) -> SSHKeyItem:
-        """Resolve by ID (fingerprint) prefix."""
-        matches = self._repo.find_by_prefix(key_id)
-        if len(matches) == 0:
-            raise KeyNotFoundError(f"Key not found: {key_id!r}")
-        if len(matches) > 1:
-            raise KeyNotFoundError(f"Key ID is ambiguous: {key_id!r}")
-        return self._enrich(matches)[0]
+        """Resolve by ID (fingerprint) prefix.
+
+        Accepts both full ID with prefix (``SHA256:abc...``) and bare
+        fingerprint (``abc...``) by automatically prepending ``SHA256:``
+        when the prefix is missing.
+        """
+        candidates = [key_id]
+        if not key_id.startswith("SHA256:"):
+            candidates.append(f"SHA256:{key_id}")
+
+        for candidate in candidates:
+            matches = self._repo.find_by_prefix(candidate)
+            if len(matches) == 1:
+                return self._enrich(matches)[0]
+            if len(matches) > 1:
+                raise KeyNotFoundError(f"Key ID is ambiguous: {key_id!r}")
+
+        raise KeyNotFoundError(f"Key not found: {key_id!r}")
 
     def by_name(self, name: str) -> SSHKeyItem:
         """Resolve by key name."""

@@ -69,8 +69,8 @@ class KeyRepository:
                 """
                 INSERT INTO ssh_keys (
                     id, name, fingerprint, algorithm, comment,
-                    private_key_path, public_key_path, is_default, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    private_key_path, public_key_path, is_default, is_present, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     fingerprint = excluded.fingerprint,
@@ -79,6 +79,7 @@ class KeyRepository:
                     private_key_path = excluded.private_key_path,
                     public_key_path = excluded.public_key_path,
                     is_default = excluded.is_default,
+                    is_present = excluded.is_present,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -90,9 +91,24 @@ class KeyRepository:
                     key.private_key_path,
                     key.public_key_path,
                     int(key.is_default),
+                    int(key.is_present),
                     key.created_at,
                     key.updated_at,
                 ),
+            )
+
+    def update_many_is_present(
+        self, key_ids: list[str], is_present: bool
+    ) -> None:
+        """Bulk update is_present flag for multiple keys."""
+        if not key_ids:
+            return
+        placeholders = ",".join(["?"] * len(key_ids))
+        with self._db.connect() as conn:
+            conn.execute(
+                f"""UPDATE ssh_keys SET is_present = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders})""",
+                [int(is_present)] + list(key_ids),
             )
 
     def delete(self, key_id: str) -> None:
@@ -132,3 +148,8 @@ class KeyRepository:
                 "SELECT * FROM ssh_keys WHERE is_default = 1 ORDER BY created_at"
             ).fetchall()
         return [SSHKeyItem(**dict(row)) for row in rows]
+
+    def clear_defaults(self) -> None:
+        """Clear all default SSH keys."""
+        with self._db.connect() as conn:
+            conn.execute("UPDATE ssh_keys SET is_default = 0")

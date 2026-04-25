@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING
 from mvmctl.constants import CONST_FILE_PERMS_PRIVATE_KEY
 from mvmctl.core.key._repository import KeyRepository
 from mvmctl.core.key._resolver import KeyResolver
-from mvmctl.core.key._service import KeyService
-from mvmctl.exceptions import MVMKeyError
 from mvmctl.models.key import SSHKeyItem
 
 if TYPE_CHECKING:
@@ -60,47 +58,51 @@ class KeyController:
         return self._key
 
     def remove(self) -> None:
-        """Remove the resolved key from the cache."""
+        """Remove the resolved key from database only.
+
+        File cleanup is handled by the orchestration layer.
+        """
         self._repo.delete(self._key.id)
 
-        pub_file = KeyService._get_keys_config_dir() / f"{self._key.name}.pub"
-        if pub_file.exists():
-            pub_file.unlink()
-
     def export(
-        self, destination: str | Path | None = None, overwrite: bool = False
+        self, destination: Path, *, keys_dir: Path, overwrite: bool = False
     ) -> tuple[Path, Path]:
-        """Export the keypair to a destination directory."""
-        keys_dir = KeyService._get_keys_config_dir()
+        """Export the keypair to a destination directory.
+
+        Args:
+            destination: Destination directory (required, must be explicit).
+            keys_dir: Directory where source key files are stored.
+            overwrite: If True, overwrite existing files.
+
+        Raises:
+            KeyExportError: If source key files not found or destination files exist.
+        """
+        from mvmctl.exceptions import KeyExportError
+
         source_private = keys_dir / self._key.name
         source_public = keys_dir / f"{self._key.name}.pub"
 
         if not source_private.exists():
-            raise MVMKeyError(
-                f"Private key '{self._key.name}' not found in cache at {source_private}"
+            raise KeyExportError(
+                f"Private key not found for '{self._key.name}'"
             )
         if not source_public.exists():
-            raise MVMKeyError(
-                f"Public key '{self._key.name}.pub' not found in cache at {source_public}"
-            )
+            raise KeyExportError(f"Public key not found for '{self._key.name}'")
 
-        if destination is None:
-            destination = Path.home() / ".ssh"
-        destination = Path(destination)
         destination.mkdir(parents=True, exist_ok=True)
 
         dest_private = destination / self._key.name
         dest_public = destination / f"{self._key.name}.pub"
 
         if not overwrite:
-            existing_files = []
+            existing = []
             if dest_private.exists():
-                existing_files.append(str(dest_private))
+                existing.append(str(dest_private))
             if dest_public.exists():
-                existing_files.append(str(dest_public))
-            if existing_files:
-                raise MVMKeyError(
-                    f"Key file(s) already exist at destination: {', '.join(existing_files)}. "
+                existing.append(str(dest_public))
+            if existing:
+                raise KeyExportError(
+                    f"Key file(s) already exist: {', '.join(existing)}. "
                     "Use --overwrite to replace."
                 )
 

@@ -5,12 +5,30 @@ from __future__ import annotations
 
 import importlib
 import os
+import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
+
+
+def _setup_signal_handlers() -> None:
+    """Install graceful signal handlers for programmatic CLI use.
+
+    SIGTERM is sent by process managers (systemd, docker stop, etc.).
+    We convert it to a clean sys.exit(143) (128 + 15).
+    """
+
+    def _handle_sigterm(signum: int, _frame: object) -> None:
+        sys.exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+
+_setup_signal_handlers()
 
 if TYPE_CHECKING:
     import importlib.metadata

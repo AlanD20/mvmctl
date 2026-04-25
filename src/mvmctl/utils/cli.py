@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import wraps
 from typing import Callable, TypeVar
 
+import click
 import typer
 from rich.console import Console
 
@@ -37,6 +38,21 @@ def handle_errors(func: F) -> F:
             return func(*args, **kwargs)
         except typer.Exit:
             raise
+        except click.exceptions.Abort:
+            raise typer.Exit(code=130)
+        except KeyboardInterrupt:
+            raise typer.Exit(code=130)
+        except BrokenPipeError:
+            # Silently exit on broken pipe (e.g., piped to head).
+            # Close stderr to avoid further writes that could trigger
+            # another BrokenPipeError during exit.
+            import sys
+
+            try:
+                sys.stderr.close()
+            except BrokenPipeError:
+                pass
+            raise typer.Exit(code=0)
         except MVMError as e:
             _print_error(str(e))
             raise typer.Exit(code=1) from e

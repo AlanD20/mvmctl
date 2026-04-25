@@ -31,7 +31,16 @@ from mvmctl.api.inputs._kernel_input import (
     KernelRequest,
     ResolvedKernelInput,
 )
-from mvmctl.api.inputs._key_input import KeyCreateInput
+from mvmctl.api.inputs._key_create_input import (
+    KeyCreateInput,
+    KeyCreateRequest,
+    ResolvedKeyCreateInput,
+)
+from mvmctl.api.inputs._key_input import (
+    KeyInput,
+    KeyRequest,
+    ResolvedKeyInput,
+)
 from mvmctl.api.inputs._network_create_input import (
     NetworkCreateInput,
     NetworkCreateRequest,
@@ -78,6 +87,9 @@ __all__ = [
     "KernelInput",
     "KernelRequest",
     "KeyCreateInput",
+    "KeyCreateRequest",
+    "KeyInput",
+    "KeyRequest",
     "NetworkCreateInput",
     "NetworkCreateRequest",
     "NetworkInput",
@@ -86,6 +98,8 @@ __all__ = [
     "ResolvedBinaryInput",
     "ResolvedKernelFetchRequest",
     "ResolvedKernelInput",
+    "ResolvedKeyCreateInput",
+    "ResolvedKeyInput",
     "ResolvedNetworkCreateRequest",
     "ResolvedNetworkInput",
     "ResolvedVMCreateInput",
