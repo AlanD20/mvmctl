@@ -89,7 +89,10 @@ class NetworkOperation:
         # Setup infrastructure
         service = NetworkService(repo)
         try:
-            service.ensure_bridge(resolved.bridge, resolved.subnet)
+            bridge_addr = NetworkUtils.compute_bridge_address(
+                resolved.ipv4_gateway, resolved.subnet
+            )
+            service.ensure_bridge(resolved.bridge, bridge_addr)
 
             if resolved.nat_enabled:
                 service.ensure_nat(
@@ -340,9 +343,10 @@ class NetworkOperation:
         # Ensure bridge is materialized
         service = NetworkService(repo)
         try:
-            service.ensure_bridge(
-                default_network.bridge, default_network.subnet
+            bridge_addr = NetworkUtils.compute_bridge_address(
+                default_network.ipv4_gateway, default_network.subnet
             )
+            service.ensure_bridge(default_network.bridge, bridge_addr)
             if default_network.nat_enabled:
                 service.ensure_nat(
                     default_network.bridge,
@@ -426,7 +430,10 @@ class NetworkOperation:
 
         for network in networks:
             try:
-                service.ensure_bridge(network.bridge, network.subnet)
+                bridge_addr = NetworkUtils.compute_bridge_address(
+                    network.ipv4_gateway, network.subnet
+                )
+                service.ensure_bridge(network.bridge, bridge_addr)
                 if network.nat_enabled:
                     service.ensure_nat(
                         network.bridge,

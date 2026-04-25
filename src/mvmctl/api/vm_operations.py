@@ -267,9 +267,11 @@ class VMCreateContext:
         # Networking
         net_repo = NetworkRepository(self._db)
         net_service = NetworkService(net_repo)
-        net_service.ensure_bridge(
-            self.resolved.network.bridge, self.resolved.network.subnet
+        bridge_addr = NetworkUtils.compute_bridge_address(
+            self.resolved.network.ipv4_gateway,
+            self.resolved.network.subnet,
         )
+        net_service.ensure_bridge(self.resolved.network.bridge, bridge_addr)
 
         # NAT rules shouldn't be tracked since we don't clean it up, and most of the time
         # NAT rules are created after network is created, this is here just to ensure the

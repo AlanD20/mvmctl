@@ -182,12 +182,11 @@ class IPTablesTracker:
         Returns:
             RuleOperationResult with success status
         """
-        delete_args = self._build_iptables_args(rule, self.RuleAction.DELETE)
-
-        # Find and mark the rule as deleted in database
+        # Find the rule in database first to get its comment_tag
         db_rule_id = rule.id
+        effective_rule = rule
+
         if db_rule_id is None:
-            # Look up the rule by its attributes
             existing_rule = self._repo.find_by_attributes(
                 table_name=rule.table_name,
                 chain_name=rule.chain_name,
@@ -203,23 +202,37 @@ class IPTablesTracker:
             )
             if existing_rule:
                 db_rule_id = existing_rule.id
+                # Use the DB rule's comment_tag so iptables -D can match
+                if not rule.comment_tag and existing_rule.comment_tag:
+                    effective_rule = existing_rule
+
+        delete_args = self._build_iptables_args(
+            effective_rule, self.RuleAction.DELETE
+        )
 
         # Remove from iptables
-        try:
-            subprocess.run(
-                privileged_cmd(delete_args),
-                capture_output=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode()
-            if "No chain/target/match by that name" not in stderr:
-                return IPTablesRuleResult(
-                    success=False,
-                    error_message=f"Failed to remove rule: {stderr}",
-                    command_executed=delete_args,
-                )
-            # Rule already gone from iptables - this is fine, continue to mark as deleted in DB
+        delete_result = subprocess.run(
+            privileged_cmd(delete_args),
+            capture_output=True,
+            check=False,
+        )
+
+        if delete_result.returncode != 0:
+            # Deletion failed. This can happen because the rule spec doesn't
+            # match (e.g. comment mismatch). We can't trust iptables -C to tell
+            # us if the rule is gone, because -C also fails when the comment
+            # doesn't match. Fallback: delete by line number.
+            if not self._remove_by_line_number(effective_rule):
+                # Best-effort: check if any rule with these interfaces remains
+                if not self._rule_exists_by_interfaces(effective_rule):
+                    pass  # Rule is truly gone
+                else:
+                    stderr = delete_result.stderr.decode()
+                    return IPTablesRuleResult(
+                        success=False,
+                        error_message=f"Failed to remove rule: {stderr}",
+                        command_executed=delete_args,
+                    )
 
         # Mark as deleted in database if we found it
         if db_rule_id is not None:
@@ -227,9 +240,121 @@ class IPTablesTracker:
 
         return IPTablesRuleResult(
             success=True,
-            rule=rule,
+            rule=effective_rule,
             command_executed=delete_args,
         )
+
+    def _remove_by_line_number(
+        self,
+        rule: IPTablesRuleItem,
+    ) -> bool:
+        """Remove a rule by scanning iptables output and deleting by line number.
+
+        Fallback when iptables -D fails (e.g. comment mismatch).
+        Matches rules by in_interface and out_interface.
+
+        Returns:
+            True if a matching rule was found and removed.
+        """
+        list_cmd = [
+            "iptables",
+            "-t",
+            rule.table_name,
+            "-L",
+            rule.chain_name,
+            "-n",
+            "--line-numbers",
+            "-v",
+        ]
+        result = subprocess.run(
+            privileged_cmd(list_cmd),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+
+        in_iface = rule.in_interface
+        out_iface = rule.out_interface
+        if in_iface == IPTablesWildcard.ANY_INTERFACE:
+            in_iface = "*"
+        if out_iface == IPTablesWildcard.ANY_INTERFACE:
+            out_iface = "*"
+
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 9:
+                continue
+            # Format: num pkts bytes target prot opt in out source destination
+            try:
+                line_in = parts[6]
+                line_out = parts[7]
+                if line_in == in_iface and line_out == out_iface:
+                    line_num = parts[0]
+                    del_cmd = [
+                        "iptables",
+                        "-t",
+                        rule.table_name,
+                        "-D",
+                        rule.chain_name,
+                        line_num,
+                    ]
+                    del_result = subprocess.run(
+                        privileged_cmd(del_cmd),
+                        capture_output=True,
+                        check=False,
+                    )
+                    return del_result.returncode == 0
+            except (IndexError, ValueError):
+                continue
+        return False
+
+    def _rule_exists_by_interfaces(
+        self,
+        rule: IPTablesRuleItem,
+    ) -> bool:
+        """Check if a rule with the given interfaces exists in the chain.
+
+        Uses iptables -L output, matching only by in/out interfaces.
+        """
+        list_cmd = [
+            "iptables",
+            "-t",
+            rule.table_name,
+            "-L",
+            rule.chain_name,
+            "-n",
+            "-v",
+        ]
+        result = subprocess.run(
+            privileged_cmd(list_cmd),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+
+        in_iface = rule.in_interface
+        out_iface = rule.out_interface
+        if in_iface == IPTablesWildcard.ANY_INTERFACE:
+            in_iface = "*"
+        if out_iface == IPTablesWildcard.ANY_INTERFACE:
+            out_iface = "*"
+
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 9:
+                continue
+            try:
+                line_in = parts[6]
+                line_out = parts[7]
+                if line_in == in_iface and line_out == out_iface:
+                    return True
+            except (IndexError, ValueError):
+                continue
+        return False
 
     def _build_iptables_args(
         self,

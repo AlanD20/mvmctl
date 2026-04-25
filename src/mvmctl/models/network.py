@@ -108,7 +108,7 @@ class IPTablesRuleItem:
     """IPTables rule record — maps to iptables_rules table."""
 
     table_name: IPTablesTable
-    chain_name: str
+    chain_name: IPTablesChain
     rule_type: IPTablesRuleType
     protocol: IPTablesProtocol
     source: str

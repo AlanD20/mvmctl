@@ -133,14 +133,19 @@ class NetworkService:
     def ensure_bridge(
         self,
         bridge: str,
-        subnet: str,
+        bridge_address: str,
     ) -> None:
-        """Create and configure the bridge interface."""
+        """Create and configure the bridge interface.
+
+        Args:
+            bridge: Bridge interface name.
+            bridge_address: Bridge IP address with prefix (e.g. '172.29.0.1/28').
+        """
         if NetworkUtils.bridge_exists(bridge):
             logger.debug("Bridge %s already exists, reconciling state", bridge)
             reconcile_cmds: list[str] = []
-            if not NetworkUtils.bridge_has_subnet(bridge, subnet):
-                reconcile_cmds.append(f"addr add {subnet} dev {bridge}")
+            if not NetworkUtils.bridge_has_subnet(bridge, bridge_address):
+                reconcile_cmds.append(f"addr add {bridge_address} dev {bridge}")
             reconcile_cmds.append(f"link set {bridge} up")
             try:
                 NetworkUtils._run_batch(reconcile_cmds)
@@ -151,7 +156,7 @@ class NetworkService:
                 NetworkUtils._run_batch(
                     [
                         f"link add name {bridge} type bridge",
-                        f"addr add {subnet} dev {bridge}",
+                        f"addr add {bridge_address} dev {bridge}",
                         f"link set {bridge} up",
                     ]
                 )
@@ -161,7 +166,7 @@ class NetworkService:
         # ip forwarding has to be enabled
         self.ensure_ip_forwarding()
 
-        logger.info("Bridge %s created with subnet %s", bridge, subnet)
+        logger.info("Bridge %s created with address %s", bridge, bridge_address)
 
     def ensure_ip_forwarding(self) -> None:
         """Enable IP forwarding for NAT.
@@ -231,7 +236,7 @@ class NetworkService:
                 table_name=IPTablesTable.NAT,
                 chain_name=IPTablesChain.MVM_POSTROUTING,
                 rule_type=IPTablesRuleType.MASQUERADE,
-                target=IPTablesTarget.ACCEPT,
+                target=IPTablesTarget.MASQUERADE,
                 network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=subnet,
@@ -368,7 +373,7 @@ class NetworkService:
                 table_name=IPTablesTable.NAT,
                 chain_name=IPTablesChain.MVM_POSTROUTING,
                 rule_type=IPTablesRuleType.MASQUERADE,
-                target=IPTablesTarget.ACCEPT,
+                target=IPTablesTarget.MASQUERADE,
                 network_id=network_id,
                 protocol=IPTablesProtocol.ALL,
                 source=effective_subnet,
@@ -380,7 +385,14 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            self._tracker.remove_rule(masquerade_rule)
+            result = self._tracker.remove_rule(masquerade_rule)
+            if not result.success:
+                logger.warning(
+                    "Failed to remove MASQUERADE rule for %s via %s: %s",
+                    bridge,
+                    gateway_iface,
+                    result.error_message,
+                )
 
             forward_out_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
@@ -398,7 +410,14 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            self._tracker.remove_rule(forward_out_rule)
+            result = self._tracker.remove_rule(forward_out_rule)
+            if not result.success:
+                logger.warning(
+                    "Failed to remove FORWARD out rule for %s via %s: %s",
+                    bridge,
+                    gateway_iface,
+                    result.error_message,
+                )
 
             forward_in_rule = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
@@ -416,7 +435,14 @@ class NetworkService:
                 is_active=True,
                 network_name=bridge,
             )
-            self._tracker.remove_rule(forward_in_rule)
+            result = self._tracker.remove_rule(forward_in_rule)
+            if not result.success:
+                logger.warning(
+                    "Failed to remove FORWARD in rule for %s via %s: %s",
+                    bridge,
+                    gateway_iface,
+                    result.error_message,
+                )
 
         logger.info(
             "NAT rules removed for bridge %s via %s (source %s)",
@@ -593,7 +619,13 @@ class NetworkService:
                 is_active=True,
                 network_name=effective_bridge,
             )
-            self._tracker.remove_rule(forward_bridge_to_tap)
+            result = self._tracker.remove_rule(forward_bridge_to_tap)
+            if not result.success:
+                logger.warning(
+                    "Failed to remove FORWARD rule (bridge->tap) for %s: %s",
+                    tap,
+                    result.error_message,
+                )
 
             forward_tap_to_bridge = IPTablesRuleItem(
                 table_name=IPTablesTable.FILTER,
@@ -611,7 +643,13 @@ class NetworkService:
                 is_active=True,
                 network_name=effective_bridge,
             )
-            self._tracker.remove_rule(forward_tap_to_bridge)
+            result = self._tracker.remove_rule(forward_tap_to_bridge)
+            if not result.success:
+                logger.warning(
+                    "Failed to remove FORWARD rule (tap->bridge) for %s: %s",
+                    tap,
+                    result.error_message,
+                )
 
         try:
             NetworkUtils._run_batch(

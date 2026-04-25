@@ -55,6 +55,20 @@ class NetworkUtils:
         return str(next(hosts_iter))
 
     @staticmethod
+    def compute_bridge_address(ipv4_gateway: str, subnet: str) -> str:
+        """Return gateway IP with subnet prefix (e.g. '172.29.0.1/28').
+
+        Args:
+            ipv4_gateway: Gateway IP address (e.g. '172.29.0.1').
+            subnet: Subnet CIDR (e.g. '172.29.0.0/28').
+
+        Returns:
+            Gateway IP with prefix (e.g. '172.29.0.1/28').
+        """
+        prefix = ipaddress.IPv4Network(subnet, strict=False).prefixlen
+        return f"{ipv4_gateway}/{prefix}"
+
+    @staticmethod
     def compute_bridge_name(network_name: str) -> str:
         """Compute bridge name from network name."""
         return f"{CLI_NAME}-{network_name}"

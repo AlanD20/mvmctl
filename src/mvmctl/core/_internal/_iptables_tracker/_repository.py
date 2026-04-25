@@ -247,6 +247,8 @@ class IPTablesRuleRepository:
     def _row_to_item(self, row: dict) -> IPTablesRuleItem:
         """Convert DB row dict to IPTablesRuleItem dataclass."""
         row_dict = dict(row)
+        row_dict["table_name"] = IPTablesTable(row_dict["table_name"])
+        row_dict["chain_name"] = IPTablesChain(row_dict["chain_name"])
         row_dict["rule_type"] = IPTablesRuleType(row_dict["rule_type"])
         row_dict["protocol"] = IPTablesProtocol(row_dict["protocol"])
         row_dict["target"] = IPTablesTarget(row_dict["target"])
