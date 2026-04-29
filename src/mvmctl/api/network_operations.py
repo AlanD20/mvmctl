@@ -211,7 +211,6 @@ class NetworkOperation:
             "is_present": network.is_present,
             "created_at": network.created_at,
             "updated_at": network.updated_at,
-            "full_name": network.full_name,
             "nat_gateways": network.nat_gateways_list or [],
             "leases": [
                 {

@@ -75,7 +75,6 @@ class NetworkItem:
     updated_at: str
     deleted_at: str | None = None
 
-    full_name: str | None = None
     nat_gateways: str | None = None
 
     # Resolved relations

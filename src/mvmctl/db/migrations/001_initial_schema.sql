@@ -69,7 +69,6 @@ CREATE INDEX idx_binaries_version ON binaries(version);
 CREATE TABLE networks (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    full_name TEXT NULL,
     subnet TEXT NOT NULL,
     bridge TEXT NOT NULL,
     ipv4_gateway TEXT NOT NULL,
