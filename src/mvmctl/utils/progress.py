@@ -17,12 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 class ASCIIProgressBar:
-    """Simple ASCII progress bar that updates on a single line.
+    """ASCII progress bar that works in both TTY and non-TTY environments.
 
     Displays progress as: [####      ] 45% (4.2MB/10MB)
 
-    Uses carriage return + ANSI clear to update the same line.
-    Works in both TTY and non-TTY environments.
+    In TTY mode, updates in-place on a single line using carriage return + ANSI clear.
+    In non-TTY mode (piped output, CI logs), prints each update on a new line.
     """
 
     def __init__(
@@ -41,6 +41,7 @@ class ASCIIProgressBar:
         self.current = 0
         self._last_line_length = 0
         self._last_percent = -1
+        self._is_tty = sys.stdout.isatty()
 
     def update(self, n: int) -> None:
         """Update progress by n bytes.
@@ -90,15 +91,17 @@ class ASCIIProgressBar:
         if len(line) > term_width - 1:
             line = line[: term_width - 1]
 
-        sys.stdout.write(f"\r\033[K{line}")
+        terminator = "\r\033[K" if self._is_tty else "\n"
+        sys.stdout.write(f"{terminator}{line}")
         sys.stdout.flush()
         self._last_line_length = len(line)
         self._last_percent = percent
 
     def finish(self) -> None:
         """Finish progress display."""
-        sys.stdout.write("\r\033[K")
-        sys.stdout.flush()
+        if self._is_tty:
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
         print(f"{self.title} complete.")
 
 
