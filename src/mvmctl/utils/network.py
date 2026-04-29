@@ -448,6 +448,33 @@ class NetworkUtils:
             return False
         return subnet in result.stdout
 
+    @staticmethod
+    def strip_tap_rules(rules_text: str) -> str:
+        """Strip TAP-related rules from iptables rules text.
+
+        Excludes any rules that reference currently active TAP devices.
+        This prevents transient TAP rules from being persisted to disk.
+
+        Args:
+            rules_text: Raw iptables-save output.
+
+        Returns:
+            Filtered rules text with TAP rules removed.
+        """
+        tap_names = set(NetworkUtils.get_tuntap_devices())
+        if not tap_names:
+            return rules_text
+        filtered: list[str] = []
+        for line in rules_text.splitlines(keepends=True):
+            if any(tap in line for tap in tap_names):
+                logger.debug(
+                    "Excluding transient TAP rule from persistence: %s",
+                    line.strip(),
+                )
+                continue
+            filtered.append(line)
+        return "".join(filtered)
+
 
 # =====================================================================
 # DEPRECATED — Use NetworkUtils instead

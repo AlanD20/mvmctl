@@ -109,11 +109,71 @@ class NetworkService:
     def remove_mvm_chains(self) -> None:
         """Remove all MVM iptables chains and their rules.
 
-        This deletes the custom MVM chains and all their rules.
-        Use with caution - this removes all MVM firewall rules.
+        Deletes jump rules from standard chains, flushes custom chains,
+        then removes the chains themselves.  Uses direct iptables calls
+        rather than the tracker so that ``chain_exists()`` (which runs
+        without privileges) cannot silently skip deletion.
         """
-        for chain_enum, table_enum, _ in _MVM_CHAINS_CONFIG:
-            self._tracker.remove_chain(chain_name=chain_enum, table=table_enum)
+        for chain_enum, table_enum, jump_from in _MVM_CHAINS_CONFIG:
+            chain_name = chain_enum.value
+            table = table_enum.value
+
+            # 1. Delete the jump rule from the standard chain first.
+            try:
+                subprocess.run(
+                    _privileged_cmd(
+                        [
+                            "iptables",
+                            "-t",
+                            table,
+                            "-D",
+                            jump_from,
+                            "-j",
+                            chain_name,
+                        ]
+                    ),
+                    check=True,
+                    capture_output=True,
+                )
+                logger.debug(
+                    "Removed jump rule from %s to %s", jump_from, chain_name
+                )
+            except subprocess.CalledProcessError:
+                logger.debug(
+                    "Jump rule from %s to %s not found (already clean)",
+                    jump_from,
+                    chain_name,
+                )
+
+            # 2. Flush the custom chain (remove all rules inside it).
+            try:
+                subprocess.run(
+                    _privileged_cmd(
+                        ["iptables", "-t", table, "-F", chain_name]
+                    ),
+                    check=True,
+                    capture_output=True,
+                )
+                logger.debug("Flushed chain %s", chain_name)
+            except subprocess.CalledProcessError:
+                logger.debug("Chain %s not found or already empty", chain_name)
+
+            # 3. Delete the custom chain.
+            try:
+                subprocess.run(
+                    _privileged_cmd(
+                        ["iptables", "-t", table, "-X", chain_name]
+                    ),
+                    check=True,
+                    capture_output=True,
+                )
+                logger.debug("Deleted chain %s", chain_name)
+            except subprocess.CalledProcessError as e:
+                logger.debug(
+                    "Chain %s not found for deletion: %s",
+                    chain_name,
+                    e.stderr.decode() if e.stderr else e,
+                )
 
     def initialize(self) -> None:
         """Initialize MVM iptables chains with proper jump rules.

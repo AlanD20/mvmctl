@@ -26,7 +26,7 @@ DEFAULTS: dict[str, object] = {
     },
     "network": {
         "defaults": {
-            "name": "default",
+            "name": "net",
             "subnet": "172.27.0.0/24",
             "ipv4_gateway": "172.27.0.1",
         },

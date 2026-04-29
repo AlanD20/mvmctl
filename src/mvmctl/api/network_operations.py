@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET
 from mvmctl.core._internal._db import Database
 from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._service import NetworkService
-from mvmctl.exceptions import NetworkError, NetworkNotFoundError
+from mvmctl.exceptions import NetworkError
 from mvmctl.models.network import NetworkItem
 from mvmctl.utils.auditlog import AuditLog
 from mvmctl.utils.full_hash import HashGenerator
@@ -321,26 +322,42 @@ class NetworkOperation:
         )
 
     @staticmethod
-    def ensure_default() -> NetworkItem:
-        """Ensure the default network is materialized (bridge/NAT up).
+    def create_default_network() -> NetworkItem:
+        """Create the default network if it doesn't exist, ensure one network is default, and materialize its bridge/NAT.
 
-        Does NOT create the default network if it doesn't exist.
-        Use create_internal_default() to create the MVM internal default network.
+        Idempotent — safe to call multiple times.
 
         Returns:
             The default NetworkItem.
-
-        Raises:
-            NetworkNotFoundError: If no default network exists in the database.
         """
+        from mvmctl.api.inputs._network_create_input import NetworkCreateInput
+
         db = Database()
         repo = NetworkRepository(db)
 
+        # 1. Ensure internal default network exists
+        internal_network = repo.get_by_name(DEFAULT_NETWORK_NAME)
+        if internal_network is None:
+            outbound_iface = NetworkUtils.detect_outbound_interface()
+            nat_gateways = [outbound_iface] if outbound_iface else []
+
+            create_input = NetworkCreateInput(
+                name=DEFAULT_NETWORK_NAME,
+                subnet=DEFAULT_NETWORK_SUBNET,
+                nat_enabled=len(nat_gateways) > 0,
+                nat_gateways=nat_gateways,
+            )
+            result = NetworkOperation.create(create_input).result
+            internal_network = result
+
+        # 2. Ensure there is a default network
         default_network = repo.get_default()
         if default_network is None:
-            raise NetworkNotFoundError("No default network found in database")
+            controller = NetworkController(internal_network, repo)
+            controller.set_default()
+            default_network = repo.get_default() or internal_network
 
-        # Ensure bridge is materialized
+        # 3. Materialize bridge and NAT
         service = NetworkService(repo)
         try:
             bridge_addr = NetworkUtils.compute_bridge_address(
@@ -363,38 +380,6 @@ class NetworkOperation:
             repo.update_bridge_active(default_network.id, bridge_active)
 
         return repo.get_default() or default_network
-
-    @staticmethod
-    def create_internal_default() -> NetworkItem:
-        """Create the internal MVM default network.
-
-        This creates the default network with DEFAULT_NETWORK_NAME,
-        DEFAULT_NETWORK_SUBNET, and auto-detected outbound interface for NAT.
-
-        Returns:
-            The created default NetworkItem.
-        """
-        from mvmctl.api.inputs._network_create_input import NetworkCreateInput
-        from mvmctl.constants import (
-            DEFAULT_NETWORK_NAME,
-            DEFAULT_NETWORK_SUBNET,
-        )
-
-        outbound_iface = NetworkUtils.detect_outbound_interface()
-        nat_gateways = [outbound_iface] if outbound_iface else []
-
-        create_input = NetworkCreateInput(
-            name=DEFAULT_NETWORK_NAME,
-            subnet=DEFAULT_NETWORK_SUBNET,
-            nat_enabled=len(nat_gateways) > 0,
-            nat_gateways=nat_gateways,
-        )
-
-        AuditLog.log(
-            "network.create_internal_default",
-            changes={"name": DEFAULT_NETWORK_NAME},
-        )
-        return NetworkOperation.create(create_input).result
 
     @staticmethod
     def reconcile() -> list[NetworkItem]:
