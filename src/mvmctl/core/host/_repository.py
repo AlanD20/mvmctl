@@ -108,6 +108,47 @@ class HostRepository:
                 ),
             )
 
+    def add_changes(self, changes: list[HostStateChangeItem]) -> None:
+        """Bulk insert host state changes atomically in a single transaction."""
+        with self._db.connect() as conn:
+            conn.execute("BEGIN")
+            try:
+                for change in changes:
+                    conn.execute(
+                        """
+                        INSERT INTO host_state_changes (
+                            session_id, init_timestamp, setting, mechanism,
+                            original_value, applied_value, reverted, reverted_at,
+                            revert_mechanism, change_order, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            change.session_id,
+                            change.init_timestamp,
+                            change.setting,
+                            change.mechanism,
+                            change.original_value,
+                            change.applied_value,
+                            int(change.reverted),
+                            change.reverted_at,
+                            change.revert_mechanism,
+                            change.change_order,
+                            change.created_at,
+                        ),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
+    def delete_changes_except_session(self, session_id: str) -> None:
+        """Delete all host state changes except those for the given session."""
+        with self._db.connect() as conn:
+            conn.execute(
+                "DELETE FROM host_state_changes WHERE session_id != ?",
+                (session_id,),
+            )
+
     def list_changes(
         self, session_id: str | None = None, include_reverted: bool = True
     ) -> list[HostStateChangeItem]:
