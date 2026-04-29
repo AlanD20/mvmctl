@@ -241,5 +241,50 @@ class BinaryOperation:
             },
         )
 
+    @staticmethod
+    def ensure_default() -> BinaryItem | None:
+        """Ensure a default Firecracker binary exists.
+
+        If local Firecracker binaries exist but none is marked default, sets
+        the latest Firecracker binary as default and returns it.
+
+        Returns:
+            The default BinaryItem, or None if no local binaries exist.
+        """
+        from packaging.version import Version
+
+        db = Database()
+        repo = BinaryRepository(db)
+        service = BinaryService(repo)
+
+        local = service.list_local()
+        if not local:
+            return None
+
+        default = service.get_default_firecracker()
+        if default is not None:
+            return default
+
+        firecracker_bins = [b for b in local if b.name == "firecracker"]
+        if not firecracker_bins:
+            return None
+
+        latest_fc = sorted(
+            firecracker_bins,
+            key=lambda b: Version(b.version),
+            reverse=True,
+        )[0]
+        controller = BinaryController(entity=latest_fc, repo=repo)
+        controller.set_default()
+        AuditLog.log(
+            "binary.ensure_default",
+            changes={
+                "id": latest_fc.id,
+                "name": latest_fc.name,
+                "version": latest_fc.version,
+            },
+        )
+        return latest_fc
+
 
 __all__ = ["BinaryOperation", "BinaryFetchResult"]
