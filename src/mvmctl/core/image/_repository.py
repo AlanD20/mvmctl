@@ -67,7 +67,7 @@ class ImageRepository:
                     compressed_size, original_size, compression_ratio,
                     compressed_format, minimum_rootfs_size_mib, pulled_at, is_default, is_present, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(os_slug) DO UPDATE SET
+                ON CONFLICT(id) DO UPDATE SET
                     os_slug = excluded.os_slug,
                     os_name = excluded.os_name,
                     arch = excluded.arch,
