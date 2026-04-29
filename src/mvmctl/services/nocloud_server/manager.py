@@ -124,10 +124,15 @@ class NoCloudNetServerManager:
             os.kill(pid, sig)
             return True
         except ProcessLookupError:
-            logger.debug("NoCloud-net server process (PID: %d) already terminated", pid)
+            logger.debug(
+                "NoCloud-net server process (PID: %d) already terminated", pid
+            )
             return False
         except PermissionError:
-            logger.warning("Cannot signal NoCloud-net server (PID: %d) - permission denied", pid)
+            logger.warning(
+                "Cannot signal NoCloud-net server (PID: %d) - permission denied",
+                pid,
+            )
             return False
 
     def _cleanup_file(self) -> None:
@@ -178,7 +183,9 @@ class NoCloudNetServerManager:
                     start_new_session=True,
                 )
             except OSError as e:
-                raise NoCloudServerError(f"Failed to spawn nocloud-net server process: {e}") from e
+                raise NoCloudServerError(
+                    f"Failed to spawn nocloud-net server process: {e}"
+                ) from e
 
             self._pid = proc.pid
             self._url = f"http://{self._ipv4_gateway}:{self._port}/"

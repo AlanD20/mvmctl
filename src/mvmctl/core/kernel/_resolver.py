@@ -39,9 +39,7 @@ class KernelResolver:
     def _enrich(self, kernels: list[KernelItem]) -> list[KernelItem]:
         """Enrich kernels with relations if include is set."""
         if self._include and kernels:
-            RelationEnricher().enrich(
-                kernels, self._include, self.RELATIONS
-            )
+            RelationEnricher().enrich(kernels, self._include, self.RELATIONS)
         return kernels
 
     def by_id(self, kernel_id: str) -> KernelItem:

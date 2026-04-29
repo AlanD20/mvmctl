@@ -144,9 +144,7 @@ def key_create(
         set_default=set_default,
     )
     key_item = KeyOperation.create(inputs)
-    print_success(
-        f"Key '{key_item.name}' created (ID: {key_item.fingerprint})"
-    )
+    print_success(f"Key '{key_item.name}' created (ID: {key_item.fingerprint})")
 
 
 @key_app.command(

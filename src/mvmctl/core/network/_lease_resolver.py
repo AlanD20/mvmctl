@@ -26,9 +26,7 @@ class NetworkLeaseResolver:
     def _enrich(self, leases: list[NetworkLeaseItem]) -> list[NetworkLeaseItem]:
         """Enrich leases with relations if include is set."""
         if self._include and leases:
-            RelationEnricher().enrich(
-                leases, self._include, self.RELATIONS
-            )
+            RelationEnricher().enrich(leases, self._include, self.RELATIONS)
         return leases
 
     def list_by_network_id(self, network_id: str) -> list[NetworkLeaseItem]:

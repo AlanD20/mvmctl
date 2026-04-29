@@ -25,7 +25,9 @@ def require_str(data: dict[str, Any], key: str) -> str:
     value = data.get(key)
     if isinstance(value, str):
         return value
-    raise ValueError(f"field '{key}' must be a string (got {type(value).__name__!r})")
+    raise ValueError(
+        f"field '{key}' must be a string (got {type(value).__name__!r})"
+    )
 
 
 def optional_str(data: dict[str, Any], key: str) -> str | None:

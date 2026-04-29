@@ -48,9 +48,7 @@ class ImageResolver:
     def _enrich(self, images: list[ImageItem]) -> list[ImageItem]:
         """Enrich images with relations if include is set."""
         if self._include and images:
-            RelationEnricher().enrich(
-                images, self._include, self.RELATIONS
-            )
+            RelationEnricher().enrich(images, self._include, self.RELATIONS)
         return images
 
     def by_id(self, image_id: str) -> ImageItem:

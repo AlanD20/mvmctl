@@ -101,16 +101,29 @@ def _forward_to_pty(pty_fd: int, data: bytes) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Console relay process for serial console")
+    parser = argparse.ArgumentParser(
+        description="Console relay process for serial console"
+    )
     parser.add_argument("--id", required=True, help="Unique identifier")
     parser.add_argument("--name", required=True, help="Name for logging")
     parser.add_argument(
-        "--pty-controller-fd", type=int, required=True, help="PTY controller file descriptor"
+        "--pty-controller-fd",
+        type=int,
+        required=True,
+        help="PTY controller file descriptor",
     )
-    parser.add_argument("--socket-path", type=Path, required=True, help="Unix socket path")
-    parser.add_argument("--pid-file", type=Path, required=True, help="PID file path")
-    parser.add_argument("--log-file", type=Path, required=True, help="Console log file path")
-    from mvmctl.services.console_relay._defaults import CONST_CONSOLE_READ_BUFFER_SIZE
+    parser.add_argument(
+        "--socket-path", type=Path, required=True, help="Unix socket path"
+    )
+    parser.add_argument(
+        "--pid-file", type=Path, required=True, help="PID file path"
+    )
+    parser.add_argument(
+        "--log-file", type=Path, required=True, help="Console log file path"
+    )
+    from mvmctl.services.console_relay._defaults import (
+        CONST_CONSOLE_READ_BUFFER_SIZE,
+    )
 
     parser.add_argument(
         "--buffer-size",
@@ -150,7 +163,10 @@ def main() -> int:
                         _shutdown_state["requested"] = True
                         break
                     _write_to_log(log_file, data)
-                    if not _forward_to_client(client_sock, data) and client_sock is not None:
+                    if (
+                        not _forward_to_client(client_sock, data)
+                        and client_sock is not None
+                    ):
                         try:
                             client_sock.close()
                         except OSError:

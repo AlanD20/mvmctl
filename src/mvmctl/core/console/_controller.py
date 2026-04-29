@@ -7,7 +7,10 @@ import os
 from pathlib import Path
 
 from mvmctl.exceptions import ConsoleError
-from mvmctl.services.console_relay import ConsoleRelayClient, ConsoleRelayManager
+from mvmctl.services.console_relay import (
+    ConsoleRelayClient,
+    ConsoleRelayManager,
+)
 
 
 class ConsoleController:
@@ -90,7 +93,9 @@ class ConsoleController:
             self._controller_fd, self._client_fd = os.openpty()
 
         if self._client_fd is None:
-            raise ConsoleError("PTY allocation failed: client FD is None after creation")
+            raise ConsoleError(
+                "PTY allocation failed: client FD is None after creation"
+            )
 
         return self._client_fd
 

@@ -317,8 +317,6 @@ class KernelOperation:
         # Verify file exists on disk
         kernel_path = default_kernel.resolved_path
         if not kernel_path.exists():
-            raise KernelError(
-                f"Default kernel file not found: {kernel_path}"
-            )
+            raise KernelError(f"Default kernel file not found: {kernel_path}")
 
         return default_kernel

@@ -154,7 +154,10 @@ def _validate_sudo_credentials() -> bool:
     Returns:
         True if sudo credentials are valid and cached.
     """
-    global _SUDO_CREDENTIALS_VALID, _SUDO_CACHE_TIMESTAMP, _SUDO_VALIDATION_IN_PROGRESS
+    global \
+        _SUDO_CREDENTIALS_VALID, \
+        _SUDO_CACHE_TIMESTAMP, \
+        _SUDO_VALIDATION_IN_PROGRESS
 
     # Anti-recursion protection
     if _SUDO_VALIDATION_IN_PROGRESS:

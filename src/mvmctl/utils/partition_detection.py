@@ -26,7 +26,11 @@ class PartitionDetector(Protocol):
         """Relative weight for this detector in the final score."""
         ...
 
-    def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
+    def score(
+        self,
+        partition: dict[str, object],
+        all_partitions: list[dict[str, object]],
+    ) -> float:
         """Evaluate a partition and return a score.
 
         Args:
@@ -141,7 +145,11 @@ class TypeCodeDetector:
     def weight(self) -> float:
         return constants.DETECTOR_WEIGHTS.get("type_code", 0.25)
 
-    def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
+    def score(
+        self,
+        partition: dict[str, object],
+        all_partitions: list[dict[str, object]],
+    ) -> float:
         """Score a partition based on its type code.
 
         Args:
@@ -158,7 +166,10 @@ class TypeCodeDetector:
         type_lower = partition_type.lower()
 
         # Root partitions get highest score
-        if type_lower in (self.GPT_ROOT_X86_64.lower(), self.GPT_ROOT_AARCH64.lower()):
+        if type_lower in (
+            self.GPT_ROOT_X86_64.lower(),
+            self.GPT_ROOT_AARCH64.lower(),
+        ):
             return constants.DETECTOR_SCORES.get("ROOT_SCORE", 1.0)
 
         # Linux MBR type gets medium score
@@ -195,7 +206,11 @@ class LabelDetector:
     def weight(self) -> float:
         return constants.DETECTOR_WEIGHTS.get("label", 0.25)
 
-    def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
+    def score(
+        self,
+        partition: dict[str, object],
+        all_partitions: list[dict[str, object]],
+    ) -> float:
         """Score a partition based on its filesystem label.
 
         Args:
@@ -222,7 +237,9 @@ class LabelDetector:
         exclude_indicators = ("esp", "efi", "boot", "swap")
         for indicator in exclude_indicators:
             if indicator in label_lower:
-                return constants.DETECTOR_SCORES.get("LABEL_EXCLUDE_SCORE", -0.5)
+                return constants.DETECTOR_SCORES.get(
+                    "LABEL_EXCLUDE_SCORE", -0.5
+                )
 
         # No indicators - neutral score
         return constants.DETECTOR_SCORES.get("NEUTRAL_SCORE", 0.0)
@@ -243,7 +260,11 @@ class SizeDetector:
     def weight(self) -> float:
         return constants.DETECTOR_WEIGHTS.get("size", 0.25)
 
-    def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
+    def score(
+        self,
+        partition: dict[str, object],
+        all_partitions: list[dict[str, object]],
+    ) -> float:
         """Score a partition based on its size relative to minimum root size.
 
         Args:
@@ -306,7 +327,11 @@ class FilesystemDetector:
     def weight(self) -> float:
         return constants.DETECTOR_WEIGHTS.get("filesystem", 0.25)
 
-    def score(self, partition: dict[str, object], all_partitions: list[dict[str, object]]) -> float:
+    def score(
+        self,
+        partition: dict[str, object],
+        all_partitions: list[dict[str, object]],
+    ) -> float:
         """Score a partition based on its filesystem type.
 
         Args:

@@ -44,9 +44,7 @@ class KeyResolver:
     def _enrich(self, keys: list[SSHKeyItem]) -> list[SSHKeyItem]:
         """Enrich keys with relations if include is set."""
         if self._include and keys:
-            RelationEnricher().enrich(
-                keys, self._include, self.RELATIONS
-            )
+            RelationEnricher().enrich(keys, self._include, self.RELATIONS)
         return keys
 
     def by_id(self, key_id: str) -> SSHKeyItem:

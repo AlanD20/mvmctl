@@ -134,7 +134,10 @@ class ConsoleRelayClient:
             True if detach sequence detected
         """
         if len(buffer) >= len(self._detach_sequence):
-            return bytes(buffer[-len(self._detach_sequence) :]) == self._detach_sequence
+            return (
+                bytes(buffer[-len(self._detach_sequence) :])
+                == self._detach_sequence
+            )
         return False
 
     @property

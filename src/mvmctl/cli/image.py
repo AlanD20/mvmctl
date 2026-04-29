@@ -221,9 +221,7 @@ def image_fetch(
         elif phase in ("complete", "optimizing"):
             spinner.stop()
 
-    result = ImageOperation.fetch(
-        fetch_input, phase_callback=_phase_callback
-    )
+    result = ImageOperation.fetch(fetch_input, phase_callback=_phase_callback)
 
     if result is None:
         print_error(f"Failed to download image '{image_selector}'")
@@ -291,9 +289,7 @@ def image_inspect(
         mvm image inspect abc123 --json
         mvm image inspect abc123 --tree
     """
-    info = ImageOperation.inspect(
-        ImageInput(id=[prefix]), is_json=json_output
-    )
+    info = ImageOperation.inspect(ImageInput(id=[prefix]), is_json=json_output)
 
     if isinstance(info, dict):
         typer.echo(json.dumps(info, indent=2, default=str))
@@ -529,9 +525,7 @@ def image_warm(
     """
     warmed_paths = ImageOperation.warm(ImageInput(id=[image_id]))
     for path in warmed_paths:
-        size_str = CommonUtils.format_bytes_human_readable(
-            path.stat().st_size
-        )
+        size_str = CommonUtils.format_bytes_human_readable(path.stat().st_size)
         print_success(f"Image warmed successfully: {image_id}")
         print_info(f"  Path: {path}")
         print_info(f"  Size: {size_str}")

@@ -56,9 +56,7 @@ class NetworkResolver:
     def _enrich(self, networks: list[NetworkItem]) -> list[NetworkItem]:
         """Enrich networks with relations if include is set."""
         if self._include and networks:
-            RelationEnricher().enrich(
-                networks, self._include, self.RELATIONS
-            )
+            RelationEnricher().enrich(networks, self._include, self.RELATIONS)
         return networks
 
     def by_id(self, network_id: str) -> NetworkItem:

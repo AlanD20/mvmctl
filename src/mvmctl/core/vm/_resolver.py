@@ -70,9 +70,7 @@ class VMResolver:
     def _enrich(self, vms: list[VMInstanceItem]) -> list[VMInstanceItem]:
         """Enrich VMs with relations if include is set."""
         if self._include and vms:
-            RelationEnricher().enrich(
-                vms, self._include, self.RELATIONS
-            )
+            RelationEnricher().enrich(vms, self._include, self.RELATIONS)
         return vms
 
     def by_id(self, vm_id: str) -> VMInstanceItem:

@@ -39,9 +39,7 @@ class BinaryResolver:
     def _enrich(self, binaries: list[BinaryItem]) -> list[BinaryItem]:
         """Enrich binaries with relations if include is set."""
         if self._include and binaries:
-            RelationEnricher().enrich(
-                binaries, self._include, self.RELATIONS
-            )
+            RelationEnricher().enrich(binaries, self._include, self.RELATIONS)
         return binaries
 
     def by_id(self, binary_id: str) -> BinaryItem:

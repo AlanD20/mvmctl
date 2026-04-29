@@ -26,9 +26,7 @@ class IPTablesRuleResolver:
     def _enrich(self, rules: list[IPTablesRuleItem]) -> list[IPTablesRuleItem]:
         """Enrich rules with relations if include is set."""
         if self._include and rules:
-            RelationEnricher().enrich(
-                rules, self._include, self.RELATIONS
-            )
+            RelationEnricher().enrich(rules, self._include, self.RELATIONS)
         return rules
 
     def list_by_network_id(self, network_id: str) -> list[IPTablesRuleItem]:

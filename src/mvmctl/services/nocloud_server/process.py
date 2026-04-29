@@ -86,10 +86,16 @@ def main() -> None:
 
     # Validate cloud-init directory
     if not args.cloud_init_dir.exists():
-        print(f"Error: Cloud-init directory does not exist: {args.cloud_init_dir}", file=sys.stderr)
+        print(
+            f"Error: Cloud-init directory does not exist: {args.cloud_init_dir}",
+            file=sys.stderr,
+        )
         sys.exit(1)
     if not args.cloud_init_dir.is_dir():
-        print(f"Error: Cloud-init path is not a directory: {args.cloud_init_dir}", file=sys.stderr)
+        print(
+            f"Error: Cloud-init path is not a directory: {args.cloud_init_dir}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Write PID file

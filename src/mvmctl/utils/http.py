@@ -231,7 +231,9 @@ class HttpDownload:
                     return int(cached.decode())
                 return None
 
-        req = Request(url, method="HEAD", headers={"User-Agent": HTTP_USER_AGENT})
+        req = Request(
+            url, method="HEAD", headers={"User-Agent": HTTP_USER_AGENT}
+        )
 
         try:
             with HttpDownload._urlopen(req, timeout=timeout) as response:
@@ -239,7 +241,8 @@ class HttpDownload:
                 if use_cache:
                     cache_file = HttpCache._cache_path(url)
                     HttpCache.write(
-                        cache_file, str(size).encode() if size is not None else b""
+                        cache_file,
+                        str(size).encode() if size is not None else b"",
                     )
                 return size
         except Exception:

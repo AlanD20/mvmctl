@@ -86,7 +86,11 @@ class MigrationRunner:
                     f"Cannot have gaps in version sequence."
                 )
 
-        return [m for m in all_migrations if self._extract_version(m) > current_version]
+        return [
+            m
+            for m in all_migrations
+            if self._extract_version(m) > current_version
+        ]
 
     def _ensure_migrations_table(self, conn: sqlite3.Connection) -> None:
         """Ensure db_migrations tracking table exists."""

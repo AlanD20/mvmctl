@@ -16,6 +16,7 @@ from mvmctl.utils.console import (
     print_info,
     print_success,
     print_table,
+    print_warning,
 )
 from mvmctl.utils.full_hash import HashGenerator
 
@@ -124,10 +125,8 @@ def bin_fetch(
     download_override = force
 
     if already_exists and not force:
-        if not typer.confirm(
-            f"Binary v{normalized} already exists. Re-download?",
-            default=False,
-        ):
+        print_warning(f"Binary v{normalized} already exists.")
+        if not typer.confirm("Re-download?", default=False):
             print_info("Aborted")
             raise typer.Exit(code=0)
         download_override = True

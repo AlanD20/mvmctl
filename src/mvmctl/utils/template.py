@@ -9,7 +9,9 @@ def render_template(template: str, variables: dict[str, str]) -> str:
         raise ValueError(f"Missing template variable: {key}") from exc
 
 
-def render_optional_template(template: str | None, variables: dict[str, str]) -> str | None:
+def render_optional_template(
+    template: str | None, variables: dict[str, str]
+) -> str | None:
     if template is None:
         return None
     return render_template(template, variables)
