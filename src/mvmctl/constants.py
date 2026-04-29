@@ -309,7 +309,7 @@ IPTABLES_CHAINS: Final[list[tuple[str, str, str]]] = _require_chain_list(
 DEFAULT_NETWORK_NAME: Final[str] = _require_str(("network", "defaults", "name"))
 FIRECRACKER_GRACEFUL_SHUTDOWN_TIMEOUT_S: Final[int] = 5
 FIRECRACKER_SIGTERM_WAIT_S: Final[int] = 1
-PRIVILEGED_BINARIES: Final[list[str]] = _require_str_list(
+PRIVILEGED_BINARIES: Final[dict[str, str]] = _require_str_dict(
     ("host", "privileged_binaries")
 )
 

@@ -11,9 +11,8 @@ from typing import TYPE_CHECKING
 import typer
 
 from mvmctl.api.host_operations import HostOperation
-from mvmctl.api.network_operations import NetworkOperation
 from mvmctl.constants import MVM_UNIX_GROUP
-from mvmctl.exceptions import HostError, MVMError
+from mvmctl.exceptions import HostError
 from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.common import CacheUtils
 from mvmctl.utils.console import (
@@ -52,6 +51,8 @@ def _format_change(change: HostStateChangeItem) -> str:
         return f"{s}: {orig} → {v}"
     if m == "noop" and s == "iptables_chains" and v == _CHAIN_EXISTS_MARKER:
         return "iptables chains already exist — keeping existing chain state"
+    if m == "network_create":
+        return f"Default network '{v}' ready"
     # Fallback: truncate long values
     orig = change.original_value or ""
     orig_display = (orig[:50] + "…") if len(orig) > 50 else orig
@@ -163,17 +164,6 @@ def host_init() -> None:
                 "ACTION REQUIRED: Log out and back in for group membership to take effect."
             )
             print_info(f"Or run immediately: newgrp {MVM_UNIX_GROUP}")
-
-    try:
-        restore_results = NetworkOperation.restore()
-        if restore_results:
-            for result in restore_results:
-                print_info(f"  {result}")
-        else:
-            NetworkOperation.create_default_network()
-            print_success("Default network ready.")
-    except MVMError as e:
-        print_warning(f"Network setup skipped: {e}")
 
     chown_to_real_user(CacheUtils.get_cache_dir())
 

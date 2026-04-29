@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from mvmctl.constants import DEFAULT_NETWORK_NAME, DEFAULT_NETWORK_SUBNET
 from mvmctl.core._internal._db import Database
+from mvmctl.core.host._repository import HostRepository
 from mvmctl.core.network._controller import NetworkController
 from mvmctl.core.network._repository import NetworkRepository
 from mvmctl.core.network._service import NetworkService
@@ -349,6 +350,7 @@ class NetworkOperation:
             )
             result = NetworkOperation.create(create_input).result
             internal_network = result
+            HostRepository(db).update_component("default_network_created", True)
 
         # 2. Ensure there is a default network
         default_network = repo.get_default()

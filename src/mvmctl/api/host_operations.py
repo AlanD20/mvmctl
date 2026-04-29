@@ -191,12 +191,37 @@ class HostOperation:
             )
         )
 
+        # --- Default network (first-time init or post-reboot restore) ---
+        repo = HostRepository()
+        repo.initialize_state()
+
+        from mvmctl.api.network_operations import NetworkOperation
+
+        try:
+            restored = NetworkOperation.restore()
+            if not restored:
+                NetworkOperation.create_default_network()
+                changes.append(
+                    HostStateChangeItem(
+                        session_id="",
+                        init_timestamp="",
+                        setting="default_network",
+                        original_value=None,
+                        applied_value=DEFAULT_NETWORK_NAME,
+                        mechanism="network_create",
+                        reverted=False,
+                        change_order=0,
+                        created_at="",
+                    )
+                )
+        except Exception:
+            logger.warning("Could not set up default network during host init")
+
         iptables_change = HostService.save_iptables_rules()
         if iptables_change:
             changes.append(iptables_change)
 
         # --- Persist state & finalize ---
-        repo = HostRepository()
         controller = HostController(repo)
         try:
             controller.record_changes(changes)
