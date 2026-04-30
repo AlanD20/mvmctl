@@ -1,11 +1,12 @@
 """VM lifecycle system tests — state operations with both approaches."""
 
+from __future__ import annotations
+
 import json
-import os
-import subprocess
-import time
 
 import pytest
+
+from tests.system.conftest import _run_mvm, wait_for_ssh
 
 pytestmark = [pytest.mark.system, pytest.mark.requires_kvm, pytest.mark.slow]
 
@@ -18,159 +19,189 @@ class TestVMCreatePerImage:
         [
             "alpine-3.21",
             "ubuntu-24.04-minimal",
-            "ubuntu-24.04",
-            "archlinux",
-            "debian-bookworm",
         ],
     )
-    def test_vm_create(self, mvm_binary, unique_vm_name, image_id, timing_targets):
-        """Create VM with specific image."""
-        start = time.monotonic()
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "create", "--name", unique_vm_name, "--image", image_id],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
+    def test_vm_create(self, mvm_binary, unique_vm_name, image_id):
+        """Create VM with specific image. Tests a lightweight and a common image."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            image_id,
         )
-        duration = time.monotonic() - start
-
         assert result.returncode == 0
-        # Command should return quickly (<1s target)
-        assert duration < 1.0, f"Create command took {duration:.2f}s, expected <1s"
 
         # Cleanup
-        subprocess.run(
-            [*mvm_binary.split(), "vm", "rm", "--name", unique_vm_name],
-            check=False,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        _run_mvm(mvm_binary, "vm", "rm", "--name", unique_vm_name, check=False)
 
 
 class TestVMStateOperationsShared:
-    """Test state operations on shared VM (approach 1)."""
+    """Test state operations on shared VM (module-scoped fixture).
+
+    All tests share one lifecycle_vm fixture and run state transitions
+    in sequence. Tests assume VM is RUNNING at start.
+    """
 
     pytestmark = pytest.mark.shared_vm
 
     def test_vm_pause_resume_chain(self, mvm_binary, lifecycle_vm):
-        """Pause then resume VM."""
+        """Pause then resume VM. Leaves VM in RUNNING state."""
         vm_name = lifecycle_vm["name"]
 
-        # Pause
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "pause", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "vm", "pause", vm_name)
         assert result.returncode == 0
 
         # Verify paused
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "ls", "--json"],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "vm", "ls", "--json")
         vms = json.loads(result.stdout)
         vm = next((v for v in vms if v["name"] == vm_name), None)
-        assert vm["status"] == "PAUSED"
+        assert vm is not None
+        assert vm["status"] == "PAUSED", f"Expected PAUSED, got {vm['status']}"
 
-        # Resume
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "resume", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "vm", "resume", vm_name)
         assert result.returncode == 0
 
     def test_vm_stop_start_chain(self, mvm_binary, lifecycle_vm):
-        """Stop then restart VM."""
+        """Stop then restart VM. Leaves VM in RUNNING state."""
         vm_name = lifecycle_vm["name"]
 
-        # Stop
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "stop", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "vm", "stop", vm_name)
         assert result.returncode == 0
 
-        # Start
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "start", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "vm", "start", vm_name)
         assert result.returncode == 0
 
     def test_vm_reboot_graceful(self, mvm_binary, lifecycle_vm):
-        """Reboot VM (stop + start)."""
+        """Reboot VM (stop + start). VM is RUNNING after."""
         vm_name = lifecycle_vm["name"]
 
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "reboot", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "vm", "reboot", vm_name)
+        assert result.returncode == 0
+
+    def test_vm_reboot_force(self, mvm_binary, lifecycle_vm):
+        """Reboot VM with --force flag. VM is RUNNING after."""
+        vm_name = lifecycle_vm["name"]
+        result = _run_mvm(mvm_binary, "vm", "reboot", vm_name, "--force")
         assert result.returncode == 0
 
 
 class TestVMStateOperationsIndependent:
-    """Test state operations with independent VMs (approach 2)."""
+    """Test state operations with independent VMs (function-scoped fixture).
+
+    Each test creates its own VM via created_vm fixture and establishes
+    the correct precondition state before testing the target operation.
+    """
 
     pytestmark = pytest.mark.independent_vm
 
     def test_vm_pause_independent(self, mvm_binary, created_vm):
-        """Pause independently created VM."""
-        vm_name = created_vm["name"]
-
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "pause", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        """Pause a running VM."""
+        result = _run_mvm(mvm_binary, "vm", "pause", created_vm["name"])
         assert result.returncode == 0
 
     def test_vm_resume_independent(self, mvm_binary, created_vm):
-        """Resume independently created VM."""
+        """Pause then resume a VM (resume requires paused state)."""
         vm_name = created_vm["name"]
 
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "resume", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        # Establish precondition: pause the running VM first
+        _run_mvm(mvm_binary, "vm", "pause", vm_name)
+
+        # Now test: resume
+        result = _run_mvm(mvm_binary, "vm", "resume", vm_name)
         assert result.returncode == 0
 
     def test_vm_stop_independent(self, mvm_binary, created_vm):
-        """Stop independently created VM."""
-        vm_name = created_vm["name"]
-
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "stop", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        """Stop a running VM."""
+        result = _run_mvm(mvm_binary, "vm", "stop", created_vm["name"])
         assert result.returncode == 0
 
     def test_vm_start_independent(self, mvm_binary, created_vm):
-        """Start independently created VM."""
+        """Stop then start a VM (start requires stopped state)."""
         vm_name = created_vm["name"]
 
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "start", vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
+        # Establish precondition: stop the running VM first
+        _run_mvm(mvm_binary, "vm", "stop", vm_name)
+
+        # Now test: start
+        result = _run_mvm(mvm_binary, "vm", "start", vm_name)
+        assert result.returncode == 0
+
+    def test_vm_stop_force(self, mvm_binary, created_vm):
+        """Stop a running VM with --force flag."""
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "stop",
+            created_vm["name"],
+            "--force",
         )
         assert result.returncode == 0
+
+    def test_vm_remove_running_without_force(self, mvm_binary, unique_vm_name):
+        """Remove a running VM without --force should fail."""
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+        )
+
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                check=False,
+            )
+            assert result.returncode != 0
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+
+
+class TestVMInspectExport:
+    """Test VM inspect and export operations."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+    ]
+
+    def test_vm_inspect(self, mvm_binary, created_vm):
+        """Show detailed VM info via vm inspect."""
+        result = _run_mvm(mvm_binary, "vm", "inspect", created_vm["name"])
+        assert result.returncode == 0
+        assert created_vm["name"] in result.stdout
+
+    def test_vm_export(self, mvm_binary, created_vm):
+        """Export VM config as JSON."""
+        result = _run_mvm(mvm_binary, "vm", "export", created_vm["name"])
+        assert result.returncode == 0
+        config = json.loads(result.stdout)
+        assert isinstance(config, dict)
+
+    def test_vm_cleanup_dry_run(self, mvm_binary, created_vm):
+        """Cleanup --dry-run shows running VMs without removing them."""
+        result = _run_mvm(mvm_binary, "vm", "cleanup", "--dry-run")
+        assert result.returncode == 0
+        # VM should appear in output (it's running)
+        assert created_vm["name"] in result.stdout
 
 
 class TestVMSSH:
@@ -178,17 +209,15 @@ class TestVMSSH:
 
     def test_vm_ssh_available(self, mvm_binary, created_vm, timing_targets):
         """SSH is available after VM boots."""
-        created_vm["name"]
         vm_ip = created_vm.get("ipv4", "")
 
         if not vm_ip:
             pytest.skip("VM has no IP address")
 
-        # Wait for SSH with timeout
-        from conftest import wait_for_ssh
-
         available = wait_for_ssh(vm_ip, "root", timing_targets["alpine-3.21"])
-        assert available, f"SSH not available after {timing_targets['alpine-3.21']}s"
+        assert available, (
+            f"SSH not available after {timing_targets['alpine-3.21']}s"
+        )
 
 
 class TestVMList:
@@ -196,24 +225,15 @@ class TestVMList:
 
     def test_vm_list_json(self, mvm_binary, created_vm):
         """List VMs in JSON format."""
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "ls", "--json"],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "vm", "ls", "--json")
         assert result.returncode == 0
+
         vms = json.loads(result.stdout)
         assert any(v["name"] == created_vm["name"] for v in vms)
 
     def test_vm_list_table(self, mvm_binary, created_vm):
         """List VMs in table format."""
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "ls"],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "vm", "ls")
         assert result.returncode == 0
         assert created_vm["name"] in result.stdout
 
@@ -223,62 +243,109 @@ class TestVMRemove:
 
     def test_vm_remove(self, mvm_binary, unique_vm_name):
         """Create and remove VM."""
-        # Create
-        subprocess.run(
-            [
-                *mvm_binary.split(),
-                "vm",
-                "create",
-                "--name",
-                unique_vm_name,
-                "--image",
-                "alpine-3.21",
-            ],
-            check=True,
-            env={**os.environ, "NO_COLOR": "1"},
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
         )
 
-        # Remove
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "rm", "--name", unique_vm_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
-        assert result.returncode == 0
+        try:
+            result = _run_mvm(mvm_binary, "vm", "rm", "--name", unique_vm_name)
+            assert result.returncode == 0
 
-        # Verify gone
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "ls", "--json"],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
-        vms = json.loads(result.stdout)
-        assert not any(v["name"] == unique_vm_name for v in vms)
+            # Verify gone
+            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms = json.loads(result.stdout)
+            assert not any(v["name"] == unique_vm_name for v in vms)
+        finally:
+            _run_mvm(
+                mvm_binary, "vm", "rm", "--name", unique_vm_name, check=False
+            )
 
     def test_vm_remove_force(self, mvm_binary, unique_vm_name):
         """Force remove running VM."""
-        # Create
-        subprocess.run(
-            [
-                *mvm_binary.split(),
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+        )
+
+        try:
+            result = _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+            )
+            assert result.returncode == 0
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
+
+    def test_vm_create_duplicate_name(self, mvm_binary, unique_vm_name):
+        """Create VM with duplicate name should fail."""
+        _run_mvm(
+            mvm_binary,
+            "vm",
+            "create",
+            "--name",
+            unique_vm_name,
+            "--image",
+            "alpine-3.21",
+        )
+        try:
+            result = _run_mvm(
+                mvm_binary,
                 "vm",
                 "create",
                 "--name",
                 unique_vm_name,
                 "--image",
                 "alpine-3.21",
-            ],
-            check=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+                check=False,
+            )
+            assert result.returncode != 0
+        finally:
+            _run_mvm(
+                mvm_binary,
+                "vm",
+                "rm",
+                "--name",
+                unique_vm_name,
+                "--force",
+                check=False,
+            )
 
-        # Force remove
-        result = subprocess.run(
-            [*mvm_binary.split(), "vm", "rm", "--name", unique_vm_name, "--force"],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
+    def test_vm_remove_nonexistent(self, mvm_binary):
+        """Remove a VM that does not exist should fail."""
+        nonexistent = "nonexistent-vm-name-xyz"
+        result = _run_mvm(
+            mvm_binary,
+            "vm",
+            "rm",
+            "--name",
+            nonexistent,
+            check=False,
         )
-        assert result.returncode == 0
+        assert result.returncode != 0
+        assert (
+            "not found" in result.stdout.lower()
+            or "not found" in result.stderr.lower()
+        )

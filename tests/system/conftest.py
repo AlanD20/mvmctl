@@ -37,7 +37,11 @@ def _cleanup_system_test_iptables(request) -> None:
         capture_output=True,
         check=False,
     )
-    subprocess.run(["sudo", "iptables", "-F", "MVM-FORWARD"], capture_output=True, check=False)
+    subprocess.run(
+        ["sudo", "iptables", "-F", "MVM-FORWARD"],
+        capture_output=True,
+        check=False,
+    )
     subprocess.run(
         ["sudo", "iptables", "-F", "MVM-NOCLOUD-INPUT"],
         capture_output=True,
@@ -161,7 +165,15 @@ def created_vm(mvm_binary, unique_vm_name) -> Generator[dict, None, None]:
     Cleans up VM even if test fails.
     """
     # Create VM (image must be pre-cached or will download)
-    _run_mvm(mvm_binary, "vm", "create", "--name", unique_vm_name, "--image", "alpine-3.21")
+    _run_mvm(
+        mvm_binary,
+        "vm",
+        "create",
+        "--name",
+        unique_vm_name,
+        "--image",
+        "alpine-3.21",
+    )
 
     # Get VM info
     vms = _parse_vm_list(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
@@ -178,9 +190,18 @@ def created_vm(mvm_binary, unique_vm_name) -> Generator[dict, None, None]:
 
 
 @pytest.fixture
-def created_network(mvm_binary, unique_network_name) -> Generator[str, None, None]:
+def created_network(
+    mvm_binary, unique_network_name
+) -> Generator[str, None, None]:
     """Create a network and guarantee cleanup."""
-    _run_mvm(mvm_binary, "network", "create", unique_network_name, "--subnet", "10.99.0.0/24")
+    _run_mvm(
+        mvm_binary,
+        "network",
+        "create",
+        unique_network_name,
+        "--subnet",
+        "10.99.0.0/24",
+    )
 
     try:
         yield unique_network_name
@@ -213,7 +234,9 @@ def lifecycle_vm(mvm_binary) -> Generator[dict, None, None]:
     """
     vm_name = f"sys-lifecycle-{uuid.uuid4().hex[:8]}"
 
-    _run_mvm(mvm_binary, "vm", "create", "--name", vm_name, "--image", "alpine-3.21")
+    _run_mvm(
+        mvm_binary, "vm", "create", "--name", vm_name, "--image", "alpine-3.21"
+    )
 
     vms = _parse_vm_list(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
     vm_info = next((v for v in vms if v["name"] == vm_name), None)
@@ -297,7 +320,13 @@ def wait_for_ssh(
     while time.monotonic() - start < timeout:
         try:
             # Try SSH connection
-            cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=2"]
+            cmd = [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "ConnectTimeout=2",
+            ]
             if key_path:
                 cmd.extend(["-i", str(key_path)])
             cmd.extend([f"{user}@{vm_ip}", "exit"])

@@ -1,9 +1,13 @@
 """SSH key management system tests."""
 
-import os
+from __future__ import annotations
+
+import json
 import subprocess
 
 import pytest
+
+from tests.system.conftest import _run_mvm
 
 pytestmark = pytest.mark.system
 
@@ -13,80 +17,156 @@ class TestKeyLifecycle:
 
     def test_key_create_ed25519(self, mvm_binary, unique_key_name):
         """Create ed25519 SSH key."""
-        result = subprocess.run(
-            [*mvm_binary.split(), "key", "create", unique_key_name, "--type", "ed25519"],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "create",
+            unique_key_name,
+            "--type",
+            "ed25519",
         )
         assert result.returncode == 0
-        assert "created" in result.stdout.lower() or unique_key_name in result.stdout
+        assert unique_key_name in result.stdout
+
+        # Cleanup
+        _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
     def test_key_create_rsa(self, mvm_binary, unique_key_name):
         """Create RSA SSH key."""
-        result = subprocess.run(
-            [*mvm_binary.split(), "key", "create", unique_key_name, "--type", "rsa"],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "create",
+            unique_key_name,
+            "--type",
+            "rsa",
         )
         assert result.returncode == 0
+        assert unique_key_name in result.stdout
+
+        # Cleanup
+        _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
     def test_key_listing(self, mvm_binary, created_key):
         """List keys and verify created key appears."""
-        result = subprocess.run(
-            [*mvm_binary.split(), "key", "ls"],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "key", "ls")
         assert result.returncode == 0
         assert created_key in result.stdout
 
     def test_key_set_default(self, mvm_binary, created_key):
         """Set key as default."""
-        result = subprocess.run(
-            [*mvm_binary.split(), "key", "set-default", created_key],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        result = _run_mvm(mvm_binary, "key", "set-default", created_key)
         assert result.returncode == 0
 
     def test_key_delete(self, mvm_binary, unique_key_name):
         """Create and delete key."""
-        # Create
-        subprocess.run(
-            [*mvm_binary.split(), "key", "create", unique_key_name],
-            check=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
+        _run_mvm(mvm_binary, "key", "create", unique_key_name)
 
-        # Delete
-        result = subprocess.run(
-            [*mvm_binary.split(), "key", "rm", unique_key_name],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
-        )
-        assert result.returncode == 0
+        try:
+            result = _run_mvm(mvm_binary, "key", "rm", unique_key_name)
+            assert result.returncode == 0
+        finally:
+            # Ensure cleanup even if assertion fails
+            _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
     def test_duplicate_key_rejection(self, mvm_binary, created_key):
         """Reject duplicate key name."""
-        result = subprocess.run(
-            [*mvm_binary.split(), "key", "create", created_key],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "create",
+            created_key,
+            check=False,
         )
-        assert result.returncode != 0 or "already exists" in result.stdout.lower()
+        assert result.returncode != 0
+        assert "already exists" in (result.stdout + result.stderr).lower()
 
     def test_key_show(self, mvm_binary, created_key):
         """Show key details."""
-        result = subprocess.run(
-            [*mvm_binary.split(), "key", "show", created_key],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "NO_COLOR": "1"},
+        result = _run_mvm(mvm_binary, "key", "show", created_key)
+        assert result.returncode == 0
+        assert created_key in result.stdout
+
+    def test_key_add_existing(self, mvm_binary, unique_key_name, tmp_path):
+        """Import an existing SSH public key."""
+        key_path = tmp_path / "test_key_temp"
+        subprocess.run(
+            [
+                "ssh-keygen",
+                "-t",
+                "ed25519",
+                "-f",
+                str(key_path),
+                "-N",
+                "",
+                "-q",
+            ],
+            check=True,
+        )
+        result = _run_mvm(
+            mvm_binary, "key", "add", unique_key_name, str(key_path) + ".pub"
         )
         assert result.returncode == 0
+        assert unique_key_name in result.stdout
+
+        # Cleanup
+        _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
+
+    def test_key_remove_nonexistent(self, mvm_binary):
+        """Removing a non-existent key should fail."""
+        result = _run_mvm(
+            mvm_binary, "key", "rm", "nonexistent-key-name-xyz", check=False
+        )
+        assert result.returncode != 0
+        assert "not found" in result.stderr.lower()
+
+    def test_key_inspect_json(self, mvm_binary, created_key):
+        """Inspect key with JSON output."""
+        result = _run_mvm(mvm_binary, "key", "inspect", created_key, "--json")
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert "name" in data
+
+    def test_key_set_default_clear(self, mvm_binary, created_key):
+        """Set key as default then clear the default."""
+        result = _run_mvm(mvm_binary, "key", "set-default", created_key)
+        assert result.returncode == 0
+        result = _run_mvm(mvm_binary, "key", "set-default", "--clear")
+        assert result.returncode == 0
+
+    def test_key_export(self, mvm_binary, created_key, tmp_path):
+        """Export a key to a file."""
+        result = _run_mvm(
+            mvm_binary, "key", "export", created_key, "--out", str(tmp_path)
+        )
+        assert result.returncode == 0
+
+    def test_key_list_json(self, mvm_binary, created_key):
+        """List keys in JSON format."""
+        result = _run_mvm(mvm_binary, "key", "ls", "--json")
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)
+        assert any(k["name"] == created_key for k in data)
+
+    def test_key_inspect_table(self, mvm_binary, created_key):
+        """Inspect key with table output (no --json flag)."""
+        result = _run_mvm(mvm_binary, "key", "inspect", created_key)
+        assert result.returncode == 0
+        assert created_key in result.stdout
+
+    def test_key_create_ecdsa(self, mvm_binary, unique_key_name):
+        """Create ECDSA SSH key."""
+        result = _run_mvm(
+            mvm_binary,
+            "key",
+            "create",
+            unique_key_name,
+            "--algorithm",
+            "ecdsa",
+        )
+        assert result.returncode == 0
+        assert unique_key_name in result.stdout
+
+        # Cleanup
+        _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
