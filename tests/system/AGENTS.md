@@ -58,6 +58,6 @@ uv run pytest tests/
 
 ## NOTES
 
-- **7 test files**: Covering host journeys, images, keys, network, and VM lifecycle
+- **5 test files**: Covering full_journeys, images, keys, network, and VM lifecycle
 - Requires real system environment (KVM, mvm group, network privileges)
 - Completely black-box testing via CLI binary calls

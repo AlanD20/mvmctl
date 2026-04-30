@@ -9,7 +9,7 @@ import sys
 
 import typer
 
-from mvmctl.api.init_operations import InitOperation, InitResult
+from mvmctl.api import InitOperation, InitResult
 from mvmctl.utils.console import print_info, print_success, print_warning
 
 init_app = typer.Typer(

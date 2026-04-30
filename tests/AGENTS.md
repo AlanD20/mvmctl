@@ -4,7 +4,7 @@
 **Status:** Pre-production project — refactoring MUST NOT create legacy migration logic.
 **Coverage Gate:** 80% branch coverage (`pyproject.toml --cov-fail-under=80`)
 **Rule:** Tests must NEVER require root, KVM, or real network stack (except system tests)
-**Files:** 109 test files — 91 unit + 8 integration + 5 system + 5 layer_compliance
+**Files:** 113 test files — 94 archived + 19 active (1 core + 8 integration + 5 system + 5 layer_compliance)
 
 ## STRUCTURE
 
@@ -13,25 +13,22 @@ tests/
 ├── conftest.py              # Root: _mock_sudo_cache, isolate_config_and_cache, _isolate_iptables_rules, _setup_database (autouse)
 ├── helpers/
 │   └── paths.py             # make_test_paths(tmp_path) — single source of truth for canonical test paths
-├── unit/
-│   ├── conftest.py          # Shared fixtures: VM/network/key fixtures, subprocess mocks
-│   ├── test_cli_*.py        # CLI layer tests (CliRunner, no subprocess)
-│   ├── test_api_*.py        # API layer tests
-│   ├── core/                # Core layer tests (45 files)
-│   ├── db/                  # DB/migration tests (8 files)
-│   ├── services/            # Service tests (console_relay, nocloud_server)
-│   └── test_*.py            # Root-level unit tests
+├── core/                    # Core layer tests
+│   └── _internal/           # _internal infrastructure tests (enrichment, etc.)
 ├── integration/
 │   ├── conftest.py          # Integration-specific fixtures
 │   └── test_*.py            # Multi-module workflow tests (8 files)
 ├── system/
 │   ├── conftest.py          # Real hardware fixtures; _restore_real_dirs override
 │   └── test_*.py            # Black-box CLI tests via subprocess (5 files)
-└── layer_compliance/
-    ├── test_imports.py      # Enforces import boundaries (cli→api→core only)
-    ├── test_constants.py    # Ensures constants.py is single source of truth
-    ├── test_privilege.py    # Verifies privilege checks in api/ layer
-    └── test_startup_time.py # Enforces <200ms startup time for all modules
+├── layer_compliance/
+│   ├── test_imports.py      # Enforces import boundaries (cli→api→core only)
+│   ├── test_constants.py    # Ensures constants.py is single source of truth
+│   ├── test_privilege.py    # Verifies privilege checks in api/ layer
+│   ├── test_startup_time.py # Enforces <200ms startup time
+│   ├── test_cleanup.py      # Pytest temp dir cleanup behavior
+│   └── test_constants_new.py# Additional constants validation
+└── archive/                 # Frozen legacy tests (94 files) — READ ONLY, NEVER MODIFY
 ```
 
 ## KEY FIXTURES (conftest.py)
@@ -74,18 +71,17 @@ paths = make_test_paths(tmp_path)
 
 | Fixture | Type | Purpose |
 |---------|------|---------|
-| `vm_manager` | `VMManager(tmp_path)` | Real manager instance, isolated state |
-| `sample_vm` | `VMInstance` | Valid VM with default config |
-| `stopped_vm` | `VMInstance` | VM in stopped state (idempotent cleanup) |
-| `running_vm` | `VMInstance` | VM in running state (mocks socket) |
-| `error_vm` | `VMInstance` | VM in error state |
+| `sample_vm` | `VMInstanceItem` | Valid VM with default config |
+| `stopped_vm` | `VMInstanceItem` | VM in stopped state (idempotent cleanup) |
+| `running_vm` | `VMInstanceItem` | VM in running state (mocks socket) |
+| `error_vm` | `VMInstanceItem` | VM in error state |
 
 ### Network Fixtures
 
 ```python
 @pytest.fixture
-def sample_network_config():
-    return NetworkConfig(name="testnet", subnet="10.0.0.0/24", ...)
+def sample_network():
+    return NetworkItem(name="testnet", subnet="10.0.0.0/24", ...)
 ```
 
 ### Key Fixtures
@@ -117,8 +113,7 @@ def test_list_vms_empty(mocker: MockerFixture):
 
 ```python
 def test_create_vm_calls_api(mocker: MockerFixture):
-    mock_api = mocker.patch("mvmctl.api.vm.create_vm")
-    mock_api.return_value = VMInstance(name="test")
+    mock_api = mocker.patch("mvmctl.api.VMOperation.create")
     mock_api.assert_called_once()
 ```
 
@@ -149,20 +144,18 @@ def test_rm_success():
     assert "Removed" in result.stdout
 ```
 
-### Patching VMManager (hash-keyed API)
+### Patching VMRepository (hash-keyed API)
 
-VMManager uses SHA256 hash keys; mock the return structure.
+VMRepository uses SHA256 hash keys; mock the return structure.
 
 ```python
 def test_vm_lookup_by_name(mocker: MockerFixture):
-    mock_mgr = mocker.MagicMock()
-    sample = VMInstance(name="test", id="abc123def...")
-    mock_mgr.get_by_name.return_value = [sample]
-    mock_mgr.find_by_id_prefix.return_value = []
-    mocker.patch("mvmctl.core.vm_manager.VMManager", return_value=mock_mgr)
+    mock_repo = mocker.MagicMock(spec=VMRepository)
+    sample = VMInstanceItem(name="test", id="abc123def...")
+    mock_repo.get_by_name.return_value = sample
+    mock_repo.find_by_prefix.return_value = []
+    mocker.patch("mvmctl.core.vm._repository.VMRepository", return_value=mock_repo)
 ```
-
-**Always mock both `get_by_name()` and `find_by_id_prefix()` together** — `vm rm` tries ID prefix first, then falls back to name.
 
 ## LAYER COMPLIANCE TESTS
 
@@ -235,7 +228,7 @@ uv run pytest tests/ -n auto
 
 ## NOTES
 
-- **69 total test files**: 54 unit + 7 integration + 8 system + 4 layer_compliance
+- **113 total test files**: 94 archived + 19 active (1 core + 8 integration + 5 system + 5 layer_compliance)
 - mypy strict exempted for tests (`pyproject.toml` overrides: no `disallow_untyped_defs`)
 - All tests run as non-root; no KVM access required (except system tests)
 - Fixtures in `unit/conftest.py` auto-used for all unit tests

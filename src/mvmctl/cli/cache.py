@@ -6,7 +6,7 @@ from typing import Optional
 
 import typer
 
-from mvmctl.api.cache_operations import CacheOperation
+from mvmctl.api import CacheOperation
 from mvmctl.utils.console import (
     print_error,
     print_info,

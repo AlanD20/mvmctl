@@ -24,17 +24,33 @@ Main Python package for the `mvmctl` microVM CLI. This root orchestrates the laz
 
 ## CONVENTIONS
 
-### 4-Layer Architecture
-All code must follow the strict flow: **CLI → API → Core → Models**.
-- **CLI** resolves runtime defaults and calls the API.
-- **API** performs privilege checks and sequences Core calls.
-- **Core** executes isolated tasks without importing from other core modules.
-- **Models** store pure state with no side effects.
+### 3-Layer Architecture (CLI → API → Core)
+All code must follow the strict flow: **CLI → API → Core**.
+- **CLI** (`cli/`) — resolves runtime defaults, calls the API via `from mvmctl.api import *`.
+- **API** (`api/`) — public Python API surface. Performs privilege checks, resolves DB-backed defaults, and sequences multiple Core domains. ALL orchestration lives here. `api/__init__.py` re-exports all public types.
+- **Core** (`core/`) — isolated domain logic. NEVER imports from other core domains. Returns `*Item` models only.
+- **Models** (`models/`) — pure `@dataclass` data containers with `*Item` suffix (e.g., `VMInstanceItem`, `NetworkItem`). No business logic.
 
-### Import Structure
-- Use absolute imports: `from mvmctl.core import vm_lifecycle`.
+### API Public Surface
+All public types are re-exported from `api/__init__.py`:
+```python
+from mvmctl.api import VMOperation, VMCreateInput
+VMOperation.create(VMCreateInput(name="my-vm", ...))
+```
+
+### CLIs Import Pattern
+CLI imports from the public `api/` package:
+```python
+from mvmctl.api import VMOperation, VMInput
+from mvmctl.api import HostOperation
+```
+
+### Import Rules
+- Use absolute imports: `from mvmctl.core.vm import VMController`.
 - Avoid circular dependencies by keeping Core modules isolated.
 - The API layer is the only place where multiple Core modules should be imported and sequenced together.
+- Core domains never import from other core domains.
+- Core modules return `*Item` models only (no Config/Input classes in core).
 
 ### Default Resolution
 Defaults must be resolved at runtime in the CLI layer. Never hardcode `DEFAULT_*` values in `typer.Option` or function signatures in API/Core layers.

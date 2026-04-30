@@ -53,6 +53,8 @@ Uses `ast.parse()` to enforce no hardcoded paths, large numbers (≥100), or lis
 
 ---
 
+- **5 test files**: Covering imports, constants, privileges, startup time, and cleanup behavior
+
 ### `test_privilege.py` — API Privilege Check Presence
 
 Uses `ast.parse()` to verify that specific API functions call `check_privileges()` or `check_privileges_interactive()` before delegating to core.
@@ -61,8 +63,8 @@ Uses `ast.parse()` to verify that specific API functions call `check_privileges(
 
 | File | Functions |
 |------|-----------|
-| `api/vms.py` | `create_vm`, `remove_vm`, `cleanup_vms` |
-| `api/network.py` | `create_network`, `remove_network` |
+| `api/vm_operations.py` | `VMOperation.create`, `VMOperation.remove`, `VMOperation.cleanup` |
+| `api/network_operations.py` | `NetworkOperation.create`, `NetworkOperation.remove` |
 
 **Detection:** walks function AST body looking for `ast.Call` nodes matching either privilege function name (direct or attribute form).
 
@@ -113,6 +115,6 @@ uv run pytest tests/layer_compliance/test_startup_time.py -v  # slow — spawns 
 
 ## NOTES
 
-- **6 test files**: Covering imports, constants, privileges, startup time, and cleanup behavior
+- **5 test files** (updated count)
 - All tests are **AST-based or subprocess-isolated** — they do NOT import `mvmctl.*` at collection time (except `test_constants.py` which imports `mvmctl.constants` for functional validation)
 - Layer compliance failures in CI indicate real architectural regressions — never skip or xfail without documented justification

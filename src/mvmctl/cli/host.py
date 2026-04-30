@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api.host_operations import HostOperation
+from mvmctl.api import HostOperation
 from mvmctl.constants import MVM_UNIX_GROUP
 from mvmctl.exceptions import HostError
 from mvmctl.utils.cli import handle_errors

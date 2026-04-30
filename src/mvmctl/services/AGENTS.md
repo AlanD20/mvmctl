@@ -24,7 +24,7 @@ src/mvmctl/services/
 Services follow a manager+process pattern:
 
 ```
-core/vm_lifecycle.py
+api/vm_operations.py (or core/vm/_controller.py)
         │
         ▼ calls
 ┌─────────────────┐     spawns    ┌──────────────────┐

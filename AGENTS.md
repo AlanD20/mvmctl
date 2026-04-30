@@ -55,11 +55,18 @@ mvmctl/
 **Key principle**: Core modules are **ISOLATED**. They do not call each other. The **API layer is the ONLY entity** that calls multiple core modules and sequences them together. 
 
 ## CONVENTIONS
-- **cli/** — arg parsing + output formatting ONLY; runtime default resolution; call `api/`
-- **api/** — privilege checks + delegation to `core/`; **NO default values in params**; **SOLE orchestrator** of core modules
-- **core/** — subprocess, filesystem, business logic; **NO default values in params**; **ISOLATED** — no cross-core imports
-- **models/** — `@dataclass` only; **NO default values for config-backed fields**
+- **cli/** — arg parsing + output formatting ONLY; imports from `mvmctl.api` (public surface); runtime default resolution; NO business logic
+- **api/** — public Python API surface (re-exported via `api/__init__.py`); privilege checks + DB resolution + **SOLE orchestrator** of core modules; **NO default values in params**
+- **core/** — isolated domain logic: Controller (stateful), Service (stateless), Repository (DB), Resolver (resolution); **NO default values in params**; **ISOLATED** — no cross-core imports; returns `*Item` models only
+- **models/** — `@dataclass` only; `*Item` suffix (e.g., `VMInstanceItem`, `NetworkItem`); **NO default values for config-backed fields**
 - **utils/** — pure helpers with no domain knowledge. **All external tool wrappers MUST be centralized in `utils/` — NEVER scattered in `core/`.**
+
+### Import Pattern
+All CLI code must use the public api/ surface:
+```python
+from mvmctl.api import VMOperation, VMCreateInput  # ✅ CORRECT
+from mvmctl.api.vm_operations import VMOperation    # ❌ WRONG — deep import
+```
 
 ### Default Values Rule (STRICT ENFORCEMENT - ZERO TOLERANCE)
 **Default values belong ONLY in the CLI layer.** API, Core, and Models must receive explicit values.

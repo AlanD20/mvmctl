@@ -21,6 +21,11 @@ from mvmctl.api.inputs._image_acquire_input import (
     ImageFetchInput,
     ImageImportInput,
 )
+from mvmctl.api.inputs._image_input import (
+    ImageInput,
+    ImageRequest,
+    ResolvedImageInput,
+)
 from mvmctl.api.inputs._kernel_fetch_input import (
     KernelFetchInput,
     KernelFetchRequest,
@@ -87,6 +92,9 @@ __all__ = [
     "CloudInitModeResolved",
     "ImageFetchInput",
     "ImageImportInput",
+    "ImageInput",
+    "ImageRequest",
+    "ResolvedImageInput",
     "KernelFetchInput",
     "KernelFetchRequest",
     "KernelInput",

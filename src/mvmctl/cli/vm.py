@@ -8,9 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 import typer
 
-from mvmctl.api.inputs._vm_create_input import VMCreateInput
-from mvmctl.api.inputs._vm_input import VMInput
-from mvmctl.api.vm_operations import VMOperation
+from mvmctl.api import VMCreateInput, VMInput, VMOperation
 from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.console import (
     print_info,

@@ -8,9 +8,7 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from mvmctl.api.inputs._kernel_fetch_input import KernelFetchInput
-from mvmctl.api.inputs._kernel_input import KernelInput
-from mvmctl.api.kernel_operations import KernelOperation
+from mvmctl.api import KernelFetchInput, KernelInput, KernelOperation
 from mvmctl.utils.cli import CliUtils, handle_errors
 from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.console import (

@@ -8,9 +8,7 @@ from typing import TYPE_CHECKING
 import typer
 from rich.prompt import Prompt
 
-from mvmctl.api.inputs._network_create_input import NetworkCreateInput
-from mvmctl.api.inputs._network_input import NetworkInput
-from mvmctl.api.network_operations import NetworkOperation
+from mvmctl.api import NetworkCreateInput, NetworkInput, NetworkOperation
 from mvmctl.utils.cli import CliUtils, handle_errors
 from mvmctl.utils.common import CommonUtils
 from mvmctl.utils.console import (

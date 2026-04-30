@@ -6,13 +6,13 @@
 
 ## RESOLUTION LAYER MANDATE (MANDATORY — NO EXCEPTIONS)
 
-**The DB layer is only accessed by the API layer. No exceptions.**
+**DB access follows the Repository pattern.** Each core domain owns its data through domain-specific Repository classes. The API layer orchestrates which repositories to call and when.
 
 | Layer | DB Access |
 |-------|-----------|
 | **CLI** | **FORBIDDEN** — never queries SQLite |
-| **API** | **REQUIRED** — only layer that instantiates `MVMDatabase` |
-| **Core** | **FORBIDDEN** — receives resolved values from API |
+| **API** | **REQUIRED** — resolves DB-backed defaults; orchestrates Core Repository calls |
+| **Core** | **VIA REPOSITORY** — `core/{domain}/_repository.py` classes own DB access for their domain using `core/_internal/_db.Database`. Core domains NEVER access DB directly outside their Repository. |
 | **Models** | **FORBIDDEN** — pure data containers |
 
 **SQLite (`mvmdb.db`) is the canonical source of truth for:**
@@ -85,8 +85,6 @@ These are intentional deviations from the layer architecture:
 | File | Deviation | Reason |
 |------|-----------|--------|
 | `cli/bin.py` | Imports `core/metadata` directly | Asset management needs direct metadata access for bulk operations |
-| `core/mvm_db.py` | Implements `MVMDatabase` class | Core module that provides DB access methods (used by API) |
-| `core/metadata.py` | Imports `mvmctl.db` for asset registration | Discovers and registers assets in DB during downloads |
 | `models/*.py` | Import ORM dataclasses from `mvmctl.db.models` | Domain models extend/reuse DB dataclasses for consistency |
 
 ## CONVENTIONS
@@ -122,53 +120,64 @@ class Binary:
 
 ### Layer Responsibility for Database Queries
 
-**CRITICAL: Only the API layer may query the database.** This is an architectural boundary violation if any other layer queries the database:
+**Database access follows the Repository pattern.** Each core domain owns its data through a domain-specific Repository class. The API layer orchestrates these repositories.
 
 | Layer | Database Query Policy | Rationale |
 |-------|----------------------|-----------|
 | **CLI** | **FORBIDDEN** — CLI passes `None` or explicit values to API | CLI is a client layer; DB access is an implementation detail |
-| **API** | **REQUIRED** — API queries DB when CLI passes `None` for DB-backed defaults | API owns the database boundary; resolves defaults before calling Core |
-| **Core** | **FORBIDDEN** — Core receives explicit values from API | Core operates on business logic only; no DB dependencies |
+| **API** | **ORCHESTRATES** — API creates `Database()` instances and passes them to Core Resolvers/Repositories | API owns the orchestration boundary; resolves DB-backed defaults before calling Core Controllers |
+| **Core** | **VIA REPOSITORY** — Each domain's `_repository.py` accesses DB using `core/_internal/_db.Database` | Core domains own their data persistence; Repository is the single entry point for all queries |
 | **DB** | **DEFINITION ONLY** — Schema and ORM models; no business logic | Database layer provides schema and models only |
 
 ### Correct Query Pattern
 
-When determining which binary/kernel/image/network is "active" or "default":
+Domain-specific repositories (e.g., `VMRepository` in `core/vm/_repository.py`) handle all DB queries:
 
 ```python
-# CORRECT — Only in API layer
-from mvmctl.core.mvm_db import MVMDatabase
+# CORRECT — Repository in core/{domain}/_repository.py
+from mvmctl.core._internal._db import Database
+from mvmctl.models.vm import VMInstanceItem
 
-def get_active_vm_config(image: Optional[str] = None) -> VMConfig:
-    # API resolves from database
-    if image is None:
-        db = MVMDatabase()
-        default_image = db.get_default_image()
-        if default_image and Path(default_image.path).exists():
-            image = default_image.path
-        else:
-            raise AssetNotFoundError("No default image set")
-    
-    # Pass explicit value to Core
-    return _core_create_vm_config(image=image)
+class VMRepository:
+    def __init__(self, db: Database | None = None) -> None:
+        self._db = db or Database()
+
+    def get(self, vm_id: str) -> VMInstanceItem | None:
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM vm_instances WHERE id = ?", (vm_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return VMInstanceItem(**dict(row))
+```
+
+API layer orchestrates:
+```python
+# CORRECT — API layer orchestrates
+from mvmctl.core._internal._db import Database
+from mvmctl.core.vm._repository import VMRepository
+
+db = Database()
+repo = VMRepository(db)
+vm = repo.get(vm_id)
 ```
 
 ### Anti-Patterns
 
 | Forbidden | Why It's Wrong | Correct Approach |
 |-----------|----------------|----------------|
-| CLI calling `get_default_image_entry()` or any DB query | CLI is a client; DB is implementation detail | CLI passes `None`, API queries DB |
-| Core calling `MVMDatabase()` directly | Core should not depend on DB | API queries DB, passes explicit values to Core |
+| CLI calling any DB method directly | CLI is a client; DB is implementation detail | CLI imports from `mvmctl.api` only |
+| Core accessing DB outside its Repository | Bypasses domain encapsulation | Use the domain's `_repository.py` |
 | CLI resolving defaults before calling API | Duplicates logic, bypasses API boundary | API resolves all DB-backed defaults |
-| Raw `sqlite3.connect()` without explicit close | Resource leak | Use `MVMDatabase` context manager |
-| Hardcoded SQL in core/ modules | Bypasses schema management | Use `MVMDatabase` methods |
-| Direct DB writes bypassing `MVMDatabase` | Inconsistent state | Always use `MVMDatabase` class |
-| Reading symlinks for binary state | Symlinks are side-effects | Query `db.get_default_binary("firecracker")` |
+| Raw `sqlite3.connect()` without using `Database` | Bypasses connection management | Use `Database` from `core/_internal/_db.py` |
+| Hardcoded SQL outside Repository classes | Scatters query logic | All SQL in `_repository.py` per domain |
+| `from __future__ import annotations` absent | Breaks PEP 563 postponed evaluation | Include in every Python file |
 
 ### SQLite is Canonical
 
 When determining which binary/kernel/image is "active" or "default":
-1. Query `MVMDatabase` **in the API layer only** (e.g., `db.get_default_binary("firecracker")`)
+1. Query through the domain-specific Repository (e.g., `BinaryRepository.get_default()`)
 2. Verify the returned path still exists on disk (stale-entry guard)
 3. Do NOT read filesystem symlinks (`firecracker` → `firecracker-v1.15.0`) to derive state
 
@@ -177,18 +186,16 @@ The `firecracker` symlink in `bin/` is a **side-effect** of `set_active_version(
 ### Verification Checklist
 
 Before submitting changes:
-- [ ] **NO CLI code imports from `mvmctl.db` or `mvmctl.core.mvm_db`** (except known exceptions)
-- [ ] **NO Core code imports from `mvmctl.db`** (except `mvm_db.py` and `metadata.py` for asset registration)
-- [ ] **ONLY API layer creates `MVMDatabase()` instances** (except core/mvm_db.py)
-- [ ] All database queries happen in API layer functions (or core/mvm_db.py methods called by API)
-- [ ] API never passes `None` to Core for required DB-backed parameters
-- [ ] Models layer may import DB dataclasses for consistency but should not query DB
+- [ ] **NO CLI code imports from `mvmctl.db` or `mvmctl.core.*`** — CLI only imports from `mvmctl.api`
+- [ ] **Core code accesses DB through domain `_repository.py` files** — never directly
+- [ ] **Repository classes use `Database` from `core/_internal/_db.py`** — not raw `sqlite3`
+- [ ] **API orchestrates but does not duplicate Repository logic** — calls Core Repositories
+- [ ] **API never passes `None` to Core Controller for required DB-backed parameters**
+- [ ] **Models layer may import DB dataclasses for consistency but should not query DB**
 
 ### Enforcement
 
-CI checks will reject PRs containing:
-- CLI code that imports from `mvmctl.db` or `mvmctl.core.mvm_db`
-- Core code that queries the database (except for asset discovery/registration)
-- Any layer other than API directly instantiating `MVMDatabase`
-
-**NO EXCEPTIONS. NO WORKAROUNDS. NO DISCUSSION.**
+CI checks (`tests/layer_compliance/test_imports.py`) enforce:
+- CLI code does NOT import from `core/` directly
+- API layer is the only consumer of multiple core modules
+- Repository pattern is followed (queries in `_repository.py`, not scattered)

@@ -7,8 +7,7 @@ from typing import Optional
 
 import typer
 
-from mvmctl.api.inputs._ssh_input import SSHInput
-from mvmctl.api.ssh_operations import SSHOperation
+from mvmctl.api import SSHInput, SSHOperation
 from mvmctl.utils.cli import handle_errors
 
 ssh_app = typer.Typer(

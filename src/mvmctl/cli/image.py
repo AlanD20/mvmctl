@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Optional, cast
 
 import typer
 
-from mvmctl.api.image_operations import ImageOperation
-from mvmctl.api.inputs._image_acquire_input import (
+from mvmctl.api import (
     ImageFetchInput,
     ImageImportInput,
+    ImageInput,
+    ImageOperation,
 )
-from mvmctl.api.inputs._image_input import ImageInput
 from mvmctl.constants import (
     DEFAULT_IMAGE_IMPORT_FORMAT,
     IMAGE_IMPORT_FORMAT_MAP,

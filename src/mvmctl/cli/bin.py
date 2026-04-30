@@ -7,9 +7,7 @@ from typing import TYPE_CHECKING, Optional
 
 import typer
 
-from mvmctl.api.binary_operations import BinaryOperation
-from mvmctl.api.inputs._binary_fetch_input import BinaryFetchInput
-from mvmctl.api.inputs._binary_input import BinaryInput
+from mvmctl.api import BinaryFetchInput, BinaryInput, BinaryOperation
 from mvmctl.utils.cli import handle_errors
 from mvmctl.utils.console import (
     print_error,
